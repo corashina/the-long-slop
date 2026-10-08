@@ -1,7 +1,7 @@
 # Desert driving in Rust and WebAssembly
 
 Date: 2026-10-08, Europe/Warsaw
-Status: Conversational design approved; written spec awaiting user review.
+Status: User approved the written spec in chat on 2026-10-08.
 
 ## Intent and agreed scope
 
