@@ -12,3 +12,7 @@ button:disabled { opacity: .45; cursor: wait; }
 button:focus-visible { outline: 3px solid white; outline-offset: 4px; }
 #runtime-error { position: absolute; top: 20px; left: 20px; right: 20px; margin: 0; padding: 20px; background: #4b211ded; }
 [hidden] { display: none !important; }
+.controls { font-size: 13px; line-height: 1.6; color: #d6c6ac; }
+#hud { position: absolute; left: 24px; bottom: 24px; padding: 12px 18px; background: #282218db; font-variant-numeric: tabular-nums; }
+#speed { font-size: 28px; font-weight: 500; }
+#camera-mode { margin-left: 24px; font-size: 13px; }

@@ -3,6 +3,26 @@ const screen = document.querySelector('#start-screen');
 const status = document.querySelector('#status');
 const runtimeError = document.querySelector('#runtime-error');
 const canvas = document.querySelector('#game');
+const hud = document.querySelector('#hud');
+const speed = document.querySelector('#speed');
+const cameraMode = document.querySelector('#camera-mode');
+let started = false;
+let lastSpeed;
+let lastCamera;
+window.gameState = { speedKmh: 0, camera: 'Chase', x: 0, y: 0, z: 0, contacts: 0, frameSteps: 0, totalSteps: 0 };
+window.gameStarted = () => started;
+window.gameUpdate = (kmh, mode, x, y, z, contacts, steps) => {
+  const state = window.gameState;
+  state.speedKmh = kmh;
+  state.camera = mode ? 'Cockpit' : 'Chase';
+  state.x = x; state.y = y; state.z = z;
+  state.contacts = contacts;
+  state.frameSteps = steps;
+  state.totalSteps += steps;
+  const rounded = Math.round(Math.abs(kmh));
+  if (rounded !== lastSpeed) { speed.textContent = rounded; lastSpeed = rounded; }
+  if (mode !== lastCamera) { cameraMode.textContent = state.camera; lastCamera = mode; }
+};
 let failed = false;
 let ready = false;
 let timeout;
@@ -38,6 +58,8 @@ canvas.addEventListener('webglcontextlost', (event) => {
 start.addEventListener('click', () => {
   if (!ready || failed) return;
   screen.hidden = true;
+  hud.hidden = false;
+  started = true;
   canvas.focus();
 });
 
