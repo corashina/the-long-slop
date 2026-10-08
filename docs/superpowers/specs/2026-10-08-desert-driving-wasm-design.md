@@ -83,6 +83,12 @@ Road and nearby terrain receive colliders. Solid rocks, posts, and station struc
 
 Generate chunks deterministically from seed and integer chunk coordinates. Road samples use shared global coordinates so adjacent chunks agree at their edges. Keep only a bounded neighborhood around the car; unload both render resources/entities and physics colliders outside that neighborhood. Avoid a road generator whose retained history grows with distance.
 
+Follow lateral travel with aligned terrain bands. Retain eleven longitudinal chunks within the current lateral band.
+Use 128-meter band spacing and 320-meter terrain width. Adjacent bands overlap by 192 meters.
+Change bands at half the band spacing, before the car reaches a terrain edge.
+Sample overlap geometry from the same global road and height field on an 8-meter grid.
+Load reset destinations within their lateral band before moving the car.
+
 Place stations at deterministic intervals and provide enough initial fuel for the first station with a conservative reserve under ordinary road driving. Fuel consumption and station spacing are tuned together. The game must always expose a recovery/new-drive route if the player runs out of fuel.
 
 Use a floating origin when local positions exceed a configured threshold. Keep absolute trip/world coordinates separately, with enough precision for long travel. Shift every affected body/collider, vehicle interpolation pose, camera, and active chunk consistently between physics steps. Update Rapier's query/broad-phase state as required by the selected integration. Rebasing must preserve velocities, wheel contact behavior, station eligibility, and distance. A near-origin coordinate shift must not count as distance traveled.

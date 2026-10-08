@@ -140,6 +140,10 @@ fn reset_stops_the_chassis() {
 - `ChunkData { key: ChunkKey, vertices: Vec<[f32; 3]>, indices: Vec<[u32; 3]>, stations: Vec<Station> }` stores generated chunk-local geometry.
 - `Station { id: i64, absolute_point: [f64; 3] }` identifies a refueling point.
 - `generate_chunk(seed: u64, key: ChunkKey) -> ChunkData` allocates only during chunk generation.
+- `generate_chunk_in_band(seed: u64, key: ChunkKey, lateral_band: i64) -> ChunkData` generates the current lateral strip.
+- `ChunkData` also stores `lateral_band`, shared `lateral_samples`, and procedural `props`.
+- Chunk vertex origin is `[lateral_band * 128, 0, -key * 128]`. Road distance is negative absolute Z.
+- `WorldStream::sync_at(absolute: [f64; 3], physics: &mut PhysicsWorld)` loads eleven chunks around the car.
 - `active_chunks(distance_m: f64) -> [ChunkKey; 11]` selects three behind and seven ahead, plus the current chunk.
 - `nearest_station(seed: u64, distance_m: f64) -> Station` works without a retained world history.
 - `PhysicsWorld::rebase(&mut self, shift: [f32; 3])` shifts local physics poses while preserving velocities.
@@ -168,6 +172,9 @@ fn adjacent_chunks_share_the_seam() {
 - [ ] Run `./scripts/check.ps1 -Test world`. Confirm the tests fail before implementing the missing behavior.
 - [ ] Generate a gently curved road, dunes, sparse props, and stations every 640 meters. Use global samples at shared edges.
 - [ ] Stream eleven active chunks. Remove physics colliders and entities when unloading; reuse shared meshes/materials where possible.
+- [ ] Follow lateral travel with 128-meter bands and 320-meter width. Use shared 8-meter overlap samples.
+- [ ] Replace the strip at 64 lateral meters, before crossing its edge. Keep eleven longitudinal chunks.
+- [ ] Test travel beyond the old lateral edge. Assert ground contact across band changes and bounded collider counts.
 - [ ] Rebase above 2048 local meters between physics steps. Shift physics, chunk entities, interpolation buffers, and cameras together.
 - [ ] Load station/reset destination chunks before moving the chassis there. Reset interpolation poses after a teleport.
 - [ ] Run world tests and build. Drive across seams and a rebase threshold; record active chunk counts.

@@ -9,9 +9,12 @@ const cameraMode = document.querySelector('#camera-mode');
 let started = false;
 let lastSpeed;
 let lastCamera;
-window.gameState = { speedKmh: 0, camera: 'Chase', x: 0, y: 0, z: 0, contacts: 0, frameSteps: 0, totalSteps: 0 };
+window.gameState = { speedKmh: 0, camera: 'Chase', x: 0, y: 0, z: 0, contacts: 0, frameSteps: 0, totalSteps: 0,
+  activeChunks: 0, colliderCount: 0, absoluteX: 0, absoluteY: 0, absoluteZ: 0, originX: 0, originY: 0, originZ: 0,
+  rebases: 0, travelM: 0, lateralBand: 0 };
 window.gameStarted = () => started;
-window.gameUpdate = (kmh, mode, x, y, z, contacts, steps) => {
+window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, chunks, colliders, absoluteX, absoluteY, absoluteZ,
+  originX, originY, originZ, rebases, travelM, lateralBand) => {
   const state = window.gameState;
   state.speedKmh = kmh;
   state.camera = mode ? 'Cockpit' : 'Chase';
@@ -19,6 +22,12 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps) => {
   state.contacts = contacts;
   state.frameSteps = steps;
   state.totalSteps += steps;
+  state.activeChunks = chunks;
+  state.colliderCount = colliders;
+  state.absoluteX = absoluteX; state.absoluteY = absoluteY; state.absoluteZ = absoluteZ;
+  state.originX = originX; state.originY = originY; state.originZ = originZ;
+  state.rebases = rebases; state.travelM = travelM;
+  state.lateralBand = lateralBand;
   const rounded = Math.round(Math.abs(kmh));
   if (rounded !== lastSpeed) { speed.textContent = rounded; lastSpeed = rounded; }
   if (mode !== lastCamera) { cameraMode.textContent = state.camera; lastCamera = mode; }

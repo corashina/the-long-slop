@@ -1,5 +1,6 @@
 pub mod camera;
 pub mod car;
+pub mod world;
 
 use crate::vehicle::VehiclePose;
 use bevy::prelude::*;

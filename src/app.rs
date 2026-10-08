@@ -6,9 +6,11 @@ use crate::presentation::{
     self,
     camera::{CameraMode, DriveCamera},
     car::{ChassisVisual, WheelVisual},
+    world::{ChunkVisual, WorldVisuals},
 };
 use crate::simulation::{DriveInput, StepClock};
 use crate::vehicle::{PhysicsWorld, VehiclePose, VehicleSnapshot};
+use crate::world::{DEFAULT_SEED, WorldStream};
 
 const START: VehiclePose = VehiclePose {
     position: [0.0, 1.1, 0.0],
@@ -22,12 +24,32 @@ extern "C" {
     #[wasm_bindgen(js_namespace = window, js_name = gameStarted)]
     fn game_started() -> bool;
     #[wasm_bindgen(js_namespace = window, js_name = gameUpdate)]
-    fn game_update(speed: f32, camera: u32, x: f32, y: f32, z: f32, contacts: u32, steps: u32);
+    fn game_update(
+        speed: f32,
+        camera: u32,
+        x: f32,
+        y: f32,
+        z: f32,
+        contacts: u32,
+        steps: u32,
+        chunks: u32,
+        colliders: u32,
+        absolute_x: f64,
+        absolute_y: f64,
+        absolute_z: f64,
+        origin_x: f64,
+        origin_y: f64,
+        origin_z: f64,
+        rebases: u32,
+        travel: f64,
+        lateral_band: f64,
+    );
 }
 
 #[derive(Resource)]
 struct Drive {
     world: PhysicsWorld,
+    stream: WorldStream,
     input: DriveInput,
     clock: StepClock,
     previous: VehicleSnapshot,
@@ -35,6 +57,8 @@ struct Drive {
     rendered: VehiclePose,
     camera: CameraMode,
     frame_steps: u32,
+    rebases: u32,
+    travel_m: f64,
 }
 
 #[wasm_bindgen]
@@ -58,6 +82,7 @@ pub fn run() {
             (
                 read_input,
                 advance_physics,
+                sync_world,
                 interpolate_vehicle,
                 update_camera,
                 update_hud,
@@ -74,49 +99,17 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let mut world = PhysicsWorld::new(START);
-    world.insert_mesh(
-        &[
-            [-300.0, 0.0, -300.0],
-            [300.0, 0.0, -300.0],
-            [300.0, 0.0, 300.0],
-            [-300.0, 0.0, 300.0],
-        ],
-        &[[0, 2, 1], [0, 3, 2]],
-    );
-    commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(600.0, 600.0))),
-        MeshMaterial3d(materials.add(Color::srgb(0.63, 0.47, 0.29))),
-    ));
-    commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(8.0, 600.0))),
-        MeshMaterial3d(materials.add(Color::srgb(0.24, 0.23, 0.21))),
-        Transform::from_xyz(0.0, 0.01, 0.0),
-    ));
-    let stripe_mesh = meshes.add(Cuboid::new(0.12, 0.015, 3.0));
-    let stripe_material = materials.add(Color::srgb(0.86, 0.75, 0.48));
-    for i in -35..35 {
-        commands.spawn((
-            Mesh3d(stripe_mesh.clone()),
-            MeshMaterial3d(stripe_material.clone()),
-            Transform::from_xyz(0.0, 0.025, i as f32 * 8.0),
-        ));
-    }
-    let obstacle_mesh = meshes.add(Cuboid::new(2.0, 1.2, 2.0));
-    let obstacle_material = materials.add(Color::srgb(0.44, 0.32, 0.22));
-    for position in [[5.5, 0.6, -25.0], [-5.5, 0.6, -45.0]] {
-        commands.spawn((
-            Mesh3d(obstacle_mesh.clone()),
-            MeshMaterial3d(obstacle_material.clone()),
-            Transform::from_translation(Vec3::from_array(position)),
-        ));
-        insert_box(&mut world, position);
-    }
+    let mut stream = WorldStream::new(DEFAULT_SEED);
+    stream.sync_at([0.0; 3], &mut world);
+    let mut visuals = WorldVisuals::new(&mut meshes, &mut materials);
+    visuals.sync(&stream, &mut commands, &mut meshes);
     for _ in 0..120 {
         world.step(DriveInput::default(), true);
     }
     let snapshot = world.snapshot();
     commands.insert_resource(Drive {
         world,
+        stream,
         input: DriveInput::default(),
         clock: StepClock::default(),
         previous: snapshot,
@@ -124,7 +117,10 @@ fn setup(
         rendered: snapshot.pose,
         camera: CameraMode::default(),
         frame_steps: 0,
+        rebases: 0,
+        travel_m: 0.0,
     });
+    commands.insert_resource(visuals);
     presentation::car::spawn(&mut commands, &mut meshes, &mut materials);
     commands.spawn((
         DirectionalLight {
@@ -140,37 +136,6 @@ fn setup(
         Msaa::Off,
         bevy::core_pipeline::tonemapping::Tonemapping::None,
     ));
-}
-
-fn insert_box(world: &mut PhysicsWorld, center: [f32; 3]) {
-    let vertices = [
-        [-1.0, -0.6, -1.0],
-        [1.0, -0.6, -1.0],
-        [1.0, -0.6, 1.0],
-        [-1.0, -0.6, 1.0],
-        [-1.0, 0.6, -1.0],
-        [1.0, 0.6, -1.0],
-        [1.0, 0.6, 1.0],
-        [-1.0, 0.6, 1.0],
-    ]
-    .map(|v| [v[0] + center[0], v[1] + center[1], v[2] + center[2]]);
-    world.insert_mesh(
-        &vertices,
-        &[
-            [0, 2, 1],
-            [0, 3, 2],
-            [4, 5, 6],
-            [4, 6, 7],
-            [0, 1, 5],
-            [0, 5, 4],
-            [1, 2, 6],
-            [1, 6, 5],
-            [2, 3, 7],
-            [2, 7, 6],
-            [3, 0, 4],
-            [3, 4, 7],
-        ],
-    );
 }
 
 fn read_input(keys: Res<ButtonInput<KeyCode>>, windows: Query<&Window>, mut drive: ResMut<Drive>) {
@@ -193,9 +158,13 @@ fn read_input(keys: Res<ButtonInput<KeyCode>>, windows: Query<&Window>, mut driv
         };
     }
     if keys.just_pressed(KeyCode::KeyR) {
-        drive.world.reset(START);
+        let distance = -drive.stream.origin.absolute(drive.current.pose.position)[2];
+        let Drive { world, stream, .. } = &mut *drive;
+        let pose = stream.reset_pose(distance, false, world);
+        world.reset(pose);
         drive.current = drive.world.snapshot();
         drive.previous = drive.current;
+        drive.rendered = drive.current.pose;
         drive.clock = StepClock::default();
     }
 }
@@ -209,9 +178,49 @@ fn advance_physics(time: Res<Time<Real>>, mut drive: ResMut<Drive>) {
     drive.frame_steps = steps as u32;
     for _ in 0..steps {
         drive.previous = drive.current;
+        let previous_absolute = drive.stream.origin.absolute(drive.current.pose.position);
         let input = drive.input;
         drive.world.step(input, true);
         drive.current = drive.world.snapshot();
+        let absolute = drive.stream.origin.absolute(drive.current.pose.position);
+        drive.travel_m += ((absolute[0] - previous_absolute[0]).powi(2)
+            + (absolute[2] - previous_absolute[2]).powi(2))
+        .sqrt();
+        let Drive { world, stream, .. } = &mut *drive;
+        let shift = stream.rebase(world);
+        stream.sync_at(absolute, world);
+        if let Some(shift) = shift {
+            shift_snapshot(&mut drive.previous, shift);
+            shift_snapshot(&mut drive.current, shift);
+            shift_pose(&mut drive.rendered, shift);
+            drive.rebases += 1;
+        }
+    }
+}
+
+fn shift_pose(pose: &mut VehiclePose, shift: [f32; 3]) {
+    for (position, shift) in pose.position.iter_mut().zip(shift) {
+        *position -= shift;
+    }
+}
+
+fn shift_snapshot(snapshot: &mut VehicleSnapshot, shift: [f32; 3]) {
+    shift_pose(&mut snapshot.pose, shift);
+    for wheel in &mut snapshot.wheels {
+        shift_pose(wheel, shift);
+    }
+}
+
+fn sync_world(
+    drive: Res<Drive>,
+    mut visuals: ResMut<WorldVisuals>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut chunks: Query<(&ChunkVisual, &mut Transform)>,
+) {
+    visuals.sync(&drive.stream, &mut commands, &mut meshes);
+    for (chunk, mut transform) in &mut chunks {
+        transform.translation = Vec3::from_array(drive.stream.origin.local(chunk.0));
     }
 }
 
@@ -242,6 +251,8 @@ fn update_camera(drive: Res<Drive>, mut cameras: Query<&mut Transform, With<Driv
 
 fn update_hud(drive: Res<Drive>) {
     let position = drive.current.pose.position;
+    let absolute = drive.stream.origin.absolute(position);
+    let origin = drive.stream.origin.offset;
     let contacts = drive
         .current
         .wheels_contact
@@ -256,6 +267,17 @@ fn update_hud(drive: Res<Drive>) {
         position[2],
         contacts,
         drive.frame_steps,
+        drive.stream.chunks().count() as u32,
+        drive.world.collider_count() as u32,
+        absolute[0],
+        absolute[1],
+        absolute[2],
+        origin[0],
+        origin[1],
+        origin[2],
+        drive.rebases,
+        drive.travel_m,
+        drive.stream.lateral_band() as f64,
     );
 }
 

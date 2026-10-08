@@ -104,7 +104,9 @@ impl PhysicsWorld {
 
     pub fn step(&mut self, input: DriveInput, engine_enabled: bool) {
         let chassis = &self.physics.bodies[self.chassis];
-        let speed = chassis.linvel().dot(chassis.position().rotation * -Vector::Z);
+        let speed = chassis
+            .linvel()
+            .dot(chassis.position().rotation * -Vector::Z);
         let steering_limit = 0.46 / (1.0 + speed.abs() * 0.055);
         let steering = if input.steer.is_finite() {
             input.steer.clamp(-1.0, 1.0) * steering_limit
@@ -191,12 +193,22 @@ impl PhysicsWorld {
     }
 
     pub fn insert_mesh(&mut self, vertices: &[[f32; 3]], indices: &[[u32; 3]]) -> ColliderHandle {
+        self.insert_mesh_at(vertices, indices, [0.0; 3])
+    }
+
+    pub fn insert_mesh_at(
+        &mut self,
+        vertices: &[[f32; 3]],
+        indices: &[[u32; 3]],
+        position: [f32; 3],
+    ) -> ColliderHandle {
         let mesh = ColliderBuilder::trimesh(
             vertices.iter().copied().map(Vector::from_array).collect(),
             indices.to_vec(),
         )
         .expect("Static mesh must contain valid triangles")
-        .friction(0.8);
+        .friction(0.8)
+        .translation(Vector::from_array(position));
         let handle = self.physics.colliders.insert(mesh);
         self.physics.detect_collisions(&(), &());
         handle
@@ -205,6 +217,35 @@ impl PhysicsWorld {
     pub fn remove_collider(&mut self, handle: ColliderHandle) {
         self.physics.remove_collider(handle);
         self.physics.detect_collisions(&(), &());
+    }
+
+    pub fn rebase(&mut self, shift: [f32; 3]) {
+        let shift = Vector::from_array(shift);
+        for (_, body) in self.physics.bodies.iter_mut() {
+            body.set_translation(body.translation() - shift, false);
+        }
+        for (_, collider) in self.physics.colliders.iter_mut() {
+            if collider.parent().is_none() {
+                collider.set_translation(collider.translation() - shift);
+            }
+        }
+        // Rapier refreshes private wheel ray points before applying forces next step.
+        // Keep suspension lengths, wheel rotations, and velocities unchanged here.
+        self.physics.detect_collisions(&(), &());
+    }
+
+    pub fn insert_box(&mut self, center: [f32; 3], half_size: [f32; 3]) -> ColliderHandle {
+        let handle = self.physics.colliders.insert(
+            ColliderBuilder::cuboid(half_size[0], half_size[1], half_size[2])
+                .translation(Vector::from_array(center))
+                .friction(0.8),
+        );
+        self.physics.detect_collisions(&(), &());
+        handle
+    }
+
+    pub fn collider_count(&self) -> usize {
+        self.physics.colliders.len()
     }
 }
 

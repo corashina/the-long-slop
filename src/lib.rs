@@ -5,6 +5,7 @@ pub mod app;
 
 pub mod simulation;
 pub mod vehicle;
+pub mod world;
 
 #[cfg(target_arch = "wasm32")]
 pub mod presentation;
