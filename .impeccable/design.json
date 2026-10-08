@@ -1,0 +1,306 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-08T15:41:48.175Z",
+  "title": "Design System: Desert Drive",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Sand accent",
+        "tonalRamp": [
+          "oklch(15% 0.09468 75.12)",
+          "oklch(26.43% 0.09468 75.12)",
+          "oklch(37.86% 0.09468 75.12)",
+          "oklch(49.29% 0.09468 75.12)",
+          "oklch(60.71% 0.09468 75.12)",
+          "oklch(72.14% 0.09468 75.12)",
+          "oklch(83.57% 0.09468 75.12)",
+          "oklch(95% 0.09468 75.12)"
+        ]
+      },
+      "accent-hover": {
+        "role": "primary",
+        "displayName": "Sand hover",
+        "tonalRamp": [
+          "oklch(15% 0.08223 75.98)",
+          "oklch(26.43% 0.08223 75.98)",
+          "oklch(37.86% 0.08223 75.98)",
+          "oklch(49.29% 0.08223 75.98)",
+          "oklch(60.71% 0.08223 75.98)",
+          "oklch(72.14% 0.08223 75.98)",
+          "oklch(83.57% 0.08223 75.98)",
+          "oklch(95% 0.08223 75.98)"
+        ]
+      },
+      "accent-active": {
+        "role": "primary",
+        "displayName": "Sand active",
+        "tonalRamp": [
+          "oklch(15% 0.09853 74.21)",
+          "oklch(26.43% 0.09853 74.21)",
+          "oklch(37.86% 0.09853 74.21)",
+          "oklch(49.29% 0.09853 74.21)",
+          "oklch(60.71% 0.09853 74.21)",
+          "oklch(72.14% 0.09853 74.21)",
+          "oklch(83.57% 0.09853 74.21)",
+          "oklch(95% 0.09853 74.21)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Pale text",
+        "tonalRamp": [
+          "oklch(15% 0.03525 81.27)",
+          "oklch(26.43% 0.03525 81.27)",
+          "oklch(37.86% 0.03525 81.27)",
+          "oklch(49.29% 0.03525 81.27)",
+          "oklch(60.71% 0.03525 81.27)",
+          "oklch(72.14% 0.03525 81.27)",
+          "oklch(83.57% 0.03525 81.27)",
+          "oklch(95% 0.03525 81.27)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted sand",
+        "tonalRamp": [
+          "oklch(15% 0.03949 79.99)",
+          "oklch(26.43% 0.03949 79.99)",
+          "oklch(37.86% 0.03949 79.99)",
+          "oklch(49.29% 0.03949 79.99)",
+          "oklch(60.71% 0.03949 79.99)",
+          "oklch(72.14% 0.03949 79.99)",
+          "oklch(83.57% 0.03949 79.99)",
+          "oklch(95% 0.03949 79.99)"
+        ]
+      },
+      "background": {
+        "role": "neutral",
+        "displayName": "Background brown",
+        "tonalRamp": [
+          "oklch(15% 0.01248 78.05)",
+          "oklch(26.43% 0.01248 78.05)",
+          "oklch(37.86% 0.01248 78.05)",
+          "oklch(49.29% 0.01248 78.05)",
+          "oklch(60.71% 0.01248 78.05)",
+          "oklch(72.14% 0.01248 78.05)",
+          "oklch(83.57% 0.01248 78.05)",
+          "oklch(95% 0.01248 78.05)"
+        ]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Panel brown",
+        "tonalRamp": [
+          "oklch(15% 0.01996 80.30)",
+          "oklch(26.43% 0.01996 80.30)",
+          "oklch(37.86% 0.01996 80.30)",
+          "oklch(49.29% 0.01996 80.30)",
+          "oklch(60.71% 0.01996 80.30)",
+          "oklch(72.14% 0.01996 80.30)",
+          "oklch(83.57% 0.01996 80.30)",
+          "oklch(95% 0.01996 80.30)"
+        ]
+      },
+      "button-text": {
+        "role": "neutral",
+        "displayName": "Dark button text",
+        "tonalRamp": [
+          "oklch(15% 0.01843 70.40)",
+          "oklch(26.43% 0.01843 70.40)",
+          "oklch(37.86% 0.01843 70.40)",
+          "oklch(49.29% 0.01843 70.40)",
+          "oklch(60.71% 0.01843 70.40)",
+          "oklch(72.14% 0.01843 70.40)",
+          "oklch(83.57% 0.01843 70.40)",
+          "oklch(95% 0.01843 70.40)"
+        ]
+      },
+      "secondary": {
+        "role": "neutral",
+        "displayName": "Secondary brown",
+        "tonalRamp": [
+          "oklch(15% 0.02909 73.03)",
+          "oklch(26.43% 0.02909 73.03)",
+          "oklch(37.86% 0.02909 73.03)",
+          "oklch(49.29% 0.02909 73.03)",
+          "oklch(60.71% 0.02909 73.03)",
+          "oklch(72.14% 0.02909 73.03)",
+          "oklch(83.57% 0.02909 73.03)",
+          "oklch(95% 0.02909 73.03)"
+        ]
+      },
+      "secondary-hover": {
+        "role": "neutral",
+        "displayName": "Secondary hover",
+        "tonalRamp": [
+          "oklch(15% 0.03748 75.94)",
+          "oklch(26.43% 0.03748 75.94)",
+          "oklch(37.86% 0.03748 75.94)",
+          "oklch(49.29% 0.03748 75.94)",
+          "oklch(60.71% 0.03748 75.94)",
+          "oklch(72.14% 0.03748 75.94)",
+          "oklch(83.57% 0.03748 75.94)",
+          "oklch(95% 0.03748 75.94)"
+        ]
+      },
+      "secondary-active": {
+        "role": "neutral",
+        "displayName": "Secondary active",
+        "tonalRamp": [
+          "oklch(15% 0.02717 75.92)",
+          "oklch(26.43% 0.02717 75.92)",
+          "oklch(37.86% 0.02717 75.92)",
+          "oklch(49.29% 0.02717 75.92)",
+          "oklch(60.71% 0.02717 75.92)",
+          "oklch(72.14% 0.02717 75.92)",
+          "oklch(83.57% 0.02717 75.92)",
+          "oklch(95% 0.02717 75.92)"
+        ]
+      },
+      "fuel-low": {
+        "role": "secondary",
+        "displayName": "Low fuel orange",
+        "tonalRamp": [
+          "oklch(15% 0.12443 46.28)",
+          "oklch(26.43% 0.12443 46.28)",
+          "oklch(37.86% 0.12443 46.28)",
+          "oklch(49.29% 0.12443 46.28)",
+          "oklch(60.71% 0.12443 46.28)",
+          "oklch(72.14% 0.12443 46.28)",
+          "oklch(83.57% 0.12443 46.28)",
+          "oklch(95% 0.12443 46.28)"
+        ]
+      },
+      "error-panel": {
+        "role": "secondary",
+        "displayName": "Error brown",
+        "tonalRamp": [
+          "oklch(15% 0.06469 27.07)",
+          "oklch(26.43% 0.06469 27.07)",
+          "oklch(37.86% 0.06469 27.07)",
+          "oklch(49.29% 0.06469 27.07)",
+          "oklch(60.71% 0.06469 27.07)",
+          "oklch(72.14% 0.06469 27.07)",
+          "oklch(83.57% 0.06469 27.07)",
+          "oklch(95% 0.06469 27.07)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The start heading uses the display token."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "The pause heading uses the title token."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Instructions use the browser's normal text size and the body line height."
+      },
+      "status": {
+        "displayName": "Status",
+        "purpose": "Loading state uses the status token."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Controls, units, camera state, and fuel readouts use the label token."
+      },
+      "speed": {
+        "displayName": "Speed",
+        "purpose": "The speed readout uses the speed token."
+      }
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": [
+      {
+        "name": "narrow",
+        "value": "600px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Start or resume driving.",
+      "html": "<button class=\"ds-button\" type=\"button\">Resume</button>",
+      "css": ".ds-button { min-height:44px; padding:10px 24px; border:0; background:var(--accent, #d9ad6f); color:#211a12; font:600 16px system-ui,sans-serif; cursor:pointer; } .ds-button:hover:enabled { background:#eac48e; } .ds-button:active:enabled { background:#c79959; } .ds-button:focus-visible { outline:2px solid #f3e5cd; outline-offset:3px; } .ds-button:disabled { opacity:.5; cursor:default; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Restart from the pause panel.",
+      "html": "<button class=\"ds-button ds-secondary\" type=\"button\">Restart</button>",
+      "css": ".ds-button { min-height:44px; padding:10px 24px; border:0; background:var(--accent, #d9ad6f); color:#211a12; font:600 16px system-ui,sans-serif; cursor:pointer; } .ds-button:hover:enabled { background:#eac48e; } .ds-button:active:enabled { background:#c79959; } .ds-button:focus-visible { outline:2px solid #f3e5cd; outline-offset:3px; } .ds-button:disabled { opacity:.5; cursor:default; } .ds-secondary { background:#514536; color:#f3e5cd; } .ds-secondary:hover:enabled { background:#695a45; } .ds-secondary:active:enabled { background:#403628; }"
+    },
+    {
+      "name": "Compact Button",
+      "kind": "button",
+      "refersTo": "button-compact",
+      "description": "Driving HUD action.",
+      "html": "<button class=\"ds-button ds-secondary ds-compact\" type=\"button\">Pause</button>",
+      "css": ".ds-button { min-height:44px; padding:10px 24px; border:0; background:var(--accent, #d9ad6f); color:#211a12; font:600 16px system-ui,sans-serif; cursor:pointer; } .ds-button:hover:enabled { background:#eac48e; } .ds-button:active:enabled { background:#c79959; } .ds-button:focus-visible { outline:2px solid #f3e5cd; outline-offset:3px; } .ds-button:disabled { opacity:.5; cursor:default; } .ds-secondary { background:#514536; color:#f3e5cd; } .ds-secondary:hover:enabled { background:#695a45; } .ds-secondary:active:enabled { background:#403628; } .ds-compact { min-height:38px; padding:8px 12px; font-size:12px; }"
+    },
+    {
+      "name": "Control Panel",
+      "kind": "card",
+      "refersTo": "controls-panel",
+      "description": "Start controls over the live scene.",
+      "html": "<section class=\"ds-panel\"><h1>Desert Drive</h1><p>A road through the desert.</p><dl class=\"ds-controls\"><div><dt>W / S or ↑ / ↓</dt><dd>Drive / brake / reverse</dd></div><div><dt>P / Esc</dt><dd>Pause / resume</dd></div></dl><button class=\"ds-button ds-start\" type=\"button\">Start</button></section>",
+      "css": "@font-face { font-family:\"Libre Baskerville\"; src:url(\"./fonts/LibreBaskerville.ttf\") format(\"truetype\"); font-weight:400 700; font-style:normal; font-display:swap; } .ds-button { min-height:44px; padding:10px 24px; border:0; background:var(--accent, #d9ad6f); color:#211a12; font:600 16px system-ui,sans-serif; cursor:pointer; } .ds-button:hover:enabled { background:#eac48e; } .ds-button:active:enabled { background:#c79959; } .ds-button:focus-visible { outline:2px solid #f3e5cd; outline-offset:3px; } .ds-button:disabled { opacity:.5; cursor:default; } .ds-panel { box-sizing:border-box; width:min(370px,calc(100% - 32px)); padding:28px; background:var(--panel, #282218f5); color:#f3e5cd; font:16px system-ui,sans-serif; } .ds-panel h1 { margin:0; font-family:\"Libre Baskerville\",serif; font-size:38px; line-height:1.1; font-weight:400; } .ds-panel p { margin:10px 0 24px; color:var(--muted, #d6c6ac); line-height:1.5; } .ds-controls { margin:0 0 16px; font-size:12px; line-height:1.5; } .ds-controls div { display:grid; grid-template-columns:114px 1fr; gap:12px; padding:5px 0; } .ds-controls dd { margin:0; color:var(--muted, #d6c6ac); } .ds-start { width:100%; margin-top:8px; } @media(max-width:600px) { .ds-panel { padding:24px; } .ds-controls div { grid-template-columns:106px 1fr; gap:8px; } }"
+    },
+    {
+      "name": "Driving HUD",
+      "kind": "custom",
+      "refersTo": "driving-hud",
+      "description": "Speed, camera, fuel, trip, and driving actions.",
+      "html": "<aside class=\"ds-hud\" aria-label=\"Driving status\"><div class=\"ds-speed-row\"><span><strong class=\"ds-speed\">0</strong> <span class=\"ds-unit\">km/h</span></span><span class=\"ds-unit\">Chase</span></div><div class=\"ds-readouts\"><span>Fuel <span class=\"ds-value\">12.0</span> / 40 L</span><span>Trip <span class=\"ds-value\">0.00</span> km</span></div><meter class=\"ds-meter\" aria-label=\"Fuel in liters\" min=\"0\" max=\"40\" low=\"4\" optimum=\"40\" value=\"12\"></meter><p class=\"ds-prompt\"></p><div class=\"ds-actions\"><button class=\"ds-button ds-secondary ds-compact\" type=\"button\">Pause</button><button class=\"ds-button ds-secondary ds-compact\" type=\"button\">Fullscreen</button></div></aside>",
+      "css": ".ds-button { min-height:44px; padding:10px 24px; border:0; background:var(--accent, #d9ad6f); color:#211a12; font:600 16px system-ui,sans-serif; cursor:pointer; } .ds-button:hover:enabled { background:#eac48e; } .ds-button:active:enabled { background:#c79959; } .ds-button:focus-visible { outline:2px solid #f3e5cd; outline-offset:3px; } .ds-button:disabled { opacity:.5; cursor:default; } .ds-secondary { background:#514536; color:#f3e5cd; } .ds-secondary:hover:enabled { background:#695a45; } .ds-secondary:active:enabled { background:#403628; } .ds-hud { box-sizing:border-box; width:min(330px,calc(100% - 32px)); padding:16px 20px; background:var(--panel, #282218f5); color:#f3e5cd; font:16px system-ui,sans-serif; font-variant-numeric:tabular-nums; } .ds-speed-row { display:flex; align-items:baseline; justify-content:space-between; } .ds-speed { font-size:32px; line-height:1.1; font-weight:500; } .ds-unit,.ds-readouts { font-size:12px; color:var(--muted, #d6c6ac); } .ds-readouts { display:flex; justify-content:space-between; gap:12px; margin-top:14px; } .ds-value { color:#f3e5cd; } .ds-meter { display:block; width:100%; height:6px; margin-top:10px; background:#514536; border:0; } .ds-meter::-webkit-meter-bar { height:6px; background:#514536; border:0; border-radius:0; } .ds-meter::-webkit-meter-optimum-value { background:var(--accent, #d9ad6f); } .ds-meter::-webkit-meter-suboptimum-value { background:#e98f63; } .ds-meter::-moz-meter-bar { background:var(--accent, #d9ad6f); } .ds-prompt { margin:12px 0; min-height:1.5em; font-size:13px; line-height:1.5; } .ds-actions { display:flex; flex-wrap:wrap; gap:8px; } .ds-compact { min-height:38px; padding:8px 12px; font-size:12px; }"
+    },
+    {
+      "name": "Runtime Error",
+      "kind": "custom",
+      "refersTo": "error-panel",
+      "description": "Readable runtime alert.",
+      "html": "<p class=\"ds-error\" role=\"alert\">Cannot start the game. This browser cannot use WebGL2. Reload to try again.</p>",
+      "css": ".ds-error { margin:0; padding:20px; background:#4b211df5; color:#f3e5cd; font:16px/1.5 system-ui,sans-serif; overflow-wrap:anywhere; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Warm desert driving",
+    "overview": "The player sees a rust-painted car, sand, and a hazy sky through the live game view.\nDark panels keep controls and fuel state readable over the scene.\n\nUse original procedural geometry for the car, road, terrain, and roadside stops.\nUse the existing warm palette when adding approved scene details.",
+    "keyCharacteristics": [
+      "Warm sand and worn rust paint.",
+      "Dark rectangular control panels.",
+      "Serif headings and compact numeric readouts."
+    ],
+    "rules": [
+      {
+        "name": "The Scene Palette Rule",
+        "body": "Use warm material colors with the existing gray-blue sky and fog.",
+        "section": "colors"
+      },
+      {
+        "name": "The Heading Rule",
+        "body": "Use Libre Baskerville for headings and the system UI font for controls.",
+        "section": "typography"
+      }
+    ],
+    "dos": [
+      "Do keep the live scene visible behind controls.",
+      "Do use the recorded button focus states.",
+      "Do keep HUD numbers tabular.",
+      "Do use the local Libre Baskerville font for headings."
+    ],
+    "donts": [
+      "Don't import original Steam assets into this procedural scene.",
+      "Don't add interface features outside the approved product scope."
+    ]
+  }
+}
