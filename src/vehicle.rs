@@ -31,6 +31,17 @@ pub struct VehicleSnapshot {
     pub wheels_contact: [bool; 4],
 }
 
+impl VehicleSnapshot {
+    pub fn absolute_speed_kmh(&self) -> f32 {
+        self.linear_velocity
+            .iter()
+            .map(|v| v * v)
+            .sum::<f32>()
+            .sqrt()
+            * 3.6
+    }
+}
+
 pub struct PhysicsWorld {
     physics: rapier3d::prelude::PhysicsWorld,
     chassis: RigidBodyHandle,

@@ -2,49 +2,21 @@ use bevy::ecs as bevy_ecs;
 use bevy::prelude::*;
 use wasm_bindgen::prelude::*;
 
+use crate::browser::{game_actions, game_keys, game_ready, game_update};
 use crate::presentation::{
     self,
     camera::{CameraMode, DriveCamera},
     car::{ChassisVisual, WheelVisual},
     world::{ChunkVisual, WorldVisuals},
 };
-use crate::simulation::{DriveInput, StepClock};
+use crate::simulation::{DriveInput, DriveState, StepClock, can_refuel};
 use crate::vehicle::{PhysicsWorld, VehiclePose, VehicleSnapshot};
-use crate::world::{DEFAULT_SEED, WorldStream};
+use crate::world::{DEFAULT_SEED, WorldStream, nearest_station};
 
 const START: VehiclePose = VehiclePose {
     position: [0.0, 1.1, 0.0],
     rotation: [0.0, 0.0, 0.0, 1.0],
 };
-
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = window, js_name = gameReady)]
-    fn game_ready();
-    #[wasm_bindgen(js_namespace = window, js_name = gameStarted)]
-    fn game_started() -> bool;
-    #[wasm_bindgen(js_namespace = window, js_name = gameUpdate)]
-    fn game_update(
-        speed: f32,
-        camera: u32,
-        x: f32,
-        y: f32,
-        z: f32,
-        contacts: u32,
-        steps: u32,
-        chunks: u32,
-        colliders: u32,
-        absolute_x: f64,
-        absolute_y: f64,
-        absolute_z: f64,
-        origin_x: f64,
-        origin_y: f64,
-        origin_z: f64,
-        rebases: u32,
-        travel: f64,
-        lateral_band: f64,
-    );
-}
 
 #[derive(Resource)]
 struct Drive {
@@ -58,7 +30,9 @@ struct Drive {
     camera: CameraMode,
     frame_steps: u32,
     rebases: u32,
-    travel_m: f64,
+    state: DriveState,
+    refuel: bool,
+    skip_elapsed: bool,
 }
 
 #[wasm_bindgen]
@@ -118,7 +92,9 @@ fn setup(
         camera: CameraMode::default(),
         frame_steps: 0,
         rebases: 0,
-        travel_m: 0.0,
+        state: DriveState::default(),
+        refuel: false,
+        skip_elapsed: false,
     });
     commands.insert_resource(visuals);
     presentation::car::spawn(&mut commands, &mut meshes, &mut materials);
@@ -138,40 +114,93 @@ fn setup(
     ));
 }
 
-fn read_input(keys: Res<ButtonInput<KeyCode>>, windows: Query<&Window>, mut drive: ResMut<Drive>) {
-    if !game_started() || !windows.iter().any(|window| window.focused) {
+fn reset_vehicle(drive: &mut Drive, restart: bool) {
+    if restart {
+        drive.state.restart();
+        drive.stream.seed = DEFAULT_SEED;
+        let shift = drive.stream.origin.offset.map(|offset| -offset as f32);
+        drive.world.rebase(shift);
+        drive.stream.origin.shift(shift);
+        let pose = drive.stream.reset_pose(0.0, false, &mut drive.world);
+        drive.world.reset(pose);
+        drive.camera = CameraMode::default();
+        drive.rebases = 0;
+    } else {
+        let distance = -drive.stream.origin.absolute(drive.current.pose.position)[2];
+        let pose =
+            drive
+                .stream
+                .reset_pose(distance, drive.state.fuel.liters == 0.0, &mut drive.world);
+        drive.world.reset(pose);
+    }
+    drive.current = drive.world.snapshot();
+    drive.previous = drive.current;
+    drive.rendered = drive.current.pose;
+    drive.clock = StepClock::default();
+    drive.input = DriveInput::default();
+    drive.refuel = false;
+    drive.skip_elapsed = true;
+}
+
+fn read_input(mut drive: ResMut<Drive>) {
+    let actions = game_actions();
+    if actions & 1 != 0 {
+        drive.state.started = true;
+        drive.state.paused = false;
+    }
+    if actions & 4 != 0 {
+        drive.state.paused = false;
+    }
+    if actions & 8 != 0 {
+        reset_vehicle(&mut drive, true);
+    }
+    if actions & 2 != 0 {
+        drive.state.paused = true;
+    }
+    if actions & 7 != 0 {
+        drive.clock = StepClock::default();
+        drive.previous = drive.current;
+        drive.skip_elapsed = true;
+    }
+    if !drive.state.active() {
         drive.input = DriveInput::default();
+        drive.refuel = false;
         return;
     }
-    let left = keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft);
-    let right = keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight);
-    drive.input = DriveInput {
-        accelerate: keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp),
-        brake_reverse: keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown),
-        steer: left as u8 as f32 - right as u8 as f32,
-        handbrake: keys.pressed(KeyCode::Space),
-    };
-    if keys.just_pressed(KeyCode::KeyC) {
+    if actions & 16 != 0 {
+        reset_vehicle(&mut drive, false);
+    }
+    if actions & 32 != 0 {
         drive.camera = match drive.camera {
             CameraMode::Cockpit => CameraMode::Chase,
             CameraMode::Chase => CameraMode::Cockpit,
         };
     }
-    if keys.just_pressed(KeyCode::KeyR) {
-        let distance = -drive.stream.origin.absolute(drive.current.pose.position)[2];
-        let Drive { world, stream, .. } = &mut *drive;
-        let pose = stream.reset_pose(distance, false, world);
-        world.reset(pose);
-        drive.current = drive.world.snapshot();
-        drive.previous = drive.current;
-        drive.rendered = drive.current.pose;
-        drive.clock = StepClock::default();
-    }
+    let keys = game_keys();
+    drive.input = DriveInput {
+        accelerate: keys & 1 != 0,
+        brake_reverse: keys & 2 != 0,
+        steer: ((keys & 4 != 0) as u8 as f32) - ((keys & 8 != 0) as u8 as f32),
+        handbrake: keys & 16 != 0,
+    };
+    drive.refuel = keys & 32 != 0;
 }
 
+fn station_distance(drive: &Drive) -> f64 {
+    let absolute = drive.stream.origin.absolute(drive.current.pose.position);
+    let station = nearest_station(drive.stream.seed, -absolute[2]);
+    ((absolute[0] - station.absolute_point[0]).powi(2)
+        + (absolute[1] - station.absolute_point[1]).powi(2)
+        + (absolute[2] - station.absolute_point[2]).powi(2))
+    .sqrt()
+}
 fn advance_physics(time: Res<Time<Real>>, mut drive: ResMut<Drive>) {
     drive.frame_steps = 0;
-    if !game_started() {
+    if !drive.state.active() {
+        return;
+    }
+    if drive.skip_elapsed {
+        drive.skip_elapsed = false;
         return;
     }
     let steps = drive.clock.advance(time.delta_secs_f64());
@@ -180,12 +209,15 @@ fn advance_physics(time: Res<Time<Real>>, mut drive: ResMut<Drive>) {
         drive.previous = drive.current;
         let previous_absolute = drive.stream.origin.absolute(drive.current.pose.position);
         let input = drive.input;
-        drive.world.step(input, true);
+        let distance = station_distance(&drive) as f32;
+        let refuel = drive.refuel;
+        let Drive { world, state, .. } = &mut *drive;
+        state.step(world, input, refuel, distance);
         drive.current = drive.world.snapshot();
         let absolute = drive.stream.origin.absolute(drive.current.pose.position);
-        drive.travel_m += ((absolute[0] - previous_absolute[0]).powi(2)
-            + (absolute[2] - previous_absolute[2]).powi(2))
-        .sqrt();
+        drive
+            .state
+            .record_travel(previous_absolute, absolute, false);
         let Drive { world, stream, .. } = &mut *drive;
         let shift = stream.rebase(world);
         stream.sync_at(absolute, world);
@@ -259,6 +291,8 @@ fn update_hud(drive: Res<Drive>) {
         .iter()
         .enumerate()
         .fold(0, |bits, (i, contact)| bits | ((*contact as u32) << i));
+    let station = nearest_station(drive.stream.seed, -absolute[2]);
+    let distance = station_distance(&drive);
     game_update(
         drive.current.speed_mps * 3.6,
         (drive.camera == CameraMode::Cockpit) as u32,
@@ -276,8 +310,16 @@ fn update_hud(drive: Res<Drive>) {
         origin[1],
         origin[2],
         drive.rebases,
-        drive.travel_m,
+        drive.state.trip_m,
         drive.stream.lateral_band() as f64,
+        drive.state.fuel.liters,
+        drive.state.paused,
+        drive.state.started,
+        station.absolute_point[0],
+        station.absolute_point[1],
+        station.absolute_point[2],
+        distance,
+        can_refuel(drive.current.absolute_speed_kmh(), distance as f32),
     );
 }
 

@@ -13,10 +13,23 @@
         <p class="eyebrow">Desert Drive</p>
         <h1 id="title">A road through the desert.</h1>
         <p id="status" role="status" aria-live="polite">Loading the game…</p>
-        <p class="controls">W / S: drive and brake · A / D: steer<br>Space: handbrake · C: camera · R: recover</p>
+        <p class="controls">W / S or ↑ / ↓: drive and brake<br>A / D or ← / →: steer · Space: handbrake<br>C: camera · E: refuel · R: recover · P / Esc: pause</p>
         <button id="start" type="button" disabled>Start</button>
       </section>
-      <aside id="hud" hidden><strong id="speed">0</strong> km/h <span id="camera-mode">Chase</span></aside>
+      <aside id="hud" hidden>
+        <div><strong id="speed">0</strong> km/h <span id="camera-mode">Chase</span></div>
+        <div class="readouts"><span><span id="fuel">12.0</span> / 40 L</span><span><span id="trip">0.00</span> km</span></div>
+        <p id="refuel-prompt" role="status"></p>
+        <button id="pause" type="button">Pause</button>
+        <button id="fullscreen" type="button">Fullscreen</button>
+      </aside>
+      <section id="pause-screen" aria-labelledby="pause-title" hidden>
+        <h2 id="pause-title">Paused</h2>
+        <p>Press P or Esc to resume.</p>
+        <p class="controls">E: refuel · R: recover · C: camera</p>
+        <button id="resume" type="button">Resume</button>
+        <button id="restart" type="button">Restart</button>
+      </section>
       <p id="runtime-error" role="alert" hidden></p>
       <noscript>Enable JavaScript to load the game.</noscript>
     </main>
