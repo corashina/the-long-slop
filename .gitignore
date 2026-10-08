@@ -1,6 +1,8 @@
 /target/
 /web/pkg/
 /node_modules/
+/.cache/
+/.impeccable/review/
 /.superpowers/
 /Steam/
 /steam/

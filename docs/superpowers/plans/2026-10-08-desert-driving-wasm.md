@@ -1,6 +1,6 @@
 # Desert Driving WASM Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Build the approved desert-driving recreation as a local Rust/WASM browser game.
 
@@ -9,6 +9,15 @@
 **Tech Stack:** Rust stable, Bevy 0.19.1, rapier3d 0.36.0, wasm-bindgen, Docker, static localhost server.
 
 **Spec:** `docs/superpowers/specs/2026-10-08-desert-driving-wasm-design.md`, approved in chat on 2026-10-08.
+
+## Execution Status
+
+Tasks 1-5 are implemented and verified through builds, 23 native tests, and controller browser checks.
+The controller approved all six final UI views after the font fix.
+Independent final code review remains pending before delivery.
+Natural 20-minute browser tank exhaustion was not run. Native physics integration covers empty-tank recovery and refueling.
+The unavailable-WebGL2 check used the actual loader with a simulated null probe, not real hardware denial.
+See `docs/verification.md` for observations and limits.
 
 ## Global Constraints
 
@@ -74,14 +83,14 @@ Sources: [Bevy 0.19.1](https://docs.rs/bevy/0.19.1/bevy/), [Rapier 0.36 vehicle 
 
 **Interfaces:** `app::run()` starts Bevy on canvas `#game`. The loader exposes Start only after Rust signals readiness. Build/check scripts return nonzero on failure.
 
-- [ ] Resolve and record the official Rust image digest. Build the project toolchain container.
-- [ ] Create the Rust package with common Rapier and WASM-only Bevy/browser dependencies.
-- [ ] Create a lit ground plane, camera, and visible cube. Connect rendering to `#game`.
-- [ ] Create the web loader, loading state, Start control, and readable initialization errors.
-- [ ] Implement `scripts/build.ps1`, `scripts/check.ps1`, and `scripts/serve.mjs` with propagated exit codes and correct WASM MIME type.
-- [ ] Run `./scripts/build.ps1` and `node scripts/serve.mjs`. Open `http://127.0.0.1:4173` and verify rendered geometry.
-- [ ] Temporarily request a missing WASM URL. Verify an error and disabled Start; restore the valid URL.
-- [ ] Commit this working layer as `feat: establish Rust WASM browser build`.
+- [x] Resolve and record the official Rust image digest. Build the project toolchain container.
+- [x] Create the Rust package with common Rapier and WASM-only Bevy/browser dependencies.
+- [x] Create a lit ground plane, camera, and visible cube. Connect rendering to `#game`.
+- [x] Create the web loader, loading state, Start control, and readable initialization errors.
+- [x] Implement `scripts/build.ps1`, `scripts/check.ps1`, and `scripts/serve.mjs` with propagated exit codes and correct WASM MIME type.
+- [x] Run `./scripts/build.ps1` and `node scripts/serve.mjs`. Open `http://127.0.0.1:4173` and verify rendered geometry.
+- [x] Temporarily request a missing WASM URL. Verify an error and disabled Start; restore the valid URL.
+- [x] Commit this working layer as `feat: establish Rust WASM browser build`.
 
 This task needs a real build/load check. A unit test of static HTML text would not verify it.
 
@@ -101,7 +110,7 @@ This task needs a real build/load check. A unit test of static HTML text would n
 - `PhysicsWorld::remove_collider(&mut self, handle: ColliderHandle)` removes it from physics/query state.
 - `CameraMode::{Cockpit, Chase}` selects the camera behavior.
 
-- [ ] Write `tests/vehicle.rs`: settle on flat ground, accelerate, brake, reverse, and reset. Assert finite poses, support, speed change, and zero reset velocities.
+- [x] Write `tests/vehicle.rs`: settle on flat ground, accelerate, brake, reverse, and reset. Assert finite poses, support, speed change, and zero reset velocities.
 
 Define the test helper `flat_track() -> PhysicsWorld` using `new` and `insert_mesh`. Settle the car for 120 steps.
 
@@ -118,14 +127,14 @@ fn reset_stops_the_chassis() {
     assert_eq!(world.snapshot().angular_velocity, [0.0; 3]);
 }
 ```
-- [ ] Run `./scripts/check.ps1 -Test vehicle`. Confirm the missing interfaces fail before implementing them.
-- [ ] Implement one dynamic chassis and four raycast wheels using Rapier. Exclude the chassis from wheel queries.
-- [ ] Tune mass, suspension, traction, steering, braking, and reverse on the static track. Use meters, seconds, and kilograms.
-- [ ] Add the procedural compact car, wheel transforms, cockpit, and both cameras.
-- [ ] Order input, fixed physics, interpolation, camera, and HUD systems. Cap elapsed frame time at 100 ms.
-- [ ] Run the vehicle tests and WASM build. Play-test driving, handbrake, collision, and camera changes.
-- [ ] Verify a simulated one-second stall cannot advance one second of physics in one frame.
-- [ ] Commit as `feat: add raycast vehicle driving and cameras`.
+- [x] Run `./scripts/check.ps1 -Test vehicle`. Confirm the missing interfaces fail before implementing them.
+- [x] Implement one dynamic chassis and four raycast wheels using Rapier. Exclude the chassis from wheel queries.
+- [x] Tune mass, suspension, traction, steering, braking, and reverse on the static track. Use meters, seconds, and kilograms.
+- [x] Add the procedural compact car, wheel transforms, cockpit, and both cameras.
+- [x] Order input, fixed physics, interpolation, camera, and HUD systems. Cap elapsed frame time at 100 ms.
+- [x] Run the vehicle tests and WASM build. Play-test driving, handbrake, collision, and camera changes.
+- [x] Verify a simulated one-second stall cannot advance one second of physics in one frame.
+- [x] Commit as `feat: add raycast vehicle driving and cameras`.
 
 ## Task 3: Stream the Desert Road
 
@@ -148,7 +157,7 @@ fn reset_stops_the_chassis() {
 - `nearest_station(seed: u64, distance_m: f64) -> Station` works without a retained world history.
 - `PhysicsWorld::rebase(&mut self, shift: [f32; 3])` shifts local physics poses while preserving velocities.
 
-- [ ] Write seam/determinism tests using adjacent chunks from the same seed. Assert matching boundary positions within 0.001 meters.
+- [x] Write seam/determinism tests using adjacent chunks from the same seed. Assert matching boundary positions within 0.001 meters.
 
 Derive `PartialEq` for chunk data and stations. In tests, define `seam_vertices(chunk: &ChunkData, end: bool) -> Vec<[f64; 3]>`.
 The helper selects boundary vertices, converts them to absolute coordinates, and sorts them by position.
@@ -168,17 +177,17 @@ fn adjacent_chunks_share_the_seam() {
     }
 }
 ```
-- [ ] Write a rebase test: compare relative wheel/chassis poses and velocities before and after a 4096-meter shift.
-- [ ] Run `./scripts/check.ps1 -Test world`. Confirm the tests fail before implementing the missing behavior.
-- [ ] Generate a gently curved road, dunes, sparse props, and stations every 640 meters. Use global samples at shared edges.
-- [ ] Stream eleven active chunks. Remove physics colliders and entities when unloading; reuse shared meshes/materials where possible.
-- [ ] Follow lateral travel with 128-meter bands and 320-meter width. Use shared 8-meter overlap samples.
-- [ ] Replace the strip at 64 lateral meters, before crossing its edge. Keep eleven longitudinal chunks.
-- [ ] Test travel beyond the old lateral edge. Assert ground contact across band changes and bounded collider counts.
-- [ ] Rebase above 2048 local meters between physics steps. Shift physics, chunk entities, interpolation buffers, and cameras together.
-- [ ] Load station/reset destination chunks before moving the chassis there. Reset interpolation poses after a teleport.
-- [ ] Run world tests and build. Drive across seams and a rebase threshold; record active chunk counts.
-- [ ] Commit as `feat: stream seeded desert road and roadside stations`.
+- [x] Write a rebase test: compare relative wheel/chassis poses and velocities before and after a 4096-meter shift.
+- [x] Run `./scripts/check.ps1 -Test world`. Confirm the tests fail before implementing the missing behavior.
+- [x] Generate a gently curved road, dunes, sparse props, and stations every 640 meters. Use global samples at shared edges.
+- [x] Stream eleven active chunks. Remove physics colliders and entities when unloading; reuse shared meshes/materials where possible.
+- [x] Follow lateral travel with 128-meter bands and 320-meter width. Use shared 8-meter overlap samples.
+- [x] Replace the strip at 64 lateral meters, before crossing its edge. Keep eleven longitudinal chunks.
+- [x] Test travel beyond the old lateral edge. Assert ground contact across band changes and bounded collider counts.
+- [x] Rebase above 2048 local meters between physics steps. Shift physics, chunk entities, interpolation buffers, and cameras together.
+- [x] Load station/reset destination chunks before moving the chassis there. Reset interpolation poses after a teleport.
+- [x] Run world tests and build. Drive across seams and a rebase threshold; record active chunk counts.
+- [x] Commit as `feat: stream seeded desert road and roadside stations`.
 
 ## Task 4: Fuel, Stops, Pause, and Browser Controls
 
@@ -195,7 +204,7 @@ fn adjacent_chunks_share_the_seam() {
 - `DriveState::restart(&mut self)` restores initial state; `reset` uses the vehicle API and preserves this state.
 - The browser shell consumes speed, fuel, distance, pause state, and refueling eligibility. It sends start/resume/restart actions and held keys.
 
-- [ ] Write tests for fuel bounds, zero-fuel engine gating, refueling thresholds, pause, and unchanged state after reset/rebase.
+- [x] Write tests for fuel bounds, zero-fuel engine gating, refueling thresholds, pause, and unchanged state after reset/rebase.
 
 ```rust
 #[test]
@@ -215,14 +224,14 @@ fn fuel_stays_within_tank_limits() {
     assert_eq!(fuel.liters, 40.0);
 }
 ```
-- [ ] Include zero-fuel reset to an unloaded station and assert correct refueling range after destination loading.
-- [ ] Run `./scripts/check.ps1 -Test simulation`. Confirm failure before adding the missing functions.
-- [ ] Implement fuel consumption/refueling. Pass `engine_enabled = fuel.liters > 0` into the vehicle step.
-- [ ] Implement trip state, station prompts, reset/restart, and the specified keyboard mappings.
-- [ ] Add Start, Resume, Restart, Fullscreen, and pause UI. Keep the HUD readable over the scene.
-- [ ] Clear key state and pause on blur/visibility loss. Resume only on explicit action.
-- [ ] Run simulation tests and build. Verify refueling, empty-tank recovery, pause, focus loss, and restart in the browser.
-- [ ] Commit as `feat: add fuel and roadside driving loop`.
+- [x] Include zero-fuel reset to an unloaded station and assert correct refueling range after destination loading.
+- [x] Run `./scripts/check.ps1 -Test simulation`. Confirm failure before adding the missing functions.
+- [x] Implement fuel consumption/refueling. Pass `engine_enabled = fuel.liters > 0` into the vehicle step.
+- [x] Implement trip state, station prompts, reset/restart, and the specified keyboard mappings.
+- [x] Add Start, Resume, Restart, Fullscreen, and pause UI. Keep the HUD readable over the scene.
+- [x] Clear key state and pause on blur/visibility loss. Resume only on explicit action.
+- [x] Run simulation tests and build. Verify refueling, pause, focus loss, and restart in the browser. Verify empty-tank recovery through native physics integration.
+- [x] Commit as `feat: add fuel and roadside driving loop`.
 
 ## Task 5: Finish and Verify the Playable Build
 
@@ -230,18 +239,18 @@ fn fuel_stays_within_tank_limits() {
 
 **Interfaces:** Retain the defined module contracts. Tune geometry, materials, camera placement, and physics values without adding a second behavior path.
 
-- [ ] Apply warm desert lighting, fog, weathered car materials, terrain variation, and sparse roadside details.
-- [ ] Use the Impeccable skill for the loading/start screen and HUD. Apply the stop-slop skill to final UI text.
-- [ ] Add original synthesized engine sound only if browser audio integration is small and verified; audio remains optional under the spec.
-- [ ] Run `./scripts/check.ps1` for formatting, critical native tests, and WASM compilation.
-- [ ] Start the loopback server. Play-test each control and game action against the spec's acceptance list.
-- [ ] Test missing WASM and denied/unavailable WebGL2. Confirm useful error text and disabled Start.
-- [ ] Drive across multiple chunks and an origin shift. Verify the visible car, terrain, wheel contact, station prompts, and bounded chunk count.
-- [ ] Measure frame times at 1280x720. Record browser, renderer, hardware context, and observed performance.
-- [ ] Fix measured failures. Re-run only the affected checks plus the final build if code changes.
-- [ ] Write launch instructions and evidence in `docs/verification.md`. Mark unavailable checks as incomplete.
-- [ ] Obtain an independent final code review. Resolve actionable findings before committing the delivery.
-- [ ] Commit as `feat: finish and verify browser desert driving slice`.
+- [x] Apply warm desert lighting, fog, weathered car materials, terrain variation, and sparse roadside details.
+- [x] Use the Impeccable skill for the loading/start screen and HUD. Apply the stop-slop skill to final UI text.
+- [x] Decide optional audio scope. Omit audio from this build; it remains optional under the spec.
+- [x] Run `./scripts/check.ps1` for formatting, critical native tests, and WASM compilation.
+- [x] Start the loopback server. Play-test each control and game action against the spec's acceptance list.
+- [x] Test missing WASM and denied/unavailable WebGL2. Confirm useful error text and disabled Start.
+- [x] Drive across multiple chunks and an origin shift. Verify the visible car, terrain, wheel contact, station prompts, and bounded chunk count.
+- [x] Measure frame times at 1280x720. Record browser, renderer, hardware context, and observed performance.
+- [x] Fix measured failures. Re-run only the affected checks plus the final build if code changes.
+- [x] Write launch instructions and evidence in `docs/verification.md`. Mark unavailable checks as incomplete.
+- [ ] Obtain an independent final code review. Resolve actionable findings before final delivery.
+- [x] Commit as `feat: finish and verify browser desert driving slice`.
 
 ## Execution and Review
 
@@ -257,4 +266,4 @@ Recommend subagent-driven execution because physics, streaming, and browser timi
 - Interfaces: Physics owns collision state. World owns absolute coordinates. Simulation owns fuel and distance. Rendering reads snapshots.
 - Tests: Native tests cover critical state and physics. Browser checks cover rendered behavior and focus/error paths.
 - Tooling: Docker access was verified. Image pull, WASM tools, and crate compilation remain implementation checks.
-- Status: Written plan awaits user review and execution choice. No product code has been written.
+- Status: User approved the plan and requested implementation. Tasks 1-5 are implemented. Independent final code review remains pending.

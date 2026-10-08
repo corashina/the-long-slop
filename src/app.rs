@@ -39,7 +39,7 @@ struct Drive {
 pub fn run() {
     console_error_panic_hook::set_once();
     App::new()
-        .insert_resource(ClearColor(Color::srgb(0.55, 0.72, 0.82)))
+        .insert_resource(ClearColor(Color::srgb(0.64, 0.72, 0.73)))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Desert Drive".into(),
@@ -100,7 +100,8 @@ fn setup(
     presentation::car::spawn(&mut commands, &mut meshes, &mut materials);
     commands.spawn((
         DirectionalLight {
-            illuminance: 12_000.0,
+            color: Color::srgb(1.0, 0.91, 0.77),
+            illuminance: 9_000.0,
             ..default()
         },
         Transform::from_xyz(6.0, 9.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -110,7 +111,15 @@ fn setup(
         Camera3d::default(),
         presentation::camera::pose(CameraMode::Chase, snapshot.pose),
         Msaa::Off,
-        bevy::core_pipeline::tonemapping::Tonemapping::None,
+        bevy::core_pipeline::tonemapping::Tonemapping::Reinhard,
+        DistanceFog {
+            color: Color::srgb(0.64, 0.72, 0.73),
+            falloff: FogFalloff::Linear {
+                start: 110.0,
+                end: 430.0,
+            },
+            ..default()
+        },
     ));
 }
 

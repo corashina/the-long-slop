@@ -7,6 +7,7 @@ const hud = document.querySelector('#hud');
 const speed = document.querySelector('#speed');
 const cameraMode = document.querySelector('#camera-mode');
 const fuel = document.querySelector('#fuel');
+const fuelLevel = document.querySelector('#fuel-level');
 const trip = document.querySelector('#trip');
 const prompt = document.querySelector('#refuel-prompt');
 const pauseScreen = document.querySelector('#pause-screen');
@@ -58,7 +59,11 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, chunks, colliders, abs
   state.stationDistanceM = stationDistanceM; state.refuelEligible = refuelEligible;
   const liters = Math.round(fuelLiters * 10);
   const distance = Math.round(travelM / 10);
-  if (liters !== lastFuel) { fuel.textContent = (liters / 10).toFixed(1); lastFuel = liters; }
+  if (liters !== lastFuel) {
+    fuel.textContent = (liters / 10).toFixed(1);
+    fuelLevel.value = liters / 10;
+    lastFuel = liters;
+  }
   if (distance !== lastTrip) { trip.textContent = (distance / 100).toFixed(2); lastTrip = distance; }
   const message = fuelLiters >= 39.99 ? 'Tank full.' : refuelEligible ? 'Hold E to refuel.' :
     fuelLiters <= 0 ? 'Tank empty. Press R to reach a station.' :

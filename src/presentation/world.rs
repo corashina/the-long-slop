@@ -197,12 +197,15 @@ fn terrain_mesh(chunk: &ChunkData) -> Mesh {
         .vertices
         .iter()
         .enumerate()
-        .map(|(i, _)| {
+        .map(|(i, vertex)| {
             let lateral = chunk.lateral_samples[i % chunk.lateral_samples.len()].abs();
+            let x = vertex[0] as f64 + chunk.origin()[0];
+            let z = vertex[2] as f64 + chunk.origin()[2];
+            let variation = ((x * 0.033).sin() * (z * 0.027).cos()) as f32 * 0.035;
             let color = if lateral <= 4.0 {
-                Color::srgb(0.24, 0.23, 0.21)
+                Color::srgb(0.22 + variation * 0.2, 0.21 + variation * 0.2, 0.18)
             } else {
-                Color::srgb(0.63, 0.47, 0.29)
+                Color::srgb(0.59 + variation, 0.44 + variation, 0.28 + variation * 0.6)
             };
             color.to_linear().to_f32_array()
         })
