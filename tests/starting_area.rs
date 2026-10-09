@@ -203,6 +203,7 @@ fn recovery_preserves_state() {
 fn production_garage_bindings_fill_start_and_move() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").expect("exported manifest");
     let reference = desert_drive::reference::ReferenceManifest::from_json(&bytes).unwrap();
+    verify_source_passenger_controls(&reference);
     let mut runtime = GarageRuntime::new(&reference).unwrap();
     assert_eq!(runtime.area.bodies.len(), reference.bodies.len());
     for collider in &reference.colliders {
@@ -352,23 +353,7 @@ fn production_garage_bindings_fill_start_and_move() {
         .area
         .interaction
         .drop_held(&mut runtime.area.items, &mut runtime.physics);
-    let driver = reference.seats.iter().find(|seat| seat.driver).unwrap();
-    let seat = reference
-        .anchors
-        .iter()
-        .find(|anchor| anchor.id == driver.anchor)
-        .unwrap();
-    assert!(
-        runtime.area.player.enter(
-            driver.id,
-            desert_drive::vehicle::VehiclePose {
-                position: seat.transform.translation,
-                rotation: seat.transform.rotation
-            },
-            &mut runtime.physics
-        ),
-        "driver seat is blocked"
-    );
+    enter_source_driver(&mut runtime, &reference);
     runtime.started = true;
     for step in 0..240 {
         runtime.step(
@@ -868,7 +853,7 @@ fn walking_far_keeps_a_parked_road_car_supported() {
 
 #[test]
 #[ignore = "Requires exported Steam assets"]
-fn production_opens_both_garage_exit_leaves() {
+fn production_garage_exits_and_reverse_to_driveway() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let reference = desert_drive::reference::ReferenceManifest::from_json(&bytes).unwrap();
     let mut runtime = GarageRuntime::new(&reference).unwrap();
@@ -879,39 +864,7 @@ fn production_opens_both_garage_exit_leaves() {
             .iter()
             .find(|hinge| hinge.source.path_id == source)
             .expect("recovered garage exit leaf");
-        runtime.step(&reference, FrameInput::default());
-        aim_at(&mut runtime, &reference, hinge.item);
-        let span = (hinge.max_degrees - hinge.closed_degrees)
-            .abs()
-            .max((hinge.min_degrees - hinge.closed_degrees).abs());
-        let mut open = false;
-        for mouse in [[0.0, 50.0], [0.0, -50.0], [50.0, 0.0], [-50.0, 0.0]] {
-            for step in 0..180 {
-                runtime.step(
-                    &reference,
-                    FrameInput {
-                        held: keys::USE,
-                        pressed: if step == 0 { keys::USE } else { 0 },
-                        mouse,
-                        ..FrameInput::default()
-                    },
-                );
-                let angle = runtime.area.interaction.hinge_angle(hinge.item).unwrap();
-                if (angle - hinge.closed_degrees).abs() >= span * 0.9 {
-                    open = true;
-                    break;
-                }
-            }
-            if open {
-                break;
-            }
-            runtime.step(&reference, FrameInput::default());
-            aim_at(&mut runtime, &reference, hinge.item);
-        }
-        assert!(
-            open,
-            "garage exit leaf {source} did not open with its recovered controls"
-        );
+        open_source_hinge(&mut runtime, &reference, source);
         let body = runtime.area.bodies[&hinge.body];
         assert!(runtime.physics.rapier().bodies[body].is_kinematic());
         assert!(!runtime.physics.rapier().bodies[body].colliders().is_empty());
@@ -920,4 +873,283 @@ fn production_opens_both_garage_exit_leaves() {
             runtime.area.interaction.hinge_angle(hinge.item).unwrap()
         );
     }
+    runtime.step(&reference, FrameInput::default());
+    enter_source_driver(&mut runtime, &reference);
+    for step in 0..240 {
+        runtime.step(
+            &reference,
+            FrameInput {
+                held: keys::IGNITION,
+                pressed: if step == 0 { keys::IGNITION } else { 0 },
+                ..FrameInput::default()
+            },
+        );
+    }
+    assert!(runtime.engine_output.running, "engine did not start");
+    let start = runtime.physics.snapshot().pose.position;
+    let mut crossed = false;
+    for step in 0..1200 {
+        runtime.step(
+            &reference,
+            FrameInput {
+                held: keys::BACK,
+                pressed: if step == 0 { keys::SPACE } else { 0 },
+                released: if step == 0 { keys::IGNITION } else { 0 },
+                ..FrameInput::default()
+            },
+        );
+        if runtime.physics.snapshot().pose.position[0] < 33.0 {
+            crossed = true;
+            break;
+        }
+    }
+    let exit = runtime.physics.snapshot();
+    assert!(
+        crossed,
+        "car did not reverse beyond garage exit plane x35.21: {start:?} -> {:?}, engine {:?}",
+        exit.pose.position, runtime.engine_output
+    );
+    assert!(exit.pose.position[0] < 35.21);
+    for step in 0..180 {
+        runtime.step(
+            &reference,
+            FrameInput {
+                pressed: if step == 0 { keys::SPACE } else { 0 },
+                ..FrameInput::default()
+            },
+        );
+    }
+    let parked = runtime.physics.snapshot();
+    assert!(
+        parked.wheels_contact.iter().all(|contact| *contact),
+        "car lost driveway support: {:?}",
+        parked.pose.position
+    );
+    assert!(parked.pose.position[1] > 0.0, "car fell below the driveway");
+    println!(
+        "source Lada reversed {:?} -> {:?}; driveway contacts {:?}",
+        start, parked.pose.position, parked.wheels_contact
+    );
+}
+
+fn open_source_hinge(
+    runtime: &mut GarageRuntime,
+    reference: &desert_drive::reference::ReferenceManifest,
+    source: i64,
+) {
+    let hinge = reference
+        .hinges
+        .iter()
+        .find(|hinge| hinge.source.path_id == source)
+        .unwrap();
+    runtime.started = true;
+    runtime.step(reference, FrameInput::default());
+    aim_at(runtime, reference, hinge.item);
+    let span = (hinge.max_degrees - hinge.closed_degrees)
+        .abs()
+        .max((hinge.min_degrees - hinge.closed_degrees).abs());
+    for mouse in [[0.0, 50.0], [0.0, -50.0], [50.0, 0.0], [-50.0, 0.0]] {
+        for step in 0..180 {
+            runtime.step(
+                reference,
+                FrameInput {
+                    held: keys::USE,
+                    pressed: if step == 0 { keys::USE } else { 0 },
+                    mouse,
+                    ..FrameInput::default()
+                },
+            );
+            if (runtime.area.interaction.hinge_angle(hinge.item).unwrap() - hinge.closed_degrees)
+                .abs()
+                > span * 0.9
+            {
+                runtime.step(reference, FrameInput::default());
+                return;
+            }
+        }
+        runtime.step(reference, FrameInput::default());
+        aim_at(runtime, reference, hinge.item);
+    }
+    panic!("source hinge {source} did not open");
+}
+
+fn enter_source_driver(
+    runtime: &mut GarageRuntime,
+    reference: &desert_drive::reference::ReferenceManifest,
+) {
+    open_source_hinge(runtime, reference, 76010);
+    let driver = reference.seats.iter().find(|seat| seat.driver).unwrap();
+    let target = aim_at(runtime, reference, driver.item);
+    assert_eq!(target.item, driver.item);
+    runtime.started = true;
+    runtime.step(
+        reference,
+        FrameInput {
+            held: keys::USE,
+            pressed: keys::USE,
+            ..FrameInput::default()
+        },
+    );
+    runtime.step(
+        reference,
+        FrameInput {
+            released: keys::USE,
+            ..FrameInput::default()
+        },
+    );
+    assert_eq!(
+        runtime.area.player.seat(),
+        Some(driver.id),
+        "driver seat must enter through actual aim and USE release"
+    );
+    assert!(runtime.area.player.driving());
+    close_source_hinge(runtime, reference, 76010);
+}
+
+fn verify_source_passenger_controls(reference: &desert_drive::reference::ReferenceManifest) {
+    let mut runtime = GarageRuntime::new(reference).unwrap();
+    open_source_hinge(&mut runtime, reference, 70795);
+    let passenger = reference
+        .seats
+        .iter()
+        .find(|seat| seat.source.path_id == 66466)
+        .expect("front passenger seat");
+    assert!(!passenger.driver);
+    aim_at(&mut runtime, reference, passenger.item);
+    runtime.step(
+        reference,
+        FrameInput {
+            held: keys::USE,
+            pressed: keys::USE,
+            ..FrameInput::default()
+        },
+    );
+    runtime.step(
+        reference,
+        FrameInput {
+            released: keys::USE,
+            ..FrameInput::default()
+        },
+    );
+    assert_eq!(
+        runtime.area.player.seat(),
+        Some(passenger.id),
+        "passenger entry must use actual source aim"
+    );
+    assert!(!runtime.area.player.driving());
+    for step in 0..180 {
+        runtime.step(
+            reference,
+            FrameInput {
+                held: keys::IGNITION | keys::FORWARD,
+                pressed: if step == 0 {
+                    keys::IGNITION | keys::SPACE
+                } else {
+                    0
+                },
+                ..FrameInput::default()
+            },
+        );
+    }
+    runtime.step(
+        reference,
+        FrameInput {
+            released: keys::IGNITION,
+            ..FrameInput::default()
+        },
+    );
+    assert!(!runtime.engine_output.ignition);
+    assert!(!runtime.engine_output.running);
+    assert!(runtime.handbrake);
+    println!(
+        "source passenger seat entered through aim; engine and handbrake controls remained disabled"
+    );
+}
+
+fn close_source_hinge(
+    runtime: &mut GarageRuntime,
+    reference: &desert_drive::reference::ReferenceManifest,
+    source: i64,
+) {
+    let hinge = reference
+        .hinges
+        .iter()
+        .find(|hinge| hinge.source.path_id == source)
+        .unwrap();
+    runtime.step(reference, FrameInput::default());
+    if runtime.area.player.seat().is_some() {
+        aim_from_seat(runtime, reference, hinge.item);
+    } else {
+        aim_at(runtime, reference, hinge.item);
+    }
+    for mouse in [[0.0, -50.0], [0.0, 50.0], [-50.0, 0.0], [50.0, 0.0]] {
+        for step in 0..180 {
+            runtime.step(
+                reference,
+                FrameInput {
+                    held: keys::USE,
+                    pressed: if step == 0 { keys::USE } else { 0 },
+                    mouse,
+                    ..FrameInput::default()
+                },
+            );
+            if (runtime.area.interaction.hinge_angle(hinge.item).unwrap() - hinge.closed_degrees)
+                .abs()
+                < 0.1
+            {
+                runtime.step(reference, FrameInput::default());
+                return;
+            }
+        }
+        runtime.step(reference, FrameInput::default());
+        if runtime.area.player.seat().is_some() {
+            aim_from_seat(runtime, reference, hinge.item);
+        } else {
+            aim_at(runtime, reference, hinge.item);
+        }
+    }
+    panic!("source hinge {source} did not close through native controls");
+}
+
+fn aim_from_seat(
+    runtime: &mut GarageRuntime,
+    reference: &desert_drive::reference::ReferenceManifest,
+    item: desert_drive::reference::ItemId,
+) {
+    assert!(runtime.area.player.seat().is_some());
+    let center = runtime
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, collider)| collider.user_data as u32 == item.0 + 1)
+        .map(|(_, collider)| collider.compute_aabb().center())
+        .unwrap();
+    let view = desert_drive::vehicle::to_rapier(runtime.area.player.view_pose(&runtime.physics));
+    let body = desert_drive::vehicle::to_rapier(runtime.area.player.body_pose(&runtime.physics));
+    let delta = body.rotation.inverse() * (center - view.translation);
+    let yaw = delta.x.atan2(-delta.z).to_degrees();
+    let pitch = (-delta.y)
+        .atan2((delta.x * delta.x + delta.z * delta.z).sqrt())
+        .to_degrees();
+    runtime.step(
+        reference,
+        FrameInput {
+            mouse: [
+                yaw - runtime.area.player.yaw_degrees(),
+                pitch - runtime.area.player.pitch_degrees(),
+            ],
+            ..FrameInput::default()
+        },
+    );
+    let target = runtime.area.interaction.aim(
+        &runtime.physics,
+        runtime.area.player.view_pose(&runtime.physics),
+        reference.player.aim_reach,
+    );
+    assert_eq!(
+        target.map(|target| target.item),
+        Some(item),
+        "seated door control must use real aim"
+    );
 }

@@ -575,7 +575,12 @@ impl GarageRuntime {
             _ => {}
         }
         self.area.sync_portable_mass(&mut self.physics);
-        if seated && input.pressed & keys::USE != 0 {
+        if seated
+            && input.pressed & keys::USE != 0
+            && matches!(action, None | Some(InteractionAction::Seat(_)))
+            && self.area.interaction.dragging_hinge().is_none()
+            && self.area.interaction.tuning_opening().is_none()
+        {
             self.notice = if self.area.player.seat().is_some() {
                 "Look toward a clear exit."
             } else {
