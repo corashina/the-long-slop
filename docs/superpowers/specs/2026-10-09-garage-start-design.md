@@ -1,7 +1,7 @@
 # Garage start and first-person control
 
 Date: 2026-10-09, Europe/Warsaw.
-Status: The user approved the conversational design. This written specification awaits review.
+Status: The user approved this written specification in chat on 2026-10-09.
 
 ## Intent and scope
 

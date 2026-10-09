@@ -70,6 +70,17 @@ Some custom component reads failed with generated serialization schemas.
 I stopped the broad component scan. I have not established all original vehicle or player defaults.
 Original meshes, textures, and colliders still need a tested conversion for Bevy and Rapier.
 
+Targeted reads later recovered the fuel, sump, coolant, engine, and player components.
+Generated schemas had a base-header alignment error. I replaced their base-header nodes with UnityPy's standard MonoBehaviour nodes.
+I compared source class links with the standard header and required complete byte consumption.
+The corrected reads confirmed fuel capacity `39 L`, sump capacity `5 L`, and coolant capacity `5 L`.
+Serialized amounts are `0.5 L` gasoline, `2.5 L` oil, and about `3.6 L` water.
+These amounts remain serialized evidence until the selected startup caller has been traced.
+`FStart()` does not randomize fluids. `RandomFluid()` replaces them when a caller invokes it.
+The engine records starter `700 RPM`, idle `800 RPM`, maximum `6600 RPM`, shutdown `550 RPM`, and maximum torque `87 Nm`.
+The player records base speed `1.75`, run multiplier `2.5`, and aim reach `1.85`.
+I saved the corrected reads to `.cache/reference/targeted-parameters.json`.
+
 ### Lada standard component checks
 
 The complete Lada prefab is `sharedassets1.assets` GameObject `40132`, Transform `82556`, named `Car02Full`.
