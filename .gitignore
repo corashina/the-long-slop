@@ -7,3 +7,6 @@
 /Steam/
 /steam/
 *.log
+/web/assets/reference/
+/tools/reference/.venv/
+__pycache__/
