@@ -3,6 +3,7 @@ import math
 from .source import key, source_id, vector
 from .gltf import GltfExporter, convert_point, convert_rotation, transform_point
 from .collision import world_pose, quaternion_product, bake_points, geometry
+from .caps import opening_metadata
 
 
 def build_manifest(source, roots, reports, hashes):
@@ -171,10 +172,11 @@ def build_manifest(source, roots, reports, hashes):
             value=source.read(reader);tank=source.resolve(reader,value['Tank'])
             if tank is None or key(tank) not in item_components:raise ValueError(f'Cap tank outside selected roots: {key(reader)}')
             opening={'id':len(openings)+1,'source':source_id(reader),'tank':item_components[key(tank)],'cap':item_nodes[node],
-                'anchor':anchor(node),'open':value['valve']>0.,'flow_liters_per_second':value['radius']**2*math.pi*0.025*main['pourSpeed'],'tilt_degrees':value['defPourAngle'],
+                'anchor':anchor(node),'flow_liters_per_second':value['radius']**2*math.pi*0.025*main['pourSpeed'],'tilt_degrees':value['defPourAngle'],
                 'tilt_axis':[0.,0.,-1.],'angle_disabled':bool(value['noAngle']),'spill_disabled':bool(value['noPour']),
                 'tube_connected':bool(value['tube']),'flow_radius':value['radius']}
             opening['can_toggle']=bool(value['canToggle'])
+            opening.update(opening_metadata(source,reader,by_source,main['fluidTuneSpeed']))
             openings.append(opening)
             tank_record=next(t for t in tanks if t['item']==opening['tank'])
             tank_record['openings'].append(opening['id'])
@@ -297,6 +299,8 @@ def build_manifest(source, roots, reports, hashes):
     player_record.update(carry_min_distance=max(0.,math.sqrt(sum(value**2 for value in held_offset))-player['maxPickupDist']),
         carry_max_distance=math.sqrt(sum(value**2 for value in held_offset))+player['maxPickupDist'],obj_move_sensitivity=defaults[3],
         obj_rotation_sensitivity=defaults[4],look_sensitivity=[defaults[0]*defaults[1],defaults[0]*defaults[2]])
+    scroll_slider=source.resolve(settings_reader,settings['tabControls']['sliders'][3]);scroll_definition=source.read(scroll_slider)
+    player_record['scroll_sensitivity']=scroll_definition['defValue']*(scroll_definition['valueMultipler'] if scroll_definition['valueMultipler'] else 1.)
     home_pose=world_pose(source,node_readers[home_root]);car_pose=world_pose(source,node_readers[car_root])
     world_points=[]
     for collider in colliders:

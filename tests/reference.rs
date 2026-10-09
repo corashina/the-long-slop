@@ -16,6 +16,28 @@ fn accepts_recovered_scalars_with_synthetic_geometry() {
 }
 
 #[test]
+fn fixture_preserves_tunable_faucet_metadata() {
+    let input = fixture();
+    let faucet = input["openings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|opening| opening["source"]["path_id"] == 64723)
+        .expect("source faucet metadata");
+    assert_eq!(faucet["can_toggle"], false);
+    assert_eq!(faucet["can_tune"], true);
+    assert_eq!(faucet["valve"], 0.0);
+    assert!((faucet["tune_rate"].as_f64().unwrap() - 0.525).abs() < 0.000001);
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_ok());
+    let mut invalid = input.clone();
+    invalid["openings"][0]["valve"] = serde_json::json!(1.5);
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&invalid).unwrap()).is_err());
+    let mut invalid = input;
+    invalid["openings"][0]["visuals"]["cap_node"] = serde_json::json!(999999);
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&invalid).unwrap()).is_err());
+}
+
+#[test]
 fn rejects_mismatch_unknown_fields_duplicate_ids_and_missing_bindings() {
     let cases = [
         ("build_id", serde_json::json!(0)),
@@ -61,6 +83,16 @@ fn rejects_invalid_geometry_quantities_and_hierarchy_cycles() {
 }
 
 #[test]
+fn rejects_incomplete_transmission_before_startup() {
+    let mut input = fixture();
+    input["vehicle"]["gear_ratios"] = serde_json::json!([-3.87, 3.75, 2.3, 1.49, 1.0]);
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    let mut input = fixture();
+    input["vehicle"]["gear_free_run"] = serde_json::json!([]);
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+}
+
+#[test]
 #[ignore = "Requires the local installed-build export"]
 fn production_export_matches_installed_contract() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
@@ -77,6 +109,36 @@ fn production_export_matches_installed_contract() {
     assert_eq!(manifest.wheel_slots.len(), 4);
     assert_eq!(manifest.hinges.len(), 7);
     assert!(manifest.openings.len() >= 8);
+    let faucet = manifest
+        .openings
+        .iter()
+        .find(|opening| opening.source.path_id == 64723)
+        .unwrap();
+    assert!(faucet.can_tune && !faucet.can_toggle);
+    assert_eq!(faucet.valve, 0.0);
+    assert!((faucet.tune_rate - 0.525).abs() < 0.000001);
+    assert_eq!(
+        manifest.nodes[faucet.visuals.cap_node.unwrap().0 as usize - 1]
+            .source
+            .path_id,
+        30290
+    );
+    assert_eq!(faucet.visuals.open_euler_degrees, [0., 0., -405.]);
+    for opening in &manifest.openings {
+        let visual = &opening.visuals;
+        if let (Some(cap), Some(closed), Some(open)) =
+            (visual.cap_node, visual.closed_node, visual.open_node)
+        {
+            assert_eq!(
+                manifest.nodes[cap.0 as usize - 1].parent,
+                manifest.nodes[closed.0 as usize - 1].parent
+            );
+            assert_eq!(
+                manifest.nodes[cap.0 as usize - 1].parent,
+                manifest.nodes[open.0 as usize - 1].parent
+            );
+        }
+    }
     for collider in &manifest.colliders {
         if let desert_drive::reference::ColliderGeometry::Convex { points } = &collider.geometry {
             let points: Vec<_> = points

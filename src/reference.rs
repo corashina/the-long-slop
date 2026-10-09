@@ -196,7 +196,6 @@ pub struct OpeningRecord {
     pub tank: ItemId,
     pub cap: ItemId,
     pub anchor: AnchorId,
-    pub open: bool,
     pub flow_liters_per_second: f32,
     pub tilt_degrees: f32,
     pub tilt_axis: [f32; 3],
@@ -205,6 +204,23 @@ pub struct OpeningRecord {
     pub tube_connected: bool,
     pub flow_radius: f32,
     pub can_toggle: bool,
+    pub valve: f32,
+    pub can_tune: bool,
+    pub tune_rate: f32,
+    pub visuals: CapVisualReference,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CapVisualReference {
+    pub open_nodes: Vec<NodeId>,
+    pub closed_nodes: Vec<NodeId>,
+    pub cap_node: Option<NodeId>,
+    pub closed_node: Option<NodeId>,
+    pub open_node: Option<NodeId>,
+    pub euler_rotation: bool,
+    pub closed_euler_degrees: [f32; 3],
+    pub open_euler_degrees: [f32; 3],
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -372,6 +388,7 @@ pub struct PlayerReference {
     pub obj_move_sensitivity: f32,
     pub obj_rotation_sensitivity: f32,
     pub look_sensitivity: [f32; 2],
+    pub scroll_sensitivity: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -811,6 +828,34 @@ impl ReferenceManifest {
             )?;
         }
         for r in &self.openings {
+            let visuals = &r.visuals;
+            require(
+                r.valve.is_finite()
+                    && (0.0..=1.0).contains(&r.valve)
+                    && r.tune_rate.is_finite()
+                    && r.tune_rate >= 0.0
+                    && (!r.can_tune || r.tune_rate > 0.0),
+                "opening valve/tuning",
+            )?;
+            require(
+                visuals
+                    .open_nodes
+                    .iter()
+                    .chain(&visuals.closed_nodes)
+                    .all(|id| node_ids.contains(id))
+                    && [visuals.cap_node, visuals.closed_node, visuals.open_node]
+                        .iter()
+                        .all(|id| id.is_none_or(|id| node_ids.contains(&id)))
+                    && finite(&visuals.closed_euler_degrees)
+                    && finite(&visuals.open_euler_degrees),
+                "cap visual bindings",
+            )?;
+            require(
+                visuals.closed_node.is_some() == visuals.open_node.is_some()
+                    && (visuals.cap_node.is_some()
+                        || (visuals.closed_node.is_none() && !visuals.euler_rotation)),
+                "cap visual control",
+            )?;
             require(
                 item_ids.contains(&r.tank)
                     && item_ids.contains(&r.cap)
@@ -904,6 +949,10 @@ impl ReferenceManifest {
             "curve key order",
         )?;
         let p = &self.player;
+        require(
+            p.scroll_sensitivity.is_finite() && p.scroll_sensitivity > 0.0,
+            "scroll sensitivity",
+        )?;
         require(
             finite(&p.carry_anchor_offset)
                 && finite(&p.look_sensitivity)
@@ -1123,7 +1172,8 @@ impl ReferenceManifest {
                 v.brake_torque_nm,
                 v.handbrake_torque_nm,
             ]) && finite(&v.gear_ratios)
-                && !v.gear_ratios.is_empty()
+                && v.gear_ratios.iter().any(|ratio| *ratio == 0.0)
+                && v.gear_free_run.len() == v.gear_ratios.len()
                 && v.mass_kg > 0.0,
             "vehicle parameters",
         )?;

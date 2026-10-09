@@ -339,6 +339,99 @@
           1
         ]
       }
+    },
+    {
+      "id": 11,
+      "source": {
+        "file": "level1",
+        "path_id": 9000
+      },
+      "name": "Synthetic faucet",
+      "hierarchy_path": "Fixture/faucet/0",
+      "asset": 1,
+      "gltf_node": 1,
+      "parent": 1,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 12,
+      "source": {
+        "file": "level1",
+        "path_id": 9001
+      },
+      "name": "Synthetic faucet",
+      "hierarchy_path": "Fixture/faucet/1",
+      "asset": 1,
+      "gltf_node": 2,
+      "parent": 11,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 13,
+      "source": {
+        "file": "level1",
+        "path_id": 9002
+      },
+      "name": "Synthetic faucet",
+      "hierarchy_path": "Fixture/faucet/2",
+      "asset": 1,
+      "gltf_node": 3,
+      "parent": 12,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
     }
   ],
   "bodies": [
@@ -898,6 +991,33 @@
           1
         ]
       }
+    },
+    {
+      "id": 6,
+      "source": {
+        "file": "level1",
+        "path_id": 11000
+      },
+      "node": 12,
+      "body": 1,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
     }
   ],
   "hinges": [],
@@ -1357,9 +1477,81 @@
       "condition": 1,
       "mass_kg": 1,
       "attached_to": null
+    },
+    {
+      "id": 18,
+      "source": {
+        "file": "level1",
+        "path_id": 10018
+      },
+      "node": 11,
+      "body": 1,
+      "name": "Synthetic faucet",
+      "kind": "container",
+      "condition": 1,
+      "mass_kg": 0,
+      "attached_to": null
+    },
+    {
+      "id": 19,
+      "source": {
+        "file": "level1",
+        "path_id": 10019
+      },
+      "node": 12,
+      "body": 1,
+      "name": "Synthetic faucet",
+      "kind": "cap",
+      "condition": 1,
+      "mass_kg": 0,
+      "attached_to": null
     }
   ],
-  "openings": [],
+  "openings": [
+    {
+      "id": 1,
+      "source": {
+        "file": "level1",
+        "path_id": 64723
+      },
+      "tank": 18,
+      "cap": 19,
+      "anchor": 6,
+      "flow_liters_per_second": 1.413716694115407,
+      "tilt_degrees": 0.0,
+      "tilt_axis": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "angle_disabled": true,
+      "spill_disabled": false,
+      "tube_connected": false,
+      "flow_radius": 3.0,
+      "can_toggle": false,
+      "valve": 0.0,
+      "can_tune": true,
+      "tune_rate": 0.5250000208616257,
+      "visuals": {
+        "open_nodes": [],
+        "closed_nodes": [],
+        "cap_node": 13,
+        "closed_node": null,
+        "open_node": null,
+        "euler_rotation": true,
+        "closed_euler_degrees": [
+          -0.0,
+          -0.0,
+          0.0
+        ],
+        "open_euler_degrees": [
+          -0.0,
+          -0.0,
+          -405.0
+        ]
+      }
+    }
+  ],
   "tanks": [
     {
       "item": 1,
@@ -1423,6 +1615,29 @@
       "no_fill_from": false,
       "slow_oil": false,
       "role": "vehicle"
+    },
+    {
+      "item": 18,
+      "source": {
+        "file": "level1",
+        "path_id": 64722
+      },
+      "capacity_liters": 1000.0,
+      "quantities_liters": [
+        0.0,
+        0.0,
+        0.0,
+        69.0,
+        0.0,
+        0.0
+      ],
+      "openings": [
+        1
+      ],
+      "no_fill_this": false,
+      "no_fill_from": false,
+      "slow_oil": false,
+      "role": "supply"
     }
   ],
   "fluid_rules": {
@@ -1697,7 +1912,8 @@
     "look_sensitivity": [
       2.0,
       2.0
-    ]
+    ],
+    "scroll_sensitivity": 20
   },
   "seats": [
     {
