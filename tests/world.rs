@@ -199,8 +199,18 @@ fn streaming_bounds_colliders_and_loads_teleport_destination() {
                     + c.data.stations.len() * 2
             })
             .sum::<usize>();
-        assert_eq!(physics.collider_count(), expected_colliders);
-        assert!(physics.collider_count() <= 63);
+        let terrain_count = physics
+            .rapier()
+            .colliders
+            .iter()
+            .filter(|(_, collider)| collider.shape().as_trimesh().is_some())
+            .count();
+        assert!((11..=14).contains(&terrain_count));
+        assert_eq!(
+            physics.collider_count(),
+            expected_colliders + terrain_count - stream.chunks().count()
+        );
+        assert!(physics.collider_count() <= 66);
         for key in active_chunks(distance) {
             assert!(stream.chunks().any(|c| c.data.key == key));
         }

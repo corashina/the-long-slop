@@ -10,6 +10,10 @@ const types = new Map([
   ['.css', 'text/css; charset=utf-8'],
   ['.js', 'text/javascript; charset=utf-8'],
   ['.wasm', 'application/wasm'],
+  ['.json', 'application/json'],
+  ['.gltf', 'model/gltf+json'],
+  ['.bin', 'application/octet-stream'],
+  ['.png', 'image/png'],
 ]);
 
 createServer(async (request, response) => {

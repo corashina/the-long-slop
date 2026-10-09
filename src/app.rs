@@ -1,115 +1,130 @@
-use bevy::ecs as bevy_ecs;
-use bevy::prelude::*;
-use wasm_bindgen::prelude::*;
-
-use crate::browser::{game_actions, game_keys, game_ready, game_update};
+use crate::browser::*;
 use crate::presentation::{
     self,
     camera::{CameraMode, DriveCamera},
-    car::{ChassisVisual, WheelVisual},
+    reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
     world::{ChunkVisual, WorldVisuals},
 };
-use crate::simulation::{DriveInput, DriveState, StepClock, can_refuel};
-use crate::vehicle::{PhysicsWorld, VehiclePose, VehicleSnapshot};
-use crate::world::{DEFAULT_SEED, WorldStream, nearest_station};
-
-const START: VehiclePose = VehiclePose {
-    position: [0.0, 1.1, 0.0],
-    rotation: [0.0, 0.0, 0.0, 1.0],
-};
+use crate::reference::{ItemId, ItemKind, ReferenceManifest};
+use crate::simulation::{FrameInput, StepClock, keys};
+use crate::starting_area::GarageRuntime;
+use crate::vehicle::VehiclePose;
+use bevy::asset::{AssetMetaCheck, LoadState, RecursiveDependencyLoadState};
+use bevy::camera::visibility::RenderLayers;
+use bevy::ecs as bevy_ecs;
+use bevy::gltf::GltfExtras;
+use bevy::prelude::*;
+use std::sync::Arc;
+use wasm_bindgen::prelude::*;
 
 #[derive(Resource)]
+struct RuntimeReference(Arc<ReferenceManifest>);
+#[derive(Resource)]
 struct Drive {
-    world: PhysicsWorld,
-    stream: WorldStream,
-    input: DriveInput,
+    runtime: GarageRuntime,
+    input: FrameInput,
     clock: StepClock,
-    previous: VehicleSnapshot,
-    current: VehicleSnapshot,
+    previous: VehiclePose,
+    current: VehiclePose,
     rendered: VehiclePose,
     camera: CameraMode,
     frame_steps: u32,
-    rebases: u32,
-    state: DriveState,
-    refuel: bool,
     skip_elapsed: bool,
+    ready: bool,
 }
 
 #[wasm_bindgen]
-pub fn run() {
+pub fn run(reference_json: &str) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
+    let reference = Arc::new(
+        ReferenceManifest::from_json(reference_json.as_bytes())
+            .map_err(|e| JsValue::from_str(&e.to_string()))?,
+    );
+    let runtime = GarageRuntime::new(&reference).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let current = runtime.area.player.view_pose(&runtime.physics);
     App::new()
+        .insert_resource(RuntimeReference(reference))
+        .insert_resource(Drive {
+            runtime,
+            input: FrameInput::default(),
+            clock: StepClock::default(),
+            previous: current,
+            current,
+            rendered: current,
+            camera: CameraMode::default(),
+            frame_steps: 0,
+            skip_elapsed: false,
+            ready: false,
+        })
         .insert_resource(ClearColor(Color::srgb(0.64, 0.72, 0.73)))
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Desert Drive".into(),
-                canvas: Some("#game".into()),
-                fit_canvas_to_parent: true,
-                prevent_default_event_handling: true,
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(AssetPlugin {
+                    file_path: "assets".into(),
+                    meta_check: AssetMetaCheck::Never,
+                    ..default()
+                })
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Desert Drive".into(),
+                        canvas: Some("#game".into()),
+                        fit_canvas_to_parent: true,
+                        prevent_default_event_handling: true,
+                        ..default()
+                    }),
+                    ..default()
+                }),
+        )
         .add_systems(Startup, setup)
         .add_systems(
             Update,
             (
+                check_ready,
                 read_input,
                 advance_physics,
                 sync_world,
-                interpolate_vehicle,
+                sync_imported,
                 update_camera,
                 update_hud,
-                announce_ready,
             )
                 .chain(),
         )
         .run();
+    Ok(())
 }
 
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    server: Res<AssetServer>,
+    reference: Res<RuntimeReference>,
+    drive: Res<Drive>,
 ) {
-    let mut world = PhysicsWorld::new(START);
-    let mut stream = WorldStream::new(DEFAULT_SEED);
-    stream.sync_at([0.0; 3], &mut world);
     let mut visuals = WorldVisuals::new(&mut meshes, &mut materials);
-    visuals.sync(&stream, &mut commands, &mut meshes);
-    for _ in 0..120 {
-        world.step(DriveInput::default(), true);
-    }
-    let snapshot = world.snapshot();
-    commands.insert_resource(Drive {
-        world,
-        stream,
-        input: DriveInput::default(),
-        clock: StepClock::default(),
-        previous: snapshot,
-        current: snapshot,
-        rendered: snapshot.pose,
-        camera: CameraMode::default(),
-        frame_steps: 0,
-        rebases: 0,
-        state: DriveState::default(),
-        refuel: false,
-        skip_elapsed: false,
-    });
+    visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
     commands.insert_resource(visuals);
-    presentation::car::spawn(&mut commands, &mut meshes, &mut materials);
+    presentation::reference::spawn(&mut commands, &server, &reference.0);
     commands.spawn((
         DirectionalLight {
             color: Color::srgb(1.0, 0.91, 0.77),
-            illuminance: 9_000.0,
+            illuminance: 9000.0,
             ..default()
         },
         Transform::from_xyz(6.0, 9.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+        (0..32).collect::<RenderLayers>(),
     ));
     commands.spawn((
         DriveCamera,
         Camera3d::default(),
-        presentation::camera::pose(CameraMode::Chase, snapshot.pose),
+        (0..32)
+            .filter(|layer| reference.0.player.camera_culling_mask & (1u32 << layer) != 0)
+            .collect::<RenderLayers>(),
+        Projection::Perspective(PerspectiveProjection {
+            fov: reference.0.player.field_of_view_degrees.to_radians(),
+            ..default()
+        }),
+        presentation::transform(drive.current),
         Msaa::Off,
         bevy::core_pipeline::tonemapping::Tonemapping::Reinhard,
         DistanceFog {
@@ -123,89 +138,121 @@ fn setup(
     ));
 }
 
-fn reset_vehicle(drive: &mut Drive, restart: bool) {
-    if restart {
-        drive.state.restart();
-        drive.stream.seed = DEFAULT_SEED;
-        let shift = drive.stream.origin.offset.map(|offset| -offset as f32);
-        drive.world.rebase(shift);
-        drive.stream.origin.shift(shift);
-        let pose = drive.stream.reset_pose(0.0, false, &mut drive.world);
-        drive.world.reset(pose);
-        drive.camera = CameraMode::default();
-        drive.rebases = 0;
-    } else {
-        let distance = -drive.stream.origin.absolute(drive.current.pose.position)[2];
-        let pose =
-            drive
-                .stream
-                .reset_pose(distance, drive.state.fuel.liters == 0.0, &mut drive.world);
-        drive.world.reset(pose);
+fn check_ready(
+    mut commands: Commands,
+    server: Res<AssetServer>,
+    reference: Res<RuntimeReference>,
+    mut drive: ResMut<Drive>,
+    mut visuals: ResMut<ReferenceVisuals>,
+    extras: Query<(Entity, &GltfExtras)>,
+    primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
+    mut frames: Local<u8>,
+) {
+    if drive.ready || visuals.failed {
+        return;
     }
-    drive.current = drive.world.snapshot();
-    drive.previous = drive.current;
-    drive.rendered = drive.current.pose;
-    drive.clock = StepClock::default();
-    drive.input = DriveInput::default();
-    drive.refuel = false;
-    drive.skip_elapsed = true;
+    for (path, handle) in &visuals.handles {
+        let Some((load, _, recursive)) = server.get_load_states(handle.id()) else {
+            return;
+        };
+        if let LoadState::Failed(error) = load {
+            game_failure(&format!("Cannot load {path}: {error}"));
+            visuals.failed = true;
+            return;
+        }
+        if let RecursiveDependencyLoadState::Failed(error) = recursive {
+            game_failure(&format!("Cannot load dependencies for {path}: {error}"));
+            visuals.failed = true;
+            return;
+        }
+        if !server.is_loaded_with_dependencies(handle.id()) {
+            return;
+        }
+    }
+    match presentation::reference::bind(
+        &mut commands,
+        &reference.0,
+        &mut visuals,
+        &extras,
+        &primitives,
+    ) {
+        Ok(true) => {
+            *frames += 1;
+            if *frames >= 2 {
+                drive.ready = true;
+                game_ready();
+            }
+        }
+        Ok(false) => {}
+        Err(error) => {
+            game_failure(&error);
+            visuals.failed = true;
+        }
+    }
 }
 
-fn read_input(mut drive: ResMut<Drive>) {
+fn clear_input(drive: &mut Drive) {
+    drive.input.clear();
+    drive.clock = StepClock::default();
+    drive.previous = drive.current;
+    drive.rendered = drive.current;
+    drive.runtime.area.begin_step();
+    drive.skip_elapsed = true;
+}
+fn read_input(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let actions = game_actions();
-    if actions & 1 != 0 {
-        drive.state.started = true;
-        drive.state.paused = false;
+    let frame = FrameInput {
+        held: game_keys(),
+        pressed: game_pressed(),
+        released: game_released(),
+        mouse: [
+            game_mouse_x() * reference.0.player.look_sensitivity[0],
+            game_mouse_y() * reference.0.player.look_sensitivity[1],
+        ],
+        wheel: game_wheel(),
+    };
+    if actions & 2 != 0 {
+        drive.runtime.paused = true;
+        clear_input(&mut drive);
     }
-    if actions & 4 != 0 {
-        drive.state.paused = false;
+    if actions & 5 != 0 && drive.ready {
+        drive.runtime.started = true;
+        drive.runtime.paused = false;
+        clear_input(&mut drive);
     }
     if actions & 8 != 0 {
-        reset_vehicle(&mut drive, true);
+        if let Err(error) = drive.runtime.restart(&reference.0) {
+            game_failure(&error.to_string());
+            return;
+        }
+        drive.camera = CameraMode::default();
+        drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
+        clear_input(&mut drive);
     }
-    if actions & 2 != 0 {
-        drive.state.paused = true;
-    }
-    if actions & 7 != 0 {
-        drive.clock = StepClock::default();
-        drive.previous = drive.current;
-        drive.skip_elapsed = true;
-    }
-    if !drive.state.active() {
-        drive.input = DriveInput::default();
-        drive.refuel = false;
+    if !drive.runtime.started || drive.runtime.paused {
+        drive.input.clear();
         return;
     }
     if actions & 16 != 0 {
-        reset_vehicle(&mut drive, false);
+        drive.runtime.recover(&reference.0);
+        drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
+        clear_input(&mut drive);
     }
-    if actions & 32 != 0 {
+    if frame.pressed & keys::CAMERA != 0 && drive.runtime.area.player.seat().is_some() {
         drive.camera = match drive.camera {
             CameraMode::Cockpit => CameraMode::Chase,
             CameraMode::Chase => CameraMode::Cockpit,
         };
     }
-    let keys = game_keys();
-    drive.input = DriveInput {
-        accelerate: keys & 1 != 0,
-        brake_reverse: keys & 2 != 0,
-        steer: ((keys & 4 != 0) as u8 as f32) - ((keys & 8 != 0) as u8 as f32),
-        handbrake: keys & 16 != 0,
-    };
-    drive.refuel = keys & 32 != 0;
+    drive.input.merge(frame);
 }
-
-fn station_distance(drive: &Drive) -> f64 {
-    let absolute = drive.stream.origin.absolute(drive.current.pose.position);
-    let station = nearest_station(drive.stream.seed, -absolute[2]);
-    ((absolute[0] - station.absolute_point[0]).powi(2)
-        + (absolute[1] - station.absolute_point[1]).powi(2)
-        + (absolute[2] - station.absolute_point[2]).powi(2))
-    .sqrt()
-}
-fn advance_physics(time: Res<Time<Real>>, mut drive: ResMut<Drive>) {
+fn advance_physics(
+    time: Res<Time<Real>>,
+    reference: Res<RuntimeReference>,
+    mut drive: ResMut<Drive>,
+) {
     drive.frame_steps = 0;
-    if !drive.state.active() {
+    if !drive.runtime.started || drive.runtime.paused {
         return;
     }
     if drive.skip_elapsed {
@@ -216,42 +263,17 @@ fn advance_physics(time: Res<Time<Real>>, mut drive: ResMut<Drive>) {
     drive.frame_steps = steps as u32;
     for _ in 0..steps {
         drive.previous = drive.current;
-        let previous_absolute = drive.stream.origin.absolute(drive.current.pose.position);
-        let input = drive.input;
-        let distance = station_distance(&drive) as f32;
-        let refuel = drive.refuel;
-        let Drive { world, state, .. } = &mut *drive;
-        state.step(world, input, refuel, distance);
-        drive.current = drive.world.snapshot();
-        let absolute = drive.stream.origin.absolute(drive.current.pose.position);
-        drive
-            .state
-            .record_travel(previous_absolute, absolute, false);
-        let Drive { world, stream, .. } = &mut *drive;
-        let shift = stream.rebase(world);
-        stream.sync_at(absolute, world);
-        if let Some(shift) = shift {
-            shift_snapshot(&mut drive.previous, shift);
-            shift_snapshot(&mut drive.current, shift);
-            shift_pose(&mut drive.rendered, shift);
-            drive.rebases += 1;
+        let old_origin = drive.runtime.stream.origin.offset;
+        let input = drive.input.take_step();
+        drive.runtime.step(&reference.0, input);
+        let new_origin = drive.runtime.stream.origin.offset;
+        for i in 0..3 {
+            drive.previous.position[i] -= (new_origin[i] - old_origin[i]) as f32;
         }
+        drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
     }
+    drive.rendered = presentation::interpolate(drive.previous, drive.current, drive.clock.alpha());
 }
-
-fn shift_pose(pose: &mut VehiclePose, shift: [f32; 3]) {
-    for (position, shift) in pose.position.iter_mut().zip(shift) {
-        *position -= shift;
-    }
-}
-
-fn shift_snapshot(snapshot: &mut VehicleSnapshot, shift: [f32; 3]) {
-    shift_pose(&mut snapshot.pose, shift);
-    for wheel in &mut snapshot.wheels {
-        shift_pose(wheel, shift);
-    }
-}
-
 fn sync_world(
     drive: Res<Drive>,
     mut visuals: ResMut<WorldVisuals>,
@@ -259,84 +281,278 @@ fn sync_world(
     mut meshes: ResMut<Assets<Mesh>>,
     mut chunks: Query<(&ChunkVisual, &mut Transform)>,
 ) {
-    visuals.sync(&drive.stream, &mut commands, &mut meshes);
+    visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
     for (chunk, mut transform) in &mut chunks {
-        transform.translation = Vec3::from_array(drive.stream.origin.local(chunk.0));
+        let translation = Vec3::from_array(drive.runtime.stream.origin.local(chunk.0));
+        if transform.translation != translation {
+            transform.translation = translation;
+        }
     }
 }
-
-fn interpolate_vehicle(
-    mut drive: ResMut<Drive>,
-    mut chassis: Query<&mut Transform, (With<ChassisVisual>, Without<WheelVisual>)>,
-    mut wheels: Query<(&WheelVisual, &mut Transform), Without<ChassisVisual>>,
+fn sync_imported(
+    drive: Res<Drive>,
+    mut query: Query<(&BodyVisual, &mut Transform)>,
+    mut items: Query<(&ItemVisual, &mut Transform), Without<BodyVisual>>,
+    mut caps: Query<(&CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
+    mut visibility: Query<(&ValveVisibility, &mut Visibility)>,
 ) {
-    let alpha = drive.clock.alpha();
-    drive.rendered = presentation::interpolate(drive.previous.pose, drive.current.pose, alpha);
-    for mut transform in &mut chassis {
-        *transform = presentation::transform(drive.rendered);
-    }
-    for (wheel, mut transform) in &mut wheels {
-        *transform = presentation::transform(presentation::interpolate(
-            drive.previous.wheels[wheel.0],
-            drive.current.wheels[wheel.0],
-            alpha,
-        ));
+    presentation::reference::sync(
+        &drive.runtime.area,
+        &drive.runtime.physics,
+        drive.clock.alpha(),
+        &mut query,
+    );
+    presentation::reference::sync_items(&drive.runtime.area, drive.clock.alpha(), &mut items);
+    presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
+}
+fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveCamera>>) {
+    for mut transform in &mut query {
+        *transform =
+            if drive.camera == CameraMode::Chase && drive.runtime.area.player.seat().is_some() {
+                presentation::camera::pose(CameraMode::Chase, drive.runtime.physics.snapshot().pose)
+            } else {
+                presentation::transform(drive.rendered)
+            };
     }
 }
-
-fn update_camera(drive: Res<Drive>, mut cameras: Query<&mut Transform, With<DriveCamera>>) {
-    for mut transform in &mut cameras {
-        *transform = presentation::camera::pose(drive.camera, drive.rendered);
-    }
-}
-
-fn update_hud(drive: Res<Drive>) {
-    let position = drive.current.pose.position;
-    let absolute = drive.stream.origin.absolute(position);
-    let origin = drive.stream.origin.offset;
-    let contacts = drive
-        .current
+fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
+    let runtime = &drive.runtime;
+    let snapshot = runtime.physics.snapshot();
+    let position = runtime.area.player.focus_position(&runtime.physics);
+    let absolute = runtime.stream.origin.absolute(position);
+    let origin = runtime.stream.origin.offset;
+    let contacts = snapshot
         .wheels_contact
         .iter()
         .enumerate()
         .fold(0, |bits, (i, contact)| bits | ((*contact as u32) << i));
-    let station = nearest_station(drive.stream.seed, -absolute[2]);
-    let distance = station_distance(&drive);
+    let fuel = runtime
+        .area
+        .items
+        .get(reference.0.engine.fuel_tank)
+        .and_then(|item| item.fluid.as_ref())
+        .map_or(0.0, |fluid| fluid.mixture.total());
     game_update(
-        drive.current.speed_mps * 3.6,
-        (drive.camera == CameraMode::Cockpit) as u32,
+        snapshot.speed_mps * 3.6,
+        (drive.camera == CameraMode::Cockpit || runtime.area.player.seat().is_none()) as u32,
         position[0],
         position[1],
         position[2],
         contacts,
         drive.frame_steps,
-        drive.stream.chunks().count() as u32,
-        drive.world.collider_count() as u32,
+        runtime.stream.chunks().count() as u32,
+        runtime.physics.collider_count() as u32,
         absolute[0],
         absolute[1],
         absolute[2],
         origin[0],
         origin[1],
         origin[2],
-        drive.rebases,
-        drive.state.trip_m,
-        drive.stream.lateral_band() as f64,
-        drive.state.fuel.liters,
-        drive.state.paused,
-        drive.state.started,
-        station.absolute_point[0],
-        station.absolute_point[1],
-        station.absolute_point[2],
-        distance,
-        can_refuel(drive.current.absolute_speed_kmh(), distance as f32),
+        runtime.rebases,
+        runtime.trip_m,
+        runtime.stream.lateral_band() as f64,
+        fuel,
+        runtime.paused,
+        runtime.started,
+    );
+    let target = runtime.target;
+    let record =
+        target.and_then(|target| reference.0.items.iter().find(|item| item.id == target.item));
+    let held = runtime
+        .area
+        .interaction
+        .held()
+        .map(|id| display_name(&reference.0, &runtime.area.items, id))
+        .unwrap_or("");
+    let state = target.and_then(|target| {
+        let id = reference
+            .0
+            .openings
+            .iter()
+            .find(|opening| opening.cap == target.item)
+            .map_or(target.item, |opening| opening.tank);
+        runtime.area.items.get(id)
+    });
+    let amount = state
+        .and_then(|item| item.fluid.as_ref())
+        .map_or(-1.0, |fluid| fluid.mixture.total());
+    let volumes = state
+        .and_then(|item| item.fluid.as_ref())
+        .map_or([-1.0; 6], |fluid| fluid.mixture.quantities_liters);
+    let action = if !runtime.notice.is_empty() {
+        runtime.notice
+    } else if runtime.area.player.seat().is_some() {
+        "E: exit · I: starter · Space: handbrake · C: camera"
+    } else {
+        record.map_or(
+            if target.is_some() && state.and_then(|item| item.fluid.as_ref()).is_some() {
+                "Open the container before pickup. Hold LMB: fill."
+            } else {
+                if held.is_empty() {
+                    ""
+                } else {
+                    "F: drop · Mouse wheel: distance · RMB + mouse: rotate"
+                }
+            },
+            |item| match item.kind {
+                ItemKind::Door | ItemKind::Hood | ItemKind::Trunk => "Hold E + mouse: move",
+                ItemKind::Cap => {
+                    if reference
+                        .0
+                        .openings
+                        .iter()
+                        .any(|opening| opening.cap == item.id && opening.can_tune)
+                    {
+                        "Hold E + mouse / Scroll: tune valve · Hold LMB: fill"
+                    } else {
+                        "E: cap · Hold LMB: fill"
+                    }
+                }
+                ItemKind::Seat => {
+                    if reference.0.seats.iter().any(|seat| seat.item == item.id) {
+                        "E: enter"
+                    } else {
+                        ""
+                    }
+                }
+                ItemKind::Wheel | ItemKind::Rim | ItemKind::Tire => {
+                    let mounted = state.is_some_and(|state| match state.location {
+                        crate::interaction::items::ItemLocation::WheelSlot(_) => true,
+                        crate::interaction::items::ItemLocation::Attached(parent) => {
+                            runtime.area.items.get(parent).is_some_and(|parent| {
+                                matches!(
+                                    parent.location,
+                                    crate::interaction::items::ItemLocation::WheelSlot(_)
+                                )
+                            })
+                        }
+                        _ => false,
+                    });
+                    if mounted {
+                        "F: remove wheel"
+                    } else if target.is_some_and(|target| target.slot.is_some()) {
+                        if held.is_empty() {
+                            "Carry a wheel. Aim here and press F."
+                        } else {
+                            "F: install wheel"
+                        }
+                    } else if held.is_empty() {
+                        "F: carry · X: split wheel"
+                    } else {
+                        "F: drop · X: split or assemble"
+                    }
+                }
+                ItemKind::Container => {
+                    if item.body == reference.0.vehicle.body {
+                        "Open the fuel cap to fill."
+                    } else {
+                        "F: carry"
+                    }
+                }
+                _ => "",
+            },
+        )
+    };
+    game_detail(
+        target
+            .map(|target| display_name(&reference.0, &runtime.area.items, target.item))
+            .unwrap_or(""),
+        action,
+        amount,
+        state.map_or(-1.0, |item| item.condition),
+        held,
+        runtime.engine_output.rpm,
+        runtime.engine_output.ignition,
+        runtime.engine_output.running,
+        runtime.engine_output.starter,
+        runtime.area.player.seat().is_some(),
+        runtime.handbrake,
+        volumes[0],
+        volumes[1],
+        volumes[2],
+        volumes[3],
+        volumes[4],
+        volumes[5],
     );
 }
 
-fn announce_ready(mut frames: Local<u8>) {
-    if *frames < 3 {
-        *frames += 1;
-        if *frames == 3 {
-            game_ready();
+fn display_name<'a>(
+    reference: &'a ReferenceManifest,
+    items: &'a crate::interaction::items::ItemStore,
+    id: ItemId,
+) -> &'a str {
+    let Some(item) = reference.items.iter().find(|item| item.id == id) else {
+        return items.name(id).unwrap_or("");
+    };
+    match item.kind {
+        ItemKind::Decoration => "",
+        ItemKind::Door => {
+            if item.body == reference.vehicle.body
+                || crate::starting_area::belongs_to_vehicle(reference, item.body)
+            {
+                "Car door"
+            } else {
+                item.name.as_str()
+            }
+        }
+        ItemKind::Hood => "Hood",
+        ItemKind::Trunk => "Trunk",
+        ItemKind::Engine => "Engine",
+        ItemKind::Radiator => "Radiator",
+        ItemKind::Tire => "Tire",
+        ItemKind::Rim => "Rim",
+        ItemKind::Wheel => "Wheel",
+        ItemKind::Seat => {
+            if reference
+                .seats
+                .iter()
+                .any(|seat| seat.item == id && seat.driver)
+            {
+                "Driver seat"
+            } else {
+                "Seat"
+            }
+        }
+        ItemKind::Cap => {
+            if reference
+                .openings
+                .iter()
+                .any(|opening| opening.cap == id && opening.can_tune)
+            {
+                return "Water tap";
+            }
+            let tank = reference
+                .openings
+                .iter()
+                .find(|opening| opening.cap == id)
+                .map(|opening| opening.tank);
+            if tank == Some(reference.engine.fuel_tank) {
+                "Fuel cap"
+            } else if tank == Some(reference.engine.oil_tank) {
+                "Oil cap"
+            } else if tank == Some(reference.engine.coolant_tank) {
+                "Coolant cap"
+            } else {
+                "Container cap"
+            }
+        }
+        ItemKind::Container => {
+            if item.body == reference.vehicle.body {
+                return "Fuel tank";
+            }
+            if let Some(tank) = reference.tanks.iter().find(|tank| tank.item == id) {
+                if tank.quantities_liters[0] > 0.0 {
+                    "Fuel can"
+                } else if tank.quantities_liters[1] > 0.0 {
+                    "Oil can"
+                } else if tank.quantities_liters[3] > 0.0 {
+                    "Water container"
+                } else {
+                    "Container"
+                }
+            } else {
+                "Container"
+            }
         }
     }
 }

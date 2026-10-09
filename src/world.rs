@@ -346,6 +346,7 @@ pub struct WorldStream {
     starting_area: Option<StartingAreaReference>,
     interiors: Vec<Bounds>,
     station_items: Vec<(i64, crate::reference::ItemId)>,
+    vehicle_support: Vec<(ChunkKey, i64, ColliderHandle)>,
 }
 
 impl WorldStream {
@@ -358,6 +359,7 @@ impl WorldStream {
             starting_area: None,
             interiors: Vec::new(),
             station_items: Vec::new(),
+            vehicle_support: Vec::with_capacity(3),
         }
     }
 
@@ -470,6 +472,51 @@ impl WorldStream {
                 colliders,
                 pumps,
             });
+        }
+        self.sync_vehicle_support(physics);
+    }
+
+    fn sync_vehicle_support(&mut self, physics: &mut PhysicsWorld) {
+        let car = self.origin.absolute(physics.snapshot().pose.position);
+        let distance = -car[2];
+        let lateral = car[0] - road_sample(self.seed, distance).center[0];
+        let band = (lateral / LATERAL_BAND_WIDTH).round() as i64;
+        let center = ChunkKey((distance / CHUNK_LENGTH).floor() as i64);
+        let keys = [ChunkKey(center.0 - 1), center, ChunkKey(center.0 + 1)];
+        // One terrain cell covers the fixed car's full footprint.
+        let covered = |key: ChunkKey| {
+            self.chunks.iter().any(|chunk| {
+                chunk.data.key == key
+                    && (lateral - chunk.data.lateral_band as f64 * LATERAL_BAND_WIDTH).abs()
+                        < TERRAIN_HALF_WIDTH - 8.0
+            })
+        };
+        self.vehicle_support.retain(|&(key, old_band, handle)| {
+            if keys.contains(&key) && old_band == band && !covered(key) {
+                return true;
+            }
+            physics.remove_collider(handle);
+            false
+        });
+        for key in keys {
+            if covered(key)
+                || self
+                    .vehicle_support
+                    .iter()
+                    .any(|&(old_key, old_band, _)| old_key == key && old_band == band)
+            {
+                continue;
+            }
+            let mut data = generate_chunk_in_band(self.seed, key, band);
+            if let Some(area) = &self.starting_area {
+                prepare_terrain(&mut data, self.seed, area, &self.interiors);
+            }
+            let handle = physics.insert_mesh_at(
+                &data.vertices,
+                &data.indices,
+                self.origin.local(data.origin()),
+            );
+            self.vehicle_support.push((key, band, handle));
         }
     }
 

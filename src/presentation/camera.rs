@@ -4,8 +4,8 @@ use bevy::prelude::*;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CameraMode {
-    Cockpit,
     #[default]
+    Cockpit,
     Chase,
 }
 
