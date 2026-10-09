@@ -33,14 +33,26 @@ fn fixture_with(
     rules: impl FnOnce(&mut ReferenceManifest),
 ) -> (InteractionState, ItemStore, PhysicsWorld, PlayerState) {
     let mut reference = common::reference();
-    for (id, tank, open) in [(1, 1, false), (2, 2, false)] {
+    for (id, tank) in [(100, 1), (101, 2)] {
         reference.openings.push(OpeningRecord {
             id: OpeningId(id),
             source: reference.player.source.clone(),
             tank: ItemId(tank),
             cap: ItemId(tank),
             anchor: AnchorId(1),
-            open,
+            valve: 0.0,
+            can_tune: false,
+            tune_rate: 0.0,
+            visuals: desert_drive::reference::CapVisualReference {
+                open_nodes: vec![],
+                closed_nodes: vec![],
+                cap_node: None,
+                closed_node: None,
+                open_node: None,
+                euler_rotation: false,
+                closed_euler_degrees: [0.0; 3],
+                open_euler_degrees: [0.0; 3],
+            },
             flow_liters_per_second: 0.5,
             tilt_degrees: 100.0,
             tilt_axis: [0.0, 0.0, -1.0],
@@ -48,6 +60,7 @@ fn fixture_with(
             spill_disabled: false,
             tube_connected: false,
             flow_radius: 0.02,
+            can_toggle: true,
         });
         reference.tanks[(tank - 1) as usize]
             .openings
@@ -632,27 +645,28 @@ fn aim_slot_flag_does_not_mark_a_loose_rim() {
 #[test]
 fn wheel_intents_preserve_state_for_the_wheel_owner() {
     let (mut interaction, mut items, mut physics, mut player) = fixture();
+    let wheel_id = common::reference().wheel_slots[0].rim;
     let action = interaction.step(
         input(keys::GRAB, keys::GRAB),
-        target(5),
+        target(wheel_id.0),
         &mut player,
         &mut items,
         &mut physics,
         1.0 / 60.0,
     );
-    assert_eq!(action, Some(InteractionAction::WheelRemove(ItemId(5))));
+    assert_eq!(action, Some(InteractionAction::WheelRemove(wheel_id)));
     assert_eq!(
-        items.get(ItemId(5)).unwrap().location,
+        items.get(wheel_id).unwrap().location,
         ItemLocation::WheelSlot(WheelSlotId(0))
     );
     let body = items.get(ItemId(1)).unwrap().body;
-    let wheel = items.get_mut(ItemId(5)).unwrap();
+    let wheel = items.get_mut(wheel_id).unwrap();
     wheel.location = ItemLocation::World;
     wheel.body = body;
     wheel.local_pose = pose([0.0; 3]);
     interaction.step(
         input(keys::GRAB, keys::GRAB),
-        target(5),
+        target(wheel_id.0),
         &mut player,
         &mut items,
         &mut physics,
@@ -673,11 +687,11 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
     assert_eq!(
         action,
         Some(InteractionAction::WheelInstall {
-            item: ItemId(5),
+            item: wheel_id,
             target: WheelSlotId(0)
         })
     );
-    assert_eq!(interaction.held(), Some(ItemId(5)));
+    assert_eq!(interaction.held(), Some(wheel_id));
     let action = interaction.step(
         input(keys::ASSEMBLE, keys::ASSEMBLE),
         None,
@@ -686,8 +700,8 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
         &mut physics,
         1.0 / 60.0,
     );
-    assert_eq!(action, Some(InteractionAction::WheelSplit(ItemId(5))));
-    assert_eq!(interaction.held(), Some(ItemId(5)));
+    assert_eq!(action, Some(InteractionAction::WheelSplit(wheel_id)));
+    assert_eq!(interaction.held(), Some(wheel_id));
 }
 
 #[test]
@@ -903,6 +917,45 @@ fn hinge_clamps_and_moves_its_collider() {
     let mut items = ItemStore::new(&reference).unwrap();
     let mut player = PlayerState::new(&reference.player, pose([10.0, 1.0, 0.0]), &mut physics);
     let before = *physics.rapier().colliders[collider].position();
+    interaction.step(
+        FrameInput {
+            held: keys::USE,
+            mouse: [1.0, 0.0],
+            ..Default::default()
+        },
+        target(4),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(interaction.dragging_hinge(), Some(ItemId(4)));
+    let first = interaction.hinge_angle(ItemId(4)).unwrap();
+    interaction.step(
+        FrameInput {
+            held: keys::USE,
+            mouse: [1.0, 0.0],
+            ..Default::default()
+        },
+        None,
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert!(interaction.hinge_angle(ItemId(4)).unwrap() < first);
+    interaction.step(
+        FrameInput {
+            released: keys::USE,
+            ..Default::default()
+        },
+        None,
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(interaction.dragging_hinge(), None);
     for _ in 0..120 {
         interaction.step(
             FrameInput {
@@ -937,4 +990,239 @@ fn hinge_clamps_and_moves_its_collider() {
             < 1e-5
     );
     assert_eq!(interaction.hinge_angle(ItemId(4)), Some(-30.0));
+}
+
+#[test]
+fn empty_slot_does_not_pick_up_a_remote_rim_and_tire_targets_its_assembly() {
+    let (mut interaction, mut items, mut physics, mut player) = fixture();
+    let reference = common::reference();
+    let rim = reference.wheel_slots[0].rim;
+    let tire = reference.wheel_slots[0].tire;
+    let body = items.get(ItemId(1)).unwrap().body;
+    let state = items.get_mut(rim).unwrap();
+    state.location = ItemLocation::World;
+    state.body = body;
+    state.local_pose = pose([0.0; 3]);
+    let slot = AimTarget {
+        slot: Some(reference.wheel_slots[0].id),
+        ..target(rim.0).unwrap()
+    };
+    interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        Some(slot),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(interaction.held(), None);
+    interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        target(tire.0),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(interaction.held(), Some(rim));
+}
+
+#[test]
+fn runtime_pump_stays_open_and_fills_the_held_container() {
+    let (mut interaction, mut items, mut physics, mut player) = fixture();
+    let pump = ItemId(90);
+    items.insert_supply(pump, pose([10.0, 2.0, -1.0]));
+    interaction.register_pump(pump, 0.5).unwrap();
+    interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        target(1),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    interaction.step(
+        input(keys::USE, keys::USE),
+        target(1),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    interaction.step(
+        input(keys::USE, keys::USE),
+        target(pump.0),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert!(interaction.opening_is_open(OpeningId(pump.0)));
+    let before = items
+        .get(ItemId(1))
+        .unwrap()
+        .fluid
+        .as_ref()
+        .unwrap()
+        .mixture
+        .total();
+    interaction.step(
+        input(keys::FILL, 0),
+        target(pump.0),
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.1,
+    );
+    assert!(
+        (items
+            .get(ItemId(1))
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .mixture
+            .total()
+            - before
+            - 0.05)
+            .abs()
+            < 1e-6
+    );
+}
+
+#[test]
+fn faucet_tuning_controls_fractional_fill_and_clamps() {
+    let (mut interaction, mut items, mut physics, mut player) = fixture_with(|reference| {
+        reference.items[0].kind = desert_drive::reference::ItemKind::Cap;
+        reference.tanks[0].role = TankRole::Supply;
+        reference.tanks[0].capacity_liters = 1000.0;
+        reference.tanks[0].quantities_liters = [0.0, 0.0, 0.0, 69.0, 0.0, 0.0];
+        let faucet = reference
+            .openings
+            .iter_mut()
+            .find(|opening| opening.cap == ItemId(1))
+            .unwrap();
+        faucet.can_toggle = false;
+        faucet.can_tune = true;
+        faucet.tune_rate = 0.525;
+        faucet.angle_disabled = true;
+        faucet.flow_liters_per_second = 1.4137167;
+    });
+    let (body, _) = physics.rapier_mut().insert(
+        RigidBodyBuilder::dynamic().translation(Vector::new(10.0, 2.0, -0.5)),
+        ColliderBuilder::ball(0.2),
+    );
+    items.bind_body(BodyId(2), body);
+    items.get_mut(ItemId(2)).unwrap().local_pose = pose([0.0; 3]);
+    interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        target(2),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    interaction.step(
+        input(keys::USE, keys::USE),
+        target(2),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    interaction.step(
+        input(keys::USE, keys::USE),
+        target(1),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(interaction.opening_valve(OpeningId(100)), 0.0);
+    let before = items
+        .get(ItemId(2))
+        .unwrap()
+        .fluid
+        .as_ref()
+        .unwrap()
+        .mixture
+        .total();
+    interaction.step(
+        input(keys::FILL, 0),
+        target(1),
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.1,
+    );
+    assert_eq!(
+        items
+            .get(ItemId(2))
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .mixture
+            .total(),
+        before
+    );
+    interaction.step(
+        FrameInput {
+            held: keys::USE,
+            mouse: [0.0, 5.0],
+            ..Default::default()
+        },
+        target(1),
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.1,
+    );
+    assert!((interaction.opening_valve(OpeningId(100)) - 0.2625).abs() < 1e-6);
+    assert_eq!(interaction.tuning_opening(), Some(OpeningId(100)));
+    interaction.step(
+        FrameInput {
+            wheel: 1.0,
+            ..Default::default()
+        },
+        target(1),
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.01,
+    );
+    let valve = interaction.opening_valve(OpeningId(100));
+    assert!((valve - 0.3675).abs() < 1e-6);
+    interaction.step(
+        input(keys::FILL, 0),
+        target(1),
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.1,
+    );
+    let accepted = items
+        .get(ItemId(2))
+        .unwrap()
+        .fluid
+        .as_ref()
+        .unwrap()
+        .mixture
+        .total()
+        - before;
+    assert!((accepted - 1.4137167 * valve * 0.1).abs() < 1e-6);
+    for (wheel, expected) in [(1000.0, 1.0), (-1000.0, 0.0)] {
+        interaction.step(
+            FrameInput {
+                wheel,
+                ..Default::default()
+            },
+            target(1),
+            &mut player,
+            &mut items,
+            &mut physics,
+            0.01,
+        );
+        assert_eq!(interaction.opening_valve(OpeningId(100)), expected);
+    }
 }

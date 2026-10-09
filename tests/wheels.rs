@@ -1,0 +1,175 @@
+mod common;
+
+use desert_drive::interaction::items::ItemLocation;
+use desert_drive::interaction::wheels::WheelAssemblies;
+use desert_drive::reference::ItemId;
+use desert_drive::simulation::DriveInput;
+use desert_drive::starting_area::StartingArea;
+
+fn reference() -> desert_drive::reference::ReferenceManifest {
+    let mut reference = common::reference();
+    reference.area.player_spawn.translation = [20.0, 1.0, 20.0];
+    reference
+}
+
+#[test]
+fn removed_wheel_has_no_support() {
+    let reference = reference();
+    let mut physics = common::world();
+    physics.insert_box([0.0, -0.25, 0.0], [100.0, 0.25, 100.0]);
+    let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
+    let mut wheels = WheelAssemblies::new(&reference).unwrap();
+    wheels.sync(&mut area.items, &mut physics).unwrap();
+    for _ in 0..120 {
+        physics.apply_vehicle_forces(DriveInput::default(), 0.0);
+        physics.step_physics();
+        wheels.sync(&mut area.items, &mut physics).unwrap();
+    }
+    let slot = reference.vehicle.wheel_slots[0];
+    let mounted = reference
+        .wheel_slots
+        .iter()
+        .find(|wheel| wheel.id == slot)
+        .unwrap();
+    assert!(physics.snapshot().wheels_contact[0]);
+    let condition = area.items.get(mounted.rim).unwrap().condition;
+    let count = area.items.len();
+    let id = wheels.remove(slot, &mut area.items, &mut physics).unwrap();
+    assert_eq!(id, mounted.rim);
+    assert_eq!(physics.wheel_support_count(), 3);
+    physics.apply_vehicle_forces(DriveInput::default(), 0.0);
+    physics.step_physics();
+    assert!(!physics.snapshot().wheels_contact[0]);
+    let part = area.items.get(id).unwrap();
+    assert_eq!(part.location, ItemLocation::World);
+    assert_eq!(part.condition, condition);
+    assert!(physics.rapier().bodies[part.body.unwrap()].is_dynamic());
+    let body = part.body.unwrap();
+    let rotation = *physics.rapier().bodies[body].rotation();
+    physics.rapier_mut().bodies[body].apply_torque_impulse(rapier3d::math::Vector::X, true);
+    physics.step_physics();
+    assert_ne!(*physics.rapier().bodies[body].rotation(), rotation);
+    wheels
+        .install(id, slot, &mut area.items, &mut physics)
+        .unwrap();
+    assert_eq!(physics.wheel_support_count(), 4);
+    assert_eq!(area.items.len(), count);
+    assert_eq!(area.items.get(id).unwrap().condition, condition);
+    assert!(
+        wheels
+            .install(id, slot, &mut area.items, &mut physics)
+            .is_err()
+    );
+}
+
+#[test]
+fn split_and_assembly_conserve_parts_and_mass() {
+    let reference = reference();
+    let mut physics = common::world();
+    let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
+    let mut wheels = WheelAssemblies::new(&reference).unwrap();
+    wheels.sync(&mut area.items, &mut physics).unwrap();
+    let mounted = &reference.wheel_slots[0];
+    let count = area.items.len();
+    let initial_mass = physics.rapier().bodies[physics.chassis_handle()].mass();
+    let id = wheels
+        .remove(mounted.id, &mut area.items, &mut physics)
+        .unwrap();
+    let (rim, tire) = wheels.split(id, &mut area.items, &mut physics).unwrap();
+    assert_eq!((rim, tire), (mounted.rim, mounted.tire));
+    assert_eq!(area.items.len(), count);
+    assert_eq!(area.items.get(tire).unwrap().location, ItemLocation::World);
+    assert_ne!(
+        area.items.get(rim).unwrap().body,
+        area.items.get(tire).unwrap().body
+    );
+    assert!(
+        wheels
+            .assemble(rim, ItemId(4), &mut area.items, &mut physics)
+            .is_err()
+    );
+    assert_eq!(
+        wheels
+            .assemble(rim, tire, &mut area.items, &mut physics)
+            .unwrap(),
+        rim
+    );
+    assert_eq!(
+        area.items.get(tire).unwrap().location,
+        ItemLocation::Attached(rim)
+    );
+    wheels
+        .install(rim, mounted.id, &mut area.items, &mut physics)
+        .unwrap();
+    wheels.sync(&mut area.items, &mut physics).unwrap();
+    assert!(
+        (physics.rapier().bodies[physics.chassis_handle()].mass() - initial_mass).abs() < 0.001
+    );
+    assert_eq!(area.items.len(), count);
+}
+
+#[test]
+fn rebase_and_reattachment_keep_contact_and_identity() {
+    let reference = reference();
+    let mut physics = common::world();
+    physics.insert_box([0.0, -0.25, 0.0], [100.0, 0.25, 100.0]);
+    let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
+    let mut wheels = WheelAssemblies::new(&reference).unwrap();
+    wheels.sync(&mut area.items, &mut physics).unwrap();
+    let slot = reference.vehicle.wheel_slots[0];
+    let id = wheels.remove(slot, &mut area.items, &mut physics).unwrap();
+    let shape_handles = physics.rapier().bodies[area.items.get(id).unwrap().body.unwrap()]
+        .colliders()
+        .to_vec();
+    physics.rebase([1024.0, 0.0, 0.0]);
+    area.items.rebase([1024.0, 0.0, 0.0]);
+    wheels
+        .install(id, slot, &mut area.items, &mut physics)
+        .unwrap();
+    for _ in 0..120 {
+        physics.apply_vehicle_forces(DriveInput::default(), 0.0);
+        physics.step_physics();
+        wheels.sync(&mut area.items, &mut physics).unwrap();
+    }
+    assert!(physics.snapshot().wheels_contact[0]);
+    assert_eq!(wheels.slot_for_item(id), Some(slot));
+    for handle in shape_handles {
+        assert!(physics.rapier().colliders.contains(handle));
+    }
+}
+
+#[test]
+#[ignore = "Requires the local installed-build export"]
+fn production_wheel_bindings_detach_and_restore() {
+    let reference = desert_drive::reference::ReferenceManifest::from_json(
+        &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+    )
+    .unwrap();
+    let transform = reference.area.car_pose;
+    let mut physics = desert_drive::vehicle::PhysicsWorld::new(
+        &reference,
+        desert_drive::vehicle::VehiclePose {
+            position: transform.translation,
+            rotation: transform.rotation,
+        },
+    )
+    .unwrap();
+    let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
+    let mut wheels = WheelAssemblies::new(&reference).unwrap();
+    wheels.sync(&mut area.items, &mut physics).unwrap();
+    let slot = reference.vehicle.wheel_slots[0];
+    let count = area.items.len();
+    let item = wheels.remove(slot, &mut area.items, &mut physics).unwrap();
+    let (rim, tire) = wheels.split(item, &mut area.items, &mut physics).unwrap();
+    assert_eq!(
+        wheels
+            .assemble(rim, tire, &mut area.items, &mut physics)
+            .unwrap(),
+        item
+    );
+    wheels
+        .install(item, slot, &mut area.items, &mut physics)
+        .unwrap();
+    assert_eq!(physics.wheel_support_count(), 4);
+    assert_eq!(area.items.len(), count);
+}

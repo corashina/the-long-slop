@@ -1,4 +1,5 @@
 pub mod items;
+pub mod wheels;
 
 use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
@@ -61,10 +62,40 @@ struct HingeState {
     target: f32,
 }
 struct OpeningState {
-    reference: OpeningRecord,
+    reference: OpeningRules,
     local_pose: Pose,
     tilt_axis: Vector,
-    open: bool,
+    valve: f32,
+}
+struct OpeningRules {
+    id: OpeningId,
+    tank: ItemId,
+    cap: ItemId,
+    flow_liters_per_second: f32,
+    tilt_degrees: f32,
+    angle_disabled: bool,
+    spill_disabled: bool,
+    tube_connected: bool,
+    can_toggle: bool,
+    can_tune: bool,
+    tune_rate: f32,
+}
+impl From<&OpeningRecord> for OpeningRules {
+    fn from(opening: &OpeningRecord) -> Self {
+        Self {
+            id: opening.id,
+            tank: opening.tank,
+            cap: opening.cap,
+            flow_liters_per_second: opening.flow_liters_per_second,
+            tilt_degrees: opening.tilt_degrees,
+            angle_disabled: opening.angle_disabled,
+            spill_disabled: opening.spill_disabled,
+            tube_connected: opening.tube_connected,
+            can_toggle: opening.can_toggle,
+            can_tune: opening.can_tune,
+            tune_rate: opening.tune_rate,
+        }
+    }
 }
 struct SeatState {
     id: SeatId,
@@ -94,6 +125,9 @@ pub struct InteractionState {
     supplies: HashSet<ItemId>,
     tank_rules: HashMap<ItemId, TankRules>,
     slow_oil_modifier: f32,
+    latched_hinge: Option<(usize, Vector)>,
+    hinge_release_distance_squared: f32,
+    tuning_opening: Option<OpeningId>,
 }
 
 #[derive(Clone, Copy)]
@@ -167,10 +201,10 @@ impl InteractionState {
                 * transform_pose(&body.pose)
                 * transform_pose(&anchor.transform);
             openings.push(OpeningState {
-                reference: opening.clone(),
+                reference: OpeningRules::from(opening),
                 local_pose,
                 tilt_axis: Vector::from_array(opening.tilt_axis),
-                open: opening.open,
+                valve: opening.valve,
             });
         }
         let mut seats = Vec::with_capacity(reference.seats.len());
@@ -226,6 +260,9 @@ impl InteractionState {
                 })
                 .collect(),
             slow_oil_modifier: reference.fluid_rules.slow_oil_modifier,
+            latched_hinge: None,
+            hinge_release_distance_squared: (reference.player.aim_reach * 1.5).powi(2),
+            tuning_opening: None,
         })
     }
 
@@ -241,16 +278,72 @@ impl InteractionState {
     pub fn register_supply(&mut self, item: ItemId) {
         self.supplies.insert(item);
     }
+    pub fn register_pump(&mut self, item: ItemId, flow: f32) -> Result<(), ReferenceError> {
+        if !flow.is_finite() || flow <= 0.0 {
+            return Err(ReferenceError("Invalid pump flow".into()));
+        }
+        if let Some(opening) = self
+            .openings
+            .iter_mut()
+            .find(|opening| opening.reference.cap == item)
+        {
+            if !self.supplies.contains(&item) {
+                return Err(ReferenceError("Pump ID overlaps another opening".into()));
+            }
+            opening.reference.flow_liters_per_second = flow;
+            return Ok(());
+        }
+        self.kinds.insert(item, ItemKind::Cap);
+        self.tank_rules.insert(
+            item,
+            TankRules {
+                no_fill_this: true,
+                no_fill_from: false,
+                slow_oil: false,
+            },
+        );
+        self.supplies.insert(item);
+        self.openings.push(OpeningState {
+            reference: OpeningRules {
+                id: OpeningId(item.0),
+                tank: item,
+                cap: item,
+                flow_liters_per_second: flow,
+                tilt_degrees: 0.0,
+                angle_disabled: true,
+                spill_disabled: true,
+                tube_connected: false,
+                can_toggle: false,
+                can_tune: false,
+                tune_rate: 0.0,
+            },
+            local_pose: Pose::IDENTITY,
+            tilt_axis: Vector::Y,
+            valve: 1.0,
+        });
+        Ok(())
+    }
     pub fn opening_is_open(&self, id: OpeningId) -> bool {
+        self.opening_valve(id) > 0.0
+    }
+    pub fn opening_valve(&self, id: OpeningId) -> f32 {
         self.openings
             .iter()
-            .any(|opening| opening.reference.id == id && opening.open)
+            .find(|opening| opening.reference.id == id)
+            .map_or(0.0, |opening| opening.valve)
+    }
+    pub fn tuning_opening(&self) -> Option<OpeningId> {
+        self.tuning_opening
     }
     pub fn hinge_angle(&self, id: ItemId) -> Option<f32> {
         self.hinges
             .iter()
             .find(|hinge| hinge.reference.item == id)
             .map(|hinge| hinge.angle)
+    }
+    pub fn dragging_hinge(&self) -> Option<ItemId> {
+        self.latched_hinge
+            .map(|(index, _)| self.hinges[index].reference.item)
     }
     pub fn drop_held(
         &mut self,
@@ -321,7 +414,56 @@ impl InteractionState {
         let target = target.filter(|target| {
             target.distance.is_finite() && target.distance >= 0.0 && target.distance <= self.reach
         });
+        if input.held & keys::USE == 0 || input.released & keys::USE != 0 {
+            self.latched_hinge = None;
+        } else if self.latched_hinge.is_none()
+            && player.seat().is_none()
+            && let Some(target) = target
+            && let Some(index) = self
+                .hinges
+                .iter()
+                .position(|hinge| hinge.reference.item == target.item)
+            && let Some(body) = self
+                .bodies
+                .get(&self.hinges[index].reference.body)
+                .and_then(|handle| physics.rapier().bodies.get(*handle))
+        {
+            self.latched_hinge = Some((
+                index,
+                body.position().inverse() * Vector::from_array(target.point),
+            ));
+        }
+        let use_target = if let Some((index, local)) = self.latched_hinge {
+            let hinge = &self.hinges[index];
+            if let Some(body) = self
+                .bodies
+                .get(&hinge.reference.body)
+                .and_then(|handle| physics.rapier().bodies.get(*handle))
+            {
+                let point = *body.position() * local;
+                let distance = (point - Vector::from_array(player.body_pose(physics).position))
+                    .length_squared();
+                if distance < self.hinge_release_distance_squared {
+                    Some(AimTarget {
+                        item: hinge.reference.item,
+                        distance: distance.sqrt(),
+                        point: point.to_array(),
+                        slot: None,
+                    })
+                } else {
+                    self.latched_hinge = None;
+                    None
+                }
+            } else {
+                self.latched_hinge = None;
+                None
+            }
+        } else {
+            target
+        };
         let mut action = None;
+        let mut carry_input = input;
+        self.tuning_opening = None;
         if input.pressed & keys::USE != 0 && player.seat().is_some() {
             if let Some(seat) = self
                 .seats
@@ -331,14 +473,39 @@ impl InteractionState {
             {
                 action = Some(InteractionAction::Seat(seat.id));
             }
-        } else if let Some(target) = target {
+        } else if let Some(target) = use_target {
             if input.pressed & keys::USE != 0 {
                 for opening in &mut self.openings {
-                    if opening.reference.cap == target.item {
-                        opening.open = !opening.open;
+                    if opening.reference.cap == target.item && opening.reference.can_toggle {
+                        opening.valve = if opening.valve > 0.0 { 0.0 } else { 1.0 };
                         action = Some(InteractionAction::Cap(opening.reference.id));
                         break;
                     }
+                }
+            }
+            if let Some(opening) = self
+                .openings
+                .iter_mut()
+                .find(|opening| opening.reference.cap == target.item && opening.reference.can_tune)
+            {
+                carry_input.wheel = 0.0;
+                let delta = if input.wheel.is_finite() && input.wheel != 0.0 {
+                    input.wheel * self.carry.scroll_sensitivity
+                } else if input.held & keys::USE != 0 {
+                    input.mouse[1]
+                } else {
+                    0.0
+                };
+                if input.held & keys::USE != 0 || delta != 0.0 {
+                    self.tuning_opening = Some(opening.reference.id);
+                }
+                if delta.is_finite() && delta != 0.0 {
+                    opening.valve =
+                        (opening.valve + delta * dt * opening.reference.tune_rate).clamp(0.0, 1.0);
+                    if opening.valve < 1e-6 {
+                        opening.valve = 0.0;
+                    }
+                    action = Some(InteractionAction::Cap(opening.reference.id));
                 }
             }
             if input.released & keys::USE != 0
@@ -392,6 +559,19 @@ impl InteractionState {
             }
         }
         if input.pressed & keys::GRAB != 0 {
+            let grab_target = target.map(|mut target| {
+                if matches!(self.kinds.get(&target.item), Some(ItemKind::Tire))
+                    && let Some(ItemLocation::Attached(parent)) =
+                        items.get(target.item).map(|item| item.location)
+                    && matches!(
+                        self.kinds.get(&parent),
+                        Some(ItemKind::Rim | ItemKind::Wheel)
+                    )
+                {
+                    target.item = parent;
+                }
+                target
+            });
             if let Some(held) = self.held.as_ref()
                 && let Some(slot) = target.and_then(|target| target.slot)
                 && matches!(
@@ -404,7 +584,7 @@ impl InteractionState {
                     target: slot,
                 });
             } else if self.held.is_none()
-                && let Some(target) = target
+                && let Some(target) = grab_target
                 && matches!(
                     self.kinds.get(&target.item),
                     Some(ItemKind::Wheel | ItemKind::Rim)
@@ -416,7 +596,8 @@ impl InteractionState {
                 action = Some(InteractionAction::WheelRemove(target.item));
             } else if let Some(item) = self.drop_held(items, physics) {
                 action = Some(InteractionAction::Drop(item));
-            } else if let Some(target) = target
+            } else if let Some(target) = grab_target
+                && target.slot.is_none()
                 && self.pickup(target, player, items, physics)
             {
                 action = Some(InteractionAction::Pickup(target.item));
@@ -431,7 +612,7 @@ impl InteractionState {
         {
             action = Some(InteractionAction::WheelSplit(item));
         }
-        if self.update_carry(input, player, physics, dt)
+        if self.update_carry(carry_input, player, physics, dt)
             && let Some(item) = self.drop_held(items, physics)
         {
             action = Some(InteractionAction::Drop(item));
@@ -454,26 +635,26 @@ impl InteractionState {
             if let Some(opening) = self
                 .openings
                 .iter()
-                .find(|opening| opening.reference.cap == target.item && opening.open)
+                .find(|opening| opening.reference.cap == target.item && opening.valve > 0.0)
             {
                 let (source_id, destination, flow) =
                     if self.supplies.contains(&opening.reference.tank) {
                         if !self.openings.iter().any(|destination| {
-                            destination.reference.tank == held.item && destination.open
+                            destination.reference.tank == held.item && destination.valve > 0.0
                         }) {
                             (held.item, held.item, 0.0)
                         } else {
                             (
                                 opening.reference.tank,
                                 held.item,
-                                opening.reference.flow_liters_per_second,
+                                opening.reference.flow_liters_per_second * opening.valve,
                             )
                         }
                     } else {
                         (
                             held.item,
                             opening.reference.tank,
-                            opening.reference.flow_liters_per_second,
+                            opening.reference.flow_liters_per_second * opening.valve,
                         )
                     };
                 let source_allowed = self
@@ -515,7 +696,7 @@ impl InteractionState {
             }
         }
         for opening in &self.openings {
-            if !opening.open
+            if opening.valve <= 0.0
                 || opening.reference.spill_disabled
                 || opening.reference.tube_connected
                 || filling == Some(opening.reference.tank)
@@ -541,7 +722,7 @@ impl InteractionState {
                 }
                 spill(
                     fluid,
-                    factor * opening.reference.flow_liters_per_second * dt,
+                    factor * opening.valve * opening.reference.flow_liters_per_second * dt,
                 );
             }
         }
@@ -651,7 +832,11 @@ impl InteractionState {
         let view = to_rapier(player.view_pose(physics));
         if input.wheel.is_finite() {
             held.offset = (held.offset
-                - Vector::Z * input.wheel * dt * self.carry.obj_move_sensitivity)
+                - Vector::Z
+                    * input.wheel
+                    * self.carry.scroll_sensitivity
+                    * dt
+                    * self.carry.obj_move_sensitivity)
                 .clamp_length_max(self.carry.carry_offset_radius);
         }
         if input.held & keys::ROTATE != 0 && input.mouse.iter().all(|delta| delta.is_finite()) {
