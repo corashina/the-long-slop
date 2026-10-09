@@ -108,7 +108,32 @@ fn production_export_matches_installed_contract() {
     );
     assert!((manifest.vehicle.mass_kg - 961.6).abs() < 0.01);
     assert_eq!(manifest.wheel_slots.len(), 4);
-    assert_eq!(manifest.hinges.len(), 7);
+    assert_eq!(manifest.hinges.len(), 9);
+    for (usable, pivot, collider_node) in [(64783, 21482, 21566), (64777, 21464, 21548)] {
+        let hinge = manifest
+            .hinges
+            .iter()
+            .find(|hinge| hinge.source.path_id == usable)
+            .expect("source garage leaf hinge");
+        let body = manifest
+            .bodies
+            .iter()
+            .find(|body| body.id == hinge.body)
+            .unwrap();
+        assert_eq!(body.source.path_id, pivot);
+        assert_ne!(body.node, manifest.area.home_root);
+        let node = manifest
+            .nodes
+            .iter()
+            .find(|node| node.source.path_id == collider_node)
+            .unwrap();
+        assert!(
+            manifest
+                .colliders
+                .iter()
+                .any(|collider| collider.node == node.id && collider.body == hinge.body)
+        );
+    }
     assert!(manifest.openings.len() >= 8);
     assert_eq!(manifest.player.camera_culling_mask & (1 << 18), 0);
     let gltf: serde_json::Value =

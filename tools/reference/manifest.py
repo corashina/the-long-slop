@@ -74,7 +74,7 @@ def build_manifest(source, roots, reports, hashes):
         for reader in group.get('usablescript',[]):
             value=source.read(reader)
             if not value['rotateAble']:continue
-            if nodes[node-1]['asset']==1 and key(reader)!=('level1',64790):continue
+            if nodes[node-1]['asset']==1 and key(reader) not in {('level1',64783),('level1',64777),('level1',64790)}:continue
             if 'Door' not in nodes[node-1]['hierarchy_path'] and 'Hood' not in nodes[node-1]['hierarchy_path'] and 'Trunk' not in nodes[node-1]['hierarchy_path']:continue
             target=pointer_node(reader,value['RT1'])
             if value['RT2']['m_PathID'] and pointer_node(reader,value['RT2'])!=target:
@@ -99,6 +99,9 @@ def build_manifest(source, roots, reports, hashes):
     for node,group in components.items():
         if not nodes[node-1]['active'] or not (item_classes.intersection(group) or node in hinge_nodes):continue
         name=nodes[node-1]['name'];kind='decoration'
+        if key(node_readers[node])==('level1',21482):name='Garage door right'
+        elif key(node_readers[node])==('level1',21464):name='Garage door left'
+        elif key(node_readers[node])==('level1',21450):name='Door'
         for class_name,kind_name in [('tankscript','container'),('enginescript','engine'),('coolantTankscript','radiator'),('gumiscript','tire'),('wheelscript','rim'),('seatscript','seat'),('tankcapscript','cap')]:
             if class_name in group:kind=kind_name
         if node in hinge_nodes:kind='hood' if 'Hood' in nodes[node-1]['hierarchy_path'] else 'trunk' if 'Trunk' in nodes[node-1]['hierarchy_path'] else 'door'
