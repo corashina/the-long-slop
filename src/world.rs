@@ -1,3 +1,4 @@
+use crate::reference::{Bounds, ColliderGeometry, ReferenceManifest, StartingAreaReference};
 use crate::vehicle::{ColliderHandle, PhysicsWorld, VehiclePose};
 
 pub const CHUNK_LENGTH: f64 = 128.0;
@@ -82,7 +83,7 @@ fn phase(seed: u64) -> f64 {
     (hash(seed) % 10_000) as f64 * std::f64::consts::TAU / 10_000.0
 }
 
-fn hash(mut value: u64) -> u64 {
+pub(crate) fn hash(mut value: u64) -> u64 {
     value = value.wrapping_add(0x9e3779b97f4a7c15);
     value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
@@ -227,6 +228,97 @@ pub fn active_chunks(distance_m: f64) -> [ChunkKey; 11] {
     std::array::from_fn(|i| ChunkKey(current + i as i64 - 3))
 }
 
+fn inside(point: [f32; 3], bounds: &Bounds, margin: f32) -> bool {
+    [0, 2].iter().all(|&axis| {
+        point[axis] >= bounds.min[axis] - margin && point[axis] <= bounds.max[axis] + margin
+    })
+}
+
+fn prepare_terrain(
+    data: &mut ChunkData,
+    seed: u64,
+    area: &StartingAreaReference,
+    interiors: &[Bounds],
+) {
+    let origin = data.origin();
+    let start = -origin[2];
+    let home = &area.home_bounds;
+    if start > -home.min[2] as f64 + 8.0 || start + CHUNK_LENGTH < -home.max[2] as f64 - 8.0 {
+        return;
+    }
+    let road_x = road_sample(seed, -(home.min[2] + home.max[2]) as f64 * 0.5).center[0];
+    let mut rows: Vec<f64> = (0..=16).map(|row| start + row as f64 * 8.0).collect();
+    for distance in ((-home.max[2] - 4.0).floor() as i32)..=((-home.min[2] + 4.0).ceil() as i32) {
+        if (start..=start + CHUNK_LENGTH).contains(&(distance as f64)) {
+            rows.push(distance as f64);
+        }
+    }
+    rows.sort_by(f64::total_cmp);
+    rows.dedup();
+    for x in ((home.min[0] - road_x as f32 - 4.0).floor() as i32)
+        ..=((home.max[0] - road_x as f32 + 4.0).ceil() as i32)
+    {
+        if (origin[0] - TERRAIN_HALF_WIDTH..=origin[0] + TERRAIN_HALF_WIDTH).contains(&(x as f64)) {
+            data.lateral_samples.push(x as f64);
+        }
+    }
+    data.lateral_samples.sort_by(f64::total_cmp);
+    data.lateral_samples.dedup();
+    let columns = data.lateral_samples.len();
+    data.vertices.clear();
+    data.indices.clear();
+    for &distance in &rows {
+        let road = road_sample(seed, distance);
+        for &lateral in &data.lateral_samples {
+            let x = road.center[0] + lateral;
+            let mut y = height(seed, distance, lateral);
+            let driveway = &area.driveway_bounds;
+            let z_fade = ((distance + driveway.max[2] as f64 + 4.0) / 4.0).clamp(0.0, 1.0)
+                * ((-driveway.min[2] as f64 + 4.0 - distance) / 4.0).clamp(0.0, 1.0);
+            let x_fade = ((x - road.center[0] - 4.0)
+                / (driveway.min[0] as f64 - road.center[0] - 4.0).max(1.0))
+            .clamp(0.0, 1.0)
+                * ((home.max[0] as f64 + 4.0 - x) / 4.0).clamp(0.0, 1.0);
+            y += (area.driveway_height as f64 - y) * z_fade * x_fade;
+            let yard_x = ((x - home.min[0] as f64 + 4.0) / 4.0).clamp(0.0, 1.0)
+                * ((home.max[0] as f64 + 4.0 - x) / 4.0).clamp(0.0, 1.0);
+            let yard_z = ((distance + home.max[2] as f64 + 4.0) / 4.0).clamp(0.0, 1.0)
+                * ((-home.min[2] as f64 + 4.0 - distance) / 4.0).clamp(0.0, 1.0);
+            y += (area.driveway_height as f64 - y) * yard_x * yard_z;
+            data.vertices.push([
+                (x - origin[0]) as f32,
+                y as f32,
+                (-distance - origin[2]) as f32,
+            ]);
+        }
+    }
+    for row in 0..rows.len() - 1 {
+        for col in 0..columns - 1 {
+            let a = (row * columns + col) as u32;
+            let b = a + 1;
+            let c = a + columns as u32;
+            let d = c + 1;
+            for triangle in [[a, b, c], [b, d, c]] {
+                let center = std::array::from_fn(|axis| {
+                    triangle
+                        .iter()
+                        .map(|index| data.vertices[*index as usize][axis])
+                        .sum::<f32>()
+                        / 3.0
+                        + origin[axis] as f32
+                });
+                if !interiors.iter().any(|bounds| inside(center, bounds, 0.3)) {
+                    data.indices.push(triangle);
+                }
+            }
+        }
+    }
+    data.props
+        .retain(|prop| !inside(prop.absolute_point.map(|x| x as f32), home, 4.0));
+    data.stations
+        .retain(|station| !inside(station.absolute_point.map(|x| x as f32), home, 10.0));
+}
+
 fn station(seed: u64, id: i64) -> Station {
     let mut point = road_sample(seed, id as f64 * STATION_SPACING).center;
     point[0] += 10.0;
@@ -243,6 +335,7 @@ pub fn nearest_station(seed: u64, distance_m: f64) -> Station {
 pub struct LoadedChunk {
     pub data: ChunkData,
     colliders: Vec<ColliderHandle>,
+    pumps: Vec<(i64, ColliderHandle)>,
 }
 
 pub struct WorldStream {
@@ -250,6 +343,9 @@ pub struct WorldStream {
     pub origin: WorldOrigin,
     chunks: Vec<LoadedChunk>,
     lateral_band: i64,
+    starting_area: Option<StartingAreaReference>,
+    interiors: Vec<Bounds>,
+    station_items: Vec<(i64, crate::reference::ItemId)>,
 }
 
 impl WorldStream {
@@ -259,6 +355,57 @@ impl WorldStream {
             origin: WorldOrigin::default(),
             chunks: Vec::with_capacity(11),
             lateral_band: 0,
+            starting_area: None,
+            interiors: Vec::new(),
+            station_items: Vec::new(),
+        }
+    }
+
+    pub fn configure_starting_area(&mut self, reference: &ReferenceManifest) {
+        assert!(
+            self.chunks.is_empty(),
+            "Configure terrain before loading chunks"
+        );
+        self.starting_area = Some(reference.area.clone());
+        for collider in &reference.colliders {
+            let Some(node) = reference.nodes.iter().find(|node| node.id == collider.node) else {
+                continue;
+            };
+            if !node.name.starts_with("interior")
+                || node.asset
+                    != reference
+                        .nodes
+                        .iter()
+                        .find(|node| node.id == reference.area.home_root)
+                        .unwrap()
+                        .asset
+            {
+                continue;
+            }
+            let ColliderGeometry::Convex { points } = &collider.geometry else {
+                continue;
+            };
+            let body = reference
+                .bodies
+                .iter()
+                .find(|body| body.id == collider.body)
+                .unwrap();
+            let pose = crate::vehicle::to_rapier(VehiclePose {
+                position: body.pose.translation,
+                rotation: body.pose.rotation,
+            });
+            let mut bounds = Bounds {
+                min: [f32::INFINITY; 3],
+                max: [f32::NEG_INFINITY; 3],
+            };
+            for point in points {
+                let point = (pose * rapier3d::math::Vector::from_array(*point)).to_array();
+                for axis in 0..3 {
+                    bounds.min[axis] = bounds.min[axis].min(point[axis]);
+                    bounds.max[axis] = bounds.max[axis].max(point[axis]);
+                }
+            }
+            self.interiors.push(bounds);
         }
     }
 
@@ -288,8 +435,12 @@ impl WorldStream {
             if self.chunks.iter().any(|c| c.data.key == key) {
                 continue;
             }
-            let data = generate_chunk_in_band(self.seed, key, self.lateral_band);
+            let mut data = generate_chunk_in_band(self.seed, key, self.lateral_band);
+            if let Some(area) = &self.starting_area {
+                prepare_terrain(&mut data, self.seed, area, &self.interiors);
+            }
             let mut colliders = Vec::with_capacity(7);
+            let mut pumps = Vec::new();
             colliders.push(physics.insert_mesh_at(
                 &data.vertices,
                 &data.indices,
@@ -310,15 +461,20 @@ impl WorldStream {
                 let mut pump = station.absolute_point;
                 pump[1] += 0.7;
                 pump[2] -= 3.0;
-                colliders.push(physics.insert_box(self.origin.local(pump), [0.35, 0.7, 0.35]));
+                let handle = physics.insert_box(self.origin.local(pump), [0.35, 0.7, 0.35]);
+                colliders.push(handle);
+                pumps.push((station.id, handle));
             }
-            self.chunks.push(LoadedChunk { data, colliders });
+            self.chunks.push(LoadedChunk {
+                data,
+                colliders,
+                pumps,
+            });
         }
     }
 
     /// Call between fixed steps. Stored metadata remains absolute.
-    pub fn rebase(&mut self, physics: &mut PhysicsWorld) -> Option<[f32; 3]> {
-        let position = physics.snapshot().pose.position;
+    pub fn rebase(&mut self, position: [f32; 3], physics: &mut PhysicsWorld) -> Option<[f32; 3]> {
         if position[0].abs().max(position[2].abs()) <= REBASE_LIMIT {
             return None;
         }
@@ -356,6 +512,44 @@ impl WorldStream {
         VehiclePose {
             position: self.origin.local(point),
             rotation: [0.0, (yaw * 0.5).sin(), 0.0, (yaw * 0.5).cos()],
+        }
+    }
+}
+
+pub fn sync_station_supplies(
+    stream: &mut WorldStream,
+    items: &mut crate::interaction::items::ItemStore,
+    interaction: &mut crate::interaction::InteractionState,
+    physics: &mut PhysicsWorld,
+) {
+    for chunk in &stream.chunks {
+        for &(station, handle) in &chunk.pumps {
+            let item = if let Some((_, item)) =
+                stream.station_items.iter().find(|(id, _)| *id == station)
+            {
+                *item
+            } else {
+                let item =
+                    crate::reference::ItemId(0x8000_0000 + stream.station_items.len() as u32);
+                let pose =
+                    crate::vehicle::from_rapier(physics.rapier().colliders[handle].position());
+                items.insert_supply(item, pose);
+                // Retain the road stop's original four-liter-per-second rate.
+                interaction
+                    .register_pump(item, 4.0)
+                    .expect("valid station pump");
+                stream.station_items.push((station, item));
+                item
+            };
+            physics.rapier_mut().colliders[handle].user_data = item.0 as u128 + 1;
+            let state = items.get_mut(item).expect("registered station supply");
+            state.pose = crate::vehicle::from_rapier(physics.rapier().colliders[handle].position());
+            state
+                .fluid
+                .as_mut()
+                .expect("pump reservoir")
+                .mixture
+                .quantities_liters = [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         }
     }
 }

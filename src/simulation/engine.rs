@@ -18,7 +18,7 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 }
 
 /// The installed Lada curve has unweighted keys and clamps at both ends.
-fn torque(curve: &TorqueCurve, rpm: f32) -> f32 {
+pub(crate) fn torque(curve: &TorqueCurve, rpm: f32) -> f32 {
     let keys = &curve.keys;
     if rpm <= keys[0].time {
         return keys[0].value;

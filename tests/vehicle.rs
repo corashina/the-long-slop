@@ -1,3 +1,5 @@
+mod common;
+
 use desert_drive::simulation::{DriveInput, StepClock};
 use desert_drive::vehicle::{PhysicsWorld, VehiclePose, VehicleSnapshot};
 
@@ -7,7 +9,7 @@ const START: VehiclePose = VehiclePose {
 };
 
 fn flat_track() -> PhysicsWorld {
-    let mut world = PhysicsWorld::new(START);
+    let mut world = PhysicsWorld::new(&common::reference(), START).expect("fixture physics");
     world.insert_mesh(
         &[
             [-500.0, 0.0, -500.0],
@@ -18,7 +20,8 @@ fn flat_track() -> PhysicsWorld {
         &[[0, 2, 1], [0, 3, 2]],
     );
     for _ in 0..120 {
-        world.step(DriveInput::default(), true);
+        world.apply_vehicle_forces(DriveInput::default(), 2600.0);
+        world.step_physics();
     }
     world
 }
@@ -47,45 +50,172 @@ fn settles_on_four_wheels() {
     );
     assert!(snapshot.linear_velocity[1].abs() < 0.1, "{snapshot:?}");
     for _ in 0..120 {
-        world.step(DriveInput::default(), true);
+        world.apply_vehicle_forces(DriveInput::default(), 2600.0);
+        world.step_physics();
     }
     assert!((world.snapshot().pose.position[1] - snapshot.pose.position[1]).abs() < 0.01);
+}
+
+#[test]
+fn removed_slot_has_no_raycast_support_and_restores_without_duplicates() {
+    use desert_drive::vehicle::InstalledWheel;
+    let reference = common::reference();
+    let mut world = flat_track();
+    let slot = reference.vehicle.wheel_slots[0];
+    world.set_wheel(slot, None).unwrap();
+    assert_eq!(world.wheel_support_count(), 3);
+    for _ in 0..30 {
+        world.apply_vehicle_forces(DriveInput::default(), 0.0);
+        world.step_physics();
+    }
+    assert!(!world.snapshot().wheels_contact[0]);
+    world
+        .set_wheel(
+            slot,
+            Some(InstalledWheel {
+                radius: reference
+                    .wheel_slots
+                    .iter()
+                    .find(|wheel| wheel.id == slot)
+                    .unwrap()
+                    .radius,
+                condition: 0.5,
+            }),
+        )
+        .unwrap();
+    assert_eq!(world.wheel_support_count(), 4);
+    for _ in 0..120 {
+        world.apply_vehicle_forces(DriveInput::default(), 0.0);
+        world.step_physics();
+    }
+    assert!(world.snapshot().wheels_contact[0]);
+    world.rebase([128.0, 0.0, -128.0]);
+    world.apply_vehicle_forces(DriveInput::default(), 0.0);
+    world.step_physics();
+    assert!(world.snapshot().wheels_contact[0]);
+}
+
+#[test]
+fn source_springs_keep_their_force_when_vehicle_mass_changes() {
+    let reference = common::reference();
+    let mut world = flat_track();
+    let before = world.snapshot().pose.position[1];
+    world.set_vehicle_mass(reference.vehicle.mass_kg * 0.5);
+    for _ in 0..180 {
+        world.apply_vehicle_forces(DriveInput::default(), 0.0);
+        world.step_physics();
+    }
+    let after = world.snapshot().pose.position[1];
+    assert!(
+        after - before > 0.02,
+        "spring compression did not decrease: {before} -> {after}"
+    );
+    assert!(
+        world
+            .snapshot()
+            .wheels_contact
+            .iter()
+            .all(|contact| *contact)
+    );
+}
+
+#[test]
+fn drivetrain_converts_running_torque_with_source_ratio_radius_and_drive_count() {
+    use desert_drive::simulation::engine::EngineOutput;
+    let reference = common::reference();
+    let output = EngineOutput {
+        running: true,
+        torque_nm: 87.0,
+        ..EngineOutput::default()
+    };
+    let force = desert_drive::vehicle::drive_force(output, &reference.vehicle, 2, 0.3, 2);
+    let expected =
+        87.0 * reference.vehicle.gear_ratios[2].abs() * reference.vehicle.final_drive_ratio / 0.6;
+    assert!((force - expected).abs() < 0.001);
+    assert_eq!(
+        desert_drive::vehicle::drive_force(EngineOutput::default(), &reference.vehicle, 2, 0.3, 2),
+        0.0
+    );
+    assert_eq!(
+        desert_drive::vehicle::drive_force(output, &reference.vehicle, 1, 0.3, 2),
+        0.0
+    );
+}
+
+#[test]
+fn automatic_shift_retains_selection_when_curve_candidates_are_zero() {
+    let mut reference = common::reference();
+    reference
+        .engine
+        .torque_curve
+        .keys
+        .iter_mut()
+        .for_each(|key| {
+            key.value = 0.0;
+            key.in_tangent = 0.0;
+            key.out_tangent = 0.0;
+        });
+    assert_eq!(
+        desert_drive::vehicle::select_gear(
+            0.0,
+            false,
+            true,
+            2,
+            &reference.engine,
+            &reference.vehicle
+        ),
+        2
+    );
+    assert_eq!(
+        desert_drive::vehicle::select_gear(
+            0.0,
+            false,
+            false,
+            2,
+            &reference.engine,
+            &reference.vehicle
+        ),
+        1
+    );
 }
 
 #[test]
 fn accelerates_brakes_and_reverses() {
     let mut world = flat_track();
     for _ in 0..180 {
-        world.step(
+        world.apply_vehicle_forces(
             DriveInput {
                 accelerate: true,
                 ..Default::default()
             },
-            true,
+            2600.0,
         );
+        world.step_physics();
     }
     let driving = world.snapshot();
     finite(driving);
     assert!(driving.speed_mps > 5.0, "{driving:?}");
     assert!(driving.pose.position[2] < -5.0);
     for _ in 0..60 {
-        world.step(
+        world.apply_vehicle_forces(
             DriveInput {
                 brake_reverse: true,
                 ..Default::default()
             },
-            true,
+            2600.0,
         );
+        world.step_physics();
     }
     assert!(world.snapshot().speed_mps < driving.speed_mps * 0.5);
     for _ in 0..180 {
-        world.step(
+        world.apply_vehicle_forces(
             DriveInput {
                 brake_reverse: true,
                 ..Default::default()
             },
-            true,
+            2600.0,
         );
+        world.step_physics();
     }
     let reversing = world.snapshot();
     finite(reversing);
@@ -101,7 +231,8 @@ fn reset_stops_the_chassis() {
         ..DriveInput::default()
     };
     for _ in 0..180 {
-        world.step(input, true);
+        world.apply_vehicle_forces(input, 2600.0);
+        world.step_physics();
     }
     assert!(world.snapshot().speed_mps.abs() > 1.0);
     world.reset(start);
@@ -118,13 +249,14 @@ fn reset_stops_the_chassis() {
 fn disabled_engine_produces_no_thrust() {
     let mut world = flat_track();
     for _ in 0..180 {
-        world.step(
+        world.apply_vehicle_forces(
             DriveInput {
                 accelerate: true,
                 ..Default::default()
             },
-            false,
+            0.0,
         );
+        world.step_physics();
     }
     assert!(world.snapshot().speed_mps.abs() < 0.1);
 }
@@ -133,31 +265,38 @@ fn disabled_engine_produces_no_thrust() {
 fn handbrake_slows_the_car() {
     let mut world = flat_track();
     for _ in 0..120 {
-        world.step(
+        world.apply_vehicle_forces(
             DriveInput {
                 accelerate: true,
                 ..Default::default()
             },
-            true,
+            2600.0,
         );
+        world.step_physics();
     }
     let before = world.snapshot().speed_mps;
-    for _ in 0..60 {
-        world.step(
+    // Recovered torque and mass require more than one second to stop this speed.
+    for _ in 0..180 {
+        world.apply_vehicle_forces(
             DriveInput {
                 handbrake: true,
                 ..Default::default()
             },
-            true,
+            2600.0,
         );
+        world.step_physics();
     }
-    assert!(world.snapshot().speed_mps.abs() < before * 0.5);
+    assert!(
+        world.snapshot().speed_mps.abs() < before * 0.1,
+        "before {before}, after {}",
+        world.snapshot().speed_mps
+    );
     finite(world.snapshot());
 }
 
 #[test]
 fn removed_ground_cannot_support_wheels() {
-    let mut world = PhysicsWorld::new(START);
+    let mut world = PhysicsWorld::new(&common::reference(), START).expect("fixture physics");
     let ground = world.insert_mesh(
         &[
             [-10.0, 0.0, -10.0],
@@ -168,11 +307,13 @@ fn removed_ground_cannot_support_wheels() {
         &[[0, 2, 1], [0, 3, 2]],
     );
     for _ in 0..120 {
-        world.step(DriveInput::default(), true);
+        world.apply_vehicle_forces(DriveInput::default(), 2600.0);
+        world.step_physics();
     }
     world.remove_collider(ground);
     for _ in 0..60 {
-        world.step(DriveInput::default(), true);
+        world.apply_vehicle_forces(DriveInput::default(), 2600.0);
+        world.step_physics();
     }
     assert_eq!(world.snapshot().wheels_contact, [false; 4]);
     assert!(world.snapshot().pose.position[1] < -1.0);
@@ -190,14 +331,15 @@ fn one_second_stall_advances_at_most_six_steps() {
 fn steering_turns_the_car_left() {
     let mut world = flat_track();
     for _ in 0..120 {
-        world.step(
+        world.apply_vehicle_forces(
             DriveInput {
                 accelerate: true,
                 steer: 1.0,
                 ..Default::default()
             },
-            true,
+            2600.0,
         );
+        world.step_physics();
     }
     let snapshot = world.snapshot();
     finite(snapshot);
@@ -218,16 +360,61 @@ fn chassis_collides_with_static_wall() {
         &[[0, 1, 2], [0, 2, 3]],
     );
     for _ in 0..240 {
-        world.step(
+        world.apply_vehicle_forces(
             DriveInput {
                 accelerate: true,
                 ..Default::default()
             },
-            true,
+            2600.0,
         );
+        world.step_physics();
     }
     let snapshot = world.snapshot();
     finite(snapshot);
     assert!(snapshot.pose.position[2] > -14.0, "{snapshot:?}");
     assert!(snapshot.speed_mps.abs() < 1.0);
+}
+
+#[test]
+fn force_application_does_not_step_the_body() {
+    let mut world = flat_track();
+    let before = world.snapshot().pose;
+    world.apply_vehicle_forces(
+        DriveInput {
+            accelerate: true,
+            ..Default::default()
+        },
+        2600.0,
+    );
+    assert_eq!(world.snapshot().pose, before);
+    world.step_physics();
+    assert_ne!(world.snapshot().pose, before);
+}
+
+#[test]
+fn query_refresh_preserves_new_kinematic_body_registration() {
+    use rapier3d::math::Vector;
+    use rapier3d::prelude::{ColliderBuilder, QueryFilter, Ray, RigidBodyBuilder};
+
+    let mut world = flat_track();
+    let pose = world.snapshot().pose;
+    let position = Vector::from_array(pose.position) + Vector::new(0.7, 0.3, 0.0);
+    let (body, collider) = world.rapier_mut().insert(
+        RigidBodyBuilder::kinematic_position_based().translation(position),
+        ColliderBuilder::cuboid(0.5, 0.5, 0.5),
+    );
+    world.refresh_queries();
+    let ray = Ray::new(position + Vector::Y * 3.0, -Vector::Y);
+    let hit = world
+        .queries(QueryFilter::default())
+        .cast_ray(&ray, 5.0, true);
+    assert_eq!(hit.map(|hit| hit.0), Some(collider));
+    world.step_physics();
+    assert!(
+        world.rapier().bodies[body]
+            .position()
+            .translation
+            .is_finite()
+    );
+    finite(world.snapshot());
 }

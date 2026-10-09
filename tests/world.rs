@@ -1,3 +1,5 @@
+mod common;
+
 use desert_drive::simulation::DriveInput;
 use desert_drive::vehicle::{PhysicsWorld, VehiclePose};
 use desert_drive::world::{
@@ -108,10 +110,14 @@ fn stations_and_active_window_follow_absolute_distance() {
 
 #[test]
 fn rebase_preserves_wheels_velocities_and_absolute_position() {
-    let mut physics = PhysicsWorld::new(VehiclePose {
-        position: [0.0, 1.1, 0.0],
-        rotation: [0.0, 0.0, 0.0, 1.0],
-    });
+    let mut physics = PhysicsWorld::new(
+        &common::reference(),
+        VehiclePose {
+            position: [0.0, 1.1, 0.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+        },
+    )
+    .expect("fixture physics");
     physics.insert_mesh(
         &[
             [-500.0, 0.0, -500.0],
@@ -122,14 +128,15 @@ fn rebase_preserves_wheels_velocities_and_absolute_position() {
         &[[0, 2, 1], [0, 3, 2]],
     );
     for _ in 0..180 {
-        physics.step(
+        physics.apply_vehicle_forces(
             DriveInput {
                 accelerate: true,
                 steer: 0.05,
                 ..Default::default()
             },
-            true,
+            2600.0,
         );
+        physics.step_physics();
     }
     let before = physics.snapshot();
     let mut origin = WorldOrigin::default();
@@ -157,17 +164,22 @@ fn rebase_preserves_wheels_velocities_and_absolute_position() {
             assert!((relative_before - relative_after).abs() < 0.001);
         }
     }
-    physics.step(DriveInput::default(), true);
+    physics.apply_vehicle_forces(DriveInput::default(), 2600.0);
+    physics.step_physics();
     assert!(physics.snapshot().wheels_contact.into_iter().all(|c| c));
     assert!(physics.snapshot().speed_mps > 1.0);
 }
 
 #[test]
 fn streaming_bounds_colliders_and_loads_teleport_destination() {
-    let mut physics = PhysicsWorld::new(VehiclePose {
-        position: [0.0, 1.1, 0.0],
-        rotation: [0.0, 0.0, 0.0, 1.0],
-    });
+    let mut physics = PhysicsWorld::new(
+        &common::reference(),
+        VehiclePose {
+            position: [0.0, 1.1, 0.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+        },
+    )
+    .expect("fixture physics");
     let mut stream = WorldStream::new(42);
     for distance in (0..40)
         .map(|i| i as f64 * 256.0)
@@ -201,35 +213,46 @@ fn streaming_bounds_colliders_and_loads_teleport_destination() {
     );
     physics.reset(pose);
     for _ in 0..120 {
-        physics.step(DriveInput::default(), false);
+        physics.apply_vehicle_forces(DriveInput::default(), 0.0);
+        physics.step_physics();
     }
     assert!(physics.snapshot().wheels_contact.into_iter().all(|c| c));
 }
 
 #[test]
 fn driving_crosses_chunk_seams_and_rebase_without_trip_jump() {
-    let mut physics = PhysicsWorld::new(VehiclePose {
-        position: [0.0, 1.1, 0.0],
-        rotation: [0.0, 0.0, 0.0, 1.0],
-    });
+    let mut physics = PhysicsWorld::new(
+        &common::reference(),
+        VehiclePose {
+            position: [0.0, 1.1, 0.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+        },
+    )
+    .expect("fixture physics");
     let mut stream = WorldStream::new(42);
     let pose = stream.reset_pose(2000.0, false, &mut physics);
     physics.reset(pose);
     for _ in 0..120 {
-        physics.step(DriveInput::default(), true);
+        physics.apply_vehicle_forces(DriveInput::default(), 2600.0);
+        physics.step_physics();
     }
     let mut previous = stream.origin.absolute(physics.snapshot().pose.position);
     let mut trip = 0.0;
     let mut rebases = 0;
     for _ in 0..600 {
-        physics.step(
+        let accelerate = physics.snapshot().speed_mps < 16.0;
+        physics.apply_vehicle_forces(
             DriveInput {
-                accelerate: true,
+                accelerate,
                 ..Default::default()
             },
-            true,
+            2600.0,
         );
-        if stream.rebase(&mut physics).is_some() {
+        physics.step_physics();
+        if stream
+            .rebase(physics.snapshot().pose.position, &mut physics)
+            .is_some()
+        {
             rebases += 1;
         }
         let snapshot = physics.snapshot();
@@ -250,19 +273,24 @@ fn driving_crosses_chunk_seams_and_rebase_without_trip_jump() {
 
 #[test]
 fn lateral_streaming_supports_travel_beyond_the_old_edge() {
-    let mut physics = PhysicsWorld::new(VehiclePose {
-        position: [55.0, 8.0, -64.0],
-        rotation: [
-            0.0,
-            -std::f32::consts::FRAC_1_SQRT_2,
-            0.0,
-            std::f32::consts::FRAC_1_SQRT_2,
-        ],
-    });
+    let mut physics = PhysicsWorld::new(
+        &common::reference(),
+        VehiclePose {
+            position: [55.0, 8.0, -64.0],
+            rotation: [
+                0.0,
+                -std::f32::consts::FRAC_1_SQRT_2,
+                0.0,
+                std::f32::consts::FRAC_1_SQRT_2,
+            ],
+        },
+    )
+    .expect("fixture physics");
     let mut stream = WorldStream::new(42);
     stream.sync_at([55.0, 8.0, -64.0], &mut physics);
     for _ in 0..180 {
-        physics.step(DriveInput::default(), true);
+        physics.apply_vehicle_forces(DriveInput::default(), 2600.0);
+        physics.step_physics();
     }
     let mut band_changes = 0;
     let mut old_band = stream.lateral_band();
@@ -274,13 +302,14 @@ fn lateral_streaming_supports_travel_beyond_the_old_edge() {
             old_band = stream.lateral_band();
         }
         let accelerate = physics.snapshot().speed_mps < 8.0;
-        physics.step(
+        physics.apply_vehicle_forces(
             DriveInput {
                 accelerate,
                 ..Default::default()
             },
-            true,
+            2600.0,
         );
+        physics.step_physics();
         let snapshot = physics.snapshot();
         assert!(
             snapshot.wheels_contact.iter().any(|c| *c),
@@ -305,4 +334,92 @@ fn lateral_streaming_supports_travel_beyond_the_old_edge() {
     }
     assert!(stream.origin.absolute(physics.snapshot().pose.position)[0] > 362.0);
     assert!(band_changes >= 3);
+}
+
+#[test]
+fn walking_focus_rebases_a_parked_vehicle_without_travel() {
+    let mut physics = PhysicsWorld::new(
+        &common::reference(),
+        VehiclePose {
+            position: [0.0, 1.1, 0.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+        },
+    )
+    .expect("fixture physics");
+    let mut stream = WorldStream::new(42);
+    let before = physics.snapshot();
+    let shift = stream.rebase([2300.0, 0.0, 0.0], &mut physics);
+    assert_eq!(shift, Some([2304.0, 0.0, 0.0]));
+    let after = physics.snapshot();
+    let absolute = stream.origin.absolute(after.pose.position);
+    assert_eq!(absolute, [0.0, 1.1_f32 as f64, 0.0]);
+    assert_eq!(before.linear_velocity, after.linear_velocity);
+    assert_eq!(before.angular_velocity, after.angular_velocity);
+}
+
+#[test]
+fn garage_terrain_keeps_interiors_clear_and_connects_driveway() {
+    use desert_drive::reference::{Bounds, ColliderGeometry};
+    let mut reference = common::reference();
+    reference.area.home_bounds = Bounds {
+        min: [30.0, -2.0, -75.0],
+        max: [50.0, 7.0, -45.0],
+    };
+    reference.area.driveway_bounds = Bounds {
+        min: [30.0, 1.0, -70.0],
+        max: [40.0, 1.0, -60.0],
+    };
+    reference.area.driveway_height = 1.0;
+    let mut interior = reference.nodes[0].clone();
+    interior.id = desert_drive::reference::NodeId(999);
+    interior.name = "interiorCellar".into();
+    reference.nodes.push(interior);
+    let mut collider = reference.colliders[0].clone();
+    collider.node = desert_drive::reference::NodeId(999);
+    collider.body = reference.bodies[0].id;
+    collider.geometry = ColliderGeometry::Convex {
+        points: vec![
+            [35.0, -2.0, -67.0],
+            [38.0, -2.0, -64.0],
+            [38.0, 0.0, -67.0],
+            [35.0, 0.0, -64.0],
+        ],
+    };
+    reference.bodies[0].pose.translation = [0.0; 3];
+    reference.bodies[0].pose.rotation = [0.0, 0.0, 0.0, 1.0];
+    reference.colliders.push(collider);
+    let mut physics = PhysicsWorld::new(
+        &common::reference(),
+        VehiclePose {
+            position: [0.0, 1.1, 0.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+        },
+    )
+    .unwrap();
+    let mut world = WorldStream::new(42);
+    world.configure_starting_area(&reference);
+    world.sync_at([40.0, 0.0, -64.0], &mut physics);
+    let data = &world
+        .chunks()
+        .find(|chunk| chunk.data.key == ChunkKey(0))
+        .unwrap()
+        .data;
+    assert!(data.vertices.iter().any(|p| p[0] > 30.0
+        && p[0] < 40.0
+        && p[2] < -60.0
+        && p[2] > -70.0
+        && (p[1] - 1.0).abs() < 0.001));
+    for triangle in &data.indices {
+        let x = triangle
+            .iter()
+            .map(|i| data.vertices[*i as usize][0])
+            .sum::<f32>()
+            / 3.0;
+        let z = triangle
+            .iter()
+            .map(|i| data.vertices[*i as usize][2])
+            .sum::<f32>()
+            / 3.0;
+        assert!(!(35.0..=38.0).contains(&x) || !(-67.0..=-64.0).contains(&z));
+    }
 }

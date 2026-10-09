@@ -1,6 +1,62 @@
 pub const FIXED_DT: f32 = 1.0 / 60.0;
+pub mod engine;
 const MAX_FRAME_SECONDS: f64 = 0.1;
 const STEP_SECONDS: f64 = 1.0 / 60.0;
+
+pub mod keys {
+    pub const FORWARD: u32 = 1;
+    pub const BACK: u32 = 2;
+    pub const LEFT: u32 = 4;
+    pub const RIGHT: u32 = 8;
+    pub const SPACE: u32 = 16;
+    pub const USE: u32 = 32;
+    pub const RUN: u32 = 64;
+    pub const CROUCH: u32 = 128;
+    pub const GRAB: u32 = 256;
+    pub const FILL: u32 = 512;
+    pub const IGNITION: u32 = 1024;
+    pub const CAMERA: u32 = 2048;
+    pub const ROTATE: u32 = 4096;
+    pub const ASSEMBLE: u32 = 8192;
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FrameInput {
+    pub held: u32,
+    pub pressed: u32,
+    pub released: u32,
+    pub mouse: [f32; 2],
+    pub wheel: f32,
+}
+
+impl FrameInput {
+    pub fn merge(&mut self, frame: Self) {
+        self.held = frame.held;
+        self.pressed |= frame.pressed;
+        self.released |= frame.released;
+        for (pending, delta) in self.mouse.iter_mut().zip(frame.mouse) {
+            if delta.is_finite() {
+                *pending += delta;
+            }
+        }
+        if frame.wheel.is_finite() {
+            self.wheel += frame.wheel;
+        }
+    }
+
+    pub fn take_step(&mut self) -> Self {
+        let step = *self;
+        *self = Self {
+            held: step.held,
+            ..Self::default()
+        };
+        step
+    }
+
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DriveInput {
@@ -8,86 +64,6 @@ pub struct DriveInput {
     pub brake_reverse: bool,
     pub steer: f32,
     pub handbrake: bool,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct FuelState {
-    pub liters: f32,
-    pub capacity_liters: f32,
-}
-
-impl Default for FuelState {
-    fn default() -> Self {
-        Self {
-            liters: 12.0,
-            capacity_liters: 40.0,
-        }
-    }
-}
-
-impl FuelState {
-    pub fn consume(&mut self, throttle: f32, dt: f32) {
-        self.liters = (self.liters - (0.001 + 0.009 * throttle.clamp(0.0, 1.0)) * dt.max(0.0))
-            .clamp(0.0, self.capacity_liters);
-    }
-
-    pub fn refuel(&mut self, dt: f32) {
-        self.liters = (self.liters + 4.0 * dt.max(0.0)).clamp(0.0, self.capacity_liters);
-    }
-}
-
-pub fn can_refuel(speed_kmh: f32, distance_m: f32) -> bool {
-    speed_kmh.abs() < 1.0 && distance_m <= 6.0
-}
-
-#[derive(Default, Debug)]
-pub struct DriveState {
-    pub fuel: FuelState,
-    pub trip_m: f64,
-    pub paused: bool,
-    pub started: bool,
-}
-
-impl DriveState {
-    pub fn active(&self) -> bool {
-        self.started && !self.paused
-    }
-
-    pub fn step(
-        &mut self,
-        world: &mut crate::vehicle::PhysicsWorld,
-        input: DriveInput,
-        refuel: bool,
-        station_distance: f32,
-    ) {
-        if !self.active() {
-            return;
-        }
-        let snapshot = world.snapshot();
-        let speed_kmh = snapshot.speed_mps * 3.6;
-        if self.fuel.liters > 0.0 {
-            let throttle = input.accelerate || (input.brake_reverse && speed_kmh < 1.44);
-            self.fuel.consume(throttle as u8 as f32, FIXED_DT);
-        }
-        if refuel && can_refuel(snapshot.absolute_speed_kmh(), station_distance) {
-            self.fuel.refuel(FIXED_DT);
-        }
-        world.step(input, self.fuel.liters > 0.0);
-    }
-
-    pub fn record_travel(&mut self, previous: [f64; 3], current: [f64; 3], teleported: bool) {
-        if self.active() && !teleported {
-            self.trip_m +=
-                ((current[0] - previous[0]).powi(2) + (current[2] - previous[2]).powi(2)).sqrt();
-        }
-    }
-
-    pub fn restart(&mut self) {
-        *self = Self {
-            started: true,
-            ..Self::default()
-        };
-    }
 }
 
 /// Retains only the fraction after at most six fixed steps per frame.
