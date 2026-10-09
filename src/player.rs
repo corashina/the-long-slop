@@ -181,7 +181,8 @@ impl PlayerState {
                 let dynamic = rapier.colliders[collision.handle]
                     .parent()
                     .is_some_and(|body| rapier.bodies[body].is_dynamic());
-                if dynamic && collision.translation_remaining.dot(collision.hit.normal1) > 1.0e-5 {
+                // The hit normal points out of the obstacle. Approaching movement has a negative dot.
+                if dynamic && collision.translation_remaining.dot(collision.hit.normal1) < -1.0e-5 {
                     self.collisions.push(collision);
                 }
             },

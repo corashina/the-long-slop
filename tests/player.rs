@@ -385,6 +385,37 @@ fn static_steps_reuse_shapes_and_scratch() {
 }
 
 #[test]
+fn player_pushes_dynamic_box() {
+    use rapier3d::math::Vector;
+    use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder};
+    let mut world = common::world();
+    floor(&mut world);
+    let mut player = player(&mut world);
+    let (body, _) = world.rapier_mut().insert(
+        RigidBodyBuilder::dynamic().translation(Vector::new(20.0, 1.0, 19.38)),
+        ColliderBuilder::cuboid(0.3, 0.5, 0.3).mass(10.0),
+    );
+    world.refresh_queries();
+    let before = world.rapier().bodies[body].translation().z;
+    player.step(
+        FrameInput {
+            held: keys::FORWARD,
+            ..FrameInput::default()
+        },
+        &mut world,
+        FIXED_DT,
+    );
+    // Check the player impulse before the shared physics solver can move the box.
+    assert!(
+        world.rapier().bodies[body].linvel().z < -0.01,
+        "box velocity={}",
+        world.rapier().bodies[body].linvel().z
+    );
+    world.step_physics();
+    assert!(world.rapier().bodies[body].translation().z < before);
+}
+
+#[test]
 fn rapier_dynamic_impulse_allocation_cost() {
     use rapier3d::control::KinematicCharacterController;
     use rapier3d::math::{Pose, Vector};
