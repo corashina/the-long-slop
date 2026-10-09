@@ -4,6 +4,7 @@ from .source import key, source_id, vector
 from .gltf import GltfExporter, convert_point, convert_rotation, transform_point
 from .collision import world_pose, quaternion_product, bake_points, geometry
 from .caps import opening_metadata
+from .visibility import recover_camera_visibility
 
 
 def build_manifest(source, roots, reports, hashes):
@@ -301,6 +302,7 @@ def build_manifest(source, roots, reports, hashes):
         obj_rotation_sensitivity=defaults[4],look_sensitivity=[defaults[0]*defaults[1],defaults[0]*defaults[2]])
     scroll_slider=source.resolve(settings_reader,settings['tabControls']['sliders'][3]);scroll_definition=source.read(scroll_slider)
     player_record['scroll_sensitivity']=scroll_definition['defValue']*(scroll_definition['valueMultipler'] if scroll_definition['valueMultipler'] else 1.)
+    player_record['camera_culling_mask']=recover_camera_visibility(source)['normal_view_mask']
     home_pose=world_pose(source,node_readers[home_root]);car_pose=world_pose(source,node_readers[car_root])
     world_points=[]
     for collider in colliders:

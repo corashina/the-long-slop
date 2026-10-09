@@ -13,6 +13,7 @@ fn accepts_recovered_scalars_with_synthetic_geometry() {
     assert_eq!(manifest.tanks[0].capacity_liters, 39.0);
     assert_eq!(manifest.tanks[0].quantities_liters[0], 0.5);
     assert_eq!(manifest.player.mass_kg, 72.0);
+    assert_eq!(manifest.player.camera_culling_mask, 0x14db8f33);
 }
 
 #[test]
@@ -109,6 +110,18 @@ fn production_export_matches_installed_contract() {
     assert_eq!(manifest.wheel_slots.len(), 4);
     assert_eq!(manifest.hinges.len(), 7);
     assert!(manifest.openings.len() >= 8);
+    assert_eq!(manifest.player.camera_culling_mask & (1 << 18), 0);
+    let gltf: serde_json::Value =
+        serde_json::from_slice(&std::fs::read("web/assets/reference/lada.gltf").unwrap()).unwrap();
+    let helper = gltf["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["extras"]["reference_id"]["path_id"] == 37124)
+        .unwrap();
+    assert_eq!(helper["extras"]["layer"], 18);
+    assert_eq!(helper["extras"]["renderer_enabled"], true);
+    assert!(helper.get("mesh").is_some());
     let faucet = manifest
         .openings
         .iter()

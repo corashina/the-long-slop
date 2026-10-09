@@ -11,6 +11,13 @@ from tools.reference.collision import bake_points
 
 
 class ReferenceExportTests(unittest.TestCase):
+    def test_camera_layers_exclude_source_helper(self):
+        from tools.reference.visibility import normal_view_mask, visible_to_camera
+        masks=[0x04d28f33,0x10000000,0x00088001,0x00010000]
+        self.assertEqual(normal_view_mask(masks),0x14db8f33)
+        self.assertFalse(visible_to_camera(18,normal_view_mask(masks)))
+        self.assertTrue(visible_to_camera(0,normal_view_mask(masks)))
+
     def test_build_and_conversion(self):
         cache = Path('.cache/reference-test')
         cache.mkdir(parents=True, exist_ok=True)

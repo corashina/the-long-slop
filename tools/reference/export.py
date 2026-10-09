@@ -25,6 +25,7 @@ def export_reference(steam_root: Path, output: Path) -> None:
     from .parameters import recover_parameters
     from .manifest import build_manifest
     from .conditions import prepare_conditions
+    from .visibility import recover_camera_visibility
     if output.resolve().is_relative_to(steam_root.resolve()):
         raise ValueError('Keep generated files outside the Steam installation')
     validate_build(steam_root)
@@ -56,6 +57,7 @@ def export_reference(steam_root: Path, output: Path) -> None:
     parameter_roots['required-prefab']=prefab
     parameters = recover_parameters(source,parameter_roots)
     parameters['conditions']=source.condition_evidence
+    parameters['camera_visibility']=recover_camera_visibility(source)
     (output/'parameter-evidence.json').write_text(json.dumps(parameters,indent=2,allow_nan=False),encoding='utf-8')
     if parameters['errors']:
         raise ValueError(f'Incomplete parameter recovery: {parameters["errors"]}')

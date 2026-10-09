@@ -389,6 +389,7 @@ pub struct PlayerReference {
     pub obj_rotation_sensitivity: f32,
     pub look_sensitivity: [f32; 2],
     pub scroll_sensitivity: f32,
+    pub camera_culling_mask: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -949,6 +950,7 @@ impl ReferenceManifest {
             "curve key order",
         )?;
         let p = &self.player;
+        require(p.camera_culling_mask != 0, "camera culling mask")?;
         require(
             p.scroll_sensitivity.is_finite() && p.scroll_sensitivity > 0.0,
             "scroll sensitivity",

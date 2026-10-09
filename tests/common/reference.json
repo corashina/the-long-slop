@@ -1913,7 +1913,8 @@
       2.0,
       2.0
     ],
-    "scroll_sensitivity": 20
+    "scroll_sensitivity": 20,
+    "camera_culling_mask": 349933363
   },
   "seats": [
     {

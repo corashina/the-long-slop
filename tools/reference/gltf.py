@@ -119,7 +119,7 @@ class GltfExporter:
         if color_override:color=color_override
         mode = int(floats.get('_Mode', 0))
         shader = self.source.resolve(reader, data['m_Shader'])
-        shader_name = self.source.object(shader).m_Name if shader else 'Unity built-in shader'
+        shader_name = (self.source.object(shader).m_Name or self.source.object(shader).m_ParsedForm.m_Name) if shader else 'Unity built-in shader'
         if mode == 0 and data.get('m_CustomRenderQueue', -1) >= 3000:
             mode = 2
         material = gl.Material(name=data['m_Name'], alphaMode={0:'OPAQUE',1:'MASK',2:'BLEND',3:'BLEND'}.get(mode,'OPAQUE'),
@@ -228,7 +228,8 @@ class GltfExporter:
                 from .collision import world_pose
                 transform=world_pose(self.source,reader)
             node = gl.Node(name=self.source.read(record['game_object'])['m_Name'],
-                extras={'reference_id': source_id(reader), 'active':record['active'], 'hierarchy_path':record['path']}, **transform)
+                extras={'reference_id': source_id(reader), 'active':record['active'], 'hierarchy_path':record['path'],
+                    'layer':self.source.read(record['game_object'])['m_Layer']}, **transform)
             components = {r.type.name:r for r in record['components']}
             renderer = components.get('MeshRenderer') or components.get('SkinnedMeshRenderer')
             mesh_filter = components.get('MeshFilter')
