@@ -382,6 +382,13 @@ pub fn belongs_to_vehicle(reference: &ReferenceManifest, mut id: BodyId) -> bool
 }
 
 pub fn collider_item(reference: &ReferenceManifest, mut node: NodeId) -> Option<ItemId> {
+    if let Some(seat) = reference
+        .seats
+        .iter()
+        .find(|seat| seat.hit_nodes.contains(&node))
+    {
+        return Some(seat.item);
+    }
     loop {
         if let Some(item) = reference.items.iter().find(|item| item.node == node) {
             return Some(item.id);

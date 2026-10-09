@@ -370,6 +370,7 @@ pub struct PlayerReference {
     pub camera_height: f32,
     pub field_of_view_degrees: f32,
     pub aim_reach: f32,
+    pub use_layer_mask: u32,
     pub standing_radius: f32,
     pub standing_height: f32,
     pub crouch_radius: f32,
@@ -400,6 +401,7 @@ pub struct SeatReference {
     pub item: ItemId,
     pub anchor: AnchorId,
     pub driver: bool,
+    pub hit_nodes: Vec<NodeId>,
     pub yaw_limits_degrees: [f32; 2],
     pub exit_distance: f32,
     pub min_exit_angle_degrees: f32,
@@ -1077,13 +1079,24 @@ impl ReferenceManifest {
                 && p.capsule_height >= p.capsule_radius * 2.0
                 && p.crouch_height >= p.capsule_radius * 2.0
                 && p.crouch_height < p.capsule_height
-                && p.aim_reach > 0.0,
+                && p.aim_reach > 0.0
+                && p.use_layer_mask != 0,
             "player parameters",
         )?;
+        let mut seat_hit_nodes = HashSet::new();
         for r in &self.seats {
             require(
                 item_ids.contains(&r.item)
                     && anchor_ids.contains(&r.anchor)
+                    && !r.hit_nodes.is_empty()
+                    && r.hit_nodes.iter().all(|node| {
+                        node_ids.contains(node)
+                            && seat_hit_nodes.insert(*node)
+                            && self
+                                .nodes
+                                .iter()
+                                .any(|record| record.id == *node && record.active)
+                    })
                     && finite(&r.yaw_limits_degrees)
                     && r.yaw_limits_degrees[0] <= r.yaw_limits_degrees[1]
                     && r.exit_distance.is_finite()

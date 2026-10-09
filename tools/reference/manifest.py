@@ -196,7 +196,13 @@ def build_manifest(source, roots, reports, hashes):
             'rotation_axes':[[-value[f'{input}to1X'],-value[f'{input}to1Y'],value[f'{input}to1Z']] for input in ('X','Y')],
             'relative_drag':bool(value['relativeRot']),'drag_anchor':anchor(drag_node),'motor_degrees_per_second':None})
     seats=[]
-    driver=source.resolve(car_reader,car['driverSeat'])
+    seat_hits={}
+    for node,group in components.items():
+        if not nodes[node-1]['active']:continue
+        for reader in group.get('seatscript',[]):
+            value=source.read(reader)
+            primary=source.resolve(reader,value['mainseat']) if value['mainseat']['m_PathID'] else reader
+            seat_hits.setdefault(key(primary),[]).append(node)
     for node,group in components.items():
         if not nodes[node-1]['active']:continue
         for reader in group.get('seatscript',[]):
@@ -204,7 +210,8 @@ def build_manifest(source, roots, reports, hashes):
             if value['mainseat']['m_PathID']:continue
             seat_node=pointer_node(reader,value['sitPos']) if value['sitPos']['m_PathID'] else node
             seats.append({'id':len(seats)+1,'source':source_id(reader),'item':item_nodes[node],'anchor':anchor(seat_node),
-                'driver':key(reader)==key(driver),'yaw_limits_degrees':[-value['rotLimit'],value['rotLimit']],'exit_distance':player['CanGetOutDist'],
+                'hit_nodes':seat_hits[key(reader)],'driver':bool(value['driverSeat0']) and key(source.resolve(reader,value['Car']))==key(car_reader),
+                'yaw_limits_degrees':[-value['rotLimit'],value['rotLimit']],'exit_distance':player['CanGetOutDist'],
                 'min_exit_angle_degrees':value['minGetUpAnlge'],'exit_height':value['getOutHeight']})
     wheel_slots=[]
     driven={key(source.resolve(car_reader,p)) for p in car['WHDriven']};steer={key(source.resolve(car_reader,p)) for p in car['WHSteer']};brake={key(source.resolve(car_reader,p)) for p in car['WHBrakeOnly']}
@@ -306,6 +313,7 @@ def build_manifest(source, roots, reports, hashes):
     scroll_slider=source.resolve(settings_reader,settings['tabControls']['sliders'][3]);scroll_definition=source.read(scroll_slider)
     player_record['scroll_sensitivity']=scroll_definition['defValue']*(scroll_definition['valueMultipler'] if scroll_definition['valueMultipler'] else 1.)
     player_record['camera_culling_mask']=recover_camera_visibility(source)['normal_view_mask']
+    player_record['use_layer_mask']=player['useLayer']['m_Bits']
     home_pose=world_pose(source,node_readers[home_root]);car_pose=world_pose(source,node_readers[car_root])
     world_points=[]
     for collider in colliders:

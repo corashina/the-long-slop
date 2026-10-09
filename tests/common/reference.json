@@ -1914,7 +1914,8 @@
       2.0
     ],
     "scroll_sensitivity": 20,
-    "camera_culling_mask": 349933363
+    "camera_culling_mask": 349933363,
+    "use_layer_mask": 12747265
   },
   "seats": [
     {
@@ -1925,6 +1926,7 @@
       },
       "item": 17,
       "anchor": 5,
+      "hit_nodes": [1],
       "driver": true,
       "yaw_limits_degrees": [
         -179,

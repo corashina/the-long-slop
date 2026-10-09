@@ -372,7 +372,9 @@ impl InteractionState {
         let view = to_rapier(view);
         let held_body = self.held.as_ref().map(|held| held.body);
         let valid = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
-            (collider.parent() != held_body || held_body.is_none())
+            collider.is_enabled()
+                && collider.collision_groups().memberships.bits() & self.carry.use_layer_mask != 0
+                && (collider.parent() != held_body || held_body.is_none())
                 && (self.player_body.is_none() || collider.parent() != self.player_body)
         };
         let surfaces = |handle: ColliderHandle, collider: &rapier3d::prelude::Collider| {

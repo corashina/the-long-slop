@@ -110,6 +110,35 @@ fn wall_blocks_target() {
 }
 
 #[test]
+fn source_use_mask_skips_hidden_cabin_envelope() {
+    let (interaction, _, mut physics, _) = fixture();
+    physics.rapier_mut().insert(
+        RigidBodyBuilder::fixed().translation(Vector::new(10.0, 2.0, -0.4)),
+        ColliderBuilder::cuboid(0.5, 0.5, 0.05).collision_groups(
+            rapier3d::prelude::InteractionGroups::new(
+                rapier3d::prelude::Group::from_bits_retain(1 << 13),
+                rapier3d::prelude::Group::ALL,
+                rapier3d::prelude::InteractionTestMode::And,
+            ),
+        ),
+    );
+    physics.refresh_queries();
+    let target = interaction.aim(&physics, pose([10.0, 2.0, 0.0]), 3.0);
+    assert_eq!(target.map(|target| target.item), Some(ItemId(1)));
+}
+
+#[test]
+fn source_seat_hit_node_routes_to_primary_seat() {
+    let mut reference = common::reference();
+    let alias = reference.items[0].node;
+    reference.seats[0].hit_nodes = vec![alias];
+    assert_eq!(
+        desert_drive::starting_area::collider_item(&reference, alias),
+        Some(reference.seats[0].item),
+    );
+}
+
+#[test]
 fn target_sensor_is_usable_but_empty_trigger_is_skipped() {
     let (interaction, _, mut physics, _) = fixture();
     physics.rapier_mut().insert(

@@ -94,6 +94,22 @@ fn rejects_incomplete_transmission_before_startup() {
 }
 
 #[test]
+fn rejects_invalid_seat_hit_nodes_and_empty_use_mask() {
+    for nodes in [
+        serde_json::json!([]),
+        serde_json::json!([999999]),
+        serde_json::json!([1, 1]),
+    ] {
+        let mut input = fixture();
+        input["seats"][0]["hit_nodes"] = nodes;
+        assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    }
+    let mut input = fixture();
+    input["player"]["use_layer_mask"] = serde_json::json!(0);
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+}
+
+#[test]
 #[ignore = "Requires the local installed-build export"]
 fn production_export_matches_installed_contract() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
@@ -135,6 +151,24 @@ fn production_export_matches_installed_contract() {
         );
     }
     assert!(manifest.openings.len() >= 8);
+    let driver = manifest.seats.iter().find(|seat| seat.driver).unwrap();
+    assert_eq!(driver.source.path_id, 69296);
+    let hit_sources: Vec<_> = driver
+        .hit_nodes
+        .iter()
+        .map(|id| {
+            manifest
+                .nodes
+                .iter()
+                .find(|node| node.id == *id)
+                .unwrap()
+                .source
+                .path_id
+        })
+        .collect();
+    assert_eq!(hit_sources, [33209, 31216, 39134]);
+    assert_eq!(manifest.player.use_layer_mask, 12747265);
+    assert_eq!(manifest.player.use_layer_mask & (1 << 13), 0);
     assert_eq!(manifest.player.camera_culling_mask & (1 << 18), 0);
     let gltf: serde_json::Value =
         serde_json::from_slice(&std::fs::read("web/assets/reference/lada.gltf").unwrap()).unwrap();
