@@ -2,6 +2,7 @@
 use crate::interaction::{
     AimTarget, InteractionAction, InteractionState,
     items::{ItemLocation, ItemStore, node_pose},
+    parts::PartSlots,
 };
 use crate::player::PlayerState;
 use crate::reference::{BodyId, ItemId, NodeId, ReferenceError, ReferenceManifest};
@@ -352,9 +353,14 @@ impl StartingArea {
         }
     }
     pub fn sync_compound(&self, physics: &mut PhysicsWorld) {
+        let chassis = physics.chassis_handle();
         for record in &self.compound_colliders {
             let local = record.local_pose(&self.interaction);
             let collider = &mut physics.rapier_mut().colliders[record.handle];
+            // A removed part carries its shapes on its own body.
+            if collider.parent() != Some(chassis) {
+                continue;
+            }
             if collider.position_wrt_parent() != Some(&local) {
                 collider.set_position_wrt_parent(local);
             }
@@ -450,6 +456,7 @@ pub struct GarageRuntime {
     pub notice: &'static str,
     pub target: Option<AimTarget>,
     pub wheels: crate::interaction::wheels::WheelAssemblies,
+    pub parts: PartSlots,
     ignition_held: bool,
     auto_gear: usize,
     recovery_bounds: crate::reference::Bounds,
@@ -457,6 +464,9 @@ pub struct GarageRuntime {
     last_speed_kmh: f32,
     crash_samples: u64,
     crash_parts: Vec<ItemId>,
+    /// Vehicle mass without the car item and its mounted items.
+    base_mass_kg: f32,
+    mass_kg: f32,
 }
 
 impl GarageRuntime {
@@ -476,9 +486,12 @@ impl GarageRuntime {
         );
         let mut wheels = crate::interaction::wheels::WheelAssemblies::new(reference)?;
         wheels.sync(&mut area.items, &mut physics)?;
+        let parts = PartSlots::new(reference, &area.items, &mut physics)?;
         physics.refresh_queries();
         area.items.sync_poses(&physics);
         area.commit_poses(&physics, true);
+        let base_mass_kg =
+            reference.vehicle.mass_kg - area.items.mounted_mass(reference.vehicle.item);
         let mut recovery_bounds = crate::reference::Bounds {
             min: [f32::MAX; 3],
             max: [f32::MIN; 3],
@@ -513,6 +526,7 @@ impl GarageRuntime {
             notice: "",
             target: None,
             wheels,
+            parts,
             ignition_held: false,
             auto_gear: reference
                 .vehicle
@@ -525,6 +539,8 @@ impl GarageRuntime {
             last_speed_kmh: 0.0,
             crash_samples: 0,
             crash_parts: Vec::with_capacity(reference.items.len()),
+            base_mass_kg,
+            mass_kg: reference.vehicle.mass_kg,
         })
     }
 
@@ -606,6 +622,32 @@ impl GarageRuntime {
                 } else {
                     self.notice = "Carry a rim and aim at a matching tire.";
                 }
+            }
+            Some(InteractionAction::PartRemove(item)) => {
+                self.notice = if self
+                    .parts
+                    .detach(item, &mut self.area.items, &mut self.physics)
+                    .is_ok()
+                {
+                    ""
+                } else {
+                    "Cannot remove this part."
+                };
+            }
+            Some(InteractionAction::PartFit(item)) => {
+                self.area
+                    .interaction
+                    .drop_held(&mut self.area.items, &mut self.physics);
+                self.notice = if self
+                    .parts
+                    .fit(item, &mut self.area.items, &mut self.physics)
+                    .is_ok()
+                {
+                    self.area.interaction.close_hinge(item);
+                    ""
+                } else {
+                    "This part does not fit the slot."
+                };
             }
             _ => {}
         }
@@ -689,31 +731,44 @@ impl GarageRuntime {
                 / reference.engine.auto_shift_clutch_rpm_range)
                 .clamp(0.0, 1.0)
         };
+        let car = reference.vehicle.item;
         let radiator_condition = self
             .area
             .items
-            .get(reference.engine.coolant_tank)
-            .map_or(0, |item| item.condition);
+            .mounted(car, reference.engine.coolant_tank)
+            .then(|| self.area.items.get(reference.engine.coolant_tank))
+            .flatten()
+            .map(|item| item.condition);
         let was_running = self.engine_output.running;
-        self.engine_output = self.engine.step(
-            EngineInput {
-                ignition_held,
-                ignition_pressed,
-                ignition_released,
-                throttle: throttle as u8 as f32,
-                clutch,
-                wheel_rpm,
-                free_run: reference.vehicle.gear_free_run[gear],
-                speed_kmh: speed * 3.6,
-                ambient_temperature: reference.engine.initial_temperature,
-                ambient_heat_modifier: reference.engine.globals.awake_heat_modifier,
-                radiator_condition,
-            },
-            self.area.items.vehicle_fluids().expect("bound fluids"),
-            &reference.engine,
-            start_sample(START_SEED, self.attempts),
-            FIXED_DT,
-        );
+        if !self.area.items.mounted(car, reference.engine.item) {
+            // Without an engine the car has no power and no engine heat.
+            self.engine.rpm = 0.0;
+            self.engine_output = EngineOutput {
+                ignition: self.engine.ignition,
+                temperature: self.engine.temperature,
+                ..EngineOutput::default()
+            };
+        } else {
+            self.engine_output = self.engine.step(
+                EngineInput {
+                    ignition_held,
+                    ignition_pressed,
+                    ignition_released,
+                    throttle: throttle as u8 as f32,
+                    clutch,
+                    wheel_rpm,
+                    free_run: reference.vehicle.gear_free_run[gear],
+                    speed_kmh: speed * 3.6,
+                    ambient_temperature: reference.engine.initial_temperature,
+                    ambient_heat_modifier: reference.engine.globals.awake_heat_modifier,
+                    radiator_condition,
+                },
+                self.area.items.vehicle_fluids().expect("bound fluids"),
+                &reference.engine,
+                start_sample(START_SEED, self.attempts),
+                FIXED_DT,
+            );
+        }
         if self.engine_output.running && !was_running {
             let engine = to_rapier(
                 self.area
@@ -774,6 +829,14 @@ impl GarageRuntime {
             .sync(&mut self.area.items, &mut self.physics)
             .expect("validated wheel bindings");
         self.damage(reference);
+        self.parts
+            .sync(
+                self.area.interaction.held(),
+                &self.area.items,
+                &mut self.physics,
+            )
+            .expect("validated part bindings");
+        self.sync_mass(reference);
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, false);
@@ -827,7 +890,9 @@ impl GarageRuntime {
         for record in &reference.items {
             let items = &self.area.items;
             if let (Some(power), Some(item)) = (record.fall_off_power, items.get(record.id))
-                && on_vehicle(items, car, record.id)
+                && (matches!(item.location, ItemLocation::WheelSlot(_))
+                    || self.parts.contains(record.id))
+                && items.mounted(car, record.id)
                 && crate::simulation::crash::falls_off(power, item.condition, crash.lerp)
             {
                 self.crash_parts.push(record.id);
@@ -837,14 +902,28 @@ impl GarageRuntime {
             let index = ((self.crash_sample() * self.crash_parts.len() as f32) as usize)
                 .min(self.crash_parts.len() - 1);
             let id = self.crash_parts.swap_remove(index);
-            // Only wheels can be fitted again. Other parts stay on.
-            if let Some(ItemLocation::WheelSlot(slot)) =
-                self.area.items.get(id).map(|item| item.location)
-            {
-                self.wheels
-                    .remove(slot, &mut self.area.items, &mut self.physics)
-                    .expect("mounted wheel");
+            match self.area.items.get(id).map(|item| item.location) {
+                Some(ItemLocation::WheelSlot(slot)) => {
+                    self.wheels
+                        .remove(slot, &mut self.area.items, &mut self.physics)
+                        .expect("mounted wheel");
+                }
+                // A part on a removed door stays on that door.
+                _ if self.area.items.mounted(car, id) => {
+                    self.parts
+                        .detach(id, &mut self.area.items, &mut self.physics)
+                        .expect("fitted part");
+                }
+                _ => {}
             }
+        }
+    }
+
+    fn sync_mass(&mut self, reference: &ReferenceManifest) {
+        let mass = self.base_mass_kg + self.area.items.mounted_mass(reference.vehicle.item);
+        if (mass - self.mass_kg).abs() > 0.0001 {
+            self.physics.set_vehicle_mass(mass);
+            self.mass_kg = mass;
         }
     }
 
@@ -922,6 +1001,13 @@ impl GarageRuntime {
         self.wheels
             .sync(&mut self.area.items, &mut self.physics)
             .expect("validated wheel bindings");
+        self.parts
+            .sync(
+                self.area.interaction.held(),
+                &self.area.items,
+                &mut self.physics,
+            )
+            .expect("validated part bindings");
         self.last_speed_kmh = 0.0;
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
@@ -977,18 +1063,6 @@ impl GarageRuntime {
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, true);
-    }
-}
-
-/// Mounted on the car through wheel slots or part links.
-fn on_vehicle(items: &ItemStore, car: ItemId, mut id: ItemId) -> bool {
-    loop {
-        match items.get(id).map(|item| item.location) {
-            Some(ItemLocation::WheelSlot(_)) => return true,
-            Some(ItemLocation::Attached(parent)) if parent == car => return true,
-            Some(ItemLocation::Attached(parent)) => id = parent,
-            _ => return false,
-        }
     }
 }
 

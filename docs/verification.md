@@ -136,14 +136,20 @@ The radiator and tire effects read that state. A rim without a tire uses the sou
 A crash is a change of forward speed of 15 to 40 km/h in one step. A rusty car body scales both speeds by 0.2.
 Each part needs its source fall-off power. A rusty part scales that power by 0.2.
 The exporter copies the static `fallOffPowerNeeded` table. It is code, not serialized data.
-Only wheels come off. Other selected parts stay on until general part fitting exists.
 The source checks once per rendered frame. This build checks once per 60 Hz step.
+
+The exporter copies 20 `partslotscript` slots: doors, mirrors, hood, trunk, bumpers, lights, cabin parts, radiator, and engine.
+A removed part takes the source `DT` pose when the slot has one. It keeps its pose when the slot has none.
+Items attached to the part, such as a mirror or plate, go with it.
+A part fits only into its own slot. The source also accepts other matching slots. Hubcaps stay on.
+The car does not run without the engine. Without the radiator it has no radiator cooling or leak.
 
 | Check | Result |
 | --- | --- |
-| Formatting and native suite | 92 passed; six source gates skipped by default |
-| Installed-source gates | Six passed in explicit runs |
+| Formatting and native suite | 92 passed; seven source gates skipped by default |
+| Installed-source gates | Seven passed in explicit runs |
 | Exporter suite | Four passed |
 | Release WASM | Passed |
 
-A headless Chromium run loaded the garage with the new export. It did not drive a crash.
+A headless Chromium run loaded the garage with the part export. The car parts render in place.
+That run did not drive a crash or fit a part. Native and source checks cover those steps.

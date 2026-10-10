@@ -80,7 +80,8 @@ pub struct EngineInput {
     pub speed_kmh: f32,
     pub ambient_temperature: f32,
     pub ambient_heat_modifier: f32,
-    pub radiator_condition: u8,
+    /// Condition of the fitted radiator. `None` means no radiator.
+    pub radiator_condition: Option<u8>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -296,7 +297,9 @@ impl EngineState {
                     * dt,
             );
         }
-        if self.temperature > reference.globals.min_steam_temperature {
+        if input.radiator_condition.is_some()
+            && self.temperature > reference.globals.min_steam_temperature
+        {
             spill(
                 fluids.coolant,
                 reference.globals.coolant_evaporate_rate / 60.0
@@ -308,9 +311,9 @@ impl EngineState {
                     ),
             );
         }
-        if running {
+        if running && let Some(condition) = input.radiator_condition {
             let radiator = &reference.radiator;
-            let condition = usize::from(input.radiator_condition.min(4));
+            let condition = usize::from(condition.min(4));
             let value_factor = [1.0, 0.75, 0.5, 0.25, 0.125][condition];
             let fan_value = radiator.max_fan_value * [1.0, 0.9, 0.8, 0.7, 0.6][condition];
             let leak = radiator.max_fluid_loss * [0.0, 0.125, 0.25, 0.5, 1.0][condition];

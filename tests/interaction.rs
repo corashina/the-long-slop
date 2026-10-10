@@ -26,6 +26,7 @@ fn target(id: u32) -> Option<AimTarget> {
         distance: 1.0,
         point: [10.0, 2.0, -1.0],
         slot: None,
+        part_slot: false,
     })
 }
 fn fixture() -> (InteractionState, ItemStore, PhysicsWorld, PlayerState) {
@@ -890,6 +891,7 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
     );
     let slot = AimTarget {
         slot: Some(WheelSlotId(0)),
+        part_slot: false,
         ..target(13).unwrap()
     };
     let action = interaction.step(
@@ -1221,6 +1223,7 @@ fn empty_slot_does_not_pick_up_a_remote_rim_and_tire_targets_its_assembly() {
     state.local_pose = pose([0.0; 3]);
     let slot = AimTarget {
         slot: Some(reference.wheel_slots[0].id),
+        part_slot: false,
         ..target(rim.0).unwrap()
     };
     interaction.step(

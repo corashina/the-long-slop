@@ -269,6 +269,19 @@ def build_manifest(source, roots, reports, hashes):
         wheel_parts.append({'item':item_nodes[node],'source':source_id(part),'radius':radius,'main_types':value['maintipus'],'part_types':value['tipus'],
             'colliders':[collider_ids[identity] for identity in identities],'tire_slot_anchor':tire_anchor,'tire_mount':tire_mount,
             'tire_main_types':tire_main,'tire_types':tire_types,'local_rotation_after_mount':euler_quaternion(vector(value['localRotationAfterMount']))})
+    # General car part slots. Wheel parts and the slots on rims use the wheel records.
+    parts=[];items_by_id={item['id']:item for item in items}
+    for node,group in components.items():
+        for slot in group.get('partslotscript',[]):
+            value=source.read(slot)
+            if not value['part']['m_PathID']:continue
+            part=source.resolve(slot,value['part']);part_data=source.read(part);item=items_by_id[item_nodes[node_of(part)]]
+            parent=items_by_id[item['attached_to']]
+            if item['kind'] in ('rim','tire') or parent['kind'] in ('rim','tire'):continue
+            if part_data['T']['m_PathID'] and pointer_node(part,part_data['T'])!=item['node']:raise ValueError('Part transform must be the part node')
+            parts.append({'item':item['id'],'source':source_id(slot),'detach_node':pointer_node(slot,value['DT']) if value['DT']['m_PathID'] else None,
+                'local_rotation_after_mount':euler_quaternion(vector(part_data['localRotationAfterMount']))})
+    parts.sort(key=lambda part:part['item'])
     for slot in wheel_slots:
         owner=source.get(slot['source']['file'],slot['source']['path_id'])
         if source.read(owner)['disableCollidersOnCraft']:
@@ -370,7 +383,7 @@ def build_manifest(source, roots, reports, hashes):
     driveway_points=[point for height,points in wheel_floors if abs(height-driveway_height)<0.001 for point in points]
     driveway_bounds={'min':[min(p[i] for p in driveway_points) for i in range(3)],'max':[max(p[i] for p in driveway_points) for i in range(3)]}
     driveway_bounds['min'][1]=driveway_height;driveway_bounds['max'][1]=driveway_height
-    result={'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'hinges':hinges,'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'items':items,'openings':openings,'tanks':tanks,
+    result={'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'hinges':hinges,'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'parts':parts,'items':items,'openings':openings,'tanks':tanks,
         'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed']},'engine':engine_record,'player':player_record,'seats':seats,
         'vehicle':{'source':source_id(car_reader),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':[w['id'] for w in wheel_slots],'colliders':[c['id'] for c in colliders if c['body']==car_body],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')],
             'rim_slip':[main['WheelSlip1'],main['WheelSlip2']],'item':item_nodes[node_of(source.resolve(car_reader,car['condition']))],

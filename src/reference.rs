@@ -462,6 +462,17 @@ pub struct WheelPartReference {
     pub local_rotation_after_mount: [f32; 4],
 }
 
+/// A general car part slot. The part fits only into its own slot.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PartReference {
+    pub item: ItemId,
+    pub source: SourceId,
+    /// `partslotscript.DT`: the part pose after removal.
+    pub detach_node: Option<NodeId>,
+    pub local_rotation_after_mount: [f32; 4],
+}
+
 /// `carscript.DamageStuff` values. Speeds are in km/h per frame.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -536,6 +547,7 @@ pub struct ReferenceManifest {
     pub hinges: Vec<HingeRecord>,
     pub wheel_slots: Vec<WheelSlotReference>,
     pub wheel_parts: Vec<WheelPartReference>,
+    pub parts: Vec<PartReference>,
     pub items: Vec<ItemRecord>,
     pub openings: Vec<OpeningRecord>,
     pub tanks: Vec<TankReference>,
@@ -1191,6 +1203,17 @@ impl ReferenceManifest {
                     && part.part_types.len() <= 16
                     && !part.part_types.is_empty(),
                 "wheel part geometry/fit",
+            )?;
+        }
+        ids(self.parts.iter().map(|part| part.item), "duplicate part")?;
+        for part in &self.parts {
+            require(
+                self.items
+                    .iter()
+                    .any(|item| item.id == part.item && item.attached_to.is_some())
+                    && part.detach_node.is_none_or(|id| node_ids.contains(&id))
+                    && finite(&part.local_rotation_after_mount),
+                "part slot bindings",
             )?;
         }
         require(
