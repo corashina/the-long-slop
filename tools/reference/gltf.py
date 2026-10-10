@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .source import key, source_id, vector
 from .materials import decode_normal_image, normal_encoding
-from .visibility import renderer_visible
+from .visibility import renderer_visible, recover_startup_inactive_nodes
 
 
 def convert_point(value: tuple[float, float, float]) -> tuple[float, float, float]:
@@ -211,6 +211,12 @@ class GltfExporter:
         mapping = {}
         for root in roots:
             records.extend(self.source.hierarchy(root, activate_root=True))
+        inactive_nodes = recover_startup_inactive_nodes(self.source, records)
+        for record in records:
+            identity = key(record['reader'])
+            if identity in inactive_nodes or (record['parent'] and key(record['parent']) in inactive_nodes):
+                inactive_nodes.add(identity)
+                record['active'] = False
         hidden_lods=set()
         for record in records:
             for component in record['components']:
@@ -242,7 +248,7 @@ class GltfExporter:
             if renderer and (mesh_filter or renderer.type.name == 'SkinnedMeshRenderer'):
                 renderer_data = self.source.read(renderer)
                 component_classes={self.source.class_name(r) for r in record['components'] if r.type.name=='MonoBehaviour'}
-                render_enabled=renderer_visible(bool(renderer_data['m_Enabled']), component_classes) and key(renderer) not in hidden_lods
+                render_enabled=renderer_visible(bool(renderer_data['m_Enabled']), component_classes) and key(renderer) not in hidden_lods and key(reader) not in inactive_nodes
                 if component_classes.intersection({'TextMeshPro','TMP_SubMesh'}):
                     self.material_report.append({'source':source_id(renderer),
                         'adaptation':'Omitted obsolete editor TMP glyphs. Seeded plate text requires glyph regeneration.'})

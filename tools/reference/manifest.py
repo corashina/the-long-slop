@@ -21,7 +21,7 @@ def build_manifest(source, roots, reports, hashes):
             by_source[identity]=node_id;node_readers[node_id]=record['reader'];objects[node_id]=record
             nodes.append({'id':node_id,'source':entry['source'],'name':source.read(record['game_object'])['m_Name'],
                 'hierarchy_path':entry['hierarchy_path'],'asset':asset_id,'gltf_node':entry['gltf_node'],
-                'parent':by_source[key(record['parent'])] if record['parent'] else None,'active':record['active'],'transform':entry['transform']})
+                'parent':by_source[key(record['parent'])] if record['parent'] else None,'active':entry['active'],'transform':entry['transform']})
             group={}
             for reader in record['components']:
                 name=source.class_name(reader) if reader.type.name=='MonoBehaviour' else reader.type.name

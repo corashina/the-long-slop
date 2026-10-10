@@ -26,6 +26,19 @@ class ReferenceExportTests(unittest.TestCase):
         self.assertFalse(renderer_visible(True, {'TextMeshPro'}))
         self.assertFalse(renderer_visible(True, {'TMP_SubMesh'}))
 
+    def test_startup_terrain_markers_use_source_references(self):
+        from types import SimpleNamespace
+        from tools.reference.visibility import recover_startup_inactive_nodes
+        component = SimpleNamespace(type=SimpleNamespace(name='MonoBehaviour'))
+        marker = SimpleNamespace(assets_file=SimpleNamespace(name='fixture.assets'), path_id=21)
+        source = SimpleNamespace(class_name=lambda _: 'terrainHeightAlignToBuildingScript',
+            read=lambda _: {'helpPosCoords': [{'m_FileID': 0, 'm_PathID': 21}]},
+            resolve=lambda _owner, _pointer: marker)
+        self.assertEqual(recover_startup_inactive_nodes(source, [{'components': [component]}]),
+                         {('fixture.assets', 21)})
+        source.class_name = lambda _: 'ordinaryScript'
+        self.assertEqual(recover_startup_inactive_nodes(source, [{'components': [component]}]), set())
+
     def test_build_and_conversion(self):
         cache = Path('.cache/reference-test')
         cache.mkdir(parents=True, exist_ok=True)
