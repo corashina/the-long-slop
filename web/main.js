@@ -45,14 +45,14 @@ async function load(){
  const response=await fetch('./assets/reference/manifest.json');
  if(!response.ok)throw Error('Cannot load reference manifest (HTTP '+response.status+').');
  const text=await response.text(),manifest=JSON.parse(text);
- status.textContent='Loading interface assets…';
+ status.textContent='Loading interface assets...';
  await loadUiAssets(manifest.ui);
  menu=createMenu({canvas,ui:manifest.ui,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  feedback=createFeedback(manifest.ui);
- status.textContent='Loading game code…';
+ status.textContent='Loading game code...';
  const {default:init,run}=await import('./pkg/my_summer_slop.js');
  const wasm=await fetch('./pkg/my_summer_slop_bg.wasm');if(!wasm.ok)throw Error('Cannot load game code (HTTP '+wasm.status+').');
- await init({module_or_path:wasm});status.textContent='Loading the garage…';
+ await init({module_or_path:wasm});status.textContent='Loading the garage...';
  timeout=setTimeout(()=>fail('The garage did not load within 120 seconds.'),120000);run(text);
 }
 load().catch(error=>fail(error.message));

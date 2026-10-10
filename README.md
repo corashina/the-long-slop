@@ -36,7 +36,7 @@ The build script writes the browser package to `web/pkg`.
 
 | Control | On foot | In the driver seat |
 | --- | --- | --- |
-| WASD / arrows | Move | Accelerate, brake, reverse, steer |
+| WASD | Move | Accelerate, brake, reverse, steer |
 | Mouse | Look | Look |
 | Shift / Ctrl | Run / crouch | — |
 | Space | Jump | Toggle handbrake |
@@ -48,8 +48,8 @@ The build script writes the browser package to `web/pkg`.
 | Hold LMB | Fill an open container | — |
 | I | — | Tap ignition; hold starter |
 | C | — | Switch first person / chase view |
-| R | Recover car | Recover car |
-| P / Esc | Pause | Pause |
+| Backspace | Hide or show feedback | Hide or show feedback |
+| Esc | Pause menu | Pause menu |
 
 Carry a fuel can. Open the fuel cap. Aim at the opening and hold LMB to fill it.
 Open carried containers before filling them at roadside pumps.
@@ -57,7 +57,9 @@ Open containers spill when tilted. Pumps retain unlimited gasoline stock.
 The Lada starts with 0.5 L gasoline, 2.5 L oil, and 3.6 L water.
 Its capacities are 39 L fuel, 5 L oil, and 5 L coolant.
 
-Focus loss pauses play and clears input. Resume captures the mouse again.
+Use Recover in the pause menu. Use Controls for bindings and Fullscreen.
+Aim at a tire and press F to dismount it. Release F to mount a held tire or rim.
+Focus loss pauses play and clears input. Continue captures the mouse again.
 Recovery preserves fluids, parts, condition, and trip distance.
 An empty fuel tank moves recovery to a station.
 Restart restores the garage, supplies, car, origin, and trip distance.
@@ -77,5 +79,7 @@ The build has no survival system, save system, multiplayer, or public deployment
 Bevy 0.19.1 uses WebGL2. Rapier 0.36.0 handles native and browser physics.
 wasm-bindgen crate and CLI use 0.2.129.
 The server binds to `127.0.0.1:4173` and serves WASM with `application/wasm`.
-The headings use self-hosted [Libre Baskerville](https://github.com/google/fonts/tree/main/ofl/librebaskerville).
-Its license is in `web/fonts/OFL.txt`.
+The menus use self-hosted [Liberation Sans 2.1.5](https://github.com/liberationfonts/liberation-fonts/releases/tag/2.1.5).
+Its license and provenance are in web/fonts/. Gameplay text uses Arial.
+Source feedback replaces the persistent vehicle status card.
+The Lada shows speed, fuel, temperature, warning lights, and distance on its imported instruments.

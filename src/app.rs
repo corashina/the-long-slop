@@ -166,6 +166,9 @@ fn check_ready(
     mut drive: ResMut<Drive>,
     mut visuals: ResMut<ReferenceVisuals>,
     mut instruments: ResMut<InstrumentVisuals>,
+    gltfs: Res<Assets<bevy::gltf::Gltf>>,
+    gltf_materials: Res<Assets<bevy::gltf::GltfMaterial>>,
+    mut standard_materials: ResMut<Assets<StandardMaterial>>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
     mut frames: Local<u8>,
@@ -199,12 +202,15 @@ fn check_ready(
         &primitives,
     ) {
         Ok(true) => {
-            if let Err(e) = instruments.bind(&reference.0, &visuals.nodes, &primitives, &server) {
-                game_failure(&e.to_string());
-                visuals.failed = true;
-                return;
-            }
-            match instruments.ready(&server) {
+            match instruments.bind(
+                &reference.0,
+                &visuals.nodes,
+                &primitives,
+                &visuals.gltfs,
+                &gltfs,
+                &gltf_materials,
+                &mut standard_materials,
+            ) {
                 Ok(true) => {}
                 Ok(false) => return,
                 Err(e) => {

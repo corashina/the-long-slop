@@ -1,9 +1,36 @@
 use crate::reference::{MaterialLink, NodeId, ReferenceError, ReferenceManifest};
 use crate::simulation::instruments::{InstrumentState, source_rotation};
-use bevy::asset::LoadState;
 use bevy::ecs as bevy_ecs;
+use bevy::gltf::{Gltf, GltfMaterial};
 use bevy::prelude::*;
 use std::collections::HashMap;
+// Bevy's glTF -> StandardMaterial converter is private. This startup-only adapter
+// maps the PBR fields emitted by our exporter; it does not load or clone frame assets.
+fn source_material(m: &GltfMaterial) -> StandardMaterial {
+    StandardMaterial {
+        base_color: m.base_color,
+        base_color_channel: m.base_color_channel.clone(),
+        base_color_texture: m.base_color_texture.clone(),
+        emissive: m.emissive,
+        emissive_channel: m.emissive_channel.clone(),
+        emissive_texture: m.emissive_texture.clone(),
+        perceptual_roughness: m.perceptual_roughness,
+        metallic: m.metallic,
+        metallic_roughness_channel: m.metallic_roughness_channel.clone(),
+        metallic_roughness_texture: m.metallic_roughness_texture.clone(),
+        reflectance: m.reflectance,
+        normal_map_channel: m.normal_map_channel.clone(),
+        normal_map_texture: m.normal_map_texture.clone(),
+        occlusion_channel: m.occlusion_channel.clone(),
+        occlusion_texture: m.occlusion_texture.clone(),
+        double_sided: m.double_sided,
+        cull_mode: m.cull_mode,
+        alpha_mode: m.alpha_mode.clone(),
+        unlit: m.unlit,
+        uv_transform: m.uv_transform,
+        ..Default::default()
+    }
+}
 struct LampVisual {
     entities: Vec<Entity>,
     on: Handle<StandardMaterial>,
@@ -15,7 +42,7 @@ pub struct InstrumentVisuals {
     needles: Vec<Entity>,
     digits: Vec<Entity>,
     lamps: Vec<LampVisual>,
-    materials: Vec<(String, Handle<StandardMaterial>)>,
+
     last_lamps: Option<u32>,
 }
 impl InstrumentVisuals {
@@ -24,10 +51,53 @@ impl InstrumentVisuals {
         reference: &ReferenceManifest,
         nodes: &HashMap<NodeId, Entity>,
         primitives: &Query<(Entity, &ChildOf), With<Mesh3d>>,
-        server: &AssetServer,
-    ) -> Result<(), ReferenceError> {
+        gltfs: &[(crate::reference::AssetId, Handle<Gltf>)],
+        gltf_assets: &Assets<Gltf>,
+        raw_materials: &Assets<GltfMaterial>,
+        standards: &mut Assets<StandardMaterial>,
+    ) -> Result<bool, ReferenceError> {
         if self.bound {
-            return Ok(());
+            return Ok(true);
+        }
+        if gltfs.iter().any(|(_, h)| gltf_assets.get(h).is_none()) {
+            return Ok(false);
+        }
+        for link in reference
+            .instruments
+            .lamps
+            .iter()
+            .flat_map(|l| [&l.on, &l.off])
+            .chain(
+                reference
+                    .instruments
+                    .odometer
+                    .digits
+                    .iter()
+                    .flat_map(|d| [&d.on, &d.off]),
+            )
+        {
+            let (_, handle) = gltfs
+                .iter()
+                .find(|(id, _)| *id == link.asset)
+                .ok_or_else(|| {
+                    ReferenceError(format!(
+                        "Missing instrument material asset {}",
+                        link.asset.0
+                    ))
+                })?;
+            let gltf = gltf_assets.get(handle).expect("checked glTF");
+            let raw = gltf
+                .materials
+                .get(link.gltf_material as usize)
+                .ok_or_else(|| {
+                    ReferenceError(format!(
+                        "Missing instrument material {}:{}",
+                        link.asset.0, link.gltf_material
+                    ))
+                })?;
+            if raw_materials.get(raw).is_none() {
+                return Ok(false);
+            }
         }
         let node = |id: NodeId| {
             nodes
@@ -49,24 +119,22 @@ impl InstrumentVisuals {
             .map(|r| node(r.node))
             .collect::<Result<_, _>>()?;
         let mut handles = HashMap::new();
-        let mut material = |r: &MaterialLink| -> Result<Handle<StandardMaterial>, ReferenceError> {
+        let mut material = |r: &MaterialLink| -> Handle<StandardMaterial> {
             let key = (r.asset, r.gltf_material);
             if let Some(h) = handles.get(&key) {
-                return Ok(Handle::clone(h));
+                return Handle::clone(h);
             }
-            let a = reference
-                .assets
+            let (_, g) = gltfs
                 .iter()
-                .find(|a| a.id == r.asset)
-                .ok_or_else(|| {
-                    ReferenceError(format!("Missing instrument material asset {}", r.asset.0))
-                })?;
-            // Bevy PBR's glTF extension creates StandardMaterial subassets at MaterialN/std.
-            let path = format!("{}#Material{}/std", a.path, r.gltf_material);
-            let handle: Handle<StandardMaterial> = server.load(path.clone());
+                .find(|(id, _)| *id == r.asset)
+                .expect("checked asset");
+            let raw =
+                &gltf_assets.get(g).expect("checked glTF").materials[r.gltf_material as usize];
+            let handle = standards.add(source_material(
+                raw_materials.get(raw).expect("checked material"),
+            ));
             handles.insert(key, handle.clone());
-            self.materials.push((path, handle.clone()));
-            Ok(handle)
+            handle
         };
         for lamp in &reference.instruments.lamps {
             let parent = node(lamp.node)?;
@@ -82,31 +150,12 @@ impl InstrumentVisuals {
             }
             self.lamps.push(LampVisual {
                 entities,
-                on: material(&lamp.on)?,
-                off: material(&lamp.off)?,
+                on: material(&lamp.on),
+                off: material(&lamp.off),
             });
         }
-        for digit in &reference.instruments.odometer.digits {
-            material(&digit.on)?;
-            material(&digit.off)?;
-        }
+        // Retain only used lamp variants. Digit illumination stays off with unsupported headlights.
         self.bound = true;
-        Ok(())
-    }
-    pub fn ready(&self, server: &AssetServer) -> Result<bool, ReferenceError> {
-        if !self.bound {
-            return Ok(false);
-        }
-        for (path, handle) in &self.materials {
-            if let Some(LoadState::Failed(error)) = server.get_load_state(handle.id()) {
-                return Err(ReferenceError(format!(
-                    "Cannot load instrument material {path}: {error}"
-                )));
-            }
-            if !server.is_loaded_with_dependencies(handle.id()) {
-                return Ok(false);
-            }
-        }
         Ok(true)
     }
     pub fn update(

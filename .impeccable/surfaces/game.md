@@ -2,38 +2,27 @@
 
 Mode: Experience.
 
-The user approved a Rust/WASM driving recreation with procedural assets.
-The first slice includes car handling, desert roads, two cameras, fuel, and roadside stops.
-The user requested implementation and continuation.
-
 ## Direction
 
-Refine the existing warm desert scene. Keep the live game view dominant.
-Use worn rust paint, sand, a hazy sky, and dark readable controls.
-Keep the start instructions, HUD, pause menu, and recovery paths clear.
-Preserve physics and the approved scope.
-
-This is code-led refinement of an existing Bevy game. No approved bitmap comp exists.
-The approved spec and existing scene define the direction.
+Use the source UI for My Summer Slop's supported garage-to-road features.
+Keep the title, fixed Lada, and garage spawn.
+Use source menu art, fonts, action icons, fluid text, and vehicle instruments.
+Keep the imported scene visible before Start.
+Use source values instead of serif headings and a persistent HUD card.
+The approved source UI spec and extracted records define visual authority.
 
 ## Quality bar
 
-- The player can see the scene before starting.
-- The player can read controls and status at desktop and narrow window sizes.
-- The cockpit shows the road through the front glass.
-- Controls support keyboard focus and loading/error states.
-- The graphics use simple original geometry; original Steam assets are outside this slice.
-- The target is smooth 60 FPS on the test machine.
+- Show supported actions and actual fluid state.
+- Keep menus and controls readable at desktop and narrow window sizes.
+- Clear input on pause, capture loss, and focus loss.
+- Keep Start disabled when required assets or instrument bindings fail.
+- Bind render entities and materials once.
+- Preserve recovery state, restart behavior, and the route-test waiver.
 
 ## Evidence
 
-The current screenshots are in `.impeccable/review`:
-`desktop-start.jpg`, `desktop-hud.jpg`, `desktop-cockpit.jpg`, `desktop-pause.jpg`, `narrow-start.jpg`, and `narrow-pause.jpg`.
-The mechanical HTML/CSS/JS detector returned an empty findings array.
-The browser collision test stopped the car at a solid roadside rock.
-The 720-interval moving sample at 1280x720 measured 143.997 browser frames/second.
-Median interval: 6.9 ms. 95th percentile: 7.1 ms. Maximum: 7.2 ms.
-Chrome 155 used WebGL2 through ANGLE/NVIDIA RTX 4070 Ti. CPU: Intel i7-11700K.
-
-Natural browser tank exhaustion was not run. Native physics/fuel integration covers zero-fuel behavior.
-Audio is optional and omitted from this build.
+Read docs/verification.md for current test results and browser limits.
+Native tests cover source input gestures, fluid inputs, instruments, recovery, and rebasing.
+Node tests cover menu capture state, input edges, icon precedence, and fluid display.
+The in-app browser rejects pointer lock. Do not claim a verified live driving route.

@@ -139,7 +139,7 @@ class GltfExporter:
             if info:
                 material.normalTexture = gl.NormalMaterialTexture(scale=floats.get('_BumpScale',1.), **info)
         emission = colors.get('_EmissionColor')
-        if emission:
+        if emission and '_EMISSION' in data['m_ValidKeywords']:
             material.emissiveFactor = [emission[n] for n in ('r','g','b')]
             if '_EmissionMap' in environments:
                 info = self.texture(reader, environments['_EmissionMap'], 'srgb')
