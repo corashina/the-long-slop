@@ -98,6 +98,9 @@ pub struct SourceSurface {
     state: SurfaceKey,
 }
 impl MaterialExtension for SourceSurface {
+    fn vertex_shader() -> ShaderRef {
+        "shaders/source_mesh.wgsl".into()
+    }
     fn fragment_shader() -> ShaderRef {
         "shaders/source_surface.wgsl".into()
     }
@@ -183,7 +186,7 @@ pub struct SourceMaterials {
     textures: Vec<SourceTexture>,
     texture_indices: HashMap<String, usize>,
     pub handles: HashMap<(source::AssetId, u32, bool), Handle<SourceMaterial>>,
-    shader: Handle<Shader>,
+    shaders: [Handle<Shader>; 2],
     pub state: RenderingState,
     pub bound: bool,
     pub texture_bytes: usize,
@@ -268,7 +271,10 @@ pub fn load_materials(commands: &mut Commands, server: &AssetServer, rendering: 
         textures,
         texture_indices,
         handles: HashMap::new(),
-        shader: server.load("shaders/source_surface.wgsl"),
+        shaders: [
+            server.load("shaders/source_surface.wgsl"),
+            server.load("shaders/source_mesh.wgsl"),
+        ],
         state: RenderingState::Loading,
         bound: false,
         texture_bytes: 0,
@@ -284,9 +290,11 @@ pub fn material_readiness(
     if source.state != RenderingState::Loading {
         return;
     }
-    if let LoadState::Failed(error) = server.load_state(source.shader.id()) {
-        source.state = RenderingState::Failed(format!("Source material shader: {error}"));
-        return;
+    for shader in &source.shaders {
+        if let LoadState::Failed(error) = server.load_state(shader.id()) {
+            source.state = RenderingState::Failed(format!("Source material shader: {error}"));
+            return;
+        }
     }
     let mut added_bytes = 0;
     for texture in &mut source.textures {
@@ -488,6 +496,7 @@ fn make_material(
         "_GLOSSYREFLECTIONS_OFF",
         "_ALPHAPREMULTIPLY_ON",
         "_ALPHATEST_ON",
+        "_ALPHABLEND_ON",
     ]
     .iter()
     .enumerate()
@@ -691,6 +700,15 @@ fn prewarm_materials(world: &mut World) {
                 .layout
                 .push(properties.material_layout.as_ref().unwrap().clone());
             let limits = world.resource::<RenderDevice>().limits();
+            // Source vertex outputs occupy locations 0..8, with conditional gaps.
+            let varying_locations = 9;
+            if varying_locations > limits.max_inter_stage_shader_variables {
+                pending.state = RenderingState::Failed(format!(
+                    "{label}: source shader needs {varying_locations} varying locations; device limit is {}",
+                    limits.max_inter_stage_shader_variables
+                ));
+                return;
+            }
             let mut textures = 0;
             let mut samplers = 0;
             let mut uniforms = 0;
@@ -732,7 +750,8 @@ fn prewarm_materials(world: &mut World) {
             };
             if seen.insert(id) {
                 info!(
-                    "Source pipeline: {textures} fragment textures, {samplers} samplers, {uniforms} uniforms"
+                    "Source pipeline: {textures} fragment textures, {samplers} samplers, {uniforms} uniforms, {varying_locations} varying locations (upper bound; device limit {})",
+                    limits.max_inter_stage_shader_variables
                 );
                 ids.push((id, label));
             }

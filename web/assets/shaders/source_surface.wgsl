@@ -1,7 +1,7 @@
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_fragment::pbr_input_from_vertex_output,
-    pbr_functions::{calculate_tbn_mikktspace, main_pass_post_lighting_processing},
+    pbr_functions::{main_pass_post_lighting_processing},
     pbr_types,
     pbr_bindings,
     mesh_view_bindings,
@@ -77,7 +77,13 @@ fn source_brdf(diffuse: vec3<f32>, specular: vec3<f32>, smoothness: f32, normal:
 }
 
 @fragment
-fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
+fn fragment(
+    in: VertexOutput,
+#ifdef VERTEX_TANGENTS
+    @location(8) world_bitangent: vec3<f32>,
+#endif
+    @builtin(front_facing) is_front: bool,
+) -> FragmentOutput {
     var pbr = pbr_input_from_vertex_output(in, is_front, false);
     var uv = vec2(0.0);
 #ifdef VERTEX_UVS_A
@@ -89,7 +95,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 #endif
     var offset = vec2(0.0);
 #ifdef VERTEX_TANGENTS
-    let tbn = calculate_tbn_mikktspace(in.world_normal, in.world_tangent);
+    let tbn = mat3x3(in.world_tangent.xyz, world_bitangent, in.world_normal);
     if source_flag(4u) {
         let height = sample_source(5u, uv, detail_uv, vec2(0.0)).g;
         var tangent_view = normalize(transpose(tbn) * pbr.V);
@@ -148,6 +154,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     if source.flags.z == 1u { light = source.color.rgb; alpha = source.color.a; }
     // The separate stained-glass layer supplies grab composition.
     if source.flags.z == 2u { light = albedo; }
+    // Unity OutputForward forces opaque and cutout Standard alpha to one.
+    if source.flags.z == 0u && !source_flag(8u) && !source_flag(10u) { alpha = 1.0; }
     var out: FragmentOutput;
     // Source premultiplication affects diffuse only. Bevy must not multiply specular by alpha again.
     pbr.material.flags = pbr_types::STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
