@@ -193,7 +193,7 @@ impl InteractionState {
     }
 
     fn supports_use(&self, item: ItemId) -> bool {
-        self.usable_items.contains(&item)
+        self.usable_items.contains(&item) || self.mechanisms.contains(item)
     }
 
     fn query_action(
@@ -317,11 +317,7 @@ impl InteractionState {
             return "F: install wheel";
         }
         if let Some(target) = aim.use_target {
-            if self
-                .hinges
-                .iter()
-                .any(|hinge| hinge.reference.item == target.item)
-            {
+            if self.mechanisms.contains(target.item) {
                 return "Hold E + mouse: move";
             }
             if self.seats.iter().any(|seat| seat.item == target.item) && self.held().is_none() {

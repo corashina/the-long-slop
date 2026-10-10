@@ -78,3 +78,87 @@ pub fn focus(
         )
         .focus_target
 }
+
+pub fn add_rotation(reference: &mut ReferenceManifest, item: u32, body: u32, limits: [f32; 2]) {
+    use my_summer_slop::reference::*;
+    let body_index = reference
+        .bodies
+        .iter()
+        .position(|b| b.id == BodyId(body))
+        .unwrap();
+    let record = reference.bodies[body_index].clone();
+    let node = NodeId(10000 + body);
+    let mut local = record.pose.clone();
+    let parent = record.parent_body.map(|id| {
+        let parent = reference.bodies.iter().find(|b| b.id == id).unwrap();
+        let relative = my_summer_slop::vehicle::to_rapier(VehiclePose {
+            position: parent.pose.translation,
+            rotation: parent.pose.rotation,
+        })
+        .inverse()
+            * my_summer_slop::vehicle::to_rapier(VehiclePose {
+                position: record.pose.translation,
+                rotation: record.pose.rotation,
+            });
+        local.translation = relative.translation.to_array();
+        local.rotation = relative.rotation.to_array();
+        parent.node
+    });
+    let original_node = record.node;
+    let mut source_node = reference
+        .nodes
+        .iter()
+        .find(|n| n.id == original_node)
+        .unwrap()
+        .clone();
+    source_node.id = node;
+    source_node.parent = parent;
+    source_node.transform = local;
+    source_node.source.path_id += i64::from(node.0);
+    reference.nodes.push(source_node);
+    reference.bodies[body_index].node = node;
+    for c in &mut reference.colliders {
+        if c.body == BodyId(body) && c.node == original_node {
+            c.node = node;
+        }
+    }
+    let owner = reference
+        .items
+        .iter_mut()
+        .find(|i| i.id == ItemId(item))
+        .unwrap();
+    owner.body = BodyId(body);
+    owner.node = node;
+    reference.mechanisms.push(MechanismReference {
+        id: MechanismId(item),
+        source: reference.player.source.clone(),
+        item: ItemId(item),
+        parent_item: None,
+        driven_nodes: vec![node],
+        enabled: true,
+        child: None,
+        invert_child: false,
+        invert_value: false,
+        disable_on_craft: false,
+        disable_on_uncraft: false,
+        drag: MechanismDrag {
+            mode: DragMode::Direct,
+            node,
+            node2: node,
+            axis: [1.0, 0.0, 0.0],
+            axes2: [[0.0; 3]; 2],
+        },
+        rotation: Some(RotationReference {
+            targets: vec![RotationTarget {
+                node,
+                mapping: [[false, true, false], [false; 3]],
+            }],
+            sum_axes: true,
+            limits_degrees: [limits, [0.0; 2]],
+            initial_degrees: [0.0; 2],
+            inverted: [false; 2],
+            sensitivity: 1.0,
+        }),
+        slide: None,
+    });
+}

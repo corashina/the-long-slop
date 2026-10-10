@@ -1,5 +1,6 @@
 pub mod carry;
 pub mod items;
+pub mod mechanisms;
 pub mod targets;
 pub mod wheels;
 pub use targets::{InteractionBlock, ResolvedAim};
@@ -7,13 +8,13 @@ pub use targets::{InteractionBlock, ResolvedAim};
 use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
 use crate::reference::{
-    ActionBinding, ActionMasks, BodyId, ColliderId, HingeRecord, ItemId, ItemKind, OpeningId,
-    OpeningRecord, ReferenceError, ReferenceManifest, SeatId, TankRole, WheelSlotId,
+    ActionBinding, ActionMasks, BodyId, ColliderId, ItemId, ItemKind, OpeningId, OpeningRecord,
+    ReferenceError, ReferenceManifest, SeatId, TankRole, WheelSlotId,
 };
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
 use items::{ItemLocation, ItemStore};
-use rapier3d::math::{Pose, Rotation, Vector};
+use rapier3d::math::{Pose, Vector};
 use rapier3d::prelude::{ColliderHandle, RigidBodyHandle};
 use std::collections::{HashMap, HashSet};
 
@@ -33,7 +34,7 @@ pub enum InteractionAction {
     Pickup(ItemId),
     Drop(ItemId),
     Cap(OpeningId),
-    Hinge(ItemId),
+    Mechanism(ItemId),
     Seat(SeatId),
     Fill {
         source: ItemId,
@@ -48,19 +49,6 @@ pub enum InteractionAction {
     WheelSplit(ItemId),
 }
 
-struct HingeState {
-    reference: HingeRecord,
-    parent: Option<BodyId>,
-    closed_pose: Pose,
-    anchor: Pose,
-    anchor_inverse: Pose,
-    axis: Vector,
-    drag_body: BodyId,
-    drag_pose: Pose,
-    drag_axis: Vector,
-    angle: f32,
-    target: f32,
-}
 struct OpeningState {
     reference: OpeningRules,
     local_pose: Pose,
@@ -113,7 +101,8 @@ pub struct InteractionState {
     filling_items: HashSet<ItemId>,
     collider_bindings: HashMap<ColliderHandle, ActionBinding>,
     bodies: HashMap<BodyId, RigidBodyHandle>,
-    hinges: Vec<HingeState>,
+    pub mechanisms: mechanisms::MechanismState,
+    mechanism_bodies: HashMap<ItemId, BodyId>,
     openings: Vec<OpeningState>,
     seats: Vec<SeatState>,
     carry: carry::CarryState,
@@ -124,8 +113,9 @@ pub struct InteractionState {
     supplies: HashSet<ItemId>,
     tank_rules: HashMap<ItemId, TankRules>,
     slow_oil_modifier: f32,
-    latched_hinge: Option<(usize, Vector, ColliderHandle)>,
-    hinge_release_distance_squared: f32,
+    latched_mechanism: Option<(ItemId, BodyId, Vector, ColliderHandle)>,
+    use_consumed: bool,
+    mechanism_release_distance_squared: f32,
     tuning_opening: Option<OpeningId>,
 }
 
@@ -138,46 +128,6 @@ struct TankRules {
 
 impl InteractionState {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
-        let mut hinges = Vec::with_capacity(reference.hinges.len());
-        for hinge in &reference.hinges {
-            let body = reference
-                .bodies
-                .iter()
-                .find(|body| body.id == hinge.body)
-                .ok_or_else(|| ReferenceError("Missing hinge body".into()))?;
-            let anchor = reference
-                .anchors
-                .iter()
-                .find(|anchor| anchor.id == hinge.anchor)
-                .ok_or_else(|| ReferenceError("Missing hinge anchor".into()))?;
-            let drag = reference
-                .anchors
-                .iter()
-                .find(|anchor| anchor.id == hinge.drag_anchor)
-                .ok_or_else(|| ReferenceError("Missing hinge drag anchor".into()))?;
-            let mut closed_pose = transform_pose(&body.pose);
-            if let Some(parent) = body.parent_body {
-                let parent = reference
-                    .bodies
-                    .iter()
-                    .find(|body| body.id == parent)
-                    .ok_or_else(|| ReferenceError("Missing hinge parent".into()))?;
-                closed_pose = transform_pose(&parent.pose).inverse() * closed_pose;
-            }
-            hinges.push(HingeState {
-                reference: hinge.clone(),
-                parent: body.parent_body,
-                closed_pose,
-                anchor: transform_pose(&anchor.transform),
-                anchor_inverse: transform_pose(&anchor.transform).inverse(),
-                axis: Vector::from_array(hinge.axis).normalize(),
-                drag_body: drag.body,
-                drag_pose: transform_pose(&drag.transform),
-                drag_axis: Vector::from_array(hinge.drag_axis),
-                angle: hinge.closed_degrees,
-                target: hinge.closed_degrees,
-            });
-        }
         let mut openings = Vec::with_capacity(reference.openings.len());
         for opening in &reference.openings {
             let anchor = reference
@@ -235,10 +185,9 @@ impl InteractionState {
             }
         }
         let usable_items = reference
-            .hinges
+            .seats
             .iter()
-            .map(|hinge| hinge.item)
-            .chain(reference.seats.iter().map(|seat| seat.item))
+            .map(|seat| seat.item)
             .chain(
                 reference
                     .openings
@@ -280,7 +229,8 @@ impl InteractionState {
                 .map(|item| (item.id, item.kind.clone()))
                 .collect(),
             bodies: HashMap::with_capacity(reference.bodies.len()),
-            hinges,
+            mechanisms: mechanisms::MechanismState::new(reference)?,
+            mechanism_bodies: reference.items.iter().map(|i| (i.id, i.body)).collect(),
             openings,
             seats,
             carry: carry::CarryState::new(reference)?,
@@ -309,14 +259,16 @@ impl InteractionState {
                 })
                 .collect(),
             slow_oil_modifier: reference.fluid_rules.slow_oil_modifier,
-            latched_hinge: None,
-            hinge_release_distance_squared: (reference.player.aim_reach * 1.5).powi(2),
+            latched_mechanism: None,
+            use_consumed: false,
+            mechanism_release_distance_squared: (reference.player.aim_reach * 1.5).powi(2),
             tuning_opening: None,
         })
     }
 
     pub fn bind_body(&mut self, id: BodyId, handle: RigidBodyHandle) {
         self.bodies.insert(id, handle);
+        self.mechanisms.bind_body(id, handle);
     }
     pub fn bind_player_body(&mut self, handle: RigidBodyHandle) {
         self.player_body = Some(handle);
@@ -385,15 +337,14 @@ impl InteractionState {
     pub fn tuning_opening(&self) -> Option<OpeningId> {
         self.tuning_opening
     }
-    pub fn hinge_angle(&self, id: ItemId) -> Option<f32> {
-        self.hinges
-            .iter()
-            .find(|hinge| hinge.reference.item == id)
-            .map(|hinge| hinge.angle)
+    pub fn dragging_mechanism(&self) -> Option<ItemId> {
+        self.latched_mechanism.map(|(item, _, _, _)| item)
     }
-    pub fn dragging_hinge(&self) -> Option<ItemId> {
-        self.latched_hinge
-            .map(|(index, _, _)| self.hinges[index].reference.item)
+    pub fn cancel_input(&mut self) {
+        self.latched_mechanism = None;
+        self.use_consumed = false;
+        self.tuning_opening = None;
+        self.mechanisms.cancel_input();
     }
     pub fn drop_held(
         &mut self,
@@ -414,11 +365,7 @@ impl InteractionState {
     }
 
     pub fn rebase(&mut self, shift: [f32; 3]) {
-        for hinge in &mut self.hinges {
-            if hinge.parent.is_none() {
-                hinge.closed_pose.translation -= Vector::from_array(shift);
-            }
-        }
+        self.mechanisms.rebase(shift);
     }
 
     pub fn step(
@@ -441,50 +388,52 @@ impl InteractionState {
         let grab_target = aim.grab_target.filter(|target| valid(*target));
         let installation_target = aim.installation_target.filter(|target| valid(*target));
         let filling_target = aim.filling_target.filter(|target| valid(*target));
-        let released_hinge = input.released & keys::USE != 0 && self.latched_hinge.is_some();
+        self.mechanisms.sync(physics, false);
+        let released_mechanism = input.released & keys::USE != 0 && self.use_consumed;
         if input.held & keys::USE == 0 || input.released & keys::USE != 0 {
-            self.latched_hinge = None;
-        } else if self.latched_hinge.is_none()
+            self.latched_mechanism = None;
+            self.use_consumed = false;
+        } else if self.latched_mechanism.is_none()
             && let Some(target) = target
-            && let Some(index) = self
-                .hinges
-                .iter()
-                .position(|hinge| hinge.reference.item == target.item)
+            && self.mechanisms.contains(target.item)
+            && let Some(&body_id) = self.mechanism_bodies.get(&target.item)
             && let Some(body) = self
                 .bodies
-                .get(&self.hinges[index].reference.body)
+                .get(&body_id)
                 .and_then(|handle| physics.rapier().bodies.get(*handle))
         {
-            self.latched_hinge = Some((
-                index,
+            self.latched_mechanism = Some((
+                target.item,
+                body_id,
                 body.position().inverse() * Vector::from_array(target.point),
                 target.collider,
             ));
+            self.use_consumed = true;
         }
-        let use_target = if let Some((index, local, collider)) = self.latched_hinge {
-            let hinge = &self.hinges[index];
-            if let Some(body) = self
-                .bodies
-                .get(&hinge.reference.body)
-                .and_then(|handle| physics.rapier().bodies.get(*handle))
+        let use_target = if let Some((item, body_id, local, collider)) = self.latched_mechanism {
+            if self.mechanisms.contains(item)
+                && let Some(body) = self
+                    .bodies
+                    .get(&body_id)
+                    .and_then(|handle| physics.rapier().bodies.get(*handle))
             {
                 let point = *body.position() * local;
                 let distance = (point - Vector::from_array(player.body_pose(physics).position))
                     .length_squared();
-                if distance < self.hinge_release_distance_squared {
+                if distance < self.mechanism_release_distance_squared {
                     Some(AimTarget {
                         collider,
-                        item: hinge.reference.item,
+                        item,
                         distance: distance.sqrt(),
                         point: point.to_array(),
                         slot: None,
                     })
                 } else {
-                    self.latched_hinge = None;
+                    self.latched_mechanism = None;
                     None
                 }
             } else {
-                self.latched_hinge = None;
+                self.latched_mechanism = None;
                 None
             }
         } else {
@@ -494,9 +443,7 @@ impl InteractionState {
         let mut carry_input = input;
         self.tuning_opening = None;
         let can_use_target = use_target.is_some_and(|target| {
-            self.hinges
-                .iter()
-                .any(|hinge| hinge.reference.item == target.item)
+            self.mechanisms.contains(target.item)
                 || self.openings.iter().any(|opening| {
                     opening.reference.cap == target.item
                         && (opening.reference.can_toggle || opening.reference.can_tune)
@@ -547,56 +494,24 @@ impl InteractionState {
                 }
             }
             if input.released & keys::USE != 0
-                && !released_hinge
+                && !released_mechanism
                 && self.held().is_none()
                 && let Some(seat) = self.seats.iter().find(|seat| seat.item == target.item)
                 && player.enter(seat.id, seat.pose, physics)
             {
                 action = Some(InteractionAction::Seat(seat.id));
             }
-            if input.held & keys::USE != 0
-                && let Some(hinge) = self
-                    .hinges
-                    .iter_mut()
-                    .find(|hinge| hinge.reference.item == target.item)
+            if self.mechanisms.contains(target.item)
+                && (input.held & keys::USE != 0
+                    || (input.wheel != 0.0 && self.mechanisms.scroll_eligible(target.item)))
             {
-                let axis = hinge.reference.drag_input_axis as usize;
-                let mut delta = input.mouse[axis];
-                if hinge.reference.relative_drag {
-                    if let Some(body) = self
-                        .bodies
-                        .get(&hinge.drag_body)
-                        .and_then(|handle| physics.rapier().bodies.get(*handle))
-                    {
-                        let view = to_rapier(player.view_pose(physics));
-                        let direction =
-                            (body.position().rotation * hinge.drag_pose.rotation) * hinge.drag_axis;
-                        delta = (view.rotation
-                            * (-Vector::Z * input.mouse[1] + Vector::X * input.mouse[0]))
-                            .dot(direction);
-                    } else {
-                        delta = 0.0;
-                    }
-                }
-                let sign = if axis == 0 {
-                    if hinge.reference.input_inverted[0] {
-                        1.0
-                    } else {
-                        -1.0
-                    }
-                } else if hinge.reference.input_inverted[1] {
-                    -1.0
-                } else {
-                    1.0
-                };
-                delta *= hinge.reference.drag_sensitivity * sign;
-                if delta.is_finite() {
-                    hinge.target = (hinge.target + delta)
-                        .clamp(hinge.reference.min_degrees, hinge.reference.max_degrees);
-                    action = Some(InteractionAction::Hinge(target.item));
-                }
+                self.mechanisms
+                    .step(target.item, input, player.view_pose(physics), dt);
+                carry_input.wheel = 0.0;
+                action = Some(InteractionAction::Mechanism(target.item));
             }
         }
+
         if input.pressed & keys::GRAB != 0
             && !self.carry.acquisition_held()
             && self.wheel_installation_block(&aim).is_none()
@@ -652,15 +567,7 @@ impl InteractionState {
         {
             action = Some(InteractionAction::Drop(item));
         }
-        for hinge in &mut self.hinges {
-            if let Some(speed) = hinge.reference.motor_degrees_per_second {
-                let max = speed * dt;
-                hinge.angle += (hinge.target - hinge.angle).clamp(-max, max);
-            } else {
-                hinge.angle = hinge.target;
-            }
-        }
-        self.place_hinges(physics, false);
+        self.mechanisms.sync(physics, false);
         items.sync_poses(physics);
         let mut filling = None;
         if input.held & keys::FILL != 0
@@ -764,50 +671,9 @@ impl InteractionState {
         action
     }
 
-    pub fn sync_hinges(&self, physics: &mut PhysicsWorld) {
-        self.place_hinges(physics, true);
+    pub fn sync_mechanisms(&mut self, physics: &mut PhysicsWorld) {
+        self.mechanisms.sync(physics, true);
     }
-
-    pub fn hinge_local_pose(&self, body: BodyId) -> Option<Pose> {
-        self.hinges
-            .iter()
-            .find(|hinge| hinge.reference.body == body)
-            .map(local_hinge_pose)
-    }
-
-    fn place_hinges(&self, physics: &mut PhysicsWorld, commit: bool) {
-        for hinge in &self.hinges {
-            let Some(handle) = self.bodies.get(&hinge.reference.body).copied() else {
-                continue;
-            };
-            let parent = if let Some(parent) = hinge.parent {
-                let Some(body) = self
-                    .bodies
-                    .get(&parent)
-                    .and_then(|handle| physics.rapier().bodies.get(*handle))
-                else {
-                    continue;
-                };
-                *body.position()
-            } else {
-                Pose::IDENTITY
-            };
-            let pose = parent * local_hinge_pose(hinge);
-            let body = &mut physics.rapier_mut().bodies[handle];
-            if commit {
-                body.set_position(pose, false);
-            }
-            body.set_next_kinematic_position(pose);
-        }
-    }
-}
-
-fn local_hinge_pose(hinge: &HingeState) -> Pose {
-    let rotation = Pose::from_rotation(Rotation::from_axis_angle(
-        hinge.axis,
-        (hinge.angle - hinge.reference.closed_degrees).to_radians(),
-    ));
-    hinge.closed_pose * hinge.anchor * rotation * hinge.anchor_inverse
 }
 
 fn transform_pose(transform: &crate::reference::Transform) -> Pose {

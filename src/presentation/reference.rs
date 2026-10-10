@@ -162,24 +162,7 @@ pub fn bind(
     }
     // Each physical group becomes a render root. Its descendants retain their source transforms.
     for body in &reference.bodies {
-        let mut scale = Vec3::ONE;
-        let mut current = Some(body.node);
-        while let Some(id) = current {
-            let node = reference
-                .nodes
-                .iter()
-                .find(|node| node.id == id)
-                .expect("validated node");
-            scale *= Vec3::from_array(node.transform.scale);
-            current = node.parent;
-        }
-        commands
-            .entity(visuals.nodes[&body.node])
-            .remove::<ChildOf>()
-            .insert(BodyVisual {
-                body: body.id,
-                scale,
-            });
+        super::mechanisms::bind_body(commands, reference, visuals, body);
     }
     for item in &reference.items {
         if !matches!(item.kind, ItemKind::Wheel | ItemKind::Rim | ItemKind::Tire) {

@@ -22,6 +22,7 @@ use std::collections::HashMap;
 struct CompoundCollider {
     handle: crate::vehicle::ColliderHandle,
     body: BodyId,
+    root: BodyId,
     fixed_pose: rapier3d::math::Pose,
     shape_pose: rapier3d::math::Pose,
 }
@@ -29,7 +30,8 @@ struct CompoundCollider {
 impl CompoundCollider {
     fn local_pose(&self, interaction: &InteractionState) -> rapier3d::math::Pose {
         interaction
-            .hinge_local_pose(self.body)
+            .mechanisms
+            .body_local_pose(self.body, self.root)
             .unwrap_or(self.fixed_pose)
             * self.shape_pose
     }
@@ -146,6 +148,7 @@ impl StartingArea {
                 compound_colliders.push(CompoundCollider {
                     handle,
                     body: record.body,
+                    root: reference.vehicle.body,
                     fixed_pose: to_rapier(VehiclePose {
                         position: parent.pose.translation,
                         rotation: parent.pose.rotation,
@@ -205,10 +208,10 @@ impl StartingArea {
             }
         }
         interaction.rebase(origin.map(|v| v as f32));
-        interaction.sync_hinges(physics);
+        interaction.sync_mechanisms(physics);
         for collider in &compound_colliders {
-            physics.rapier_mut().colliders[collider.handle]
-                .set_position_wrt_parent(collider.local_pose(&interaction));
+            let local = collider.local_pose(&interaction);
+            physics.rapier_mut().colliders[collider.handle].set_position_wrt_parent(local);
         }
         physics.refresh_queries();
         items.sync_poses(physics);
@@ -228,7 +231,11 @@ impl StartingArea {
             .iter()
             .filter_map(|record| {
                 let parent = record.parent_body?;
-                if reference.hinges.iter().any(|hinge| hinge.body == record.id) {
+                if reference
+                    .mechanisms
+                    .iter()
+                    .any(|m| m.driven_nodes.contains(&record.node))
+                {
                     return None;
                 }
                 let parent_record = reference
@@ -389,7 +396,7 @@ impl StartingArea {
         }
     }
 
-    /// Attached bodies without hinges follow the authoritative vehicle pose.
+    /// Attached bodies without mechanisms follow the authoritative vehicle pose.
     pub fn sync_attachments(&self, physics: &mut PhysicsWorld, next: bool) {
         for &(handle, parent, local) in &self.attachments {
             let parent_pose = if next {
@@ -538,6 +545,7 @@ impl GarageRuntime {
 
     pub fn step(&mut self, reference: &ReferenceManifest, input: FrameInput) {
         if !self.started || self.paused {
+            self.area.interaction.cancel_input();
             return;
         }
         let previous = self
@@ -656,7 +664,7 @@ impl GarageRuntime {
         if seated
             && input.pressed & keys::USE != 0
             && matches!(action, None | Some(InteractionAction::Seat(_)))
-            && self.area.interaction.dragging_hinge().is_none()
+            && self.area.interaction.dragging_mechanism().is_none()
             && self.area.interaction.tuning_opening().is_none()
         {
             self.notice = if self.area.player.seat().is_some() {
@@ -668,7 +676,7 @@ impl GarageRuntime {
             self.notice = "";
         }
         let mut walking_input = input;
-        if (input.held & keys::USE != 0 && self.area.interaction.dragging_hinge().is_some())
+        if (input.held & keys::USE != 0 && self.area.interaction.dragging_mechanism().is_some())
             || (input.held & keys::USE != 0 && self.area.interaction.tuning_opening().is_some())
             || (input.held & (keys::ROTATE | keys::TRANSLATE) != 0
                 && self.area.interaction.held().is_some())
@@ -815,7 +823,7 @@ impl GarageRuntime {
             ),
         );
         self.physics.step_physics();
-        self.area.interaction.sync_hinges(&mut self.physics);
+        self.area.interaction.sync_mechanisms(&mut self.physics);
         self.area.sync_attachments(&mut self.physics, false);
         self.area.sync_compound(&mut self.physics);
         self.wheels
@@ -920,7 +928,7 @@ impl GarageRuntime {
         for &body in &self.recovery_bodies {
             transport_body(&mut self.physics, body, cargo_delta);
         }
-        self.area.interaction.sync_hinges(&mut self.physics);
+        self.area.interaction.sync_mechanisms(&mut self.physics);
         self.area.sync_attachments(&mut self.physics, false);
         self.area.sync_compound(&mut self.physics);
         self.wheels

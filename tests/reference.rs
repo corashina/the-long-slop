@@ -180,17 +180,16 @@ fn production_export_matches_installed_contract() {
         assert_eq!(body.angular_damping, 0.0);
     }
     assert_eq!(manifest.wheel_slots.len(), 4);
-    assert_eq!(manifest.hinges.len(), 9);
     for (usable, pivot, collider_node) in [(64783, 21482, 21566), (64777, 21464, 21548)] {
         let hinge = manifest
-            .hinges
+            .mechanisms
             .iter()
             .find(|hinge| hinge.source.path_id == usable)
             .expect("source garage leaf hinge");
         let body = manifest
             .bodies
             .iter()
-            .find(|body| body.id == hinge.body)
+            .find(|body| hinge.driven_nodes.contains(&body.node))
             .unwrap();
         assert_eq!(body.source.path_id, pivot);
         assert_ne!(body.node, manifest.area.home_root);
@@ -203,7 +202,7 @@ fn production_export_matches_installed_contract() {
             manifest
                 .colliders
                 .iter()
-                .any(|collider| collider.node == node.id && collider.body == hinge.body)
+                .any(|collider| collider.node == node.id && collider.body == body.id)
         );
     }
     assert!(manifest.openings.len() >= 8);
@@ -341,4 +340,33 @@ fn rejects_missing_masks_and_invalid_action_owners() {
     let mut input = fixture();
     input["action_bindings"].as_array_mut().unwrap().pop();
     assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+}
+
+#[test]
+#[ignore = "requires installed reference export"]
+fn installed_mechanisms_keep_source_controls_and_window_tracks() {
+    let json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read("web/assets/reference/manifest.json").unwrap())
+            .unwrap();
+    let mechanisms = json["mechanisms"]
+        .as_array()
+        .expect("source rotation and slide mechanisms");
+    for source in [
+        64783, 64777, 64811, 64916, 64797, 75324, 77425, 71545, 71291, 66558, 73523, 67612, 70647,
+        79151, 74645, 76322,
+    ] {
+        assert!(
+            mechanisms.iter().any(|m| m["source"]["path_id"] == source),
+            "missing source mechanism {source}"
+        );
+    }
+    for source in [70647, 79151, 74645, 76322] {
+        let window = mechanisms
+            .iter()
+            .find(|m| m["source"]["path_id"] == source)
+            .unwrap();
+        assert_eq!(window["slide"]["paths"].as_array().unwrap().len(), 1);
+        assert_eq!(window["slide"]["rotations"][0]["angle_degrees"], -810.0);
+        assert!(window["parent_item"].is_number());
+    }
 }

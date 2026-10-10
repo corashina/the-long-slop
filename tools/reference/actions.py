@@ -14,14 +14,14 @@ def recover_masks(player):
     return result
 
 
-def recover_bindings(source, nodes, components, item_nodes, colliders, hinges, openings, seats):
+def recover_bindings(source, nodes, components, item_nodes, colliders, mechanisms, openings, seats):
     component_items = {}
     for node, group in components.items():
         for readers in group.values():
             for reader in readers:
                 if node in item_nodes:
                     component_items[key(reader)] = item_nodes[node]
-    uses = {(r['source']['file'], r['source']['path_id']): r['item'] for r in hinges}
+    uses = {(r['source']['file'], r['source']['path_id']): r['item'] for r in mechanisms}
     uses.update({(r['source']['file'], r['source']['path_id']): r['cap'] for r in openings})
     for seat in seats:
         for node in seat['hit_nodes']:

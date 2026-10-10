@@ -16,6 +16,7 @@ macro_rules! id {
         pub struct $name(pub $inner);
     };
 }
+id!(MechanismId, u32);
 id!(ItemId, u32);
 id!(AssetId, u32);
 id!(NodeId, u32);
@@ -159,23 +160,87 @@ pub struct AnchorRecord {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct HingeRecord {
-    pub item: ItemId,
+pub struct MechanismReference {
+    pub id: MechanismId,
     pub source: SourceId,
-    pub anchor: AnchorId,
-    pub body: BodyId,
+    pub item: ItemId,
+    pub parent_item: Option<ItemId>,
+    pub driven_nodes: Vec<NodeId>,
+    pub enabled: bool,
+    pub child: Option<ItemId>,
+    pub invert_child: bool,
+    pub invert_value: bool,
+    pub disable_on_craft: bool,
+    pub disable_on_uncraft: bool,
+    pub drag: MechanismDrag,
+    pub rotation: Option<RotationReference>,
+    pub slide: Option<SlideReference>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MechanismDrag {
+    pub mode: DragMode,
+    pub node: NodeId,
+    pub node2: NodeId,
     pub axis: [f32; 3],
-    pub closed_degrees: f32,
-    pub min_degrees: f32,
-    pub max_degrees: f32,
-    pub drag_axis: [f32; 3],
-    pub drag_input_axis: u8,
-    pub drag_sensitivity: f32,
-    pub input_inverted: [bool; 2],
-    pub rotation_axes: [[f32; 3]; 2],
-    pub relative_drag: bool,
-    pub drag_anchor: AnchorId,
-    pub motor_degrees_per_second: Option<f32>,
+    pub axes2: [[f32; 3]; 2],
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DragMode {
+    Direct,
+    Relative,
+    RelativeTwo,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RotationReference {
+    pub targets: Vec<RotationTarget>,
+    pub sum_axes: bool,
+    pub limits_degrees: [[f32; 2]; 2],
+    pub initial_degrees: [f32; 2],
+    pub inverted: [bool; 2],
+    pub sensitivity: f32,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RotationTarget {
+    pub node: NodeId,
+    pub mapping: [[bool; 3]; 2],
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SlideReference {
+    pub initial_value: f32,
+    pub speed: f32,
+    pub sensitivity: f32,
+    pub axes: [bool; 6],
+    pub multiplier: [f32; 3],
+    pub scroll_without_use: bool,
+    pub animation_source: Option<SourceId>,
+    pub paths: Vec<SlidePath>,
+    pub rotations: Vec<SlideRotation>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SlidePath {
+    pub node: NodeId,
+    pub points: Vec<SlidePoint>,
+    pub rotate: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SlidePoint {
+    pub node: NodeId,
+    pub value: f32,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SlideRotation {
+    pub node: NodeId,
+    pub reference: NodeId,
+    pub axis: [f32; 3],
+    pub angle_degrees: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -551,7 +616,7 @@ pub struct ReferenceManifest {
     pub colliders: Vec<ColliderRecord>,
     pub action_bindings: Vec<ActionBinding>,
     pub anchors: Vec<AnchorRecord>,
-    pub hinges: Vec<HingeRecord>,
+    pub mechanisms: Vec<MechanismReference>,
     pub wheel_slots: Vec<WheelSlotReference>,
     pub wheel_parts: Vec<WheelPartReference>,
     pub items: Vec<ItemRecord>,
@@ -886,31 +951,98 @@ impl ReferenceManifest {
                 )?;
             }
         }
-        for r in &self.hinges {
+        ids(
+            self.mechanisms.iter().map(|m| m.id),
+            "duplicate mechanism ID",
+        )?;
+        ids(
+            self.mechanisms.iter().map(|m| m.item),
+            "duplicate mechanism item",
+        )?;
+        let mechanism_items: HashSet<_> = self.mechanisms.iter().map(|m| m.item).collect();
+        for r in &self.mechanisms {
             require(
                 item_ids.contains(&r.item)
-                    && anchor_ids.contains(&r.anchor)
-                    && body_ids.contains(&r.body),
-                "hinge binding",
+                    && r.parent_item.is_none_or(|id| item_ids.contains(&id))
+                    && r.child
+                        .is_none_or(|id| mechanism_items.contains(&id) && id != r.item)
+                    && !r.driven_nodes.is_empty()
+                    && r.driven_nodes.iter().all(|id| {
+                        node_ids.contains(id) && self.bodies.iter().any(|b| b.node == *id)
+                    })
+                    && node_ids.contains(&r.drag.node)
+                    && node_ids.contains(&r.drag.node2)
+                    && finite(&r.drag.axis)
+                    && r.drag.axes2.iter().all(|a| finite(a)),
+                "mechanism binding",
             )?;
-            require(
-                finite(&r.axis)
-                    && finite(&[
-                        r.closed_degrees,
-                        r.min_degrees,
-                        r.max_degrees,
-                        r.drag_sensitivity,
-                    ])
-                    && r.min_degrees <= r.max_degrees
-                    && r.drag_sensitivity > 0.0
-                    && r.drag_input_axis < 2
-                    && finite(&r.drag_axis)
-                    && r.rotation_axes.iter().all(|axis| finite(axis))
-                    && anchor_ids.contains(&r.drag_anchor)
-                    && r.motor_degrees_per_second
-                        .is_none_or(|speed| speed.is_finite() && speed > 0.0),
-                "hinge parameters",
-            )?;
+            require(r.rotation.is_some() || r.slide.is_some(), "empty mechanism")?;
+            if let Some(rotation) = &r.rotation {
+                require(
+                    !rotation.targets.is_empty()
+                        && rotation
+                            .targets
+                            .iter()
+                            .all(|t| r.driven_nodes.contains(&t.node))
+                        && rotation
+                            .limits_degrees
+                            .iter()
+                            .all(|v| finite(v) && v[0] <= v[1])
+                        && finite(&rotation.initial_degrees)
+                        && rotation.sensitivity.is_finite()
+                        && rotation.sensitivity > 0.0,
+                    "mechanism rotation",
+                )?;
+            }
+            if let Some(slide) = &r.slide {
+                require(
+                    slide.initial_value.is_finite()
+                        && (0.0..=1.0).contains(&slide.initial_value)
+                        && slide.speed.is_finite()
+                        && slide.sensitivity.is_finite()
+                        && slide.speed > 0.0
+                        && slide.sensitivity > 0.0
+                        && finite(&slide.multiplier)
+                        && (!slide.paths.is_empty() || !slide.rotations.is_empty()),
+                    "mechanism slide",
+                )?;
+                for path in &slide.paths {
+                    require(
+                        r.driven_nodes.contains(&path.node)
+                            && path.points.len() >= 2
+                            && path
+                                .points
+                                .iter()
+                                .all(|p| node_ids.contains(&p.node) && p.value.is_finite())
+                            && path.points.windows(2).all(|p| p[0].value < p[1].value)
+                            && path.points[0].value == 0.0
+                            && path.points.last().unwrap().value == 1.0,
+                        "mechanism path",
+                    )?;
+                }
+                for track in &slide.rotations {
+                    require(
+                        r.driven_nodes.contains(&track.node)
+                            && node_ids.contains(&track.reference)
+                            && finite(&track.axis)
+                            && track.axis.iter().any(|v| *v != 0.0)
+                            && track.angle_degrees.is_finite(),
+                        "mechanism animation",
+                    )?;
+                }
+            }
+            let mut child = r.child;
+            for depth in 0..=self.mechanisms.len() {
+                let Some(id) = child else {
+                    break;
+                };
+                require(depth < self.mechanisms.len(), "mechanism child cycle")?;
+                child = self
+                    .mechanisms
+                    .iter()
+                    .find(|m| m.item == id)
+                    .and_then(|m| m.child);
+            }
         }
         for r in &self.openings {
             let visuals = &r.visuals;

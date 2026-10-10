@@ -6,8 +6,7 @@ use my_summer_slop::interaction::{
 };
 use my_summer_slop::player::PlayerState;
 use my_summer_slop::reference::{
-    AnchorId, BodyId, HingeRecord, ItemId, OpeningId, OpeningRecord, ReferenceManifest, TankRole,
-    WheelSlotId,
+    AnchorId, BodyId, ItemId, OpeningId, OpeningRecord, ReferenceManifest, TankRole, WheelSlotId,
 };
 use my_summer_slop::simulation::{FrameInput, keys};
 use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose};
@@ -91,24 +90,7 @@ fn fixture_with(
 }
 fn door_fixture() -> (InteractionState, ItemStore, PhysicsWorld, PlayerState) {
     fixture_with(|reference| {
-        reference.hinges.push(HingeRecord {
-            item: ItemId(1),
-            source: reference.player.source.clone(),
-            anchor: AnchorId(1),
-            body: BodyId(90),
-            axis: [0.0, 1.0, 0.0],
-            closed_degrees: 0.0,
-            min_degrees: -30.0,
-            max_degrees: 0.0,
-            drag_axis: [1.0, 0.0, 0.0],
-            drag_input_axis: 0,
-            drag_sensitivity: 1.0,
-            input_inverted: [false, false],
-            rotation_axes: [[0.0, 1.0, 0.0], [0.0; 3]],
-            relative_drag: false,
-            drag_anchor: AnchorId(1),
-            motor_degrees_per_second: None,
-        });
+        common::add_rotation(reference, 1, 90, [-30.0, 0.0]);
     })
 }
 fn input(held: u32, pressed: u32) -> FrameInput {
@@ -660,7 +642,7 @@ fn door_release_over_a_seat_does_not_enter() {
         &mut physics,
         1.0 / 60.0,
     );
-    assert_eq!(interaction.dragging_hinge(), Some(ItemId(1)));
+    assert_eq!(interaction.dragging_mechanism(), Some(ItemId(1)));
     let action = interaction.step(
         FrameInput {
             released: keys::USE,
@@ -674,7 +656,7 @@ fn door_release_over_a_seat_does_not_enter() {
     );
     assert_eq!(action, None);
     assert!(player.seat().is_none());
-    assert_eq!(interaction.dragging_hinge(), None);
+    assert_eq!(interaction.dragging_mechanism(), None);
 }
 
 #[test]
@@ -730,10 +712,16 @@ fn seated_door_drag_keeps_the_player_in_the_seat() {
         &mut physics,
         1.0 / 60.0,
     );
-    assert_eq!(action, Some(InteractionAction::Hinge(ItemId(1))));
+    assert_eq!(action, Some(InteractionAction::Mechanism(ItemId(1))));
     assert_eq!(player.seat(), Some(reference.seats[0].id));
-    assert_eq!(interaction.dragging_hinge(), Some(ItemId(1)));
-    assert_eq!(interaction.hinge_angle(ItemId(1)), Some(-3.0));
+    assert_eq!(interaction.dragging_mechanism(), Some(ItemId(1)));
+    assert_eq!(
+        interaction
+            .mechanisms
+            .rotation_degrees(ItemId(1))
+            .map(|v| v[0]),
+        Some(-3.0)
+    );
     interaction.step(
         FrameInput {
             held: keys::USE,
@@ -746,7 +734,13 @@ fn seated_door_drag_keeps_the_player_in_the_seat() {
         &mut physics,
         1.0 / 60.0,
     );
-    assert_eq!(interaction.hinge_angle(ItemId(1)), Some(-6.0));
+    assert_eq!(
+        interaction
+            .mechanisms
+            .rotation_degrees(ItemId(1))
+            .map(|v| v[0]),
+        Some(-6.0)
+    );
     assert_eq!(player.seat(), Some(reference.seats[0].id));
     interaction.step(
         FrameInput {
@@ -1123,24 +1117,7 @@ fn hinge_clamps_and_moves_its_collider() {
     body.id = BodyId(90);
     body.parent_body = Some(BodyId(2));
     reference.bodies.push(body);
-    reference.hinges.push(HingeRecord {
-        item: ItemId(4),
-        source: reference.player.source.clone(),
-        anchor: AnchorId(1),
-        body: BodyId(90),
-        axis: [0.0, 1.0, 0.0],
-        closed_degrees: 0.0,
-        min_degrees: -30.0,
-        max_degrees: 0.0,
-        drag_axis: [1.0, 0.0, 0.0],
-        drag_input_axis: 0,
-        drag_sensitivity: 1.0,
-        input_inverted: [false, false],
-        rotation_axes: [[0.0, 1.0, 0.0], [0.0; 3]],
-        relative_drag: false,
-        drag_anchor: AnchorId(1),
-        motor_degrees_per_second: Some(60.0),
-    });
+    common::add_rotation(&mut reference, 4, 90, [-30.0, 0.0]);
     let mut physics = common::world();
     let (handle, collider) = physics.rapier_mut().insert(
         RigidBodyBuilder::kinematic_position_based().translation(Vector::new(0.0, 1.1, 0.0)),
@@ -1164,8 +1141,12 @@ fn hinge_clamps_and_moves_its_collider() {
         &mut physics,
         1.0 / 60.0,
     );
-    assert_eq!(interaction.dragging_hinge(), Some(ItemId(4)));
-    let first = interaction.hinge_angle(ItemId(4)).unwrap();
+    assert_eq!(interaction.dragging_mechanism(), Some(ItemId(4)));
+    let first = interaction
+        .mechanisms
+        .rotation_degrees(ItemId(4))
+        .map(|v| v[0])
+        .unwrap();
     interaction.step(
         FrameInput {
             held: keys::USE,
@@ -1178,7 +1159,14 @@ fn hinge_clamps_and_moves_its_collider() {
         &mut physics,
         1.0 / 60.0,
     );
-    assert!(interaction.hinge_angle(ItemId(4)).unwrap() < first);
+    assert!(
+        interaction
+            .mechanisms
+            .rotation_degrees(ItemId(4))
+            .map(|v| v[0])
+            .unwrap()
+            < first
+    );
     interaction.step(
         FrameInput {
             released: keys::USE,
@@ -1190,7 +1178,7 @@ fn hinge_clamps_and_moves_its_collider() {
         &mut physics,
         1.0 / 60.0,
     );
-    assert_eq!(interaction.dragging_hinge(), None);
+    assert_eq!(interaction.dragging_mechanism(), None);
     for _ in 0..120 {
         interaction.step(
             FrameInput {
@@ -1205,17 +1193,23 @@ fn hinge_clamps_and_moves_its_collider() {
             1.0 / 60.0,
         );
         physics.step_physics();
-        interaction.sync_hinges(&mut physics);
+        interaction.sync_mechanisms(&mut physics);
         physics.refresh_queries();
     }
-    assert_eq!(interaction.hinge_angle(ItemId(4)), Some(-30.0));
+    assert_eq!(
+        interaction
+            .mechanisms
+            .rotation_degrees(ItemId(4))
+            .map(|v| v[0]),
+        Some(-30.0)
+    );
     assert_ne!(*physics.rapier().colliders[collider].position(), before);
     let before_translation = physics.rapier().bodies[handle].translation();
     let chassis = physics.chassis_handle();
     let mut parent = *physics.rapier().bodies[chassis].position();
     parent.translation += Vector::new(5.0, 0.0, 0.0);
     physics.rapier_mut().bodies[chassis].set_position(parent, true);
-    interaction.sync_hinges(&mut physics);
+    interaction.sync_mechanisms(&mut physics);
     physics.refresh_queries();
     assert!(
         (physics.rapier().bodies[handle].translation()
@@ -1224,7 +1218,13 @@ fn hinge_clamps_and_moves_its_collider() {
         .length()
             < 1e-5
     );
-    assert_eq!(interaction.hinge_angle(ItemId(4)), Some(-30.0));
+    assert_eq!(
+        interaction
+            .mechanisms
+            .rotation_degrees(ItemId(4))
+            .map(|v| v[0]),
+        Some(-30.0)
+    );
 }
 
 #[test]
@@ -2059,4 +2059,72 @@ fn combined_carry_buttons_apply_source_pitch_exception() {
             );
         }
     }
+}
+
+#[test]
+fn seated_window_drag_preserves_seat_and_driver_state() {
+    let (mut interaction, mut items, mut physics, mut player) = fixture_with(|r| {
+        common::add_rotation(r, 1, 90, [-30.0, 0.0]);
+        let node = r.mechanisms[0].driven_nodes[0];
+        let mut end = r.nodes.last().unwrap().clone();
+        end.id = my_summer_slop::reference::NodeId(190);
+        end.transform.translation[1] -= 0.4;
+        r.nodes.push(end);
+        r.mechanisms[0].rotation = None;
+        r.mechanisms[0].slide = Some(my_summer_slop::reference::SlideReference {
+            initial_value: 0.0,
+            speed: 0.1,
+            sensitivity: 0.02,
+            axes: [false, false, false, false, true, true],
+            multiplier: [1.0, 1.0, 10.0],
+            scroll_without_use: true,
+            animation_source: None,
+            paths: vec![my_summer_slop::reference::SlidePath {
+                node,
+                rotate: true,
+                points: vec![
+                    my_summer_slop::reference::SlidePoint { node, value: 0.0 },
+                    my_summer_slop::reference::SlidePoint {
+                        node: my_summer_slop::reference::NodeId(190),
+                        value: 1.0,
+                    },
+                ],
+            }],
+            rotations: vec![],
+        });
+    });
+    let reference = common::reference();
+    player.configure_seats(&reference.seats);
+    assert!(player.enter(reference.seats[0].id, pose([10.0, 0.25, 0.0]), &mut physics));
+    let seat_before = player.seat();
+    let driving_before = player.driving();
+    interaction.step(
+        FrameInput {
+            held: keys::USE,
+            pressed: keys::USE,
+            mouse: [0.0, 125.0],
+            ..Default::default()
+        },
+        common::resolved(target(1)),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert!((interaction.mechanisms.value(ItemId(1), false).unwrap() - 0.5).abs() < 1e-6);
+    // Cross a seat on release. It must not consume the mechanism's release.
+    interaction.step(
+        FrameInput {
+            released: keys::USE,
+            ..Default::default()
+        },
+        common::resolved(target(17)),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(player.seat(), seat_before);
+    assert_eq!(player.driving(), driving_before);
+    assert_eq!(interaction.dragging_mechanism(), None);
 }

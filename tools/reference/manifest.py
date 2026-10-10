@@ -5,6 +5,7 @@ from .gltf import GltfExporter, convert_point, convert_rotation, transform_point
 from .collision import world_pose, quaternion_product, bake_points, geometry
 from .actions import recover_masks, recover_bindings, recover_pickup
 from .caps import opening_metadata
+from .mechanisms import recover_mechanisms, bind_mechanisms
 from .visibility import recover_camera_visibility
 
 
@@ -72,23 +73,9 @@ def build_manifest(source, roots, reports, hashes):
     for root in roots['items']:
         node=by_source[key(root)];rigidbody=components[node].get('Rigidbody',[])
         body(node,bool(rigidbody),total_mass(node),rigidbody[0] if rigidbody else root)
-    hinge_sources=[]
-    for node,group in components.items():
-        if not nodes[node-1]['active']:continue
-        for reader in group.get('usablescript',[]):
-            value=source.read(reader)
-            if not value['rotateAble']:continue
-            if nodes[node-1]['asset']==1 and key(reader) not in {('level1',64783),('level1',64777),('level1',64790)}:continue
-            if 'Door' not in nodes[node-1]['hierarchy_path'] and 'Hood' not in nodes[node-1]['hierarchy_path'] and 'Trunk' not in nodes[node-1]['hierarchy_path']:continue
-            target=pointer_node(reader,value['RT1'])
-            if value['RT2']['m_PathID'] and pointer_node(reader,value['RT2'])!=target:
-                continue  # Window and mirror adjustment remain outside this stage.
-            axes=[]
-            for input_axis in ('X','Y'):
-                axis=[int(value[f'{input_axis}to1{c}']) for c in ('X','Y','Z')]
-                if any(axis):axes.append((axis,value[f'min{input_axis}'],value[f'max{input_axis}'],0 if input_axis=='X' else 1))
-            if len(axes)!=1:continue  # Mirror aim uses two axes.
-            body(target,False,0.,node_readers[target]);hinge_sources.append((reader,target,axes[0]))
+    mechanisms=recover_mechanisms(source,nodes,components,pointer_node,node_of,main)
+    driven_nodes={node for mechanism in mechanisms for node in mechanism['driven_nodes']}
+    for node in sorted(driven_nodes):body(node,False,0.,node_readers[node])
     def body_for(node):
         while node not in body_roots:
             node=nodes[node-1]['parent']
@@ -99,16 +86,16 @@ def build_manifest(source, roots, reports, hashes):
         value['parent_body']=body_for(parent) if parent is not None else None
     items=[];item_nodes={};item_components={}
     item_classes={'tosaveitemscript','massScript','tankscript','enginescript','coolantTankscript','seatscript','tankcapscript','gumiscript','wheelscript','pickupable','usablescript','pushablescript'}
-    hinge_nodes={node for _,node,_ in hinge_sources}
+    mechanism_nodes=driven_nodes
     for node,group in components.items():
-        if not nodes[node-1]['active'] or not (item_classes.intersection(group) or node in hinge_nodes):continue
+        if not nodes[node-1]['active'] or not (item_classes.intersection(group) or node in mechanism_nodes):continue
         name=nodes[node-1]['name'];kind='decoration'
         if key(node_readers[node])==('level1',21482):name='Garage door right'
         elif key(node_readers[node])==('level1',21464):name='Garage door left'
         elif key(node_readers[node])==('level1',21450):name='Door'
         for class_name,kind_name in [('tankscript','container'),('enginescript','engine'),('coolantTankscript','radiator'),('gumiscript','tire'),('wheelscript','rim'),('seatscript','seat'),('tankcapscript','cap')]:
             if class_name in group:kind=kind_name
-        if node in hinge_nodes:kind='hood' if 'Hood' in nodes[node-1]['hierarchy_path'] else 'trunk' if 'Trunk' in nodes[node-1]['hierarchy_path'] else 'door'
+        if node in mechanism_nodes:kind='hood' if 'Hood' in nodes[node-1]['hierarchy_path'] else 'trunk' if 'Trunk' in nodes[node-1]['hierarchy_path'] else 'door'
         condition=data(node,'partconditionscript')
         raw=source.conditions[key(group['partconditionscript'][0])]['state'] if condition else 0
         mass=data(node,'massScript')
@@ -190,15 +177,7 @@ def build_manifest(source, roots, reports, hashes):
             tank_record['openings'].append(opening['id'])
             if not value['canToggle'] and value['noAngle'] and not tank_record['no_fill_from'] and not bodies[body_for(node)-1]['dynamic']:
                 tank_record['role']='supply'
-    hinges=[]
-    for reader,node,(axis,minimum,maximum,input_axis) in hinge_sources:
-        value=source.read(reader);drag_node=pointer_node(reader,value['MouseT']) if value['MouseT']['m_PathID'] else node_of(reader)
-        hinges.append({'item':item_nodes[node],'source':source_id(reader),'anchor':anchor(node),'body':body_for(node),
-            'axis':[-axis[0],-axis[1],axis[2]],'closed_degrees':0.,'min_degrees':minimum,'max_degrees':maximum,
-            'drag_axis':list(convert_point(vector(value['MouseAxis']))),'drag_input_axis':input_axis,'drag_sensitivity':main['rotSens'],
-            'input_inverted':[bool(value['invX']),bool(value['invY'])],
-            'rotation_axes':[[-value[f'{input}to1X'],-value[f'{input}to1Y'],value[f'{input}to1Z']] for input in ('X','Y')],
-            'relative_drag':bool(value['relativeRot']),'drag_anchor':anchor(drag_node),'motor_degrees_per_second':None})
+    bind_mechanisms(source,mechanisms,nodes,components,items,item_nodes)
     seats=[]
     seat_hits={}
     for node,group in components.items():
@@ -367,13 +346,13 @@ def build_manifest(source, roots, reports, hashes):
     driveway_points=[point for height,points in wheel_floors if abs(height-driveway_height)<0.001 for point in points]
     driveway_bounds={'min':[min(p[i] for p in driveway_points) for i in range(3)],'max':[max(p[i] for p in driveway_points) for i in range(3)]}
     driveway_bounds['min'][1]=driveway_height;driveway_bounds['max'][1]=driveway_height
-    result={'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'hinges':hinges,'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'items':items,'openings':openings,'tanks':tanks,
+    result={'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'items':items,'openings':openings,'tanks':tanks,
         'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed']},'engine':engine_record,'player':player_record,'seats':seats,
         'vehicle':{'source':source_id(car_reader),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':[w['id'] for w in wheel_slots],'colliders':[c['id'] for c in colliders if c['body']==car_body],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')]},
         'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn,'car_pose':car_pose,'driveway_bounds':driveway_bounds,'driveway_height':driveway_height}}
     result['vehicle'].update(auto_shift_stop_speed=car['autoShiftStopSpeed'],auto_shift_min_rpm=car['autoShiftMinRpm'],auto_shift_max_rpm=car['autoShiftMaxRpm'])
     result['vehicle'].update(gear_free_run=[bool(gear['freeRun']) for gear in car['gears']],
         dont_ignite_with_throttle_in_automatic=bool(car['dontIgniteWithThorttleInAutomatic']),auto_move_min=0.3)
-    result['action_bindings']=recover_bindings(source,nodes,components,item_nodes,colliders,hinges,openings,seats)
+    result['action_bindings']=recover_bindings(source,nodes,components,item_nodes,colliders,mechanisms,openings,seats)
     result['vehicle']['colliders']=[c['id'] for c in colliders if c['body']==car_body and c['enabled']]
     return result

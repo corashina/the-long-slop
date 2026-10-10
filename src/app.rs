@@ -193,6 +193,7 @@ fn check_ready(
 
 fn clear_input(drive: &mut Drive) {
     drive.input.clear();
+    drive.runtime.area.interaction.cancel_input();
     drive.clock = StepClock::default();
     drive.previous = drive.current;
     drive.rendered = drive.current;

@@ -57,9 +57,9 @@ fn pause_freezes_complete_state() {
     let quantities = fluids(&runtime);
     let engine = runtime.engine.clone();
     let hinges: Vec<_> = reference
-        .hinges
+        .mechanisms
         .iter()
-        .map(|hinge| runtime.area.interaction.hinge_angle(hinge.item))
+        .map(|hinge| runtime.area.interaction.mechanisms.value(hinge.item, false))
         .collect();
     let input = FrameInput {
         held: keys::FORWARD | keys::IGNITION | keys::USE | keys::FILL,
@@ -76,8 +76,11 @@ fn pause_freezes_complete_state() {
     assert_eq!(runtime.engine.temperature, engine.temperature);
     assert_eq!(runtime.engine.ignition, engine.ignition);
     assert_eq!(runtime.trip_m, 0.0);
-    for (hinge, angle) in reference.hinges.iter().zip(hinges) {
-        assert_eq!(runtime.area.interaction.hinge_angle(hinge.item), angle);
+    for (hinge, angle) in reference.mechanisms.iter().zip(hinges) {
+        assert_eq!(
+            runtime.area.interaction.mechanisms.value(hinge.item, false),
+            angle
+        );
     }
 }
 #[test]
@@ -475,11 +478,10 @@ fn aim_at(
 #[test]
 fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
     use my_summer_slop::reference::{
-        AnchorId, BodyId, ColliderId, HingeRecord, ItemId, ItemKind, NodeId, Transform,
+        AnchorId, BodyId, ColliderId, ItemId, ItemKind, NodeId, Transform,
     };
     use my_summer_slop::vehicle::collider_builder;
     let mut reference = common::reference();
-    let source = reference.player.source.clone();
     let identity = Transform {
         translation: [0.0; 3],
         rotation: [0.0, 0.0, 0.0, 1.0],
@@ -517,24 +519,7 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
     anchor.body = BodyId(90);
     anchor.transform = identity;
     reference.anchors.push(anchor);
-    reference.hinges.push(HingeRecord {
-        item: ItemId(90),
-        source,
-        anchor: AnchorId(90),
-        body: BodyId(90),
-        axis: [0.0, 1.0, 0.0],
-        closed_degrees: 0.0,
-        min_degrees: 0.0,
-        max_degrees: 90.0,
-        drag_axis: [1.0, 0.0, 0.0],
-        drag_input_axis: 0,
-        drag_sensitivity: 1.0,
-        input_inverted: [false, false],
-        rotation_axes: [[0.0, 1.0, 0.0], [0.0; 3]],
-        relative_drag: false,
-        drag_anchor: AnchorId(90),
-        motor_degrees_per_second: None,
-    });
+    common::add_rotation(&mut reference, 90, 90, [0.0, 90.0]);
     let mut collider = reference.colliders[0].clone();
     collider.id = ColliderId(90);
     collider.node = NodeId(90);
@@ -588,7 +573,15 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
         &mut runtime.physics,
         1.0 / 60.0,
     );
-    assert_eq!(runtime.area.interaction.hinge_angle(ItemId(90)), Some(45.0));
+    assert_eq!(
+        runtime
+            .area
+            .interaction
+            .mechanisms
+            .rotation_degrees(ItemId(90))
+            .map(|v| v[0]),
+        Some(45.0)
+    );
     runtime.area.sync_compound(&mut runtime.physics);
     runtime.physics.refresh_queries();
     let expected =
@@ -939,17 +932,28 @@ fn production_garage_exits_and_reverse_to_road() {
     );
     for source in [64783, 64777] {
         let hinge = reference
-            .hinges
+            .mechanisms
             .iter()
             .find(|hinge| hinge.source.path_id == source)
             .expect("recovered garage exit leaf");
         open_source_hinge(&mut runtime, &reference, source);
-        let body = runtime.area.bodies[&hinge.body];
+        let body_id = reference
+            .bodies
+            .iter()
+            .find(|b| b.node == hinge.driven_nodes[0])
+            .unwrap()
+            .id;
+        let body = runtime.area.bodies[&body_id];
         assert!(runtime.physics.rapier().bodies[body].is_kinematic());
         assert!(!runtime.physics.rapier().bodies[body].colliders().is_empty());
         println!(
             "garage leaf {source} opened to {} degrees",
-            runtime.area.interaction.hinge_angle(hinge.item).unwrap()
+            runtime
+                .area
+                .interaction
+                .mechanisms
+                .value(hinge.item, false)
+                .unwrap()
         );
     }
     runtime.step(&reference, FrameInput::default());
@@ -1063,16 +1067,14 @@ fn open_source_hinge(
     source: i64,
 ) {
     let hinge = reference
-        .hinges
+        .mechanisms
         .iter()
         .find(|hinge| hinge.source.path_id == source)
         .unwrap();
     runtime.started = true;
     runtime.step(reference, FrameInput::default());
     aim_at(runtime, reference, hinge.item);
-    let span = (hinge.max_degrees - hinge.closed_degrees)
-        .abs()
-        .max((hinge.min_degrees - hinge.closed_degrees).abs());
+    let span = 1.0;
     for mouse in [[0.0, 50.0], [0.0, -50.0], [50.0, 0.0], [-50.0, 0.0]] {
         for step in 0..180 {
             runtime.step(
@@ -1084,8 +1086,13 @@ fn open_source_hinge(
                     ..FrameInput::default()
                 },
             );
-            if (runtime.area.interaction.hinge_angle(hinge.item).unwrap() - hinge.closed_degrees)
-                .abs()
+            if (runtime
+                .area
+                .interaction
+                .mechanisms
+                .value(hinge.item, false)
+                .unwrap())
+            .abs()
                 > span * 0.9
             {
                 runtime.step(reference, FrameInput::default());
@@ -1197,7 +1204,7 @@ fn close_source_hinge(
     source: i64,
 ) {
     let hinge = reference
-        .hinges
+        .mechanisms
         .iter()
         .find(|hinge| hinge.source.path_id == source)
         .unwrap();
@@ -1218,8 +1225,13 @@ fn close_source_hinge(
                     ..FrameInput::default()
                 },
             );
-            if (runtime.area.interaction.hinge_angle(hinge.item).unwrap() - hinge.closed_degrees)
-                .abs()
+            if (runtime
+                .area
+                .interaction
+                .mechanisms
+                .value(hinge.item, false)
+                .unwrap())
+            .abs()
                 < 0.1
             {
                 runtime.step(reference, FrameInput::default());
@@ -1329,4 +1341,131 @@ fn production_cap_surface_pickup_uses_source_owner() {
         },
     );
     assert_eq!(runtime.area.interaction.held(), Some(opening.tank));
+}
+
+#[test]
+fn mechanism_compound_pose_stays_exact_when_the_chassis_moves() {
+    use my_summer_slop::reference::BodyId;
+    let mut reference = common::reference();
+    let mut body = reference.bodies[1].clone();
+    body.id = BodyId(90);
+    body.parent_body = Some(reference.vehicle.body);
+    body.pose.translation = [0.82, 0.7, 0.0];
+    reference.bodies.push(body);
+    common::add_rotation(&mut reference, 1, 90, [-30.0, 0.0]);
+    let mut collider = reference.colliders[0].clone();
+    collider.id = my_summer_slop::reference::ColliderId(90);
+    collider.body = BodyId(90);
+    collider.node = reference.mechanisms[0].driven_nodes[0];
+    reference.colliders.push(collider);
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    let shape = runtime
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, c)| (c.user_data >> 64) as u32 == 90)
+        .unwrap()
+        .0;
+    let local = *runtime.physics.rapier().colliders[shape]
+        .position_wrt_parent()
+        .unwrap();
+    let chassis = runtime.physics.chassis_handle();
+    for x in [37.781, 37.78833, 37.789, 37.791] {
+        let mut pose = *runtime.physics.rapier().bodies[chassis].position();
+        pose.translation.x = x;
+        runtime.physics.rapier_mut().bodies[chassis].set_position(pose, false);
+        runtime
+            .area
+            .interaction
+            .sync_mechanisms(&mut runtime.physics);
+        runtime.area.sync_compound(&mut runtime.physics);
+        assert_eq!(
+            *runtime.physics.rapier().colliders[shape]
+                .position_wrt_parent()
+                .unwrap(),
+            local,
+            "idle mechanism must not rewrite chassis collider offsets"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires installed reference export"]
+fn production_mechanism_nodes_share_physics_and_render_pose() {
+    use my_summer_slop::reference::ReferenceManifest;
+    use my_summer_slop::vehicle::{collider_builder, to_rapier};
+    let reference =
+        ReferenceManifest::from_json(&std::fs::read("web/assets/reference/manifest.json").unwrap())
+            .unwrap();
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    for source in [
+        64811, 64916, 64797, 75324, 77425, 71545, 71291, 66558, 73523, 67612, 70647, 79151, 74645,
+        76322,
+    ] {
+        let mechanism = reference
+            .mechanisms
+            .iter()
+            .find(|m| m.source.path_id == source)
+            .unwrap();
+        let view = runtime.area.player.view_pose(&runtime.physics);
+        runtime.area.interaction.mechanisms.step(
+            mechanism.item,
+            FrameInput {
+                held: keys::USE,
+                mouse: [25.0, 125.0],
+                ..Default::default()
+            },
+            view,
+            1.0 / 60.0,
+        );
+    }
+    runtime
+        .area
+        .interaction
+        .sync_mechanisms(&mut runtime.physics);
+    runtime.area.sync_compound(&mut runtime.physics);
+    runtime.physics.refresh_queries();
+    runtime.area.commit_poses(&runtime.physics, true);
+    for mechanism in &reference.mechanisms {
+        for node in &mechanism.driven_nodes {
+            let body = reference.bodies.iter().find(|b| b.node == *node).unwrap();
+            let pose = runtime
+                .area
+                .interaction
+                .mechanisms
+                .node_pose(*node)
+                .unwrap();
+            let physical =
+                runtime.physics.rapier().bodies[runtime.area.bodies[&body.id]].position();
+            assert_eq!(to_rapier(pose), *physical);
+            let visual = runtime
+                .area
+                .render_poses
+                .iter()
+                .find(|(id, _, _)| *id == body.id)
+                .unwrap()
+                .2;
+            assert_eq!(visual, pose);
+            for c in reference.colliders.iter().filter(|c| c.body == body.id) {
+                let actual = runtime
+                    .physics
+                    .rapier()
+                    .colliders
+                    .iter()
+                    .find(|(_, s)| (s.user_data >> 64) as u32 == c.id.0)
+                    .unwrap()
+                    .1
+                    .position();
+                let local = *collider_builder(&c.geometry).unwrap().build().position();
+                let expected = to_rapier(pose) * local;
+                assert!(
+                    (actual.translation - expected.translation).length() < 0.0001,
+                    "source collider {}",
+                    c.source.path_id
+                );
+                assert!(actual.rotation.dot(expected.rotation).abs() > 0.99999);
+            }
+        }
+    }
 }
