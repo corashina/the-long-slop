@@ -17,7 +17,8 @@ The approved garage spawn takes precedence over the original bedroom spawn.
 
 The build includes walking, first person look, crouching, jumping, seating, carrying, and aimed use.
 Preparation includes doors, fluid caps, filling, spilling, ignition, and wheel assembly.
-It retains the road, stations, chase camera, pause, recovery, and restart.
+The road and terrain follow the source generator: seed, noise, road path, biomes, and power poles.
+Placeholder stations sit beside the road. The build retains the chase camera, pause, recovery, and restart.
 Recovery preserves state. Restart restores the garage.
 
 Survival, weapons, other vehicles, multiplayer, saves, audio, and deployment remain outside this stage.

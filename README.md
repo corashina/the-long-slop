@@ -59,7 +59,7 @@ Its capacities are 39 L fuel, 5 L oil, and 5 L coolant.
 
 Focus loss pauses play and clears input. Resume captures the mouse again.
 Recovery preserves fluids, parts, condition, and trip distance.
-An empty fuel tank moves recovery to a station.
+An empty fuel tank moves recovery to a station. Other recovery moves the car to the nearest road point.
 Restart restores the garage, supplies, car, origin, and trip distance.
 Close the driver door before reversing through the garage exit.
 
@@ -68,6 +68,7 @@ Close the driver door before reversing through the garage exit.
 Read [the approved scope](docs/superpowers/specs/2026-10-09-garage-start-design.md) and [verification](docs/verification.md).
 Imported layout and recovered rules do not establish identical Unity physics or full-game parity.
 Unity shader effects, live mirror reflections, and audio are not reproduced.
+Terrain uses the source sand texture only. Biome blending and distant terrain are not reproduced.
 The final browser walking route was skipped at the user's request. It remains unverified.
 The build has no survival system, save system, multiplayer, or public deployment.
 

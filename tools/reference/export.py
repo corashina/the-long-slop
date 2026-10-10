@@ -26,6 +26,7 @@ def export_reference(steam_root: Path, output: Path) -> None:
     from .manifest import build_manifest
     from .conditions import prepare_conditions
     from .visibility import recover_camera_visibility
+    from .world import export_world
     if output.resolve().is_relative_to(steam_root.resolve()):
         raise ValueError('Keep generated files outside the Steam installation')
     validate_build(steam_root)
@@ -69,6 +70,8 @@ def export_reference(steam_root: Path, output: Path) -> None:
         digest=hashlib.file_digest(path.open('rb'),'sha256').hexdigest()
         hashes.append({'file':str(path.relative_to(data_root)).replace('\\','/'),'sha256':digest})
     manifest=build_manifest(source,roots,report,hashes)
+    manifest['world']=export_world(source,output/'world.gltf')
+    print(f'Exported world: {len(manifest["world"]["road"]["biomes"])} road biomes',flush=True)
     parameters['controls']={
         'source':{'file':'level0','path_id':16865},
         'defaults':{'object_move':manifest['player']['obj_move_sensitivity'],'object_rotation':manifest['player']['obj_rotation_sensitivity'],

@@ -6,6 +6,8 @@ use std::{
     fmt,
 };
 
+pub mod world;
+
 pub const APP_ID: u32 = 1_017_180;
 pub const BUILD_ID: u32 = 11_140_890;
 
@@ -524,6 +526,7 @@ pub struct ReferenceManifest {
     pub seats: Vec<SeatReference>,
     pub vehicle: VehicleReference,
     pub area: StartingAreaReference,
+    pub world: world::WorldReference,
 }
 
 #[derive(Debug)]
@@ -535,7 +538,7 @@ impl fmt::Display for ReferenceError {
 }
 impl std::error::Error for ReferenceError {}
 
-fn require(ok: bool, field: &str) -> Result<(), ReferenceError> {
+pub(crate) fn require(ok: bool, field: &str) -> Result<(), ReferenceError> {
     if ok {
         Ok(())
     } else {
@@ -562,7 +565,7 @@ fn ids<T: Eq + std::hash::Hash>(
     }
     Ok(result)
 }
-fn hash(value: &str) -> bool {
+pub(crate) fn hash(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
@@ -1221,6 +1224,7 @@ impl ReferenceManifest {
             )?;
         }
         require(a.driveway_height.is_finite(), "driveway height")?;
+        self.world.validate()?;
         Ok(())
     }
 }

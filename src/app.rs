@@ -3,7 +3,7 @@ use crate::presentation::{
     self,
     camera::{CameraMode, DriveCamera},
     reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
-    world::{ChunkVisual, WorldVisuals},
+    world::{WorldVisual, WorldVisuals},
 };
 use crate::reference::{ItemId, ItemKind, ReferenceManifest};
 use crate::simulation::{FrameInput, StepClock, keys};
@@ -101,7 +101,7 @@ fn setup(
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
 ) {
-    let mut visuals = WorldVisuals::new(&mut meshes, &mut materials);
+    let mut visuals = WorldVisuals::new(&server, &reference.0.world, &mut meshes, &mut materials);
     visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
     commands.insert_resource(visuals);
     presentation::reference::spawn(&mut commands, &server, &reference.0);
@@ -144,6 +144,7 @@ fn check_ready(
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
     mut visuals: ResMut<ReferenceVisuals>,
+    world: Res<WorldVisuals>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
     mut frames: Local<u8>,
@@ -151,23 +152,31 @@ fn check_ready(
     if drive.ready || visuals.failed {
         return;
     }
-    for (path, handle) in &visuals.handles {
-        let Some((load, _, recursive)) = server.get_load_states(handle.id()) else {
+    let assets = visuals
+        .handles
+        .iter()
+        .map(|(path, handle)| (path, handle.id().untyped()))
+        .chain([(&reference.0.world.asset.path, world.asset.id().untyped())]);
+    let mut failure = None;
+    for (path, id) in assets {
+        let Some((load, _, recursive)) = server.get_load_states(id) else {
             return;
         };
         if let LoadState::Failed(error) = load {
-            game_failure(&format!("Cannot load {path}: {error}"));
-            visuals.failed = true;
+            failure = Some(format!("Cannot load {path}: {error}"));
+        } else if let RecursiveDependencyLoadState::Failed(error) = recursive {
+            failure = Some(format!("Cannot load dependencies for {path}: {error}"));
+        } else if !server.is_loaded_with_dependencies(id) {
             return;
         }
-        if let RecursiveDependencyLoadState::Failed(error) = recursive {
-            game_failure(&format!("Cannot load dependencies for {path}: {error}"));
-            visuals.failed = true;
-            return;
+        if failure.is_some() {
+            break;
         }
-        if !server.is_loaded_with_dependencies(handle.id()) {
-            return;
-        }
+    }
+    if let Some(failure) = failure {
+        game_failure(&failure);
+        visuals.failed = true;
+        return;
     }
     match presentation::reference::bind(
         &mut commands,
@@ -279,11 +288,11 @@ fn sync_world(
     mut visuals: ResMut<WorldVisuals>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut chunks: Query<(&ChunkVisual, &mut Transform)>,
+    mut visible: Query<(&WorldVisual, &mut Transform)>,
 ) {
     visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
-    for (chunk, mut transform) in &mut chunks {
-        let translation = Vec3::from_array(drive.runtime.stream.origin.local(chunk.0));
+    for (anchor, mut transform) in &mut visible {
+        let translation = Vec3::from_array(drive.runtime.stream.origin.local(anchor.0));
         if transform.translation != translation {
             transform.translation = translation;
         }
@@ -340,7 +349,7 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
         position[2],
         contacts,
         drive.frame_steps,
-        runtime.stream.chunks().count() as u32,
+        runtime.stream.tiles().count() as u32,
         runtime.physics.collider_count() as u32,
         absolute[0],
         absolute[1],
@@ -350,7 +359,6 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
         origin[2],
         runtime.rebases,
         runtime.trip_m,
-        runtime.stream.lateral_band() as f64,
         fuel,
         runtime.paused,
         runtime.started,
