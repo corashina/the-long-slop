@@ -4,7 +4,7 @@ use crate::player::PlayerState;
 use crate::reference::{BodyId, ItemId, PlayerReference, PushReference, ReferenceManifest};
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, to_rapier};
-use rapier3d::math::{Pose, Vector};
+use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{GenericJointBuilder, ImpulseJointHandle, JointAxesMask, RigidBodyHandle};
 use std::collections::HashMap;
 
@@ -18,6 +18,7 @@ struct Grip {
 pub struct PushState {
     rules: HashMap<ItemId, PushReference>,
     player: PlayerReference,
+    steering_angle: f32,
     grip: Option<Grip>,
     cancelled: bool,
     steer: Option<f32>,
@@ -32,6 +33,7 @@ impl PushState {
                 .map(|r| (r.owner, r.clone()))
                 .collect(),
             player: reference.player.clone(),
+            steering_angle: reference.vehicle.max_steer_degrees.to_radians(),
             grip: None,
             cancelled: false,
             steer: None,
@@ -142,7 +144,8 @@ impl PushState {
         };
         if target.slot.is_some()
             || player.seat().is_some()
-            || (player.grounded()
+            || (self.grip.is_none()
+                && player.grounded()
                 && player.support_body() == Some(body_handle)
                 && !rule.push_even_if_same_parent)
             || !target.point.iter().all(|v| v.is_finite())
@@ -170,9 +173,10 @@ impl PushState {
                     position: grip_rule.local_pose.translation,
                     rotation: grip_rule.local_pose.rotation,
                 });
-            if !player.grounded()
-                || grip_rule.in_use
-                || player.support_body() == Some(body_handle)
+            if (self.grip.is_none()
+                && (!player.grounded()
+                    || grip_rule.in_use
+                    || player.support_body() == Some(body_handle)))
                 || position.distance_squared(grip_pose.translation)
                     > self.player.grip_distance.powi(2)
                 || self
@@ -217,12 +221,11 @@ impl PushState {
                 ((input.held & keys::LEFT != 0) as u8 as f32)
                     - ((input.held & keys::RIGHT != 0) as u8 as f32),
             );
-            let x = ((input.held & keys::RIGHT != 0) as u8 as f32)
-                - ((input.held & keys::LEFT != 0) as u8 as f32);
-            let z = ((input.held & keys::BACK != 0) as u8 as f32)
-                - ((input.held & keys::FORWARD != 0) as u8 as f32);
-            let direction = to_rapier(player.body_pose(physics)).rotation
-                * Vector::new(x, 0.0, z).normalize_or_zero();
+            let forward = ((input.held & keys::FORWARD != 0) as u8 as f32)
+                - ((input.held & keys::BACK != 0) as u8 as f32);
+            let direction = Rotation::from_rotation_y(self.steer.unwrap() * self.steering_angle)
+                * (car_pose.rotation * -Vector::Z)
+                * forward;
             let up = car_pose.rotation * Vector::Y;
             let projected = (direction - up * direction.dot(up)).normalize_or_zero();
             physics.rapier_mut().bodies[body_handle].apply_impulse_at_point(

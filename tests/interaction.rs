@@ -2690,3 +2690,118 @@ fn pickup_surface_preempts_root_push_in_shared_resolver() {
     assert_eq!(aim.grab_target.map(|target| target.item), Some(ItemId(1)));
     assert_eq!(aim.push_target, None);
 }
+
+#[test]
+fn grip_forward_force_uses_car_direction_after_look_change() {
+    let (mut interaction, mut items, mut physics, mut player, target) = grip_fixture();
+    let aim = my_summer_slop::interaction::ResolvedAim {
+        push_target: Some(target),
+        ..Default::default()
+    };
+    interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        aim,
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    player.step(
+        FrameInput {
+            mouse: [90.0, 0.0],
+            ..Default::default()
+        },
+        &mut physics,
+        1.0 / 60.0,
+    );
+    let chassis = physics.chassis_handle();
+    let r = common::reference();
+    for keys in [keys::FORWARD, keys::FORWARD | keys::LEFT, keys::BACK] {
+        let before = physics.rapier().bodies[chassis].linvel();
+        let steer = if keys & keys::LEFT != 0 { 1.0 } else { 0.0 };
+        let sign = if keys & keys::BACK != 0 { -1.0 } else { 1.0 };
+        let direction = Rotation::from_rotation_y(steer * r.vehicle.max_steer_degrees.to_radians())
+            * (physics.rapier().bodies[chassis].position().rotation * -Vector::Z)
+            * sign;
+        let up = physics.rapier().bodies[chassis].position().rotation * Vector::Y;
+        let expected = (direction - up * direction.dot(up)).normalize_or_zero()
+            * r.player.grip_speed
+            * r.player.grip_force
+            * r.player.source_force_interval
+            / physics.rapier().bodies[chassis].mass();
+        interaction.step(
+            input(keys, 0),
+            my_summer_slop::interaction::ResolvedAim::default(),
+            &mut player,
+            &mut items,
+            &mut physics,
+            1.0 / 60.0,
+        );
+        let delta = physics.rapier().bodies[chassis].linvel() - before;
+        assert!(
+            (delta - expected).length() < 1e-5,
+            "actual {delta:?}, expected {expected:?}"
+        );
+    }
+}
+
+#[test]
+fn grip_steering_without_forward_or_backward_applies_no_push() {
+    let (mut interaction, mut items, mut physics, mut player, target) = grip_fixture();
+    let chassis = physics.chassis_handle();
+    let before = physics.rapier().bodies[chassis].linvel();
+    interaction.step(
+        input(keys::GRAB | keys::LEFT, keys::GRAB),
+        my_summer_slop::interaction::ResolvedAim {
+            push_target: Some(target),
+            ..Default::default()
+        },
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert!(interaction.push_gripping());
+    assert_eq!(interaction.push_steering(), Some(1.0));
+    assert_eq!(physics.rapier().bodies[chassis].linvel(), before);
+}
+
+#[test]
+fn grip_jump_retains_joint_and_dynamic_body() {
+    let (mut interaction, mut items, mut physics, mut player, target) = grip_fixture();
+    interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        my_summer_slop::interaction::ResolvedAim {
+            push_target: Some(target),
+            ..Default::default()
+        },
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    player.step(input(keys::SPACE, keys::SPACE), &mut physics, 1.0 / 60.0);
+    assert!(!player.grounded());
+    assert!(physics.rapier().bodies[player.body_handle()].linvel().y > 0.0);
+    interaction.step(
+        FrameInput::default(),
+        my_summer_slop::interaction::ResolvedAim::default(),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert!(interaction.push_gripping());
+    assert_eq!(physics.rapier().impulse_joints.len(), 1);
+    assert!(physics.rapier().bodies[player.body_handle()].is_dynamic());
+    physics.step_physics();
+    interaction.step(
+        FrameInput::default(),
+        my_summer_slop::interaction::ResolvedAim::default(),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert!(interaction.push_gripping());
+}
