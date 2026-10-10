@@ -837,8 +837,10 @@ impl GarageRuntime {
         let drive = DriveInput {
             accelerate: driving && input.held & keys::FORWARD != 0,
             brake_reverse: driving && input.held & keys::BACK != 0,
-            steer: ((driving && input.held & keys::LEFT != 0) as u8 as f32)
-                - ((driving && input.held & keys::RIGHT != 0) as u8 as f32),
+            steer: self.area.interaction.push_steering().unwrap_or(
+                ((driving && input.held & keys::LEFT != 0) as u8 as f32)
+                    - ((driving && input.held & keys::RIGHT != 0) as u8 as f32),
+            ),
             handbrake: self.handbrake,
         };
         let drive_count = self.physics.driven_wheel_count();

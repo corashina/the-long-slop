@@ -3,6 +3,7 @@ pub mod items;
 pub mod lighting;
 pub mod mechanisms;
 pub mod parts;
+pub mod push;
 pub mod targets;
 pub mod wheels;
 pub use targets::{InteractionBlock, ResolvedAim};
@@ -41,6 +42,8 @@ pub enum SlotTarget {
 pub enum InteractionAction {
     Pickup(ItemId),
     Drop(ItemId),
+    Throw(ItemId),
+    Push(ItemId),
     Cap(OpeningId),
     Mechanism(ItemId),
     Seat(SeatId),
@@ -117,6 +120,7 @@ pub struct InteractionState {
     openings: Vec<OpeningState>,
     seats: Vec<SeatState>,
     carry: carry::CarryState,
+    push: push::PushState,
     player_body: Option<RigidBodyHandle>,
     reach: f32,
     action_masks: ActionMasks,
@@ -246,6 +250,7 @@ impl InteractionState {
             openings,
             seats,
             carry: carry::CarryState::new(reference)?,
+            push: push::PushState::new(reference),
             player_body: None,
             reach: reference.player.aim_reach,
             action_masks: reference.player.action_masks,
@@ -352,7 +357,18 @@ impl InteractionState {
     pub fn dragging_mechanism(&self) -> Option<ItemId> {
         self.latched_mechanism.map(|(item, _, _, _)| item)
     }
+    pub fn throw_charge(&self) -> f32 {
+        self.carry.throw_charge()
+    }
+    pub fn push_steering(&self) -> Option<f32> {
+        self.push.steering()
+    }
+    pub fn push_gripping(&self) -> bool {
+        self.push.gripping()
+    }
     pub fn cancel_input(&mut self) {
+        self.carry.cancel_input();
+        self.push.cancel_input();
         self.latched_mechanism = None;
         self.use_consumed = false;
         self.tuning_opening = None;
@@ -392,9 +408,11 @@ impl InteractionState {
         if !dt.is_finite() || dt <= 0.0 {
             return None;
         }
+        let acquisition_release = self.carry.acquisition_held();
         self.carry.release_acquisition(input);
+        let reach = self.reach;
         let valid = |target: AimTarget| {
-            target.distance.is_finite() && target.distance >= 0.0 && target.distance <= self.reach
+            target.distance.is_finite() && target.distance >= 0.0 && target.distance <= reach
         };
         let target = aim.use_target.filter(|target| valid(*target));
         let grab_target = aim.grab_target.filter(|target| valid(*target));
@@ -527,15 +545,25 @@ impl InteractionState {
             }
         }
 
+        let grip_release = self.push.gripping() && input.pressed & keys::GRAB != 0;
+        if grip_release {
+            self.push.stop(player, physics);
+        }
+        let blocked_install = self.wheel_installation_block(&aim).is_some()
+            || (self.held().is_some() && installation_target.is_some_and(|target| {
+                matches!(target.slot, Some(SlotTarget::Part(slot)) if self.parts.can_install(self.held().unwrap(), slot, items).is_err())
+            }));
         if input.pressed & keys::GRAB != 0
             && !self.carry.acquisition_held()
-            && self.wheel_installation_block(&aim).is_none()
+            && !blocked_install
+            && !grip_release
         {
             if let Some(held) = self.held()
                 && let Some(slot) = installation_target.and_then(|target| target.slot)
             {
                 match slot {
                     SlotTarget::Wheel(slot) => {
+                        self.carry.cancel_input();
                         action = Some(InteractionAction::WheelInstall {
                             item: held,
                             target: slot,
@@ -596,9 +624,8 @@ impl InteractionState {
                 {
                     action = Some(InteractionAction::WheelRemove(target.item));
                 }
-            } else if let Some(item) = self.drop_held(items, physics) {
-                action = Some(InteractionAction::Drop(item));
-            } else if let Some(target) = grab_target
+            } else if self.held().is_none()
+                && let Some(target) = grab_target
                 && target.slot.is_none()
                 && self
                     .carry
@@ -606,6 +633,44 @@ impl InteractionState {
                     .is_ok()
             {
                 action = Some(InteractionAction::Pickup(target.item));
+            }
+        }
+        if blocked_install && (input.held | input.pressed) & keys::GRAB != 0 {
+            self.carry.cancel_input();
+        }
+        let push_target = aim.push_target.filter(|target| valid(*target));
+        let pushing = if (action.is_none() || self.push.gripping())
+            && self.held().is_none()
+            && !blocked_install
+            && !grip_release
+        {
+            self.push
+                .step(input, push_target, &self.bodies, player, physics, dt)
+        } else {
+            self.push.stop(player, physics);
+            None
+        };
+        if action.is_none()
+            && let Some(item) = pushing
+        {
+            action = Some(InteractionAction::Push(item));
+        }
+        if action.is_none() && !blocked_install && !acquisition_release && self.held().is_some() {
+            if input.pressed & keys::GRAB != 0 {
+                self.carry.begin_throw();
+            }
+            if input.held & keys::GRAB != 0 {
+                self.carry.charge_throw(dt);
+            }
+            if input.released & keys::GRAB != 0 {
+                let throwing = self.carry.throw_charge() > self.carry.reference_throw_minimum();
+                if let Some(item) = self.carry.release_throw(player, items, physics) {
+                    action = Some(if throwing {
+                        InteractionAction::Throw(item)
+                    } else {
+                        InteractionAction::Drop(item)
+                    });
+                }
             }
         }
         if input.pressed & keys::ASSEMBLE != 0

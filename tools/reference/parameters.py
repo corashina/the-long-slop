@@ -8,7 +8,7 @@ REQUIRED_CLASSES = {
     'newRandomStuffSpawnScript','tosaveitemscript','radiatorscript',
     'coolantTankscript','usablescript','partslotscript','partscript','wheelscript','pickupable','electronicsscript',
     'wheelgraphicsscript','dataonmountscript',
-    'layerScript','pushablescript',
+    'layerScript','pushablescript','pushgripable',
 }
 
 
@@ -34,6 +34,8 @@ def recover_parameters(env, roots) -> dict:
     for file,path_id in [('level1',80125),('level1',64896),('level1',64898),('level1',64919)]:
         reader = source.get(file,path_id)
         records[f'{file}:{path_id}'] = {'source':source_id(reader),'class':source.class_name(reader),'fields':source.read(reader)}
+    time=source.get('globalgamemanagers',8)
+    records['globalgamemanagers:8']={'source':source_id(time),'class':time.type.name,'fields':source.read(time)}
     for path_id,capacity in [(154417,39.),(138629,5.),(144880,5.)]:
         record = records[f'sharedassets1.assets:{path_id}']['fields']
         if record['F']['maxC'] != capacity:

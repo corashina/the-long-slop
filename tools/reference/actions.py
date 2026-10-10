@@ -132,3 +132,41 @@ def recover_pickup(source, reader):
         'recenter_position': convert_point(vector(fields['recenterPos'])),
         'use_recenter_rotation': bool(fields['useRecenterRot']),
         'recenter_rotation': convert_rotation(rotation), 'recenter_distance': fields['recenterDist']}
+
+
+def recover_pushables(source, nodes, components, item_nodes, colliders, bodies, mask):
+    from .source import source_id
+    from .collision import world_pose, bake_points, quaternion_product
+    records = []
+    by_source = {(n['source']['file'], n['source']['path_id']): n['id'] for n in nodes}
+    for node, group in components.items():
+        if not nodes[node - 1]['active']:
+            continue
+        for reader in group.get('pushablescript', []):
+            fields = source.read(reader)
+            if not fields['m_Enabled']:
+                continue
+            body = next(b for b in bodies if b['node'] == node)
+            record = {'source': source_id(reader), 'owner': item_nodes[node], 'body': body['id'],
+                'mask': mask, 'modifier': fields['modifier'], 'only_projected': bool(fields['onlyProjected']),
+                'both': bool(fields['both']), 'push_even_if_same_parent': bool(fields['pushEvenIfSameParent']), 'grip': None}
+            for grip_node, grip_group in components.items():
+                for grip_reader in grip_group.get('pushgripable', []):
+                    if not nodes[grip_node - 1]['active']:
+                        continue
+                    grip = source.read(grip_reader)
+                    car = source.resolve(grip_reader, grip['car'])
+                    car_go = source.resolve(car, source.read(car)['m_GameObject'])
+                    if by_source[key(source.transform_for(car_go))] != node:
+                        continue
+                    if record['grip'] is not None:
+                        raise ValueError('Multiple selected push grips')
+                    go = source.resolve(grip_reader, grip['m_GameObject'])
+                    pose = world_pose(source, source.transform_for(go))
+                    # Root-local pose uses the same scene transform conversion as other anchors.
+                    record['grip'] = {'source': source_id(grip_reader), 'node': grip_node,
+                        'hand_node': by_source[key(source.resolve(grip_reader, grip['HT']))],
+                        'colliders': [c['id'] for c in colliders if c['node'] == grip_node],
+                        'local_pose': {'translation': bake_points([(0.,0.,0.)], source.chain(source.transform_for(go)), body['pose'])[0], 'rotation': quaternion_product([-body['pose']['rotation'][0], -body['pose']['rotation'][1], -body['pose']['rotation'][2], body['pose']['rotation'][3]], pose['rotation']), 'scale': [1.,1.,1.]}, 'in_use': bool(grip['inuse'])}
+            records.append(record)
+    return records

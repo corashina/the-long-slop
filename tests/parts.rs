@@ -143,6 +143,27 @@ fn wrong_or_occupied_slot_keeps_held_part_and_contents() {
         &mut g.physics,
         0.02,
     );
+    for input in [
+        FrameInput {
+            held: keys::GRAB,
+            ..Default::default()
+        },
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+    ] {
+        g.area.interaction.step(
+            input,
+            ResolvedAim::default(),
+            &mut g.area.player,
+            &mut g.area.items,
+            &mut g.physics,
+            0.2,
+        );
+        assert_eq!(g.area.interaction.throw_charge(), 0.0);
+        assert_eq!(g.area.interaction.held(), Some(engine));
+    }
     let after = g.area.items.get(engine).unwrap();
     assert_eq!(g.area.interaction.held(), Some(engine));
     assert_eq!(after.location, before.location);

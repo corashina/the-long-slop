@@ -85,6 +85,7 @@ fn fixture_with(
     items.get_mut(ItemId(1)).unwrap().local_pose = pose([0.0; 3]);
     let mut interaction = InteractionState::new(&reference).unwrap();
     interaction.bind_body(BodyId(90), handle);
+    interaction.bind_body(reference.vehicle.body, physics.chassis_handle());
     let player = PlayerState::new(&reference.player, pose([10.0, 1.0, 0.0]), &mut physics);
     (interaction, items, physics, player)
 }
@@ -522,6 +523,17 @@ fn pickup_drop_preserves_identity_and_collision() {
     );
     interaction.step(
         input(keys::GRAB, keys::GRAB),
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    interaction.step(
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
         common::resolved(None),
         &mut player,
         &mut items,
@@ -1132,6 +1144,7 @@ fn hinge_clamps_and_moves_its_collider() {
     );
     let mut interaction = InteractionState::new(&reference).unwrap();
     interaction.bind_body(BodyId(90), handle);
+    interaction.bind_body(reference.vehicle.body, physics.chassis_handle());
     interaction.bind_body(BodyId(2), physics.chassis_handle());
     let mut items = ItemStore::new(&reference).unwrap();
     let mut player = PlayerState::new(&reference.player, pose([10.0, 1.0, 0.0]), &mut physics);
@@ -2136,4 +2149,544 @@ fn seated_window_drag_preserves_seat_and_driver_state() {
     assert_eq!(player.seat(), seat_before);
     assert_eq!(player.driving(), driving_before);
     assert_eq!(interaction.dragging_mechanism(), None);
+}
+
+#[test]
+fn pickup_release_does_not_drop_or_throw_acquired_item() {
+    let (mut interaction, mut items, mut physics, mut player) = fixture();
+    for frame in [
+        input(keys::GRAB, keys::GRAB),
+        input(keys::GRAB, 0),
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+    ] {
+        interaction.step(
+            frame,
+            common::resolved(target(1)),
+            &mut player,
+            &mut items,
+            &mut physics,
+            1.0 / 60.0,
+        );
+        assert_eq!(interaction.held(), Some(ItemId(1)));
+        assert_eq!(interaction.throw_charge(), 0.0);
+    }
+}
+
+#[test]
+fn held_f_charges_and_release_throws_once() {
+    let (mut interaction, mut items, mut physics, mut player) = fixture();
+    interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        common::resolved(target(1)),
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.01,
+    );
+    interaction.step(
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.01,
+    );
+    let body = items.get(ItemId(1)).unwrap().body.unwrap();
+    physics.rapier_mut().bodies[body].set_linvel(Vector::new(2.0, 0.0, 1.0), true);
+    interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.2,
+    );
+    assert_eq!(interaction.held(), Some(ItemId(1)));
+    interaction.step(
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.01,
+    );
+    assert_eq!(interaction.held(), None);
+    let velocity = physics.rapier().bodies[body].linvel();
+    assert_eq!(velocity.x, 2.0);
+    let mass = physics.rapier().bodies[body].mass();
+    assert!((velocity.z - (1.0 - 0.3 * 1000.0 * 0.02 / mass)).abs() < 0.0001);
+    interaction.step(
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.01,
+    );
+    assert_eq!(physics.rapier().bodies[body].linvel(), velocity);
+}
+
+#[test]
+fn source_push_wakes_and_applies_point_impulse() {
+    let (mut interaction, mut items, mut physics, mut player) = fixture();
+    let chassis = physics.chassis_handle();
+    physics.rapier_mut().bodies[chassis].sleep();
+    let aim = my_summer_slop::interaction::ResolvedAim {
+        push_target: target(5),
+        ..Default::default()
+    };
+    interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        aim,
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert!(!physics.rapier().bodies[chassis].is_sleeping());
+    assert!((physics.rapier().bodies[chassis].linvel().z + 500.0 / 60.0 * 0.02).abs() < 1e-5);
+    assert_eq!(physics.rapier().bodies[chassis].linvel().y, 0.0);
+    assert!(physics.rapier().bodies[chassis].angvel().length() > 0.0);
+    player.step(FrameInput::default(), &mut physics, 1.0 / 60.0);
+    assert!(player.body_pose(&physics).position[2] > 0.0);
+}
+
+#[test]
+fn throw_charge_rises_falls_stops_and_capture_cancels_release() {
+    let (mut interaction, mut items, mut physics, mut player) = fixture();
+    interaction
+        .pickup_item(
+            ItemId(1),
+            [10.0, 2.0, -1.0],
+            &player,
+            &mut items,
+            &mut physics,
+        )
+        .unwrap();
+    interaction.step(
+        FrameInput::default(),
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.02,
+    );
+    interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.02,
+    );
+    assert!((interaction.throw_charge() - 0.03).abs() < 1e-6);
+    for _ in 0..33 {
+        interaction.step(
+            input(keys::GRAB, 0),
+            common::resolved(None),
+            &mut player,
+            &mut items,
+            &mut physics,
+            0.02,
+        );
+    }
+    let maximum = interaction.throw_charge();
+    assert!((1.0..1.031).contains(&maximum));
+    interaction.step(
+        input(keys::GRAB, 0),
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.02,
+    );
+    assert!((interaction.throw_charge() - (maximum - 0.03)).abs() < 1e-6);
+    for _ in 0..40 {
+        interaction.step(
+            input(keys::GRAB, 0),
+            common::resolved(None),
+            &mut player,
+            &mut items,
+            &mut physics,
+            0.02,
+        );
+    }
+    let minimum = interaction.throw_charge();
+    assert!(minimum <= 0.2);
+    interaction.step(
+        input(keys::GRAB, 0),
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.02,
+    );
+    assert_eq!(interaction.throw_charge(), minimum);
+    interaction.cancel_input();
+    let body = items.get(ItemId(1)).unwrap().body.unwrap();
+    let velocity = physics.rapier().bodies[body].linvel();
+    interaction.step(
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.02,
+    );
+    assert_eq!(interaction.held(), Some(ItemId(1)));
+    assert_eq!(interaction.throw_charge(), 0.0);
+    assert_eq!(physics.rapier().bodies[body].linvel(), velocity);
+}
+
+fn grip_fixture() -> (
+    InteractionState,
+    ItemStore,
+    PhysicsWorld,
+    PlayerState,
+    AimTarget,
+) {
+    let (mut interaction, items, mut physics, mut player) = fixture_with(|reference| {
+        let node = reference.nodes[0].id;
+        reference.pushables[0].grip = Some(my_summer_slop::reference::PushGripReference {
+            source: reference.player.source.clone(),
+            node,
+            hand_node: node,
+            colliders: vec![my_summer_slop::reference::ColliderId(1)],
+            local_pose: my_summer_slop::reference::Transform {
+                translation: [10.0, 0.0, 0.0],
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: [1.0; 3],
+            },
+            in_use: false,
+        });
+    });
+    physics.insert_box([10.0, -0.5, 0.0], [20.0, 0.5, 20.0]);
+    for _ in 0..60 {
+        player.step(FrameInput::default(), &mut physics, 1.0 / 60.0);
+        physics.step_physics();
+    }
+    assert!(player.grounded());
+    let chassis = physics.chassis_handle();
+    let collider = physics.rapier_mut().insert_collider(
+        ColliderBuilder::ball(0.1)
+            .translation(Vector::new(10.0, 0.0, 0.0))
+            .sensor(true)
+            .user_data(1_u128 << 64),
+        Some(chassis),
+    );
+    interaction.bind_surface(
+        collider,
+        my_summer_slop::reference::ActionBinding {
+            collider: my_summer_slop::reference::ColliderId(1),
+            use_owner: None,
+            pickup_owner: None,
+            removal_owner: None,
+            push_owner: Some(ItemId(5)),
+        },
+    );
+    let aim = AimTarget {
+        collider,
+        item: ItemId(5),
+        distance: 1.0,
+        point: [10.0, 1.0, 0.0],
+        slot: None,
+    };
+    (interaction, items, physics, player, aim)
+}
+
+#[test]
+fn steering_grip_retains_release_and_look_away_then_next_press_releases() {
+    let (mut interaction, mut items, mut physics, mut player, target) = grip_fixture();
+    let aim = my_summer_slop::interaction::ResolvedAim {
+        push_target: Some(target),
+        ..Default::default()
+    };
+    interaction.step(
+        input(keys::GRAB | keys::FORWARD | keys::LEFT, keys::GRAB),
+        aim,
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert!(interaction.push_gripping());
+    assert_eq!(interaction.push_steering(), Some(1.0));
+    assert_eq!(physics.rapier().impulse_joints.len(), 1);
+    let joint = physics.rapier().impulse_joints.iter().next().unwrap().1;
+    assert_eq!(
+        joint.data.locked_axes,
+        rapier3d::prelude::JointAxesMask::LIN_X | rapier3d::prelude::JointAxesMask::LIN_Z
+    );
+    assert!(physics.rapier().bodies[physics.chassis_handle()].linvel().z < 0.0);
+    interaction.step(
+        FrameInput {
+            held: keys::FORWARD,
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        my_summer_slop::interaction::ResolvedAim::default(),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert!(interaction.push_gripping());
+    assert!(interaction.prompt(&aim, &items).contains("release grip"));
+    interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        aim,
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert!(!interaction.push_gripping());
+    assert!(physics.rapier().impulse_joints.is_empty());
+}
+
+#[test]
+fn steering_grip_distance_collider_and_capture_cancel() {
+    for cancel in 0..3 {
+        let (mut interaction, mut items, mut physics, mut player, target) = grip_fixture();
+        let aim = my_summer_slop::interaction::ResolvedAim {
+            push_target: Some(target),
+            ..Default::default()
+        };
+        interaction.step(
+            input(keys::GRAB, keys::GRAB),
+            aim,
+            &mut player,
+            &mut items,
+            &mut physics,
+            1.0 / 60.0,
+        );
+        assert!(interaction.push_gripping());
+        match cancel {
+            0 => {
+                let chassis = physics.chassis_handle();
+                let mut pose = *physics.rapier().bodies[chassis].position();
+                pose.translation.x += 2.0;
+                physics.rapier_mut().bodies[chassis].set_position(pose, true);
+            }
+            1 => physics.rapier_mut().colliders[target.collider].set_enabled(false),
+            _ => interaction.cancel_input(),
+        }
+        interaction.step(
+            FrameInput::default(),
+            my_summer_slop::interaction::ResolvedAim::default(),
+            &mut player,
+            &mut items,
+            &mut physics,
+            1.0 / 60.0,
+        );
+        assert!(!interaction.push_gripping());
+        assert!(physics.rapier().impulse_joints.is_empty());
+        assert!(physics.rapier().bodies[player.body_handle()].is_kinematic());
+    }
+}
+
+#[test]
+#[ignore = "requires installed source export"]
+fn source_push_wakes_car_without_bypassing_handbrake() {
+    let r =
+        ReferenceManifest::from_json(&std::fs::read("web/assets/reference/manifest.json").unwrap())
+            .unwrap();
+    let mut runtime = my_summer_slop::starting_area::GarageRuntime::new(&r).unwrap();
+    let push = &r.pushables[0];
+    let binding = r
+        .action_bindings
+        .iter()
+        .find(|b| {
+            b.push_owner == Some(push.owner)
+                && !push.grip.as_ref().unwrap().colliders.contains(&b.collider)
+                && !r
+                    .part_slots
+                    .iter()
+                    .any(|s| s.colliders.contains(&b.collider))
+        })
+        .unwrap();
+    let collider = runtime
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, c)| (c.user_data >> 64) as u32 == binding.collider.0)
+        .unwrap()
+        .0;
+    let point = runtime.physics.rapier().colliders[collider]
+        .position()
+        .translation
+        .to_array();
+    let target = AimTarget {
+        collider,
+        item: push.owner,
+        distance: 1.0,
+        point,
+        slot: None,
+    };
+    let chassis = runtime.physics.chassis_handle();
+    runtime.physics.rapier_mut().bodies[chassis].sleep();
+    assert!(runtime.handbrake);
+    runtime.area.interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        my_summer_slop::interaction::ResolvedAim {
+            push_target: Some(target),
+            ..Default::default()
+        },
+        &mut runtime.area.player,
+        &mut runtime.area.items,
+        &mut runtime.physics,
+        1.0 / 60.0,
+    );
+    assert!(!runtime.physics.rapier().bodies[chassis].is_sleeping());
+    assert!(runtime.handbrake);
+}
+
+#[test]
+fn steering_grip_moves_car_and_keeps_player_joint_across_physics_steps() {
+    let (mut interaction, mut items, mut physics, mut player, target) = grip_fixture();
+    let aim = my_summer_slop::interaction::ResolvedAim {
+        push_target: Some(target),
+        ..Default::default()
+    };
+    let chassis = physics.chassis_handle();
+    // The native chassis rests on a box. Real wheel contacts use the vehicle tire solver.
+    for (_, collider) in physics.rapier_mut().colliders.iter_mut() {
+        if collider.parent() == Some(chassis) {
+            collider.set_friction(0.0);
+        }
+    }
+    let before = physics.rapier().bodies[chassis].position().translation;
+    let local_anchor = physics.rapier().bodies[chassis].position().inverse()
+        * Vector::from_array(player.body_pose(&physics).position);
+    interaction.step(
+        input(keys::GRAB | keys::FORWARD, keys::GRAB),
+        aim,
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert!(physics.rapier().bodies[player.body_handle()].is_dynamic());
+    for _ in 0..60 {
+        let input = input(keys::FORWARD, 0);
+        interaction.step(
+            input,
+            my_summer_slop::interaction::ResolvedAim::default(),
+            &mut player,
+            &mut items,
+            &mut physics,
+            1.0 / 60.0,
+        );
+        player.step(input, &mut physics, 1.0 / 60.0);
+        physics.step_physics();
+        assert!(interaction.push_gripping());
+        let anchor = *physics.rapier().bodies[chassis].position() * local_anchor;
+        let position = Vector::from_array(player.body_pose(&physics).position);
+        assert!(Vector::new(anchor.x - position.x, 0.0, anchor.z - position.z).length() < 0.1);
+    }
+    assert!((physics.rapier().bodies[chassis].position().translation - before).length() > 0.02);
+    let position = player.body_pose(&physics).position;
+    interaction.cancel_input();
+    interaction.step(
+        FrameInput::default(),
+        my_summer_slop::interaction::ResolvedAim::default(),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert!(!interaction.push_gripping());
+    assert!(physics.rapier().bodies[player.body_handle()].is_kinematic());
+    assert_eq!(player.body_pose(&physics).position, position);
+    assert!(physics.rapier().impulse_joints.is_empty());
+    let before = player.body_pose(&physics).position;
+    player.step(input(keys::FORWARD, 0), &mut physics, 1.0 / 60.0);
+    physics.step_physics();
+    assert_ne!(player.body_pose(&physics).position, before);
+}
+
+#[test]
+fn steering_grip_requires_ground_and_ordinary_push_rejects_support_root() {
+    let (mut interaction, mut items, mut physics, mut player, grip_target) = grip_fixture();
+    player.step(input(keys::SPACE, keys::SPACE), &mut physics, 1.0 / 60.0);
+    assert!(!player.grounded());
+    interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        my_summer_slop::interaction::ResolvedAim {
+            push_target: Some(grip_target),
+            ..Default::default()
+        },
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert!(!interaction.push_gripping());
+    assert!(physics.rapier().impulse_joints.is_empty());
+    let (mut interaction, mut items, mut physics, _) = fixture();
+    let r = common::reference();
+    let mut player = PlayerState::new(
+        &r.player,
+        pose([0.0, 1.34 + r.player.standing_height * 0.5, 0.0]),
+        &mut physics,
+    );
+    for _ in 0..30 {
+        player.step(FrameInput::default(), &mut physics, 1.0 / 60.0);
+    }
+    assert!(player.grounded());
+    assert_eq!(player.support_body(), Some(physics.chassis_handle()));
+    let velocity = physics.rapier().bodies[physics.chassis_handle()].linvel();
+    let action = interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        my_summer_slop::interaction::ResolvedAim {
+            push_target: target(5),
+            ..Default::default()
+        },
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(action, None);
+    assert_eq!(
+        physics.rapier().bodies[physics.chassis_handle()].linvel(),
+        velocity
+    );
+}
+
+#[test]
+fn pickup_surface_preempts_root_push_in_shared_resolver() {
+    let (mut interaction, items, mut physics, _) = fixture();
+    let handle =
+        physics.rapier().bodies[items.get(ItemId(1)).unwrap().body.unwrap()].colliders()[0];
+    interaction.bind_surface(
+        handle,
+        my_summer_slop::reference::ActionBinding {
+            collider: my_summer_slop::reference::ColliderId(0),
+            use_owner: None,
+            pickup_owner: Some(ItemId(1)),
+            removal_owner: None,
+            push_owner: Some(ItemId(5)),
+        },
+    );
+    physics.refresh_queries();
+    let aim = interaction.resolve(&physics, pose([10.0, 2.0, 0.0]), &items);
+    assert_eq!(aim.grab_target.map(|target| target.item), Some(ItemId(1)));
+    assert_eq!(aim.push_target, None);
 }

@@ -460,3 +460,17 @@ fn rejects_shared_general_and_wheel_collider() {
     r.parts[0].colliders.push(r.wheel_parts[0].colliders[0]);
     assert!(r.validate().is_err());
 }
+
+#[test]
+fn rejects_invalid_push_owner_and_source_force_interval() {
+    let mut r = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    r.player.source_force_interval = 0.0;
+    assert!(r.validate().is_err());
+    let mut r = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    r.pushables[0].body = r.bodies[0].id;
+    assert!(r.validate().is_err());
+    let mut r = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    r.action_bindings[0].push_owner = Some(r.items[0].id);
+    r.pushables.clear();
+    assert!(r.validate().is_err());
+}

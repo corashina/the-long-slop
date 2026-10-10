@@ -29,6 +29,10 @@ pub struct CarryState {
     held: Option<HeldState>,
     anchor: Option<RigidBodyHandle>,
     acquisition_held: bool,
+    throw_charge: f32,
+    throwing: bool,
+    charge_falling: bool,
+    charge_stopped: bool,
 }
 
 impl CarryState {
@@ -50,7 +54,73 @@ impl CarryState {
             held: None,
             anchor: None,
             acquisition_held: false,
+            throw_charge: 0.0,
+            throwing: false,
+            charge_falling: false,
+            charge_stopped: false,
         })
+    }
+    pub(super) fn reference_throw_minimum(&self) -> f32 {
+        self.reference.throw_minimum
+    }
+    pub fn throw_charge(&self) -> f32 {
+        self.throw_charge
+    }
+    pub fn cancel_input(&mut self) {
+        self.throw_charge = 0.0;
+        self.throwing = false;
+        self.charge_falling = false;
+        self.charge_stopped = false;
+        self.acquisition_held = self.held.is_some();
+    }
+    pub(super) fn begin_throw(&mut self) {
+        if self.held.is_some() && !self.acquisition_held {
+            self.throwing = true;
+            self.throw_charge = 0.0;
+            self.charge_falling = false;
+            self.charge_stopped = false;
+        }
+    }
+    pub(super) fn charge_throw(&mut self, dt: f32) {
+        if !self.throwing || self.charge_stopped {
+            return;
+        }
+        let gain = self.reference.throw_gain * dt;
+        if self.charge_falling {
+            self.throw_charge -= gain;
+            if self.throw_charge <= self.reference.throw_minimum {
+                self.charge_stopped = true;
+            }
+        } else {
+            self.throw_charge += gain;
+            if self.throw_charge >= 1.0 {
+                self.charge_falling = true;
+            }
+        }
+    }
+    pub fn release_throw(
+        &mut self,
+        player: &PlayerState,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Option<ItemId> {
+        if !self.throwing {
+            return None;
+        }
+        let charge = self.throw_charge;
+        let body = self.body()?;
+        let direction = to_rapier(player.view_pose(physics)).rotation * -Vector::Z;
+        let item = self.drop(items, physics)?;
+        if charge > self.reference.throw_minimum {
+            physics.rapier_mut().bodies[body].apply_impulse(
+                direction
+                    * charge
+                    * self.reference.throw_multiplier
+                    * self.reference.source_force_interval,
+                true,
+            );
+        }
+        Some(item)
     }
     pub fn held(&self) -> Option<ItemId> {
         self.held.as_ref().map(|held| held.item)
@@ -80,6 +150,8 @@ impl CarryState {
             item.location = ItemLocation::World;
         }
         self.acquisition_held = false;
+        self.throwing = false;
+        self.throw_charge = 0.0;
         Some(held.item)
     }
     pub fn can_acquire(
@@ -151,7 +223,7 @@ impl CarryState {
             local_pose,
         });
         item.location = ItemLocation::Held;
-        self.acquisition_held = true;
+        self.cancel_input();
         Ok(())
     }
 

@@ -546,6 +546,30 @@ pub struct FluidRulesReference {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct PushGripReference {
+    pub source: SourceId,
+    pub node: NodeId,
+    pub hand_node: NodeId,
+    pub colliders: Vec<ColliderId>,
+    pub local_pose: Transform,
+    pub in_use: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PushReference {
+    pub source: SourceId,
+    pub owner: ItemId,
+    pub body: BodyId,
+    pub mask: u32,
+    pub modifier: f32,
+    pub only_projected: bool,
+    pub both: bool,
+    pub push_even_if_same_parent: bool,
+    pub grip: Option<PushGripReference>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PlayerReference {
     pub source: SourceId,
     pub capsule_source: SourceId,
@@ -576,6 +600,15 @@ pub struct PlayerReference {
     pub exit_steps_vertical: u32,
     pub exit_step_horizontal: f32,
     pub exit_steps_horizontal: u32,
+    pub source_force_interval: f32,
+    pub throw_minimum: f32,
+    pub throw_gain: f32,
+    pub throw_multiplier: f32,
+    pub push_force: f32,
+    pub airborne_push_force: f32,
+    pub grip_force: f32,
+    pub grip_speed: f32,
+    pub grip_distance: f32,
     pub carry_min_weight: f32,
     pub carry_max_weight: f32,
     pub carry_anchor_offset: [f32; 3],
@@ -747,6 +780,7 @@ pub struct ReferenceManifest {
     pub bodies: Vec<BodyRecord>,
     pub colliders: Vec<ColliderRecord>,
     pub action_bindings: Vec<ActionBinding>,
+    pub pushables: Vec<PushReference>,
     pub anchors: Vec<AnchorRecord>,
     pub mechanisms: Vec<MechanismReference>,
     pub lighting: LightingReference,
@@ -1633,6 +1667,69 @@ impl ReferenceManifest {
                 && p.exit_capsule_half_height > 0.0
                 && p.exit_capsule_radius > 0.0,
             "player parameters",
+        )?;
+        require(
+            finite(&[
+                p.source_force_interval,
+                p.throw_minimum,
+                p.throw_gain,
+                p.throw_multiplier,
+                p.push_force,
+                p.airborne_push_force,
+                p.grip_force,
+                p.grip_speed,
+                p.grip_distance,
+            ]) && p.source_force_interval > 0.0
+                && p.throw_minimum > 0.0
+                && p.throw_minimum < 1.0
+                && p.throw_gain > 0.0
+                && p.throw_multiplier > 0.0
+                && p.push_force > 0.0
+                && p.airborne_push_force > 0.0
+                && p.grip_force > 0.0
+                && p.grip_speed > 0.0
+                && p.grip_distance > 0.0,
+            "push and throw parameters",
+        )?;
+        let mut push_owners = HashSet::new();
+        for push in &self.pushables {
+            require(
+                item_ids.contains(&push.owner)
+                    && self
+                        .items
+                        .iter()
+                        .find(|item| item.id == push.owner)
+                        .is_some_and(|item| item.body == push.body)
+                    && self
+                        .bodies
+                        .iter()
+                        .find(|body| body.id == push.body)
+                        .is_some_and(|body| body.dynamic)
+                    && body_ids.contains(&push.body)
+                    && push_owners.insert(push.owner)
+                    && push.mask == p.action_masks.push_mask
+                    && push.modifier.is_finite()
+                    && push.modifier >= 0.0,
+                "push record",
+            )?;
+            if let Some(grip) = &push.grip {
+                require(
+                    node_ids.contains(&grip.node)
+                        && node_ids.contains(&grip.hand_node)
+                        && transform(&grip.local_pose)
+                        && !grip.colliders.is_empty()
+                        && grip.colliders.iter().all(|id| collider_ids.contains(id)),
+                    "push grip",
+                )?;
+            }
+        }
+        require(
+            self.action_bindings.iter().all(|binding| {
+                binding
+                    .push_owner
+                    .is_none_or(|owner| push_owners.contains(&owner))
+            }),
+            "push action owner",
         )?;
         let mut seat_hit_nodes = HashSet::new();
         for r in &self.seats {

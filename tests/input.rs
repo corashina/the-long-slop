@@ -83,3 +83,24 @@ fn carry_input_preserves_modes_and_consumes_recenter_once() {
         2
     );
 }
+
+#[test]
+fn f_release_edge_runs_once_across_catch_up_steps() {
+    let mut pending = FrameInput::default();
+    pending.merge(FrameInput {
+        held: keys::GRAB,
+        pressed: keys::GRAB,
+        ..Default::default()
+    });
+    pending.merge(FrameInput {
+        released: keys::GRAB,
+        ..Default::default()
+    });
+    let first = pending.take_step();
+    assert_eq!(first.pressed, keys::GRAB);
+    assert_eq!(first.released, keys::GRAB);
+    assert_eq!(first.held, 0);
+    for _ in 0..5 {
+        assert_eq!(pending.take_step(), FrameInput::default());
+    }
+}

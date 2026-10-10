@@ -185,6 +185,14 @@ impl InteractionState {
         if aim.installation_block.is_some() {
             aim.installation_target = None;
         }
+        if self.held().is_some()
+            || aim.use_target.is_some()
+            || aim.grab_target.is_some()
+            || aim.installation_target.is_some()
+            || aim.filling_target.is_some()
+        {
+            aim.push_target = None;
+        }
         aim
     }
 
@@ -269,7 +277,11 @@ impl InteractionState {
                                     matches!(item.location, ItemLocation::WheelSlot(_))
                                 }))
                     }),
-                QueryAction::Push => binding.and_then(|binding| binding.push_owner),
+                QueryAction::Push => binding.and_then(|binding| binding.push_owner).filter(|id| {
+                    self.push.supports(*id)
+                        && self.parts.slot_target(binding.unwrap().collider).is_none()
+                        && collider.user_data & SLOT_SENSOR_FLAG == 0
+                }),
                 QueryAction::Install
                     if self
                         .parts
@@ -341,6 +353,9 @@ impl InteractionState {
     }
 
     pub fn prompt(&self, aim: &ResolvedAim, items: &ItemStore) -> &'static str {
+        if self.push.gripping() {
+            return "WASD: push and steer · F: release grip";
+        }
         if let Some(block) = self.wheel_installation_block(aim) {
             return match block {
                 InteractionBlock::Covered => "Remove the cover first.",
@@ -407,6 +422,16 @@ impl InteractionState {
                 return "F: carry · X: split wheel";
             }
             return "F: carry";
+        }
+        if let Some(target) = aim.push_target {
+            if self
+                .collider_bindings
+                .get(&target.collider)
+                .is_some_and(|binding| self.push.is_grip(target.item, binding.collider))
+            {
+                return "F: grip · WASD: push and steer";
+            }
+            return "Hold F: push";
         }
         if aim.installation_target.is_some() {
             return "Carry a wheel. Aim here and press F.";

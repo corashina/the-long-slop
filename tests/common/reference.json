@@ -2404,7 +2404,16 @@
       "push_mask": 163841
     },
     "carry_min_weight": 2.0,
-    "carry_max_weight": 85.0
+    "carry_max_weight": 85.0,
+    "source_force_interval": 0.02,
+    "throw_minimum": 0.2,
+    "throw_gain": 1.5,
+    "throw_multiplier": 1000.0,
+    "push_force": 500.0,
+    "airborne_push_force": 2500.0,
+    "grip_force": 300.0,
+    "grip_speed": 10.0,
+    "grip_distance": 1.5
   },
   "seats": [
     {
@@ -2933,5 +2942,21 @@
     "home_electronics_threshold": 0.2
   },
   "parts": [],
-  "part_slots": []
+  "part_slots": [],
+  "pushables": [
+    {
+      "source": {
+        "file": "level1",
+        "path_id": 80125
+      },
+      "owner": 5,
+      "body": 2,
+      "mask": 163841,
+      "modifier": 1.0,
+      "only_projected": true,
+      "both": false,
+      "push_even_if_same_parent": false,
+      "grip": null
+    }
+  ]
 }

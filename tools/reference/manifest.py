@@ -3,7 +3,7 @@ import math
 from .source import key, source_id, vector
 from .gltf import GltfExporter, convert_point, convert_rotation, transform_point
 from .collision import world_pose, quaternion_product, bake_points, geometry
-from .actions import recover_masks, recover_bindings, recover_pickup
+from .actions import recover_masks, recover_bindings, recover_pickup, recover_pushables
 from .caps import opening_metadata
 from .mechanisms import recover_mechanisms, bind_mechanisms, recover_lighting
 from .visibility import recover_camera_visibility
@@ -299,6 +299,12 @@ def build_manifest(source, roots, reports, hashes):
     player_record['scroll_sensitivity']=scroll_definition['defValue']*(scroll_definition['valueMultipler'] if scroll_definition['valueMultipler'] else 1.)
     player_record['camera_culling_mask']=recover_camera_visibility(source)['normal_view_mask']
     player_record['action_masks']=recover_masks(player)
+    time_reader=source.get('globalgamemanagers',8)
+    if time_reader.type.name != 'TimeManager':raise ValueError('Source TimeManager differs')
+    player_record.update(source_force_interval=source.read(time_reader)['Fixed Timestep'],
+        throw_minimum=player['minThrowForce'],throw_gain=player['throwForceGain'],throw_multiplier=1000.,
+        push_force=main['pushForce'],airborne_push_force=main['selfNotGroundedPushForce'],
+        grip_force=player['pushgripForce'],grip_speed=player['FspeedM'],grip_distance=player['pushGripDistance'])
     player_record['get_out_layer_mask']=player['getOutLayer']['m_Bits']
     # fpscontroller.CanGetOut uses literal capsule endpoints and radius.
     player_record['exit_capsule_half_height']=.568
@@ -355,6 +361,7 @@ def build_manifest(source, roots, reports, hashes):
     result['vehicle'].update(auto_shift_stop_speed=car['autoShiftStopSpeed'],auto_shift_min_rpm=car['autoShiftMinRpm'],auto_shift_max_rpm=car['autoShiftMaxRpm'])
     result['vehicle'].update(gear_free_run=[bool(gear['freeRun']) for gear in car['gears']],
         dont_ignite_with_throttle_in_automatic=bool(car['dontIgniteWithThorttleInAutomatic']),auto_move_min=0.3)
+    result['pushables']=recover_pushables(source,nodes,components,item_nodes,colliders,bodies,player_record['action_masks']['push_mask'])
     result['action_bindings']=recover_bindings(source,nodes,components,item_nodes,colliders,mechanisms,openings,seats)
     result['vehicle']['colliders']=[c['id'] for c in colliders if c['body']==car_body and c['enabled']]
     return result
