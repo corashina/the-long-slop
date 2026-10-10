@@ -268,6 +268,18 @@ impl RenderingRecord {
                             &format!("{label}: {field}"),
                         )?;
                     }
+                    if keywords.contains("_EMISSION") {
+                        require(
+                            material.properties.colors.contains_key("_EmissionColor"),
+                            &format!("{label}: _EmissionColor"),
+                        )?;
+                    }
+                    if keywords.contains("_PARALLAXMAP") {
+                        require(
+                            material.properties.floats.contains_key("_Parallax"),
+                            &format!("{label}: _Parallax"),
+                        )?;
+                    }
                     let alpha = if keywords.contains("_ALPHAPREMULTIPLY_ON") {
                         AlphaMode::Premultiply
                     } else if keywords.contains("_ALPHABLEND_ON") {

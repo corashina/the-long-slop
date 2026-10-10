@@ -45,6 +45,82 @@ fn rejects_missing_mips_and_invalid_dimensions() {
     }
 }
 
+fn standard_fixture(
+    keyword: &str,
+    slot: &str,
+    default: my_summer_slop::reference::TextureDefault,
+) -> ReferenceManifest {
+    use my_summer_slop::reference::{ShaderFamily, TextureDefault};
+    let mut manifest =
+        ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    let material = &mut manifest.rendering.materials[1];
+    material.shader_family = ShaderFamily::Standard;
+    material.keywords = vec![keyword.to_owned()];
+    material.properties.floats = [
+        "_Cutoff",
+        "_Glossiness",
+        "_GlossMapScale",
+        "_Metallic",
+        "_BumpScale",
+        "_OcclusionStrength",
+        "_DetailNormalMapScale",
+        "_UVSec",
+        "_SrcBlend",
+        "_DstBlend",
+        "_ZWrite",
+    ]
+    .into_iter()
+    .map(|field| (field.to_owned(), 0.))
+    .collect();
+    material
+        .properties
+        .defaults
+        .insert("_MainTex".to_owned(), TextureDefault::White);
+    material
+        .properties
+        .defaults
+        .insert("_OcclusionMap".to_owned(), TextureDefault::White);
+    material
+        .properties
+        .defaults
+        .insert(slot.to_owned(), default);
+    manifest
+}
+
+#[test]
+fn rejects_missing_emission_color() {
+    use my_summer_slop::reference::TextureDefault;
+    let mut manifest = standard_fixture("_EMISSION", "_EmissionMap", TextureDefault::White);
+    manifest.rendering.materials[1]
+        .properties
+        .colors
+        .insert("_EmissionColor".to_owned(), [1.; 4]);
+    assert!(manifest.validate().is_ok());
+    manifest.rendering.materials[1]
+        .properties
+        .colors
+        .remove("_EmissionColor");
+    let error = manifest.validate().unwrap_err().to_string();
+    assert!(error.contains("_EmissionColor"), "{error}");
+}
+
+#[test]
+fn rejects_missing_parallax_scale() {
+    use my_summer_slop::reference::TextureDefault;
+    let mut manifest = standard_fixture("_PARALLAXMAP", "_ParallaxMap", TextureDefault::Black);
+    manifest.rendering.materials[1]
+        .properties
+        .floats
+        .insert("_Parallax".to_owned(), 0.02);
+    assert!(manifest.validate().is_ok());
+    manifest.rendering.materials[1]
+        .properties
+        .floats
+        .remove("_Parallax");
+    let error = manifest.validate().unwrap_err().to_string();
+    assert!(error.contains("_Parallax"), "{error}");
+}
+
 #[test]
 #[ignore = "Requires the local installed-build export"]
 fn installed_materials_match_gltf_and_mips() {
