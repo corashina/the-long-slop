@@ -355,9 +355,7 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
         runtime.paused,
         runtime.started,
     );
-    let target = runtime.target;
-    let record =
-        target.and_then(|target| reference.0.items.iter().find(|item| item.id == target.item));
+    let target = runtime.aim.focus_target;
     let held = runtime
         .area
         .interaction
@@ -379,90 +377,27 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
     let volumes = state
         .and_then(|item| item.fluid.as_ref())
         .map_or([-1.0; 6], |fluid| fluid.mixture.quantities_liters);
-    let usable_target =
-        record.is_some_and(|item| {
-            reference.0.hinges.iter().any(|hinge| hinge.item == item.id)
-                || reference.0.openings.iter().any(|opening| {
-                    opening.cap == item.id && (opening.can_toggle || opening.can_tune)
-                })
-        });
     let action = if !runtime.notice.is_empty() {
         runtime.notice
-    } else if runtime.area.player.seat().is_some() && !usable_target {
+    } else if runtime.area.player.seat().is_some()
+        && runtime.aim.use_target.is_none_or(|target| {
+            reference
+                .0
+                .seats
+                .iter()
+                .any(|seat| seat.item == target.item)
+        })
+    {
         if runtime.area.player.driving() {
             "E: exit · I: starter · Space: handbrake · C: camera"
         } else {
             "E: exit · C: camera"
         }
     } else {
-        record.map_or(
-            if target.is_some() && state.and_then(|item| item.fluid.as_ref()).is_some() {
-                "Open the container before pickup. Hold LMB: fill."
-            } else {
-                if held.is_empty() {
-                    ""
-                } else {
-                    "F: drop · Mouse wheel: distance · RMB + mouse: rotate"
-                }
-            },
-            |item| match item.kind {
-                ItemKind::Door | ItemKind::Hood | ItemKind::Trunk => "Hold E + mouse: move",
-                ItemKind::Cap => {
-                    if reference
-                        .0
-                        .openings
-                        .iter()
-                        .any(|opening| opening.cap == item.id && opening.can_tune)
-                    {
-                        "Hold E + mouse / Scroll: tune valve · Hold LMB: fill"
-                    } else {
-                        "E: cap · Hold LMB: fill"
-                    }
-                }
-                ItemKind::Seat => {
-                    if reference.0.seats.iter().any(|seat| seat.item == item.id) {
-                        "E: enter"
-                    } else {
-                        ""
-                    }
-                }
-                ItemKind::Wheel | ItemKind::Rim | ItemKind::Tire => {
-                    let mounted = state.is_some_and(|state| match state.location {
-                        crate::interaction::items::ItemLocation::WheelSlot(_) => true,
-                        crate::interaction::items::ItemLocation::Attached(parent) => {
-                            runtime.area.items.get(parent).is_some_and(|parent| {
-                                matches!(
-                                    parent.location,
-                                    crate::interaction::items::ItemLocation::WheelSlot(_)
-                                )
-                            })
-                        }
-                        _ => false,
-                    });
-                    if mounted {
-                        "F: remove wheel"
-                    } else if target.is_some_and(|target| target.slot.is_some()) {
-                        if held.is_empty() {
-                            "Carry a wheel. Aim here and press F."
-                        } else {
-                            "F: install wheel"
-                        }
-                    } else if held.is_empty() {
-                        "F: carry · X: split wheel"
-                    } else {
-                        "F: drop · X: split or assemble"
-                    }
-                }
-                ItemKind::Container => {
-                    if item.body == reference.0.vehicle.body {
-                        "Open the fuel cap to fill."
-                    } else {
-                        "F: carry"
-                    }
-                }
-                _ => "",
-            },
-        )
+        runtime
+            .area
+            .interaction
+            .prompt(&runtime.aim, &runtime.area.items)
     };
     game_detail(
         target

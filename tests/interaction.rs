@@ -22,6 +22,7 @@ fn pose(position: [f32; 3]) -> VehiclePose {
 }
 fn target(id: u32) -> Option<AimTarget> {
     Some(AimTarget {
+        collider: rapier3d::prelude::ColliderHandle::invalid(),
         item: ItemId(id),
         distance: 1.0,
         point: [10.0, 2.0, -1.0],
@@ -126,11 +127,7 @@ fn wall_blocks_target() {
         ColliderBuilder::cuboid(0.5, 0.5, 0.05),
     );
     physics.refresh_queries();
-    assert!(
-        interaction
-            .aim(&physics, pose([10.0, 2.0, 0.0]), 3.0)
-            .is_none()
-    );
+    assert!(common::focus(&interaction, &physics, pose([10.0, 2.0, 0.0])).is_none());
 }
 
 #[test]
@@ -147,7 +144,7 @@ fn source_use_mask_skips_hidden_cabin_envelope() {
         ),
     );
     physics.refresh_queries();
-    let target = interaction.aim(&physics, pose([10.0, 2.0, 0.0]), 3.0);
+    let target = common::focus(&interaction, &physics, pose([10.0, 2.0, 0.0]));
     assert_eq!(target.map(|target| target.item), Some(ItemId(1)));
 }
 
@@ -175,8 +172,7 @@ fn target_sensor_is_usable_but_empty_trigger_is_skipped() {
     );
     physics.refresh_queries();
     assert_eq!(
-        interaction
-            .aim(&physics, pose([10.0, 2.0, 0.0]), 3.0)
+        common::focus(&interaction, &physics, pose([10.0, 2.0, 0.0]))
             .unwrap()
             .item,
         ItemId(2)
@@ -196,7 +192,7 @@ fn fill_requires_destination_open() {
         .quantities_liters = [1.0; 6];
     interaction.step(
         input(keys::GRAB, keys::GRAB),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -212,7 +208,7 @@ fn fill_requires_destination_open() {
         .total();
     interaction.step(
         input(keys::FILL, 0),
-        target(2),
+        common::resolved(target(2)),
         &mut player,
         &mut items,
         &mut physics,
@@ -231,7 +227,7 @@ fn fill_requires_destination_open() {
     );
     interaction.step(
         input(keys::USE, keys::USE),
-        target(2),
+        common::resolved(target(2)),
         &mut player,
         &mut items,
         &mut physics,
@@ -248,7 +244,7 @@ fn fill_requires_destination_open() {
         + before;
     interaction.step(
         input(keys::FILL, 0),
-        target(2),
+        common::resolved(target(2)),
         &mut player,
         &mut items,
         &mut physics,
@@ -284,7 +280,7 @@ fn fill_requires_destination_open() {
     );
     interaction.step(
         input(keys::FILL, 0),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -312,7 +308,14 @@ fn fill_requires_destination_open() {
             ..Default::default()
         },
     ] {
-        interaction.step(next, None, &mut player, &mut items, &mut physics, 0.1);
+        interaction.step(
+            next,
+            common::resolved(None),
+            &mut player,
+            &mut items,
+            &mut physics,
+            0.1,
+        );
         assert_eq!(
             items
                 .get(ItemId(2))
@@ -327,7 +330,7 @@ fn fill_requires_destination_open() {
     }
     interaction.step(
         input(keys::USE, keys::USE),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -343,7 +346,7 @@ fn fill_requires_destination_open() {
         .total();
     interaction.step(
         input(keys::FILL, 0),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -364,7 +367,7 @@ fn fill_requires_destination_open() {
     destination_state.capacity_liters = destination_state.mixture.total() + 0.001;
     interaction.step(
         input(keys::FILL, 0),
-        target(2),
+        common::resolved(target(2)),
         &mut player,
         &mut items,
         &mut physics,
@@ -380,7 +383,7 @@ fn fill_requires_destination_open() {
         .total();
     interaction.step(
         input(keys::FILL, 0),
-        target(2),
+        common::resolved(target(2)),
         &mut player,
         &mut items,
         &mut physics,
@@ -420,7 +423,7 @@ fn spill_requires_open_tilted_source() {
         .total();
     interaction.step(
         FrameInput::default(),
-        None,
+        common::resolved(None),
         &mut player,
         &mut items,
         &mut physics,
@@ -439,7 +442,7 @@ fn spill_requires_open_tilted_source() {
     );
     interaction.step(
         input(keys::USE, keys::USE),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -456,7 +459,7 @@ fn spill_requires_open_tilted_source() {
     assert!(after < before);
     interaction.step(
         input(keys::USE, keys::USE),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -477,7 +480,7 @@ fn spill_requires_open_tilted_source() {
         .set_position(Pose::from_translation(Vector::new(10.0, 2.0, -1.0)), true);
     interaction.step(
         input(keys::USE, keys::USE),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -485,7 +488,7 @@ fn spill_requires_open_tilted_source() {
     );
     interaction.step(
         FrameInput::default(),
-        None,
+        common::resolved(None),
         &mut player,
         &mut items,
         &mut physics,
@@ -511,7 +514,7 @@ fn pickup_drop_preserves_identity_and_collision() {
     let body = items.get(ItemId(1)).unwrap().body.unwrap();
     interaction.step(
         input(keys::GRAB, keys::GRAB),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -526,7 +529,7 @@ fn pickup_drop_preserves_identity_and_collision() {
     );
     interaction.step(
         input(keys::GRAB, keys::GRAB),
-        None,
+        common::resolved(None),
         &mut player,
         &mut items,
         &mut physics,
@@ -539,7 +542,7 @@ fn pickup_drop_preserves_identity_and_collision() {
     let bodies = physics.rapier().bodies.len();
     interaction.step(
         input(keys::GRAB, keys::GRAB),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -560,7 +563,7 @@ fn carry_stops_at_a_solid_wall() {
     physics.refresh_queries();
     interaction.step(
         input(keys::GRAB, keys::GRAB),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -572,7 +575,7 @@ fn carry_stops_at_a_solid_wall() {
                 wheel: 100.0,
                 ..Default::default()
             },
-            None,
+            common::resolved(None),
             &mut player,
             &mut items,
             &mut physics,
@@ -581,11 +584,7 @@ fn carry_stops_at_a_solid_wall() {
         physics.step_physics();
     }
     assert!(physics.rapier().bodies[body].translation().z > -1.7);
-    assert!(
-        interaction
-            .aim(&physics, pose([10.0, 2.0, 0.0]), 1.0)
-            .is_none()
-    );
+    assert!(common::focus(&interaction, &physics, pose([10.0, 2.0, 0.0])).is_none());
 }
 
 #[test]
@@ -595,7 +594,7 @@ fn seat_enters_on_release_and_exits_on_press() {
     player.configure_seats(&reference.seats);
     interaction.step(
         input(keys::USE, keys::USE),
-        target(17),
+        common::resolved(target(17)),
         &mut player,
         &mut items,
         &mut physics,
@@ -607,7 +606,7 @@ fn seat_enters_on_release_and_exits_on_press() {
             released: keys::USE,
             ..Default::default()
         },
-        target(17),
+        common::resolved(target(17)),
         &mut player,
         &mut items,
         &mut physics,
@@ -624,7 +623,7 @@ fn seat_enters_on_release_and_exits_on_press() {
     );
     interaction.step(
         input(keys::USE, keys::USE),
-        None,
+        common::resolved(None),
         &mut player,
         &mut items,
         &mut physics,
@@ -644,7 +643,7 @@ fn door_release_over_a_seat_does_not_enter() {
             mouse: [3.0, 0.0],
             ..Default::default()
         },
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -656,7 +655,7 @@ fn door_release_over_a_seat_does_not_enter() {
             released: keys::USE,
             ..Default::default()
         },
-        target(17),
+        common::resolved(target(17)),
         &mut player,
         &mut items,
         &mut physics,
@@ -673,7 +672,7 @@ fn bare_seat_release_can_enter_after_an_empty_target_press() {
     player.configure_seats(&common::reference().seats);
     interaction.step(
         input(keys::USE, keys::USE),
-        None,
+        common::resolved(None),
         &mut player,
         &mut items,
         &mut physics,
@@ -684,7 +683,7 @@ fn bare_seat_release_can_enter_after_an_empty_target_press() {
             released: keys::USE,
             ..Default::default()
         },
-        target(17),
+        common::resolved(target(17)),
         &mut player,
         &mut items,
         &mut physics,
@@ -714,7 +713,7 @@ fn seated_door_drag_keeps_the_player_in_the_seat() {
             mouse: [3.0, 0.0],
             ..Default::default()
         },
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -730,7 +729,7 @@ fn seated_door_drag_keeps_the_player_in_the_seat() {
             mouse: [3.0, 0.0],
             ..Default::default()
         },
-        None,
+        common::resolved(None),
         &mut player,
         &mut items,
         &mut physics,
@@ -743,7 +742,7 @@ fn seated_door_drag_keeps_the_player_in_the_seat() {
             released: keys::USE,
             ..Default::default()
         },
-        None,
+        common::resolved(None),
         &mut player,
         &mut items,
         &mut physics,
@@ -751,7 +750,7 @@ fn seated_door_drag_keeps_the_player_in_the_seat() {
     );
     interaction.step(
         input(keys::USE, keys::USE),
-        None,
+        common::resolved(None),
         &mut player,
         &mut items,
         &mut physics,
@@ -785,7 +784,7 @@ fn seated_cap_tuning_keeps_the_player_in_the_seat() {
             mouse: [0.0, 5.0],
             ..Default::default()
         },
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -802,7 +801,7 @@ fn car_tanks_cannot_pick_up_the_chassis() {
     items.bind_body(BodyId(2), physics.chassis_handle());
     interaction.step(
         input(keys::GRAB, keys::GRAB),
-        target(2),
+        common::resolved(target(2)),
         &mut player,
         &mut items,
         &mut physics,
@@ -814,7 +813,8 @@ fn car_tanks_cannot_pick_up_the_chassis() {
 
 #[test]
 fn aim_excludes_the_player_body() {
-    let (mut interaction, _, mut physics, player) = fixture();
+    let (mut interaction, _, mut physics, player) =
+        fixture_with(|reference| reference.player.aim_reach = 6.0);
     physics.rapier_mut().insert(
         RigidBodyBuilder::fixed().translation(Vector::new(10.0, -1.0, 0.0)),
         ColliderBuilder::ball(0.2).sensor(true).user_data(3),
@@ -824,7 +824,7 @@ fn aim_excludes_the_player_body() {
     let mut view = pose([10.0, 3.0, 0.0]);
     view.rotation = Rotation::from_rotation_x(-std::f32::consts::FRAC_PI_2).to_array();
     assert_eq!(
-        interaction.aim(&physics, view, 6.0).unwrap().item,
+        common::focus(&interaction, &physics, view).unwrap().item,
         ItemId(2)
     );
 }
@@ -839,9 +839,7 @@ fn aim_slot_flag_does_not_mark_a_loose_rim() {
             .user_data(SLOT_SENSOR_FLAG | (2u128 << 96) | 14),
     );
     physics.refresh_queries();
-    let selected = interaction
-        .aim(&physics, pose([10.0, 2.0, 0.0]), 1.0)
-        .unwrap();
+    let selected = common::focus(&interaction, &physics, pose([10.0, 2.0, 0.0])).unwrap();
     assert_eq!(selected.item, ItemId(13));
     assert_eq!(selected.slot, Some(WheelSlotId(2)));
     physics.rapier_mut().insert(
@@ -850,8 +848,7 @@ fn aim_slot_flag_does_not_mark_a_loose_rim() {
     );
     physics.refresh_queries();
     assert_eq!(
-        interaction
-            .aim(&physics, pose([10.0, 2.0, 0.0]), 1.0)
+        common::focus(&interaction, &physics, pose([10.0, 2.0, 0.0]))
             .unwrap()
             .slot,
         None
@@ -864,7 +861,7 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
     let wheel_id = common::reference().wheel_slots[0].rim;
     let action = interaction.step(
         input(keys::GRAB, keys::GRAB),
-        target(wheel_id.0),
+        common::resolved(target(wheel_id.0)),
         &mut player,
         &mut items,
         &mut physics,
@@ -882,7 +879,7 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
     wheel.local_pose = pose([0.0; 3]);
     interaction.step(
         input(keys::GRAB, keys::GRAB),
-        target(wheel_id.0),
+        common::resolved(target(wheel_id.0)),
         &mut player,
         &mut items,
         &mut physics,
@@ -894,7 +891,7 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
     };
     let action = interaction.step(
         input(keys::GRAB, keys::GRAB),
-        Some(slot),
+        common::resolved(Some(slot)),
         &mut player,
         &mut items,
         &mut physics,
@@ -910,7 +907,7 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
     assert_eq!(interaction.held(), Some(wheel_id));
     let action = interaction.step(
         input(keys::ASSEMBLE, keys::ASSEMBLE),
-        None,
+        common::resolved(None),
         &mut player,
         &mut items,
         &mut physics,
@@ -932,7 +929,7 @@ fn supply_fills_only_an_open_held_container() {
     items.get_mut(ItemId(2)).unwrap().local_pose = pose([0.0; 3]);
     interaction.step(
         input(keys::USE, keys::USE),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -940,7 +937,7 @@ fn supply_fills_only_an_open_held_container() {
     );
     interaction.step(
         input(keys::GRAB, keys::GRAB),
-        target(2),
+        common::resolved(target(2)),
         &mut player,
         &mut items,
         &mut physics,
@@ -956,7 +953,7 @@ fn supply_fills_only_an_open_held_container() {
         .total();
     interaction.step(
         input(keys::FILL, 0),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -975,7 +972,7 @@ fn supply_fills_only_an_open_held_container() {
     );
     interaction.step(
         input(keys::USE, keys::USE),
-        target(2),
+        common::resolved(target(2)),
         &mut player,
         &mut items,
         &mut physics,
@@ -983,7 +980,7 @@ fn supply_fills_only_an_open_held_container() {
     );
     interaction.step(
         input(keys::FILL, 0),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1011,7 +1008,7 @@ fn fill_applies_source_blocks_and_slow_oil() {
         });
         interaction.step(
             input(keys::GRAB, keys::GRAB),
-            target(1),
+            common::resolved(target(1)),
             &mut player,
             &mut items,
             &mut physics,
@@ -1019,7 +1016,7 @@ fn fill_applies_source_blocks_and_slow_oil() {
         );
         interaction.step(
             input(keys::USE, keys::USE),
-            target(2),
+            common::resolved(target(2)),
             &mut player,
             &mut items,
             &mut physics,
@@ -1035,7 +1032,7 @@ fn fill_applies_source_blocks_and_slow_oil() {
             .total();
         interaction.step(
             input(keys::FILL, 0),
-            target(2),
+            common::resolved(target(2)),
             &mut player,
             &mut items,
             &mut physics,
@@ -1060,7 +1057,7 @@ fn fill_applies_source_blocks_and_slow_oil() {
     });
     interaction.step(
         input(keys::GRAB, keys::GRAB),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1068,7 +1065,7 @@ fn fill_applies_source_blocks_and_slow_oil() {
     );
     interaction.step(
         input(keys::USE, keys::USE),
-        target(2),
+        common::resolved(target(2)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1076,7 +1073,7 @@ fn fill_applies_source_blocks_and_slow_oil() {
     );
     interaction.step(
         input(keys::FILL, 0),
-        target(2),
+        common::resolved(target(2)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1139,7 +1136,7 @@ fn hinge_clamps_and_moves_its_collider() {
             mouse: [1.0, 0.0],
             ..Default::default()
         },
-        target(4),
+        common::resolved(target(4)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1153,7 +1150,7 @@ fn hinge_clamps_and_moves_its_collider() {
             mouse: [1.0, 0.0],
             ..Default::default()
         },
-        None,
+        common::resolved(None),
         &mut player,
         &mut items,
         &mut physics,
@@ -1165,7 +1162,7 @@ fn hinge_clamps_and_moves_its_collider() {
             released: keys::USE,
             ..Default::default()
         },
-        None,
+        common::resolved(None),
         &mut player,
         &mut items,
         &mut physics,
@@ -1179,7 +1176,7 @@ fn hinge_clamps_and_moves_its_collider() {
                 mouse: [100.0, 0.0],
                 ..Default::default()
             },
-            target(4),
+            common::resolved(target(4)),
             &mut player,
             &mut items,
             &mut physics,
@@ -1225,16 +1222,35 @@ fn empty_slot_does_not_pick_up_a_remote_rim_and_tire_targets_its_assembly() {
     };
     interaction.step(
         input(keys::GRAB, keys::GRAB),
-        Some(slot),
+        common::resolved(Some(slot)),
         &mut player,
         &mut items,
         &mut physics,
         1.0 / 60.0,
     );
     assert_eq!(interaction.held(), None);
+    let (_, collider) = physics.rapier_mut().insert(
+        RigidBodyBuilder::fixed().translation(Vector::new(10.0, 2.0, -0.4)),
+        ColliderBuilder::ball(0.1)
+            .sensor(true)
+            .user_data(tire.0 as u128 + 1),
+    );
+    interaction.bind_surface(
+        collider,
+        my_summer_slop::reference::ActionBinding {
+            collider: my_summer_slop::reference::ColliderId(0),
+            use_owner: None,
+            pickup_owner: Some(tire),
+            removal_owner: Some(tire),
+            push_owner: None,
+        },
+    );
+    physics.refresh_queries();
+    let aim = interaction.resolve(&physics, pose([10.0, 2.0, 0.0]), &items);
+    assert_eq!(aim.grab_target.map(|hit| hit.item), Some(rim));
     interaction.step(
         input(keys::GRAB, keys::GRAB),
-        target(tire.0),
+        aim,
         &mut player,
         &mut items,
         &mut physics,
@@ -1251,7 +1267,7 @@ fn runtime_pump_stays_open_and_fills_the_held_container() {
     interaction.register_pump(pump, 0.5).unwrap();
     interaction.step(
         input(keys::GRAB, keys::GRAB),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1259,7 +1275,7 @@ fn runtime_pump_stays_open_and_fills_the_held_container() {
     );
     interaction.step(
         input(keys::USE, keys::USE),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1267,7 +1283,7 @@ fn runtime_pump_stays_open_and_fills_the_held_container() {
     );
     interaction.step(
         input(keys::USE, keys::USE),
-        target(pump.0),
+        common::resolved(target(pump.0)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1284,7 +1300,7 @@ fn runtime_pump_stays_open_and_fills_the_held_container() {
         .total();
     interaction.step(
         input(keys::FILL, 0),
-        target(pump.0),
+        common::resolved(target(pump.0)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1332,7 +1348,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
     items.get_mut(ItemId(2)).unwrap().local_pose = pose([0.0; 3]);
     interaction.step(
         input(keys::GRAB, keys::GRAB),
-        target(2),
+        common::resolved(target(2)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1340,7 +1356,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
     );
     interaction.step(
         input(keys::USE, keys::USE),
-        target(2),
+        common::resolved(target(2)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1348,7 +1364,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
     );
     interaction.step(
         input(keys::USE, keys::USE),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1365,7 +1381,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
         .total();
     interaction.step(
         input(keys::FILL, 0),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1388,7 +1404,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
             mouse: [0.0, 5.0],
             ..Default::default()
         },
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1401,7 +1417,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
             wheel: 1.0,
             ..Default::default()
         },
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1411,7 +1427,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
     assert!((valve - 0.3675).abs() < 1e-6);
     interaction.step(
         input(keys::FILL, 0),
-        target(1),
+        common::resolved(target(1)),
         &mut player,
         &mut items,
         &mut physics,
@@ -1433,7 +1449,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
                 wheel,
                 ..Default::default()
             },
-            target(1),
+            common::resolved(target(1)),
             &mut player,
             &mut items,
             &mut physics,
@@ -1441,4 +1457,118 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
         );
         assert_eq!(interaction.opening_valve(OpeningId(100)), expected);
     }
+}
+
+#[test]
+fn cap_surface_resolves_use_and_carry_owner() {
+    let mut reference = common::reference();
+    reference.openings[0].can_tune = false;
+    reference.openings[0].can_toggle = true;
+    reference.action_bindings[0].pickup_owner = Some(reference.openings[0].tank);
+    let cap = reference.openings[0].cap;
+    let can = reference.openings[0].tank;
+    let mut interaction = InteractionState::new(&reference).unwrap();
+    let mut items = ItemStore::new(&reference).unwrap();
+    let mut physics = common::world();
+    let (body, collider) = physics.rapier_mut().insert(
+        RigidBodyBuilder::dynamic().translation(Vector::new(10.0, 2.0, -1.0)),
+        ColliderBuilder::ball(0.2)
+            .user_data(cap.0 as u128 + 1)
+            .collision_groups(rapier3d::prelude::InteractionGroups::new(
+                rapier3d::prelude::Group::from_bits_retain(1 << 22),
+                rapier3d::prelude::Group::ALL,
+                rapier3d::prelude::InteractionTestMode::And,
+            )),
+    );
+    let body_id = reference
+        .items
+        .iter()
+        .find(|item| item.id == can)
+        .unwrap()
+        .body;
+    items.bind_body(body_id, body);
+    interaction.bind_body(body_id, body);
+    interaction.bind_surface(
+        collider,
+        my_summer_slop::reference::ActionBinding {
+            collider: my_summer_slop::reference::ColliderId(0),
+            use_owner: Some(cap),
+            pickup_owner: Some(can),
+            removal_owner: None,
+            push_owner: None,
+        },
+    );
+    physics.refresh_queries();
+    let aim = interaction.resolve(&physics, pose([10.0, 2.0, 0.0]), &items);
+    assert_eq!(aim.use_target.map(|hit| hit.item), Some(cap));
+    assert_eq!(aim.grab_target.map(|hit| hit.item), Some(can));
+    assert_eq!(aim.use_target.unwrap().collider, collider);
+    assert_eq!(aim.grab_target.unwrap().collider, collider);
+    assert_eq!(interaction.prompt(&aim, &items), "E: cap · F: carry");
+    let mut player = PlayerState::new(&reference.player, pose([10.0, 1.0, 0.0]), &mut physics);
+    assert_eq!(
+        interaction.step(
+            input(keys::USE, keys::USE),
+            aim,
+            &mut player,
+            &mut items,
+            &mut physics,
+            1.0 / 60.0
+        ),
+        Some(InteractionAction::Cap(reference.openings[0].id))
+    );
+    assert_eq!(
+        interaction.step(
+            input(keys::GRAB, keys::GRAB),
+            aim,
+            &mut player,
+            &mut items,
+            &mut physics,
+            1.0 / 60.0
+        ),
+        Some(InteractionAction::Pickup(can))
+    );
+}
+
+#[test]
+fn pickup_mask_does_not_cross_a_solid_wall() {
+    let (mut interaction, items, mut physics, _) = fixture_with(|reference| {
+        reference.player.action_masks.use_mask = 1;
+        reference.player.action_masks.pickup_mask = 1 << 23;
+    });
+    let collider = physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, collider)| collider.user_data == 2)
+        .unwrap()
+        .0;
+    physics.rapier_mut().colliders[collider].set_collision_groups(
+        rapier3d::prelude::InteractionGroups::new(
+            rapier3d::prelude::Group::from_bits_retain(1 << 23),
+            rapier3d::prelude::Group::ALL,
+            rapier3d::prelude::InteractionTestMode::And,
+        ),
+    );
+    interaction.bind_surface(
+        collider,
+        my_summer_slop::reference::ActionBinding {
+            collider: my_summer_slop::reference::ColliderId(0),
+            use_owner: None,
+            pickup_owner: Some(ItemId(1)),
+            removal_owner: None,
+            push_owner: None,
+        },
+    );
+    physics.refresh_queries();
+    let aim = interaction.resolve(&physics, pose([10.0, 2.0, 0.0]), &items);
+    assert_eq!(aim.grab_target.map(|hit| hit.item), Some(ItemId(1)));
+    assert!(aim.use_target.is_none());
+    physics.rapier_mut().insert(
+        RigidBodyBuilder::fixed().translation(Vector::new(10.0, 2.0, -0.4)),
+        ColliderBuilder::cuboid(0.5, 0.5, 0.05),
+    );
+    physics.refresh_queries();
+    let blocked_aim = interaction.resolve(&physics, pose([10.0, 2.0, 0.0]), &items);
+    assert!(blocked_aim.grab_target.is_none());
 }

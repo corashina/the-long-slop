@@ -11,6 +11,42 @@ from tools.reference.collision import bake_points
 
 
 class ReferenceExportTests(unittest.TestCase):
+    def test_source_action_masks(self):
+        from tools.reference.actions import recover_masks
+        masks = recover_masks({'useLayer': {'m_Bits': 12747265},
+            'pickupLayer': {'m_Bits': 8388609}, 'attachLayer': {'m_Bits': 8552449},
+            'pushLayer': {'m_Bits': 163841}})
+        self.assertEqual(masks, {'use_mask': 12747265, 'pickup_mask': 8388609,
+            'attach_mask': 8552449, 'push_mask': 163841})
+
+    def test_cap_binding_follows_pickupable_parent_and_startup_layer_link(self):
+        from types import SimpleNamespace
+        from tools.reference.actions import recover_bindings
+        def reader(identity, name):
+            return SimpleNamespace(assets_file=SimpleNamespace(name='fixture'), path_id=identity,
+                type=SimpleNamespace(name=name))
+        pick, cap, layer, collider = [reader(identity, name) for identity, name in
+            [(1, 'MonoBehaviour'), (2, 'MonoBehaviour'), (3, 'MonoBehaviour'), (4, 'BoxCollider')]]
+        null = {'m_FileID': 0, 'm_PathID': 0}
+        fields = {1: {'cantPickup': False, 'cols': [{'m_PathID': 3}], 'part': null},
+            2: {}, 3: {'col': null, 'p': null}}
+        readers = {r.path_id: r for r in (pick, cap, layer, collider)}
+        classes = {1: 'pickupable', 2: 'tankcapscript', 3: 'layerScript'}
+        source = SimpleNamespace(read=lambda r: fields[r.path_id],
+            resolve=lambda r, p: readers.get(p['m_PathID']),
+            class_name=lambda r: classes[r.path_id], get=lambda file, identity: readers[identity])
+        nodes = [{'id': 1, 'parent': None, 'active': True}, {'id': 2, 'parent': 1, 'active': True}]
+        components = {1: {'pickupable': [pick]},
+            2: {'tankcapscript': [cap], 'layerScript': [layer], 'BoxCollider': [collider]}}
+        bindings = recover_bindings(source, nodes, components, {1: 10, 2: 11},
+            [{'id': 1, 'node': 2, 'source': {'file': 'fixture', 'path_id': 4}}], [],
+            [{'source': {'file': 'fixture', 'path_id': 2}, 'cap': 11}], [])
+        self.assertEqual(bindings, [{'collider': 1, 'use_owner': 11, 'pickup_owner': 10,
+            'removal_owner': None, 'push_owner': None}])
+        fields[1]['cols'] = [{'m_PathID': 2}]
+        with self.assertRaisesRegex(ValueError, 'pickupable.cols'):
+            recover_bindings(source, nodes, components, {1: 10, 2: 11}, [], [], [], [])
+
     def test_camera_layers_exclude_source_helper(self):
         from tools.reference.visibility import normal_view_mask, visible_to_camera
         masks=[0x04d28f33,0x10000000,0x00088001,0x00010000]

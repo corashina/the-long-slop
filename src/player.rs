@@ -322,7 +322,7 @@ impl PlayerState {
             return false;
         }
         // Unity rays ignore colliders containing the ray origin.
-        let use_mask = self.reference.use_layer_mask;
+        let use_mask = self.reference.action_masks.use_mask;
         let ray_targets = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
             collider.is_enabled()
                 && collider.collision_groups().memberships.bits() & use_mask != 0

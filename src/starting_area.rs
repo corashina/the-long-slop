@@ -1,6 +1,6 @@
 //! Persistent imported home bodies and preparation state.
 use crate::interaction::{
-    AimTarget, InteractionAction, InteractionState,
+    InteractionAction, InteractionState, ResolvedAim,
     items::{ItemStore, node_pose},
 };
 use crate::player::PlayerState;
@@ -87,7 +87,12 @@ impl StartingArea {
             if reference.vehicle.colliders.contains(&record.id) {
                 continue;
             }
-            let item = collider_item(reference, record.node);
+            let item = reference
+                .action_bindings
+                .iter()
+                .find(|binding| binding.collider == record.id)
+                .and_then(|binding| binding.use_owner)
+                .or_else(|| collider_item(reference, record.node));
             let flag = if belongs_to_vehicle(reference, record.body) {
                 VEHICLE_COLLIDER_FLAG
             } else {
@@ -163,8 +168,14 @@ impl StartingArea {
                     .iter()
                     .find(|record| record.id.0 == source)
                 {
-                    collider.user_data |=
-                        collider_item(reference, record.node).map_or(0, |id| id.0 as u128 + 1);
+                    let item = reference
+                        .action_bindings
+                        .iter()
+                        .find(|binding| binding.collider == record.id)
+                        .and_then(|binding| binding.use_owner)
+                        .or_else(|| collider_item(reference, record.node));
+                    collider.user_data = (collider.user_data & !(u32::MAX as u128))
+                        | item.map_or(0, |id| id.0 as u128 + 1);
                 }
             }
         }
@@ -185,6 +196,12 @@ impl StartingArea {
                 );
             let rapier = physics.rapier_mut();
             rapier.colliders.insert(builder);
+        }
+        for (handle, collider) in physics.rapier().colliders.iter() {
+            let id = crate::reference::ColliderId((collider.user_data >> 64) as u32);
+            if id.0 != 0 {
+                interaction.bind_collider(id, handle);
+            }
         }
         interaction.rebase(origin.map(|v| v as f32));
         interaction.sync_hinges(physics);
@@ -443,7 +460,7 @@ pub struct GarageRuntime {
     pub attempts: u64,
     pub rebases: u32,
     pub notice: &'static str,
-    pub target: Option<AimTarget>,
+    pub aim: ResolvedAim,
     pub wheels: crate::interaction::wheels::WheelAssemblies,
     ignition_held: bool,
     auto_gear: usize,
@@ -504,7 +521,7 @@ impl GarageRuntime {
             attempts: 0,
             rebases: 0,
             notice: "",
-            target: None,
+            aim: ResolvedAim::default(),
             wheels,
             ignition_held: false,
             auto_gear: reference
@@ -527,16 +544,21 @@ impl GarageRuntime {
             .origin
             .absolute(self.physics.snapshot().pose.position);
         self.area.begin_step();
-        let target = self.area.interaction.aim(
+        let aim = self.area.interaction.resolve(
             &self.physics,
             self.area.player.view_pose(&self.physics),
-            reference.player.aim_reach,
+            &self.area.items,
         );
-        self.target = target;
+        if !self.aim.same_actions(&aim)
+            || input.pressed & (keys::GRAB | keys::USE | keys::ASSEMBLE) != 0
+        {
+            self.notice = "";
+        }
+        self.aim = aim;
         let seated = self.area.player.seat().is_some();
         let action = self.area.interaction.step(
             input,
-            target,
+            aim,
             &mut self.area.player,
             &mut self.area.items,
             &mut self.physics,
@@ -580,7 +602,8 @@ impl GarageRuntime {
                     .is_ok()
                 {
                     self.notice = "";
-                } else if let Some(tire) = target
+                } else if let Some(tire) = aim
+                    .grab_target
                     .filter(|target| target.item != item)
                     .map(|target| target.item)
                 {
@@ -785,11 +808,9 @@ impl GarageRuntime {
         if self.stream.rebase(focus, &mut self.physics).is_some() {
             let old_origin = self.area.origin;
             self.area.sync_origin(self.stream.origin.offset);
-            if let Some(target) = &mut self.target {
-                for i in 0..3 {
-                    target.point[i] -= (self.area.origin[i] - old_origin[i]) as f32;
-                }
-            }
+            self.aim.rebase(std::array::from_fn(|i| {
+                (self.area.origin[i] - old_origin[i]) as f32
+            }));
             self.rebases += 1;
         }
         self.stream.sync_at(absolute, &mut self.physics);
@@ -811,7 +832,7 @@ impl GarageRuntime {
     }
 
     pub fn recover(&mut self, reference: &ReferenceManifest) {
-        self.target = None;
+        self.aim = ResolvedAim::default();
         let held = self
             .area
             .interaction

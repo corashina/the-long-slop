@@ -128,6 +128,25 @@ pub struct ColliderRecord {
     pub geometry: ColliderGeometry,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionMasks {
+    pub use_mask: u32,
+    pub pickup_mask: u32,
+    pub attach_mask: u32,
+    pub push_mask: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionBinding {
+    pub collider: ColliderId,
+    pub use_owner: Option<ItemId>,
+    pub pickup_owner: Option<ItemId>,
+    pub removal_owner: Option<ItemId>,
+    pub push_owner: Option<ItemId>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnchorRecord {
@@ -372,7 +391,7 @@ pub struct PlayerReference {
     pub camera_height: f32,
     pub field_of_view_degrees: f32,
     pub aim_reach: f32,
-    pub use_layer_mask: u32,
+    pub action_masks: ActionMasks,
     pub get_out_layer_mask: u32,
     pub exit_capsule_half_height: f32,
     pub exit_capsule_radius: f32,
@@ -511,6 +530,7 @@ pub struct ReferenceManifest {
     pub nodes: Vec<NodeRecord>,
     pub bodies: Vec<BodyRecord>,
     pub colliders: Vec<ColliderRecord>,
+    pub action_bindings: Vec<ActionBinding>,
     pub anchors: Vec<AnchorRecord>,
     pub hinges: Vec<HingeRecord>,
     pub wheel_slots: Vec<WheelSlotReference>,
@@ -790,6 +810,27 @@ impl ReferenceManifest {
                 }
             };
             require(valid, "collider geometry")?;
+        }
+        let action_ids = ids(
+            self.action_bindings.iter().map(|r| r.collider),
+            "duplicate action collider",
+        )?;
+        require(
+            action_ids == collider_ids,
+            "complete action collider bindings",
+        )?;
+        for binding in &self.action_bindings {
+            require(
+                [
+                    binding.use_owner,
+                    binding.pickup_owner,
+                    binding.removal_owner,
+                    binding.push_owner,
+                ]
+                .iter()
+                .all(|owner| owner.is_none_or(|id| item_ids.contains(&id))),
+                "action owner binding",
+            )?;
         }
         for r in &self.anchors {
             require(
@@ -1091,7 +1132,10 @@ impl ReferenceManifest {
                 && p.crouch_height >= p.capsule_radius * 2.0
                 && p.crouch_height < p.capsule_height
                 && p.aim_reach > 0.0
-                && p.use_layer_mask != 0
+                && p.action_masks.use_mask != 0
+                && p.action_masks.pickup_mask != 0
+                && p.action_masks.attach_mask != 0
+                && p.action_masks.push_mask != 0
                 && p.get_out_layer_mask != 0
                 && p.exit_capsule_half_height > 0.0
                 && p.exit_capsule_radius > 0.0,

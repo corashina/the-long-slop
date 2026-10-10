@@ -43,7 +43,7 @@ fn assert_slot_aim(
         position: (center + outward * 0.6).to_array(),
         rotation: Rotation::from_rotation_arc(-Vector::Z, -outward).to_array(),
     };
-    let aim = area.interaction.aim(physics, view, 1.0).unwrap();
+    let aim = common::focus(&area.interaction, physics, view).unwrap();
     assert_eq!(aim.item, item);
     assert_eq!(aim.slot, empty.then_some(slot));
 }

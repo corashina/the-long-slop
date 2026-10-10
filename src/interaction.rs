@@ -1,11 +1,13 @@
 pub mod items;
+pub mod targets;
 pub mod wheels;
+pub use targets::{InteractionBlock, ResolvedAim};
 
 use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
 use crate::reference::{
-    BodyId, HingeRecord, ItemId, ItemKind, OpeningId, OpeningRecord, PlayerReference,
-    ReferenceError, ReferenceManifest, SeatId, TankRole, WheelSlotId,
+    ActionBinding, BodyId, ColliderId, HingeRecord, ItemId, ItemKind, OpeningId, OpeningRecord,
+    PlayerReference, ReferenceError, ReferenceManifest, SeatId, TankRole, WheelSlotId,
 };
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
@@ -13,7 +15,7 @@ use items::{ItemLocation, ItemStore};
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::parry::query::ShapeCastOptions;
 use rapier3d::prelude::{
-    ColliderHandle, FixedJointBuilder, ImpulseJointHandle, QueryFilter, Ray, RigidBodyBuilder,
+    ColliderHandle, FixedJointBuilder, ImpulseJointHandle, QueryFilter, RigidBodyBuilder,
     RigidBodyHandle,
 };
 use std::collections::{HashMap, HashSet};
@@ -22,6 +24,7 @@ pub use crate::vehicle::SLOT_SENSOR_FLAG;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AimTarget {
+    pub collider: ColliderHandle,
     pub item: ItemId,
     pub distance: f32,
     pub point: [f32; 3],
@@ -113,6 +116,11 @@ struct HeldState {
 
 pub struct InteractionState {
     kinds: HashMap<ItemId, ItemKind>,
+    source_bindings: HashMap<ColliderId, ActionBinding>,
+    pickup_layers: HashMap<ItemId, u32>,
+    usable_items: HashSet<ItemId>,
+    filling_items: HashSet<ItemId>,
+    collider_bindings: HashMap<ColliderHandle, ActionBinding>,
     bodies: HashMap<BodyId, RigidBodyHandle>,
     hinges: Vec<HingeState>,
     openings: Vec<OpeningState>,
@@ -125,7 +133,7 @@ pub struct InteractionState {
     supplies: HashSet<ItemId>,
     tank_rules: HashMap<ItemId, TankRules>,
     slow_oil_modifier: f32,
-    latched_hinge: Option<(usize, Vector)>,
+    latched_hinge: Option<(usize, Vector, ColliderHandle)>,
     hinge_release_distance_squared: f32,
     tuning_opening: Option<OpeningId>,
 }
@@ -224,7 +232,45 @@ impl InteractionState {
                 exit: ExitReference::from_reference(&reference.player, seat),
             });
         }
+        let mut pickup_layers = HashMap::new();
+        for binding in &reference.action_bindings {
+            if let Some(owner) = binding.pickup_owner {
+                let collider = reference
+                    .colliders
+                    .iter()
+                    .find(|collider| collider.id == binding.collider)
+                    .ok_or_else(|| ReferenceError("Missing action collider".into()))?;
+                *pickup_layers.entry(owner).or_insert(0) |= collider.membership;
+            }
+        }
+        let usable_items = reference
+            .hinges
+            .iter()
+            .map(|hinge| hinge.item)
+            .chain(reference.seats.iter().map(|seat| seat.item))
+            .chain(
+                reference
+                    .openings
+                    .iter()
+                    .filter(|opening| opening.can_toggle || opening.can_tune)
+                    .map(|opening| opening.cap),
+            )
+            .collect();
+        let filling_items = reference
+            .openings
+            .iter()
+            .map(|opening| opening.cap)
+            .collect();
         Ok(Self {
+            pickup_layers,
+            usable_items,
+            filling_items,
+            source_bindings: reference
+                .action_bindings
+                .iter()
+                .map(|binding| (binding.collider, *binding))
+                .collect(),
+            collider_bindings: HashMap::with_capacity(reference.colliders.len()),
             kinds: reference
                 .items
                 .iter()
@@ -294,6 +340,7 @@ impl InteractionState {
             return Ok(());
         }
         self.kinds.insert(item, ItemKind::Cap);
+        self.filling_items.insert(item);
         self.tank_rules.insert(
             item,
             TankRules {
@@ -343,7 +390,7 @@ impl InteractionState {
     }
     pub fn dragging_hinge(&self) -> Option<ItemId> {
         self.latched_hinge
-            .map(|(index, _)| self.hinges[index].reference.item)
+            .map(|(index, _, _)| self.hinges[index].reference.item)
     }
     pub fn drop_held(
         &mut self,
@@ -365,46 +412,10 @@ impl InteractionState {
         }
     }
 
-    pub fn aim(&self, physics: &PhysicsWorld, view: VehiclePose, reach: f32) -> Option<AimTarget> {
-        if !reach.is_finite() || reach <= 0.0 {
-            return None;
-        }
-        let view = to_rapier(view);
-        let held_body = self.held.as_ref().map(|held| held.body);
-        let valid = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
-            collider.is_enabled()
-                && collider.collision_groups().memberships.bits() & self.carry.use_layer_mask != 0
-                && (collider.parent() != held_body || held_body.is_none())
-                && (self.player_body.is_none() || collider.parent() != self.player_body)
-        };
-        let surfaces = |handle: ColliderHandle, collider: &rapier3d::prelude::Collider| {
-            valid(handle, collider)
-                && (!collider.is_sensor() || (collider.user_data as u32) != 0)
-                && !collider
-                    .shape()
-                    .contains_point(collider.position(), view.translation)
-        };
-        let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
-        let (handle, hit) = physics
-            .queries(QueryFilter::default().predicate(&surfaces))
-            .cast_ray_and_get_normal(&ray, reach, true)?;
-        let encoded = physics.rapier().colliders[handle].user_data as u32;
-        let item = ItemId(encoded.checked_sub(1)?);
-        self.kinds.get(&item)?;
-        Some(AimTarget {
-            item,
-            distance: hit.time_of_impact,
-            point: ray.point_at(hit.time_of_impact).to_array(),
-            slot: (physics.rapier().colliders[handle].user_data & SLOT_SENSOR_FLAG != 0).then_some(
-                WheelSlotId((physics.rapier().colliders[handle].user_data >> 96) as u8),
-            ),
-        })
-    }
-
     pub fn step(
         &mut self,
         input: FrameInput,
-        target: Option<AimTarget>,
+        aim: ResolvedAim,
         player: &mut PlayerState,
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
@@ -413,9 +424,13 @@ impl InteractionState {
         if !dt.is_finite() || dt <= 0.0 {
             return None;
         }
-        let target = target.filter(|target| {
+        let valid = |target: AimTarget| {
             target.distance.is_finite() && target.distance >= 0.0 && target.distance <= self.reach
-        });
+        };
+        let target = aim.use_target.filter(|target| valid(*target));
+        let grab_target = aim.grab_target.filter(|target| valid(*target));
+        let installation_target = aim.installation_target.filter(|target| valid(*target));
+        let filling_target = aim.filling_target.filter(|target| valid(*target));
         let released_hinge = input.released & keys::USE != 0 && self.latched_hinge.is_some();
         if input.held & keys::USE == 0 || input.released & keys::USE != 0 {
             self.latched_hinge = None;
@@ -433,9 +448,10 @@ impl InteractionState {
             self.latched_hinge = Some((
                 index,
                 body.position().inverse() * Vector::from_array(target.point),
+                target.collider,
             ));
         }
-        let use_target = if let Some((index, local)) = self.latched_hinge {
+        let use_target = if let Some((index, local, collider)) = self.latched_hinge {
             let hinge = &self.hinges[index];
             if let Some(body) = self
                 .bodies
@@ -447,6 +463,7 @@ impl InteractionState {
                     .length_squared();
                 if distance < self.hinge_release_distance_squared {
                     Some(AimTarget {
+                        collider,
                         item: hinge.reference.item,
                         distance: distance.sqrt(),
                         point: point.to_array(),
@@ -571,21 +588,8 @@ impl InteractionState {
             }
         }
         if input.pressed & keys::GRAB != 0 {
-            let grab_target = target.map(|mut target| {
-                if matches!(self.kinds.get(&target.item), Some(ItemKind::Tire))
-                    && let Some(ItemLocation::Attached(parent)) =
-                        items.get(target.item).map(|item| item.location)
-                    && matches!(
-                        self.kinds.get(&parent),
-                        Some(ItemKind::Rim | ItemKind::Wheel)
-                    )
-                {
-                    target.item = parent;
-                }
-                target
-            });
             if let Some(held) = self.held.as_ref()
-                && let Some(slot) = target.and_then(|target| target.slot)
+                && let Some(slot) = installation_target.and_then(|target| target.slot)
                 && matches!(
                     self.kinds.get(&held.item),
                     Some(ItemKind::Wheel | ItemKind::Rim)
@@ -616,7 +620,9 @@ impl InteractionState {
             }
         }
         if input.pressed & keys::ASSEMBLE != 0
-            && let Some(item) = self.held().or_else(|| target.map(|target| target.item))
+            && let Some(item) = self
+                .held()
+                .or_else(|| grab_target.map(|target| target.item))
             && matches!(self.kinds.get(&item), Some(ItemKind::Wheel | ItemKind::Rim))
             && items.get(item).is_some_and(|item| {
                 matches!(item.location, ItemLocation::Held | ItemLocation::World)
@@ -642,7 +648,7 @@ impl InteractionState {
         let mut filling = None;
         if input.held & keys::FILL != 0
             && let Some(held) = self.held.as_ref()
-            && let Some(target) = target
+            && let Some(target) = filling_target
         {
             if let Some(opening) = self
                 .openings
@@ -785,12 +791,6 @@ impl InteractionState {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> bool {
-        if !matches!(
-            self.kinds.get(&target.item),
-            Some(ItemKind::Container | ItemKind::Wheel | ItemKind::Rim | ItemKind::Tire)
-        ) {
-            return false;
-        }
         let Some(item) = items.get_mut(target.item) else {
             return false;
         };

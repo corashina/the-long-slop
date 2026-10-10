@@ -1919,10 +1919,15 @@
     ],
     "scroll_sensitivity": 20,
     "camera_culling_mask": 349933363,
-    "use_layer_mask": 12747265,
     "get_out_layer_mask": 10125313,
     "exit_capsule_half_height": 0.568,
-    "exit_capsule_radius": 0.25
+    "exit_capsule_radius": 0.25,
+    "action_masks": {
+      "use_mask": 12747265,
+      "pickup_mask": 8388609,
+      "attach_mask": 8552449,
+      "push_mask": 163841
+    }
   },
   "seats": [
     {
@@ -2366,6 +2371,71 @@
         0.0,
         1.0
       ]
+    }
+  ],
+  "action_bindings": [
+    {
+      "collider": 1,
+      "use_owner": null,
+      "pickup_owner": null,
+      "removal_owner": null,
+      "push_owner": null
+    },
+    {
+      "collider": 2,
+      "use_owner": null,
+      "pickup_owner": 13,
+      "removal_owner": 13,
+      "push_owner": null
+    },
+    {
+      "collider": 3,
+      "use_owner": null,
+      "pickup_owner": 9,
+      "removal_owner": 9,
+      "push_owner": null
+    },
+    {
+      "collider": 4,
+      "use_owner": null,
+      "pickup_owner": 14,
+      "removal_owner": 14,
+      "push_owner": null
+    },
+    {
+      "collider": 5,
+      "use_owner": null,
+      "pickup_owner": 10,
+      "removal_owner": 10,
+      "push_owner": null
+    },
+    {
+      "collider": 6,
+      "use_owner": null,
+      "pickup_owner": 15,
+      "removal_owner": 15,
+      "push_owner": null
+    },
+    {
+      "collider": 7,
+      "use_owner": null,
+      "pickup_owner": 11,
+      "removal_owner": 11,
+      "push_owner": null
+    },
+    {
+      "collider": 8,
+      "use_owner": null,
+      "pickup_owner": 16,
+      "removal_owner": 16,
+      "push_owner": null
+    },
+    {
+      "collider": 9,
+      "use_owner": null,
+      "pickup_owner": 12,
+      "removal_owner": 12,
+      "push_owner": null
     }
   ]
 }

@@ -96,12 +96,13 @@ fn restart_after_carry_detach_rebase() {
                 pressed: keys::GRAB,
                 ..FrameInput::default()
             },
-            Some(my_summer_slop::interaction::AimTarget {
+            common::resolved(Some(my_summer_slop::interaction::AimTarget {
+                collider: rapier3d::prelude::ColliderHandle::invalid(),
                 item: reference.items[0].id,
                 distance: 1.0,
                 point: [10.0, 2.0, -1.0],
                 slot: None,
-            }),
+            })),
             &mut runtime.area.player,
             &mut runtime.area.items,
             &mut runtime.physics,
@@ -248,7 +249,7 @@ fn production_garage_bindings_fill_start_and_move() {
             mouse: [0.0, 500.0],
             ..FrameInput::default()
         },
-        Some(faucet_target),
+        common::resolved(Some(faucet_target)),
         &mut runtime.area.player,
         &mut runtime.area.items,
         &mut runtime.physics,
@@ -266,7 +267,7 @@ fn production_garage_bindings_fill_start_and_move() {
             pressed: keys::USE,
             ..FrameInput::default()
         },
-        Some(cap),
+        common::resolved(Some(cap)),
         &mut runtime.area.player,
         &mut runtime.area.items,
         &mut runtime.physics,
@@ -305,7 +306,7 @@ fn production_garage_bindings_fill_start_and_move() {
             pressed: keys::GRAB,
             ..FrameInput::default()
         },
-        Some(can_target),
+        common::resolved(Some(can_target)),
         &mut runtime.area.player,
         &mut runtime.area.items,
         &mut runtime.physics,
@@ -328,7 +329,7 @@ fn production_garage_bindings_fill_start_and_move() {
             held: keys::FILL,
             ..FrameInput::default()
         },
-        Some(cap),
+        common::resolved(Some(cap)),
         &mut runtime.area.player,
         &mut runtime.area.items,
         &mut runtime.physics,
@@ -459,10 +460,10 @@ fn aim_at(
             &mut runtime.physics,
             1.0 / 60.0,
         );
-        if let Some(target) = runtime.area.interaction.aim(
+        if let Some(target) = common::focus(
+            &runtime.area.interaction,
             &runtime.physics,
             runtime.area.player.view_pose(&runtime.physics),
-            reference.player.aim_reach,
         ) && target.item == item
         {
             return target;
@@ -575,12 +576,13 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
             mouse: [-45.0, 0.0],
             ..FrameInput::default()
         },
-        Some(my_summer_slop::interaction::AimTarget {
+        common::resolved(Some(my_summer_slop::interaction::AimTarget {
+            collider: rapier3d::prelude::ColliderHandle::invalid(),
             item: ItemId(90),
             distance: 1.0,
             point: [0.8, 0.7, 0.0],
             slot: None,
-        }),
+        })),
         &mut runtime.area.player,
         &mut runtime.area.items,
         &mut runtime.physics,
@@ -617,12 +619,13 @@ fn dry_recovery_keeps_a_carried_can_reachable() {
             pressed: keys::GRAB,
             ..FrameInput::default()
         },
-        Some(my_summer_slop::interaction::AimTarget {
+        common::resolved(Some(my_summer_slop::interaction::AimTarget {
+            collider: rapier3d::prelude::ColliderHandle::invalid(),
             item: can,
             distance: 1.0,
             point: [10.0, 2.0, -1.0],
             slot: None,
-        }),
+        })),
         &mut runtime.area.player,
         &mut runtime.area.items,
         &mut runtime.physics,
@@ -682,7 +685,7 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
             pressed: keys::GRAB,
             ..FrameInput::default()
         },
-        Some(target),
+        common::resolved(Some(target)),
         &mut runtime.area.player,
         &mut runtime.area.items,
         &mut runtime.physics,
@@ -1264,14 +1267,66 @@ fn aim_from_seat(
             ..FrameInput::default()
         },
     );
-    let target = runtime.area.interaction.aim(
+    let target = common::focus(
+        &runtime.area.interaction,
         &runtime.physics,
         runtime.area.player.view_pose(&runtime.physics),
-        reference.player.aim_reach,
     );
     assert_eq!(
         target.map(|target| target.item),
         Some(item),
         "seated door control must use real aim"
     );
+}
+
+#[test]
+#[ignore = "Requires exported Steam assets"]
+fn production_cap_surface_pickup_uses_source_owner() {
+    let reference = my_summer_slop::reference::ReferenceManifest::from_json(
+        &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+    )
+    .unwrap();
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    runtime.started = true;
+    let opening = reference
+        .openings
+        .iter()
+        .find(|opening| {
+            reference
+                .items
+                .iter()
+                .find(|item| item.id == opening.tank)
+                .is_some_and(|item| {
+                    reference.bodies.iter().any(|body| {
+                        body.id == item.body && body.dynamic && body.id != reference.vehicle.body
+                    })
+                })
+        })
+        .unwrap();
+    aim_at(&mut runtime, &reference, opening.cap);
+    let aim = runtime.area.interaction.resolve(
+        &runtime.physics,
+        runtime.area.player.view_pose(&runtime.physics),
+        &runtime.area.items,
+    );
+    assert_eq!(aim.use_target.map(|hit| hit.item), Some(opening.cap));
+    assert_eq!(aim.grab_target.map(|hit| hit.item), Some(opening.tank));
+    assert_eq!(
+        aim.use_target.unwrap().collider,
+        aim.grab_target.unwrap().collider
+    );
+    let source = &runtime.physics.rapier().colliders[aim.use_target.unwrap().collider];
+    assert_eq!(
+        source.collision_groups().memberships.bits() & reference.player.action_masks.pickup_mask,
+        0
+    );
+    runtime.step(
+        &reference,
+        FrameInput {
+            pressed: keys::GRAB,
+            held: keys::GRAB,
+            ..Default::default()
+        },
+    );
+    assert_eq!(runtime.area.interaction.held(), Some(opening.tank));
 }

@@ -8,7 +8,7 @@ REQUIRED_CLASSES = {
     'newRandomStuffSpawnScript','tosaveitemscript','radiatorscript',
     'coolantTankscript','usablescript','partslotscript','partscript','wheelscript','pickupable','electronicsscript',
     'wheelgraphicsscript','dataonmountscript',
-    'layerScript',
+    'layerScript','pushablescript',
 }
 
 

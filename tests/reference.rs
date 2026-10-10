@@ -129,7 +129,7 @@ fn rejects_invalid_seat_hit_nodes_and_empty_use_mask() {
         assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
     }
     let mut input = fixture();
-    input["player"]["use_layer_mask"] = serde_json::json!(0);
+    input["player"]["action_masks"]["use_mask"] = serde_json::json!(0);
     assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
     let mut input = fixture();
     input["player"]["get_out_layer_mask"] = serde_json::json!(0);
@@ -223,8 +223,41 @@ fn production_export_matches_installed_contract() {
         })
         .collect();
     assert_eq!(hit_sources, [33209, 31216, 39134]);
-    assert_eq!(manifest.player.use_layer_mask, 12747265);
-    assert_eq!(manifest.player.use_layer_mask & (1 << 13), 0);
+    assert_eq!(manifest.player.action_masks.use_mask, 12747265);
+    assert_eq!(manifest.player.action_masks.pickup_mask, 8388609);
+    assert_eq!(manifest.player.action_masks.attach_mask, 8552449);
+    assert_eq!(manifest.player.action_masks.push_mask, 163841);
+    for opening in &manifest.openings {
+        let tank = manifest
+            .items
+            .iter()
+            .find(|item| item.id == opening.tank)
+            .unwrap();
+        let body = manifest
+            .bodies
+            .iter()
+            .find(|body| body.id == tank.body)
+            .unwrap();
+        if !body.dynamic || body.id == manifest.vehicle.body {
+            continue;
+        }
+        let bindings: Vec<_> = manifest
+            .action_bindings
+            .iter()
+            .filter(|binding| binding.use_owner == Some(opening.cap))
+            .collect();
+        assert!(
+            !bindings.is_empty(),
+            "cap must have a source action collider"
+        );
+        assert!(
+            bindings
+                .iter()
+                .all(|binding| binding.pickup_owner == Some(opening.tank)),
+            "cap must resolve its source container"
+        );
+    }
+    assert_eq!(manifest.player.action_masks.use_mask & (1 << 13), 0);
     assert_eq!(manifest.player.get_out_layer_mask, 10125313);
     assert_eq!(manifest.player.get_out_layer_mask & (1 << 13), 0);
     assert_eq!(manifest.player.exit_capsule_half_height, 0.568);
@@ -285,4 +318,27 @@ fn production_export_matches_installed_contract() {
             );
         }
     }
+}
+
+#[test]
+fn rejects_missing_masks_and_invalid_action_owners() {
+    for field in ["use_mask", "pickup_mask", "attach_mask", "push_mask"] {
+        let mut input = fixture();
+        input["player"]["action_masks"]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+        let mut input = fixture();
+        input["player"]["action_masks"][field] = serde_json::json!(0);
+        assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    }
+    for field in ["use_owner", "pickup_owner", "removal_owner", "push_owner"] {
+        let mut input = fixture();
+        input["action_bindings"][0][field] = serde_json::json!(999999);
+        assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    }
+    let mut input = fixture();
+    input["action_bindings"].as_array_mut().unwrap().pop();
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
 }
