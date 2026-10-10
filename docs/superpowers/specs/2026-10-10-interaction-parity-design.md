@@ -1,7 +1,7 @@
 # Home and Lada interactions
 
 Date: 2026-10-10, Europe/Warsaw.
-Status: The user approved the in-chat design. Written specification review is pending.
+Status: The user approved this written specification in chat on 2026-10-10.
 Reference: installed The Long Drive Steam build 11140890.
 Base commit: d4cdefc.
 
