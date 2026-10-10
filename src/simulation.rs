@@ -1,5 +1,6 @@
 pub const FIXED_DT: f32 = 1.0 / 60.0;
 pub mod engine;
+pub mod instruments;
 const MAX_FRAME_SECONDS: f64 = 0.1;
 const STEP_SECONDS: f64 = 1.0 / 60.0;
 

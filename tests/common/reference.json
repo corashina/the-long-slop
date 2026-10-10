@@ -6221,6 +6221,8 @@
     "low_fuel": 5.0,
     "low_oil": 2.0,
     "oil_test_rpm": 300.0,
-    "battery_test_rpm": 800.0
+    "battery_test_rpm": 800.0,
+    "electronics_output": 1.0,
+    "electronics_off_threshold": 0.2
   }
 }

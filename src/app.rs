@@ -1,4 +1,5 @@
 use crate::browser::*;
+use crate::presentation::instruments::InstrumentVisuals;
 use crate::presentation::{
     self,
     camera::{CameraMode, DriveCamera},
@@ -6,6 +7,7 @@ use crate::presentation::{
     world::{ChunkVisual, WorldVisuals},
 };
 use crate::reference::{ItemId, OpeningId, ReferenceManifest};
+use crate::simulation::instruments::{InstrumentSample, InstrumentState};
 use crate::simulation::{FrameInput, StepClock, keys};
 use crate::starting_area::GarageRuntime;
 use crate::vehicle::VehiclePose;
@@ -22,6 +24,7 @@ struct RuntimeReference(Arc<ReferenceManifest>);
 #[derive(Resource)]
 struct Drive {
     runtime: GarageRuntime,
+    instruments: InstrumentState,
     input: FrameInput,
     clock: StepClock,
     previous: VehiclePose,
@@ -57,8 +60,9 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
     let runtime = GarageRuntime::new(&reference).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let current = runtime.area.player.view_pose(&runtime.physics);
     App::new()
-        .insert_resource(RuntimeReference(reference))
+        .insert_resource(RuntimeReference(reference.clone()))
         .insert_resource(Drive {
+            instruments: InstrumentState::new(&reference.instruments),
             runtime,
             input: FrameInput::default(),
             clock: StepClock::default(),
@@ -99,6 +103,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
                 advance_physics,
                 sync_world,
                 sync_imported,
+                sync_instruments,
                 update_camera,
                 update_hud,
             )
@@ -119,6 +124,7 @@ fn setup(
     let mut visuals = WorldVisuals::new(&mut meshes, &mut materials);
     visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
     commands.insert_resource(visuals);
+    commands.insert_resource(InstrumentVisuals::default());
     presentation::reference::spawn(&mut commands, &server, &reference.0);
     commands.spawn((
         DirectionalLight {
@@ -159,6 +165,7 @@ fn check_ready(
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
     mut visuals: ResMut<ReferenceVisuals>,
+    mut instruments: ResMut<InstrumentVisuals>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
     mut frames: Local<u8>,
@@ -192,6 +199,20 @@ fn check_ready(
         &primitives,
     ) {
         Ok(true) => {
+            if let Err(e) = instruments.bind(&reference.0, &visuals.nodes, &primitives, &server) {
+                game_failure(&e.to_string());
+                visuals.failed = true;
+                return;
+            }
+            match instruments.ready(&server) {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(e) => {
+                    game_failure(&e.to_string());
+                    visuals.failed = true;
+                    return;
+                }
+            }
             *frames += 1;
             if *frames >= 2 {
                 drive.ready = true;
@@ -240,6 +261,7 @@ fn read_input(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             game_failure(&error.to_string());
             return;
         }
+        drive.instruments.reset(&reference.0.instruments);
         drive.camera = CameraMode::default();
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
         clear_input(&mut drive);
@@ -319,6 +341,43 @@ fn sync_imported(
     );
     presentation::reference::sync_items(&drive.runtime.area, drive.clock.alpha(), &mut items);
     presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
+}
+fn sync_instruments(
+    time: Res<Time<Real>>,
+    reference: Res<RuntimeReference>,
+    mut drive: ResMut<Drive>,
+    mut visuals: ResMut<InstrumentVisuals>,
+    mut transforms: Query<&mut Transform, Without<DriveCamera>>,
+    mut materials: Query<&mut MeshMaterial3d<StandardMaterial>>,
+) {
+    let run = &drive.runtime;
+    let amount = |id: ItemId| {
+        run.area
+            .items
+            .get(id)
+            .and_then(|i| i.fluid.as_ref())
+            .map_or(0., |f| f.mixture.total())
+    };
+    let r = &reference.0.instruments;
+    let sample = InstrumentSample {
+        speed_kmh: run.physics.snapshot().speed_mps * 3.6,
+        fuel_liters: amount(reference.0.engine.fuel_tank),
+        oil_liters: amount(reference.0.engine.oil_tank),
+        temperature: run.engine_output.temperature,
+        rpm: run.engine_output.rpm,
+        local_ignition: run.engine_output.ignition
+            && r.electronics_output > r.electronics_off_threshold,
+        distance_m: run.trip_m,
+    };
+    if run.started && !run.paused {
+        drive.instruments.update(r, sample, time.delta_secs());
+    }
+    visuals.update(
+        &reference.0,
+        &drive.instruments,
+        &mut transforms,
+        &mut materials,
+    );
 }
 fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveCamera>>) {
     for mut transform in &mut query {

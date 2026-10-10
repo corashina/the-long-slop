@@ -42,7 +42,12 @@ def recover_instruments(source,manifest,reports):
             'axis':next((i for i,x in enumerate(axes) if x),0),'inv':bool(digit['inv']),'direct':bool(digit['direct']),
             'continuous':bool(digit['continous']),'initial_value':digit['alakiertek'],'initial_angle':digit['angle'],
             'on':material(r,digit['MOn']),'off':material(r,digit['MOff'])})
-    return {'needles':needles,'lamps':lamps,'odometer':{'source':source_id(r),'initial_value':count['value'],
+    electronic=source.resolve(car,cd['electronics'])
+    if electronic is None:electronic_output=1.
+    else:
+        e=source.read(electronic);maximum=e['overRideMaxJamValue'] if e['overRideMaxJamValue']>0 else 0.3
+        electronic_output=e['maxOutput']*(1.-max(0.,min(1.,e['jamValue']/maximum)))
+    return {'electronics_output':electronic_output,'electronics_off_threshold':0.2,'needles':needles,'lamps':lamps,'odometer':{'source':source_id(r),'initial_value':count['value'],
         'base':d['szamrendszer'],'decimals':d['tizedesjegyek'],'use_multiplier':bool(d['useMultiplier']),
         'multiplier':d['multiplier'],'digits':digits},
         'low_fuel':cd['lowFuelValue'],'low_oil':cd['lowOilValue'],

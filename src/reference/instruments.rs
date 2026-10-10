@@ -65,6 +65,8 @@ pub struct OdometerReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InstrumentReference {
+    pub electronics_output: f32,
+    pub electronics_off_threshold: f32,
     pub needles: Vec<NeedleReference>,
     pub lamps: Vec<LampReference>,
     pub odometer: OdometerReference,
@@ -148,6 +150,8 @@ impl InstrumentReference {
         ids(o.digits.iter().map(|d| d.place), "duplicate digit place")?;
         require(
             finite(&[
+                self.electronics_output,
+                self.electronics_off_threshold,
                 self.low_fuel,
                 self.low_oil,
                 self.oil_test_rpm,

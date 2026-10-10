@@ -34,7 +34,7 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #hud {position:absolute;inset:0;pointer-events:none;font-family:Arial,sans-serif;text-shadow:2px 2px 2px #000;}
 #crosshair {position:absolute;transform:translate(-50%,-50%);}
 .action-row {position:absolute;margin:0;white-space:nowrap;text-shadow:2px 2px 2px #000;}
-#fluid-text {position:absolute;margin:0;white-space:pre;transform:translateX(-50%);text-align:center;text-shadow:3px 3px 2px #000;}
+#fluid-text {position:absolute;margin:0;white-space:pre;transform:translate(-50%,-50%);text-align:center;text-shadow:3px 3px 2px #000;}
 #carry-help {position:absolute;margin:0;white-space:pre;text-align:right;text-shadow:2px 2px 2px #000;}
 #action-notice {position:absolute;left:0;bottom:20px;margin:0;color:#fff;text-shadow:2px 2px 2px #000;}
 @media(max-width:799px) {

@@ -58,7 +58,7 @@ export function createFeedback(ui) {
   const active=lastIcon||'default';icon.style.width=((active==='pickup'||active==='dismount'||active==='carrying')?75:active==='default'?35:40)*scale+'px';
   icon.style.height=(active==='default'?35:40)*scale+'px';icon.style.left='50%';icon.style.top='50%';
   icon.style.opacity=active==='default'?ui.layouts.reticle.image_color[3]:1;
-  applyLayout(fluid,ui.layouts.fluid);fluid.style.height='auto';fluid.style.width='max-content';fluid.style.left='50%';
+  const fluidBox=applyLayout(fluid,ui.layouts.fluid);fluid.style.top=(fluidBox.y+fluidBox.height/2)+'px';fluid.style.height='auto';fluid.style.width='max-content';fluid.style.left='50%';
   applyLayout(carry,ui.layouts.carry);carry.style.left='auto';carry.style.right='8px';carry.style.width='max-content';carry.style.height='auto';
   notice.style.fontSize=ui.layouts.use.font_size*scale+'px';
  }

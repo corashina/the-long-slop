@@ -218,6 +218,9 @@ impl InteractionState {
         {
             a.actions.0 |= ActionMask::EXIT;
         }
+        if a.actions.0 & ActionMask::MOUNT != 0 {
+            a.actions.0 &= !ActionMask::DROP;
+        }
         a.consumes_mouse = a.actions.0 & (ActionMask::DOOR | ActionMask::TUNE) != 0;
         a
     }
