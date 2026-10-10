@@ -1,6 +1,8 @@
 import copy
 import json
 import unittest
+from tempfile import TemporaryDirectory
+from tools.reference.export import NATIVE_ENGINE_SHA256, native_engine_evidence
 from pathlib import Path
 from tools.reference.lighting import recover_cycle, recover_lighting, validate_lighting_export
 from tools.reference.source import Source
@@ -94,6 +96,30 @@ class LightingTests(unittest.TestCase):
             for values in (None,[],[1.,2.],[1.,2.,3.,4.],[float('nan'),1.,2.]):
                 altered=copy.deepcopy(original);altered['lighting']['cycle'][field]=values
                 with self.assertRaisesRegex(ValueError,field):validate_lighting_export(altered,output)
+
+    def test_fog_modifier_retains_source_draw_distance_setting(self):
+        cycle=recover_cycle(self.source,self.source.get('level1',64920),self.output)
+        self.assertEqual(cycle['fog_modifier'],3.2959184646606445)
+        evidence=self.source.lighting_fog_evidence
+        self.assertEqual(evidence['source'],{'file':'level0','path_id':16865})
+        self.assertEqual(evidence['draw_distance'],2500.)
+        self.assertEqual(evidence['minimum'],{'draw_distance':500.,'fog_modifier':3.5})
+        self.assertEqual(evidence['maximum'],{'draw_distance':25000.,'fog_modifier':1.})
+
+    def test_acceptance_rejects_missing_or_invalid_fog_modifier(self):
+        output=Path('web/assets/reference');original=json.loads((output/'manifest.json').read_text())
+        for value in (None,-1.,float('nan'),float('inf')):
+            altered=copy.deepcopy(original);altered['lighting']['cycle']['fog_modifier']=value
+            with self.assertRaisesRegex(ValueError,'fog_modifier'):validate_lighting_export(altered,output)
+        altered=copy.deepcopy(original);del altered['lighting']['cycle']['fog_modifier']
+        with self.assertRaisesRegex(ValueError,'fog_modifier'):validate_lighting_export(altered,output)
+
+    def test_native_engine_evidence_rejects_an_unchecked_dll(self):
+        evidence=native_engine_evidence(Path(r'C:/Program Files (x86)/Steam/steamapps/common/The Long Drive'))
+        self.assertEqual(evidence['sha256'],NATIVE_ENGINE_SHA256)
+        with TemporaryDirectory() as directory:
+            root=Path(directory);(root/'UnityPlayer.dll').write_bytes(b'unchecked engine')
+            with self.assertRaisesRegex(ValueError,'checked native cloud noise source'):native_engine_evidence(root)
 
     def recover(self):
         s=self.source

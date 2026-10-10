@@ -2,6 +2,7 @@
 import hashlib
 import json
 import math
+import struct
 from pathlib import Path
 from .source import Source, key, source_id, vector
 from .gltf import converted_transform, convert_point
@@ -56,6 +57,20 @@ def gradient(data):
     return {'mode':data['m_Mode'],'colors':[{'time':data[f'ctime{i}']/65535.,'value':rgba(data[f'key{i}'])} for i in range(data['m_NumColorKeys'])],
         'alphas':[{'time':data[f'atime{i}']/65535.,'value':data[f'key{i}']['a']} for i in range(data['m_NumAlphaKeys'])]}
 
+def recover_fog_modifier(source):
+    reader=source.get('level0',16865);settings=source.read(reader)
+    draw=settings['S']['FDrawDistance'];lo=settings['DDSmin'];hi=settings['DDSmax']
+    def f32(value):return struct.unpack('<f',struct.pack('<f',value))[0]
+    fraction=max(0.,min(1.,f32(f32(draw-lo['drawDistance'])/f32(hi['drawDistance']-lo['drawDistance']))))
+    modifier=f32(lo['fogModifier']+f32(f32(hi['fogModifier']-lo['fogModifier'])*fraction))
+    source.lighting_fog_evidence={'source':source_id(reader),'draw_distance':draw,
+        'minimum':{'draw_distance':lo['drawDistance'],'fog_modifier':lo['fogModifier']},
+        'maximum':{'draw_distance':hi['drawDistance'],'fog_modifier':hi['fogModifier']},
+        'clamped_fraction':fraction,'fog_modifier':modifier,
+        'rule':'settingsscript.DrawDistanceChanged uses InverseLerp, then Lerp; each operation uses float32.'}
+    return modifier
+
+
 def recover_cycle(source: Source, reader, output: Path) -> dict:
     output.mkdir(parents=True,exist_ok=True)
     if not hasattr(source,'lighting_textures'):source.lighting_textures={}
@@ -68,7 +83,7 @@ def recover_cycle(source: Source, reader, output: Path) -> dict:
         'dayAngleMin':'day_angle_min','dayAngleMax':'day_angle_max','midnightAngleR':'midnight_angle_dawn','midnightAngleE':'midnight_angle_dusk',
         'minMoonAngle':'min_moon_angle','maxMoonAngle':'max_moon_angle','colorDelay':'color_delay','starSpeed':'star_speed',
         'CloudPerlinSpread':'cloud_perlin_spread','CloudPerlinSpeed':'cloud_perlin_speed','sunFlareLerpMStart':'flare_lerp_start','sunFlareLerpMEnd':'flare_lerp_end'}
-    result.update({v:f[k] for k,v in fields.items()});result['day_yaw_degrees']=60.;result['biome_refresh_seconds']=1.
+    result.update({v:f[k] for k,v in fields.items()});result['day_yaw_degrees']=60.;result['biome_refresh_seconds']=1.;result['fog_modifier']=recover_fog_modifier(source)
     # The approved desert-only world uses TerrainGenerator's forced desert RGB selector.
     result['desert_color']=[1.,0.,0.,1.]
     for k,v in {'skyColors':'sky_colors','daySkyGroundColors':'day_ground_colors','nightSkyGroundColors':'night_ground_colors',
@@ -325,7 +340,7 @@ def recover_lighting(source: Source, roots: list, output: Path) -> dict:
     settings_reader=source.get('level0',16865);sf=source.read(settings_reader)
     draw=sf['S']['FDrawDistance'];lo=sf['DDSmin'];hi=sf['DDSmax'];fraction=max(0.,min(1.,(draw-lo['drawDistance'])/(hi['drawDistance']-lo['drawDistance'])))
     def setting(name):return lo[name]+(hi[name]-lo[name])*fraction
-    result['startup_fog_density']*=setting('fogModifier')
+    result['startup_fog_density']*=cycle['fog_modifier']
     for role in ('Cam','mainCam','farCamera','skyCamera'):
         camera=source.resolve(player,pf[role]);cf=source.read(camera)
         result['cameras'].append({'source':source_id(camera),'role':role,'near_plane':cf['near clip plane'],'far_plane':cf['far clip plane'],
@@ -395,6 +410,9 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
         values=lighting['cycle'].get(field)
         if not isinstance(values,list) or len(values)!=3 or not all(isinstance(v,(int,float)) and math.isfinite(v) for v in values):
             fail(lighting['cycle']['source'],field+' requires three finite values')
+    modifier=lighting['cycle'].get('fog_modifier')
+    if not isinstance(modifier,(int,float)) or not math.isfinite(modifier) or modifier<0:
+        fail(lighting['cycle']['source'],'fog_modifier requires a finite nonnegative value')
     flares=lighting['cycle']['sun_flares']
     expected_flares=[57088,57090,57089]
     if len(flares)!=len(expected_flares):fail(lighting['cycle']['source'],'sun flare chain')

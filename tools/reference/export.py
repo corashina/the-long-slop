@@ -7,6 +7,15 @@ from pathlib import Path
 
 APP_ID = 1017180
 BUILD_ID = 11140890
+NATIVE_ENGINE_SHA256 = '553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86'
+
+
+def native_engine_evidence(steam_root: Path):
+    with (steam_root / 'UnityPlayer.dll').open('rb') as stream:
+        digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+    if digest != NATIVE_ENGINE_SHA256:
+        raise ValueError('UnityPlayer.dll differs from the checked native cloud noise source')
+    return {'file': 'UnityPlayer.dll', 'version': '2021.3.18f1 (3129e69bc0c7)', 'sha256': digest}
 
 
 def validate_build(steam_root: Path):
@@ -31,6 +40,7 @@ def export_reference(steam_root: Path, output: Path) -> None:
     if output.resolve().is_relative_to(steam_root.resolve()):
         raise ValueError('Keep generated files outside the Steam installation')
     validate_build(steam_root)
+    native_engine = native_engine_evidence(steam_root)
     source = Source(steam_root)
     def transform(go):return source.transform_for(source.get('level1',go))
     roots = {'home':[source.get('level1',21400)], 'lada':[transform(17687)],
@@ -50,6 +60,7 @@ def export_reference(steam_root: Path, output: Path) -> None:
     output.mkdir(parents=True, exist_ok=True)
     # Remove acceptance before any export. A failed run cannot leave it usable.
     (output/'manifest.json').unlink(missing_ok=True)
+    native_engine = native_engine_evidence(steam_root)
     source.lighting_root_assets={key(root):i for i,readers in enumerate(roots.values(),1) for root in readers}
     _,pole=road_source(source)
     clouds=source.get('level1',27217)
@@ -83,7 +94,7 @@ def export_reference(steam_root: Path, output: Path) -> None:
         hashes.append({'file':str(path.relative_to(data_root)).replace('\\','/'),'sha256':digest})
     manifest=build_manifest(source,roots,report,hashes)
     validate_lighting_export(manifest,output)
-    (output/'lighting-evidence.json').write_text(json.dumps({'lighting':manifest['lighting'],'byte_checks':source.evidence},indent=2,allow_nan=False),encoding='utf-8')
+    (output/'lighting-evidence.json').write_text(json.dumps({'lighting':manifest['lighting'],'byte_checks':source.evidence,'native_engine':native_engine,'fog_setting':source.lighting_fog_evidence},indent=2,allow_nan=False),encoding='utf-8')
     parameters['controls']={
         'source':{'file':'level0','path_id':16865},
         'defaults':{'object_move':manifest['player']['obj_move_sensitivity'],'object_rotation':manifest['player']['obj_rotation_sensitivity'],
