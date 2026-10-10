@@ -63,6 +63,7 @@ A blocked texture kept Start disabled and named the failed glTF dependency.
 On 2026-10-10, Computer Use stopped before final UI input.
 It could not verify the current browser URL with enough confidence to enforce policy.
 The final continuous browser garage-to-road route remains unverified.
+The user requested that this test be skipped on 2026-10-10.
 Native source tests verify that route's vehicle and interaction steps.
 
 The earlier 1280 by 720 measurement used an RTX 4070 Ti with ANGLE Direct3D11.

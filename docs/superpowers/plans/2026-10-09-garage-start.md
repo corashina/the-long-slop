@@ -384,7 +384,7 @@ Use delegated asset, fluid, and player work with the ownership above. The primar
 Tasks 3 and 4 share only frozen interfaces and can run together. Serialize changes to the physics owner and app.
 Review each completed module against the spec before integration. Use one final independent review after browser acceptance.
 The user approved this plan before product implementation.
-Implementation and native source acceptance are verified. Final browser route verification is blocked by Computer Use URL checks.
+Implementation and native source acceptance are verified. The user requested that final browser route verification be skipped.
 See `docs/verification.md` for results and limits.
 
 ## Verified API references

@@ -68,7 +68,7 @@ Close the driver door before reversing through the garage exit.
 Read [the approved scope](docs/superpowers/specs/2026-10-09-garage-start-design.md) and [verification](docs/verification.md).
 Imported layout and recovered rules do not establish identical Unity physics or full-game parity.
 Unity shader effects, live mirror reflections, and audio are not reproduced.
-The final browser walking route remains unverified because Computer Use could not verify its browser URL.
+The final browser walking route was skipped at the user's request. It remains unverified.
 The build has no survival system, save system, multiplayer, or public deployment.
 
 ## Toolchain
