@@ -1,8 +1,8 @@
 mod common;
 
-use desert_drive::simulation::DriveInput;
-use desert_drive::vehicle::{PhysicsWorld, VehiclePose};
-use desert_drive::world::{
+use my_summer_slop::simulation::DriveInput;
+use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose};
+use my_summer_slop::world::{
     ChunkData, ChunkKey, WorldOrigin, WorldStream, active_chunks, generate_chunk,
     generate_chunk_in_band, nearest_station, road_sample,
 };
@@ -194,7 +194,7 @@ fn streaming_bounds_colliders_and_loads_teleport_destination() {
                     .data
                     .props
                     .iter()
-                    .filter(|p| p.kind != desert_drive::world::PropKind::Cactus)
+                    .filter(|p| p.kind != my_summer_slop::world::PropKind::Cactus)
                     .count()
                     + c.data.stations.len() * 2
             })
@@ -335,7 +335,7 @@ fn lateral_streaming_supports_travel_beyond_the_old_edge() {
                     .data
                     .props
                     .iter()
-                    .filter(|p| p.kind != desert_drive::world::PropKind::Cactus)
+                    .filter(|p| p.kind != my_summer_slop::world::PropKind::Cactus)
                     .count()
                     + c.data.stations.len() * 2
             })
@@ -369,7 +369,7 @@ fn walking_focus_rebases_a_parked_vehicle_without_travel() {
 
 #[test]
 fn garage_terrain_keeps_interiors_clear_and_connects_driveway() {
-    use desert_drive::reference::{Bounds, ColliderGeometry};
+    use my_summer_slop::reference::{Bounds, ColliderGeometry};
     let mut reference = common::reference();
     reference.area.home_bounds = Bounds {
         min: [30.0, -2.0, -75.0],
@@ -381,11 +381,11 @@ fn garage_terrain_keeps_interiors_clear_and_connects_driveway() {
     };
     reference.area.driveway_height = 1.0;
     let mut interior = reference.nodes[0].clone();
-    interior.id = desert_drive::reference::NodeId(999);
+    interior.id = my_summer_slop::reference::NodeId(999);
     interior.name = "interiorCellar".into();
     reference.nodes.push(interior);
     let mut collider = reference.colliders[0].clone();
-    collider.node = desert_drive::reference::NodeId(999);
+    collider.node = my_summer_slop::reference::NodeId(999);
     collider.body = reference.bodies[0].id;
     collider.geometry = ColliderGeometry::Convex {
         points: vec![

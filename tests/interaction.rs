@@ -1,14 +1,16 @@
 mod common;
 
-use desert_drive::interaction::items::{ItemLocation, ItemStore};
-use desert_drive::interaction::{AimTarget, InteractionAction, InteractionState, SLOT_SENSOR_FLAG};
-use desert_drive::player::PlayerState;
-use desert_drive::reference::{
+use my_summer_slop::interaction::items::{ItemLocation, ItemStore};
+use my_summer_slop::interaction::{
+    AimTarget, InteractionAction, InteractionState, SLOT_SENSOR_FLAG,
+};
+use my_summer_slop::player::PlayerState;
+use my_summer_slop::reference::{
     AnchorId, BodyId, HingeRecord, ItemId, OpeningId, OpeningRecord, ReferenceManifest, TankRole,
     WheelSlotId,
 };
-use desert_drive::simulation::{FrameInput, keys};
-use desert_drive::vehicle::{PhysicsWorld, VehiclePose};
+use my_summer_slop::simulation::{FrameInput, keys};
+use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose};
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder};
 
@@ -43,7 +45,7 @@ fn fixture_with(
             valve: 0.0,
             can_tune: false,
             tune_rate: 0.0,
-            visuals: desert_drive::reference::CapVisualReference {
+            visuals: my_summer_slop::reference::CapVisualReference {
                 open_nodes: vec![],
                 closed_nodes: vec![],
                 cap_node: None,
@@ -155,7 +157,7 @@ fn source_seat_hit_node_routes_to_primary_seat() {
     let alias = reference.items[0].node;
     reference.seats[0].hit_nodes = vec![alias];
     assert_eq!(
-        desert_drive::starting_area::collider_item(&reference, alias),
+        my_summer_slop::starting_area::collider_item(&reference, alias),
         Some(reference.seats[0].item),
     );
 }
@@ -1307,7 +1309,7 @@ fn runtime_pump_stays_open_and_fills_the_held_container() {
 #[test]
 fn faucet_tuning_controls_fractional_fill_and_clamps() {
     let (mut interaction, mut items, mut physics, mut player) = fixture_with(|reference| {
-        reference.items[0].kind = desert_drive::reference::ItemKind::Cap;
+        reference.items[0].kind = my_summer_slop::reference::ItemKind::Cap;
         reference.tanks[0].role = TankRole::Supply;
         reference.tanks[0].capacity_liters = 1000.0;
         reference.tanks[0].quantities_liters = [0.0, 0.0, 0.0, 69.0, 0.0, 0.0];

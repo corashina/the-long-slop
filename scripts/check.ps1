@@ -1,7 +1,7 @@
 param([string]$Test)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$image = 'the-long-drive-wasm-toolchain'
+$image = 'my-summer-slop-toolchain'
 try {
     & docker build --tag $image --file "$root/tools/Dockerfile" $root
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

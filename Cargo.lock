@@ -2027,7 +2027,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "desert-drive"
+name = "my-summer-slop"
 version = "0.1.0"
 dependencies = [
  "bevy",

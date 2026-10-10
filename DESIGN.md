@@ -1,5 +1,5 @@
 ---
-name: Desert Drive
+name: My Summer Slop
 description: Imported garage preparation with dark readable controls.
 colors:
   accent: "#d9ad6f"
@@ -84,7 +84,7 @@ components:
     padding: "20px"
 ---
 
-# Design System: Desert Drive
+# Design System: My Summer Slop
 
 ## Overview
 

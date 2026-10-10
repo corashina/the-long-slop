@@ -1,4 +1,4 @@
-# Desert Drive
+# My Summer Slop
 
 Prepare a fixed Lada 2101 in the starting garage. Drive onto the desert road.
 The home, car, and supplies come from installed Steam build 11140890.

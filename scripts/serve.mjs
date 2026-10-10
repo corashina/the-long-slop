@@ -48,5 +48,5 @@ createServer(async (request, response) => {
     response.writeHead(code).end(code === 404 ? 'Not found' : 'Invalid request');
   }
 }).listen(4173, '127.0.0.1', () => {
-  console.log('Desert Drive: http://127.0.0.1:4173');
+  console.log('My Summer Slop: http://127.0.0.1:4173');
 });

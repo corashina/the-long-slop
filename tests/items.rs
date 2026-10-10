@@ -1,6 +1,6 @@
 mod common;
 
-use desert_drive::interaction::items::ItemStore;
+use my_summer_slop::interaction::items::ItemStore;
 
 #[test]
 fn engine_fluid_view_changes_the_owned_item_quantities() {

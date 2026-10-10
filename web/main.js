@@ -212,8 +212,8 @@ async function load() {
   if (!graphics) throw new Error('This browser cannot use WebGL2.');
   graphics.getExtension('WEBGL_lose_context')?.loseContext();
   status.textContent = 'Loading the game code…';
-  const { default: init, run } = await import('./pkg/desert_drive.js');
-  const wasm = await fetch('./pkg/desert_drive_bg.wasm');
+  const { default: init, run } = await import('./pkg/my_summer_slop.js');
+  const wasm = await fetch('./pkg/my_summer_slop_bg.wasm');
   if (!wasm.ok) throw new Error(`Cannot load game code (HTTP ${wasm.status}).`);
   await init({ module_or_path: wasm });
   status.textContent = 'Loading the garage assets…';

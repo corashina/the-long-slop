@@ -1,4 +1,4 @@
-use desert_drive::reference::{BUILD_ID, ReferenceManifest};
+use my_summer_slop::reference::{BUILD_ID, ReferenceManifest};
 
 fn fixture() -> serde_json::Value {
     serde_json::from_slice(include_bytes!("common/reference.json")).unwrap()
@@ -92,7 +92,7 @@ fn rejects_mismatch_unknown_fields_duplicate_ids_and_missing_bindings() {
 fn rejects_invalid_geometry_quantities_and_hierarchy_cycles() {
     let mut manifest =
         ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
-    if let desert_drive::reference::ColliderGeometry::Convex { points } =
+    if let my_summer_slop::reference::ColliderGeometry::Convex { points } =
         &mut manifest.colliders[0].geometry
     {
         points[0][0] = f32::NAN;
@@ -272,7 +272,7 @@ fn production_export_matches_installed_contract() {
         }
     }
     for collider in &manifest.colliders {
-        if let desert_drive::reference::ColliderGeometry::Convex { points } = &collider.geometry {
+        if let my_summer_slop::reference::ColliderGeometry::Convex { points } = &collider.geometry {
             let points: Vec<_> = points
                 .iter()
                 .copied()

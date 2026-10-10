@@ -1,11 +1,11 @@
 mod common;
 
-use desert_drive::interaction::items::ItemLocation;
-use desert_drive::interaction::wheels::WheelAssemblies;
-use desert_drive::reference::{ItemId, WheelSlotId};
-use desert_drive::simulation::DriveInput;
-use desert_drive::starting_area::StartingArea;
-use desert_drive::vehicle::{PhysicsWorld, VehiclePose};
+use my_summer_slop::interaction::items::ItemLocation;
+use my_summer_slop::interaction::wheels::WheelAssemblies;
+use my_summer_slop::reference::{ItemId, WheelSlotId};
+use my_summer_slop::simulation::DriveInput;
+use my_summer_slop::starting_area::StartingArea;
+use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose};
 use rapier3d::math::{Rotation, Vector};
 use rapier3d::prelude::ColliderHandle;
 
@@ -18,7 +18,7 @@ fn slot_sensor(physics: &PhysicsWorld, slot: WheelSlotId) -> ColliderHandle {
             collider.is_sensor()
                 && (collider.user_data >> 96) as u8 == slot.0
                 && (collider.user_data >> 64) as u32 == 0
-                && collider.user_data & desert_drive::vehicle::VEHICLE_COLLIDER_FLAG != 0
+                && collider.user_data & my_summer_slop::vehicle::VEHICLE_COLLIDER_FLAG != 0
         })
         .unwrap()
         .0
@@ -48,7 +48,7 @@ fn assert_slot_aim(
     assert_eq!(aim.slot, empty.then_some(slot));
 }
 
-fn reference() -> desert_drive::reference::ReferenceManifest {
+fn reference() -> my_summer_slop::reference::ReferenceManifest {
     let mut reference = common::reference();
     reference.area.player_spawn.translation = [20.0, 1.0, 20.0];
     reference
@@ -208,14 +208,14 @@ fn rebase_and_reattachment_keep_contact_and_identity() {
 #[test]
 #[ignore = "Requires the local installed-build export"]
 fn production_wheel_bindings_detach_and_restore() {
-    let reference = desert_drive::reference::ReferenceManifest::from_json(
+    let reference = my_summer_slop::reference::ReferenceManifest::from_json(
         &std::fs::read("web/assets/reference/manifest.json").unwrap(),
     )
     .unwrap();
     let transform = reference.area.car_pose;
-    let mut physics = desert_drive::vehicle::PhysicsWorld::new(
+    let mut physics = my_summer_slop::vehicle::PhysicsWorld::new(
         &reference,
-        desert_drive::vehicle::VehiclePose {
+        my_summer_slop::vehicle::VehiclePose {
             position: transform.translation,
             rotation: transform.rotation,
         },

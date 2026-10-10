@@ -46,7 +46,7 @@ It supports native tests. It does not replace the installed export.
 Run the installed export check after extraction:
 
 ```powershell
-docker run --rm --mount "type=bind,source=$PWD,target=/workspace" --mount "type=volume,source=tld-wasm-cargo,target=/cargo" --mount "type=volume,source=tld-wasm-target,target=/target" the-long-drive-wasm-toolchain cargo test --locked --test reference -- --ignored
+docker run --rm --mount "type=bind,source=$PWD,target=/workspace" --mount "type=volume,source=tld-wasm-cargo,target=/cargo" --mount "type=volume,source=tld-wasm-target,target=/target" my-summer-slop-toolchain cargo test --locked --test reference -- --ignored
 ```
 
 Pinned package metadata: [pygltflib](https://pypi.org/pypi/pygltflib/json).

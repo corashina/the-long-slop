@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "generatedAt": "2026-10-08T15:41:48.175Z",
-  "title": "Design System: Desert Drive",
+  "title": "Design System: My Summer Slop",
   "extensions": {
     "colorMeta": {
       "accent": {
@@ -252,7 +252,7 @@
       "kind": "card",
       "refersTo": "controls-panel",
       "description": "Start controls over the live scene.",
-      "html": "<section class=\"ds-panel\"><h1>Desert Drive</h1><p>A road through the desert.</p><dl class=\"ds-controls\"><div><dt>W / S or ↑ / ↓</dt><dd>Drive / brake / reverse</dd></div><div><dt>P / Esc</dt><dd>Pause / resume</dd></div></dl><button class=\"ds-button ds-start\" type=\"button\">Start</button></section>",
+      "html": "<section class=\"ds-panel\"><h1>My Summer Slop</h1><p>A road through the desert.</p><dl class=\"ds-controls\"><div><dt>W / S or ↑ / ↓</dt><dd>Drive / brake / reverse</dd></div><div><dt>P / Esc</dt><dd>Pause / resume</dd></div></dl><button class=\"ds-button ds-start\" type=\"button\">Start</button></section>",
       "css": "@font-face { font-family:\"Libre Baskerville\"; src:url(\"./fonts/LibreBaskerville.ttf\") format(\"truetype\"); font-weight:400 700; font-style:normal; font-display:swap; } .ds-button { min-height:44px; padding:10px 24px; border:0; background:var(--accent, #d9ad6f); color:#211a12; font:600 16px system-ui,sans-serif; cursor:pointer; } .ds-button:hover:enabled { background:#eac48e; } .ds-button:active:enabled { background:#c79959; } .ds-button:focus-visible { outline:2px solid #f3e5cd; outline-offset:3px; } .ds-button:disabled { opacity:.5; cursor:default; } .ds-panel { box-sizing:border-box; width:min(370px,calc(100% - 32px)); padding:28px; background:var(--panel, #282218f5); color:#f3e5cd; font:16px system-ui,sans-serif; } .ds-panel h1 { margin:0; font-family:\"Libre Baskerville\",serif; font-size:38px; line-height:1.1; font-weight:400; } .ds-panel p { margin:10px 0 24px; color:var(--muted, #d6c6ac); line-height:1.5; } .ds-controls { margin:0 0 16px; font-size:12px; line-height:1.5; } .ds-controls div { display:grid; grid-template-columns:114px 1fr; gap:12px; padding:5px 0; } .ds-controls dd { margin:0; color:var(--muted, #d6c6ac); } .ds-start { width:100%; margin-top:8px; } @media(max-width:600px) { .ds-panel { padding:24px; } .ds-controls div { grid-template-columns:106px 1fr; gap:8px; } }"
     },
     {

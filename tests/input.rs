@@ -1,4 +1,4 @@
-use desert_drive::simulation::{FrameInput, keys};
+use my_summer_slop::simulation::{FrameInput, keys};
 
 #[test]
 fn catch_up_steps_consume_toggle_once_and_keep_held_input() {

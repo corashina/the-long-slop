@@ -1,7 +1,7 @@
 mod common;
 
-use desert_drive::simulation::{DriveInput, StepClock};
-use desert_drive::vehicle::{PhysicsWorld, VehiclePose, VehicleSnapshot};
+use my_summer_slop::simulation::{DriveInput, StepClock};
+use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose, VehicleSnapshot};
 
 const START: VehiclePose = VehiclePose {
     position: [0.0, 1.1, 0.0],
@@ -58,7 +58,7 @@ fn settles_on_four_wheels() {
 
 #[test]
 fn removed_slot_has_no_raycast_support_and_restores_without_duplicates() {
-    use desert_drive::vehicle::InstalledWheel;
+    use my_summer_slop::vehicle::InstalledWheel;
     let reference = common::reference();
     let mut world = flat_track();
     let slot = reference.vehicle.wheel_slots[0];
@@ -121,23 +121,29 @@ fn source_springs_keep_their_force_when_vehicle_mass_changes() {
 
 #[test]
 fn drivetrain_converts_running_torque_with_source_ratio_radius_and_drive_count() {
-    use desert_drive::simulation::engine::EngineOutput;
+    use my_summer_slop::simulation::engine::EngineOutput;
     let reference = common::reference();
     let output = EngineOutput {
         running: true,
         torque_nm: 87.0,
         ..EngineOutput::default()
     };
-    let force = desert_drive::vehicle::drive_force(output, &reference.vehicle, 2, 0.3, 2);
+    let force = my_summer_slop::vehicle::drive_force(output, &reference.vehicle, 2, 0.3, 2);
     let expected =
         87.0 * reference.vehicle.gear_ratios[2].abs() * reference.vehicle.final_drive_ratio / 0.6;
     assert!((force - expected).abs() < 0.001);
     assert_eq!(
-        desert_drive::vehicle::drive_force(EngineOutput::default(), &reference.vehicle, 2, 0.3, 2),
+        my_summer_slop::vehicle::drive_force(
+            EngineOutput::default(),
+            &reference.vehicle,
+            2,
+            0.3,
+            2
+        ),
         0.0
     );
     assert_eq!(
-        desert_drive::vehicle::drive_force(output, &reference.vehicle, 1, 0.3, 2),
+        my_summer_slop::vehicle::drive_force(output, &reference.vehicle, 1, 0.3, 2),
         0.0
     );
 }
@@ -156,7 +162,7 @@ fn automatic_shift_retains_selection_when_curve_candidates_are_zero() {
             key.out_tangent = 0.0;
         });
     assert_eq!(
-        desert_drive::vehicle::select_gear(
+        my_summer_slop::vehicle::select_gear(
             0.0,
             false,
             true,
@@ -167,7 +173,7 @@ fn automatic_shift_retains_selection_when_curve_candidates_are_zero() {
         2
     );
     assert_eq!(
-        desert_drive::vehicle::select_gear(
+        my_summer_slop::vehicle::select_gear(
             0.0,
             false,
             false,

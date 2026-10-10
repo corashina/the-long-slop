@@ -1,8 +1,8 @@
 mod common;
 
-use desert_drive::fluids::{FluidContainer, VehicleFluids};
-use desert_drive::reference::EngineReference;
-use desert_drive::simulation::{
+use my_summer_slop::fluids::{FluidContainer, VehicleFluids};
+use my_summer_slop::reference::EngineReference;
+use my_summer_slop::simulation::{
     FIXED_DT,
     engine::{EngineInput, EngineOutput, EngineState},
 };

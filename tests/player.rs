@@ -1,8 +1,8 @@
 mod common;
 
-use desert_drive::player::{ExitReference, PlayerMode, PlayerState};
-use desert_drive::simulation::{FIXED_DT, FrameInput, keys};
-use desert_drive::vehicle::{PhysicsWorld, VehiclePose};
+use my_summer_slop::player::{ExitReference, PlayerMode, PlayerState};
+use my_summer_slop::simulation::{FIXED_DT, FrameInput, keys};
+use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose};
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;

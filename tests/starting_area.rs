@@ -1,18 +1,18 @@
 mod common;
-use desert_drive::simulation::{FrameInput, keys};
-use desert_drive::starting_area::GarageRuntime;
+use my_summer_slop::simulation::{FrameInput, keys};
+use my_summer_slop::starting_area::GarageRuntime;
 
-fn initial() -> (desert_drive::reference::ReferenceManifest, GarageRuntime) {
+fn initial() -> (my_summer_slop::reference::ReferenceManifest, GarageRuntime) {
     let mut reference = common::reference();
     let item = reference.items[0].id;
     let node = reference.items[0].node;
     let mut body = reference.bodies[1].clone();
-    body.id = desert_drive::reference::BodyId(90);
+    body.id = my_summer_slop::reference::BodyId(90);
     body.node = node;
     body.mass_kg = 7.0;
     body.pose.translation = [10.0, 2.0, -1.0];
     reference.bodies.push(body);
-    reference.items[0].body = desert_drive::reference::BodyId(90);
+    reference.items[0].body = my_summer_slop::reference::BodyId(90);
     reference.items[0].attached_to = None;
     reference
         .nodes
@@ -22,10 +22,10 @@ fn initial() -> (desert_drive::reference::ReferenceManifest, GarageRuntime) {
         .transform
         .translation = [10.0, 2.0, -1.0];
     let mut collider = reference.colliders[0].clone();
-    collider.id = desert_drive::reference::ColliderId(90);
-    collider.body = desert_drive::reference::BodyId(90);
+    collider.id = my_summer_slop::reference::ColliderId(90);
+    collider.body = my_summer_slop::reference::BodyId(90);
     collider.node = node;
-    collider.geometry = desert_drive::reference::ColliderGeometry::Sphere {
+    collider.geometry = my_summer_slop::reference::ColliderGeometry::Sphere {
         center: [0.0; 3],
         radius: 0.2,
     };
@@ -96,7 +96,7 @@ fn restart_after_carry_detach_rebase() {
                 pressed: keys::GRAB,
                 ..FrameInput::default()
             },
-            Some(desert_drive::interaction::AimTarget {
+            Some(my_summer_slop::interaction::AimTarget {
                 item: reference.items[0].id,
                 distance: 1.0,
                 point: [10.0, 2.0, -1.0],
@@ -119,7 +119,7 @@ fn restart_after_carry_detach_rebase() {
             .unwrap();
         assert_eq!(
             runtime.area.items.get(removed).unwrap().location,
-            desert_drive::interaction::items::ItemLocation::World
+            my_summer_slop::interaction::items::ItemLocation::World
         );
         runtime.physics.rebase([1280.0, 0.0, -1280.0]);
         runtime.stream.origin.shift([1280.0, 0.0, -1280.0]);
@@ -202,13 +202,13 @@ fn recovery_preserves_state() {
 #[ignore = "Requires exported Steam assets"]
 fn production_garage_bindings_fill_start_and_move() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").expect("exported manifest");
-    let reference = desert_drive::reference::ReferenceManifest::from_json(&bytes).unwrap();
+    let reference = my_summer_slop::reference::ReferenceManifest::from_json(&bytes).unwrap();
     verify_source_passenger_controls(&reference);
     let mut runtime = GarageRuntime::new(&reference).unwrap();
     assert_eq!(runtime.area.bodies.len(), reference.bodies.len());
     for collider in &reference.colliders {
         if collider.body != reference.vehicle.body
-            && desert_drive::starting_area::belongs_to_vehicle(&reference, collider.body)
+            && my_summer_slop::starting_area::belongs_to_vehicle(&reference, collider.body)
         {
             let shape = runtime
                 .physics
@@ -291,12 +291,12 @@ fn production_garage_bindings_fill_start_and_move() {
         .item;
     // Stage the source can near the opening. Browser checks cover the walking route.
     let mut staged = runtime.area.items.get(can).unwrap().pose;
-    let view = desert_drive::vehicle::to_rapier(runtime.area.player.view_pose(&runtime.physics));
+    let view = my_summer_slop::vehicle::to_rapier(runtime.area.player.view_pose(&runtime.physics));
     staged.position =
         (view.translation + view.rotation * rapier3d::math::Vector::new(0.0, 0.0, -0.6)).to_array();
     let can_body = runtime.area.items.get(can).unwrap().body.unwrap();
     runtime.physics.rapier_mut().bodies[can_body]
-        .set_position(desert_drive::vehicle::to_rapier(staged), true);
+        .set_position(my_summer_slop::vehicle::to_rapier(staged), true);
     runtime.physics.refresh_queries();
     runtime.area.items.sync_poses(&runtime.physics);
     let can_target = aim_at(&mut runtime, &reference, can);
@@ -336,7 +336,7 @@ fn production_garage_bindings_fill_start_and_move() {
     );
     assert!(matches!(
         fill_action,
-        Some(desert_drive::interaction::InteractionAction::Fill { .. })
+        Some(my_summer_slop::interaction::InteractionAction::Fill { .. })
     ));
     let fuel_after = runtime
         .area
@@ -397,9 +397,9 @@ fn production_garage_bindings_fill_start_and_move() {
 
 fn aim_at(
     runtime: &mut GarageRuntime,
-    reference: &desert_drive::reference::ReferenceManifest,
-    item: desert_drive::reference::ItemId,
-) -> desert_drive::interaction::AimTarget {
+    reference: &my_summer_slop::reference::ReferenceManifest,
+    item: my_summer_slop::reference::ItemId,
+) -> my_summer_slop::interaction::AimTarget {
     let center = runtime
         .physics
         .rapier()
@@ -420,7 +420,7 @@ fn aim_at(
             center[2] + angle.sin() * 1.0,
         ];
         let old = runtime.area.player.body_handle();
-        let pose = desert_drive::vehicle::VehiclePose {
+        let pose = my_summer_slop::vehicle::VehiclePose {
             position,
             rotation: [0.0, 0.0, 0.0, 1.0],
         };
@@ -431,7 +431,7 @@ fn aim_at(
                     .exclude_sensors()
                     .exclude_rigid_body(old),
             )
-            .intersect_shape(desert_drive::vehicle::to_rapier(pose), standing.as_ref())
+            .intersect_shape(my_summer_slop::vehicle::to_rapier(pose), standing.as_ref())
             .next()
             .is_some()
         {
@@ -439,7 +439,7 @@ fn aim_at(
         }
         runtime.physics.rapier_mut().remove_body(old);
         runtime.area.player =
-            desert_drive::player::PlayerState::new(&reference.player, pose, &mut runtime.physics);
+            my_summer_slop::player::PlayerState::new(&reference.player, pose, &mut runtime.physics);
         runtime.area.player.configure_seats(&reference.seats);
         runtime
             .area
@@ -473,10 +473,10 @@ fn aim_at(
 
 #[test]
 fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
-    use desert_drive::reference::{
+    use my_summer_slop::reference::{
         AnchorId, BodyId, ColliderId, HingeRecord, ItemId, ItemKind, NodeId, Transform,
     };
-    use desert_drive::vehicle::collider_builder;
+    use my_summer_slop::vehicle::collider_builder;
     let mut reference = common::reference();
     let source = reference.player.source.clone();
     let identity = Transform {
@@ -539,7 +539,7 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
     collider.node = NodeId(90);
     collider.body = BodyId(90);
     collider.sensor = false;
-    collider.geometry = desert_drive::reference::ColliderGeometry::Box {
+    collider.geometry = my_summer_slop::reference::ColliderGeometry::Box {
         center: [0.3, 0.0, 0.0],
         half_extents: [0.2, 0.5, 0.01],
         rotation: [0.0, 0.0, 0.0, 1.0],
@@ -575,7 +575,7 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
             mouse: [-45.0, 0.0],
             ..FrameInput::default()
         },
-        Some(desert_drive::interaction::AimTarget {
+        Some(my_summer_slop::interaction::AimTarget {
             item: ItemId(90),
             distance: 1.0,
             point: [0.8, 0.7, 0.0],
@@ -601,8 +601,8 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
         let second = &runtime.physics.rapier().colliders[contact.collider2];
         assert!(
             !(contact.has_any_active_contact()
-                && first.user_data & desert_drive::vehicle::VEHICLE_COLLIDER_FLAG != 0
-                && second.user_data & desert_drive::vehicle::VEHICLE_COLLIDER_FLAG != 0)
+                && first.user_data & my_summer_slop::vehicle::VEHICLE_COLLIDER_FLAG != 0
+                && second.user_data & my_summer_slop::vehicle::VEHICLE_COLLIDER_FLAG != 0)
         );
     }
 }
@@ -617,7 +617,7 @@ fn dry_recovery_keeps_a_carried_can_reachable() {
             pressed: keys::GRAB,
             ..FrameInput::default()
         },
-        Some(desert_drive::interaction::AimTarget {
+        Some(my_summer_slop::interaction::AimTarget {
             item: can,
             distance: 1.0,
             point: [10.0, 2.0, -1.0],
@@ -665,13 +665,13 @@ fn dry_recovery_keeps_a_carried_can_reachable() {
 #[ignore = "Requires exported Steam assets"]
 fn production_dry_recovery_keeps_source_can_and_cargo() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
-    let reference = desert_drive::reference::ReferenceManifest::from_json(&bytes).unwrap();
+    let reference = my_summer_slop::reference::ReferenceManifest::from_json(&bytes).unwrap();
     let mut runtime = GarageRuntime::new(&reference).unwrap();
     let can = reference
         .tanks
         .iter()
         .find(|tank| {
-            tank.role == desert_drive::reference::TankRole::Portable
+            tank.role == my_summer_slop::reference::TankRole::Portable
                 && tank.quantities_liters[0] > 0.1
         })
         .unwrap()
@@ -715,7 +715,7 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
             .sqrt()
             < reference.player.aim_reach
     );
-    let station = desert_drive::world::nearest_station(
+    let station = my_summer_slop::world::nearest_station(
         runtime.stream.seed,
         -runtime
             .stream
@@ -734,14 +734,14 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
     );
     // Stage the same source can as trunk cargo. Recovery must preserve its car-relative pose.
     let body = runtime.area.items.get(can).unwrap().body.unwrap();
-    let mut cargo = desert_drive::vehicle::to_rapier(runtime.physics.snapshot().pose);
+    let mut cargo = my_summer_slop::vehicle::to_rapier(runtime.physics.snapshot().pose);
     cargo.translation += cargo.rotation * rapier3d::math::Vector::new(0.0, 0.5, 0.0);
     runtime.physics.rapier_mut().bodies[body].set_position(cargo, true);
     runtime.physics.refresh_queries();
     runtime.area.items.sync_poses(&runtime.physics);
-    let old_car = desert_drive::vehicle::to_rapier(runtime.physics.snapshot().pose);
+    let old_car = my_summer_slop::vehicle::to_rapier(runtime.physics.snapshot().pose);
     let relative = old_car.inverse() * *runtime.physics.rapier().bodies[body].position();
-    let next = desert_drive::vehicle::VehiclePose {
+    let next = my_summer_slop::vehicle::VehiclePose {
         position: [
             old_car.translation.x + 20.0,
             old_car.translation.y,
@@ -751,9 +751,9 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
     };
     runtime.physics.reset(next);
     runtime.physics.rapier_mut().bodies[body]
-        .set_position(desert_drive::vehicle::to_rapier(next) * relative, true);
+        .set_position(my_summer_slop::vehicle::to_rapier(next) * relative, true);
     runtime.recover(&reference);
-    let expected = desert_drive::vehicle::to_rapier(runtime.physics.snapshot().pose) * relative;
+    let expected = my_summer_slop::vehicle::to_rapier(runtime.physics.snapshot().pose) * relative;
     let actual = *runtime.physics.rapier().bodies[body].position();
     assert!(
         (actual.translation - expected.translation).length() < 0.001,
@@ -773,12 +773,12 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
 #[test]
 fn walking_far_keeps_a_parked_road_car_supported() {
     let mut physics = common::world();
-    let mut stream = desert_drive::world::WorldStream::new(desert_drive::world::DEFAULT_SEED);
+    let mut stream = my_summer_slop::world::WorldStream::new(my_summer_slop::world::DEFAULT_SEED);
     let pose = stream.reset_pose(640.0, false, &mut physics);
     physics.reset(pose);
     for _ in 0..180 {
         physics.apply_vehicle_forces(
-            desert_drive::simulation::DriveInput {
+            my_summer_slop::simulation::DriveInput {
                 handbrake: true,
                 ..Default::default()
             },
@@ -787,11 +787,11 @@ fn walking_far_keeps_a_parked_road_car_supported() {
         physics.step_physics();
     }
     let before = physics.snapshot().pose.position;
-    let distant = desert_drive::world::road_sample(stream.seed, 3000.0).center;
+    let distant = my_summer_slop::world::road_sample(stream.seed, 3000.0).center;
     stream.sync_at(distant, &mut physics);
     for _ in 0..120 {
         physics.apply_vehicle_forces(
-            desert_drive::simulation::DriveInput {
+            my_summer_slop::simulation::DriveInput {
                 handbrake: true,
                 ..Default::default()
             },
@@ -855,7 +855,7 @@ fn walking_far_keeps_a_parked_road_car_supported() {
 #[ignore = "Requires exported Steam assets"]
 fn production_parked_garage_car_stays_stable() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
-    let reference = desert_drive::reference::ReferenceManifest::from_json(&bytes).unwrap();
+    let reference = my_summer_slop::reference::ReferenceManifest::from_json(&bytes).unwrap();
     let mut runtime = GarageRuntime::new(&reference).unwrap();
     runtime.started = true;
     let initial = runtime.physics.snapshot();
@@ -882,9 +882,9 @@ fn production_parked_garage_car_stays_stable() {
         let drift = ((state.pose.position[0] - settled.pose.position[0]).powi(2)
             + (state.pose.position[2] - settled.pose.position[2]).powi(2))
         .sqrt();
-        let rotation = desert_drive::vehicle::to_rapier(settled.pose)
+        let rotation = my_summer_slop::vehicle::to_rapier(settled.pose)
             .rotation
-            .angle_between(desert_drive::vehicle::to_rapier(state.pose).rotation)
+            .angle_between(my_summer_slop::vehicle::to_rapier(state.pose).rotation)
             .to_degrees();
         max_drift = max_drift.max(drift);
         max_rotation = max_rotation.max(rotation);
@@ -924,7 +924,7 @@ fn production_parked_garage_car_stays_stable() {
 #[ignore = "Requires exported Steam assets"]
 fn production_garage_exits_and_reverse_to_road() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
-    let reference = desert_drive::reference::ReferenceManifest::from_json(&bytes).unwrap();
+    let reference = my_summer_slop::reference::ReferenceManifest::from_json(&bytes).unwrap();
     let mut runtime = GarageRuntime::new(&reference).unwrap();
     runtime.started = true;
     for _ in 0..5700 {
@@ -996,7 +996,7 @@ fn production_garage_exits_and_reverse_to_road() {
             crossed = true;
         }
         let absolute = runtime.stream.origin.absolute(state.pose.position);
-        let road = desert_drive::world::road_sample(runtime.stream.seed, -absolute[2]);
+        let road = my_summer_slop::world::road_sample(runtime.stream.seed, -absolute[2]);
         if (absolute[0] - road.center[0]).abs() <= 4.0 {
             assert!(
                 state.wheels_contact.iter().all(|contact| *contact),
@@ -1056,7 +1056,7 @@ fn production_garage_exits_and_reverse_to_road() {
 
 fn open_source_hinge(
     runtime: &mut GarageRuntime,
-    reference: &desert_drive::reference::ReferenceManifest,
+    reference: &my_summer_slop::reference::ReferenceManifest,
     source: i64,
 ) {
     let hinge = reference
@@ -1097,7 +1097,7 @@ fn open_source_hinge(
 
 fn enter_source_driver(
     runtime: &mut GarageRuntime,
-    reference: &desert_drive::reference::ReferenceManifest,
+    reference: &my_summer_slop::reference::ReferenceManifest,
 ) {
     open_source_hinge(runtime, reference, 76010);
     let driver = reference.seats.iter().find(|seat| seat.driver).unwrap();
@@ -1128,7 +1128,7 @@ fn enter_source_driver(
     close_source_hinge(runtime, reference, 76010);
 }
 
-fn verify_source_passenger_controls(reference: &desert_drive::reference::ReferenceManifest) {
+fn verify_source_passenger_controls(reference: &my_summer_slop::reference::ReferenceManifest) {
     let mut runtime = GarageRuntime::new(reference).unwrap();
     open_source_hinge(&mut runtime, reference, 70795);
     let passenger = reference
@@ -1190,7 +1190,7 @@ fn verify_source_passenger_controls(reference: &desert_drive::reference::Referen
 
 fn close_source_hinge(
     runtime: &mut GarageRuntime,
-    reference: &desert_drive::reference::ReferenceManifest,
+    reference: &my_summer_slop::reference::ReferenceManifest,
     source: i64,
 ) {
     let hinge = reference
@@ -1235,8 +1235,8 @@ fn close_source_hinge(
 
 fn aim_from_seat(
     runtime: &mut GarageRuntime,
-    reference: &desert_drive::reference::ReferenceManifest,
-    item: desert_drive::reference::ItemId,
+    reference: &my_summer_slop::reference::ReferenceManifest,
+    item: my_summer_slop::reference::ItemId,
 ) {
     assert!(runtime.area.player.seat().is_some());
     let center = runtime
@@ -1247,8 +1247,8 @@ fn aim_from_seat(
         .find(|(_, collider)| collider.user_data as u32 == item.0 + 1)
         .map(|(_, collider)| collider.compute_aabb().center())
         .unwrap();
-    let view = desert_drive::vehicle::to_rapier(runtime.area.player.view_pose(&runtime.physics));
-    let body = desert_drive::vehicle::to_rapier(runtime.area.player.body_pose(&runtime.physics));
+    let view = my_summer_slop::vehicle::to_rapier(runtime.area.player.view_pose(&runtime.physics));
+    let body = my_summer_slop::vehicle::to_rapier(runtime.area.player.body_pose(&runtime.physics));
     let delta = body.rotation.inverse() * (center - view.translation);
     let yaw = delta.x.atan2(-delta.z).to_degrees();
     let pitch = (-delta.y)

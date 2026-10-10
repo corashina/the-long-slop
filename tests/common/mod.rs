@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use desert_drive::reference::{ColliderGeometry, ColliderId, ReferenceManifest};
-use desert_drive::vehicle::{PhysicsWorld, VehiclePose};
+use my_summer_slop::reference::{ColliderGeometry, ColliderId, ReferenceManifest};
+use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose};
 
 pub fn reference() -> ReferenceManifest {
     let mut reference = ReferenceManifest::from_json(include_bytes!("reference.json"))

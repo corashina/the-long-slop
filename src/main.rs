@@ -1,6 +1,6 @@
 #[cfg(target_arch = "wasm32")]
 fn main() {
-    desert_drive::app::run();
+    my_summer_slop::app::run();
 }
 
 #[cfg(not(target_arch = "wasm32"))]
