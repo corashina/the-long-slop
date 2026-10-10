@@ -241,6 +241,19 @@ fn production_export_matches_installed_contract() {
     assert_eq!(helper["extras"]["layer"], 18);
     assert_eq!(helper["extras"]["renderer_enabled"], true);
     assert!(helper.get("mesh").is_some());
+    let home: serde_json::Value =
+        serde_json::from_slice(&std::fs::read("web/assets/reference/home.gltf").unwrap()).unwrap();
+    let hole = home["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| {
+            node["extras"]["reference_id"]["file"] == "level1"
+                && node["extras"]["reference_id"]["path_id"] == 35014
+        })
+        .expect("source terrain hole node");
+    assert_eq!(hole["extras"]["renderer_enabled"], false);
+    assert!(hole.get("mesh").is_none());
     let faucet = manifest
         .openings
         .iter()

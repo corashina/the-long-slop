@@ -5,6 +5,8 @@ import struct
 from pathlib import Path
 
 from .source import key, source_id, vector
+from .materials import decode_normal_image, normal_encoding
+from .visibility import renderer_visible
 
 
 def convert_point(value: tuple[float, float, float]) -> tuple[float, float, float]:
@@ -67,7 +69,7 @@ class GltfExporter:
             min=[min(row[i] for row in rows) for i in range(width)], max=[max(row[i] for row in rows) for i in range(width)]))
         return accessor
 
-    def texture(self, owner, environment, color_space):
+    def texture(self, owner, environment, color_space, normal_encoding=None):
         from PIL import Image
         gl = self.gl
         reader = self.source.resolve(owner, environment['m_Texture'])
@@ -76,7 +78,7 @@ class GltfExporter:
         if reader.type.name == 'RenderTexture':
             self.material_report.append({'source':source_id(reader),'adaptation':'Runtime render texture omitted; authored material factors retained.'})
             return None
-        identity = key(reader), color_space
+        identity = key(reader), color_space, normal_encoding
         if identity not in self.textures:
             texture = self.source.object(reader)
             settings=texture.m_TextureSettings
@@ -91,10 +93,12 @@ class GltfExporter:
                 self.samplers[sampler_key]=len(self.document.samplers)
                 self.document.samplers.append(gl.Sampler(wrapS=wrapping[settings.m_WrapU],wrapT=wrapping[settings.m_WrapV],
                     magFilter=mag,minFilter=minimum,extras={'unity_aniso':settings.m_Aniso,'unity_mip_bias':settings.m_MipBias}))
-            name = f'texture-{reader.assets_file.name}-{reader.path_id}-{color_space}.png'
-            texture.image.transpose(Image.Transpose.FLIP_TOP_BOTTOM).save(self.output.parent / name)
+            suffix = f'-normal-{normal_encoding}' if normal_encoding is not None else ''
+            name = f'texture-{reader.assets_file.name}-{reader.path_id}-{color_space}{suffix}.png'
+            pixels = decode_normal_image(texture.image, normal_encoding) if normal_encoding is not None else texture.image
+            pixels.transpose(Image.Transpose.FLIP_TOP_BOTTOM).save(self.output.parent / name)
             image = len(self.document.images)
-            self.document.images.append(gl.Image(uri=name, extras={'source': source_id(reader), 'color_space': color_space,'unity_color_space':texture.m_ColorSpace}))
+            self.document.images.append(gl.Image(uri=name, extras={'source': source_id(reader), 'color_space': color_space,'unity_color_space':texture.m_ColorSpace, 'normal_encoding':normal_encoding}))
             self.textures[identity] = len(self.document.textures)
             self.document.textures.append(gl.Texture(source=image, sampler=self.samplers[sampler_key]))
         scale, offset = environment['m_Scale'], environment['m_Offset']
@@ -135,7 +139,9 @@ class GltfExporter:
                     material.pbrMetallicRoughness.baseColorTexture = gl.TextureInfo(**info)
                 break
         if '_BumpMap' in environments:
-            info = self.texture(reader, environments['_BumpMap'], 'linear')
+            normal_reader = self.source.resolve(reader, environments['_BumpMap']['m_Texture'])
+            encoding = normal_encoding(self.source.object(normal_reader), self.source.object(shader) if shader else None, shader_name) if normal_reader else None
+            info = self.texture(reader, environments['_BumpMap'], 'linear', normal_encoding=encoding)
             if info:
                 material.normalTexture = gl.NormalMaterialTexture(scale=floats.get('_BumpScale',1.), **info)
         emission = colors.get('_EmissionColor')
@@ -235,10 +241,9 @@ class GltfExporter:
             mesh_filter = components.get('MeshFilter')
             if renderer and (mesh_filter or renderer.type.name == 'SkinnedMeshRenderer'):
                 renderer_data = self.source.read(renderer)
-                render_enabled=bool(renderer_data['m_Enabled']) and key(renderer) not in hidden_lods
-                text_component=next((r for r in record['components'] if r.type.name=='MonoBehaviour' and self.source.class_name(r) in {'TextMeshPro','TMP_SubMesh'}),None)
-                if text_component:
-                    render_enabled=False
+                component_classes={self.source.class_name(r) for r in record['components'] if r.type.name=='MonoBehaviour'}
+                render_enabled=renderer_visible(bool(renderer_data['m_Enabled']), component_classes) and key(renderer) not in hidden_lods
+                if component_classes.intersection({'TextMeshPro','TMP_SubMesh'}):
                     self.material_report.append({'source':source_id(renderer),
                         'adaptation':'Omitted obsolete editor TMP glyphs. Seeded plate text requires glyph regeneration.'})
                 node.extras['renderer_enabled'] = render_enabled
