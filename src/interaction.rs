@@ -374,6 +374,9 @@ impl InteractionState {
         self.tuning_opening = None;
         self.mechanisms.cancel_input();
     }
+    pub fn finish_cancelled_input(&mut self, player: &mut PlayerState, physics: &mut PhysicsWorld) {
+        self.push.finish_cancelled_input(player, physics);
+    }
     pub fn drop_held(
         &mut self,
         items: &mut ItemStore,
@@ -394,6 +397,7 @@ impl InteractionState {
 
     pub fn rebase(&mut self, shift: [f32; 3]) {
         self.mechanisms.rebase(shift);
+        self.parts.rebase(shift);
     }
 
     pub fn step(
@@ -405,6 +409,7 @@ impl InteractionState {
         physics: &mut PhysicsWorld,
         dt: f32,
     ) -> Option<InteractionAction> {
+        self.finish_cancelled_input(player, physics);
         if !dt.is_finite() || dt <= 0.0 {
             return None;
         }

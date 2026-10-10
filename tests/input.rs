@@ -104,3 +104,14 @@ fn f_release_edge_runs_once_across_catch_up_steps() {
         assert_eq!(pending.take_step(), FrameInput::default());
     }
 }
+
+#[test]
+fn lifecycle_boundary_discards_the_sampled_frame() {
+    let app = include_str!("../src/app.rs");
+    let boundary = app
+        .find("if actions & 31 != 0")
+        .expect("lifecycle actions must discard the frame sampled before input clear");
+    let merge = app.find("drive.input.merge(frame)").unwrap();
+    assert!(boundary < merge);
+    assert!(app[boundary..merge].contains("return;"));
+}

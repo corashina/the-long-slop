@@ -175,6 +175,18 @@ impl PartAttachments {
                 .collect(),
         })
     }
+    pub fn rebase(&mut self, shift: [f32; 3]) {
+        let shift = rapier3d::math::Vector::from_array(shift);
+        for part in &mut self.parts {
+            part.pose.translation -= shift;
+        }
+        for slot in &mut self.slots {
+            slot.mount_pose.translation -= shift;
+            if let Some(pose) = &mut slot.detach_pose {
+                pose.translation -= shift;
+            }
+        }
+    }
     pub fn bind(
         &mut self,
         items: &mut ItemStore,

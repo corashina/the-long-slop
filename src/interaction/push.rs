@@ -69,6 +69,15 @@ impl PushState {
         self.target = None;
         self.cancelled = false;
     }
+    pub(super) fn finish_cancelled_input(
+        &mut self,
+        player: &mut PlayerState,
+        physics: &mut PhysicsWorld,
+    ) {
+        if self.cancelled {
+            self.stop(player, physics);
+        }
+    }
     pub fn step(
         &mut self,
         input: FrameInput,
@@ -78,12 +87,6 @@ impl PushState {
         physics: &mut PhysicsWorld,
         dt: f32,
     ) -> Option<ItemId> {
-        if self.cancelled {
-            self.stop(player, physics);
-            if input.pressed & keys::GRAB == 0 {
-                return None;
-            }
-        }
         if self.grip.is_none() && (input.held & keys::GRAB == 0 || input.released & keys::GRAB != 0)
         {
             self.stop(player, physics);

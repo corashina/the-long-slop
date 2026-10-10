@@ -556,6 +556,9 @@ impl GarageRuntime {
             self.area.interaction.cancel_input();
             return;
         }
+        self.area
+            .interaction
+            .finish_cancelled_input(&mut self.area.player, &mut self.physics);
         let previous = self
             .stream
             .origin
@@ -910,6 +913,10 @@ impl GarageRuntime {
     }
 
     pub fn recover(&mut self, reference: &ReferenceManifest) {
+        self.area.interaction.cancel_input();
+        self.area
+            .interaction
+            .finish_cancelled_input(&mut self.area.player, &mut self.physics);
         self.aim = ResolvedAim::default();
         let held = self
             .area
@@ -1027,6 +1034,10 @@ impl GarageRuntime {
             let player_delta =
                 to_rapier(self.area.player.view_pose(&self.physics)) * old_view.inverse();
             transport_body(&mut self.physics, body, player_delta);
+            self.area
+                .interaction
+                .sync_parts(&mut self.area.items, &mut self.physics)
+                .expect("bound parts");
         }
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);

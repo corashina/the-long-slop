@@ -269,6 +269,9 @@ impl MechanismState {
                 f.local.translation -= shift;
             }
             f.world.translation -= shift;
+            if let Some(pose) = &mut f.external_pose {
+                pose.translation -= shift;
+            }
         }
     }
     pub fn cancel_input(&mut self) {

@@ -269,6 +269,10 @@ fn read_input(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
         clear_input(&mut drive);
     }
+    // Discard the frame sampled before the lifecycle input clear.
+    if actions & 31 != 0 {
+        return;
+    }
     if frame.pressed & keys::CAMERA != 0 && drive.runtime.area.player.seat().is_some() {
         drive.camera = match drive.camera {
             CameraMode::Cockpit => CameraMode::Chase,

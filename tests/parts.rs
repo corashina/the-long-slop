@@ -738,3 +738,301 @@ fn loose_mass_tracks_nested_attachment_and_fluid_changes() {
         .unwrap();
     assert!((mass(&mut g, radiator) - before - 1.).abs() < 0.001);
 }
+
+#[test]
+#[ignore = "requires installed source export"]
+fn detached_door_children_survive_rebase_and_recovery() {
+    let r = installed();
+    let mut g = GarageRuntime::new(&r).unwrap();
+    let door = part(&r, "frdoor");
+    let mirror = part(&r, "rightmirror");
+    let window = r
+        .mechanisms
+        .iter()
+        .find(|m| m.source.path_id == 70647)
+        .unwrap()
+        .item;
+    let radiator = part(&r, "coolanttank");
+    g.area.interaction.mechanisms.step(
+        window,
+        FrameInput {
+            held: keys::USE,
+            mouse: [0., 100.],
+            ..Default::default()
+        },
+        g.area.player.view_pose(&g.physics),
+        0.02,
+    );
+    g.area
+        .interaction
+        .sync_parts(&mut g.area.items, &mut g.physics)
+        .unwrap();
+    let window_value = g.area.interaction.mechanisms.value(window, false);
+    assert!(window_value.unwrap() > 0.);
+    detach(&mut g, door);
+    detach(&mut g, radiator);
+    g.area.items.get_mut(mirror).unwrap().condition = 0.37;
+    g.area
+        .items
+        .get_mut(radiator)
+        .unwrap()
+        .fluid
+        .as_mut()
+        .unwrap()
+        .mixture
+        .quantities_liters[3] = 1.7;
+    g.area
+        .interaction
+        .sync_parts(&mut g.area.items, &mut g.physics)
+        .unwrap();
+    let before = [door, window, mirror, radiator].map(|id| g.area.items.get(id).unwrap().clone());
+    let source_handles: Vec<_> = r
+        .parts
+        .iter()
+        .map(|p| g.area.interaction.parts.loose_body(p.item).unwrap())
+        .collect();
+    let shift = [1280., 0., -1280.];
+    g.physics.rebase(shift);
+    g.stream.origin.shift(shift);
+    g.area.sync_origin(g.stream.origin.offset);
+    let radiator_slot = r
+        .part_slots
+        .iter()
+        .find(|s| s.part == Some(radiator))
+        .unwrap();
+    let anchor = r
+        .anchors
+        .iter()
+        .find(|a| a.id == radiator_slot.mount_anchor)
+        .unwrap();
+    let expected_mount = Vector::from_array(
+        g.area
+            .interaction
+            .mechanisms
+            .node_pose(anchor.node)
+            .unwrap()
+            .position,
+    );
+    g.area
+        .interaction
+        .parts
+        .install(
+            radiator,
+            radiator_slot.id,
+            &mut g.area.items,
+            &mut g.physics,
+        )
+        .unwrap();
+    let actual_mount = Vector::from_array(g.area.items.get(radiator).unwrap().pose.position);
+    assert!(
+        (actual_mount - expected_mount).length() < 1e-3,
+        "radiator mount used an old anchor: {actual_mount:?} vs {expected_mount:?}"
+    );
+    g.area
+        .interaction
+        .parts
+        .mount_mechanism(radiator, &mut g.area.interaction.mechanisms);
+    let door_node = r.parts.iter().find(|p| p.item == door).unwrap().node;
+    let rebased_door = Vector::from_array(
+        g.area
+            .interaction
+            .mechanisms
+            .node_pose(door_node)
+            .unwrap()
+            .position,
+    );
+    assert!(
+        (rebased_door - (Vector::from_array(before[0].pose.position) - Vector::from_array(shift)))
+            .length()
+            < 1e-3
+    );
+    g.area
+        .interaction
+        .sync_parts(&mut g.area.items, &mut g.physics)
+        .unwrap();
+    detach(&mut g, radiator);
+    // An immediate child transaction must use the rebased slot anchor.
+    detach(&mut g, mirror);
+    let expected = Vector::from_array(before[2].pose.position) - Vector::from_array(shift);
+    let actual = Vector::from_array(g.area.items.get(mirror).unwrap().pose.position);
+    assert!(
+        (actual - expected).length() < 1e-3,
+        "mirror detach used an old anchor: {actual:?} vs {expected:?}"
+    );
+    let mirror_slot = r
+        .part_slots
+        .iter()
+        .find(|s| s.part == Some(mirror))
+        .unwrap()
+        .id;
+    g.area
+        .interaction
+        .parts
+        .install(mirror, mirror_slot, &mut g.area.items, &mut g.physics)
+        .unwrap();
+    g.area
+        .interaction
+        .parts
+        .mount_mechanism(mirror, &mut g.area.interaction.mechanisms);
+    g.area
+        .interaction
+        .sync_parts(&mut g.area.items, &mut g.physics)
+        .unwrap();
+    // Keep the detached assembly with the player through recovery.
+    let point = g.area.items.get(door).unwrap().pose.position;
+    g.area
+        .interaction
+        .pickup_item(
+            door,
+            point,
+            &g.area.player,
+            &mut g.area.items,
+            &mut g.physics,
+        )
+        .unwrap();
+    g.recover(&r);
+    assert_eq!(
+        g.area.interaction.mechanisms.value(window, false),
+        window_value
+    );
+    for (id, old) in [door, window, mirror, radiator].into_iter().zip(before) {
+        let state = g.area.items.get(id).unwrap();
+        assert_eq!(state.location, old.location);
+        assert_eq!(state.condition, old.condition);
+        assert_eq!(state.fluid, old.fluid);
+        if id == window || id == mirror {
+            assert_eq!(state.body, g.area.items.get(door).unwrap().body);
+            let node = r.items.iter().find(|i| i.id == id).unwrap().node;
+            let mechanism_pose = g.area.interaction.mechanisms.node_pose(node).unwrap();
+            assert!(
+                (Vector::from_array(mechanism_pose.position)
+                    - Vector::from_array(state.pose.position))
+                .length()
+                    < 1e-3
+            );
+        }
+        let rendered = g.area.item_render_poses.iter().find(|p| p.0 == id).unwrap();
+        assert_eq!(rendered.1, state.pose);
+        assert_eq!(rendered.2, state.pose);
+    }
+    for (p, handle) in r.parts.iter().zip(source_handles) {
+        assert_eq!(g.area.interaction.parts.loose_body(p.item), Some(handle));
+        assert!(g.physics.rapier().bodies.contains(handle));
+    }
+    let body = g.area.items.get(door).unwrap().body.unwrap();
+    let door_inverse = g.physics.rapier().bodies[body].position().inverse();
+    for source in r.parts.iter().filter(|p| [door, mirror].contains(&p.item)) {
+        for id in &source.colliders {
+            let collider = g
+                .physics
+                .rapier()
+                .colliders
+                .iter()
+                .find(|(_, c)| (c.user_data >> 64) as u32 == id.0)
+                .unwrap()
+                .1;
+            assert_eq!(collider.parent(), Some(body));
+            assert!(collider.is_enabled());
+        }
+    }
+    for id in [window, mirror] {
+        let item = g.area.items.get(id).unwrap();
+        assert!(
+            (door_inverse * my_summer_slop::vehicle::to_rapier(item.pose))
+                .translation
+                .distance(my_summer_slop::vehicle::to_rapier(item.local_pose).translation)
+                < 1e-3
+        );
+    }
+    let radiator_body = g.area.items.get(radiator).unwrap().body.unwrap();
+    let world = g.physics.rapier_mut();
+    world.bodies[radiator_body].recompute_mass_properties_from_colliders(&world.colliders);
+    let mass = world.bodies[radiator_body].mass();
+    g.area
+        .items
+        .get_mut(radiator)
+        .unwrap()
+        .fluid
+        .as_mut()
+        .unwrap()
+        .mixture
+        .quantities_liters[3] += 0.3;
+    g.area
+        .interaction
+        .parts
+        .sync(&mut g.area.items, &mut g.physics)
+        .unwrap();
+    let world = g.physics.rapier_mut();
+    world.bodies[radiator_body].recompute_mass_properties_from_colliders(&world.colliders);
+    assert!((world.bodies[radiator_body].mass() - mass - 0.3).abs() < 1e-3);
+}
+
+#[test]
+#[ignore = "requires installed source export"]
+fn restart_clears_constraints_and_restores_source_parts() {
+    let r = installed();
+    let mut g = GarageRuntime::new(&r).unwrap();
+    let initial: Vec<_> = g
+        .area
+        .items
+        .iter()
+        .filter(|i| i.id.0 < 0x80000000)
+        .cloned()
+        .collect();
+    let counts = (g.physics.rapier().bodies.len(), g.physics.collider_count());
+    let controls: Vec<_> = r
+        .mechanisms
+        .iter()
+        .map(|m| (m.item, g.area.interaction.mechanisms.value(m.item, false)))
+        .collect();
+    for _ in 0..3 {
+        let door = part(&r, "frdoor");
+        detach(&mut g, door);
+        let point = g.area.items.get(door).unwrap().pose.position;
+        g.area
+            .interaction
+            .pickup_item(
+                door,
+                point,
+                &g.area.player,
+                &mut g.area.items,
+                &mut g.physics,
+            )
+            .unwrap();
+        assert!(!g.physics.rapier().impulse_joints.is_empty());
+        for i in g.area.items.iter_mut() {
+            i.condition = 0.1;
+            if let Some(f) = &mut i.fluid {
+                f.mixture.quantities_liters = [0.; 6];
+            }
+        }
+        let seat = &r.seats[0];
+        assert!(g.area.player.enter(
+            seat.id,
+            g.area.items.get(seat.item).unwrap().pose,
+            &mut g.physics
+        ));
+        g.restart(&r).unwrap();
+        assert_eq!(
+            (g.physics.rapier().bodies.len(), g.physics.collider_count()),
+            counts
+        );
+        assert!(g.physics.rapier().impulse_joints.is_empty());
+        assert_eq!(g.area.player.seat(), None);
+        assert_eq!(g.area.interaction.held(), None);
+        assert_eq!(g.area.interaction.throw_charge(), 0.);
+        assert!(!g.area.interaction.push_gripping());
+        for old in &initial {
+            let item = g.area.items.get(old.id).unwrap();
+            assert_eq!(item.location, old.location);
+            assert_eq!(item.fluid, old.fluid);
+            assert_eq!(item.condition, old.condition);
+        }
+        for &(id, value) in &controls {
+            assert_eq!(g.area.interaction.mechanisms.value(id, false), value);
+        }
+        for slot in &r.part_slots {
+            assert_eq!(g.area.interaction.parts.slot_item(slot.id), slot.part);
+        }
+    }
+}

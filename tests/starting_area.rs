@@ -1556,3 +1556,297 @@ fn aimed_handbrake_uses_the_space_state() {
     assert!(runtime.handbrake);
     assert_eq!(runtime.area.player.seat(), seat_before);
 }
+
+#[test]
+fn focus_loss_cancels_throw_push_and_drag() {
+    use my_summer_slop::interaction::{AimTarget, ResolvedAim};
+    for recover in [false, true] {
+        let (reference, mut runtime) = initial();
+        let (_, mut control_runtime) = initial();
+        let item = reference.items[0].id;
+        for runtime in [&mut runtime, &mut control_runtime] {
+            let point = runtime.area.items.get(item).unwrap().pose.position;
+            runtime
+                .area
+                .interaction
+                .pickup_item(
+                    item,
+                    point,
+                    &runtime.area.player,
+                    &mut runtime.area.items,
+                    &mut runtime.physics,
+                )
+                .unwrap();
+            runtime.area.interaction.step(
+                FrameInput::default(),
+                ResolvedAim::default(),
+                &mut runtime.area.player,
+                &mut runtime.area.items,
+                &mut runtime.physics,
+                0.02,
+            );
+            runtime.area.interaction.step(
+                FrameInput {
+                    held: keys::GRAB,
+                    pressed: keys::GRAB,
+                    ..Default::default()
+                },
+                ResolvedAim::default(),
+                &mut runtime.area.player,
+                &mut runtime.area.items,
+                &mut runtime.physics,
+                0.4,
+            );
+            assert!(runtime.area.interaction.throw_charge() > 0.2);
+        }
+        let mut pending = FrameInput {
+            held: keys::GRAB | keys::FORWARD,
+            released: keys::GRAB,
+            mouse: [30., -40.],
+            wheel: 2.,
+            ..Default::default()
+        };
+        for runtime in [&mut runtime, &mut control_runtime] {
+            if recover {
+                runtime.recover(&reference);
+            } else {
+                runtime.area.interaction.cancel_input();
+            }
+        }
+        pending.clear();
+        assert_eq!(runtime.area.interaction.throw_charge(), 0.0);
+        let body = runtime.area.items.get(item).unwrap().body.unwrap();
+        let velocity = runtime.physics.rapier().bodies[body].linvel();
+        let yaw = runtime.area.player.yaw_degrees();
+        let action = runtime.area.interaction.step(
+            pending.take_step(),
+            ResolvedAim::default(),
+            &mut runtime.area.player,
+            &mut runtime.area.items,
+            &mut runtime.physics,
+            0.02,
+        );
+        assert!(action.is_none());
+        assert_eq!(runtime.physics.rapier().bodies[body].linvel(), velocity);
+        assert_eq!(runtime.area.player.yaw_degrees(), yaw);
+        assert_eq!(runtime.area.interaction.held(), (!recover).then_some(item));
+        runtime.started = true;
+        control_runtime.started = true;
+        let control_body = control_runtime.area.items.get(item).unwrap().body.unwrap();
+        for _ in 0..3 {
+            runtime.step(&reference, pending.take_step());
+            control_runtime.step(&reference, FrameInput::default());
+            assert_eq!(
+                runtime.physics.rapier().bodies[body].linvel(),
+                control_runtime.physics.rapier().bodies[control_body].linvel()
+            );
+            assert_eq!(
+                runtime.area.player.yaw_degrees(),
+                control_runtime.area.player.yaw_degrees()
+            );
+            assert_eq!(
+                runtime.area.player.pitch_degrees(),
+                control_runtime.area.player.pitch_degrees()
+            );
+            assert_eq!(
+                runtime.area.interaction.held(),
+                control_runtime.area.interaction.held()
+            );
+        }
+    }
+    let (mut reference, _) = initial();
+    common::add_rotation(&mut reference, 1, 90, [-30., 0.]);
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    let target = AimTarget {
+        collider: rapier3d::prelude::ColliderHandle::invalid(),
+        item: reference.items[0].id,
+        distance: 1.,
+        point: [10., 2., -1.],
+        slot: None,
+    };
+    runtime.area.interaction.step(
+        FrameInput {
+            held: keys::USE,
+            pressed: keys::USE,
+            mouse: [-5., 0.],
+            ..Default::default()
+        },
+        common::resolved(Some(target)),
+        &mut runtime.area.player,
+        &mut runtime.area.items,
+        &mut runtime.physics,
+        0.02,
+    );
+    assert!(runtime.area.interaction.dragging_mechanism().is_some());
+    let value = runtime
+        .area
+        .interaction
+        .mechanisms
+        .value(target.item, false);
+    runtime.area.interaction.cancel_input();
+    let mut pending = FrameInput {
+        held: keys::USE,
+        mouse: [-20., 0.],
+        ..Default::default()
+    };
+    pending.clear();
+    runtime.area.interaction.step(
+        pending.take_step(),
+        common::resolved(Some(target)),
+        &mut runtime.area.player,
+        &mut runtime.area.items,
+        &mut runtime.physics,
+        0.02,
+    );
+    assert_eq!(runtime.area.interaction.dragging_mechanism(), None);
+    assert_eq!(
+        runtime
+            .area
+            .interaction
+            .mechanisms
+            .value(target.item, false),
+        value
+    );
+}
+
+fn gripped_runtime() -> (my_summer_slop::reference::ReferenceManifest, GarageRuntime) {
+    use my_summer_slop::interaction::{AimTarget, ResolvedAim};
+    use my_summer_slop::reference::*;
+    use rapier3d::math::Vector;
+    use rapier3d::prelude::ColliderBuilder;
+    let (mut reference, _) = initial();
+    reference.pushables[0].grip = Some(PushGripReference {
+        source: reference.player.source.clone(),
+        node: reference.nodes[0].id,
+        hand_node: reference.nodes[0].id,
+        colliders: vec![ColliderId(1)],
+        local_pose: Transform {
+            translation: [10., 0., 0.],
+            rotation: [0., 0., 0., 1.],
+            scale: [1.; 3],
+        },
+        in_use: false,
+    });
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    runtime.physics.reset(my_summer_slop::vehicle::VehiclePose {
+        position: [0., 1.1, 0.],
+        rotation: [0., 0., 0., 1.],
+    });
+    let chassis = runtime.physics.chassis_handle();
+    runtime.physics.rapier_mut().bodies[chassis].set_gravity_scale(0., true);
+    runtime.physics.insert_box([10., -0.5, 0.], [20., 0.5, 20.]);
+    for _ in 0..60 {
+        runtime
+            .area
+            .player
+            .step(FrameInput::default(), &mut runtime.physics, 1. / 60.);
+        runtime.physics.step_physics();
+    }
+    assert!(runtime.area.player.grounded());
+    let chassis = runtime.physics.chassis_handle();
+    let collider = runtime.physics.rapier_mut().insert_collider(
+        ColliderBuilder::ball(0.1)
+            .translation(Vector::new(10., 0., 0.))
+            .sensor(true)
+            .user_data(1_u128 << 64),
+        Some(chassis),
+    );
+    runtime.area.interaction.step(
+        FrameInput {
+            held: keys::GRAB,
+            pressed: keys::GRAB,
+            ..Default::default()
+        },
+        ResolvedAim {
+            push_target: Some(AimTarget {
+                collider,
+                item: ItemId(5),
+                distance: 1.,
+                point: [10., 1., 0.],
+                slot: None,
+            }),
+            ..Default::default()
+        },
+        &mut runtime.area.player,
+        &mut runtime.area.items,
+        &mut runtime.physics,
+        0.02,
+    );
+    assert!(runtime.area.interaction.push_gripping());
+    (reference, runtime)
+}
+
+#[test]
+fn recovery_cancels_latched_grip_before_transport() {
+    let (reference, mut runtime) = gripped_runtime();
+    runtime.recover(&reference);
+    assert!(!runtime.area.interaction.push_gripping());
+    assert_eq!(runtime.area.interaction.push_steering(), None);
+    assert!(runtime.physics.rapier().impulse_joints.is_empty());
+    assert!(runtime.physics.rapier().bodies[runtime.area.player.body_handle()].is_kinematic());
+}
+
+#[test]
+fn pause_and_capture_release_grip_at_the_physical_pose() {
+    use my_summer_slop::interaction::ResolvedAim;
+    use rapier3d::math::Vector;
+    for paused in [false, true] {
+        let (reference, mut runtime) = gripped_runtime();
+        let player = runtime.area.player.body_handle();
+        let chassis = runtime.physics.chassis_handle();
+        let mut pose = *runtime.physics.rapier().bodies[player].position();
+        pose.translation += Vector::new(0.2, 0.1, 0.3);
+        let velocity = Vector::new(0.5, -0.2, 0.7);
+        runtime.physics.rapier_mut().bodies[player].set_position(pose, true);
+        runtime.physics.rapier_mut().bodies[player].set_linvel(velocity, true);
+        let car_velocity = runtime.physics.rapier().bodies[chassis].linvel();
+        if paused {
+            runtime.started = true;
+            runtime.paused = true;
+            runtime.step(
+                &reference,
+                FrameInput {
+                    held: keys::GRAB | keys::FORWARD,
+                    mouse: [50., 30.],
+                    ..Default::default()
+                },
+            );
+            assert_eq!(*runtime.physics.rapier().bodies[player].position(), pose);
+            assert_eq!(runtime.physics.rapier().bodies[player].linvel(), velocity);
+            runtime.paused = false;
+        } else {
+            // Focus and capture loss use this same input-clear boundary.
+            runtime.area.interaction.cancel_input();
+        }
+        runtime.area.interaction.step(
+            FrameInput::default(),
+            ResolvedAim::default(),
+            &mut runtime.area.player,
+            &mut runtime.area.items,
+            &mut runtime.physics,
+            0.0,
+        );
+        assert!(runtime.physics.rapier().impulse_joints.is_empty());
+        assert!(runtime.physics.rapier().bodies[player].is_kinematic());
+        assert_eq!(*runtime.physics.rapier().bodies[player].position(), pose);
+        assert_eq!(runtime.physics.rapier().bodies[player].linvel(), velocity);
+        assert_eq!(
+            runtime.area.player.body_pose(&runtime.physics).position,
+            pose.translation.to_array()
+        );
+        assert_eq!(
+            runtime.physics.rapier().bodies[chassis].linvel(),
+            car_velocity
+        );
+    }
+}
+
+#[test]
+fn restart_cancels_latched_grip() {
+    let (reference, mut runtime) = gripped_runtime();
+    runtime.restart(&reference).unwrap();
+    assert!(!runtime.area.interaction.push_gripping());
+    assert_eq!(runtime.area.interaction.push_steering(), None);
+    assert!(runtime.physics.rapier().impulse_joints.is_empty());
+    assert!(runtime.physics.rapier().bodies[runtime.area.player.body_handle()].is_kinematic());
+}
