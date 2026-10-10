@@ -1,7 +1,7 @@
 # Day cycle headlights and lamps
 
 Date: 2026-10-10, Europe/Warsaw.
-Status: Chat design approved. Written specification awaits user review.
+Status: The user approved this written specification in chat on 2026-10-10.
 
 ## Intent and scope
 
