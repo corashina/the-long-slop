@@ -1,7 +1,7 @@
 # Source UI and interaction feedback
 
 Date: 2026-10-10, Europe/Warsaw.
-Status: Written spec for review. The user approved the design direction in chat.
+Status: The user approved this written spec in chat on 2026-10-10.
 
 ## Intent
 
