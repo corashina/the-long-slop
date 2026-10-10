@@ -26,6 +26,7 @@ id!(AnchorId, u32);
 id!(SeatId, u32);
 id!(OpeningId, u32);
 id!(WheelSlotId, u8);
+id!(PartSlotId, u32);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -636,7 +637,48 @@ pub struct WheelSlotReference {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct PartReference {
+    pub usable: Option<ItemId>,
+    pub item: ItemId,
+    pub source: SourceId,
+    pub node: NodeId,
+    pub main_types: Vec<String>,
+    pub part_types: Vec<String>,
+    pub cover_slot: Option<PartSlotId>,
+    pub local_rotation_after_mount: [f32; 4],
+    pub colliders: Vec<ColliderId>,
+    pub linear_damping: f32,
+    pub angular_damping: f32,
+    pub enable_if_mounted: Vec<NodeId>,
+    pub enable_if_dismounted: Vec<NodeId>,
+    pub disable_if_mounted: Vec<NodeId>,
+    pub disable_if_dismounted: Vec<NodeId>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PartSlotReference {
+    pub id: PartSlotId,
+    pub source: SourceId,
+    pub node: NodeId,
+    pub owner: Option<ItemId>,
+    pub part: Option<ItemId>,
+    pub mount_anchor: AnchorId,
+    pub detach_anchor: Option<AnchorId>,
+    pub fixed_detach: bool,
+    pub detach_position: [f32; 3],
+    pub detach_rotation: [f32; 4],
+    pub main_types: Vec<String>,
+    pub part_types: Vec<String>,
+    pub cant_craft: bool,
+    pub cant_uncraft: bool,
+    pub disable_colliders_on_craft: bool,
+    pub colliders: Vec<ColliderId>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WheelPartReference {
+    pub cover_slot: Option<PartSlotId>,
     pub item: ItemId,
     pub source: SourceId,
     pub radius: f32,
@@ -710,6 +752,8 @@ pub struct ReferenceManifest {
     pub lighting: LightingReference,
     pub wheel_slots: Vec<WheelSlotReference>,
     pub wheel_parts: Vec<WheelPartReference>,
+    pub parts: Vec<PartReference>,
+    pub part_slots: Vec<PartSlotReference>,
     pub items: Vec<ItemRecord>,
     pub openings: Vec<OpeningRecord>,
     pub tanks: Vec<TankReference>,
@@ -796,6 +840,92 @@ impl ReferenceManifest {
             self.wheel_slots.iter().map(|r| r.wheel),
             "duplicate mounted wheel",
         )?;
+        let part_ids = ids(self.parts.iter().map(|p| p.item), "duplicate part item")?;
+        let part_slot_ids = ids(self.part_slots.iter().map(|s| s.id), "duplicate part slot")?;
+        ids(
+            self.part_slots.iter().filter_map(|s| s.part),
+            "duplicate slot occupant",
+        )?;
+        let mut owned_shapes = HashSet::new();
+        for p in &self.parts {
+            require(
+                item_ids.contains(&p.item) && node_ids.contains(&p.node),
+                "part item/node",
+            )?;
+            require(
+                !p.part_types.is_empty() && p.cover_slot.is_none_or(|s| part_slot_ids.contains(&s)),
+                "part types/cover",
+            )?;
+            require(
+                p.linear_damping.is_finite()
+                    && p.linear_damping >= 0.
+                    && p.angular_damping.is_finite()
+                    && p.angular_damping >= 0.,
+                "part damping",
+            )?;
+            require(
+                p.local_rotation_after_mount.iter().all(|v| v.is_finite()),
+                "part mount rotation",
+            )?;
+            require(
+                p.colliders
+                    .iter()
+                    .all(|id| collider_ids.contains(id) && owned_shapes.insert(*id)),
+                "part collider ownership",
+            )?;
+            require(
+                p.enable_if_mounted
+                    .iter()
+                    .chain(&p.disable_if_mounted)
+                    .chain(&p.enable_if_dismounted)
+                    .chain(&p.disable_if_dismounted)
+                    .all(|id| node_ids.contains(id)),
+                "part visibility node",
+            )?;
+        }
+        for s in &self.part_slots {
+            require(
+                node_ids.contains(&s.node)
+                    && anchor_ids.contains(&s.mount_anchor)
+                    && s.detach_anchor.is_none_or(|id| anchor_ids.contains(&id)),
+                "part slot anchors",
+            )?;
+            require(
+                s.part.is_none_or(|id| part_ids.contains(&id))
+                    && s.owner.is_none_or(|id| item_ids.contains(&id)),
+                "part slot owner/occupant",
+            )?;
+            require(
+                s.colliders.iter().all(|id| collider_ids.contains(id)),
+                "part slot collider",
+            )?;
+            require(
+                s.detach_position
+                    .iter()
+                    .chain(&s.detach_rotation)
+                    .all(|v| v.is_finite()),
+                "part detach pose",
+            )?;
+            let mut owner = s.owner;
+            for _ in 0..=self.part_slots.len() {
+                let Some(item) = owner else {
+                    break;
+                };
+                require(s.part != Some(item), "cyclic part slots")?;
+                owner = self
+                    .part_slots
+                    .iter()
+                    .find(|s| s.part == Some(item))
+                    .and_then(|s| s.owner);
+            }
+            require(owner.is_none(), "cyclic part slots")?;
+        }
+        for p in &self.wheel_parts {
+            require(
+                p.cover_slot.is_none_or(|id| part_slot_ids.contains(&id)),
+                "wheel cover slot",
+            )?;
+        }
         require(
             self.assets
                 .iter()

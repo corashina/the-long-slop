@@ -82,6 +82,28 @@ impl CarryState {
         self.acquisition_held = false;
         Some(held.item)
     }
+    pub fn can_acquire(
+        &self,
+        id: ItemId,
+        point: [f32; 3],
+        player: &PlayerState,
+        body: RigidBodyHandle,
+        physics: &PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        if self.held.is_some()
+            || !point.iter().all(|v| v.is_finite())
+            || !self.allows_pickup(id, player.seat().is_some(), false)
+            || body == physics.chassis_handle()
+            || physics
+                .rapier()
+                .bodies
+                .get(body)
+                .is_none_or(|body| !body.is_dynamic())
+        {
+            return Err(ReferenceError("Cannot carry this item".into()));
+        }
+        Ok(())
+    }
     pub fn pickup(
         &mut self,
         id: ItemId,
@@ -90,24 +112,17 @@ impl CarryState {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
-        if self.held.is_some()
-            || !point.iter().all(|value| value.is_finite())
-            || !self.allows_pickup(id, player.seat().is_some(), false)
-        {
-            return Err(ReferenceError("Cannot carry this item".into()));
-        }
-        let Some(item) = items.get_mut(id) else {
-            return Err(ReferenceError("Cannot carry this item".into()));
-        };
+        let item = items
+            .get(id)
+            .ok_or_else(|| ReferenceError("Cannot carry this item".into()))?;
         if item.location != ItemLocation::World {
             return Err(ReferenceError("Cannot carry this item".into()));
         }
-        let Some(body) = item.body else {
-            return Err(ReferenceError("Cannot carry this item".into()));
-        };
-        if body == physics.chassis_handle() || !physics.rapier().bodies[body].is_dynamic() {
-            return Err(ReferenceError("Cannot carry this item".into()));
-        }
+        let body = item
+            .body
+            .ok_or_else(|| ReferenceError("Cannot carry this item".into()))?;
+        self.can_acquire(id, point, player, body, physics)?;
+        let item = items.get_mut(id).unwrap();
         let pose = *physics.rapier().bodies[body].position();
         let anchor = *self.anchor.get_or_insert_with(|| {
             physics

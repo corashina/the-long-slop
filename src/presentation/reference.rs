@@ -167,7 +167,9 @@ pub fn bind(
         super::mechanisms::bind_body(commands, reference, visuals, body);
     }
     for item in &reference.items {
-        if !matches!(item.kind, ItemKind::Wheel | ItemKind::Rim | ItemKind::Tire) {
+        if !matches!(item.kind, ItemKind::Wheel | ItemKind::Rim | ItemKind::Tire)
+            && !reference.parts.iter().any(|p| p.item == item.id)
+        {
             continue;
         }
         let mut scale = Vec3::ONE;

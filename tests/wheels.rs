@@ -45,7 +45,10 @@ fn assert_slot_aim(
     };
     let aim = common::focus(&area.interaction, physics, view).unwrap();
     assert_eq!(aim.item, item);
-    assert_eq!(aim.slot, empty.then_some(slot));
+    assert_eq!(
+        aim.slot,
+        empty.then_some(my_summer_slop::interaction::SlotTarget::Wheel(slot))
+    );
 }
 
 fn reference() -> my_summer_slop::reference::ReferenceManifest {
@@ -232,6 +235,15 @@ fn production_wheel_bindings_detach_and_restore() {
         .find(|wheel| wheel.id == slot)
         .unwrap();
     assert_slot_aim(&area, &mut physics, slot, mounted.rim, false);
+    let cover = area.interaction.parts.covering_item(mounted.rim).unwrap();
+    assert!(wheels.remove(slot, &mut area.items, &mut physics).is_err());
+    area.interaction
+        .parts
+        .remove(cover, &mut area.items, &mut physics)
+        .unwrap();
+    let cover_body = area.items.get(cover).unwrap().body.unwrap();
+    let off = physics.rapier().bodies[cover_body].translation() + Vector::Y * 20.;
+    physics.rapier_mut().bodies[cover_body].set_translation(off, true);
     let item = wheels.remove(slot, &mut area.items, &mut physics).unwrap();
     let body = area.items.get(item).unwrap().body.unwrap();
     let translation = physics.rapier().bodies[body].translation() + Vector::X * 20.0;
@@ -300,7 +312,14 @@ fn runtime_aiming_at_wheel(
     );
     assert_eq!(
         before_aim.grab_target.map(|target| target.item),
-        Some(rim),
+        Some(
+            runtime
+                .area
+                .interaction
+                .parts
+                .covering_item(rim)
+                .unwrap_or(rim)
+        ),
         "{before_aim:?}"
     );
     runtime.started = true;
@@ -349,7 +368,10 @@ fn removed_wheel_is_held_with_the_same_identity() {
         &runtime.area.items,
     );
     assert_eq!(empty.grab_target, None);
-    assert_eq!(empty.installation_target.unwrap().slot, Some(slot));
+    assert_eq!(
+        empty.installation_target.unwrap().slot,
+        Some(my_summer_slop::interaction::SlotTarget::Wheel(slot))
+    );
     runtime.step(
         &reference,
         FrameInput {
@@ -443,6 +465,25 @@ fn production_wheel_removal_acquires_the_source_rim() {
     let rim = reference.wheel_slots[0].rim;
     let tire = reference.wheel_slots[0].tire;
     let condition = runtime.area.items.get(rim).unwrap().condition;
+    let cover = runtime.area.interaction.parts.covering_item(rim).unwrap();
+    runtime.step(
+        &reference,
+        FrameInput {
+            held: keys::GRAB,
+            pressed: keys::GRAB,
+            ..Default::default()
+        },
+    );
+    assert_eq!(runtime.area.interaction.held(), Some(cover));
+    assert!(runtime.wheels.installed(slot));
+    runtime
+        .area
+        .interaction
+        .drop_held(&mut runtime.area.items, &mut runtime.physics);
+    let body = runtime.area.items.get(cover).unwrap().body.unwrap();
+    let off = runtime.physics.rapier().bodies[body].translation() + Vector::Y * 20.;
+    runtime.physics.rapier_mut().bodies[body].set_translation(off, true);
+    runtime.step(&reference, FrameInput::default());
     runtime.step(
         &reference,
         FrameInput {

@@ -2609,7 +2609,8 @@
         -0.0,
         0.0,
         1.0
-      ]
+      ],
+      "cover_slot": null
     },
     {
       "item": 9,
@@ -2634,7 +2635,8 @@
         -0.0,
         0.0,
         1.0
-      ]
+      ],
+      "cover_slot": null
     },
     {
       "item": 14,
@@ -2680,7 +2682,8 @@
         -0.0,
         0.0,
         1.0
-      ]
+      ],
+      "cover_slot": null
     },
     {
       "item": 10,
@@ -2705,7 +2708,8 @@
         -0.0,
         0.0,
         1.0
-      ]
+      ],
+      "cover_slot": null
     },
     {
       "item": 15,
@@ -2751,7 +2755,8 @@
         -0.0,
         0.0,
         1.0
-      ]
+      ],
+      "cover_slot": null
     },
     {
       "item": 11,
@@ -2776,7 +2781,8 @@
         -0.0,
         0.0,
         1.0
-      ]
+      ],
+      "cover_slot": null
     },
     {
       "item": 16,
@@ -2822,7 +2828,8 @@
         -0.0,
         0.0,
         1.0
-      ]
+      ],
+      "cover_slot": null
     },
     {
       "item": 12,
@@ -2847,7 +2854,8 @@
         -0.0,
         0.0,
         1.0
-      ]
+      ],
+      "cover_slot": null
     }
   ],
   "action_bindings": [
@@ -2923,5 +2931,7 @@
     "door_limit": 0.02,
     "groups": [],
     "home_electronics_threshold": 0.2
-  }
+  },
+  "parts": [],
+  "part_slots": []
 }

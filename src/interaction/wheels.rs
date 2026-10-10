@@ -44,6 +44,8 @@ pub struct WheelAssemblies {
     base_mass: f32,
     last_mass: f32,
     bound: bool,
+    general_mass: Vec<(ItemId, f32)>,
+    covers: HashMap<ItemId, ItemId>,
 }
 
 impl WheelAssemblies {
@@ -213,13 +215,49 @@ impl WheelAssemblies {
             .filter(|tank| tank.role == TankRole::Vehicle)
             .map(|tank| tank.quantities_liters.iter().sum::<f32>())
             .sum();
+        let general_mass: Vec<_> = reference
+            .items
+            .iter()
+            .filter(|item| {
+                let mut node = Some(item.node);
+                while let Some(id) = node {
+                    if reference.parts.iter().any(|p| p.node == id) {
+                        return true;
+                    }
+                    node = reference
+                        .nodes
+                        .iter()
+                        .find(|n| n.id == id)
+                        .and_then(|n| n.parent);
+                }
+                false
+            })
+            .map(|i| (i.id, i.mass_kg))
+            .collect();
+        let general_dry: f32 = general_mass.iter().map(|(_, mass)| mass).sum();
         Ok(Self {
             parts,
             indices,
             slots,
             tire_fits,
             vehicle_tanks,
-            base_mass: reference.vehicle.mass_kg - installed_mass - initial_fluids,
+            base_mass: reference.vehicle.mass_kg - installed_mass - initial_fluids - general_dry,
+            general_mass,
+            covers: reference
+                .wheel_parts
+                .iter()
+                .filter_map(|p| {
+                    p.cover_slot
+                        .and_then(|s| {
+                            reference
+                                .part_slots
+                                .iter()
+                                .find(|slot| slot.id == s)
+                                .and_then(|s| s.part)
+                        })
+                        .map(|cover| (p.item, cover))
+                })
+                .collect(),
             last_mass: f32::NAN,
             bound: false,
         })
@@ -319,6 +357,14 @@ impl WheelAssemblies {
         let rim = self.slots[slot]
             .rim
             .ok_or_else(|| error("Wheel slot is empty"))?;
+        if self.covers.get(&self.parts[rim].item).is_some_and(|id| {
+            matches!(
+                items.get(*id).map(|i| i.location),
+                Some(ItemLocation::PartSlot(_))
+            )
+        }) {
+            return Err(error("Remove the wheel cover first"));
+        }
         let world = item_pose(items, self.parts[rim].item, physics)?;
         let body = self.free_body(rim, world, physics);
         let velocity =
@@ -359,6 +405,14 @@ impl WheelAssemblies {
             .indices
             .get(&item)
             .ok_or_else(|| error("Unknown rim"))?;
+        if self.covers.get(&item).is_some_and(|id| {
+            matches!(
+                items.get(*id).map(|i| i.location),
+                Some(ItemLocation::PartSlot(_))
+            )
+        }) {
+            return Err(error("Remove the wheel cover first"));
+        }
         if !self.parts[rim].rim || !self.slots[slot].compatible.contains(&item) {
             return Err(error("Rim does not fit wheel slot"));
         }
@@ -627,7 +681,15 @@ impl WheelAssemblies {
                 }
             }
         }
+        for &(id, dry) in &self.general_mass {
+            if items.get(id).is_some_and(|i| i.body == Some(chassis)) {
+                mass += dry;
+            }
+        }
         for id in &self.vehicle_tanks {
+            if items.get(*id).is_some_and(|i| i.body != Some(chassis)) {
+                continue;
+            }
             mass += items
                 .get(*id)
                 .and_then(|item| item.fluid.as_ref())

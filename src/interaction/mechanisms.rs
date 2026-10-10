@@ -19,6 +19,8 @@ struct Frame {
     body: Option<BodyId>,
     root_body: Option<BodyId>,
     relative: Pose,
+    external: Option<RigidBodyHandle>,
+    external_pose: Option<Pose>,
 }
 struct Control {
     reference: MechanismReference,
@@ -35,10 +37,14 @@ pub struct MechanismState {
     bodies: HashMap<BodyId, usize>,
     scroll_sensitivity: f32,
     control_action: Option<ControlAction>,
+    item_nodes: HashMap<ItemId, NodeId>,
+    order: Vec<usize>,
 }
 impl MechanismState {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut needed = HashSet::new();
+        needed.extend(reference.items.iter().map(|i| i.node));
+        needed.extend(reference.anchors.iter().map(|a| a.node));
         let driven: HashSet<_> = reference
             .mechanisms
             .iter()
@@ -112,6 +118,8 @@ impl MechanismState {
                     body,
                     root_body: None,
                     relative: Pose::IDENTITY,
+                    external: None,
+                    external_pose: None,
                 });
             }
             if frames.len() == before {
@@ -135,7 +143,9 @@ impl MechanismState {
                 turn_state: m.turn.as_ref().map_or(0, |t| t.initial_state),
             })
             .collect();
+        let order = (0..frames.len()).collect();
         let mut state = Self {
+            order,
             controls,
             items,
             frames,
@@ -143,6 +153,7 @@ impl MechanismState {
             bodies,
             scroll_sensitivity: reference.player.scroll_sensitivity,
             control_action: None,
+            item_nodes: reference.items.iter().map(|i| (i.id, i.node)).collect(),
         };
         state.propagate();
         for i in 0..state.controls.len() {
@@ -263,6 +274,57 @@ impl MechanismState {
     pub fn cancel_input(&mut self) {
         self.control_action = None;
     }
+    pub fn set_part_root(&mut self, node: NodeId, body: Option<RigidBodyHandle>) {
+        let f = &mut self.frames[self.nodes[&node]];
+        f.external = body;
+        if body.is_none() {
+            f.external_pose = None;
+        }
+    }
+    pub fn set_item_pose(&mut self, item: ItemId, pose: VehiclePose) {
+        let f = &mut self.frames[self.nodes[&self.item_nodes[&item]]];
+        f.external_pose = Some(to_rapier(pose));
+    }
+    pub fn mount_part(&mut self, node: NodeId, mount: NodeId, rotation: [f32; 4]) {
+        let parent = self.nodes[&mount];
+        let f = &mut self.frames[self.nodes[&node]];
+        f.external = None;
+        f.external_pose = None;
+        f.parent = Some(parent);
+        f.local = Pose::from_rotation(Rotation::from_xyzw(
+            rotation[0],
+            rotation[1],
+            rotation[2],
+            rotation[3],
+        ));
+        let mut order = Vec::with_capacity(self.frames.len());
+        while order.len() < self.frames.len() {
+            let before = order.len();
+            for i in 0..self.frames.len() {
+                if !order.contains(&i) && self.frames[i].parent.is_none_or(|p| order.contains(&p)) {
+                    order.push(i);
+                }
+            }
+            assert!(order.len() > before, "Cyclic part mount");
+        }
+        self.order = order;
+        self.propagate();
+    }
+    pub fn node_local_pose(&self, node: NodeId, root: BodyId) -> Option<Pose> {
+        let f = &self.frames[*self.nodes.get(&node)?];
+        (f.root_body == Some(root)).then_some(f.relative)
+    }
+    pub fn uncraft(&mut self, usable: ItemId, node: NodeId) -> Option<Rotation> {
+        let index = *self.items.get(&usable)?;
+        let control_node = self.nodes[&self.item_nodes[&self.controls[index].reference.item]];
+        let rotation = self.frames[control_node].world.rotation;
+        let root = self.frames[self.nodes[&node]].world.rotation;
+        let c = &mut self.controls[index];
+        c.degrees = [0.; 2];
+        c.slide = 0.;
+        self.apply(index);
+        Some(rotation * self.frames[control_node].world.rotation.inverse() * root)
+    }
     pub fn set_mounted(&mut self, parent: ItemId, mounted: bool) {
         for c in &mut self.controls {
             if c.reference.parent_item != Some(parent) {
@@ -376,8 +438,10 @@ impl MechanismState {
         self.apply(index);
     }
     fn propagate(&mut self) {
-        for i in 0..self.frames.len() {
-            let (world, scale) = if let Some(parent) = self.frames[i].parent {
+        for &i in &self.order {
+            let (world, scale) = if let Some(pose) = self.frames[i].external_pose {
+                (pose, self.frames[i].world_scale)
+            } else if let Some(parent) = self.frames[i].parent {
                 let p = &self.frames[parent];
                 let f = &self.frames[i];
                 (
@@ -501,9 +565,14 @@ impl MechanismState {
         self.frames[node].world = pose;
     }
     pub fn sync(&mut self, physics: &mut PhysicsWorld, commit: bool) {
+        for f in &mut self.frames {
+            if let Some(handle) = f.external {
+                f.external_pose = Some(*physics.rapier().bodies[handle].position());
+            }
+        }
         // External body roots supply their current pose. Mechanism bodies use this state.
         for i in 0..self.frames.len() {
-            if self.frames[i].driven {
+            if self.frames[i].driven || self.frames[i].external.is_some() {
                 continue;
             }
             if let Some(handle) = self.frames[i].handle

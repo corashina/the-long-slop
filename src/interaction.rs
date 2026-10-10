@@ -2,6 +2,7 @@ pub mod carry;
 pub mod items;
 pub mod lighting;
 pub mod mechanisms;
+pub mod parts;
 pub mod targets;
 pub mod wheels;
 pub use targets::{InteractionBlock, ResolvedAim};
@@ -10,7 +11,7 @@ use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
 use crate::reference::{
     ActionBinding, ActionMasks, BodyId, ColliderId, ItemId, ItemKind, OpeningId, OpeningRecord,
-    ReferenceError, ReferenceManifest, SeatId, TankRole, WheelSlotId,
+    PartSlotId, ReferenceError, ReferenceManifest, SeatId, TankRole, WheelSlotId,
 };
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
@@ -27,7 +28,13 @@ pub struct AimTarget {
     pub item: ItemId,
     pub distance: f32,
     pub point: [f32; 3],
-    pub slot: Option<WheelSlotId>,
+    pub slot: Option<SlotTarget>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlotTarget {
+    Wheel(WheelSlotId),
+    Part(PartSlotId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -43,6 +50,8 @@ pub enum InteractionAction {
         liters: f32,
     },
     WheelRemove(ItemId),
+    PartRemove(ItemId),
+    PartInstall(ItemId),
     WheelInstall {
         item: ItemId,
         target: WheelSlotId,
@@ -103,6 +112,7 @@ pub struct InteractionState {
     collider_bindings: HashMap<ColliderHandle, ActionBinding>,
     bodies: HashMap<BodyId, RigidBodyHandle>,
     pub mechanisms: mechanisms::MechanismState,
+    pub parts: parts::PartAttachments,
     mechanism_bodies: HashMap<ItemId, BodyId>,
     openings: Vec<OpeningState>,
     seats: Vec<SeatState>,
@@ -231,6 +241,7 @@ impl InteractionState {
                 .collect(),
             bodies: HashMap::with_capacity(reference.bodies.len()),
             mechanisms: mechanisms::MechanismState::new(reference)?,
+            parts: parts::PartAttachments::new(reference)?,
             mechanism_bodies: reference.items.iter().map(|i| (i.id, i.body)).collect(),
             openings,
             seats,
@@ -523,10 +534,51 @@ impl InteractionState {
             if let Some(held) = self.held()
                 && let Some(slot) = installation_target.and_then(|target| target.slot)
             {
-                action = Some(InteractionAction::WheelInstall {
-                    item: held,
-                    target: slot,
-                });
+                match slot {
+                    SlotTarget::Wheel(slot) => {
+                        action = Some(InteractionAction::WheelInstall {
+                            item: held,
+                            target: slot,
+                        })
+                    }
+                    SlotTarget::Part(slot) => {
+                        if self.parts.can_install(held, slot, items).is_ok() {
+                            self.drop_held(items, physics);
+                            self.parts
+                                .install(held, slot, items, physics)
+                                .expect("validated part installation");
+                            self.parts.mount_mechanism(held, &mut self.mechanisms);
+                            self.sync_parts(items, physics).expect("bound parts");
+                            action = Some(InteractionAction::PartInstall(held));
+                        }
+                    }
+                }
+            } else if self.held().is_none()
+                && let Some(target) = grab_target
+                && self.parts.contains(target.item)
+                && matches!(
+                    items.get(target.item).map(|i| i.location),
+                    Some(ItemLocation::PartSlot(_))
+                )
+            {
+                if self.parts.can_remove(target.item, player, items).is_ok()
+                    && self.parts.loose_body(target.item).is_some_and(|body| {
+                        self.carry
+                            .can_acquire(target.item, target.point, player, body, physics)
+                            .is_ok()
+                    })
+                {
+                    self.parts
+                        .remove(target.item, items, physics)
+                        .expect("validated removal");
+                    self.parts
+                        .detach_mechanism(target.item, &mut self.mechanisms, physics);
+                    self.sync_parts(items, physics).expect("bound parts");
+                    self.carry
+                        .pickup(target.item, target.point, player, items, physics)
+                        .expect("validated carry acquisition");
+                    action = Some(InteractionAction::PartRemove(target.item));
+                }
             } else if self.held().is_none()
                 && let Some(target) = grab_target
                 && matches!(
@@ -540,6 +592,7 @@ impl InteractionState {
                 if self
                     .carry
                     .allows_pickup(target.item, player.seat().is_some(), true)
+                    && !self.parts.covered(target.item)
                 {
                     action = Some(InteractionAction::WheelRemove(target.item));
                 }
@@ -675,6 +728,17 @@ impl InteractionState {
         action
     }
 
+    pub fn sync_parts(
+        &mut self,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        self.parts.prepare_mechanisms(items, &mut self.mechanisms);
+        self.mechanisms.sync(physics, true);
+        self.parts
+            .capture_mechanisms(items, &self.mechanisms, physics)?;
+        Ok(())
+    }
     pub fn sync_mechanisms(&mut self, physics: &mut PhysicsWorld) {
         self.mechanisms.sync(physics, true);
     }

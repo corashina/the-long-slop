@@ -213,6 +213,8 @@ impl StartingArea {
             let local = collider.local_pose(&interaction);
             physics.rapier_mut().colliders[collider.handle].set_position_wrt_parent(local);
         }
+        interaction.parts.bind(&mut items, physics)?;
+        interaction.sync_parts(&mut items, physics)?;
         physics.refresh_queries();
         items.sync_poses(physics);
         let spawn = &reference.area.player_spawn;
@@ -373,6 +375,10 @@ impl StartingArea {
     }
     pub fn sync_compound(&self, physics: &mut PhysicsWorld) {
         for record in &self.compound_colliders {
+            if physics.rapier().colliders[record.handle].parent() != Some(physics.chassis_handle())
+            {
+                continue;
+            }
             let local = record.local_pose(&self.interaction);
             let collider = &mut physics.rapier_mut().colliders[record.handle];
             if collider.position_wrt_parent() != Some(&local) {
@@ -704,6 +710,10 @@ impl GarageRuntime {
             .step(walking_input, &mut self.physics, FIXED_DT);
         self.area.sync_attachments(&mut self.physics, true);
         self.area.sync_compound(&mut self.physics);
+        self.area
+            .interaction
+            .sync_parts(&mut self.area.items, &mut self.physics)
+            .expect("bound parts");
         let driving = self.area.player.driving();
         if driving && input.pressed & keys::SPACE != 0 {
             self.handbrake = !self.handbrake;
@@ -768,6 +778,8 @@ impl GarageRuntime {
         let was_running = self.engine_output.running;
         self.engine_output = self.engine.step(
             EngineInput {
+                engine_present: self.area.items.mounted(reference.engine.item),
+                radiator_present: self.area.items.mounted(reference.engine.coolant_tank),
                 ignition_held,
                 ignition_pressed,
                 ignition_released,
@@ -785,6 +797,11 @@ impl GarageRuntime {
             start_sample(DEFAULT_SEED, self.attempts),
             FIXED_DT,
         );
+        self.area
+            .items
+            .get_mut(reference.engine.item)
+            .expect("engine item")
+            .temperature = Some(self.engine.temperature);
         if self.engine_output.running && !was_running {
             let engine = to_rapier(
                 self.area
@@ -842,6 +859,10 @@ impl GarageRuntime {
         self.area.interaction.sync_mechanisms(&mut self.physics);
         self.area.sync_attachments(&mut self.physics, false);
         self.area.sync_compound(&mut self.physics);
+        self.area
+            .interaction
+            .sync_parts(&mut self.area.items, &mut self.physics)
+            .expect("bound parts");
         self.wheels
             .sync(&mut self.area.items, &mut self.physics)
             .expect("validated wheel bindings");
@@ -947,6 +968,10 @@ impl GarageRuntime {
         self.area.interaction.sync_mechanisms(&mut self.physics);
         self.area.sync_attachments(&mut self.physics, false);
         self.area.sync_compound(&mut self.physics);
+        self.area
+            .interaction
+            .sync_parts(&mut self.area.items, &mut self.physics)
+            .expect("bound parts");
         self.wheels
             .sync(&mut self.area.items, &mut self.physics)
             .expect("validated wheel bindings");

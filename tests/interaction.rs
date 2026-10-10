@@ -846,7 +846,12 @@ fn aim_slot_flag_does_not_mark_a_loose_rim() {
     physics.refresh_queries();
     let selected = common::focus(&interaction, &physics, pose([10.0, 2.0, 0.0])).unwrap();
     assert_eq!(selected.item, ItemId(13));
-    assert_eq!(selected.slot, Some(WheelSlotId(2)));
+    assert_eq!(
+        selected.slot,
+        Some(my_summer_slop::interaction::SlotTarget::Wheel(WheelSlotId(
+            2
+        )))
+    );
     physics.rapier_mut().insert(
         RigidBodyBuilder::dynamic().translation(Vector::new(10.0, 2.0, -0.3)),
         ColliderBuilder::ball(0.1).user_data(14),
@@ -902,7 +907,9 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
         1.0 / 60.0,
     );
     let slot = AimTarget {
-        slot: Some(WheelSlotId(0)),
+        slot: Some(my_summer_slop::interaction::SlotTarget::Wheel(WheelSlotId(
+            0,
+        ))),
         ..target(13).unwrap()
     };
     let action = interaction.step(
@@ -1239,7 +1246,9 @@ fn empty_slot_does_not_pick_up_a_remote_rim_and_tire_targets_its_assembly() {
     state.body = body;
     state.local_pose = pose([0.0; 3]);
     let slot = AimTarget {
-        slot: Some(reference.wheel_slots[0].id),
+        slot: Some(my_summer_slop::interaction::SlotTarget::Wheel(
+            reference.wheel_slots[0].id,
+        )),
         ..target(rim.0).unwrap()
     };
     interaction.step(

@@ -7,6 +7,7 @@ from .actions import recover_masks, recover_bindings, recover_pickup
 from .caps import opening_metadata
 from .mechanisms import recover_mechanisms, bind_mechanisms, recover_lighting
 from .visibility import recover_camera_visibility
+from .parts import recover_parts
 
 
 def build_manifest(source, roots, reports, hashes):
@@ -120,7 +121,7 @@ def build_manifest(source, roots, reports, hashes):
         return anchor_nodes[node]
     colliders=[];exporter=GltfExporter(source,None);wheel_parts_source=[];detachable_colliders=set()
     for node,group in components.items():
-        if not nodes[node-1]['active'] or not ('wheelscript' in group or 'gumiscript' in group):continue
+        if not nodes[node-1]['active'] or 'partscript' not in group:continue
         part=group['partscript'][0];part_data=source.read(part);pick=source.resolve(part,part_data['p']);pick_data=source.read(pick)
         identities=[]
         for pointer in pick_data['cols']:
@@ -133,10 +134,10 @@ def build_manifest(source, roots, reports, hashes):
                 owner=source.resolve(layer,layer_data['m_GameObject']);transform=source.transform_for(owner)
                 _,owner_components=source.components(transform)
                 candidates=[component for component in owner_components if component.type.name in {'BoxCollider','SphereCollider','CapsuleCollider','MeshCollider'}]
-                if len(candidates)!=1:raise ValueError(f'Ambiguous layerScript collider owner: {key(layer)}')
+                if not candidates:raise ValueError(f'Missing layerScript collider owner: {key(layer)}')
                 collider=candidates[0]
             identities.append(key(collider));detachable_colliders.add(key(collider))
-        wheel_parts_source.append((node,part,part_data,identities))
+        if 'wheelscript' in group or 'gumiscript' in group:wheel_parts_source.append((node,part,part_data,identities))
     for node,group in components.items():
         if not nodes[node-1]['active'] and not any(key(reader) in detachable_colliders for readers in group.values() for reader in readers):continue
         layer=source.read(objects[node]['game_object'])['m_Layer']
@@ -244,7 +245,7 @@ def build_manifest(source, roots, reports, hashes):
         else:radius=source.read(components[node]['gumiscript'][0])['radius']
         wheel_parts.append({'item':item_nodes[node],'source':source_id(part),'radius':radius,'main_types':value['maintipus'],'part_types':value['tipus'],
             'colliders':[collider_ids[identity] for identity in identities],'tire_slot_anchor':tire_anchor,'tire_mount':tire_mount,
-            'tire_main_types':tire_main,'tire_types':tire_types,'local_rotation_after_mount':euler_quaternion(vector(value['localRotationAfterMount']))})
+            'tire_main_types':tire_main,'tire_types':tire_types,'local_rotation_after_mount':euler_quaternion(vector(value['localRotationAfterMount'])),'cover_slot':value['cover_CantCraftIfCovered']['m_PathID'] or None})
     for slot in wheel_slots:
         owner=source.get(slot['source']['file'],slot['source']['path_id'])
         if source.read(owner)['disableCollidersOnCraft']:
@@ -255,6 +256,7 @@ def build_manifest(source, roots, reports, hashes):
     tire_colliders={collider_id for part in wheel_parts if 'gumi' in part['part_types'] for collider_id in part['colliders']}
     for part in wheel_parts:
         if 'felni' in part['part_types']:part['colliders']=[collider_id for collider_id in part['colliders'] if collider_id not in tire_colliders]
+    parts,part_slots=recover_parts(source,nodes,components,item_nodes,node_readers,colliders,car_root,pointer_node,anchor,euler_quaternion)
     engine_reader=next(r for group in components.values() for r in group.get('enginescript',[]));engine=source.read(engine_reader)
     radiator_reader=next(r for group in components.values() for r in group.get('coolantTankscript',[]));radiator=source.read(radiator_reader)
     oil=source.resolve(engine_reader,engine['T']);coolant=source.resolve(radiator_reader,radiator['coolant']);fuel=components[car_root]['tankscript'][0]
@@ -346,7 +348,7 @@ def build_manifest(source, roots, reports, hashes):
     driveway_points=[point for height,points in wheel_floors if abs(height-driveway_height)<0.001 for point in points]
     driveway_bounds={'min':[min(p[i] for p in driveway_points) for i in range(3)],'max':[max(p[i] for p in driveway_points) for i in range(3)]}
     driveway_bounds['min'][1]=driveway_height;driveway_bounds['max'][1]=driveway_height
-    result={'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'lighting':recover_lighting(source,nodes,components,pointer_node,item_nodes,car,car_reader,reports),'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'items':items,'openings':openings,'tanks':tanks,
+    result={'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'lighting':recover_lighting(source,nodes,components,pointer_node,item_nodes,car,car_reader,reports),'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'parts':parts,'part_slots':part_slots,'items':items,'openings':openings,'tanks':tanks,
         'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed']},'engine':engine_record,'player':player_record,'seats':seats,
         'vehicle':{'source':source_id(car_reader),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':[w['id'] for w in wheel_slots],'colliders':[c['id'] for c in colliders if c['body']==car_body],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')]},
         'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn,'car_pose':car_pose,'driveway_bounds':driveway_bounds,'driveway_height':driveway_height}}

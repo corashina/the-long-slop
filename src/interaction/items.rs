@@ -4,12 +4,15 @@ use rapier3d::math::{Rotation, Vector};
 use rapier3d::prelude::RigidBodyHandle;
 
 use crate::fluids::{FluidContainer, VehicleFluids};
-use crate::reference::{BodyId, ItemId, NodeId, ReferenceError, ReferenceManifest, WheelSlotId};
+use crate::reference::{
+    BodyId, ItemId, NodeId, PartSlotId, ReferenceError, ReferenceManifest, WheelSlotId,
+};
 use crate::vehicle::{PhysicsWorld, VehiclePose, from_rapier, to_rapier};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ItemLocation {
     World,
+    PartSlot(PartSlotId),
     Held,
     Attached(ItemId),
     WheelSlot(WheelSlotId),
@@ -24,6 +27,7 @@ pub struct ItemState {
     pub local_pose: VehiclePose,
     /// One is new; zero is the most worn source state.
     pub condition: f32,
+    pub temperature: Option<f32>,
     pub fluid: Option<FluidContainer>,
 }
 
@@ -33,6 +37,8 @@ pub struct ItemStore {
     body_ids: Vec<BodyId>,
     vehicle_tanks: [usize; 3],
     names: Vec<String>,
+    vehicle_item: ItemId,
+    slot_owners: HashMap<PartSlotId, Option<ItemId>>,
 }
 
 impl ItemStore {
@@ -70,6 +76,8 @@ impl ItemStore {
                 pose,
                 local_pose,
                 condition: item.condition,
+                temperature: (item.id == reference.engine.item)
+                    .then_some(reference.engine.initial_temperature),
                 fluid,
             });
         }
@@ -108,7 +116,26 @@ impl ItemStore {
                 states[*index].location = ItemLocation::Attached(slot.rim);
             }
         }
+        for slot in &reference.part_slots {
+            if let Some(id) = slot.part {
+                states[*indices
+                    .get(&id)
+                    .ok_or_else(|| ReferenceError("Missing mounted part".into()))?]
+                .location = ItemLocation::PartSlot(slot.id);
+            }
+        }
         Ok(Self {
+            vehicle_item: reference
+                .items
+                .iter()
+                .find(|i| i.node == reference.vehicle.root)
+                .expect("vehicle item")
+                .id,
+            slot_owners: reference
+                .part_slots
+                .iter()
+                .map(|s| (s.id, s.owner))
+                .collect(),
             states,
             indices,
             body_ids,
@@ -129,6 +156,26 @@ impl ItemStore {
         })
     }
 
+    pub fn mounted(&self, mut id: ItemId) -> bool {
+        for _ in 0..self.states.len() {
+            if id == self.vehicle_item {
+                return true;
+            }
+            match self.get(id).map(|i| i.location) {
+                Some(ItemLocation::PartSlot(slot)) => {
+                    if let Some(Some(owner)) = self.slot_owners.get(&slot) {
+                        id = *owner;
+                    } else {
+                        return true;
+                    }
+                }
+                Some(ItemLocation::WheelSlot(_)) => return true,
+                Some(ItemLocation::Attached(parent)) => id = parent,
+                _ => return false,
+            }
+        }
+        false
+    }
     pub fn len(&self) -> usize {
         self.states.len()
     }
@@ -154,6 +201,7 @@ impl ItemStore {
                 rotation: [0.0, 0.0, 0.0, 1.0],
             },
             condition: 1.0,
+            temperature: None,
             fluid: Some(FluidContainer {
                 capacity_liters: 1000.0,
                 mixture: crate::fluids::FluidMixture {

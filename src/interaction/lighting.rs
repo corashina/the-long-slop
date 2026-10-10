@@ -1,5 +1,5 @@
 //! Switch requests and source fades advance in the fixed simulation step.
-use crate::interaction::items::{ItemLocation, ItemStore};
+use crate::interaction::items::ItemStore;
 use crate::interaction::mechanisms::{ControlAction, MechanismState};
 use crate::reference::{LampControl, LightingReference};
 
@@ -63,9 +63,7 @@ impl LightingState {
     }
     pub fn step(&mut self, mechanisms: &MechanismState, items: &ItemStore, dt: f32) {
         let doors_open = self.reference.door_items.iter().any(|id| {
-            items
-                .get(*id)
-                .is_some_and(|item| matches!(item.location, ItemLocation::Attached(_)))
+            items.mounted(*id)
                 && mechanisms
                     .value(*id, false)
                     .is_some_and(|value| value > self.reference.door_limit)
@@ -76,11 +74,12 @@ impl LightingState {
             _ => false,
         };
         for (g, state) in self.reference.groups.iter().zip(&mut self.groups) {
-            let installed = g.owner.is_none_or(|id| {
-                items
-                    .get(id)
-                    .is_some_and(|item| matches!(item.location, ItemLocation::Attached(_)))
-            });
+            let installed = g.owner.is_none_or(|id| items.mounted(id));
+            if g.control == LampControl::Headlights && !installed {
+                state.current = 0;
+                state.energy = 0.;
+                continue;
+            }
             let target = match g.control {
                 LampControl::Headlights => {
                     if installed {

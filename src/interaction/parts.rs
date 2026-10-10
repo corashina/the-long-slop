@@ -1,0 +1,633 @@
+//! General parts own slot occupancy and reuse one collider set when moved.
+use super::InteractionBlock;
+use super::items::{ItemLocation, ItemStore, node_pose};
+use super::mechanisms::MechanismState;
+use crate::player::PlayerState;
+use crate::reference::*;
+use crate::vehicle::{PhysicsWorld, VEHICLE_COLLIDER_FLAG, from_rapier, to_rapier};
+use rapier3d::math::Pose;
+use rapier3d::prelude::{ColliderHandle, RigidBodyBuilder, RigidBodyHandle};
+use std::collections::HashMap;
+
+struct Shape {
+    id: ColliderId,
+    handle: Option<ColliderHandle>,
+    body: BodyId,
+    shape: Pose,
+    part_local: Pose,
+    enabled: bool,
+}
+struct Part {
+    reference: PartReference,
+    slot: Option<usize>,
+    body: Option<RigidBodyHandle>,
+    shapes: Vec<Shape>,
+    members: Vec<(ItemId, NodeId, f32)>,
+    pickup: PickupReference,
+    seats: Vec<SeatId>,
+    pose: Pose,
+    mass: f32,
+}
+struct Slot {
+    reference: PartSlotReference,
+    part: Option<usize>,
+    mount_node: NodeId,
+    detach_node: Option<NodeId>,
+    compatible: Vec<ItemId>,
+    mount_pose: Pose,
+    detach_pose: Option<Pose>,
+}
+pub struct PartAttachments {
+    parts: Vec<Part>,
+    indices: HashMap<ItemId, usize>,
+    slots: Vec<Slot>,
+    slot_indices: HashMap<PartSlotId, usize>,
+    collider_slots: HashMap<ColliderId, PartSlotId>,
+    wheel_covers: HashMap<ItemId, PartSlotId>,
+    chassis: BodyId,
+    bound: bool,
+}
+impl PartAttachments {
+    pub fn new(r: &ReferenceManifest) -> Result<Self, ReferenceError> {
+        let indices: HashMap<_, _> = r
+            .parts
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.item, i))
+            .collect();
+        let slot_indices: HashMap<_, _> = r
+            .part_slots
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.id, i))
+            .collect();
+        let ancestry = |mut node: NodeId| {
+            loop {
+                if let Some(p) = r.parts.iter().position(|p| p.node == node) {
+                    return Some(p);
+                }
+                node = r.nodes.iter().find(|n| n.id == node)?.parent?;
+            }
+        };
+        let mut parts = Vec::new();
+        for (i, p) in r.parts.iter().enumerate() {
+            let item = r
+                .items
+                .iter()
+                .find(|x| x.id == p.item)
+                .ok_or_else(|| error("Missing part item"))?;
+            let members: Vec<_> = r
+                .items
+                .iter()
+                .filter(|x| ancestry(x.node) == Some(i))
+                .map(|x| (x.id, x.node, x.mass_kg))
+                .collect();
+            let mut shapes = Vec::new();
+            for id in &p.colliders {
+                let c = r
+                    .colliders
+                    .iter()
+                    .find(|c| c.id == *id)
+                    .ok_or_else(|| error("Missing part collider"))?;
+                shapes.push(Shape {
+                    id: *id,
+                    handle: None,
+                    body: c.body,
+                    shape: *crate::vehicle::collider_builder(&c.geometry)?
+                        .build()
+                        .position(),
+                    part_local: Pose::IDENTITY,
+                    enabled: c.enabled,
+                });
+            }
+            parts.push(Part {
+                reference: p.clone(),
+                slot: r.part_slots.iter().position(|s| s.part == Some(p.item)),
+                body: None,
+                shapes,
+                seats: r
+                    .seats
+                    .iter()
+                    .filter(|s| members.iter().any(|m| m.0 == s.item))
+                    .map(|s| s.id)
+                    .collect(),
+                members,
+                pickup: item
+                    .pickup
+                    .clone()
+                    .ok_or_else(|| error("Part has no pickup"))?,
+                pose: to_rapier(node_pose(r, p.node)?),
+                mass: f32::NAN,
+            });
+        }
+        let mut slots = Vec::new();
+        let mut collider_slots = HashMap::new();
+        for s in &r.part_slots {
+            let anchor = |id| {
+                r.anchors
+                    .iter()
+                    .find(|a| a.id == id)
+                    .map(|a| a.node)
+                    .ok_or_else(|| error("Missing part anchor"))
+            };
+            for c in &s.colliders {
+                collider_slots.insert(*c, s.id);
+            }
+            slots.push(Slot {
+                reference: s.clone(),
+                part: s
+                    .part
+                    .map(|id| {
+                        indices
+                            .get(&id)
+                            .copied()
+                            .ok_or_else(|| error("Missing slot part"))
+                    })
+                    .transpose()?,
+                mount_node: anchor(s.mount_anchor)?,
+                detach_node: s.detach_anchor.map(anchor).transpose()?,
+                mount_pose: Pose::IDENTITY,
+                detach_pose: None,
+                compatible: r
+                    .parts
+                    .iter()
+                    .filter(|p| fits(&s.main_types, &s.part_types, &p.main_types, &p.part_types))
+                    .map(|p| p.item)
+                    .collect(),
+            });
+        }
+        Ok(Self {
+            parts,
+            indices,
+            slots,
+            slot_indices,
+            collider_slots,
+            chassis: r.vehicle.body,
+            bound: false,
+            wheel_covers: r
+                .wheel_parts
+                .iter()
+                .filter_map(|p| p.cover_slot.map(|s| (p.item, s)))
+                .collect(),
+        })
+    }
+    pub fn bind(
+        &mut self,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        if self.bound {
+            return Ok(());
+        }
+        let handles: HashMap<_, _> = physics
+            .rapier()
+            .colliders
+            .iter()
+            .map(|(h, c)| (ColliderId((c.user_data >> 64) as u32), h))
+            .collect();
+        for p in &mut self.parts {
+            let body = physics.rapier_mut().insert_body(
+                RigidBodyBuilder::dynamic()
+                    .enabled(false)
+                    .ccd_enabled(true)
+                    .linear_damping(p.reference.linear_damping)
+                    .angular_damping(p.reference.angular_damping),
+            );
+            p.body = Some(body);
+            for shape in &mut p.shapes {
+                let h = *handles
+                    .get(&shape.id)
+                    .ok_or_else(|| error("Missing part collider binding"))?;
+                shape.handle = Some(h);
+                let collider = &physics.rapier().colliders[h];
+                shape.part_local = to_rapier(items.get(p.reference.item).unwrap().pose).inverse()
+                    * *collider.position();
+            }
+            if let Some(slot) = p.slot {
+                items.get_mut(p.reference.item).unwrap().location =
+                    ItemLocation::PartSlot(self.slots[slot].reference.id);
+            }
+        }
+        self.bound = true;
+        Ok(())
+    }
+    pub fn loose_body(&self, item: ItemId) -> Option<RigidBodyHandle> {
+        self.parts
+            .get(*self.indices.get(&item)?)
+            .and_then(|p| p.body)
+    }
+    pub fn contains(&self, item: ItemId) -> bool {
+        self.indices.contains_key(&item)
+    }
+    pub fn slot_target(&self, id: ColliderId) -> Option<PartSlotId> {
+        self.collider_slots.get(&id).copied()
+    }
+    pub fn slot_item(&self, id: PartSlotId) -> Option<ItemId> {
+        self.slots[*self.slot_indices.get(&id)?]
+            .part
+            .map(|p| self.parts[p].reference.item)
+    }
+    pub fn covering_item(&self, item: ItemId) -> Option<ItemId> {
+        self.wheel_covers
+            .get(&item)
+            .copied()
+            .and_then(|s| self.slot_item(s))
+    }
+    pub fn covered(&self, item: ItemId) -> bool {
+        self.wheel_covers
+            .get(&item)
+            .copied()
+            .or_else(|| {
+                self.indices
+                    .get(&item)
+                    .and_then(|i| self.parts[*i].reference.cover_slot)
+            })
+            .is_some_and(|s| self.slot_item(s).is_some())
+    }
+    pub fn installed(&self, item: ItemId) -> bool {
+        let Some(&i) = self.indices.get(&item) else {
+            return false;
+        };
+        let Some(s) = self.parts[i].slot else {
+            return false;
+        };
+        self.slots[s]
+            .reference
+            .owner
+            .is_none_or(|owner| !self.contains(owner) || self.installed(owner))
+    }
+    pub fn can_install(
+        &self,
+        item: ItemId,
+        id: PartSlotId,
+        items: &ItemStore,
+    ) -> Result<(), InteractionBlock> {
+        let s = self
+            .slots
+            .get(
+                *self
+                    .slot_indices
+                    .get(&id)
+                    .ok_or(InteractionBlock::Unavailable)?,
+            )
+            .unwrap();
+        if s.part.is_some() {
+            return Err(InteractionBlock::Occupied);
+        }
+        if s.reference.cant_craft {
+            return Err(InteractionBlock::Unavailable);
+        }
+        if !s.compatible.contains(&item) {
+            return Err(InteractionBlock::Incompatible);
+        }
+        if self.covered(item) {
+            return Err(InteractionBlock::Covered);
+        }
+        if items
+            .get(item)
+            .is_none_or(|i| !matches!(i.location, ItemLocation::World | ItemLocation::Held))
+        {
+            return Err(InteractionBlock::Unavailable);
+        }
+        Ok(())
+    }
+    pub fn can_remove(
+        &self,
+        item: ItemId,
+        player: &PlayerState,
+        items: &ItemStore,
+    ) -> Result<(), InteractionBlock> {
+        let p = &self.parts[*self
+            .indices
+            .get(&item)
+            .ok_or(InteractionBlock::Unavailable)?];
+        let s = &self.slots[p.slot.ok_or(InteractionBlock::Unavailable)?];
+        if self.covered(item) {
+            return Err(InteractionBlock::Covered);
+        }
+        if s.reference.cant_craft
+            || s.reference.cant_uncraft
+            || p.pickup.cant_pickup
+            || p.pickup.cant_pickup_while_mounted
+            || (player.seat().is_some() && p.pickup.cant_pickup_while_seated)
+            || player.seat().is_some_and(|seat| p.seats.contains(&seat))
+            || items.get(item).is_none()
+        {
+            return Err(InteractionBlock::Unavailable);
+        }
+        Ok(())
+    }
+    pub fn remove(
+        &mut self,
+        item: ItemId,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<ItemId, ReferenceError> {
+        let i = *self
+            .indices
+            .get(&item)
+            .ok_or_else(|| error("Unknown part"))?;
+        let s = self.parts[i]
+            .slot
+            .ok_or_else(|| error("Part is not mounted"))?;
+        if !self.bound
+            || self.parts[i].pickup.cant_pickup
+            || self.parts[i].pickup.cant_pickup_while_mounted
+            || self.covered(item)
+            || self.slots[s].reference.cant_craft
+            || self.slots[s].reference.cant_uncraft
+        {
+            return Err(error("Cannot remove part"));
+        }
+        let mut world = self.slots[s].detach_pose.unwrap_or(to_rapier(
+            items
+                .get(item)
+                .ok_or_else(|| error("Missing part state"))?
+                .pose,
+        ));
+        if self.slots[s].detach_pose.is_some() {
+            world.rotation *= rotation(self.parts[i].reference.local_rotation_after_mount);
+        }
+        if self.slots[s].reference.fixed_detach {
+            world.translation = self.slots[s].mount_pose.translation
+                + rapier3d::math::Vector::from_array(self.slots[s].reference.detach_position);
+            world.rotation = rotation(self.slots[s].reference.detach_rotation);
+        }
+        let body = self.parts[i].body.unwrap();
+        let parent = items.get(item).unwrap().body.unwrap();
+        let velocity = physics.rapier().bodies[parent].velocity_at_point(world.translation);
+        let angular = physics.rapier().bodies[parent].angvel();
+        let b = &mut physics.rapier_mut().bodies[body];
+        b.set_position(world, true);
+        b.set_enabled(true);
+        b.set_linvel(velocity, true);
+        b.set_angvel(angular, true);
+        self.parts[i].pose = world;
+        self.parts[i].slot = None;
+        self.slots[s].part = None;
+        let old = to_rapier(items.get(item).unwrap().pose);
+        items.get_mut(item).unwrap().location = ItemLocation::World;
+        self.move_assembly(i, old, world, items, physics);
+        self.sync(items, physics)?;
+        physics.refresh_queries();
+        Ok(item)
+    }
+    pub fn install(
+        &mut self,
+        item: ItemId,
+        id: PartSlotId,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        self.can_install(item, id, items)
+            .map_err(|_| error("Cannot install part"))?;
+        if !self.bound || items.get(item).unwrap().location != ItemLocation::World {
+            return Err(error("Release carry constraint before installation"));
+        }
+        let i = self.indices[&item];
+        let s = self.slot_indices[&id];
+        self.parts[i].slot = Some(s);
+        self.slots[s].part = Some(i);
+        physics.rapier_mut().bodies[self.parts[i].body.unwrap()].set_enabled(false);
+        items.get_mut(item).unwrap().location = ItemLocation::PartSlot(id);
+        let old = to_rapier(items.get(item).unwrap().pose);
+        let world = self.slots[s].mount_pose
+            * Pose::from_rotation(rotation(self.parts[i].reference.local_rotation_after_mount));
+        self.move_assembly(i, old, world, items, physics);
+        self.sync(items, physics)?;
+        physics.refresh_queries();
+        Ok(())
+    }
+    fn move_assembly(
+        &self,
+        root: usize,
+        old: Pose,
+        pose: Pose,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) {
+        let body = self.physical_body(root, items, physics);
+        let delta = pose * old.inverse();
+        let inverse = physics.rapier().bodies[body].position().inverse();
+        for (i, p) in self.parts.iter().enumerate() {
+            let mut parent = i;
+            while parent != root {
+                let Some(slot) = self.parts[parent].slot else {
+                    break;
+                };
+                let Some(owner) = self.slots[slot]
+                    .reference
+                    .owner
+                    .and_then(|id| self.indices.get(&id).copied())
+                else {
+                    break;
+                };
+                parent = owner;
+            }
+            if parent != root {
+                continue;
+            }
+            for &(id, _, _) in &p.members {
+                let state = items.get_mut(id).unwrap();
+                state.pose = from_rapier(&(delta * to_rapier(state.pose)));
+                state.body = Some(body);
+                state.local_pose = from_rapier(&(inverse * to_rapier(state.pose)));
+            }
+            for shape in &p.shapes {
+                let handle = shape.handle.unwrap();
+                let local = inverse * delta * *physics.rapier().colliders[handle].position();
+                let world = physics.rapier_mut();
+                world
+                    .colliders
+                    .set_parent(handle, Some(body), &mut world.bodies);
+                world.colliders[handle].set_position_wrt_parent(local);
+                world.colliders[handle].set_enabled(
+                    p.slot
+                        .is_none_or(|s| !self.slots[s].reference.disable_colliders_on_craft)
+                        && shape.enabled,
+                );
+            }
+        }
+    }
+    pub fn detach_mechanism(
+        &self,
+        item: ItemId,
+        m: &mut MechanismState,
+        physics: &mut PhysicsWorld,
+    ) {
+        let p = &self.parts[self.indices[&item]];
+        m.set_part_root(p.reference.node, Some(p.body.unwrap()));
+        m.sync(physics, true);
+        let rotation = p
+            .reference
+            .usable
+            .and_then(|usable| m.uncraft(usable, p.reference.node));
+        if let Some(rotation) = rotation {
+            physics.rapier_mut().bodies[p.body.unwrap()].set_rotation(rotation, true);
+        }
+        m.set_mounted(item, false);
+    }
+    pub fn mount_mechanism(&self, item: ItemId, m: &mut MechanismState) {
+        let p = &self.parts[self.indices[&item]];
+        let s = &self.slots[p.slot.unwrap()];
+        m.mount_part(
+            p.reference.node,
+            s.mount_node,
+            p.reference.local_rotation_after_mount,
+        );
+        m.set_mounted(item, true);
+    }
+    pub fn prepare_mechanisms(&mut self, items: &ItemStore, m: &mut MechanismState) {
+        for p in &self.parts {
+            if p.slot.is_none() {
+                m.set_part_root(p.reference.node, p.body);
+            }
+        }
+        for s in &self.slots {
+            if let Some(owner) = s.reference.owner
+                && !self.contains(owner)
+                && let Some(item) = items.get(owner)
+            {
+                m.set_item_pose(owner, item.pose);
+            }
+        }
+    }
+    pub fn capture_mechanisms(
+        &mut self,
+        items: &mut ItemStore,
+        m: &MechanismState,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        for slot in &mut self.slots {
+            slot.mount_pose = to_rapier(
+                m.node_pose(slot.mount_node)
+                    .ok_or_else(|| error("Missing slot mount"))?,
+            );
+            slot.detach_pose = slot.detach_node.and_then(|n| m.node_pose(n)).map(to_rapier);
+        }
+        for p in &mut self.parts {
+            p.pose = to_rapier(
+                m.node_pose(p.reference.node)
+                    .ok_or_else(|| error("Missing part transform"))?,
+            );
+            for &(id, node, _) in &p.members {
+                items.get_mut(id).unwrap().pose = m
+                    .node_pose(node)
+                    .ok_or_else(|| error("Missing member transform"))?;
+            }
+        }
+        for i in 0..self.parts.len() {
+            let body = self.physical_body(i, items, physics);
+            let inverse = physics.rapier().bodies[body].position().inverse();
+            for &(id, _, _) in &self.parts[i].members {
+                let state = items.get_mut(id).unwrap();
+                state.body = Some(body);
+                state.local_pose = from_rapier(&(inverse * to_rapier(state.pose)));
+            }
+            for shape in &self.parts[i].shapes {
+                let local = if body == physics.chassis_handle() {
+                    m.body_local_pose(shape.body, self.chassis)
+                        .map(|pose| pose * shape.shape)
+                        .unwrap_or_else(|| {
+                            m.node_local_pose(self.parts[i].reference.node, self.chassis)
+                                .unwrap()
+                                * shape.part_local
+                        })
+                } else {
+                    inverse
+                        * m.body_pose(shape.body)
+                            .map(|pose| pose * shape.shape)
+                            .unwrap_or(self.parts[i].pose * shape.part_local)
+                };
+                let vehicle = body == physics.chassis_handle();
+                let h = shape.handle.unwrap();
+                let world = physics.rapier_mut();
+                if world.colliders[h].parent() != Some(body) {
+                    world.colliders.set_parent(h, Some(body), &mut world.bodies);
+                }
+                let c = &mut world.colliders[h];
+                if c.position_wrt_parent() != Some(&local) {
+                    c.set_position_wrt_parent(local);
+                }
+                let enabled = self.parts[i]
+                    .slot
+                    .is_none_or(|s| !self.slots[s].reference.disable_colliders_on_craft)
+                    && shape.enabled;
+                if c.is_enabled() != enabled {
+                    c.set_enabled(enabled);
+                }
+                if vehicle {
+                    c.user_data |= VEHICLE_COLLIDER_FLAG;
+                } else {
+                    c.user_data &= !VEHICLE_COLLIDER_FLAG;
+                }
+            }
+        }
+        self.sync(items, physics)
+    }
+    fn physical_body(
+        &self,
+        mut i: usize,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+    ) -> RigidBodyHandle {
+        loop {
+            let p = &self.parts[i];
+            let Some(s) = p.slot else {
+                return p.body.unwrap();
+            };
+            let Some(owner) = self.slots[s].reference.owner else {
+                return physics.chassis_handle();
+            };
+            if let Some(&parent) = self.indices.get(&owner) {
+                i = parent;
+            } else {
+                return items.get(owner).and_then(|i| i.body).unwrap();
+            }
+        }
+    }
+    pub fn sync(
+        &mut self,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        for i in 0..self.parts.len() {
+            if self.parts[i].slot.is_some() {
+                continue;
+            }
+            let body = self.parts[i]
+                .body
+                .ok_or_else(|| error("Part bodies are not bound"))?;
+            let mass = self
+                .parts
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| self.physical_body(*j, items, physics) == body)
+                .flat_map(|(_, p)| p.members.iter())
+                .map(|(id, _, dry)| {
+                    dry + items
+                        .get(*id)
+                        .and_then(|i| i.fluid.as_ref())
+                        .map_or(0., |f| f.mixture.total())
+                })
+                .sum::<f32>()
+                .max(0.001);
+            if self.parts[i].mass != mass {
+                physics.rapier_mut().bodies[body].set_additional_mass(mass, true);
+                self.parts[i].mass = mass;
+            }
+        }
+        Ok(())
+    }
+}
+fn fits(a: &[String], b: &[String], c: &[String], d: &[String]) -> bool {
+    (a.is_empty() || c.is_empty() || a.iter().any(|x| c.contains(x)))
+        && b.iter().any(|x| d.contains(x))
+}
+fn error(s: &str) -> ReferenceError {
+    ReferenceError(s.into())
+}
+
+fn rotation(q: [f32; 4]) -> rapier3d::math::Rotation {
+    rapier3d::math::Rotation::from_xyzw(q[0], q[1], q[2], q[3])
+}

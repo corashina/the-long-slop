@@ -1,6 +1,6 @@
 //! Collider identity and source action owners.
 use super::items::{ItemLocation, ItemStore};
-use super::{AimTarget, InteractionState, SLOT_SENSOR_FLAG};
+use super::{AimTarget, InteractionState, SLOT_SENSOR_FLAG, SlotTarget};
 use crate::reference::{ActionBinding, ColliderId, ItemId, ItemKind, WheelSlotId};
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
 use rapier3d::math::Vector;
@@ -154,6 +154,7 @@ impl InteractionState {
                         self.is_wheel(target.item)
                             && self.carry.allows_pickup(target.item, false, true)
                     }
+                    ItemLocation::PartSlot(_) => self.carry.allows_pickup(target.item, false, true),
                     ItemLocation::World => {
                         self.carry.allows_pickup(target.item, false, false)
                             && item.body.is_some_and(|body| {
@@ -167,12 +168,20 @@ impl InteractionState {
                     }
                     _ => false,
                 });
-            if !available {
+            if self.parts.covered(target.item) {
+                aim.grab_target = None;
+                aim.grab_block = Some(InteractionBlock::Covered);
+            } else if !available {
                 aim.grab_target = None;
                 aim.grab_block = Some(InteractionBlock::Unavailable);
             }
         }
         aim.installation_block = self.wheel_installation_block(&aim);
+        if let Some(SlotTarget::Part(slot)) = aim.installation_target.and_then(|t| t.slot)
+            && let Some(item) = self.held()
+        {
+            aim.installation_block = self.parts.can_install(item, slot, items).err();
+        }
         if aim.installation_block.is_some() {
             aim.installation_target = None;
         }
@@ -182,7 +191,7 @@ impl InteractionState {
     pub(super) fn wheel_installation_block(&self, aim: &ResolvedAim) -> Option<InteractionBlock> {
         aim.installation_block.or_else(|| {
             (aim.installation_target
-                .is_some_and(|target| target.slot.is_some())
+                .is_some_and(|target| matches!(target.slot, Some(SlotTarget::Wheel(_))))
                 && self.held().is_some_and(|item| !self.is_wheel(item)))
             .then_some(InteractionBlock::Incompatible)
         })
@@ -229,7 +238,10 @@ impl InteractionState {
                 QueryAction::Grab | QueryAction::Removal => binding
                     .and_then(|binding| {
                         if matches!(action, QueryAction::Removal) {
-                            binding.removal_owner
+                            self.parts
+                                .slot_target(binding.collider)
+                                .map(|s| self.parts.slot_item(s))
+                                .unwrap_or(binding.removal_owner)
                         } else {
                             binding.pickup_owner
                         }
@@ -242,17 +254,34 @@ impl InteractionState {
                         {
                             parent
                         } else {
-                            id
+                            self.parts.covering_item(id).unwrap_or(id)
                         }
                     })
                     .filter(|id| {
                         !matches!(action, QueryAction::Removal)
+                            || (self.parts.contains(*id)
+                                && matches!(
+                                    items.get(*id).map(|i| i.location),
+                                    Some(ItemLocation::PartSlot(_))
+                                ))
                             || (self.is_wheel(*id)
                                 && items.get(*id).is_some_and(|item| {
                                     matches!(item.location, ItemLocation::WheelSlot(_))
                                 }))
                     }),
                 QueryAction::Push => binding.and_then(|binding| binding.push_owner),
+                QueryAction::Install
+                    if self
+                        .parts
+                        .slot_target(ColliderId((collider.user_data >> 64) as u32))
+                        .is_some() =>
+                {
+                    self.held().or_else(|| {
+                        self.parts
+                            .slot_target(ColliderId((collider.user_data >> 64) as u32))
+                            .and_then(|s| self.parts.slot_item(s))
+                    })
+                }
                 QueryAction::Install if collider.user_data & SLOT_SENSOR_FLAG != 0 => {
                     (collider.user_data as u32).checked_sub(1).map(ItemId)
                 }
@@ -300,7 +329,14 @@ impl InteractionState {
             distance: hit.time_of_impact,
             point: ray.point_at(hit.time_of_impact).to_array(),
             slot: (collider.user_data & SLOT_SENSOR_FLAG != 0)
-                .then_some(WheelSlotId((collider.user_data >> 96) as u8)),
+                .then_some(SlotTarget::Wheel(WheelSlotId(
+                    (collider.user_data >> 96) as u8,
+                )))
+                .or_else(|| {
+                    self.parts
+                        .slot_target(ColliderId((collider.user_data >> 64) as u32))
+                        .map(SlotTarget::Part)
+                }),
         })
     }
 
@@ -314,7 +350,7 @@ impl InteractionState {
             };
         }
         if self.held().is_some() && aim.installation_target.is_some() {
-            return "F: install wheel";
+            return "F: install part";
         }
         if let Some(target) = aim.use_target {
             if self.mechanisms.contains(target.item) {
