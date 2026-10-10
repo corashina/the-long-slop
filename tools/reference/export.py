@@ -44,6 +44,21 @@ def export_reference(steam_root: Path, output: Path) -> None:
         raise ValueError('Selected home link differs from the required home')
     if source.read(source.get('level1',64898))['StartCar02']['m_PathID']!=206:
         raise ValueError('Selected Lada starter link differs from the required car')
+    source.live_mirror_sources = []
+    source.live_mirror_renderers = {}
+    main_reader = source.get('level1', 64919)
+    main = source.read(main_reader)
+    mirror_material = source.resolve(main_reader, main['defMirrorMaterial'])
+    mirror_texture = source.resolve(main_reader, main['defMirrorTexture'])
+    from .source import source_id, key
+    for node in source.hierarchy(roots['lada'][0], activate_root=True):
+        for reader in node['components']:
+            if reader.type.name == 'MonoBehaviour' and source.class_name(reader) == 'mirrorscript':
+                data = source.read(reader)['M']
+                if data['R']['m_PathID'] and data['C']['m_PathID']:
+                    source.live_mirror_sources.append(source_id(reader))
+                    source.live_mirror_renderers[key(source.resolve(reader, data['R']))] = mirror_material
+    source.live_mirror_sources.append(source_id(mirror_texture))
     prepare_conditions(source,[root for readers in roots.values() for root in readers])
     output.mkdir(parents=True, exist_ok=True)
     # Remove acceptance before any export. A failed run cannot leave it usable.
@@ -52,6 +67,7 @@ def export_reference(steam_root: Path, output: Path) -> None:
     for name, readers in roots.items():
         report[name] = export_gltf((source,readers),output/f'{name}.gltf')
         print(f'Exported {name}: {report[name]["node_count"]} nodes',flush=True)
+    (output/'material-evidence.json').write_text(json.dumps(list(source.material_evidence.values()), indent=2, allow_nan=False), encoding='utf-8')
     (output/'geometry-evidence.json').write_text(json.dumps(report,indent=2,allow_nan=False),encoding='utf-8')
     parameter_roots={f'{name}-{i}':root for name,readers in roots.items() for i,root in enumerate(readers)}
     parameter_roots['required-prefab']=prefab

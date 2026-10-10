@@ -1,5 +1,8 @@
 //! Validated installed-build data. Geometry uses converted body-local meters.
 
+pub mod rendering;
+pub use rendering::*;
+
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -508,6 +511,7 @@ pub struct ReferenceManifest {
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
     pub assets: Vec<AssetRecord>,
+    pub rendering: RenderingRecord,
     pub nodes: Vec<NodeRecord>,
     pub bodies: Vec<BodyRecord>,
     pub colliders: Vec<ColliderRecord>,
@@ -580,6 +584,7 @@ impl ReferenceManifest {
             self.app_id == APP_ID && self.build_id == BUILD_ID,
             "app/build",
         )?;
+        self.rendering.validate(&self.assets)?;
         let asset_ids = ids(self.assets.iter().map(|r| r.id), "duplicate asset ID")?;
         let node_ids = ids(self.nodes.iter().map(|r| r.id), "duplicate node ID")?;
         let body_ids = ids(self.bodies.iter().map(|r| r.id), "duplicate body ID")?;

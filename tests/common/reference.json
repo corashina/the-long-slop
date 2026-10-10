@@ -16,7 +16,16 @@
         "file": "level1",
         "path_id": 21400
       },
-      "dependencies": []
+      "dependencies": [
+        {
+          "file": "reference/synthetic-color.png",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+          "file": "reference/synthetic-color-mip-1.png",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ]
     },
     {
       "id": 2,
@@ -2367,5 +2376,134 @@
         1.0
       ]
     }
-  ]
+  ],
+  "rendering": {
+    "materials": [
+      {
+        "asset": 1,
+        "gltf_material": 0,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 1
+        },
+        "shader_family": "stained_glass",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "refract",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {
+            "_BumpAmt": 10
+          },
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [
+            {
+              "slot": "_MainTex",
+              "source": {
+                "file": "synthetic.assets",
+                "path_id": 10
+              },
+              "file": "reference/synthetic-color.png",
+              "color_space": "srgb",
+              "encoding": "rgba",
+              "source_encoding": "rgba",
+              "uv_channel": 0,
+              "scale": [
+                1,
+                1
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "sampler": {
+                "filter": 1,
+                "wrap_u": 0,
+                "wrap_v": 0,
+                "aniso": 1,
+                "mip_bias": 0,
+                "mip_count": 2
+              },
+              "mips": [
+                {
+                  "file": "reference/synthetic-color.png",
+                  "width": 2,
+                  "height": 2
+                },
+                {
+                  "file": "reference/synthetic-color-mip-1.png",
+                  "width": 1,
+                  "height": 1
+                }
+              ]
+            }
+          ],
+          "defaults": {
+            "_BumpMap": "bump"
+          },
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 0,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 2
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      }
+    ]
+  }
 }
