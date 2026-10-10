@@ -41,6 +41,9 @@ pub struct WheelAssemblies {
     slots: Vec<Slot>,
     tire_fits: HashSet<(ItemId, ItemId)>,
     vehicle_tanks: Vec<ItemId>,
+    /// `gumiscript` forward stiffness for a new and a rusty tire.
+    tire_slip: [f32; 2],
+    rim_slip: f32,
     base_mass: f32,
     last_mass: f32,
     bound: bool,
@@ -219,6 +222,11 @@ impl WheelAssemblies {
             slots,
             tire_fits,
             vehicle_tanks,
+            tire_slip: [
+                reference.vehicle.wheel_slip[0],
+                reference.vehicle.wheel_slip[1],
+            ],
+            rim_slip: reference.vehicle.rim_slip[0],
             base_mass: reference.vehicle.mass_kg - installed_mass - initial_fluids,
             last_mass: f32::NAN,
             bound: false,
@@ -550,7 +558,7 @@ impl WheelAssemblies {
                 state.local_pose = from_rapier(&(inverse * rim_pose));
                 state.pose = from_rapier(&rim_pose);
                 mass += part.mass;
-                let (radius, quality) = if let Some(tire) = part.tire {
+                let (radius, slip) = if let Some(tire) = part.tire {
                     let tire_part = &self.parts[tire];
                     let tire_pose = rim_pose
                         * part
@@ -565,18 +573,25 @@ impl WheelAssemblies {
                     tire_state.pose = from_rapier(&tire_pose);
                     tire_state.location = ItemLocation::Attached(part.item);
                     mass += tire_part.mass;
-                    (tire_part.radius, tire_state.condition)
+                    let wear = f32::from(tire_state.condition) / 4.0;
+                    (
+                        tire_part.radius,
+                        self.tire_slip[0] + (self.tire_slip[1] - self.tire_slip[0]) * wear,
+                    )
                 } else {
-                    (part.radius, 1.0)
+                    (part.radius, self.rim_slip)
                 };
-                Some((radius, quality))
+                Some((radius, slip))
             } else {
                 None
             };
             if slot.last_support != support {
                 physics.set_wheel(
                     slot.id,
-                    support.map(|(radius, condition)| InstalledWheel { radius, condition }),
+                    support.map(|(radius, friction_slip)| InstalledWheel {
+                        radius,
+                        friction_slip,
+                    }),
                 )?;
                 slot.last_support = support;
             }

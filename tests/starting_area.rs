@@ -162,7 +162,7 @@ fn recovery_preserves_state() {
     let (reference, mut runtime) = initial();
     runtime.trip_m = 256.0;
     for item in runtime.area.items.iter_mut() {
-        item.condition *= 0.5;
+        item.condition = 4 - item.condition;
     }
     runtime
         .area
@@ -1256,4 +1256,41 @@ fn aim_from_seat(
         Some(item),
         "seated door control must use real aim"
     );
+}
+#[test]
+fn hard_crash_knocks_wheels_off() {
+    use my_summer_slop::interaction::items::ItemLocation;
+    let (reference, mut runtime) = initial();
+    runtime.started = true;
+    let rims: Vec<_> = reference.wheel_slots.iter().map(|slot| slot.rim).collect();
+    let mounted = |runtime: &GarageRuntime| {
+        rims.iter()
+            .filter(|id| {
+                matches!(
+                    runtime.area.items.get(**id).unwrap().location,
+                    ItemLocation::WheelSlot(_)
+                )
+            })
+            .count()
+    };
+    let chassis = runtime.physics.chassis_handle();
+    let forward = |runtime: &mut GarageRuntime, kmh: f32| {
+        let rotation = *runtime.physics.rapier().bodies[chassis].rotation();
+        runtime.physics.rapier_mut().bodies[chassis]
+            .set_linvel(rotation * -rapier3d::math::Vector::Z * (kmh / 3.6), true);
+    };
+    for _ in 0..60 {
+        forward(&mut runtime, 5.0);
+        runtime.step(&reference, FrameInput::default());
+    }
+    assert_eq!(mounted(&runtime), 4, "gentle driving keeps every wheel");
+    forward(&mut runtime, 100.0);
+    runtime.step(&reference, FrameInput::default());
+    assert!(mounted(&runtime) < 4, "a 95 km/h jump knocks wheels off");
+    let loose = rims
+        .iter()
+        .find(|id| runtime.area.items.get(**id).unwrap().location == ItemLocation::World)
+        .unwrap();
+    let body = runtime.area.items.get(*loose).unwrap().body.unwrap();
+    assert!(runtime.physics.rapier().bodies[body].is_dynamic());
 }

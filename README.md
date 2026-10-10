@@ -59,6 +59,8 @@ Its capacities are 39 L fuel, 5 L oil, and 5 L coolant.
 
 Focus loss pauses play and clears input. Resume captures the mouse again.
 Recovery preserves fluids, parts, condition, and trip distance.
+A hard crash can knock wheels off. Worn wheels and a worn car body break first.
+Fit a loose wheel again in its slot.
 An empty fuel tank moves recovery to a station. Other recovery moves the car to the nearest road point.
 Restart restores the garage, supplies, car, origin, and trip distance.
 Close the driver door before reversing through the garage exit.

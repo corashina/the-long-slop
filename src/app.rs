@@ -478,7 +478,7 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
             .unwrap_or(""),
         action,
         amount,
-        state.map_or(-1.0, |item| item.condition),
+        state.map_or(-1, |item| i32::from(item.condition)),
         held,
         runtime.engine_output.rpm,
         runtime.engine_output.ignition,

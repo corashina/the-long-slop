@@ -22,8 +22,8 @@ pub struct ItemState {
     pub location: ItemLocation,
     pub pose: VehiclePose,
     pub local_pose: VehiclePose,
-    /// One is new; zero is the most worn source state.
-    pub condition: f32,
+    /// Source condition state: zero is new, four is rusty.
+    pub condition: u8,
     pub fluid: Option<FluidContainer>,
 }
 
@@ -153,7 +153,7 @@ impl ItemStore {
                 position: [0.0; 3],
                 rotation: [0.0, 0.0, 0.0, 1.0],
             },
-            condition: 1.0,
+            condition: 0,
             fluid: Some(FluidContainer {
                 capacity_liters: 1000.0,
                 mixture: crate::fluids::FluidMixture {

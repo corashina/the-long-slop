@@ -187,7 +187,10 @@ pub struct ItemRecord {
     pub body: BodyId,
     pub name: String,
     pub kind: ItemKind,
-    pub condition: f32,
+    /// Source condition state: zero is new, four is rusty.
+    pub condition: u8,
+    /// Crash lerp a new part needs to fall off. `None` keeps the part on.
+    pub fall_off_power: Option<f32>,
     pub mass_kg: f32,
     pub attached_to: Option<ItemId>,
 }
@@ -459,6 +462,17 @@ pub struct WheelPartReference {
     pub local_rotation_after_mount: [f32; 4],
 }
 
+/// `carscript.DamageStuff` values. Speeds are in km/h per frame.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrashReference {
+    pub fall_off_speed: [f32; 2],
+    pub max_fall_off_speed: f32,
+    pub fall_off_counts: [[u8; 2]; 2],
+    pub multiplier: f32,
+    pub fall_off_multiplier: f32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VehicleReference {
@@ -475,6 +489,11 @@ pub struct VehicleReference {
     pub brake_torque_nm: f32,
     pub handbrake_torque_nm: f32,
     pub wheel_slip: [f32; 4],
+    /// Forward and side stiffness for a rim without a tire.
+    pub rim_slip: [f32; 2],
+    /// Car item. Its condition scales the crash speeds.
+    pub item: ItemId,
+    pub crash: CrashReference,
     pub auto_shift_stop_speed: f32,
     pub auto_shift_min_rpm: f32,
     pub auto_shift_max_rpm: f32,
@@ -809,8 +828,9 @@ impl ReferenceManifest {
                 "item binding",
             )?;
             require(
-                r.condition.is_finite()
-                    && (0.0..=1.0).contains(&r.condition)
+                r.condition <= 4
+                    && r.fall_off_power
+                        .is_none_or(|power| power.is_finite() && power >= 0.0)
                     && r.mass_kg.is_finite()
                     && r.mass_kg >= 0.0,
                 "item condition/mass",
@@ -1186,8 +1206,20 @@ impl ReferenceManifest {
             body_ids.contains(&v.body)
                 && node_ids.contains(&v.root)
                 && v.wheel_slots.iter().all(|id| wheel_ids.contains(id))
-                && v.colliders.iter().all(|id| collider_ids.contains(id)),
+                && v.colliders.iter().all(|id| collider_ids.contains(id))
+                && item_ids.contains(&v.item),
             "vehicle bindings",
+        )?;
+        let c = &v.crash;
+        require(
+            finite(&v.wheel_slip)
+                && finite(&v.rim_slip)
+                && finite(&[c.max_fall_off_speed, c.multiplier, c.fall_off_multiplier])
+                && finite(&c.fall_off_speed)
+                && c.fall_off_speed[0] <= c.fall_off_speed[1]
+                && c.fall_off_speed[0] < c.max_fall_off_speed
+                && c.fall_off_counts.iter().all(|[low, high]| low <= high),
+            "crash and slip parameters",
         )?;
         require(
             wheel_ids.len() == 4

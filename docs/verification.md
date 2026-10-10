@@ -124,3 +124,26 @@ A headless Chromium run with SwiftShader showed the road, poles, sand terrain, a
 That run used a temporary roadside spawn in a copied manifest. It is not a performance measurement.
 
 Distant terrain layers, the `TerrainBiome` blend shader, building holes, power lines, lamps, and grass are not reproduced.
+
+## Part condition and crashes
+
+Verification date: 2026-10-10, Europe/Warsaw.
+Sources: `partconditionscript`, `partscript.WouldFallOff`, `carscript.DamageStuff`, and `gumiscript` in `Assembly-CSharp.dll`.
+Crash values come from `mainscript` 64919 and the Lada `carscript` in `level1`.
+
+Each part keeps the source condition state from 0, new, to 4, rusty.
+The radiator and tire effects read that state. A rim without a tire uses the source rim stiffness.
+A crash is a change of forward speed of 15 to 40 km/h in one step. A rusty car body scales both speeds by 0.2.
+Each part needs its source fall-off power. A rusty part scales that power by 0.2.
+The exporter copies the static `fallOffPowerNeeded` table. It is code, not serialized data.
+Only wheels come off. Other selected parts stay on until general part fitting exists.
+The source checks once per rendered frame. This build checks once per 60 Hz step.
+
+| Check | Result |
+| --- | --- |
+| Formatting and native suite | 92 passed; six source gates skipped by default |
+| Installed-source gates | Six passed in explicit runs |
+| Exporter suite | Four passed |
+| Release WASM | Passed |
+
+A headless Chromium run loaded the garage with the new export. It did not drive a crash.

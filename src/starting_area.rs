@@ -1,7 +1,7 @@
 //! Persistent imported home bodies and preparation state.
 use crate::interaction::{
     AimTarget, InteractionAction, InteractionState,
-    items::{ItemStore, node_pose},
+    items::{ItemLocation, ItemStore, node_pose},
 };
 use crate::player::PlayerState;
 use crate::reference::{BodyId, ItemId, NodeId, ReferenceError, ReferenceManifest};
@@ -21,6 +21,8 @@ use std::collections::HashMap;
 
 /// Seed for the engine start sequence.
 const START_SEED: u64 = 42;
+/// Seed for crash thresholds and part choices.
+const CRASH_SEED: u64 = 7;
 
 struct CompoundCollider {
     handle: crate::vehicle::ColliderHandle,
@@ -452,6 +454,9 @@ pub struct GarageRuntime {
     auto_gear: usize,
     recovery_bounds: crate::reference::Bounds,
     recovery_bodies: Vec<RigidBodyHandle>,
+    last_speed_kmh: f32,
+    crash_samples: u64,
+    crash_parts: Vec<ItemId>,
 }
 
 impl GarageRuntime {
@@ -517,6 +522,9 @@ impl GarageRuntime {
                 .expect("validated neutral"),
             recovery_bounds,
             recovery_bodies: Vec::with_capacity(reference.items.len()),
+            last_speed_kmh: 0.0,
+            crash_samples: 0,
+            crash_parts: Vec::with_capacity(reference.items.len()),
         })
     }
 
@@ -681,14 +689,11 @@ impl GarageRuntime {
                 / reference.engine.auto_shift_clutch_rpm_range)
                 .clamp(0.0, 1.0)
         };
-        let radiator_condition = ((1.0
-            - self
-                .area
-                .items
-                .get(reference.engine.coolant_tank)
-                .map_or(1.0, |item| item.condition))
-            * 4.0)
-            .round() as u8;
+        let radiator_condition = self
+            .area
+            .items
+            .get(reference.engine.coolant_tank)
+            .map_or(0, |item| item.condition);
         let was_running = self.engine_output.running;
         self.engine_output = self.engine.step(
             EngineInput {
@@ -768,6 +773,7 @@ impl GarageRuntime {
         self.wheels
             .sync(&mut self.area.items, &mut self.physics)
             .expect("validated wheel bindings");
+        self.damage(reference);
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, false);
@@ -800,6 +806,51 @@ impl GarageRuntime {
             &mut self.area.interaction,
             &mut self.physics,
         );
+    }
+
+    /// Source crash damage. A hard speed change knocks mounted parts off.
+    fn damage(&mut self, reference: &ReferenceManifest) {
+        let speed = self.physics.snapshot().speed_mps.abs() * 3.6;
+        let change = (speed - self.last_speed_kmh).abs();
+        self.last_speed_kmh = speed;
+        let car = reference.vehicle.item;
+        let samples = [self.crash_sample(), self.crash_sample()];
+        let Some(crash) = crate::simulation::crash::crash(
+            &reference.vehicle.crash,
+            change,
+            self.area.items.get(car).map_or(0, |item| item.condition),
+            samples,
+        ) else {
+            return;
+        };
+        self.crash_parts.clear();
+        for record in &reference.items {
+            let items = &self.area.items;
+            if let (Some(power), Some(item)) = (record.fall_off_power, items.get(record.id))
+                && on_vehicle(items, car, record.id)
+                && crate::simulation::crash::falls_off(power, item.condition, crash.lerp)
+            {
+                self.crash_parts.push(record.id);
+            }
+        }
+        for _ in 0..crash.count.min(self.crash_parts.len()) {
+            let index = ((self.crash_sample() * self.crash_parts.len() as f32) as usize)
+                .min(self.crash_parts.len() - 1);
+            let id = self.crash_parts.swap_remove(index);
+            // Only wheels can be fitted again. Other parts stay on.
+            if let Some(ItemLocation::WheelSlot(slot)) =
+                self.area.items.get(id).map(|item| item.location)
+            {
+                self.wheels
+                    .remove(slot, &mut self.area.items, &mut self.physics)
+                    .expect("mounted wheel");
+            }
+        }
+    }
+
+    fn crash_sample(&mut self) -> f32 {
+        self.crash_samples = self.crash_samples.wrapping_add(1);
+        start_sample(CRASH_SEED, self.crash_samples)
     }
 
     pub fn restart(&mut self, reference: &ReferenceManifest) -> Result<(), ReferenceError> {
@@ -871,6 +922,7 @@ impl GarageRuntime {
         self.wheels
             .sync(&mut self.area.items, &mut self.physics)
             .expect("validated wheel bindings");
+        self.last_speed_kmh = 0.0;
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         if self.area.player.seat().is_none() {
@@ -925,6 +977,18 @@ impl GarageRuntime {
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, true);
+    }
+}
+
+/// Mounted on the car through wheel slots or part links.
+fn on_vehicle(items: &ItemStore, car: ItemId, mut id: ItemId) -> bool {
+    loop {
+        match items.get(id).map(|item| item.location) {
+            Some(ItemLocation::WheelSlot(_)) => return true,
+            Some(ItemLocation::Attached(parent)) if parent == car => return true,
+            Some(ItemLocation::Attached(parent)) => id = parent,
+            _ => return false,
+        }
     }
 }
 
