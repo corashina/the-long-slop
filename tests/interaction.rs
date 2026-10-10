@@ -1572,3 +1572,49 @@ fn pickup_mask_does_not_cross_a_solid_wall() {
     let blocked_aim = interaction.resolve(&physics, pose([10.0, 2.0, 0.0]), &items);
     assert!(blocked_aim.grab_target.is_none());
 }
+
+#[test]
+fn held_container_at_wheel_slot_shows_incompatibility_and_stays_held() {
+    let (mut interaction, mut items, mut physics, mut player) = fixture();
+    let can = ItemId(1);
+    assert_eq!(
+        interaction.step(
+            input(keys::GRAB, keys::GRAB),
+            common::resolved(target(can.0)),
+            &mut player,
+            &mut items,
+            &mut physics,
+            1.0 / 60.0
+        ),
+        Some(InteractionAction::Pickup(can))
+    );
+    physics.rapier_mut().insert(
+        RigidBodyBuilder::fixed().translation(Vector::new(10.0, 2.0, -0.5)),
+        ColliderBuilder::ball(0.1)
+            .sensor(true)
+            .user_data(SLOT_SENSOR_FLAG | 14),
+    );
+    physics.refresh_queries();
+    let aim = interaction.resolve(&physics, pose([10.0, 2.0, 0.0]), &items);
+    assert_eq!(
+        aim.installation_block,
+        Some(my_summer_slop::interaction::InteractionBlock::Incompatible)
+    );
+    assert!(aim.installation_target.is_none());
+    assert_eq!(interaction.prompt(&aim, &items), "This part does not fit.");
+    let joints = physics.rapier().impulse_joints.len();
+    assert_eq!(
+        interaction.step(
+            input(keys::GRAB, keys::GRAB),
+            aim,
+            &mut player,
+            &mut items,
+            &mut physics,
+            1.0 / 60.0
+        ),
+        None
+    );
+    assert_eq!(interaction.held(), Some(can));
+    assert_eq!(items.get(can).unwrap().location, ItemLocation::Held);
+    assert_eq!(physics.rapier().impulse_joints.len(), joints);
+}

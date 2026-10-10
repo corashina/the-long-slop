@@ -142,7 +142,20 @@ impl InteractionState {
                 aim.grab_block = Some(InteractionBlock::Unavailable);
             }
         }
+        aim.installation_block = self.wheel_installation_block(&aim);
+        if aim.installation_block.is_some() {
+            aim.installation_target = None;
+        }
         aim
+    }
+
+    pub(super) fn wheel_installation_block(&self, aim: &ResolvedAim) -> Option<InteractionBlock> {
+        aim.installation_block.or_else(|| {
+            (aim.installation_target
+                .is_some_and(|target| target.slot.is_some())
+                && self.held().is_some_and(|item| !self.is_wheel(item)))
+            .then_some(InteractionBlock::Incompatible)
+        })
     }
 
     fn is_wheel(&self, item: ItemId) -> bool {
@@ -262,7 +275,7 @@ impl InteractionState {
     }
 
     pub fn prompt(&self, aim: &ResolvedAim, items: &ItemStore) -> &'static str {
-        if let Some(block) = aim.installation_block {
+        if let Some(block) = self.wheel_installation_block(aim) {
             return match block {
                 InteractionBlock::Covered => "Remove the cover first.",
                 InteractionBlock::Incompatible => "This part does not fit.",

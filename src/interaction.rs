@@ -587,13 +587,9 @@ impl InteractionState {
                 }
             }
         }
-        if input.pressed & keys::GRAB != 0 {
+        if input.pressed & keys::GRAB != 0 && self.wheel_installation_block(&aim).is_none() {
             if let Some(held) = self.held.as_ref()
                 && let Some(slot) = installation_target.and_then(|target| target.slot)
-                && matches!(
-                    self.kinds.get(&held.item),
-                    Some(ItemKind::Wheel | ItemKind::Rim)
-                )
             {
                 action = Some(InteractionAction::WheelInstall {
                     item: held.item,
