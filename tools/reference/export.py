@@ -131,6 +131,8 @@ def main(argv=None):
     else:
         if arguments.steam_root is None:
             parser.error('Runtime export needs --steam-root')
+        if arguments.output.resolve().is_relative_to(arguments.steam_root.resolve()):
+            parser.error('Keep runtime output outside the Steam installation')
         if arguments.verify:
             parser.error('Runtime verification belongs to the runtime stage task')
         snapshot = stage_source(arguments.steam_root)

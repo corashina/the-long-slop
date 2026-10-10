@@ -103,6 +103,27 @@ class LibrarySourceTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 main(['--stage', 'source', '--work-root', str(self.work)])
 
+    def test_cli_rejects_live_installation_output_before_staging(self):
+        from tools.reference.export import main, _export_selected
+        before = {path.relative_to(self.root).as_posix(): (path.stat().st_mtime_ns, path.read_bytes())
+                  for path in self.root.rglob('*') if path.is_file()}
+        for output in (self.root, self.root / 'generated', self.data / '..' / 'generated'):
+            with self.subTest(output=output):
+                with patch('tools.reference.export.stage_source') as source, patch('tools.reference.export.export_reference') as runtime, patch('sys.stderr'):
+                    with self.assertRaises(SystemExit) as rejected:
+                        main(['--steam-root', str(self.root), '--output', str(output)])
+                self.assertEqual(rejected.exception.code, 2)
+                source.assert_not_called()
+                runtime.assert_not_called()
+        after = {path.relative_to(self.root).as_posix(): (path.stat().st_mtime_ns, path.read_bytes())
+                 for path in self.root.rglob('*') if path.is_file()}
+        self.assertEqual(before, after)
+        self.assertFalse((self.root / 'generated').exists())
+        archive_root = self.work / 'source'
+        with self.assertRaisesRegex(ValueError, 'outside the source installation'):
+            _export_selected(SimpleNamespace(root=archive_root), archive_root / 'generated')
+        self.assertFalse((archive_root / 'generated').exists())
+
     def test_changed_source_rejects_snapshot(self):
         runtime = self.base / 'reference/manifest.json'
         runtime.parent.mkdir()
