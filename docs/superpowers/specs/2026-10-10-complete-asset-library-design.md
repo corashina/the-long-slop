@@ -2,7 +2,7 @@
 
 Date: 2026-10-10, Europe/Warsaw.
 Status: The user approved the library design and requested this specification and plan together.
-Written-document review and execution choice remain pending. This document does not authorize implementation.
+The user approved execution and selected subagents on 2026-10-10. Implementation follows the written plan.
 
 ## Intent and scope
 
