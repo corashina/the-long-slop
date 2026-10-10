@@ -160,5 +160,6 @@ pub fn add_rotation(reference: &mut ReferenceManifest, item: u32, body: u32, lim
             sensitivity: 1.0,
         }),
         slide: None,
+        turn: None,
     });
 }

@@ -65,7 +65,7 @@ def recover_bindings(source, nodes, components, item_nodes, colliders, mechanism
     result = []
     for collider in colliders:
         node = collider['node']
-        use = ancestor(node, ('tankcapscript', 'usablescript', 'seatscript'))
+        use = ancestor(node, ('tankcapscript', 'usablescript', 'seatscript', 'flashlightscript'))
         use_owner = uses.get(key(use), item(use, 'use owner')) if use else None
         pickup = ancestor(node, ('pickupable',))
         pickup_owner = None

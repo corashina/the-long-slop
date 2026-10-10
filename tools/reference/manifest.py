@@ -5,7 +5,7 @@ from .gltf import GltfExporter, convert_point, convert_rotation, transform_point
 from .collision import world_pose, quaternion_product, bake_points, geometry
 from .actions import recover_masks, recover_bindings, recover_pickup
 from .caps import opening_metadata
-from .mechanisms import recover_mechanisms, bind_mechanisms
+from .mechanisms import recover_mechanisms, bind_mechanisms, recover_lighting
 from .visibility import recover_camera_visibility
 
 
@@ -37,7 +37,7 @@ def build_manifest(source, roots, reports, hashes):
         return by_source[key(source.transform_for(go))]
     def pointer_node(owner,pointer):
         reader=source.resolve(owner,pointer)
-        return by_source[key(reader)] if reader.type.name=='Transform' else node_of(reader)
+        return by_source[key(reader)] if reader.type.name=='Transform' else by_source[key(source.transform_for(reader))] if reader.type.name=='GameObject' else node_of(reader)
     def descendants(node):
         result={node}
         for entry in nodes:
@@ -85,7 +85,7 @@ def build_manifest(source, roots, reports, hashes):
         parent=nodes[value['node']-1]['parent']
         value['parent_body']=body_for(parent) if parent is not None else None
     items=[];item_nodes={};item_components={}
-    item_classes={'tosaveitemscript','massScript','tankscript','enginescript','coolantTankscript','seatscript','tankcapscript','gumiscript','wheelscript','pickupable','usablescript','pushablescript'}
+    item_classes={'tosaveitemscript','massScript','tankscript','enginescript','coolantTankscript','seatscript','tankcapscript','gumiscript','wheelscript','pickupable','usablescript','flashlightscript','pushablescript'}
     mechanism_nodes=driven_nodes
     for node,group in components.items():
         if not nodes[node-1]['active'] or not (item_classes.intersection(group) or node in mechanism_nodes):continue
@@ -346,7 +346,7 @@ def build_manifest(source, roots, reports, hashes):
     driveway_points=[point for height,points in wheel_floors if abs(height-driveway_height)<0.001 for point in points]
     driveway_bounds={'min':[min(p[i] for p in driveway_points) for i in range(3)],'max':[max(p[i] for p in driveway_points) for i in range(3)]}
     driveway_bounds['min'][1]=driveway_height;driveway_bounds['max'][1]=driveway_height
-    result={'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'items':items,'openings':openings,'tanks':tanks,
+    result={'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'lighting':recover_lighting(source,nodes,components,pointer_node,item_nodes,car,car_reader,reports),'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'items':items,'openings':openings,'tanks':tanks,
         'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed']},'engine':engine_record,'player':player_record,'seats':seats,
         'vehicle':{'source':source_id(car_reader),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':[w['id'] for w in wheel_slots],'colliders':[c['id'] for c in colliders if c['body']==car_body],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')]},
         'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn,'car_pose':car_pose,'driveway_bounds':driveway_bounds,'driveway_height':driveway_height}}

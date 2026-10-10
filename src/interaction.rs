@@ -1,5 +1,6 @@
 pub mod carry;
 pub mod items;
+pub mod lighting;
 pub mod mechanisms;
 pub mod targets;
 pub mod wheels;
@@ -502,7 +503,10 @@ impl InteractionState {
                 action = Some(InteractionAction::Seat(seat.id));
             }
             if self.mechanisms.contains(target.item)
-                && (input.held & keys::USE != 0
+                && (input.pressed & keys::USE != 0
+                    || (input.pressed & keys::FILL != 0
+                        && self.mechanisms.primary_switch(target.item))
+                    || input.held & keys::USE != 0
                     || (input.wheel != 0.0 && self.mechanisms.scroll_eligible(target.item)))
             {
                 self.mechanisms

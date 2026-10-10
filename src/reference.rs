@@ -175,6 +175,96 @@ pub struct MechanismReference {
     pub drag: MechanismDrag,
     pub rotation: Option<RotationReference>,
     pub slide: Option<SlideReference>,
+    pub turn: Option<TurnReference>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TurnReference {
+    pub action: TurnAction,
+    pub max_state: u8,
+    pub initial_state: u8,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TurnAction {
+    ToggleHandbrake,
+    CycleHeadlights,
+    InteriorLight,
+    ToggleHomeLight { source: SourceId },
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LightingReference {
+    pub headlights: u8,
+    pub handbrake: bool,
+    pub interior_light_mode: u8,
+    pub door_items: Vec<ItemId>,
+    pub door_limit: f32,
+    pub home_electronics_threshold: f32,
+    pub groups: Vec<LampGroupReference>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LampControl {
+    Headlights,
+    Interior,
+    Home,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LampGroupReference {
+    pub source: SourceId,
+    pub owner: Option<ItemId>,
+    pub control: LampControl,
+    pub electronics_source: Option<SourceId>,
+    pub electronics_output: f32,
+    pub initial_on: bool,
+    pub initial_state: u8,
+    pub initial_target: u8,
+    pub initial_energy: f32,
+    pub energy_move: f32,
+    pub button: Option<LampButtonReference>,
+    pub states: Vec<LampStateReference>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LampButtonReference {
+    pub node: NodeId,
+    pub on: NodeId,
+    pub off: NodeId,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LampStateReference {
+    pub intensity: f32,
+    pub lamps: Vec<LampReference>,
+    pub renderers: Vec<NodeId>,
+    pub material: Option<LampMaterialReference>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LampMaterialReference {
+    pub source: SourceId,
+    pub asset: AssetId,
+    pub index: u32,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LampType {
+    Spot,
+    Point,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LampReference {
+    pub source: SourceId,
+    pub node: NodeId,
+    pub lamp_type: LampType,
+    pub color: [f32; 3],
+    pub intensity: f32,
+    pub range: f32,
+    pub outer_degrees: f32,
+    pub inner_degrees: f32,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -617,6 +707,7 @@ pub struct ReferenceManifest {
     pub action_bindings: Vec<ActionBinding>,
     pub anchors: Vec<AnchorRecord>,
     pub mechanisms: Vec<MechanismReference>,
+    pub lighting: LightingReference,
     pub wheel_slots: Vec<WheelSlotReference>,
     pub wheel_parts: Vec<WheelPartReference>,
     pub items: Vec<ItemRecord>,
@@ -966,7 +1057,7 @@ impl ReferenceManifest {
                     && r.parent_item.is_none_or(|id| item_ids.contains(&id))
                     && r.child
                         .is_none_or(|id| mechanism_items.contains(&id) && id != r.item)
-                    && !r.driven_nodes.is_empty()
+                    && (!r.driven_nodes.is_empty() || r.turn.is_some())
                     && r.driven_nodes.iter().all(|id| {
                         node_ids.contains(id) && self.bodies.iter().any(|b| b.node == *id)
                     })
@@ -976,7 +1067,26 @@ impl ReferenceManifest {
                     && r.drag.axes2.iter().all(|a| finite(a)),
                 "mechanism binding",
             )?;
-            require(r.rotation.is_some() || r.slide.is_some(), "empty mechanism")?;
+            require(
+                r.rotation.is_some() || r.slide.is_some() || r.turn.is_some(),
+                "empty mechanism",
+            )?;
+            if let Some(turn) = &r.turn {
+                require(turn.initial_state <= turn.max_state, "switch state")?;
+                match &turn.action {
+                    TurnAction::ToggleHomeLight { source } => require(
+                        self.lighting
+                            .groups
+                            .iter()
+                            .any(|g| g.source == *source && g.control == LampControl::Home),
+                        "switch lamp link",
+                    )?,
+                    TurnAction::InteriorLight => {
+                        require(turn.max_state == 2, "cabin switch modes")?
+                    }
+                    _ => require(turn.max_state == 0, "event switch state")?,
+                }
+            }
             if let Some(rotation) = &r.rotation {
                 require(
                     !rotation.targets.is_empty()
@@ -1042,6 +1152,78 @@ impl ReferenceManifest {
                     .iter()
                     .find(|m| m.item == id)
                     .and_then(|m| m.child);
+            }
+        }
+        let lighting = &self.lighting;
+        require(
+            lighting.home_electronics_threshold.is_finite()
+                && lighting.home_electronics_threshold >= 0.0
+                && lighting.headlights <= 2
+                && lighting.interior_light_mode <= 2
+                && lighting.door_limit.is_finite()
+                && lighting.door_limit >= 0.0
+                && lighting
+                    .door_items
+                    .iter()
+                    .all(|id| mechanism_items.contains(id)),
+            "lighting controls",
+        )?;
+        ids(
+            lighting
+                .groups
+                .iter()
+                .map(|g| (&g.source.file, g.source.path_id)),
+            "lamp group source",
+        )?;
+        for g in &lighting.groups {
+            require(
+                g.owner.is_none_or(|id| item_ids.contains(&id))
+                    && !g.states.is_empty()
+                    && usize::from(g.initial_state) < g.states.len()
+                    && usize::from(g.initial_target) < g.states.len()
+                    && g.initial_energy.is_finite()
+                    && (0.0..=1.0).contains(&g.initial_energy)
+                    && g.electronics_output.is_finite()
+                    && g.electronics_output >= 0.0
+                    && g.energy_move.is_finite()
+                    && g.energy_move >= 0.0,
+                "lamp group",
+            )?;
+            if let Some(b) = &g.button {
+                require(
+                    [b.node, b.on, b.off].iter().all(|id| node_ids.contains(id)),
+                    "lamp button nodes",
+                )?;
+            }
+            for state in &g.states {
+                require(
+                    state.intensity.is_finite()
+                        && state.intensity >= 0.0
+                        && state.renderers.iter().all(|id| node_ids.contains(id))
+                        && state
+                            .material
+                            .as_ref()
+                            .is_none_or(|m| asset_ids.contains(&m.asset)),
+                    "lamp state",
+                )?;
+                for l in &state.lamps {
+                    require(
+                        node_ids.contains(&l.node)
+                            && finite(&l.color)
+                            && l.color.iter().all(|v| *v >= 0.0)
+                            && l.intensity.is_finite()
+                            && l.intensity >= 0.0
+                            && l.range.is_finite()
+                            && l.range > 0.0
+                            && l.outer_degrees.is_finite()
+                            && l.inner_degrees.is_finite()
+                            && l.inner_degrees >= 0.0
+                            && l.outer_degrees > 0.0
+                            && l.outer_degrees < 180.0
+                            && l.inner_degrees <= l.outer_degrees,
+                        "lamp parameters",
+                    )?;
+                }
             }
         }
         for r in &self.openings {

@@ -20,6 +20,8 @@ use wasm_bindgen::prelude::*;
 #[derive(Resource)]
 struct RuntimeReference(Arc<ReferenceManifest>);
 #[derive(Resource)]
+struct LampMaterials(Vec<Vec<Option<Handle<StandardMaterial>>>>);
+#[derive(Resource)]
 struct Drive {
     runtime: GarageRuntime,
     input: FrameInput,
@@ -105,6 +107,10 @@ fn setup(
     visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
     commands.insert_resource(visuals);
     presentation::reference::spawn(&mut commands, &server, &reference.0);
+    commands.insert_resource(LampMaterials(presentation::lighting::load_materials(
+        &server,
+        &reference.0,
+    )));
     commands.spawn((
         DirectionalLight {
             color: Color::srgb(1.0, 0.91, 0.77),
@@ -147,6 +153,7 @@ fn check_ready(
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
     mut frames: Local<u8>,
+    lamp_materials: Res<LampMaterials>,
 ) {
     if drive.ready || visuals.failed {
         return;
@@ -169,6 +176,20 @@ fn check_ready(
             return;
         }
     }
+    for handle in lamp_materials.0.iter().flatten().flatten() {
+        if matches!(
+            server.get_load_state(handle.id()),
+            Some(LoadState::Failed(_))
+        ) {
+            game_failure("Cannot load lamp material.");
+            visuals.failed = true;
+            return;
+        }
+        if !server.is_loaded_with_dependencies(handle.id()) {
+            return;
+        }
+    }
+    let bind_lights = !visuals.bound;
     match presentation::reference::bind(
         &mut commands,
         &reference.0,
@@ -177,6 +198,15 @@ fn check_ready(
         &primitives,
     ) {
         Ok(true) => {
+            if bind_lights {
+                presentation::lighting::bind(
+                    &mut commands,
+                    &reference.0,
+                    &visuals,
+                    &primitives,
+                    &lamp_materials.0,
+                );
+            }
             *frames += 1;
             if *frames >= 2 {
                 drive.ready = true;
@@ -294,8 +324,35 @@ fn sync_imported(
     drive: Res<Drive>,
     mut query: Query<(&BodyVisual, &mut Transform)>,
     mut items: Query<(&ItemVisual, &mut Transform), Without<BodyVisual>>,
-    mut caps: Query<(&CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
-    mut visibility: Query<(&ValveVisibility, &mut Visibility)>,
+    mut caps: Query<
+        (&CapVisual, &mut Transform),
+        (
+            Without<BodyVisual>,
+            Without<ItemVisual>,
+            Without<presentation::lighting::LampButtonVisual>,
+        ),
+    >,
+    mut visibility: Query<
+        (&ValveVisibility, &mut Visibility),
+        Without<presentation::lighting::LampVisual>,
+    >,
+    mut lamps: Query<
+        (
+            &presentation::lighting::LampVisual,
+            &mut Visibility,
+            Option<&mut PointLight>,
+            Option<&mut SpotLight>,
+        ),
+        Without<ValveVisibility>,
+    >,
+    mut lamp_materials: Query<(
+        &presentation::lighting::LampMaterialVisual,
+        &mut MeshMaterial3d<StandardMaterial>,
+    )>,
+    mut lamp_buttons: Query<
+        (&presentation::lighting::LampButtonVisual, &mut Transform),
+        (Without<BodyVisual>, Without<ItemVisual>, Without<CapVisual>),
+    >,
 ) {
     presentation::reference::sync(
         &drive.runtime.area,
@@ -305,6 +362,12 @@ fn sync_imported(
     );
     presentation::reference::sync_items(&drive.runtime.area, drive.clock.alpha(), &mut items);
     presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
+    presentation::lighting::sync(
+        &drive.runtime.lighting,
+        &mut lamps,
+        &mut lamp_materials,
+        &mut lamp_buttons,
+    );
 }
 fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveCamera>>) {
     for mut transform in &mut query {
@@ -432,7 +495,17 @@ fn display_name<'a>(
         return items.name(id).unwrap_or("");
     };
     match item.kind {
-        ItemKind::Decoration => "",
+        ItemKind::Decoration => reference
+            .mechanisms
+            .iter()
+            .find(|m| m.item == id)
+            .and_then(|m| m.turn.as_ref())
+            .map_or("", |turn| match turn.action {
+                crate::reference::TurnAction::ToggleHandbrake => "Handbrake",
+                crate::reference::TurnAction::CycleHeadlights => "Headlights",
+                crate::reference::TurnAction::InteriorLight => "Cabin light",
+                crate::reference::TurnAction::ToggleHomeLight { .. } => "Light switch",
+            }),
         ItemKind::Door => {
             if item.body == reference.vehicle.body
                 || crate::starting_area::belongs_to_vehicle(reference, item.body)

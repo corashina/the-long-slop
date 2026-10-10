@@ -25,6 +25,7 @@ struct Control {
     degrees: [f32; 2],
     slide: f32,
     enabled: bool,
+    turn_state: u8,
 }
 pub struct MechanismState {
     controls: Vec<Control>,
@@ -33,6 +34,7 @@ pub struct MechanismState {
     nodes: HashMap<NodeId, usize>,
     bodies: HashMap<BodyId, usize>,
     scroll_sensitivity: f32,
+    control_action: Option<ControlAction>,
 }
 impl MechanismState {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
@@ -130,6 +132,7 @@ impl MechanismState {
                 degrees: m.rotation.as_ref().map_or([0.0; 2], |r| r.initial_degrees),
                 slide: m.slide.as_ref().map_or(0.0, |s| s.initial_value),
                 enabled: m.enabled,
+                turn_state: m.turn.as_ref().map_or(0, |t| t.initial_state),
             })
             .collect();
         let mut state = Self {
@@ -139,12 +142,30 @@ impl MechanismState {
             nodes,
             bodies,
             scroll_sensitivity: reference.player.scroll_sensitivity,
+            control_action: None,
         };
         state.propagate();
         for i in 0..state.controls.len() {
             state.apply(i);
         }
         Ok(state)
+    }
+    pub fn take_control_action(&mut self) -> Option<ControlAction> {
+        self.control_action.take()
+    }
+    pub fn primary_switch(&self, item: ItemId) -> bool {
+        self.items.get(&item).is_some_and(|i| {
+            self.controls[*i].enabled
+                && self.controls[*i]
+                    .reference
+                    .turn
+                    .as_ref()
+                    .is_some_and(|t| matches!(t.action, TurnAction::ToggleHomeLight { .. }))
+        })
+    }
+    pub fn turn_state(&self, item: ItemId) -> Option<u8> {
+        let c = &self.controls[*self.items.get(&item)?];
+        c.reference.turn.as_ref().map(|_| c.turn_state)
     }
     pub fn contains(&self, item: ItemId) -> bool {
         self.items
@@ -239,7 +260,8 @@ impl MechanismState {
             f.world.translation -= shift;
         }
     }
-    pub fn cancel_input(&mut self) { /* Input deltas never persist between steps. */
+    pub fn cancel_input(&mut self) {
+        self.control_action = None;
     }
     pub fn set_mounted(&mut self, parent: ItemId, mounted: bool) {
         for c in &mut self.controls {
@@ -267,6 +289,27 @@ impl MechanismState {
         };
         if !self.controls[index].enabled {
             return;
+        }
+        if input.pressed & keys::USE != 0
+            || (input.pressed & keys::FILL != 0 && self.primary_switch(item))
+        {
+            let c = &mut self.controls[index];
+            if let Some(turn) = &c.reference.turn {
+                c.turn_state = if c.turn_state >= turn.max_state {
+                    0
+                } else {
+                    c.turn_state + 1
+                };
+                self.control_action = Some(match &turn.action {
+                    TurnAction::ToggleHandbrake => ControlAction::ToggleHandbrake,
+                    TurnAction::CycleHeadlights => ControlAction::CycleHeadlights,
+                    TurnAction::InteriorLight => ControlAction::InteriorLight(c.turn_state),
+                    TurnAction::ToggleHomeLight { source } => {
+                        ControlAction::ToggleHomeLight(source.clone())
+                    }
+                });
+                return;
+            }
         }
         let held = input.held & keys::USE != 0;
         if !held && !(input.wheel != 0.0 && self.scroll_eligible(item)) {
@@ -491,4 +534,12 @@ fn inverse_lerp(a: f32, b: f32, value: f32) -> f32 {
     } else {
         ((value - a) / (b - a)).clamp(0.0, 1.0)
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ControlAction {
+    ToggleHandbrake,
+    CycleHeadlights,
+    InteriorLight(u8),
+    ToggleHomeLight(SourceId),
 }

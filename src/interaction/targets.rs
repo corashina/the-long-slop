@@ -318,7 +318,13 @@ impl InteractionState {
         }
         if let Some(target) = aim.use_target {
             if self.mechanisms.contains(target.item) {
-                return "Hold E + mouse: move";
+                return if self.mechanisms.primary_switch(target.item) {
+                    "E / LMB: switch"
+                } else if self.mechanisms.turn_state(target.item).is_some() {
+                    "E: switch"
+                } else {
+                    "Hold E + mouse: move"
+                };
             }
             if self.seats.iter().any(|seat| seat.item == target.item) && self.held().is_none() {
                 return "E: enter";

@@ -48,20 +48,22 @@ pub struct ReferenceVisuals {
     pub failed: bool,
 }
 
+pub fn configure_import(settings: &mut GltfLoaderSettings) {
+    settings.load_cameras = false;
+    settings.load_lights = false;
+    settings.load_animations = false;
+    settings.convert_coordinates = Some(GltfConvertCoordinates {
+        rotate_scene_entity: false,
+        rotate_meshes: false,
+    });
+}
+
 pub fn spawn(commands: &mut Commands, server: &AssetServer, reference: &ReferenceManifest) {
     let mut visuals = ReferenceVisuals::default();
     for asset in &reference.assets {
         let handle = server
             .load_builder()
-            .with_settings(|settings: &mut GltfLoaderSettings| {
-                settings.load_cameras = false;
-                settings.load_lights = false;
-                settings.load_animations = false;
-                settings.convert_coordinates = Some(GltfConvertCoordinates {
-                    rotate_scene_entity: false,
-                    rotate_meshes: false,
-                });
-            })
+            .with_settings(configure_import)
             .load(GltfAssetLabel::Scene(0).from_asset(asset.path.clone()));
         visuals.handles.push((asset.path.clone(), handle.clone()));
         commands
@@ -255,8 +257,18 @@ pub fn bind(
 
 pub fn sync_caps(
     area: &StartingArea,
-    caps: &mut Query<(&CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
-    visibility: &mut Query<(&ValveVisibility, &mut Visibility)>,
+    caps: &mut Query<
+        (&CapVisual, &mut Transform),
+        (
+            Without<BodyVisual>,
+            Without<ItemVisual>,
+            Without<super::lighting::LampButtonVisual>,
+        ),
+    >,
+    visibility: &mut Query<
+        (&ValveVisibility, &mut Visibility),
+        Without<super::lighting::LampVisual>,
+    >,
 ) {
     for (cap, mut transform) in caps {
         let valve = area.interaction.opening_valve(cap.opening);

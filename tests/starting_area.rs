@@ -1469,3 +1469,90 @@ fn production_mechanism_nodes_share_physics_and_render_pose() {
         }
     }
 }
+
+#[test]
+fn aimed_handbrake_uses_the_space_state() {
+    use my_summer_slop::reference::*;
+    let (mut reference, _) = initial();
+    let item = reference.items[0].clone();
+    reference.mechanisms.push(MechanismReference {
+        id: MechanismId(90),
+        source: item.source.clone(),
+        item: item.id,
+        parent_item: None,
+        driven_nodes: vec![],
+        enabled: true,
+        child: None,
+        invert_child: false,
+        invert_value: false,
+        disable_on_craft: false,
+        disable_on_uncraft: false,
+        drag: MechanismDrag {
+            mode: DragMode::Direct,
+            node: item.node,
+            node2: item.node,
+            axis: [0.0; 3],
+            axes2: [[0.0; 3]; 2],
+        },
+        rotation: None,
+        slide: None,
+        turn: Some(TurnReference {
+            action: TurnAction::ToggleHandbrake,
+            max_state: 0,
+            initial_state: 0,
+        }),
+    });
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    runtime.started = true;
+    let seat = &reference.seats[0];
+    assert!(runtime.area.player.enter(
+        seat.id,
+        my_summer_slop::vehicle::VehiclePose {
+            position: [0.0, 1.0, 0.0],
+            rotation: [0.0, 0.0, 0.0, 1.0]
+        },
+        &mut runtime.physics
+    ));
+    let seat_before = runtime.area.player.seat();
+    let target = my_summer_slop::interaction::AimTarget {
+        collider: rapier3d::prelude::ColliderHandle::invalid(),
+        item: item.id,
+        distance: 1.0,
+        point: [10.0, 2.0, -1.0],
+        slot: None,
+    };
+    runtime.area.interaction.step(
+        FrameInput {
+            pressed: keys::USE,
+            held: keys::USE,
+            ..Default::default()
+        },
+        common::resolved(Some(target)),
+        &mut runtime.area.player,
+        &mut runtime.area.items,
+        &mut runtime.physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(runtime.area.player.seat(), seat_before);
+    assert_eq!(
+        runtime
+            .area
+            .interaction
+            .prompt(&common::resolved(Some(target)), &runtime.area.items),
+        "E: switch"
+    );
+    runtime.step(&reference, FrameInput::default());
+    assert!(!runtime.handbrake);
+    assert_eq!(runtime.area.player.seat(), seat_before);
+    runtime.step(&reference, FrameInput::default());
+    assert!(!runtime.handbrake);
+    runtime.step(
+        &reference,
+        FrameInput {
+            pressed: keys::SPACE,
+            ..Default::default()
+        },
+    );
+    assert!(runtime.handbrake);
+    assert_eq!(runtime.area.player.seat(), seat_before);
+}

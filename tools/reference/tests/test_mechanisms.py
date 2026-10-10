@@ -64,3 +64,24 @@ class InstalledMechanisms(unittest.TestCase):
         cap_node=manifest['nodes'][anchor['node']-1]
         spout_node=manifest['nodes'][spout['driven_nodes'][0]-1]
         self.assertEqual(cap_node['parent'],spout_node['parent'])
+
+    def test_source_switches_and_lamps(self):
+        m=self.manifest
+        switches={x['source']['path_id']:x for x in m['mechanisms'] if x.get('turn')}
+        self.assertEqual(switches[70733]['turn']['action'], {'kind':'cycle_headlights'})
+        self.assertEqual(switches[68075]['turn']['action'], {'kind':'toggle_handbrake'})
+        self.assertEqual(switches[69669]['turn']['max_state'],2)
+        lights=m['lighting']
+        self.assertEqual(len(lights['groups']),8)
+        self.assertEqual({id for id,s in switches.items() if s['turn']['action']['kind']=='toggle_home_light'},{76065,68886,75508,67484,72019})
+        for identity in [76065,68886,75508,67484,72019]:
+            item=switches[identity]['item']
+            self.assertTrue(any(b['use_owner']==item and m['colliders'][b['collider']-1]['enabled'] and m['colliders'][b['collider']-1]['membership'] & m['player']['action_masks']['use_mask'] for b in m['action_bindings']))
+        self.assertEqual(lights['door_limit'],self.source.read(self.source.get('level1',73157))['iUsableV1To1Limit'])
+        self.assertEqual(len(lights['door_items']),4)
+        lamps=[l for g in lights['groups'] for st in g['states'] for l in st['lamps']]
+        self.assertEqual({l['source']['path_id'] for l in lamps},{56907,57015,56880,56971,56933,56912,56909,56913,56908,56911,56910})
+        for lamp in lamps:
+            raw=self.source.read(self.source.get(lamp['source']['file'],lamp['source']['path_id']))
+            self.assertEqual(lamp['range'],raw['m_Range'])
+            self.assertEqual(lamp['outer_degrees'],raw['m_SpotAngle'])

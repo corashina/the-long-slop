@@ -2914,5 +2914,14 @@
       "removal_owner": 12,
       "push_owner": null
     }
-  ]
+  ],
+  "lighting": {
+    "headlights": 0,
+    "handbrake": true,
+    "interior_light_mode": 0,
+    "door_items": [],
+    "door_limit": 0.02,
+    "groups": [],
+    "home_electronics_threshold": 0.2
+  }
 }

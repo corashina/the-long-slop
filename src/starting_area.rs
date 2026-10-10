@@ -463,6 +463,7 @@ pub struct GarageRuntime {
     pub engine_output: EngineOutput,
     pub trip_m: f64,
     pub handbrake: bool,
+    pub lighting: crate::interaction::lighting::LightingState,
     pub paused: bool,
     pub started: bool,
     pub attempts: u64,
@@ -523,7 +524,8 @@ impl GarageRuntime {
             engine: EngineState::new(&reference.engine),
             engine_output: EngineOutput::default(),
             trip_m: 0.0,
-            handbrake: true,
+            handbrake: reference.lighting.handbrake,
+            lighting: crate::interaction::lighting::LightingState::new(&reference.lighting),
             paused: false,
             started: false,
             attempts: 0,
@@ -660,6 +662,20 @@ impl GarageRuntime {
             }
             _ => {}
         }
+        if let Some(action) = self.area.interaction.mechanisms.take_control_action() {
+            if matches!(
+                action,
+                crate::interaction::mechanisms::ControlAction::ToggleHandbrake
+            ) {
+                self.handbrake = !self.handbrake;
+            }
+            self.lighting.apply(&action);
+        }
+        self.lighting.step(
+            &self.area.interaction.mechanisms,
+            &self.area.items,
+            FIXED_DT,
+        );
         self.area.sync_portable_mass(&mut self.physics);
         if seated
             && input.pressed & keys::USE != 0
