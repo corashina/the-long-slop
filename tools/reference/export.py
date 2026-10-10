@@ -83,9 +83,49 @@ def export_reference(steam_root: Path, output: Path) -> None:
     print(f'Exported manifest: {len(manifest["colliders"])} colliders, {len(manifest["items"])} items',flush=True)
 
 
+def stage_source(steam_root: Path | None, work_root: Path, verify: bool = False) -> None:
+    from dataclasses import asdict
+    from .library.archive import load_snapshot, snapshot_source, verify_snapshot
+    from .library.inventory import inventory_source
+    from .source import Source
+    if verify:
+        snapshot = load_snapshot(work_root)
+        verify_snapshot(snapshot)
+    else:
+        if steam_root is None:
+            raise ValueError('Source staging needs --steam-root')
+        snapshot = snapshot_source(steam_root, work_root)
+    source = Source(snapshot.root)
+    catalog = inventory_source(source, snapshot)
+    if len(catalog.containers) != 9 or len(catalog.objects) != 262784:
+        raise ValueError(f'Installed inventory mismatch: {len(catalog.containers)} serialized files, {len(catalog.objects)} objects')
+    data = asdict(catalog)
+    catalog_path = work_root / 'catalog.json'
+    if verify:
+        if json.loads(catalog_path.read_text(encoding='utf-8')) != data:
+            raise ValueError('Archived catalog differs from the complete inventory')
+    else:
+        # Publish the catalog after the complete inventory passes its checks.
+        temporary = work_root / '.catalog.json'
+        temporary.write_text(json.dumps(data, indent=2, allow_nan=False) + '\n', encoding='utf-8')
+        temporary.replace(catalog_path)
+    action = 'Verified' if verify else 'Archived'
+    print(f'{action} source: {len(catalog.containers)} serialized files, {len(catalog.streams)} streams, {len(catalog.objects):,} objects', flush=True)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--steam-root',type=Path,required=True)
-    parser.add_argument('--output',type=Path,default=Path('web/assets/reference'))
+    parser.add_argument('--steam-root', type=Path)
+    parser.add_argument('--output', type=Path, default=Path('web/assets/reference'))
+    parser.add_argument('--stage', choices=('runtime', 'source'), default='runtime')
+    parser.add_argument('--work-root', type=Path, default=Path('web/assets/library'))
+    parser.add_argument('--verify', action='store_true')
     arguments = parser.parse_args()
-    export_reference(arguments.steam_root,arguments.output)
+    if arguments.stage == 'source':
+        stage_source(arguments.steam_root, arguments.work_root, arguments.verify)
+    else:
+        if arguments.steam_root is None:
+            parser.error('Runtime export needs --steam-root')
+        if arguments.verify:
+            parser.error('--verify requires --stage source')
+        export_reference(arguments.steam_root, arguments.output)

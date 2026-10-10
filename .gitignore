@@ -10,3 +10,4 @@
 /web/assets/reference/
 /tools/reference/.venv/
 __pycache__/
+/web/assets/library/

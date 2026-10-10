@@ -3,11 +3,46 @@ from pathlib import Path
 
 
 def source_id(reader):
-    return {'file': reader.assets_file.name, 'path_id': reader.path_id}
+    return {'file': reader.assets_file.source_container_path, 'path_id': reader.path_id}
 
 
 def key(reader):
-    return reader.assets_file.name, reader.path_id
+    return reader.assets_file.source_container_path, reader.path_id
+
+
+def discover_source(directory: Path):
+    """Find serialized files by their header, including both Unity built-ins."""
+    from UnityPy.enums import FileType
+    from UnityPy.helpers.ImportHelper import check_file_type
+    from .library.archive import _paths
+    directory = directory.absolute()
+    paths, _ = _paths(directory)
+    serialized, streams = [], []
+    for path in paths:
+        name = path.relative_to(directory).as_posix()
+        if path.suffix.casefold() in ('.ress', '.resource'):
+            streams.append(name)
+            continue
+        with path.open('rb') as stream:
+            kind, _ = check_file_type(stream)
+        if kind == FileType.AssetsFile:
+            serialized.append(name)
+        elif kind in (FileType.BundleFile, FileType.WebFile):
+            raise ValueError(f'Unsupported source container: {name}')
+    return tuple(sorted(serialized)), tuple(sorted(streams))
+
+
+def serialized_version(path: Path):
+    """Read the Unity version from the serialized file metadata header."""
+    import struct
+    with path.open('rb') as stream:
+        header = stream.read(20)
+        version = struct.unpack('>I', header[8:12])[0]
+        if version != 22:
+            raise ValueError(f'Unsupported serialized header: {path}: {version}')
+        stream.seek(48)
+        raw = stream.read(64).split(b'\x00', 1)[0]
+    return raw.decode('ascii')
 
 
 def vector(value, width=3):
@@ -30,22 +65,43 @@ class Source:
         import UnityPy
         from UnityPy.helpers import TypeTreeHelper
         from UnityPy.helpers.TypeTreeGenerator import TypeTreeGenerator
-        directory = steam_root / 'TheLongDrive_Data'
-        self.env = UnityPy.load(*(str(directory / name) for name in (
-            'level0', 'level1', 'sharedassets1.assets', 'sharedassets0.assets',
-            'globalgamemanagers', 'globalgamemanagers.assets', 'resources.assets')))
+        from .library.types import DATA_DIRECTORY, expected_serialized_version
+        self.root = steam_root.absolute()
+        directory = self.root / DATA_DIRECTORY
+        serialized, streams = discover_source(directory)
+        self.env = UnityPy.Environment(path=str(directory))
+        self.resource_streams = streams
+        self.serialized_files = {}
+        # Register all stream files before a decoder can request their bytes.
+        for name in streams:
+            self.env.load_file(str(directory / name))
+        for name in serialized:
+            asset = self.env.load_file(str(directory / name))
+            if asset.unity_version != expected_serialized_version(name):
+                raise ValueError(f'Unity version mismatch: {name}: {asset.unity_version}')
+            asset.source_container_path = name
+            self.serialized_files[name] = asset
         self.generator = TypeTreeGenerator('2021.3.18f1')
         self.generator.load_local_game(str(steam_root))
         self.env.typetree_generator = self.generator
         # The native reader caches type dispatch before generated-tree repairs.
         # Use UnityPy's Python reader so repaired array types control dispatch.
         TypeTreeHelper.read_typetree_boost = None
-        self.objects = {key(obj): obj for obj in self.env.objects}
+        self.objects = {}
+        for asset in self.serialized_files.values():
+            for obj in asset.objects.values():
+                identity = key(obj)
+                if identity in self.objects:
+                    raise ValueError(f'Duplicate source identity: {identity}')
+                self.objects[identity] = obj
         self.data_cache = {}
         self.object_cache = {}
         self.tree_cache = {}
         self.evidence = {}
         self.class_cache = {}
+
+    def container_path(self, reader) -> str:
+        return reader.assets_file.source_container_path
 
     def get(self, file, path_id):
         return self.objects[file, path_id]
