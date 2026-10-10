@@ -5,10 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import patch, Mock
+from dataclasses import FrozenInstanceError, fields
 
 from tools.reference.library.archive import snapshot_source, verify_snapshot, scan_files
 from tools.reference.library.inventory import inventory_source
+from tools.reference.library.types import ObjectId, FileRecord, Snapshot, ObjectRecord, Catalog, AssetExport, LibraryReceipt
 from tools.reference.source import Source, discover_source, source_id, key
 
 
@@ -39,6 +41,67 @@ class LibrarySourceTests(unittest.TestCase):
             self.assertEqual(discover_source(relative_root / 'TheLongDrive_Data'), discover_source(self.data))
             snapshot_source(relative_root, Path('library'))
             verify_snapshot(load_snapshot(Path('library')))
+
+    def test_shared_records_and_cache_layout(self):
+        expected = {
+            ObjectId: ('file', 'path_id'), FileRecord: ('file', 'bytes', 'sha256'),
+            Snapshot: ('root', 'files', 'manifest_path', 'manifest_sha256'),
+            ObjectRecord: ('source', 'type', 'class_id', 'offset', 'bytes', 'container_sha256'),
+            Catalog: ('objects', 'counts', 'dependencies'),
+            AssetExport: ('source', 'category', 'status', 'runtime', 'reason', 'files', 'dependencies', 'details'),
+            LibraryReceipt: ('manifest_path', 'manifest_sha256', 'catalog_sha256', 'source_manifest_sha256', 'exports'),
+        }
+        for record, names in expected.items():
+            self.assertEqual(tuple(field.name for field in fields(record)), names)
+            self.assertTrue(record.__dataclass_params__.frozen)
+        snapshot = snapshot_source(self.root, self.work)
+        self.assertEqual(snapshot.root, self.work / 'source')
+        self.assertEqual(snapshot.manifest_path, self.work / 'source-manifest.json')
+        self.assertTrue((self.work / 'steam-manifest.acf').is_file())
+        self.assertFalse((snapshot.root / 'steam-manifest.acf').exists())
+        self.assertEqual(snapshot.manifest_sha256, hashlib.sha256(snapshot.manifest_path.read_bytes()).hexdigest())
+        self.assertTrue(all(isinstance(file, FileRecord) for file in snapshot.files))
+        with self.assertRaises(FrozenInstanceError):
+            snapshot.root = self.root
+        with patch('UnityPy.Environment', return_value=FakeEnvironment()), patch('UnityPy.helpers.TypeTreeGenerator.TypeTreeGenerator'):
+            source = Source(snapshot.root)
+        catalog = inventory_source(source, snapshot)
+        identity = ObjectId('level0', 1)
+        self.assertEqual(set(catalog.objects), {identity})
+        self.assertEqual(catalog.counts, {'GameObject': 1})
+        self.assertEqual(catalog.dependencies, {identity: ()})
+        record = catalog.objects[identity]
+        self.assertIsInstance(record, ObjectRecord)
+        container = next(file for file in snapshot.files if file.file == 'TheLongDrive_Data/level0')
+        self.assertEqual(record.container_sha256, container.sha256)
+
+    def test_cli_runtime_uses_source_prerequisite(self):
+        from tools.reference.export import main
+        accepted = Mock(spec=Snapshot)
+        calls = Mock()
+        calls.attach_mock(Mock(return_value=accepted), 'source')
+        calls.attach_mock(Mock(), 'runtime')
+        with patch('tools.reference.export.stage_source', calls.source), patch('tools.reference.export.export_reference', calls.runtime):
+            main(['--steam-root', str(self.root), '--output', str(self.base / 'runtime')])
+        self.assertEqual([call[0] for call in calls.mock_calls], ['source', 'runtime'])
+        calls.source.assert_called_once_with(self.root)
+        calls.runtime.assert_called_once_with(accepted, self.base / 'runtime')
+        from tools.reference.export import export_reference
+        snapshot = snapshot_source(self.root, self.work)
+        parsed = Mock()
+        with patch('tools.reference.library.archive.verify_snapshot') as verify, patch('tools.reference.source.Source', return_value=parsed) as load, patch('tools.reference.export._export_selected') as selected:
+            export_reference(snapshot, self.base / 'runtime')
+        verify.assert_called_once_with(snapshot)
+        load.assert_called_once_with(snapshot.root)
+        selected.assert_called_once_with(parsed, self.base / 'runtime')
+        with patch('tools.reference.library.archive.verify_snapshot', side_effect=ValueError('invalid source')), patch('tools.reference.source.Source') as load:
+            with self.assertRaisesRegex(ValueError, 'invalid source'):
+                export_reference(snapshot, self.base / 'runtime')
+        load.assert_not_called()
+
+        with patch('sys.stderr'):
+            with self.assertRaises(SystemExit):
+                main(['--stage', 'source', '--work-root', str(self.work)])
 
     def test_changed_source_rejects_snapshot(self):
         runtime = self.base / 'reference/manifest.json'
@@ -126,8 +189,8 @@ class LibrarySourceTests(unittest.TestCase):
         source.root = snapshot.root
         catalog = inventory_source(source, snapshot)
         self.assertEqual(len(catalog.objects), 2)
-        self.assertEqual({item['source']['file'] for item in catalog.objects}, {'level0', 'Nested/level0'})
-        self.assertTrue(all(item['byte_start'] == 128 and item['byte_size'] == 8 for item in catalog.objects))
+        self.assertEqual({item.source.file for item in catalog.objects.values()}, {'level0', 'Nested/level0'})
+        self.assertTrue(all(item.offset == 128 and item.bytes == 8 for item in catalog.objects.values()))
 
     def test_verify_rejects_changed_hash_list_and_identity_without_writes(self):
         snapshot = snapshot_source(self.root, self.work)
@@ -150,7 +213,7 @@ class LibrarySourceTests(unittest.TestCase):
         manifest = json.loads(snapshot.manifest_path.read_text())
         manifest['build_id'] += 1
         snapshot.manifest_path.write_text(json.dumps(manifest))
-        with self.assertRaisesRegex(ValueError, 'identity|build'):
+        with self.assertRaisesRegex(ValueError, 'manifest|identity|build'):
             verify_snapshot(snapshot)
 
 

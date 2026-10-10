@@ -1,4 +1,5 @@
 """Publish a complete copy only after source and archive hashes match."""
+from dataclasses import asdict
 import hashlib
 import json
 import os
@@ -9,7 +10,7 @@ import tempfile
 import unicodedata
 from pathlib import Path, PurePosixPath
 
-from .types import APP_ID, BUILD_ID, UNITY_VERSION, SCHEMA_VERSION, DATA_DIRECTORY, Snapshot, expected_serialized_version
+from .types import APP_ID, BUILD_ID, UNITY_VERSION, SCHEMA_VERSION, DATA_DIRECTORY, Snapshot, FileRecord, expected_serialized_version
 
 
 def validate_paths(paths):
@@ -73,8 +74,8 @@ def scan_files(root: Path):
             raise OSError(f'Cannot hash source file: {path}: {error}') from error
         if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
             raise ValueError(f'Source changed while hashing: {path}')
-        result.append({'path': path.relative_to(root).as_posix(), 'size': after.st_size, 'sha256': digest})
-    return sorted(result, key=lambda item: item['path'])
+        result.append(FileRecord(path.relative_to(root).as_posix(), after.st_size, digest))
+    return tuple(sorted(result, key=lambda item: item.file))
 
 
 def _steam_values(raw):
@@ -99,22 +100,29 @@ def _unity_identity(root):
 
 
 def load_snapshot(work_root: Path) -> Snapshot:
-    directory = work_root.absolute() / 'source'
-    return Snapshot(directory / 'install', directory / 'source-manifest.json')
+    directory = work_root.absolute()
+    path = directory / 'source-manifest.json'
+    data = json.loads(path.read_text(encoding='utf-8'))
+    files = tuple(FileRecord(**record) for record in data['files'])
+    return Snapshot(directory / 'source', files, path, sha256(path))
 
 
 def _read_manifest(snapshot):
-    expected_root = snapshot.manifest_path.parent / 'install'
+    expected_root = snapshot.manifest_path.parent / 'source'
     if snapshot.root.absolute() != expected_root.absolute():
         raise ValueError('Snapshot root differs from its manifest')
     _check_path(snapshot.manifest_path, snapshot.manifest_path.parent.resolve())
+    if sha256(snapshot.manifest_path) != snapshot.manifest_sha256:
+        raise ValueError('Source manifest hash changed')
     manifest = json.loads(snapshot.manifest_path.read_text(encoding='utf-8'))
     if (manifest.get('schema_version'), manifest.get('app_id'), manifest.get('build_id'), manifest.get('unity_version')) != (
             SCHEMA_VERSION, APP_ID, BUILD_ID, UNITY_VERSION):
         raise ValueError('Source manifest schema or build identity mismatch')
     if manifest.get('steam_manifest', {}).get('path') != 'steam-manifest.acf':
         raise ValueError('Invalid Steam manifest evidence path')
-    validate_paths([record['path'] for record in manifest['files']] + manifest['directories'])
+    validate_paths([record['file'] for record in manifest['files']] + manifest['directories'])
+    if tuple(FileRecord(**record) for record in manifest['files']) != snapshot.files:
+        raise ValueError('Snapshot files differ from the source manifest')
     return manifest
 
 
@@ -126,7 +134,7 @@ def verify_snapshot(snapshot: Snapshot) -> None:
     if sha256(evidence) != manifest['steam_manifest']['sha256']:
         raise ValueError('Steam manifest evidence hash changed')
     actual = scan_files(snapshot.root)
-    if actual != manifest['files']:
+    if actual != snapshot.files:
         raise ValueError('Snapshot file list, size, or hash changed')
     if _paths(snapshot.root)[1] != manifest['directories']:
         raise ValueError('Snapshot directory list changed')
@@ -146,29 +154,32 @@ def snapshot_source(steam_root: Path, work_root: Path) -> Snapshot:
     before = scan_files(steam_root)
     directories = _paths(steam_root)[1]
     versions = _unity_identity(steam_root)
-    snapshot = load_snapshot(work_root)
-    if snapshot.manifest_path.parent.exists():
+    manifest_path = work_root / 'source-manifest.json'
+    if manifest_path.exists():
+        snapshot = load_snapshot(work_root)
         verify_snapshot(snapshot)
         manifest = _read_manifest(snapshot)
-        if before != manifest['files'] or directories != manifest['directories'] or evidence != (
+        if before != snapshot.files or directories != manifest['directories'] or evidence != (
                 snapshot.manifest_path.parent / 'steam-manifest.acf').read_bytes():
             raise ValueError('Installed source changed from the verified snapshot')
         return snapshot
+    if (work_root / 'source').exists():
+        raise ValueError(f'Unaccepted source tree: {work_root / "source"}')
     work_root.mkdir(parents=True, exist_ok=True)
     _check_path(work_root, work_root.resolve())
-    required = sum(record['size'] for record in before) + len(evidence) + 1024 * 1024
+    required = sum(record.bytes for record in before) + len(evidence) + 1024 * 1024
     available = shutil.disk_usage(work_root).free
     if available < required:
         raise OSError(f'Insufficient archive space: need {required} bytes, have {available}')
     with tempfile.TemporaryDirectory(prefix='.source-', dir=work_root) as temporary:
         stage = Path(temporary)
-        copied = stage / 'install'
+        copied = stage / 'source'
         copied.mkdir()
         for name in directories:
             (copied / name).mkdir(parents=True, exist_ok=True)
         for record in before:
-            source = steam_root / record['path']
-            destination = copied / record['path']
+            source = steam_root / record.file
+            destination = copied / record.file
             try:
                 _check_path(source, steam_root.resolve())
                 shutil.copy2(source, destination)
@@ -181,10 +192,13 @@ def snapshot_source(steam_root: Path, work_root: Path) -> Snapshot:
             raise ValueError('Copied source list, size, or hash changed')
         (stage / 'steam-manifest.acf').write_bytes(evidence)
         manifest = {'schema_version': SCHEMA_VERSION, 'app_id': APP_ID, 'build_id': BUILD_ID,
-                    'unity_version': UNITY_VERSION, 'serialized_versions': versions, 'files': before, 'directories': directories,
+                    'unity_version': UNITY_VERSION, 'serialized_versions': versions, 'files': [asdict(record) for record in before], 'directories': directories,
                     'steam_manifest': {'path': 'steam-manifest.acf', 'sha256': hashlib.sha256(evidence).hexdigest()}}
         (stage / 'source-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
-        verify_snapshot(Snapshot(copied, stage / 'source-manifest.json'))
-        # Rename the complete directory. An interrupted copy cannot become accepted.
-        os.rename(stage, snapshot.manifest_path.parent)
-    return snapshot
+        staged = load_snapshot(stage)
+        verify_snapshot(staged)
+        os.rename(copied, work_root / 'source')
+        (stage / 'steam-manifest.acf').replace(work_root / 'steam-manifest.acf')
+        # Publish acceptance after the source tree and Steam evidence exist.
+        (stage / 'source-manifest.json').replace(manifest_path)
+    return load_snapshot(work_root)

@@ -15,18 +15,66 @@ def expected_serialized_version(container: str) -> str:
     return SERIALIZED_VERSIONS.get(container, UNITY_VERSION)
 
 
+@dataclass(frozen=True, order=True)
+class ObjectId:
+    file: str
+    path_id: int
+
+
+@dataclass(frozen=True)
+class FileRecord:
+    file: str
+    bytes: int
+    sha256: str
+
+
 @dataclass(frozen=True)
 class Snapshot:
     root: Path
+    files: tuple[FileRecord, ...]
     manifest_path: Path
+    manifest_sha256: str
 
 
-@dataclass
+@dataclass(frozen=True)
+class ObjectRecord:
+    source: ObjectId
+    type: str
+    class_id: int
+    offset: int
+    bytes: int
+    container_sha256: str
+
+
+@dataclass(frozen=True)
 class Catalog:
-    schema_version: int
-    app_id: int
-    build_id: int
-    unity_version: str
-    containers: list[dict]
-    streams: list[dict]
-    objects: list[dict]
+    objects: dict[ObjectId, ObjectRecord]
+    counts: dict[str, int]
+    dependencies: dict[ObjectId, tuple[ObjectId, ...]]
+
+
+@dataclass(frozen=True)
+class AssetExport:
+    source: ObjectId
+    category: str
+    status: str
+    runtime: str
+    reason: str
+    files: tuple[FileRecord, ...]
+    dependencies: tuple[ObjectId, ...]
+    details: dict
+
+    def __post_init__(self):
+        if self.status not in ('converted', 'native_record', 'source_empty', 'failed'):
+            raise ValueError(f'Invalid export status: {self.status}')
+        if self.runtime not in ('verified', 'engine_dependent', 'unverified'):
+            raise ValueError(f'Invalid runtime support: {self.runtime}')
+
+
+@dataclass(frozen=True)
+class LibraryReceipt:
+    manifest_path: Path
+    manifest_sha256: str
+    catalog_sha256: str
+    source_manifest_sha256: str
+    exports: tuple[AssetExport, ...]
