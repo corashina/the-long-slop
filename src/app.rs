@@ -75,6 +75,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
                     ..default()
                 }),
         )
+        .add_plugins(presentation::materials::SourceMaterialPlugin)
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -104,6 +105,7 @@ fn setup(
     let mut visuals = WorldVisuals::new(&mut meshes, &mut materials);
     visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
     commands.insert_resource(visuals);
+    presentation::materials::load_materials(&mut commands, &server, &reference.0.rendering);
     presentation::reference::spawn(&mut commands, &server, &reference.0);
     commands.spawn((
         DirectionalLight {
@@ -146,7 +148,7 @@ fn check_ready(
     mut visuals: ResMut<ReferenceVisuals>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
-    mut frames: Local<u8>,
+    materials: Res<presentation::materials::SourceMaterials>,
 ) {
     if drive.ready || visuals.failed {
         return;
@@ -177,8 +179,12 @@ fn check_ready(
         &primitives,
     ) {
         Ok(true) => {
-            *frames += 1;
-            if *frames >= 2 {
+            if let presentation::materials::RenderingState::Failed(error) = &materials.state {
+                game_failure(error);
+                visuals.failed = true;
+                return;
+            }
+            if materials.state == presentation::materials::RenderingState::Ready {
                 drive.ready = true;
                 game_ready();
             }
@@ -199,7 +205,12 @@ fn clear_input(drive: &mut Drive) {
     drive.runtime.area.begin_step();
     drive.skip_elapsed = true;
 }
-fn read_input(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
+fn read_input(
+    reference: Res<RuntimeReference>,
+    mut drive: ResMut<Drive>,
+    materials: Res<Assets<presentation::materials::SourceMaterial>>,
+    source_materials: Res<presentation::materials::SourceMaterials>,
+) {
     let actions = game_actions();
     let frame = FrameInput {
         held: game_keys(),
@@ -225,6 +236,12 @@ fn read_input(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             game_failure(&error.to_string());
             return;
         }
+        info!(
+            "Restart reused source materials: {} handles, {} record bindings, {} mip bytes",
+            materials.len(),
+            source_materials.handles.len(),
+            source_materials.texture_bytes
+        );
         drive.camera = CameraMode::default();
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
         clear_input(&mut drive);

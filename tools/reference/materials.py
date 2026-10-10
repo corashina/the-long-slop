@@ -262,6 +262,7 @@ def material_source_evidence(source, reader, record):
         'passes': [{'subshader': index, 'active': index == 0, 'type': p.m_Type,
                     'state': attrs.asdict(p.m_State), 'tags': attrs.asdict(p.m_Tags)}
                    for index, sub in enumerate(shader.m_ParsedForm.m_SubShaders) for p in sub.m_Passes],
+        'channel_samples': SOURCE_CHANNEL_SAMPLES,
         'state': record['state'], 'channels': {slot: channels[slot] for slot in
             [*record['properties']['defaults'], *[t['slot'] for t in record['properties']['textures']]]},
         'textures': record['properties']['textures'], 'defaults': record['properties']['defaults'],
@@ -269,3 +270,13 @@ def material_source_evidence(source, reader, record):
         'transport_limits': ['Base glTF does not apply layered shader operations.',
             'Final binding must upload authored mips, source anisotropy and mip bias.'],
     }
+
+
+# UnityStandardInput.cginc Albedo and MetallicGloss; retain inputs for GPU probes.
+SOURCE_CHANNEL_SAMPLES = [
+    dict(operation='detail_albedo', color_space='gamma', detail=.2, mask_alpha=.5, albedo_multiplier=.7),
+    dict(operation='smoothness', keyword='_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A',
+         main_alpha=.75, gloss_map_scale=.4, smoothness=.3),
+    dict(operation='detail_albedo', color_space='linear', detail=.2, mask_alpha=.5,
+         unity_color_space_double=4.59479380, albedo_multiplier=.95947938),
+]

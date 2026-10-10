@@ -37,19 +37,18 @@ def converted_transform(data):
 
 
 class GltfExporter:
-    def __init__(self, source, output):
+    def __init__(self, source, output, asset_id):
         import pygltflib as gl
         self.gl = gl
         self.source = source
+        self.asset_id = asset_id
         self.output = output
         self.document = gl.GLTF2(asset=gl.Asset(generator='My Summer Slop reference exporter'))
         self.binary = bytearray()
         self.meshes = {}
         self.materials = {}
-        self.textures = {}
         self.mesh_data = {}
         self.material_report = []
-        self.samplers = {}
         self.material_records = []
         self.material_dependencies = {}
 
@@ -71,62 +70,19 @@ class GltfExporter:
             min=[min(row[i] for row in rows) for i in range(width)], max=[max(row[i] for row in rows) for i in range(width)]))
         return accessor
 
-    def record_texture(self, entry):
-        gl = self.gl
-        settings = entry['sampler']
-        identity = entry['file']
-        if identity not in self.textures:
-            sampler_key = tuple(settings.values())
-            if sampler_key not in self.samplers:
-                wrapping = {0: 10497, 1: 33071, 2: 33648, 3: 33071}
-                mag, minimum = {0: (9728, 9984), 1: (9729, 9985), 2: (9729, 9987)}[settings['filter']]
-                if settings['mip_count'] <= 1: minimum = mag
-                self.samplers[sampler_key] = len(self.document.samplers)
-                self.document.samplers.append(gl.Sampler(wrapS=wrapping[settings['wrap_u']],
-                    wrapT=wrapping[settings['wrap_v']], magFilter=mag, minFilter=minimum,
-                    extras={'unity_aniso': settings['aniso'], 'unity_mip_bias': settings['mip_bias'],
-                            'source_mips': entry['mips']}))
-            image = len(self.document.images)
-            self.document.images.append(gl.Image(uri=entry['file'].removeprefix('reference/'),
-                extras={'source': entry['source'], 'color_space': entry['color_space'],
-                        'normal_encoding': entry['encoding']}))
-            self.textures[identity] = len(self.document.textures)
-            self.document.textures.append(gl.Texture(source=image, sampler=self.samplers[sampler_key]))
-        if 'KHR_texture_transform' not in self.document.extensionsUsed:
-            self.document.extensionsUsed.append('KHR_texture_transform')
-        return {'index': self.textures[identity], 'texCoord': entry['uv_channel'],
-            'extensions': {'KHR_texture_transform': {'scale': entry['scale'], 'offset': entry['offset']}}}
-
     def material(self, reader, color_override=None, condition=None):
         if reader is None: raise ValueError('Required renderer material has no source')
         import json
-        identity = key(reader), tuple(color_override[c] for c in ('r', 'g', 'b', 'a')) if color_override is not None else None, json.dumps(condition, sort_keys=True)
-        if identity in self.materials: return self.materials[identity]
         record = recover_material(self.source, reader, color_override, condition)
+        identity = json.dumps(record, sort_keys=True, separators=(',', ':'))
+        if identity in self.materials: return self.materials[identity]
         material_source_evidence(self.source, reader, record)
         dependencies = export_material_textures(self.source, reader, record, self.output.parent)
         self.material_dependencies.update({entry['file']: entry for entry in dependencies})
-        gl = self.gl; properties = record['properties']; floats = properties['floats']
-        mode = record['state']['alpha_mode']
+        gl = self.gl
         material = gl.Material(name=self.source.read(reader)['m_Name'],
-            alphaMode={'opaque': 'OPAQUE', 'mask': 'MASK', 'blend': 'BLEND',
-                       'premultiply': 'BLEND', 'refract': 'BLEND'}[mode],
-            alphaCutoff=floats['_Cutoff'] if mode == 'mask' else None,
-            doubleSided=record['state']['cull'] == 0,
-            pbrMetallicRoughness=gl.PbrMetallicRoughness(baseColorFactor=record['color'],
-                metallicFactor=floats.get('_Metallic', 0.), roughnessFactor=1.-floats.get('_Glossiness', .5)),
-            extras={'source': record['source'], 'source_material_record': len(self.material_records)})
-        for entry in properties['textures']:
-            info = self.record_texture(entry)
-            if entry['slot'] == '_MainTex': material.pbrMetallicRoughness.baseColorTexture = gl.TextureInfo(**info)
-            elif entry['slot'] == '_BumpMap': material.normalTexture = gl.NormalMaterialTexture(scale=floats.get('_BumpScale', 1.), **info)
-            elif entry['slot'] == '_EmissionMap': material.emissiveTexture = gl.TextureInfo(**info)
-            elif entry['slot'] == '_OcclusionMap': material.occlusionTexture = gl.OcclusionTextureInfo(strength=floats.get('_OcclusionStrength', 1.), **info)
-        if '_EMISSION' in record['keywords']:
-            material.emissiveFactor = properties['colors']['_EmissionColor'][:3]
-        if record['shader_family'] == 'unlit_color':
-            material.extensions['KHR_materials_unlit'] = {}
-            if 'KHR_materials_unlit' not in self.document.extensionsUsed: self.document.extensionsUsed.append('KHR_materials_unlit')
+            extras={'source': record['source'], 'asset': self.asset_id,
+                    'gltf_material': len(self.material_records)})
         index = len(self.document.materials)
         self.materials[identity] = index; record['gltf_material'] = index
         self.material_records.append(record); self.document.materials.append(material)
@@ -160,7 +116,7 @@ class GltfExporter:
         position = self.accessor(points,'VEC3')
         normal = self.accessor([convert_point(v[:3]) for v in handler.m_Normals], 'VEC3') if handler.m_Normals else None
         tangent = self.accessor([(*convert_point(v[:3]),-v[3]) for v in handler.m_Tangents], 'VEC4') if handler.m_Tangents else None
-        uvs={f'TEXCOORD_{index}':self.accessor(values,'VEC2') for index in range(8) if (values:=getattr(handler,f'm_UV{index}'))}
+        uvs={f'TEXCOORD_{index}':self.accessor(values,'VEC2') for index in range(2) if (values:=getattr(handler,f'm_UV{index}'))}
         colors=self.accessor(handler.m_Colors,'VEC4') if handler.m_Colors else None
         joints = self.accessor(handler.m_BoneIndices, 'VEC4',5123) if handler.m_BoneIndices else None
         weights = self.accessor(handler.m_BoneWeights, 'VEC4') if handler.m_BoneWeights else None
@@ -316,7 +272,7 @@ def validate_gltf(path):
     return document
 
 
-def export_gltf(roots, output: Path) -> dict:
+def export_gltf(roots, output: Path, asset_id: int) -> dict:
     """Roots are (Source, selected Transform readers)."""
     source, readers = roots
-    return GltfExporter(source, output).export(readers)
+    return GltfExporter(source, output, asset_id).export(readers)

@@ -9,6 +9,35 @@ from PIL import Image
 
 
 class MaterialTests(unittest.TestCase):
+    def test_material_identity_includes_color_and_condition(self):
+        from unittest.mock import patch
+        from tools.reference.gltf import GltfExporter
+        source, owner = self.material_source()
+        cache = Path('.cache/reference-test'); cache.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=cache) as directory, patch('tools.reference.gltf.material_source_evidence'):
+            exporter = GltfExporter(source, Path(directory) / 'fixture.gltf', 1)
+            white = dict(r=1., g=1., b=1., a=1.)
+            first = exporter.material(owner)
+            self.assertEqual(first, exporter.material(owner, white))
+            red = exporter.material(owner, dict(r=1., g=0., b=0., a=1.))
+            self.assertNotEqual(first, red)
+            condition = dict(source=dict(file='fixture.assets', path_id=99), state=0, quality=1., range=None)
+            conditioned = exporter.material(owner, white, condition)
+            self.assertNotEqual(first, conditioned)
+            self.assertEqual(conditioned, exporter.material(owner, white, dict(condition)))
+
+    def test_source_channel_samples(self):
+        from tools.reference.materials import SOURCE_CHANNEL_SAMPLES
+        detail, smoothness, linear = SOURCE_CHANNEL_SAMPLES
+        self.assertEqual(detail['detail'], .2)
+        self.assertEqual(detail['mask_alpha'], .5)
+        self.assertAlmostEqual(detail['albedo_multiplier'], .7)
+        self.assertEqual(smoothness['main_alpha'], .75)
+        self.assertEqual(smoothness['gloss_map_scale'], .4)
+        self.assertAlmostEqual(smoothness['smoothness'], .3)
+        self.assertEqual(smoothness['keyword'], '_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A')
+        self.assertAlmostEqual(linear['albedo_multiplier'], .5 + .5 * .2 * 4.59479380)
+
     def test_packed_normal_uses_alpha_green(self):
         from tools.reference.materials import decode_normal_rgba
         x, y, z = decode_normal_rgba((255, 126, 126, 127), 'ag')

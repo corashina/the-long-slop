@@ -65,7 +65,7 @@ def export_reference(steam_root: Path, output: Path) -> None:
     (output/'manifest.json').unlink(missing_ok=True)
     report = {}
     for name, readers in roots.items():
-        report[name] = export_gltf((source,readers),output/f'{name}.gltf')
+        report[name] = export_gltf((source,readers),output/f'{name}.gltf', list(roots).index(name) + 1)
         print(f'Exported {name}: {report[name]["node_count"]} nodes',flush=True)
     (output/'material-evidence.json').write_text(json.dumps(list(source.material_evidence.values()), indent=2, allow_nan=False), encoding='utf-8')
     (output/'geometry-evidence.json').write_text(json.dumps(report,indent=2,allow_nan=False),encoding='utf-8')

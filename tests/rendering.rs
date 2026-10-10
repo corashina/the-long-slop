@@ -152,6 +152,14 @@ fn installed_materials_match_gltf_and_mips() {
                 serde_json::to_value(&material.source).unwrap(),
                 gltf["materials"][material.gltf_material as usize]["extras"]["source"]
             );
+            assert_eq!(
+                gltf["materials"][material.gltf_material as usize]["extras"]["asset"],
+                serde_json::json!(asset.id.0)
+            );
+            assert_eq!(
+                gltf["materials"][material.gltf_material as usize]["extras"]["gltf_material"],
+                serde_json::json!(material.gltf_material)
+            );
             for texture in &material.properties.textures {
                 if texture.slot == "_BumpMap" || texture.slot == "_DetailNormalMap" {
                     assert_eq!(texture.encoding, TextureEncoding::Rgb);
@@ -193,4 +201,24 @@ fn installed_materials_match_gltf_and_mips() {
                 .any(|texture| texture.slot == slot)
         );
     }
+}
+
+#[test]
+fn accepts_zero_alpha_standard_glass() {
+    let mut input = fixture();
+    let mut standard = standard_fixture(
+        "_ALPHAPREMULTIPLY_ON",
+        "_MainTex",
+        my_summer_slop::reference::TextureDefault::White,
+    );
+    let glass = &mut standard.rendering.materials[1];
+    glass.asset = my_summer_slop::reference::AssetId(1);
+    glass.state.alpha_mode = my_summer_slop::reference::AlphaMode::Premultiply;
+    glass.state.src_blend = 1;
+    glass.state.dst_blend = 10;
+    glass.state.z_write = false;
+    input["rendering"]["materials"][0] = serde_json::to_value(glass).unwrap();
+    input["rendering"]["materials"][0]["color"][3] = serde_json::json!(0.0);
+    input["rendering"]["materials"][0]["properties"]["floats"]["_Mode"] = serde_json::json!(3.0);
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_ok());
 }

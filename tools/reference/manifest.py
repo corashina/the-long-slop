@@ -130,7 +130,7 @@ def build_manifest(source, roots, reports, hashes):
             value={'id':len(anchors)+1,'source':source_id(node_readers[node]),'node':node,'body':body_id,'transform':pose}
             anchors.append(value);anchor_nodes[node]=value['id']
         return anchor_nodes[node]
-    colliders=[];exporter=GltfExporter(source,None);wheel_parts_source=[];detachable_colliders=set()
+    colliders=[];exporter=GltfExporter(source,None,0);wheel_parts_source=[];detachable_colliders=set()
     for node,group in components.items():
         if not nodes[node-1]['active'] or not ('wheelscript' in group or 'gumiscript' in group):continue
         part=group['partscript'][0];part_data=source.read(part);pick=source.resolve(part,part_data['p']);pick_data=source.read(pick)

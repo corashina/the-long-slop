@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod materials;
 pub mod reference;
 pub mod world;
 
