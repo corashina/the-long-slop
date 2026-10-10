@@ -6,6 +6,11 @@ use std::{
     fmt,
 };
 
+pub mod instruments;
+pub mod ui;
+pub use instruments::*;
+pub use ui::*;
+
 pub const APP_ID: u32 = 1_017_180;
 pub const BUILD_ID: u32 = 11_140_890;
 
@@ -51,6 +56,7 @@ pub struct Transform {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssetRecord {
+    pub material_count: u32,
     pub id: AssetId,
     pub path: String,
     pub sha256: String,
@@ -210,6 +216,7 @@ pub struct OpeningRecord {
     pub can_tune: bool,
     pub tune_rate: f32,
     pub visuals: CapVisualReference,
+    pub presentation: FluidPresentation,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -504,6 +511,8 @@ pub struct StartingAreaReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
+    pub ui: UiReference,
+    pub instruments: InstrumentReference,
     pub app_id: u32,
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
@@ -582,6 +591,8 @@ impl ReferenceManifest {
         )?;
         let asset_ids = ids(self.assets.iter().map(|r| r.id), "duplicate asset ID")?;
         let node_ids = ids(self.nodes.iter().map(|r| r.id), "duplicate node ID")?;
+        self.ui.validate()?;
+        self.instruments.validate(&node_ids, &self.assets)?;
         let body_ids = ids(self.bodies.iter().map(|r| r.id), "duplicate body ID")?;
         let collider_ids = ids(self.colliders.iter().map(|r| r.id), "duplicate collider ID")?;
         let anchor_ids = ids(self.anchors.iter().map(|r| r.id), "duplicate anchor ID")?;

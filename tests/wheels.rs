@@ -258,3 +258,33 @@ fn production_wheel_bindings_detach_and_restore() {
     assert_eq!(physics.wheel_support_count(), 4);
     assert_eq!(area.items.len(), count);
 }
+
+#[test]
+fn mounted_tire_dismount_preserves_rim_and_vehicle_mass() {
+    let r = reference();
+    let mut physics = common::world();
+    let mut area = StartingArea::new(&r, &mut physics, [0.; 3]).unwrap();
+    let mut wheels = WheelAssemblies::new(&r).unwrap();
+    wheels.sync(&mut area.items, &mut physics).unwrap();
+    let slot = &r.wheel_slots[0];
+    let count = area.items.len();
+    let before = physics.rapier().bodies[physics.chassis_handle()].mass();
+    let tire_mass = r.items.iter().find(|i| i.id == slot.tire).unwrap().mass_kg;
+    let (rim, tire) = wheels
+        .split(slot.rim, &mut area.items, &mut physics)
+        .unwrap();
+    assert_eq!(
+        area.items.get(rim).unwrap().location,
+        ItemLocation::WheelSlot(slot.id)
+    );
+    assert_eq!(area.items.get(tire).unwrap().location, ItemLocation::World);
+    assert_eq!(area.items.len(), count);
+    assert!(
+        (physics.rapier().bodies[physics.chassis_handle()].mass() - (before - tire_mass)).abs()
+            < 0.01
+    );
+    wheels
+        .assemble(rim, tire, &mut area.items, &mut physics)
+        .unwrap();
+    assert!((physics.rapier().bodies[physics.chassis_handle()].mass() - before).abs() < 0.01);
+}

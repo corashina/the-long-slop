@@ -1,0 +1,33 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {formatTank,FeedbackState,selectIcon} from '../../web/feedback.js';
+const tank=(amount,capacity=39)=>({amount,capacity,quantities:[amount,0,0,0,0,0],hasName:false,name:'',noText:false});
+test('empty_full_and_fractional_source_format',()=>{
+ assert.equal(formatTank(tank(Math.fround(.05))),'empty');
+ assert.equal(formatTank(tank(.5)),'0.5 / 39 L\n100% Gas');
+ assert.equal(formatTank(tank(39)),'39 L (full)\n100% Gas');
+ assert.equal(formatTank({...tank(.5),noText:true}),'');
+});
+test('mixture_filters_below_one_percent_and_keeps_source_order',()=>{
+ assert.equal(formatTank({...tank(10),quantities:[9.91,.09,0,0,0,0]}),'10 / 39 L\n99% Gas');
+ assert.equal(formatTank({...tank(10),quantities:[9,.1,0,.9,0,0]}),'10 / 39 L\n90% Gas\n1% Oil\n9% Water');
+});
+test('same_volume_new_container_refreshes_capacity_and_name',()=>{
+ const m=new FeedbackState();
+ m.update({...tank(.5),hasName:true,name:'Fuel Tank',actions:1,context:2,carrying:false,notice:''});
+ assert.match(m.fluidText,/Fuel Tank:\n0.5 \/ 39 L/);
+ m.update({...tank(.5,5),hasName:true,name:'Oil Tank',actions:1,context:2,carrying:false,notice:''});
+ assert.match(m.fluidText,/Oil Tank:\n0.5 \/ 5 L/);
+});
+test('chase_and_menu_hide_feedback_and_restart_preserves_choice',()=>{
+ const m=new FeedbackState();m.setVisible(false);assert.equal(m.visible,false);
+ m.toggle();m.setVisible(true);assert.equal(m.visible,false);
+ m.setVisible(false);m.setVisible(true);assert.equal(m.visible,false);
+});
+test('context_icons_prioritize_mount_fill_and_use',()=>{
+ assert.equal(selectIcon(16|256,5,false),'mount');
+ assert.equal(selectIcon(64|1,2,false),'fill');
+ assert.equal(selectIcon(512,4,false),'exit');
+ assert.equal(selectIcon(0,0,false),'default');
+ assert.equal(selectIcon(0,0,true),'carrying');
+});

@@ -1,11 +1,13 @@
 use crate::browser::*;
+use crate::presentation::instruments::InstrumentVisuals;
 use crate::presentation::{
     self,
     camera::{CameraMode, DriveCamera},
     reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
     world::{ChunkVisual, WorldVisuals},
 };
-use crate::reference::{ItemId, ItemKind, ReferenceManifest};
+use crate::reference::{ItemId, OpeningId, ReferenceManifest};
+use crate::simulation::instruments::{InstrumentSample, InstrumentState};
 use crate::simulation::{FrameInput, StepClock, keys};
 use crate::starting_area::GarageRuntime;
 use crate::vehicle::VehiclePose;
@@ -22,6 +24,7 @@ struct RuntimeReference(Arc<ReferenceManifest>);
 #[derive(Resource)]
 struct Drive {
     runtime: GarageRuntime,
+    instruments: InstrumentState,
     input: FrameInput,
     clock: StepClock,
     previous: VehiclePose,
@@ -31,6 +34,20 @@ struct Drive {
     frame_steps: u32,
     skip_elapsed: bool,
     ready: bool,
+    last_feedback: Option<FeedbackStamp>,
+}
+#[derive(Clone, Copy, PartialEq)]
+struct FeedbackStamp {
+    actions: u32,
+    context: u32,
+    item: Option<ItemId>,
+    opening: Option<OpeningId>,
+    carrying: bool,
+    notice: &'static str,
+    amount: u32,
+    empty: bool,
+    capacity: f32,
+    percents: [u32; 6],
 }
 
 #[wasm_bindgen]
@@ -43,8 +60,9 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
     let runtime = GarageRuntime::new(&reference).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let current = runtime.area.player.view_pose(&runtime.physics);
     App::new()
-        .insert_resource(RuntimeReference(reference))
+        .insert_resource(RuntimeReference(reference.clone()))
         .insert_resource(Drive {
+            instruments: InstrumentState::new(&reference.instruments),
             runtime,
             input: FrameInput::default(),
             clock: StepClock::default(),
@@ -55,6 +73,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
             frame_steps: 0,
             skip_elapsed: false,
             ready: false,
+            last_feedback: None,
         })
         .insert_resource(ClearColor(Color::srgb(0.64, 0.72, 0.73)))
         .add_plugins(
@@ -84,6 +103,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
                 advance_physics,
                 sync_world,
                 sync_imported,
+                sync_instruments,
                 update_camera,
                 update_hud,
             )
@@ -104,6 +124,7 @@ fn setup(
     let mut visuals = WorldVisuals::new(&mut meshes, &mut materials);
     visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
     commands.insert_resource(visuals);
+    commands.insert_resource(InstrumentVisuals::default());
     presentation::reference::spawn(&mut commands, &server, &reference.0);
     commands.spawn((
         DirectionalLight {
@@ -144,6 +165,10 @@ fn check_ready(
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
     mut visuals: ResMut<ReferenceVisuals>,
+    mut instruments: ResMut<InstrumentVisuals>,
+    gltfs: Res<Assets<bevy::gltf::Gltf>>,
+    gltf_materials: Res<Assets<bevy::gltf::GltfMaterial>>,
+    mut standard_materials: ResMut<Assets<StandardMaterial>>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
     mut frames: Local<u8>,
@@ -177,6 +202,23 @@ fn check_ready(
         &primitives,
     ) {
         Ok(true) => {
+            match instruments.bind(
+                &reference.0,
+                &visuals.nodes,
+                &primitives,
+                &visuals.gltfs,
+                &gltfs,
+                &gltf_materials,
+                &mut standard_materials,
+            ) {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(e) => {
+                    game_failure(&e.to_string());
+                    visuals.failed = true;
+                    return;
+                }
+            }
             *frames += 1;
             if *frames >= 2 {
                 drive.ready = true;
@@ -225,18 +267,19 @@ fn read_input(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             game_failure(&error.to_string());
             return;
         }
+        drive.instruments.reset(&reference.0.instruments);
         drive.camera = CameraMode::default();
+        drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
+        clear_input(&mut drive);
+    }
+    if actions & 16 != 0 {
+        drive.runtime.recover(&reference.0);
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
         clear_input(&mut drive);
     }
     if !drive.runtime.started || drive.runtime.paused {
         drive.input.clear();
         return;
-    }
-    if actions & 16 != 0 {
-        drive.runtime.recover(&reference.0);
-        drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
-        clear_input(&mut drive);
     }
     if frame.pressed & keys::CAMERA != 0 && drive.runtime.area.player.seat().is_some() {
         drive.camera = match drive.camera {
@@ -305,6 +348,43 @@ fn sync_imported(
     presentation::reference::sync_items(&drive.runtime.area, drive.clock.alpha(), &mut items);
     presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
 }
+fn sync_instruments(
+    time: Res<Time<Real>>,
+    reference: Res<RuntimeReference>,
+    mut drive: ResMut<Drive>,
+    mut visuals: ResMut<InstrumentVisuals>,
+    mut transforms: Query<&mut Transform, Without<DriveCamera>>,
+    mut materials: Query<&mut MeshMaterial3d<StandardMaterial>>,
+) {
+    let run = &drive.runtime;
+    let amount = |id: ItemId| {
+        run.area
+            .items
+            .get(id)
+            .and_then(|i| i.fluid.as_ref())
+            .map_or(0., |f| f.mixture.total())
+    };
+    let r = &reference.0.instruments;
+    let sample = InstrumentSample {
+        speed_kmh: run.physics.snapshot().speed_mps * 3.6,
+        fuel_liters: amount(reference.0.engine.fuel_tank),
+        oil_liters: amount(reference.0.engine.oil_tank),
+        temperature: run.engine_output.temperature,
+        rpm: run.engine_output.rpm,
+        local_ignition: run.engine_output.ignition
+            && r.electronics_output > r.electronics_off_threshold,
+        distance_m: run.trip_m,
+    };
+    if run.started && !run.paused {
+        drive.instruments.update(r, sample, time.delta_secs());
+    }
+    visuals.update(
+        &reference.0,
+        &drive.instruments,
+        &mut transforms,
+        &mut materials,
+    );
+}
 fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveCamera>>) {
     for mut transform in &mut query {
         *transform =
@@ -315,7 +395,7 @@ fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveC
             };
     }
 }
-fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
+fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let runtime = &drive.runtime;
     let snapshot = runtime.physics.snapshot();
     let position = runtime.area.player.focus_position(&runtime.physics);
@@ -355,215 +435,66 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
         runtime.paused,
         runtime.started,
     );
-    let target = runtime.target;
-    let record =
-        target.and_then(|target| reference.0.items.iter().find(|item| item.id == target.item));
-    let held = runtime
+    let available = runtime.area.interaction.available_actions(
+        runtime.target,
+        &runtime.area.player,
+        &runtime.area.items,
+        &runtime.physics,
+    );
+    let info = runtime
         .area
         .interaction
-        .held()
-        .map(|id| display_name(&reference.0, &runtime.area.items, id))
-        .unwrap_or("");
-    let state = target.and_then(|target| {
-        let id = reference
-            .0
-            .openings
-            .iter()
-            .find(|opening| opening.cap == target.item)
-            .map_or(target.item, |opening| opening.tank);
-        runtime.area.items.get(id)
-    });
-    let amount = state
-        .and_then(|item| item.fluid.as_ref())
-        .map_or(-1.0, |fluid| fluid.mixture.total());
-    let volumes = state
-        .and_then(|item| item.fluid.as_ref())
-        .map_or([-1.0; 6], |fluid| fluid.mixture.quantities_liters);
-    let usable_target =
-        record.is_some_and(|item| {
-            reference.0.hinges.iter().any(|hinge| hinge.item == item.id)
-                || reference.0.openings.iter().any(|opening| {
-                    opening.cap == item.id && (opening.can_toggle || opening.can_tune)
-                })
-        });
-    let action = if !runtime.notice.is_empty() {
-        runtime.notice
-    } else if runtime.area.player.seat().is_some() && !usable_target {
-        if runtime.area.player.driving() {
-            "E: exit · I: starter · Space: handbrake · C: camera"
-        } else {
-            "E: exit · C: camera"
-        }
-    } else {
-        record.map_or(
-            if target.is_some() && state.and_then(|item| item.fluid.as_ref()).is_some() {
-                "Open the container before pickup. Hold LMB: fill."
+        .feedback(&available, &runtime.area.items, &reference.0);
+    let (amount, capacity, quantities, name, has_name, no_text) =
+        info.fluid
+            .as_ref()
+            .map_or((0., 0., [0.; 6], info.name, false, true), |f| {
+                (
+                    f.amount,
+                    f.capacity,
+                    f.quantities,
+                    f.presentation.name.as_str(),
+                    f.presentation.has_name,
+                    f.presentation.no_text,
+                )
+            });
+    let stamp = FeedbackStamp {
+        actions: info.actions.0,
+        context: info.context as u32,
+        item: available.item,
+        opening: available.opening,
+        carrying: info.carrying,
+        notice: runtime.notice,
+        amount: (amount * 10.).round() as u32,
+        empty: amount <= 0.05,
+        capacity,
+        percents: std::array::from_fn(|i| {
+            let p = if amount > 0. {
+                quantities[i] / amount * 100.
             } else {
-                if held.is_empty() {
-                    ""
-                } else {
-                    "F: drop · Mouse wheel: distance · RMB + mouse: rotate"
-                }
-            },
-            |item| match item.kind {
-                ItemKind::Door | ItemKind::Hood | ItemKind::Trunk => "Hold E + mouse: move",
-                ItemKind::Cap => {
-                    if reference
-                        .0
-                        .openings
-                        .iter()
-                        .any(|opening| opening.cap == item.id && opening.can_tune)
-                    {
-                        "Hold E + mouse / Scroll: tune valve · Hold LMB: fill"
-                    } else {
-                        "E: cap · Hold LMB: fill"
-                    }
-                }
-                ItemKind::Seat => {
-                    if reference.0.seats.iter().any(|seat| seat.item == item.id) {
-                        "E: enter"
-                    } else {
-                        ""
-                    }
-                }
-                ItemKind::Wheel | ItemKind::Rim | ItemKind::Tire => {
-                    let mounted = state.is_some_and(|state| match state.location {
-                        crate::interaction::items::ItemLocation::WheelSlot(_) => true,
-                        crate::interaction::items::ItemLocation::Attached(parent) => {
-                            runtime.area.items.get(parent).is_some_and(|parent| {
-                                matches!(
-                                    parent.location,
-                                    crate::interaction::items::ItemLocation::WheelSlot(_)
-                                )
-                            })
-                        }
-                        _ => false,
-                    });
-                    if mounted {
-                        "F: remove wheel"
-                    } else if target.is_some_and(|target| target.slot.is_some()) {
-                        if held.is_empty() {
-                            "Carry a wheel. Aim here and press F."
-                        } else {
-                            "F: install wheel"
-                        }
-                    } else if held.is_empty() {
-                        "F: carry · X: split wheel"
-                    } else {
-                        "F: drop · X: split or assemble"
-                    }
-                }
-                ItemKind::Container => {
-                    if item.body == reference.0.vehicle.body {
-                        "Open the fuel cap to fill."
-                    } else {
-                        "F: carry"
-                    }
-                }
-                _ => "",
-            },
-        )
+                0.
+            };
+            if p >= 1. { p.round() as u32 } else { u32::MAX }
+        }),
     };
-    game_detail(
-        target
-            .map(|target| display_name(&reference.0, &runtime.area.items, target.item))
-            .unwrap_or(""),
-        action,
-        amount,
-        state.map_or(-1.0, |item| item.condition),
-        held,
-        runtime.engine_output.rpm,
-        runtime.engine_output.ignition,
-        runtime.engine_output.running,
-        runtime.engine_output.starter,
-        runtime.area.player.seat().is_some(),
-        runtime.handbrake,
-        volumes[0],
-        volumes[1],
-        volumes[2],
-        volumes[3],
-        volumes[4],
-        volumes[5],
-    );
-}
-
-fn display_name<'a>(
-    reference: &'a ReferenceManifest,
-    items: &'a crate::interaction::items::ItemStore,
-    id: ItemId,
-) -> &'a str {
-    let Some(item) = reference.items.iter().find(|item| item.id == id) else {
-        return items.name(id).unwrap_or("");
-    };
-    match item.kind {
-        ItemKind::Decoration => "",
-        ItemKind::Door => {
-            if item.body == reference.vehicle.body
-                || crate::starting_area::belongs_to_vehicle(reference, item.body)
-            {
-                "Car door"
-            } else {
-                item.name.as_str()
-            }
-        }
-        ItemKind::Hood => "Hood",
-        ItemKind::Trunk => "Trunk",
-        ItemKind::Engine => "Engine",
-        ItemKind::Radiator => "Radiator",
-        ItemKind::Tire => "Tire",
-        ItemKind::Rim => "Rim",
-        ItemKind::Wheel => "Wheel",
-        ItemKind::Seat => {
-            if reference
-                .seats
-                .iter()
-                .any(|seat| seat.item == id && seat.driver)
-            {
-                "Driver seat"
-            } else {
-                "Seat"
-            }
-        }
-        ItemKind::Cap => {
-            if reference
-                .openings
-                .iter()
-                .any(|opening| opening.cap == id && opening.can_tune)
-            {
-                return "Water tap";
-            }
-            let tank = reference
-                .openings
-                .iter()
-                .find(|opening| opening.cap == id)
-                .map(|opening| opening.tank);
-            if tank == Some(reference.engine.fuel_tank) {
-                "Fuel cap"
-            } else if tank == Some(reference.engine.oil_tank) {
-                "Oil cap"
-            } else if tank == Some(reference.engine.coolant_tank) {
-                "Coolant cap"
-            } else {
-                "Container cap"
-            }
-        }
-        ItemKind::Container => {
-            if item.body == reference.vehicle.body {
-                return "Fuel tank";
-            }
-            if let Some(tank) = reference.tanks.iter().find(|tank| tank.item == id) {
-                if tank.quantities_liters[0] > 0.0 {
-                    "Fuel can"
-                } else if tank.quantities_liters[1] > 0.0 {
-                    "Oil can"
-                } else if tank.quantities_liters[3] > 0.0 {
-                    "Water container"
-                } else {
-                    "Container"
-                }
-            } else {
-                "Container"
-            }
-        }
+    if drive.last_feedback != Some(stamp) {
+        game_feedback(
+            stamp.actions,
+            stamp.context,
+            name,
+            stamp.notice,
+            stamp.carrying,
+            amount,
+            capacity,
+            has_name,
+            no_text,
+            quantities[0],
+            quantities[1],
+            quantities[2],
+            quantities[3],
+            quantities[4],
+            quantities[5],
+        );
+        drive.last_feedback = Some(stamp);
     }
 }
