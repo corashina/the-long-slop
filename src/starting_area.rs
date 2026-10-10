@@ -13,11 +13,14 @@ use crate::simulation::{
 use crate::vehicle::{
     PhysicsWorld, VEHICLE_COLLIDER_FLAG, VehiclePose, collider_builder, to_rapier,
 };
-use crate::world::{DEFAULT_SEED, WorldStream};
+use crate::world::WorldStream;
 use rapier3d::prelude::{
     Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder, RigidBodyHandle,
 };
 use std::collections::HashMap;
+
+/// Seed for the engine start sequence.
+const START_SEED: u64 = 42;
 
 struct CompoundCollider {
     handle: crate::vehicle::ColliderHandle,
@@ -455,8 +458,7 @@ impl GarageRuntime {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut physics = PhysicsWorld::new(reference, initial_vehicle_pose(reference)?)?;
         let mut area = StartingArea::new(reference, &mut physics, [0.0; 3])?;
-        let mut stream = WorldStream::new(DEFAULT_SEED);
-        stream.configure_starting_area(reference);
+        let mut stream = WorldStream::new(reference);
         stream.sync_at(
             reference.area.player_spawn.translation.map(|v| v as f64),
             &mut physics,
@@ -704,7 +706,7 @@ impl GarageRuntime {
             },
             self.area.items.vehicle_fluids().expect("bound fluids"),
             &reference.engine,
-            start_sample(DEFAULT_SEED, self.attempts),
+            start_sample(START_SEED, self.attempts),
             FIXED_DT,
         );
         if self.engine_output.running && !was_running {
@@ -716,11 +718,10 @@ impl GarageRuntime {
                     .pose,
             );
             let sequence = self.attempts.wrapping_mul(4);
-            let factor = 0.85 + 0.3 * start_sample(DEFAULT_SEED, sequence);
-            let vertical = 2.0 * start_sample(DEFAULT_SEED, sequence.wrapping_add(1)) - 1.0;
-            let angle =
-                std::f32::consts::TAU * start_sample(DEFAULT_SEED, sequence.wrapping_add(2));
-            let radius = start_sample(DEFAULT_SEED, sequence.wrapping_add(3)).cbrt();
+            let factor = 0.85 + 0.3 * start_sample(START_SEED, sequence);
+            let vertical = 2.0 * start_sample(START_SEED, sequence.wrapping_add(1)) - 1.0;
+            let angle = std::f32::consts::TAU * start_sample(START_SEED, sequence.wrapping_add(2));
+            let radius = start_sample(START_SEED, sequence.wrapping_add(3)).cbrt();
             let horizontal = (1.0 - vertical * vertical).sqrt();
             let offset = rapier3d::math::Vector::new(
                 horizontal * angle.cos(),
@@ -846,17 +847,13 @@ impl GarageRuntime {
         self.area
             .interaction
             .drop_held(&mut self.area.items, &mut self.physics);
-        let old = self.physics.snapshot().pose;
         let fuel = self
             .area
             .items
             .get(reference.engine.fuel_tank)
             .and_then(|item| item.fluid.as_ref())
             .map_or(0.0, |fluid| fluid.mixture.total());
-        let distance = -self.stream.origin.absolute(old.position)[2];
-        let pose = self
-            .stream
-            .reset_pose(distance, fuel <= 0.0, &mut self.physics);
+        let pose = self.stream.reset_pose(fuel <= 0.0, &mut self.physics);
         crate::world::sync_station_supplies(
             &mut self.stream,
             &mut self.area.items,
@@ -944,5 +941,12 @@ fn transport_body(
 }
 
 fn start_sample(seed: u64, attempt: u64) -> f32 {
-    (crate::world::hash(seed ^ attempt) >> 40) as f32 / 16_777_216.0
+    (hash(seed ^ attempt) >> 40) as f32 / 16_777_216.0
+}
+
+fn hash(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9e3779b97f4a7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
+    value ^ (value >> 31)
 }

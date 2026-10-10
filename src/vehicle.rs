@@ -493,28 +493,23 @@ impl PhysicsWorld {
     }
 
     pub fn insert_mesh(&mut self, vertices: &[[f32; 3]], indices: &[[u32; 3]]) -> ColliderHandle {
-        self.insert_mesh_at(vertices, indices, [0.0; 3])
-    }
-
-    pub fn insert_mesh_at(
-        &mut self,
-        vertices: &[[f32; 3]],
-        indices: &[[u32; 3]],
-        position: [f32; 3],
-    ) -> ColliderHandle {
         let mesh = ColliderBuilder::trimesh(
             vertices.iter().copied().map(Vector::from_array).collect(),
             indices.to_vec(),
         )
-        .expect("Static mesh must contain valid triangles")
-        .friction(0.8)
-        .translation(Vector::from_array(position));
-        let handle = self.physics.colliders.insert(mesh);
+        .expect("Static mesh must contain valid triangles");
+        let handle = self.insert_static(mesh);
         self.refresh_queries();
         handle
     }
 
-    pub fn remove_collider(&mut self, handle: ColliderHandle) {
+    /// Adds fixed world geometry. Call `refresh_queries` after a batch.
+    pub fn insert_static(&mut self, collider: ColliderBuilder) -> ColliderHandle {
+        self.physics.colliders.insert(collider.friction(0.8))
+    }
+
+    /// Removes fixed world geometry. Call `refresh_queries` after a batch.
+    pub fn remove_static(&mut self, handle: ColliderHandle) {
         if self
             .controller
             .wheels()
@@ -524,6 +519,10 @@ impl PhysicsWorld {
             self.physics.bodies[self.chassis].wake_up(true);
         }
         self.physics.remove_collider(handle);
+    }
+
+    pub fn remove_collider(&mut self, handle: ColliderHandle) {
+        self.remove_static(handle);
         self.refresh_queries();
     }
 
@@ -543,10 +542,9 @@ impl PhysicsWorld {
     }
 
     pub fn insert_box(&mut self, center: [f32; 3], half_size: [f32; 3]) -> ColliderHandle {
-        let handle = self.physics.colliders.insert(
+        let handle = self.insert_static(
             ColliderBuilder::cuboid(half_size[0], half_size[1], half_size[2])
-                .translation(Vector::from_array(center))
-                .friction(0.8),
+                .translation(Vector::from_array(center)),
         );
         self.refresh_queries();
         handle

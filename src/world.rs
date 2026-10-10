@@ -1,14 +1,29 @@
-use crate::reference::{Bounds, ColliderGeometry, ReferenceManifest, StartingAreaReference};
-use crate::vehicle::{ColliderHandle, PhysicsWorld, VehiclePose};
+use rapier3d::glamx::{Quat, Vec3};
+use rapier3d::math::{Pose, Vector};
+use rapier3d::prelude::ColliderBuilder;
 
+use crate::reference::world::WorldReference;
+use crate::reference::{Bounds, ColliderGeometry, ReferenceManifest};
+use crate::vehicle::{ColliderHandle, PhysicsWorld, VehiclePose};
+use generation::{FlatZone, RoadPath, RoadPoints, TerrainNoise};
+
+pub mod generation;
+mod road;
 mod terrain;
 
-pub const CHUNK_LENGTH: f64 = 128.0;
-pub const STATION_SPACING: f64 = 640.0;
+pub use road::{PoleCollider, RoadMesh, mirror};
+pub use terrain::Tile;
+
 pub const REBASE_LIMIT: f32 = 2048.0;
-pub const DEFAULT_SEED: u64 = 42;
-pub const LATERAL_BAND_WIDTH: f64 = 128.0;
-pub const TERRAIN_HALF_WIDTH: f64 = 160.0;
+/// Placeholder fuel stops sit beside every sixth road segment.
+pub const STATION_SEGMENTS: usize = 6;
+const STATION_OFFSET: f32 = 10.0;
+/// `roadGenScript.controlDist`: road placement waits for 100 meters of travel.
+const ROAD_REFRESH: f64 = 100.0;
+/// `TerrainGenerator.distFromTerrain`: tiles read road segments that start this close.
+const TILE_ROAD_RANGE: f64 = 1000.0;
+/// `RoadCoordsForTerrainHeight2`: single height queries read road segments this close.
+const POINT_ROAD_RANGE: f64 = 150.0;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WorldOrigin {
@@ -31,350 +46,220 @@ impl WorldOrigin {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ChunkKey(pub i64);
-
-pub struct RoadSample {
-    pub center: [f64; 3],
-    pub tangent: [f32; 3],
+/// Source generators in one place. Game space is Unity space with Z mirrored and the home lift removed.
+pub struct Generator {
+    pub reference: WorldReference,
+    pub noise: TerrainNoise,
+    pub path: RoadPath,
+    zones: Vec<FlatZone>,
+    /// The source lifts the home onto the terrain. The game keeps the home fixed and lowers the world.
+    pub lift: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Station {
-    pub id: i64,
-    pub absolute_point: [f64; 3],
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum PropKind {
-    Rock,
-    Cactus,
-    Post,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Prop {
-    pub kind: PropKind,
-    pub absolute_point: [f64; 3],
-    pub half_size: [f32; 3],
-}
-
-/// Vertex origin is [lateral_band * 128, 0, -key * 128]. Distance increases along absolute -Z.
-#[derive(Debug, PartialEq)]
-pub struct ChunkData {
-    pub key: ChunkKey,
-    pub lateral_band: i64,
-    pub lateral_samples: Vec<f64>,
-    pub vertices: Vec<[f32; 3]>,
-    pub indices: Vec<[u32; 3]>,
-    pub stations: Vec<Station>,
-    pub props: Vec<Prop>,
-}
-
-impl ChunkData {
-    pub fn origin(&self) -> [f64; 3] {
-        [
-            self.lateral_band as f64 * LATERAL_BAND_WIDTH,
-            0.0,
-            -(self.key.0 as f64 * CHUNK_LENGTH),
-        ]
-    }
-}
-
-fn phase(seed: u64) -> f64 {
-    (hash(seed) % 10_000) as f64 * std::f64::consts::TAU / 10_000.0
-}
-
-pub(crate) fn hash(mut value: u64) -> u64 {
-    value = value.wrapping_add(0x9e3779b97f4a7c15);
-    value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-    value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
-    value ^ (value >> 31)
-}
-
-pub fn road_sample(seed: u64, distance_m: f64) -> RoadSample {
-    let p = phase(seed);
-    let a = distance_m / 700.0 + p;
-    let b = distance_m / 190.0 + p;
-    let x = 16.0 * (a.sin() - p.sin()) + 5.0 * (b.sin() - p.sin());
-    let y = 0.5 * ((distance_m / 300.0 + p).sin() - p.sin());
-    let dx = 16.0 / 700.0 * a.cos() + 5.0 / 190.0 * b.cos();
-    let dy = 0.5 / 300.0 * (distance_m / 300.0 + p).cos();
-    let length = (dx * dx + dy * dy + 1.0).sqrt();
-    RoadSample {
-        center: [x, y, -distance_m],
-        tangent: [
-            (dx / length) as f32,
-            (dy / length) as f32,
-            (-1.0 / length) as f32,
-        ],
-    }
-}
-
-fn height(seed: u64, distance: f64, lateral: f64) -> f64 {
-    let road = road_sample(seed, distance);
-    let fade = ((lateral.abs() - 20.0) / 35.0).clamp(0.0, 1.0);
-    let p = phase(seed);
-    road.center[1]
-        + fade
-            * (3.5
-                + 2.2 * (lateral / 32.0 + distance / 83.0 + p).sin()
-                + 1.2 * (distance / 41.0 - lateral / 24.0).sin())
-}
-
-pub fn generate_chunk(seed: u64, key: ChunkKey) -> ChunkData {
-    generate_chunk_in_band(seed, key, 0)
-}
-
-pub fn generate_chunk_in_band(seed: u64, key: ChunkKey, lateral_band: i64) -> ChunkData {
-    let start = key.0 as f64 * CHUNK_LENGTH;
-    let band_center = lateral_band as f64 * LATERAL_BAND_WIDTH;
-    let mut lateral_samples: Vec<f64> = (-20..=20).map(|i| band_center + i as f64 * 8.0).collect();
-    for edge in [-4.0, 4.0] {
-        if (band_center - TERRAIN_HALF_WIDTH..=band_center + TERRAIN_HALF_WIDTH).contains(&edge) {
-            lateral_samples.push(edge);
-        }
-    }
-    lateral_samples.sort_by(f64::total_cmp);
-    let columns = lateral_samples.len();
-    let mut vertices = Vec::with_capacity(17 * columns);
-    let mut indices = Vec::with_capacity(16 * (columns - 1) * 2);
-    for row in 0..=16 {
-        let distance = start + row as f64 * 8.0;
-        let road = road_sample(seed, distance);
-        for &lateral in &lateral_samples {
-            vertices.push([
-                (road.center[0] + lateral - band_center) as f32,
-                height(seed, distance, lateral) as f32,
-                -(row as f32 * 8.0),
-            ]);
-        }
-    }
-    for row in 0..16 {
-        for col in 0..columns - 1 {
-            let a = (row * columns + col) as u32;
-            let b = a + 1;
-            let c = a + columns as u32;
-            let d = c + 1;
-            indices.extend([[a, b, c], [b, d, c]]);
-        }
-    }
-    let stations =
-        if key.0.rem_euclid(5) == 0 && (10.0 - band_center).abs() < TERRAIN_HALF_WIDTH - 8.0 {
-            vec![station(seed, key.0 / 5)]
-        } else {
-            Vec::new()
+impl Generator {
+    pub fn new(reference: &WorldReference) -> Self {
+        let noise = TerrainNoise::new(
+            reference.seed,
+            reference.edge_of_world,
+            reference.edge_gradient,
+        );
+        let path = RoadPath::new(reference, &noise);
+        let mut generator = Self {
+            reference: reference.clone(),
+            noise,
+            path,
+            zones: Vec::new(),
+            lift: 0.0,
         };
-    let mut props = Vec::with_capacity(5);
-    for i in 0..2 {
-        let bits = hash(seed ^ (key.0 as u64).wrapping_mul(17) ^ i);
-        let distance = start + if i == 0 { 25.0 } else { 45.0 };
-        let lateral = if key.0 == 0 {
-            5.5
-        } else {
-            7.0 + (bits % 24) as f64
-        } * if i == 0 { 1.0 } else { -1.0 };
-        let road = road_sample(seed, distance);
-        props.push(Prop {
-            kind: PropKind::Rock,
-            absolute_point: [
-                road.center[0] + lateral,
-                height(seed, distance, lateral) + 0.6,
-                -distance,
-            ],
-            half_size: [1.0, 0.6, 1.0],
-        });
+        // `StartObjs` align to the road but not to buildings.
+        let anchor = reference.height_anchor;
+        let point = [anchor[0] as f64, anchor[2] as f64];
+        generator.lift = generator.height(point, POINT_ROAD_RANGE, false) - anchor[1] as f64;
+        generator.zones = reference
+            .flat_zones
+            .iter()
+            .map(|zone| FlatZone {
+                center: [
+                    zone.center[0],
+                    (zone.center[1] as f64 + generator.lift) as f32,
+                    zone.center[2],
+                ],
+                inner_sqr: zone.inner_sqr,
+                outer_sqr: zone.outer_sqr,
+            })
+            .collect();
+        generator
     }
-    for lateral in [-4.8, 4.8] {
-        let distance = start + 80.0;
-        let road = road_sample(seed, distance);
-        props.push(Prop {
-            kind: PropKind::Post,
-            absolute_point: [road.center[0] + lateral, road.center[1] + 0.6, -distance],
-            half_size: [0.09, 0.6, 0.09],
-        });
-    }
-    let distance = start + 64.0;
-    let lateral = if hash(seed ^ key.0 as u64) & 1 == 0 {
-        46.0
-    } else {
-        -46.0
-    };
-    let road = road_sample(seed, distance);
-    props.push(Prop {
-        kind: PropKind::Cactus,
-        absolute_point: [
-            road.center[0] + lateral,
-            height(seed, distance, lateral) + 1.2,
-            -distance,
-        ],
-        half_size: [0.2, 1.2, 0.2],
-    });
-    props.retain(|prop| {
-        let road = road_sample(seed, -prop.absolute_point[2]);
-        (prop.absolute_point[0] - road.center[0] - band_center).abs() < TERRAIN_HALF_WIDTH - 8.0
-    });
-    ChunkData {
-        key,
-        lateral_band,
-        lateral_samples,
-        vertices,
-        indices,
-        stations,
-        props,
-    }
-}
 
-pub fn active_chunks(distance_m: f64) -> [ChunkKey; 11] {
-    let current = (distance_m / CHUNK_LENGTH).floor() as i64;
-    std::array::from_fn(|i| ChunkKey(current + i as i64 - 3))
-}
+    /// Calculates road segments up to an absolute Unity Z.
+    pub fn extend_to(&mut self, z: f64) {
+        while self.path.end_z() < z && self.path.extend(&self.reference, &self.noise) {}
+    }
 
-fn inside(point: [f32; 3], bounds: &Bounds, margin: f32) -> bool {
-    [0, 2].iter().all(|&axis| {
-        point[axis] >= bounds.min[axis] - margin && point[axis] <= bounds.max[axis] + margin
-    })
-}
-
-fn prepare_terrain(
-    data: &mut ChunkData,
-    seed: u64,
-    area: &StartingAreaReference,
-    interiors: &[Bounds],
-) {
-    let origin = data.origin();
-    let start = -origin[2];
-    let home = &area.home_bounds;
-    if start > -home.min[2] as f64 + 8.0 || start + CHUNK_LENGTH < -home.max[2] as f64 - 8.0 {
-        return;
-    }
-    let road_x = road_sample(seed, -(home.min[2] + home.max[2]) as f64 * 0.5).center[0];
-    let mut rows: Vec<f64> = (0..=16).map(|row| start + row as f64 * 8.0).collect();
-    for distance in ((-home.max[2] - 4.0).floor() as i32)..=((-home.min[2] + 4.0).ceil() as i32) {
-        if (start..=start + CHUNK_LENGTH).contains(&(distance as f64)) {
-            rows.push(distance as f64);
-        }
-    }
-    rows.sort_by(f64::total_cmp);
-    rows.dedup();
-    for x in ((home.min[0] - road_x as f32 - 4.0).floor() as i32)
-        ..=((home.max[0] - road_x as f32 + 4.0).ceil() as i32)
-    {
-        if (origin[0] - TERRAIN_HALF_WIDTH..=origin[0] + TERRAIN_HALF_WIDTH).contains(&(x as f64)) {
-            data.lateral_samples.push(x as f64);
-        }
-    }
-    data.lateral_samples.sort_by(f64::total_cmp);
-    data.lateral_samples.dedup();
-    let columns = data.lateral_samples.len();
-    data.vertices.clear();
-    data.indices.clear();
-    for &distance in &rows {
-        let road = road_sample(seed, distance);
-        for &lateral in &data.lateral_samples {
-            let x = road.center[0] + lateral;
-            let mut y = height(seed, distance, lateral);
-            let driveway = &area.driveway_bounds;
-            let z_fade = ((distance + driveway.max[2] as f64 + 4.0) / 4.0).clamp(0.0, 1.0)
-                * ((-driveway.min[2] as f64 + 4.0 - distance) / 4.0).clamp(0.0, 1.0);
-            let x_fade = ((x - road.center[0] - 4.0)
-                / (driveway.min[0] as f64 - road.center[0] - 4.0).max(1.0))
-            .clamp(0.0, 1.0)
-                * ((home.max[0] as f64 + 4.0 - x) / 4.0).clamp(0.0, 1.0);
-            y += (area.driveway_height as f64 - y) * z_fade * x_fade;
-            let yard_x = ((x - home.min[0] as f64 + 4.0) / 4.0).clamp(0.0, 1.0)
-                * ((home.max[0] as f64 + 4.0 - x) / 4.0).clamp(0.0, 1.0);
-            let yard_z = ((distance + home.max[2] as f64 + 4.0) / 4.0).clamp(0.0, 1.0)
-                * ((-home.min[2] as f64 + 4.0 - distance) / 4.0).clamp(0.0, 1.0);
-            y += (area.driveway_height as f64 - y) * yard_x * yard_z;
-            data.vertices.push([
-                (x - origin[0]) as f32,
-                y as f32,
-                (-distance - origin[2]) as f32,
-            ]);
-        }
-    }
-    for row in 0..rows.len() - 1 {
-        for col in 0..columns - 1 {
-            let a = (row * columns + col) as u32;
-            let b = a + 1;
-            let c = a + columns as u32;
-            let d = c + 1;
-            for triangle in [[a, b, c], [b, d, c]] {
-                data.indices.push(triangle);
+    /// Bone ends of segments that start within `range` of a Unity X and Z.
+    fn road_points(&self, point: [f64; 2], range: f64, points: &mut Vec<[f32; 3]>) {
+        points.clear();
+        let segments = &self.path.segments;
+        // Segments run toward +Z. Yaw stays within 90 degrees.
+        let first =
+            segments.partition_point(|s| self.path.origin[2] + s.position[2] < point[1] - range);
+        for index in first..segments.len() {
+            let start = self.path.start(index);
+            if start[2] > point[1] + range {
+                break;
+            }
+            if (start[0] - point[0]).powi(2) + (start[2] - point[1]).powi(2) < range * range {
+                points.extend((0..segments[index].points.len()).map(|b| self.path.point(index, b)));
             }
         }
     }
-    terrain::carve_rooms(data, interiors);
-    data.props
-        .retain(|prop| !inside(prop.absolute_point.map(|x| x as f32), home, 4.0));
-    data.stations
-        .retain(|station| !inside(station.absolute_point.map(|x| x as f32), home, 10.0));
-}
 
-fn station(seed: u64, id: i64) -> Station {
-    let mut point = road_sample(seed, id as f64 * STATION_SPACING).center;
-    point[0] += 10.0;
-    Station {
-        id,
-        absolute_point: point,
+    /// Game height at a Unity X and Z.
+    pub fn height(&mut self, point: [f64; 2], range: f64, zones: bool) -> f64 {
+        self.extend_to(point[1] + range);
+        let mut points = Vec::new();
+        self.road_points(point, range, &mut points);
+        let road = RoadPoints {
+            points: &points,
+            range: self.reference.road.point_range,
+        };
+        let zones = if zones { &self.zones[..] } else { &[] };
+        self.noise
+            .height([point[0] as f32, point[1] as f32], zones, &road) as f64
+            - self.lift
+    }
+
+    pub fn tile(&mut self, key: [i32; 2], rooms: &[Bounds]) -> Tile {
+        let terrain = &self.reference.terrain;
+        let (size, resolution) = (terrain.tile_size, terrain.resolution);
+        let center = [key[0] as f64 * size as f64, key[1] as f64 * size as f64];
+        self.extend_to(center[1] + TILE_ROAD_RANGE);
+        let mut points = Vec::new();
+        self.road_points(center, TILE_ROAD_RANGE, &mut points);
+        let road = RoadPoints {
+            points: &points,
+            range: self.reference.road.point_range,
+        };
+        let lift = self.lift;
+        terrain::build(
+            key,
+            size,
+            resolution,
+            |c| (self.noise.height(c, &self.zones, &road) as f64 - lift) as f32,
+            rooms,
+        )
+    }
+
+    /// Converts an absolute Unity point to game space.
+    pub fn game(&self, point: [f64; 3]) -> [f64; 3] {
+        [point[0], point[1] - self.lift, -point[2]]
+    }
+
+    /// Game start of one road segment.
+    pub fn start(&self, index: usize) -> [f64; 3] {
+        self.game(self.path.start(index))
+    }
+
+    pub fn segment(&self, index: usize) -> RoadMesh {
+        let start = self.path.start(index);
+        let biome = self
+            .noise
+            .biome([start[0] as f32, start[2] as f32], start[1] as f32);
+        road::place(
+            &self.reference.road,
+            biome,
+            &self.path.segments[index].rotations,
+            index,
+            self.reference.seed,
+        )
+    }
+
+    /// Placeholder fuel stop beside the start of a road segment.
+    pub fn station(&self, index: usize) -> Station {
+        let yaw = self.path.segments[index].rotations[0][1].to_radians();
+        let start = self.path.start(index);
+        let right = [yaw.cos() as f64, 0.0, -yaw.sin() as f64];
+        let offset = STATION_OFFSET as f64;
+        Station {
+            id: index / STATION_SEGMENTS,
+            point: self.game(std::array::from_fn(|i| start[i] + right[i] * offset)),
+            yaw: -yaw,
+        }
     }
 }
 
-pub fn nearest_station(seed: u64, distance_m: f64) -> Station {
-    station(seed, (distance_m / STATION_SPACING).round() as i64)
+/// Game yaw turns local -Z toward the road heading.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Station {
+    pub id: usize,
+    pub point: [f64; 3],
+    pub yaw: f32,
 }
 
-pub struct LoadedChunk {
-    pub data: ChunkData,
+impl Station {
+    fn pose(&self, origin: &WorldOrigin, local: [f32; 3]) -> Pose {
+        let rotation = Quat::from_rotation_y(self.yaw);
+        let point = Vec3::from_array(origin.local(self.point)) + rotation * Vec3::from_array(local);
+        Pose::from_parts(point, rotation)
+    }
+}
+
+pub struct LoadedTile {
+    pub tile: Tile,
+    collider: ColliderHandle,
+}
+
+pub struct LoadedRoad {
+    pub index: usize,
+    pub start: [f64; 3],
+    pub mesh: RoadMesh,
+    pub station: Option<Station>,
     colliders: Vec<ColliderHandle>,
-    pumps: Vec<(i64, ColliderHandle)>,
+    pump: Option<ColliderHandle>,
 }
 
 pub struct WorldStream {
-    pub seed: u64,
     pub origin: WorldOrigin,
-    chunks: Vec<LoadedChunk>,
-    lateral_band: i64,
-    starting_area: Option<StartingAreaReference>,
+    pub generator: Generator,
+    tiles: Vec<LoadedTile>,
+    roads: Vec<LoadedRoad>,
+    /// `TerrainSetting.PreComputedCoords` in tile units, nearest first.
+    offsets: Vec<[i32; 2]>,
     interiors: Vec<Bounds>,
-    station_items: Vec<(i64, crate::reference::ItemId)>,
-    vehicle_support: Vec<(ChunkKey, i64, ColliderHandle)>,
+    tile_keys: Option<[[i32; 2]; 2]>,
+    road_points: Option<[[f64; 2]; 2]>,
+    needed: Vec<usize>,
+    station_items: Vec<(usize, crate::reference::ItemId)>,
+}
+
+fn offsets(generate_distance: f32, size: f32) -> Vec<[i32; 2]> {
+    let draw = ((generate_distance / size) as i32).max(1);
+    let needed = (((draw as f32 + 0.5).powi(2) * std::f32::consts::PI) as usize).max(5);
+    let side = (draw * 2 + 1).max(4);
+    let mut offsets: Vec<[i32; 2]> = (0..side * side)
+        .map(|i| [i % side - draw, i / side - draw])
+        .collect();
+    // The source bubble sort is stable.
+    offsets.sort_by_key(|o| o[0] * o[0] + o[1] * o[1]);
+    offsets.truncate(needed);
+    offsets
 }
 
 impl WorldStream {
-    pub fn new(seed: u64) -> Self {
-        Self {
-            seed,
-            origin: WorldOrigin::default(),
-            chunks: Vec::with_capacity(11),
-            lateral_band: 0,
-            starting_area: None,
-            interiors: Vec::new(),
-            station_items: Vec::new(),
-            vehicle_support: Vec::with_capacity(3),
-        }
-    }
-
-    pub fn configure_starting_area(&mut self, reference: &ReferenceManifest) {
-        assert!(
-            self.chunks.is_empty(),
-            "Configure terrain before loading chunks"
-        );
-        self.starting_area = Some(reference.area.clone());
+    pub fn new(reference: &ReferenceManifest) -> Self {
+        let world = &reference.world;
+        let home = reference
+            .nodes
+            .iter()
+            .find(|node| node.id == reference.area.home_root)
+            .expect("validated home root")
+            .asset;
+        let mut interiors = Vec::new();
         for collider in &reference.colliders {
             let Some(node) = reference.nodes.iter().find(|node| node.id == collider.node) else {
                 continue;
             };
-            if !node.name.starts_with("interior")
-                || node.asset
-                    != reference
-                        .nodes
-                        .iter()
-                        .find(|node| node.id == reference.area.home_root)
-                        .unwrap()
-                        .asset
-            {
+            if !node.name.starts_with("interior") || node.asset != home {
                 continue;
             }
             let ColliderGeometry::Convex { points } = &collider.geometry else {
@@ -394,122 +279,200 @@ impl WorldStream {
                 max: [f32::NEG_INFINITY; 3],
             };
             for point in points {
-                let point = (pose * rapier3d::math::Vector::from_array(*point)).to_array();
+                let point = (pose * Vector::from_array(*point)).to_array();
                 for axis in 0..3 {
                     bounds.min[axis] = bounds.min[axis].min(point[axis]);
                     bounds.max[axis] = bounds.max[axis].max(point[axis]);
                 }
             }
-            self.interiors.push(bounds);
+            interiors.push(bounds);
+        }
+        Self {
+            origin: WorldOrigin::default(),
+            generator: Generator::new(world),
+            tiles: Vec::new(),
+            roads: Vec::new(),
+            offsets: offsets(world.terrain.generate_distance, world.terrain.tile_size),
+            interiors,
+            tile_keys: None,
+            road_points: None,
+            needed: Vec::new(),
+            station_items: Vec::new(),
         }
     }
 
-    pub fn chunks(&self) -> impl Iterator<Item = &LoadedChunk> {
-        self.chunks.iter()
+    pub fn tiles(&self) -> impl Iterator<Item = &LoadedTile> {
+        self.tiles.iter()
     }
 
-    pub fn lateral_band(&self) -> i64 {
-        self.lateral_band
+    pub fn roads(&self) -> impl Iterator<Item = &LoadedRoad> {
+        self.roads.iter()
     }
 
-    pub fn sync_at(&mut self, absolute: [f64; 3], physics: &mut PhysicsWorld) {
-        let distance = -absolute[2];
-        let lateral = absolute[0] - road_sample(self.seed, distance).center[0];
-        self.lateral_band = (lateral / LATERAL_BAND_WIDTH).round() as i64;
-        let keys = active_chunks(distance);
-        self.chunks.retain(|chunk| {
-            if keys.contains(&chunk.data.key) && chunk.data.lateral_band == self.lateral_band {
-                return true;
+    /// Loads the world around the focus and the car. Both are `ImportantObj` in the source.
+    pub fn sync_at(&mut self, focus: [f64; 3], physics: &mut PhysicsWorld) {
+        let car = self.origin.absolute(physics.snapshot().pose.position);
+        let points = [[focus[0], -focus[2]], [car[0], -car[2]]];
+        let tiles = self.sync_tiles(points, physics);
+        let roads = self.sync_roads(points, physics);
+        if tiles || roads {
+            physics.refresh_queries();
+        }
+    }
+
+    fn sync_tiles(&mut self, points: [[f64; 2]; 2], physics: &mut PhysicsWorld) -> bool {
+        let terrain = &self.generator.reference.terrain;
+        let size = terrain.tile_size as f64;
+        // `Mathf.RoundToInt` rounds half to even.
+        let keys = points.map(|p| p.map(|v| (v / size).round_ties_even() as i32));
+        if self.tile_keys == Some(keys) {
+            return false;
+        }
+        self.tile_keys = Some(keys);
+        let remove = (terrain.remove_distance as f64 / size).powi(2);
+        self.tiles.retain(|loaded| {
+            let key = loaded.tile.key;
+            let near = keys.iter().any(|k| {
+                ((key[0] - k[0]) as f64).powi(2) + ((key[1] - k[1]) as f64).powi(2) < remove
+            });
+            if !near {
+                physics.remove_static(loaded.collider);
             }
-            for handle in &chunk.colliders {
-                physics.remove_collider(*handle);
-            }
-            false
+            near
         });
-        for key in keys {
-            if self.chunks.iter().any(|c| c.data.key == key) {
-                continue;
+        for center in keys {
+            for offset in &self.offsets {
+                let key = [center[0] + offset[0], center[1] + offset[1]];
+                if self.tiles.iter().any(|loaded| loaded.tile.key == key) {
+                    continue;
+                }
+                let tile = self.generator.tile(key, &self.interiors);
+                let collider = physics.insert_static(
+                    ColliderBuilder::trimesh(
+                        tile.positions
+                            .iter()
+                            .copied()
+                            .map(Vector::from_array)
+                            .collect(),
+                        tile.indices.clone(),
+                    )
+                    .expect("terrain tile triangles")
+                    .translation(Vector::from_array(self.origin.local(tile.center))),
+                );
+                self.tiles.push(LoadedTile { tile, collider });
             }
-            let mut data = generate_chunk_in_band(self.seed, key, self.lateral_band);
-            if let Some(area) = &self.starting_area {
-                prepare_terrain(&mut data, self.seed, area, &self.interiors);
+        }
+        true
+    }
+
+    fn sync_roads(&mut self, points: [[f64; 2]; 2], physics: &mut PhysicsWorld) -> bool {
+        if let Some(last) = self.road_points
+            && points.iter().zip(&last).all(|(p, l)| {
+                (p[0] - l[0]).powi(2) + (p[1] - l[1]).powi(2) < ROAD_REFRESH * ROAD_REFRESH
+            })
+        {
+            return false;
+        }
+        self.road_points = Some(points);
+        let range = self.generator.reference.road.generate_distance as f64;
+        let far = points.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
+        let near = points.iter().map(|p| p[1]).fold(f64::MAX, f64::min);
+        self.generator.extend_to(far + range);
+        let path = &self.generator.path;
+        self.needed.clear();
+        let first = path
+            .segments
+            .partition_point(|s| path.origin[2] + s.position[2] < near - range);
+        for index in first..path.segments.len() {
+            let start = path.start(index);
+            if start[2] > far + range {
+                break;
             }
-            let mut colliders = Vec::with_capacity(7);
-            let mut pumps = Vec::new();
-            colliders.push(physics.insert_mesh_at(
-                &data.vertices,
-                &data.indices,
-                self.origin.local(data.origin()),
-            ));
-            for prop in &data.props {
-                if prop.kind != PropKind::Cactus {
-                    colliders.push(
-                        physics.insert_box(self.origin.local(prop.absolute_point), prop.half_size),
-                    );
+            // `GetNearRoads` compares squared distance with the squared range.
+            if points
+                .iter()
+                .any(|p| (start[0] - p[0]).powi(2) + (start[2] - p[1]).powi(2) <= range * range)
+            {
+                self.needed.push(index);
+            }
+        }
+        self.roads.retain(|road| {
+            let keep = self.needed.contains(&road.index);
+            if !keep {
+                for handle in &road.colliders {
+                    physics.remove_static(*handle);
                 }
             }
-            for station in &data.stations {
-                let mut center = station.absolute_point;
-                center[0] += 6.0;
-                center[1] += 1.5;
-                colliders.push(physics.insert_box(self.origin.local(center), [2.0, 1.5, 3.0]));
-                let mut pump = station.absolute_point;
-                pump[1] += 0.7;
-                pump[2] -= 3.0;
-                let handle = physics.insert_box(self.origin.local(pump), [0.35, 0.7, 0.35]);
-                colliders.push(handle);
-                pumps.push((station.id, handle));
-            }
-            self.chunks.push(LoadedChunk {
-                data,
-                colliders,
-                pumps,
-            });
-        }
-        self.sync_vehicle_support(physics);
-    }
-
-    fn sync_vehicle_support(&mut self, physics: &mut PhysicsWorld) {
-        let car = self.origin.absolute(physics.snapshot().pose.position);
-        let distance = -car[2];
-        let lateral = car[0] - road_sample(self.seed, distance).center[0];
-        let band = (lateral / LATERAL_BAND_WIDTH).round() as i64;
-        let center = ChunkKey((distance / CHUNK_LENGTH).floor() as i64);
-        let keys = [ChunkKey(center.0 - 1), center, ChunkKey(center.0 + 1)];
-        // One terrain cell covers the fixed car's full footprint.
-        let covered = |key: ChunkKey| {
-            self.chunks.iter().any(|chunk| {
-                chunk.data.key == key
-                    && (lateral - chunk.data.lateral_band as f64 * LATERAL_BAND_WIDTH).abs()
-                        < TERRAIN_HALF_WIDTH - 8.0
-            })
-        };
-        self.vehicle_support.retain(|&(key, old_band, handle)| {
-            if keys.contains(&key) && old_band == band && !covered(key) {
-                return true;
-            }
-            physics.remove_collider(handle);
-            false
+            keep
         });
-        for key in keys {
-            if covered(key)
-                || self
-                    .vehicle_support
-                    .iter()
-                    .any(|&(old_key, old_band, _)| old_key == key && old_band == band)
-            {
+        for i in 0..self.needed.len() {
+            let index = self.needed[i];
+            if self.roads.iter().any(|road| road.index == index) {
                 continue;
             }
-            let mut data = generate_chunk_in_band(self.seed, key, band);
-            if let Some(area) = &self.starting_area {
-                prepare_terrain(&mut data, self.seed, area, &self.interiors);
-            }
-            let handle = physics.insert_mesh_at(
-                &data.vertices,
-                &data.indices,
-                self.origin.local(data.origin()),
+            let road = self.place_road(index, physics);
+            self.roads.push(road);
+        }
+        true
+    }
+
+    fn place_road(&self, index: usize, physics: &mut PhysicsWorld) -> LoadedRoad {
+        let mesh = self.generator.segment(index);
+        let start = self.generator.start(index);
+        let local = Vector::from_array(self.origin.local(start));
+        let mut colliders = Vec::with_capacity(mesh.colliders.len() + 3);
+        colliders.push(
+            physics.insert_static(
+                ColliderBuilder::trimesh(
+                    mesh.positions
+                        .iter()
+                        .copied()
+                        .map(Vector::from_array)
+                        .collect(),
+                    mesh.indices.clone(),
+                )
+                .expect("road segment triangles")
+                .translation(local),
+            ),
+        );
+        for collider in &mesh.colliders {
+            let builder = match *collider {
+                PoleCollider::Capsule { a, b, radius } => {
+                    ColliderBuilder::capsule_from_endpoints(a + local, b + local, radius)
+                }
+                PoleCollider::Box { matrix, half_size } => {
+                    let (_, rotation, translation) = matrix.to_scale_rotation_translation();
+                    ColliderBuilder::cuboid(half_size.x, half_size.y, half_size.z)
+                        .position(Pose::from_parts(translation + local, rotation))
+                }
+            };
+            colliders.push(physics.insert_static(builder));
+        }
+        let mut station = None;
+        let mut pump = None;
+        if index > 0 && index % STATION_SEGMENTS == 0 {
+            let stop = self.generator.station(index);
+            colliders.push(
+                physics.insert_static(
+                    ColliderBuilder::cuboid(2.0, 1.5, 3.0)
+                        .position(stop.pose(&self.origin, [6.0, 1.5, 0.0])),
+                ),
             );
-            self.vehicle_support.push((key, band, handle));
+            let handle = physics.insert_static(
+                ColliderBuilder::cuboid(0.35, 0.7, 0.35)
+                    .position(stop.pose(&self.origin, [0.0, 0.7, -3.0])),
+            );
+            colliders.push(handle);
+            pump = Some(handle);
+            station = Some(stop);
+        }
+        LoadedRoad {
+            index,
+            start,
+            mesh,
+            station,
+            colliders,
+            pump,
         }
     }
 
@@ -528,27 +491,68 @@ impl WorldStream {
         Some(shift)
     }
 
-    /// Load the destination before the caller resets the vehicle.
-    pub fn reset_pose(
-        &mut self,
-        distance: f64,
-        at_station: bool,
-        physics: &mut PhysicsWorld,
-    ) -> VehiclePose {
-        let sample_distance = if at_station {
-            nearest_station(self.seed, distance).id as f64 * STATION_SPACING
+    /// Nearest road bone end to a game point, with the game yaw along the road.
+    pub fn nearest_road(&self, point: [f64; 3]) -> ([f64; 3], f32) {
+        let path = &self.generator.path;
+        let target = [point[0], -point[2]];
+        let mut best = (f64::MAX, 0, 0);
+        for (index, segment) in path.segments.iter().enumerate() {
+            for bone in 0..segment.points.len() {
+                let p = path.point(index, bone);
+                let d = (p[0] as f64 - target[0]).powi(2) + (p[2] as f64 - target[1]).powi(2);
+                if d < best.0 {
+                    best = (d, index, bone);
+                }
+            }
+        }
+        let (_, index, bone) = best;
+        let end = path.point(index, bone);
+        let start = if bone > 0 {
+            path.point(index, bone - 1)
         } else {
-            distance
+            path.start(index).map(|v| v as f32)
         };
-        let road = road_sample(self.seed, sample_distance);
-        let mut point = if at_station {
-            nearest_station(self.seed, distance).absolute_point
+        // Unity heading (dx, dz) becomes game yaw atan2(-dx, dz).
+        let yaw = (-(end[0] - start[0])).atan2(end[2] - start[2]);
+        (self.generator.game(end.map(|v| v as f64)), yaw)
+    }
+
+    /// Placeholder fuel stop nearest to a game point.
+    pub fn nearest_station(&mut self, point: [f64; 3]) -> Station {
+        let index = {
+            let path = &self.generator.path;
+            let target = [point[0], -point[2]];
+            (0..path.segments.len())
+                .min_by(|a, b| {
+                    let d = |i: usize| {
+                        let s = path.start(i);
+                        (s[0] - target[0]).powi(2) + (s[2] - target[1]).powi(2)
+                    };
+                    d(*a).total_cmp(&d(*b))
+                })
+                .unwrap_or(0)
+        };
+        let id = ((index as f64 / STATION_SEGMENTS as f64).round() as usize).max(1);
+        let index = id * STATION_SEGMENTS;
+        let z = self.generator.path.origin[2]
+            + (index as f64 + 1.0) * self.generator.reference.road.segment_length as f64;
+        self.generator.extend_to(z);
+        self.generator.station(index)
+    }
+
+    /// Load the destination before the caller resets the vehicle.
+    pub fn reset_pose(&mut self, at_station: bool, physics: &mut PhysicsWorld) -> VehiclePose {
+        let car = self.origin.absolute(physics.snapshot().pose.position);
+        let range = self.generator.reference.road.generate_distance as f64;
+        self.generator.extend_to(-car[2] + range);
+        let (mut point, yaw) = if at_station {
+            let station = self.nearest_station(car);
+            (station.point, station.yaw)
         } else {
-            road.center
+            self.nearest_road(car)
         };
         self.sync_at(point, physics);
         point[1] += 1.1;
-        let yaw = (-road.tangent[0]).atan2(-road.tangent[2]);
         VehiclePose {
             position: self.origin.local(point),
             rotation: [0.0, (yaw * 0.5).sin(), 0.0, (yaw * 0.5).cos()],
@@ -562,34 +566,35 @@ pub fn sync_station_supplies(
     interaction: &mut crate::interaction::InteractionState,
     physics: &mut PhysicsWorld,
 ) {
-    for chunk in &stream.chunks {
-        for &(station, handle) in &chunk.pumps {
-            let item = if let Some((_, item)) =
-                stream.station_items.iter().find(|(id, _)| *id == station)
-            {
-                *item
-            } else {
-                let item =
-                    crate::reference::ItemId(0x8000_0000 + stream.station_items.len() as u32);
-                let pose =
-                    crate::vehicle::from_rapier(physics.rapier().colliders[handle].position());
-                items.insert_supply(item, pose);
-                // Retain the road stop's original four-liter-per-second rate.
-                interaction
-                    .register_pump(item, 4.0)
-                    .expect("valid station pump");
-                stream.station_items.push((station, item));
-                item
-            };
-            physics.rapier_mut().colliders[handle].user_data = item.0 as u128 + 1;
-            let state = items.get_mut(item).expect("registered station supply");
-            state.pose = crate::vehicle::from_rapier(physics.rapier().colliders[handle].position());
-            state
-                .fluid
-                .as_mut()
-                .expect("pump reservoir")
-                .mixture
-                .quantities_liters = [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        }
+    for road in &stream.roads {
+        let (Some(station), Some(handle)) = (road.station, road.pump) else {
+            continue;
+        };
+        let item = if let Some((_, item)) = stream
+            .station_items
+            .iter()
+            .find(|(id, _)| *id == station.id)
+        {
+            *item
+        } else {
+            let item = crate::reference::ItemId(0x8000_0000 + stream.station_items.len() as u32);
+            let pose = crate::vehicle::from_rapier(physics.rapier().colliders[handle].position());
+            items.insert_supply(item, pose);
+            // Retain the road stop's original four-liter-per-second rate.
+            interaction
+                .register_pump(item, 4.0)
+                .expect("valid station pump");
+            stream.station_items.push((station.id, item));
+            item
+        };
+        physics.rapier_mut().colliders[handle].user_data = item.0 as u128 + 1;
+        let state = items.get_mut(item).expect("registered station supply");
+        state.pose = crate::vehicle::from_rapier(physics.rapier().colliders[handle].position());
+        state
+            .fluid
+            .as_mut()
+            .expect("pump reservoir")
+            .mixture
+            .quantities_liters = [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0];
     }
 }

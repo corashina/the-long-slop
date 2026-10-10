@@ -280,21 +280,28 @@ class GltfExporter:
                 root_nodes.append(index)
             else:
                 self.document.nodes[mapping[key(record['parent'])]].children.append(index)
-        self.document.scenes.append(gl.Scene(nodes=root_nodes))
-        self.document.scene = 0
+        result = self.save(root_nodes)
+        return {**result,
+                'node_count':len(records), 'mesh_count':len(self.meshes), 'material_adaptations':self.material_report,
+                'nodes':[{'source':source_id(r['reader']),'gltf_node':mapping[key(r['reader'])],
+                    'parent':source_id(r['parent']) if r['parent'] else None,'hierarchy_path':r['path'],
+                    'active':r['active'],'transform':{'translation':self.document.nodes[mapping[key(r['reader'])]].translation,
+                        'rotation':self.document.nodes[mapping[key(r['reader'])]].rotation,'scale':self.document.nodes[mapping[key(r['reader'])]].scale}} for r in records]}
+
+    def save(self, root_nodes):
+        gl = self.gl
+        self.output.parent.mkdir(parents=True, exist_ok=True)
+        # A record-only asset has no scene. Some loaders reject an empty node list.
+        if root_nodes:
+            self.document.scenes.append(gl.Scene(nodes=root_nodes))
+            self.document.scene = 0
         self.document.buffers.append(gl.Buffer(uri=self.output.with_suffix('.bin').name,byteLength=len(self.binary)))
         self.output.with_suffix('.bin').write_bytes(self.binary)
         self.document.save_json(str(self.output))
         validate_gltf(self.output)
         paths={buffer.uri for buffer in self.document.buffers}|{image.uri for image in self.document.images}
         dependencies=[{'file':f'reference/{path}','sha256':hashlib.sha256((self.output.parent/path).read_bytes()).hexdigest()} for path in sorted(paths)]
-        return {'path': self.output.name, 'sha256': hashlib.sha256(self.output.read_bytes()).hexdigest(),
-                'dependencies':dependencies,
-                'node_count':len(records), 'mesh_count':len(self.meshes), 'material_adaptations':self.material_report,
-                'nodes':[{'source':source_id(r['reader']),'gltf_node':mapping[key(r['reader'])],
-                    'parent':source_id(r['parent']) if r['parent'] else None,'hierarchy_path':r['path'],
-                    'active':r['active'],'transform':{'translation':self.document.nodes[mapping[key(r['reader'])]].translation,
-                        'rotation':self.document.nodes[mapping[key(r['reader'])]].rotation,'scale':self.document.nodes[mapping[key(r['reader'])]].scale}} for r in records]}
+        return {'path': self.output.name, 'sha256': hashlib.sha256(self.output.read_bytes()).hexdigest(), 'dependencies':dependencies}
 
 
 def validate_gltf(path):

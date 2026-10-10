@@ -175,24 +175,21 @@ fn recovery_preserves_state() {
         .mixture
         .quantities_liters = [0.0; 6];
     let quantities = fluids(&runtime);
-    let parts: Vec<_> = runtime
-        .area
-        .items
-        .iter()
-        .map(|item| (item.id, item.location, item.condition))
-        .collect();
-    let body_count = runtime.physics.rapier().bodies.len();
-    runtime.recover(&reference);
-    assert_eq!(fluids(&runtime), quantities);
-    assert_eq!(
+    // Station supplies stream with the road. Recovery may load another one.
+    let parts = |runtime: &GarageRuntime| {
         runtime
             .area
             .items
             .iter()
+            .filter(|item| item.id.0 < 0x8000_0000)
             .map(|item| (item.id, item.location, item.condition))
-            .collect::<Vec<_>>(),
-        parts
-    );
+            .collect::<Vec<_>>()
+    };
+    let before = parts(&runtime);
+    let body_count = runtime.physics.rapier().bodies.len();
+    runtime.recover(&reference);
+    assert_eq!(fluids(&runtime), quantities);
+    assert_eq!(parts(&runtime), before);
     assert_eq!(runtime.trip_m, 256.0);
     assert_eq!(runtime.physics.rapier().bodies.len(), body_count);
 }
@@ -715,22 +712,13 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
             .sqrt()
             < reference.player.aim_reach
     );
-    let station = my_summer_slop::world::nearest_station(
-        runtime.stream.seed,
-        -runtime
-            .stream
-            .origin
-            .absolute(runtime.physics.snapshot().pose.position)[2],
-    );
     let car = runtime
         .stream
         .origin
         .absolute(runtime.physics.snapshot().pose.position);
+    let station = runtime.stream.nearest_station(car);
     assert!(
-        ((car[0] - station.absolute_point[0]).powi(2)
-            + (car[2] - station.absolute_point[2]).powi(2))
-        .sqrt()
-            < 0.01
+        ((car[0] - station.point[0]).powi(2) + (car[2] - station.point[2]).powi(2)).sqrt() < 0.01
     );
     // Stage the same source can as trunk cargo. Recovery must preserve its car-relative pose.
     let body = runtime.area.items.get(can).unwrap().body.unwrap();
@@ -773,32 +761,26 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
 #[test]
 fn walking_far_keeps_a_parked_road_car_supported() {
     let mut physics = common::world();
-    let mut stream = my_summer_slop::world::WorldStream::new(my_summer_slop::world::DEFAULT_SEED);
-    let pose = stream.reset_pose(640.0, false, &mut physics);
+    let mut stream = my_summer_slop::world::WorldStream::new(&common::reference());
+    let pose = stream.reset_pose(false, &mut physics);
     physics.reset(pose);
-    for _ in 0..180 {
-        physics.apply_vehicle_forces(
-            my_summer_slop::simulation::DriveInput {
-                handbrake: true,
-                ..Default::default()
-            },
-            0.0,
-        );
-        physics.step_physics();
-    }
+    let parked = |physics: &mut my_summer_slop::vehicle::PhysicsWorld, steps: usize| {
+        for _ in 0..steps {
+            physics.apply_vehicle_forces(
+                my_summer_slop::simulation::DriveInput {
+                    handbrake: true,
+                    ..Default::default()
+                },
+                0.0,
+            );
+            physics.step_physics();
+        }
+    };
+    parked(&mut physics, 180);
     let before = physics.snapshot().pose.position;
-    let distant = my_summer_slop::world::road_sample(stream.seed, 3000.0).center;
-    stream.sync_at(distant, &mut physics);
-    for _ in 0..120 {
-        physics.apply_vehicle_forces(
-            my_summer_slop::simulation::DriveInput {
-                handbrake: true,
-                ..Default::default()
-            },
-            0.0,
-        );
-        physics.step_physics();
-    }
+    let car = stream.origin.absolute(before);
+    stream.sync_at([car[0] + 400.0, car[1], car[2] - 3000.0], &mut physics);
+    parked(&mut physics, 120);
     let after = physics.snapshot().pose.position;
     assert!(
         after[1] > before[1] - 0.1,
@@ -812,38 +794,11 @@ fn walking_far_keeps_a_parked_road_car_supported() {
             .wheels_contact
             .iter()
             .all(|contact| *contact),
-        "support halo must retain all four wheel contacts"
-    );
-    assert_eq!(stream.chunks().count(), 11);
-    assert!(
-        physics.collider_count() <= 66,
-        "support halo exceeded collider bound"
-    );
-    assert_eq!(
-        physics
-            .rapier()
-            .colliders
-            .iter()
-            .filter(|(_, collider)| collider.shape().as_trimesh().is_some())
-            .count(),
-        14
+        "the car keeps its own terrain tiles"
     );
     stream.sync_at(stream.origin.absolute(after), &mut physics);
     let count = physics.collider_count();
-    assert!(
-        count <= 63,
-        "returning focus must remove the terrain-only support halo"
-    );
-    assert_eq!(
-        physics
-            .rapier()
-            .colliders
-            .iter()
-            .filter(|(_, collider)| collider.shape().as_trimesh().is_some())
-            .count(),
-        11
-    );
-    stream.sync_at(stream.origin.absolute(after), &mut physics);
+    stream.sync_at([car[0] + 1.0, car[1], car[2]], &mut physics);
     assert_eq!(
         physics.collider_count(),
         count,
@@ -996,29 +951,56 @@ fn production_garage_exits_and_reverse_to_road() {
             crossed = true;
         }
         let absolute = runtime.stream.origin.absolute(state.pose.position);
-        let road = my_summer_slop::world::road_sample(runtime.stream.seed, -absolute[2]);
-        if (absolute[0] - road.center[0]).abs() <= 4.0 {
-            assert!(
-                state.wheels_contact.iter().all(|contact| *contact),
-                "car lost wheel support at the road join: {:?}, contacts {:?}",
-                state.pose.position,
-                state.wheels_contact
-            );
-            assert!(
-                state.pose.position.iter().all(|value| value.is_finite())
-                    && state.pose.position[1] > 0.0,
-                "car left the terrain at the road join"
-            );
-            println!(
-                "source road joined after {} reverse steps at {:?}; road centre {:?}; contacts {:?}",
-                step + 1,
-                absolute,
-                road.center,
-                state.wheels_contact
-            );
-            joined = true;
-            break;
+        let (road, yaw) = runtime.stream.nearest_road(absolute);
+        let lateral = ((absolute[0] - road[0]) * yaw.cos() as f64
+            - (absolute[2] - road[2]) * yaw.sin() as f64)
+            .abs();
+        if lateral > 4.0 {
+            continue;
         }
+        assert!(
+            state.pose.position.iter().all(|value| value.is_finite())
+                && state.pose.position[1] > 0.0,
+            "car left the terrain at the road join"
+        );
+        // The source terrain sits 0.1 meters below the road within 4.5 meters of it.
+        // A wheel can leave that lip for a moment. All four must land within one second.
+        let mut settled = None;
+        for extra in 0..60 {
+            if runtime
+                .physics
+                .snapshot()
+                .wheels_contact
+                .iter()
+                .all(|contact| *contact)
+            {
+                settled = Some(extra);
+                break;
+            }
+            runtime.step(
+                &reference,
+                FrameInput {
+                    held: keys::BACK,
+                    ..FrameInput::default()
+                },
+            );
+        }
+        let landed = runtime.physics.snapshot();
+        assert!(
+            settled.is_some(),
+            "car lost wheel support at the road join: {:?}, contacts {:?}",
+            landed.pose.position,
+            landed.wheels_contact
+        );
+        println!(
+            "source road joined after {} reverse steps at {:?}; road bone {:?}; all wheels down after {} more steps",
+            step + 1,
+            absolute,
+            road,
+            settled.unwrap()
+        );
+        joined = true;
+        break;
     }
     let exit = runtime.physics.snapshot();
     assert!(

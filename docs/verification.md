@@ -34,7 +34,7 @@ The source interaction tests stage clear player positions. They do not prove a c
 The actual source flow opens both garage leaves through aim and Use.
 It enters the recovered driver seat and closes the driver door from the seat.
 The car starts and reverses through the garage onto the road.
-It reaches the road lane after 6.65 seconds with all four wheel contacts.
+It reaches the generated road lane after 5.65 seconds. All four wheels land within four more steps.
 After braking, it continues beyond the lane. This check proves the join, not parking within the lane.
 
 The car remains still for 90 seconds with the source spare wheel present.
@@ -98,3 +98,29 @@ The [Starting House](https://the-long-drive.fandom.com/wiki/Starting_House),
 [Lada 2101](https://the-long-drive.fandom.com/wiki/Lada_2101) wiki pages provided secondary context.
 The site is a community wiki. Installed-build evidence controls conflicting values.
 See `docs/research/2026-10-09-garage-reference.md` for the recovery record.
+
+## World generation
+
+Verification date: 2026-10-10, Europe/Warsaw.
+Sources: `roadGenScript` 64771, `TerrainGenerationSettings` 64898, and `terrainHeightAlignToBuildingScript` 79970 in `level1`.
+Draw distances come from `settingsscript` 16865 in `level0` at the default slider.
+
+The `System.Random` port returns the published .NET values for seeds 0 and 42.
+The Perlin port returns the engine lattice value 0.4652731.
+The serialized seed is -1705217151. The source picks a new seed for each new game. This build keeps the serialized one.
+The source lifts the home onto the terrain. This build keeps the home fixed and lowers the world by 578.897 meters.
+
+| Check | Result |
+| --- | --- |
+| Formatting and native suite | 90 passed; six source gates skipped by default |
+| Installed-source gates | Six passed in explicit runs |
+| Exporter suite | Four passed |
+| Release WASM | Passed |
+
+Native checks cover tile seams, skinned road bone ends, streaming bounds, recovery, rebasing, and home flat zones.
+The source terrain sits 0.1 meters below the road within 4.5 meters of it. A wheel can leave that lip for a moment.
+
+A headless Chromium run with SwiftShader showed the road, poles, sand terrain, and home.
+That run used a temporary roadside spawn in a copied manifest. It is not a performance measurement.
+
+Distant terrain layers, the `TerrainBiome` blend shader, building holes, power lines, lamps, and grass are not reproduced.
