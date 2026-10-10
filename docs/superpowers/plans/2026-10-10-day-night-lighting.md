@@ -114,26 +114,26 @@ Modify `tools/reference/gltf.py`, `tools/reference/export.py`, `tools/reference/
 - Use asset ID plus glTF material index for material links. Reuse typed texture records for cookies and sky images.
 - Produce `LightingRecord::validate(&self, manifest: &ReferenceManifest) -> Result<(), ReferenceError>`.
 
-- [ ] Add `test_cycle_uses_scene_values_and_nested_transition_durations` with 1200 day, 300 night, 240 dawn, and 180 dusk seconds.
+- [x] Add `test_cycle_uses_scene_values_and_nested_transition_durations` with 1200 day, 300 night, 240 dawn, and 180 dusk seconds.
   Assert the startup offset equals 240 and the total cycle equals 1500, not 1920 seconds.
-- [ ] Add `test_runtime_intensity_overrides_serialized_light_intensity`.
+- [x] Add `test_runtime_intensity_overrides_serialized_light_intensity`.
   Assert the selected high-beam state intensity is 1, although its serialized Light intensity is 1.25.
-- [ ] Add `test_selected_scene_lamps_have_checked_links`.
+- [x] Add `test_selected_scene_lamps_have_checked_links`.
   Assert five house controls, six lamp entries, two headlight controllers, one cabin controller, and a rear-light controller.
-- [ ] Add `rejects_missing_cookie_and_invalid_controller_links` in `lighting_reference.rs`.
+- [x] Add `rejects_missing_cookie_and_invalid_controller_links` in `lighting_reference.rs`.
   Remove a required cookie, alter a node ID, duplicate a control ID, and inject a nonfinite angle. Assert rejection.
-- [ ] Add `prototype_loading_does_not_spawn_a_pole_at_the_origin`. Verify readiness counts only unique scene instances.
-- [ ] Run the new Python cases and `./scripts/check.ps1 -Test lighting_reference`. Expect failures before implementation.
-- [ ] Recover source `level1:64920`, selected scene Lada links, house switch links, and desert road pole links.
+- [x] Add `prototype_loading_does_not_spawn_a_pole_at_the_origin`. Verify readiness counts only unique scene instances.
+- [x] Run the new Python cases and `./scripts/check.ps1 -Test lighting_reference`. Expect failures before implementation.
+- [x] Recover source `level1:64920`, selected scene Lada links, house switch links, and desert road pole links.
   Trace startup overrides, usable events, electronics output, on/off materials, sky shaders, stars, source fog mode, and color space.
-- [ ] Export on/off materials even when no mesh uses them at startup. Retain stable material indices and condition keys.
-- [ ] Export the pole scene separately. Keep its transforms reusable; do not bake its original prefab world placement.
-- [ ] Keep prototype nodes outside unique scene binding and body/item construction. Validate their links within their reusable asset.
-- [ ] Implement required records and validation. Check full custom-component byte consumption through `Source.read`.
-- [ ] Regenerate the fixture and installed export. Write the accepted manifest after resource and link validation succeeds.
-- [ ] Run the Python suite, lighting reference tests, and existing reference tests. Expect no regressions.
-- [ ] Build and load the current daylight game with the new export before replacing its renderer.
-- [ ] Commit as `Export source cycle and lamp controllers`.
+- [x] Export on/off materials even when no mesh uses them at startup. Retain stable material indices and condition keys.
+- [x] Export the pole scene separately. Keep its transforms reusable; do not bake its original prefab world placement.
+- [x] Keep prototype nodes outside unique scene binding and body/item construction. Validate their links within their reusable asset.
+- [x] Implement required records and validation. Check full custom-component byte consumption through `Source.read`.
+- [x] Regenerate the fixture and installed export. Write the accepted manifest after resource and link validation succeeds.
+- [x] Run the Python suite, lighting reference tests, and existing reference tests. Expect no regressions.
+- [x] Build and load the current daylight game with the new export before replacing its renderer.
+- [x] Commit as `Export source cycle and lamp controllers`.
 
 ## Task 2: Implement the active cycle clock
 
