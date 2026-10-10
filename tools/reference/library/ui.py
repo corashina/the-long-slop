@@ -38,12 +38,16 @@ def convert_layout(record: dict, ancestry: tuple[dict, ...]) -> dict:
     if canvas.get('m_RenderMode') == 2 or viewport is None:
         return {'browser': {'space': 'world' if canvas.get('m_RenderMode') == 2 else 'unresolved',
                             'rect': None, 'scale_factor': None, 'y_conversion_count': 0}}
+    parents = tuple(item for item in ancestry if 'canvas' not in item)
+    if any('m_AnchorMin' not in item for item in parents):
+        return {'browser': {'space': 'unresolved', 'rect': None, 'scale_factor': None,
+                            'y_conversion_count': 0, 'reason': 'ordinary_transform_ancestry'}}
     scale = _scale(scaler, viewport)
     if scale <= 0:
         raise ValueError('Canvas scale must be positive')
     canvas_size = (viewport[0] / scale, viewport[1] / scale)
     parent = [0, 0, *canvas_size]
-    for current in (*[item for item in ancestry if 'm_AnchorMin' in item], record):
+    for current in (*parents, record):
         minimum, maximum = current['m_AnchorMin'], current['m_AnchorMax']
         pivot, position, delta = current['m_Pivot'], current['m_AnchoredPosition'], current['m_SizeDelta']
         size = [(maximum[axis] - minimum[axis]) * parent[2 + index] + delta[axis]

@@ -42,6 +42,27 @@ class LayoutTests(unittest.TestCase):
         result = convert_layout(child, (context, parent))
         self.assertEqual(result['browser']['rect'], [25, 480, 190, 80])
 
+    def test_ordinary_parent_rejects_stale_anchors(self):
+        context = {'canvas': {'m_RenderMode': 0}, 'scaler': {'m_UiScaleMode': 0, 'm_ScaleFactor': 1},
+                   'viewport': [800, 600]}
+        earlier_rectangle = rect(20, 30)
+        for translation in ((0, 0), (200, 150)):
+            ordinary_parent = {'m_LocalPosition': {'x': translation[0], 'y': translation[1], 'z': 0},
+                               'm_LocalScale': {'x': 1, 'y': 1, 'z': 1},
+                               'm_LocalRotation': {'x': 0, 'y': 0, 'z': 0, 'w': 1}}
+            for stale_y in (.8510000109672546, 10000):
+                with self.subTest(translation=translation, stale_y=stale_y):
+                    child = rect(0, stale_y)
+                    child['m_LocalPosition'] = {'x': 0, 'y': 0, 'z': 0}
+                    result = convert_layout(child, (context, earlier_rectangle, ordinary_parent))
+                    self.assertEqual(result['browser']['space'], 'unresolved')
+                    self.assertIsNone(result['browser']['rect'])
+                    self.assertEqual(result['browser']['reason'], 'ordinary_transform_ancestry')
+                    self.assertEqual(result['browser']['y_conversion_count'], 0)
+                    self.assertEqual(child['m_AnchoredPosition']['y'], stale_y)
+                    self.assertEqual(child['m_LocalPosition']['y'], 0)
+                    self.assertEqual(ordinary_parent['m_LocalPosition']['y'], translation[1])
+
     def test_world_canvas_retains_engine_limit(self):
         result = convert_layout(rect(), ({'canvas': {'m_RenderMode': 2}},))
         self.assertEqual(result['browser']['space'], 'world')
