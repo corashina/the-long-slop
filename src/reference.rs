@@ -846,11 +846,16 @@ impl ReferenceManifest {
             self.part_slots.iter().filter_map(|s| s.part),
             "duplicate slot occupant",
         )?;
+        let mechanism_items: HashSet<_> = self.mechanisms.iter().map(|m| m.item).collect();
         let mut owned_shapes = HashSet::new();
         for p in &self.parts {
             require(
                 item_ids.contains(&p.item) && node_ids.contains(&p.node),
                 "part item/node",
+            )?;
+            require(
+                p.usable.is_none_or(|id| mechanism_items.contains(&id)),
+                "part usable mechanism",
             )?;
             require(
                 !p.part_types.is_empty() && p.cover_slot.is_none_or(|s| part_slot_ids.contains(&s)),
@@ -921,6 +926,10 @@ impl ReferenceManifest {
             require(owner.is_none(), "cyclic part slots")?;
         }
         for p in &self.wheel_parts {
+            require(
+                p.colliders.iter().all(|id| owned_shapes.insert(*id)),
+                "part collider ownership",
+            )?;
             require(
                 p.cover_slot.is_none_or(|id| part_slot_ids.contains(&id)),
                 "wheel cover slot",

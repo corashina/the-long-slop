@@ -578,3 +578,142 @@ fn failed_carry_acquisition_keeps_part_mounted() {
         collider_parent
     );
 }
+
+#[test]
+#[ignore = "requires installed source export"]
+fn transferred_hubcap_blocks_only_its_current_wheel() {
+    let r = installed();
+    let mut g = GarageRuntime::new(&r).unwrap();
+    let source = PartSlotId(65545);
+    let spare = PartSlotId(74070);
+    let cover = g.area.interaction.parts.slot_item(source).unwrap();
+    let rim = r
+        .wheel_parts
+        .iter()
+        .find(|p| p.cover_slot == Some(source))
+        .unwrap()
+        .item;
+    let spare_rim = r
+        .wheel_parts
+        .iter()
+        .find(|p| p.cover_slot == Some(spare))
+        .unwrap()
+        .item;
+    let slot = g.wheels.slot_for_item(rim).unwrap();
+    detach(&mut g, cover);
+    g.area
+        .interaction
+        .parts
+        .install(cover, spare, &mut g.area.items, &mut g.physics)
+        .unwrap();
+    g.area
+        .interaction
+        .parts
+        .mount_mechanism(cover, &mut g.area.interaction.mechanisms);
+    g.area
+        .interaction
+        .sync_parts(&mut g.area.items, &mut g.physics)
+        .unwrap();
+    assert_eq!(g.area.interaction.parts.slot_item(source), None);
+    g.wheels
+        .remove(slot, &mut g.area.items, &mut g.physics)
+        .unwrap();
+    assert!(g.wheels.can_install(rim, slot, &g.area.items).is_ok());
+    assert!(
+        g.wheels
+            .can_install(spare_rim, slot, &g.area.items)
+            .is_err()
+    );
+    g.wheels
+        .install(rim, slot, &mut g.area.items, &mut g.physics)
+        .unwrap();
+    let replacement = g
+        .area
+        .interaction
+        .parts
+        .slot_item(PartSlotId(66804))
+        .unwrap();
+    detach(&mut g, replacement);
+    g.area
+        .interaction
+        .parts
+        .install(replacement, source, &mut g.area.items, &mut g.physics)
+        .unwrap();
+    g.area
+        .interaction
+        .parts
+        .mount_mechanism(replacement, &mut g.area.interaction.mechanisms);
+    g.area
+        .interaction
+        .sync_parts(&mut g.area.items, &mut g.physics)
+        .unwrap();
+    assert!(
+        g.wheels
+            .remove(slot, &mut g.area.items, &mut g.physics)
+            .is_err()
+    );
+    detach(&mut g, replacement);
+    g.wheels
+        .remove(slot, &mut g.area.items, &mut g.physics)
+        .unwrap();
+}
+
+#[test]
+#[ignore = "requires installed source export"]
+fn loose_mass_tracks_nested_attachment_and_fluid_changes() {
+    fn mass(g: &mut GarageRuntime, item: ItemId) -> f32 {
+        let body = g.area.items.get(item).unwrap().body.unwrap();
+        let world = g.physics.rapier_mut();
+        world.bodies[body].recompute_mass_properties_from_colliders(&world.colliders);
+        world.bodies[body].mass()
+    }
+    let r = installed();
+    let mut g = GarageRuntime::new(&r).unwrap();
+    let door = part(&r, "frdoor");
+    let mirror = part(&r, "rightmirror");
+    let slot = r
+        .part_slots
+        .iter()
+        .find(|s| s.part == Some(mirror))
+        .unwrap()
+        .id;
+    detach(&mut g, door);
+    let initial = mass(&mut g, door);
+    detach(&mut g, mirror);
+    let door_mass = mass(&mut g, door);
+    let mirror_mass = mass(&mut g, mirror);
+    assert!(mirror_mass > 0.);
+    assert!((initial - door_mass - mirror_mass).abs() < 0.001);
+    g.area
+        .interaction
+        .parts
+        .install(mirror, slot, &mut g.area.items, &mut g.physics)
+        .unwrap();
+    g.area
+        .interaction
+        .parts
+        .mount_mechanism(mirror, &mut g.area.interaction.mechanisms);
+    g.area
+        .interaction
+        .sync_parts(&mut g.area.items, &mut g.physics)
+        .unwrap();
+    assert!((mass(&mut g, door) - initial).abs() < 0.001);
+    let radiator = part(&r, "coolanttank");
+    detach(&mut g, radiator);
+    let before = mass(&mut g, radiator);
+    g.area
+        .items
+        .get_mut(radiator)
+        .unwrap()
+        .fluid
+        .as_mut()
+        .unwrap()
+        .mixture
+        .quantities_liters[3] += 1.;
+    g.area
+        .interaction
+        .parts
+        .sync(&mut g.area.items, &mut g.physics)
+        .unwrap();
+    assert!((mass(&mut g, radiator) - before - 1.).abs() < 0.001);
+}

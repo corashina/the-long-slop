@@ -2,8 +2,8 @@
 
 use super::items::{ItemLocation, ItemStore, node_pose};
 use crate::reference::{
-    ColliderId, ItemId, ItemKind, ReferenceError, ReferenceManifest, TankRole, Transform,
-    WheelSlotId,
+    ColliderId, ItemId, ItemKind, PartSlotId, ReferenceError, ReferenceManifest, TankRole,
+    Transform, WheelSlotId,
 };
 use crate::vehicle::{
     InstalledWheel, PhysicsWorld, SLOT_SENSOR_FLAG, VEHICLE_COLLIDER_FLAG, VehiclePose,
@@ -45,7 +45,7 @@ pub struct WheelAssemblies {
     last_mass: f32,
     bound: bool,
     general_mass: Vec<(ItemId, f32)>,
-    covers: HashMap<ItemId, ItemId>,
+    covers: HashMap<ItemId, PartSlotId>,
 }
 
 impl WheelAssemblies {
@@ -246,20 +246,18 @@ impl WheelAssemblies {
             covers: reference
                 .wheel_parts
                 .iter()
-                .filter_map(|p| {
-                    p.cover_slot
-                        .and_then(|s| {
-                            reference
-                                .part_slots
-                                .iter()
-                                .find(|slot| slot.id == s)
-                                .and_then(|s| s.part)
-                        })
-                        .map(|cover| (p.item, cover))
-                })
+                .filter_map(|p| p.cover_slot.map(|slot| (p.item, slot)))
                 .collect(),
             last_mass: f32::NAN,
             bound: false,
+        })
+    }
+
+    fn covered(&self, item: ItemId, items: &ItemStore) -> bool {
+        self.covers.get(&item).is_some_and(|slot| {
+            items
+                .iter()
+                .any(|state| state.location == ItemLocation::PartSlot(*slot))
         })
     }
 
@@ -357,12 +355,7 @@ impl WheelAssemblies {
         let rim = self.slots[slot]
             .rim
             .ok_or_else(|| error("Wheel slot is empty"))?;
-        if self.covers.get(&self.parts[rim].item).is_some_and(|id| {
-            matches!(
-                items.get(*id).map(|i| i.location),
-                Some(ItemLocation::PartSlot(_))
-            )
-        }) {
+        if self.covered(self.parts[rim].item, items) {
             return Err(error("Remove the wheel cover first"));
         }
         let world = item_pose(items, self.parts[rim].item, physics)?;
@@ -405,12 +398,7 @@ impl WheelAssemblies {
             .indices
             .get(&item)
             .ok_or_else(|| error("Unknown rim"))?;
-        if self.covers.get(&item).is_some_and(|id| {
-            matches!(
-                items.get(*id).map(|i| i.location),
-                Some(ItemLocation::PartSlot(_))
-            )
-        }) {
+        if self.covered(item, items) {
             return Err(error("Remove the wheel cover first"));
         }
         if !self.parts[rim].rim || !self.slots[slot].compatible.contains(&item) {

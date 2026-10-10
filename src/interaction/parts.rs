@@ -27,6 +27,8 @@ struct Part {
     seats: Vec<SeatId>,
     pose: Pose,
     mass: f32,
+    assembly_dry_mass: f32,
+    assembly_fluids: Vec<ItemId>,
 }
 struct Slot {
     reference: PartSlotReference,
@@ -118,6 +120,8 @@ impl PartAttachments {
                     .ok_or_else(|| error("Part has no pickup"))?,
                 pose: to_rapier(node_pose(r, p.node)?),
                 mass: f32::NAN,
+                assembly_dry_mass: 0.,
+                assembly_fluids: Vec::with_capacity(r.tanks.len()),
             });
         }
         let mut slots = Vec::new();
@@ -209,6 +213,7 @@ impl PartAttachments {
             }
         }
         self.bound = true;
+        self.cache_assembly_mass(items);
         Ok(())
     }
     pub fn loose_body(&self, item: ItemId) -> Option<RigidBodyHandle> {
@@ -368,6 +373,7 @@ impl PartAttachments {
         let old = to_rapier(items.get(item).unwrap().pose);
         items.get_mut(item).unwrap().location = ItemLocation::World;
         self.move_assembly(i, old, world, items, physics);
+        self.cache_assembly_mass(items);
         self.sync(items, physics)?;
         physics.refresh_queries();
         Ok(item)
@@ -394,6 +400,7 @@ impl PartAttachments {
         let world = self.slots[s].mount_pose
             * Pose::from_rotation(rotation(self.parts[i].reference.local_rotation_after_mount));
         self.move_assembly(i, old, world, items, physics);
+        self.cache_assembly_mass(items);
         self.sync(items, physics)?;
         physics.refresh_queries();
         Ok(())
@@ -586,6 +593,36 @@ impl PartAttachments {
             }
         }
     }
+    // Attachment transactions rebuild membership; fixed steps only read cached fluid items.
+    fn cache_assembly_mass(&mut self, items: &ItemStore) {
+        for p in &mut self.parts {
+            p.assembly_dry_mass = 0.;
+            p.assembly_fluids.clear();
+        }
+        for i in 0..self.parts.len() {
+            let mut root = i;
+            while let Some(slot) = self.parts[root].slot {
+                let Some(parent) = self.slots[slot]
+                    .reference
+                    .owner
+                    .and_then(|id| self.indices.get(&id).copied())
+                else {
+                    break;
+                };
+                root = parent;
+            }
+            if self.parts[root].slot.is_some() {
+                continue;
+            }
+            for member in 0..self.parts[i].members.len() {
+                let (id, _, dry) = self.parts[i].members[member];
+                self.parts[root].assembly_dry_mass += dry;
+                if items.get(id).is_some_and(|item| item.fluid.is_some()) {
+                    self.parts[root].assembly_fluids.push(id);
+                }
+            }
+        }
+    }
     pub fn sync(
         &mut self,
         items: &mut ItemStore,
@@ -598,20 +635,22 @@ impl PartAttachments {
             let body = self.parts[i]
                 .body
                 .ok_or_else(|| error("Part bodies are not bound"))?;
-            let mass = self
-                .parts
-                .iter()
-                .enumerate()
-                .filter(|(j, _)| self.physical_body(*j, items, physics) == body)
-                .flat_map(|(_, p)| p.members.iter())
-                .map(|(id, _, dry)| {
-                    dry + items
-                        .get(*id)
-                        .and_then(|i| i.fluid.as_ref())
-                        .map_or(0., |f| f.mixture.total())
-                })
-                .sum::<f32>()
-                .max(0.001);
+            let mass = (self.parts[i].assembly_dry_mass
+                + self.parts[i]
+                    .assembly_fluids
+                    .iter()
+                    .map(|id| {
+                        items
+                            .get(*id)
+                            .unwrap()
+                            .fluid
+                            .as_ref()
+                            .unwrap()
+                            .mixture
+                            .total()
+                    })
+                    .sum::<f32>())
+            .max(0.001);
             if self.parts[i].mass != mass {
                 physics.rapier_mut().bodies[body].set_additional_mass(mass, true);
                 self.parts[i].mass = mass;

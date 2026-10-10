@@ -419,3 +419,44 @@ fn lighting_state_counts_match_reachable_control_states() {
         }
     }
 }
+
+fn part_validation_fixture() -> ReferenceManifest {
+    use my_summer_slop::reference::*;
+    let mut r = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    r.parts.push(PartReference {
+        usable: None,
+        item: r.items[0].id,
+        node: r.items[0].node,
+        source: SourceId {
+            file: "level1".into(),
+            path_id: 999900,
+        },
+        main_types: vec![],
+        part_types: vec!["fixture".into()],
+        cover_slot: None,
+        local_rotation_after_mount: [0., 0., 0., 1.],
+        colliders: vec![],
+        linear_damping: 0.,
+        angular_damping: 0.,
+        enable_if_mounted: vec![],
+        enable_if_dismounted: vec![],
+        disable_if_mounted: vec![],
+        disable_if_dismounted: vec![],
+    });
+    r.validate().unwrap();
+    r
+}
+
+#[test]
+fn rejects_unknown_part_usable() {
+    let mut r = part_validation_fixture();
+    r.parts[0].usable = Some(my_summer_slop::reference::ItemId(999999));
+    assert!(r.validate().is_err());
+}
+
+#[test]
+fn rejects_shared_general_and_wheel_collider() {
+    let mut r = part_validation_fixture();
+    r.parts[0].colliders.push(r.wheel_parts[0].colliders[0]);
+    assert!(r.validate().is_err());
+}
