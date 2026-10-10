@@ -150,7 +150,7 @@ Modify `tools/reference/gltf.py`, `tools/reference/export.py`, `tools/reference/
 - Retain numeric cloud, star, and flare outputs in `CycleOutput`; use fixed arrays for the recovered clear-weather layers.
 - Evaluate source gradients with exported key times and modes. Keep source values separate from Bevy units.
 
-- [ ] Add `cycle_boundaries_match_source` with these assertions after source fixture evaluation:
+- [x] Add `cycle_boundaries_match_source` with these assertions after source fixture evaluation:
 
 ```rust
 assert_eq!(phase(240.0), CyclePhase::Dawn);
@@ -162,21 +162,21 @@ assert_eq!(phase(1200.001), CyclePhase::Night);
 ```
 
   Define `phase(t)` as a test-local helper evaluating a zero-offset fixture at `t` seconds.
-- [ ] Add `source_cycle_formulas_match`.
+- [x] Add `source_cycle_formulas_match`.
   Assert dawn midpoint intensity 0.5625, ambient 0.11, and sky exposure 1 within `1e-6`.
   Assert noon intensity 1.6, night intensity 0.3, night exposure 2, and reflection intensity 0.
-- [ ] Add `roadside_thresholds_match_source`.
+- [x] Add `roadside_thresholds_match_source`.
   Assert on before dawn progress 0.5, off at 0.5, off at dusk 0.5, and on above 0.5.
-- [ ] Add `cycle_wrap_retains_source_update_order` and `invalid_elapsed_does_not_corrupt_state`.
+- [x] Add `cycle_wrap_retains_source_update_order` and `invalid_elapsed_does_not_corrupt_state`.
   Preserve the terminal night output on the source reset update. Verify the following update begins dawn.
   Assert negative, NaN, and infinite elapsed input leave state unchanged.
-- [ ] Run `./scripts/check.ps1 -Test lighting`. Expect new cases to fail.
-- [ ] Implement the active clock and source `FixedUpdate` phase formulas, including source interpolation clamps and exposure jumps.
+- [x] Run `./scripts/check.ps1 -Test lighting`. Expect new cases to fail.
+- [x] Implement the active clock and source `FixedUpdate` phase formulas, including source interpolation clamps and exposure jumps.
   Retain one-second desert biome refresh and clear-weather visual temperature inputs. Do not change engine temperature.
-- [ ] Implement clear-weather cloud density and motion from the recovered shader and cycle rules.
+- [x] Implement clear-weather cloud density and motion from the recovered shader and cycle rules.
   Verify Unity's native Perlin behavior through reference samples. Record any measured mismatch; do not substitute undocumented noise.
-- [ ] Run the lighting tests and native suite. Expect source numeric outputs to pass.
-- [ ] Commit as `Implement source day cycle state`.
+- [x] Run the lighting tests and native suite. Expect source numeric outputs to pass.
+- [x] Commit as `Implement source day cycle state`.
 
 ## Task 3: Render the cycle and validate WebGL2 lighting
 
