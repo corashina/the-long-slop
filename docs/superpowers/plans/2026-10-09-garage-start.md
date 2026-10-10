@@ -383,7 +383,9 @@ The user authorized subagents where they reduce work time.
 Use delegated asset, fluid, and player work with the ownership above. The primary owns physics contracts and integration.
 Tasks 3 and 4 share only frozen interfaces and can run together. Serialize changes to the physics owner and app.
 Review each completed module against the spec before integration. Use one final independent review after browser acceptance.
-This plan awaits user review before product implementation.
+The user approved this plan before product implementation.
+Implementation and native source acceptance are verified. Final browser route verification is blocked by Computer Use URL checks.
+See `docs/verification.md` for results and limits.
 
 ## Verified API references
 

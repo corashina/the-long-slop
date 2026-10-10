@@ -2,42 +2,36 @@
 
 <!-- impeccable:product-schema 1 -->
 
-## Platform
+## Platform and stack
 
-web
+Local desktop browser. Rust, WebAssembly, Bevy, Rapier, and a static browser shell.
+Keyboard and mouse controls. WebGL2 rendering.
 
-## Stack
+## Purpose
 
-The user approved Rust, WebAssembly, Bevy, Rapier, and a small static browser shell.
+Prepare a fixed Lada 2101 in the imported starting garage. Drive onto the endless desert road.
+Installed Steam build 11140890 owns the reference values.
+The approved garage spawn takes precedence over the original bedroom spawn.
 
-## Users
+## Scope
 
-The user wants to drive a car through a desert in a local browser.
+The build includes walking, first person look, crouching, jumping, seating, carrying, and aimed use.
+Preparation includes doors, fluid caps, filling, spilling, ignition, and wheel assembly.
+It retains the road, stations, chase camera, pause, recovery, and restart.
+Recovery preserves state. Restart restores the garage.
 
-## Product Purpose
+Survival, weapons, other vehicles, multiplayer, saves, audio, and deployment remain outside this stage.
+The build does not claim identical Unity physics or full-game parity.
 
-Recreate the selected driving loop from The Long Drive. The user accepted a recreation with original code and procedural assets.
+## Evidence
 
-## Operating Context
+The approved design and plan are in `docs/superpowers`.
+The installed build uses Unity 2021.3.18f1 and Mono.
+The exporter records input hashes, source IDs, geometry, and recovered parameters.
+Generated original assets remain outside version control.
+The browser stops loading when required reference data is missing or invalid.
 
-The game runs on localhost on a desktop. The user plays with a keyboard and mouse.
+## Principles
 
-## Capabilities and Constraints
-
-The approved scope includes car physics, an endless desert road, two cameras, fuel, and refueling stops.
-It includes pause, focus handling, vehicle recovery, and restart.
-The browser runs the simulation and rendering. It uses WebGL2 and WASM.
-Walking, inventory, multiplayer, asset import, persistence, and public deployment are outside this build.
-
-## Evidence on Hand
-
-The user approved the design spec and requested implementation of the plan.
-The local Steam installation uses Unity 2021.3.18f1 and Mono.
-The research sources and installation findings are in the design spec.
-
-## Product Principles
-
-- Show the game before asking the player to start.
-- Keep controls and fuel state readable over the scene.
-- Build and verify each working layer.
-- Preserve the approved scope.
+Show the loaded garage before Start. Keep controls and state readable.
+Use one fluid state and one physics world. Build each working layer before extending it.

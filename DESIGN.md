@@ -1,6 +1,6 @@
 ---
 name: Desert Drive
-description: Warm procedural desert driving with dark readable controls.
+description: Imported garage preparation with dark readable controls.
 colors:
   accent: "#d9ad6f"
   accent-hover: "#eac48e"
@@ -187,7 +187,7 @@ Car materials vary roughness and metal content. Glass uses alpha blending.
 
 Use square panel corners and borderless buttons.
 The fuel track has square corners and a 6px height.
-Build the car and roadside props from cuboids, cylinders, and the steering wheel torus.
+Use imported home, car, and supply geometry. Keep procedural road and station geometry.
 Keep the cockpit road view clear through the front glass.
 
 ## Components
@@ -212,7 +212,7 @@ Control descriptions use muted text beside pale key labels.
 
 Place speed and camera state on the first row.
 Place fuel and trip on the next row, above the fuel meter.
-Keep the refuel prompt above the Pause and Fullscreen buttons.
+Show the aimed item, fluid amount, condition, and action above the buttons.
 Use the shared panel background and compact panel padding.
 
 ### Runtime Error
@@ -232,5 +232,5 @@ Allow long error text to wrap within the panel.
 
 ### Don't:
 
-- **Don't** import original Steam assets into this procedural scene.
+- **Don't** substitute procedural assets when the required export is missing.
 - **Don't** add interface features outside the approved product scope.
