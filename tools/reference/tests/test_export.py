@@ -11,6 +11,30 @@ from tools.reference.collision import bake_points
 
 
 class ReferenceExportTests(unittest.TestCase):
+    def test_required_switch_callbacks_reject_unknown_methods_and_skip_audio(self):
+        from types import SimpleNamespace
+        from tools.reference.mechanisms import recover_turn
+        reader=SimpleNamespace(assets_file=SimpleNamespace(name='level1'),path_id=70733,type=SimpleNamespace(name='MonoBehaviour'))
+        target=SimpleNamespace(assets_file=reader.assets_file,path_id=77839,type=SimpleNamespace(name='MonoBehaviour'))
+        audio=SimpleNamespace(assets_file=reader.assets_file,path_id=17,type=SimpleNamespace(name='AudioSource'))
+        source=SimpleNamespace(resolve=lambda r,p: target if p['m_PathID']==77839 else audio,
+            class_name=lambda r:'carscript',read=lambda r:{'m_GameObject':{'m_PathID':20}})
+        def call(method,identity=77839,mode=1):
+            return {'m_Target':{'m_PathID':identity},'m_MethodName':method,'m_Mode':mode,'m_CallState':2}
+        def recover(calls):
+            fields={'turnable':True,'maxTurnState':0,'currentTurnState':0,
+                'turnedEvent':{'m_PersistentCalls':{'m_Calls':calls}}}
+            return recover_turn(source,reader,fields,{1:{}},1,lambda r,p:1)
+        with self.assertRaisesRegex(ValueError,r'usablescript level1:70733.*turnedEvent.*m_MethodName.*UnknownLights'):
+            recover([call('UnknownLights')])
+        with self.assertRaisesRegex(ValueError,r'usablescript level1:70733.*turnedEvent.*m_Mode'):
+            recover([call('InteractSwitchLights',mode=2)])
+        self.assertIsNone(recover([call('Play',identity=17)]))
+        mixed=recover([call('Play',identity=17),call('InteractSwitchLights')])
+        self.assertEqual(mixed['action'],{'kind':'cycle_headlights'})
+        with self.assertRaisesRegex(ValueError,r'turnedEvent.*m_MethodName'):
+            recover([call('InteractSwitchLights'),call('UnknownLights')])
+
     def test_pickup_recenter_and_restrictions_keep_source_values(self):
         from types import SimpleNamespace
         from tools.reference.actions import recover_pickup

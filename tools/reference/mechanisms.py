@@ -118,14 +118,18 @@ def recover_turn(source, reader, fields, components, node, pointer_node):
     if not fields['turnable']:return None
     calls=fields['turnedEvent']['m_PersistentCalls']['m_Calls']
     action=None
-    for call in calls:
+    for index,call in enumerate(calls):
+        field=f"usablescript {reader.assets_file.name}:{reader.path_id}.turnedEvent.m_PersistentCalls.m_Calls[{index}]"
         if call['m_CallState']==0:continue
         target=source.resolve(reader,call['m_Target'])
-        cls=source.class_name(target) if target else None
+        cls=(source.class_name(target) if target.type.name=='MonoBehaviour' else target.type.name) if target else None
         pair=(cls,call['m_MethodName'])
         kind={('carscript','InteractHandbrake'):'toggle_handbrake',('carscript','InteractSwitchLights'):'cycle_headlights',('flashlightscript','TURN'):'toggle_home_light'}.get(pair)
-        if kind is None:return None  # Audio controls have no supported action.
-        if call['m_Mode']!=1 or action is not None:raise ValueError('Unsupported selected switch callback')
+        if pair in {('AudioSource',method) for method in ('Play','PlayOneShot','Stop','Pause','UnPause')}:
+            continue  # Excluded audio has no gameplay action.
+        if kind is None:raise ValueError(f'{field}.m_MethodName: unsupported required callback {cls}.{call["m_MethodName"]}')
+        if call['m_Mode']!=1:raise ValueError(f'{field}.m_Mode: required callback needs mode 1')
+        if action is not None:raise ValueError(f'{field}: multiple required callbacks')
         pointer_node(target,source.read(target)['m_GameObject']) # Reject callbacks outside selected roots.
         action={'kind':kind}
         if kind=='toggle_home_light':action['source']=source_id(target)

@@ -1176,9 +1176,13 @@ impl ReferenceManifest {
             "lamp group source",
         )?;
         for g in &lighting.groups {
+            let state_count = match g.control {
+                LampControl::Headlights => 3,
+                LampControl::Interior | LampControl::Home => 2,
+            };
+            require(g.states.len() == state_count, "lamp state count")?;
             require(
                 g.owner.is_none_or(|id| item_ids.contains(&id))
-                    && !g.states.is_empty()
                     && usize::from(g.initial_state) < g.states.len()
                     && usize::from(g.initial_target) < g.states.len()
                     && g.initial_energy.is_finite()
