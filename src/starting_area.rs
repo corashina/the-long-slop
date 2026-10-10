@@ -1,7 +1,8 @@
 //! Persistent imported home bodies and preparation state.
 use crate::interaction::{
     AimTarget, InteractionAction, InteractionState,
-    items::{ItemStore, node_pose},
+    items::{ItemLocation, ItemStore, node_pose},
+    parts::PartSlots,
 };
 use crate::player::PlayerState;
 use crate::reference::{BodyId, ItemId, NodeId, ReferenceError, ReferenceManifest};
@@ -21,6 +22,8 @@ use std::collections::HashMap;
 
 /// Seed for the engine start sequence.
 const START_SEED: u64 = 42;
+/// Seed for crash thresholds and part choices.
+const CRASH_SEED: u64 = 7;
 
 struct CompoundCollider {
     handle: crate::vehicle::ColliderHandle,
@@ -350,9 +353,14 @@ impl StartingArea {
         }
     }
     pub fn sync_compound(&self, physics: &mut PhysicsWorld) {
+        let chassis = physics.chassis_handle();
         for record in &self.compound_colliders {
             let local = record.local_pose(&self.interaction);
             let collider = &mut physics.rapier_mut().colliders[record.handle];
+            // A removed part carries its shapes on its own body.
+            if collider.parent() != Some(chassis) {
+                continue;
+            }
             if collider.position_wrt_parent() != Some(&local) {
                 collider.set_position_wrt_parent(local);
             }
@@ -448,10 +456,17 @@ pub struct GarageRuntime {
     pub notice: &'static str,
     pub target: Option<AimTarget>,
     pub wheels: crate::interaction::wheels::WheelAssemblies,
+    pub parts: PartSlots,
     ignition_held: bool,
     auto_gear: usize,
     recovery_bounds: crate::reference::Bounds,
     recovery_bodies: Vec<RigidBodyHandle>,
+    last_speed_kmh: f32,
+    crash_samples: u64,
+    crash_parts: Vec<ItemId>,
+    /// Vehicle mass without the car item and its mounted items.
+    base_mass_kg: f32,
+    mass_kg: f32,
 }
 
 impl GarageRuntime {
@@ -471,9 +486,12 @@ impl GarageRuntime {
         );
         let mut wheels = crate::interaction::wheels::WheelAssemblies::new(reference)?;
         wheels.sync(&mut area.items, &mut physics)?;
+        let parts = PartSlots::new(reference, &area.items, &mut physics)?;
         physics.refresh_queries();
         area.items.sync_poses(&physics);
         area.commit_poses(&physics, true);
+        let base_mass_kg =
+            reference.vehicle.mass_kg - area.items.mounted_mass(reference.vehicle.item);
         let mut recovery_bounds = crate::reference::Bounds {
             min: [f32::MAX; 3],
             max: [f32::MIN; 3],
@@ -508,6 +526,7 @@ impl GarageRuntime {
             notice: "",
             target: None,
             wheels,
+            parts,
             ignition_held: false,
             auto_gear: reference
                 .vehicle
@@ -517,6 +536,11 @@ impl GarageRuntime {
                 .expect("validated neutral"),
             recovery_bounds,
             recovery_bodies: Vec::with_capacity(reference.items.len()),
+            last_speed_kmh: 0.0,
+            crash_samples: 0,
+            crash_parts: Vec::with_capacity(reference.items.len()),
+            base_mass_kg,
+            mass_kg: reference.vehicle.mass_kg,
         })
     }
 
@@ -598,6 +622,32 @@ impl GarageRuntime {
                 } else {
                     self.notice = "Carry a rim and aim at a matching tire.";
                 }
+            }
+            Some(InteractionAction::PartRemove(item)) => {
+                self.notice = if self
+                    .parts
+                    .detach(item, &mut self.area.items, &mut self.physics)
+                    .is_ok()
+                {
+                    ""
+                } else {
+                    "Cannot remove this part."
+                };
+            }
+            Some(InteractionAction::PartFit(item)) => {
+                self.area
+                    .interaction
+                    .drop_held(&mut self.area.items, &mut self.physics);
+                self.notice = if self
+                    .parts
+                    .fit(item, &mut self.area.items, &mut self.physics)
+                    .is_ok()
+                {
+                    self.area.interaction.close_hinge(item);
+                    ""
+                } else {
+                    "This part does not fit the slot."
+                };
             }
             _ => {}
         }
@@ -681,34 +731,44 @@ impl GarageRuntime {
                 / reference.engine.auto_shift_clutch_rpm_range)
                 .clamp(0.0, 1.0)
         };
-        let radiator_condition = ((1.0
-            - self
-                .area
-                .items
-                .get(reference.engine.coolant_tank)
-                .map_or(1.0, |item| item.condition))
-            * 4.0)
-            .round() as u8;
+        let car = reference.vehicle.item;
+        let radiator_condition = self
+            .area
+            .items
+            .mounted(car, reference.engine.coolant_tank)
+            .then(|| self.area.items.get(reference.engine.coolant_tank))
+            .flatten()
+            .map(|item| item.condition);
         let was_running = self.engine_output.running;
-        self.engine_output = self.engine.step(
-            EngineInput {
-                ignition_held,
-                ignition_pressed,
-                ignition_released,
-                throttle: throttle as u8 as f32,
-                clutch,
-                wheel_rpm,
-                free_run: reference.vehicle.gear_free_run[gear],
-                speed_kmh: speed * 3.6,
-                ambient_temperature: reference.engine.initial_temperature,
-                ambient_heat_modifier: reference.engine.globals.awake_heat_modifier,
-                radiator_condition,
-            },
-            self.area.items.vehicle_fluids().expect("bound fluids"),
-            &reference.engine,
-            start_sample(START_SEED, self.attempts),
-            FIXED_DT,
-        );
+        if !self.area.items.mounted(car, reference.engine.item) {
+            // Without an engine the car has no power and no engine heat.
+            self.engine.rpm = 0.0;
+            self.engine_output = EngineOutput {
+                ignition: self.engine.ignition,
+                temperature: self.engine.temperature,
+                ..EngineOutput::default()
+            };
+        } else {
+            self.engine_output = self.engine.step(
+                EngineInput {
+                    ignition_held,
+                    ignition_pressed,
+                    ignition_released,
+                    throttle: throttle as u8 as f32,
+                    clutch,
+                    wheel_rpm,
+                    free_run: reference.vehicle.gear_free_run[gear],
+                    speed_kmh: speed * 3.6,
+                    ambient_temperature: reference.engine.initial_temperature,
+                    ambient_heat_modifier: reference.engine.globals.awake_heat_modifier,
+                    radiator_condition,
+                },
+                self.area.items.vehicle_fluids().expect("bound fluids"),
+                &reference.engine,
+                start_sample(START_SEED, self.attempts),
+                FIXED_DT,
+            );
+        }
         if self.engine_output.running && !was_running {
             let engine = to_rapier(
                 self.area
@@ -768,6 +828,15 @@ impl GarageRuntime {
         self.wheels
             .sync(&mut self.area.items, &mut self.physics)
             .expect("validated wheel bindings");
+        self.damage(reference);
+        self.parts
+            .sync(
+                self.area.interaction.held(),
+                &self.area.items,
+                &mut self.physics,
+            )
+            .expect("validated part bindings");
+        self.sync_mass(reference);
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, false);
@@ -800,6 +869,67 @@ impl GarageRuntime {
             &mut self.area.interaction,
             &mut self.physics,
         );
+    }
+
+    /// Source crash damage. A hard speed change knocks mounted parts off.
+    fn damage(&mut self, reference: &ReferenceManifest) {
+        let speed = self.physics.snapshot().speed_mps.abs() * 3.6;
+        let change = (speed - self.last_speed_kmh).abs();
+        self.last_speed_kmh = speed;
+        let car = reference.vehicle.item;
+        let samples = [self.crash_sample(), self.crash_sample()];
+        let Some(crash) = crate::simulation::crash::crash(
+            &reference.vehicle.crash,
+            change,
+            self.area.items.get(car).map_or(0, |item| item.condition),
+            samples,
+        ) else {
+            return;
+        };
+        self.crash_parts.clear();
+        for record in &reference.items {
+            let items = &self.area.items;
+            if let (Some(power), Some(item)) = (record.fall_off_power, items.get(record.id))
+                && (matches!(item.location, ItemLocation::WheelSlot(_))
+                    || self.parts.contains(record.id))
+                && items.mounted(car, record.id)
+                && crate::simulation::crash::falls_off(power, item.condition, crash.lerp)
+            {
+                self.crash_parts.push(record.id);
+            }
+        }
+        for _ in 0..crash.count.min(self.crash_parts.len()) {
+            let index = ((self.crash_sample() * self.crash_parts.len() as f32) as usize)
+                .min(self.crash_parts.len() - 1);
+            let id = self.crash_parts.swap_remove(index);
+            match self.area.items.get(id).map(|item| item.location) {
+                Some(ItemLocation::WheelSlot(slot)) => {
+                    self.wheels
+                        .remove(slot, &mut self.area.items, &mut self.physics)
+                        .expect("mounted wheel");
+                }
+                // A part on a removed door stays on that door.
+                _ if self.area.items.mounted(car, id) => {
+                    self.parts
+                        .detach(id, &mut self.area.items, &mut self.physics)
+                        .expect("fitted part");
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn sync_mass(&mut self, reference: &ReferenceManifest) {
+        let mass = self.base_mass_kg + self.area.items.mounted_mass(reference.vehicle.item);
+        if (mass - self.mass_kg).abs() > 0.0001 {
+            self.physics.set_vehicle_mass(mass);
+            self.mass_kg = mass;
+        }
+    }
+
+    fn crash_sample(&mut self) -> f32 {
+        self.crash_samples = self.crash_samples.wrapping_add(1);
+        start_sample(CRASH_SEED, self.crash_samples)
     }
 
     pub fn restart(&mut self, reference: &ReferenceManifest) -> Result<(), ReferenceError> {
@@ -871,6 +1001,14 @@ impl GarageRuntime {
         self.wheels
             .sync(&mut self.area.items, &mut self.physics)
             .expect("validated wheel bindings");
+        self.parts
+            .sync(
+                self.area.interaction.held(),
+                &self.area.items,
+                &mut self.physics,
+            )
+            .expect("validated part bindings");
+        self.last_speed_kmh = 0.0;
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         if self.area.player.seat().is_none() {

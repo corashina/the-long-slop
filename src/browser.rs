@@ -47,7 +47,7 @@ extern "C" {
         target: &str,
         action: &str,
         amount: f32,
-        condition: f32,
+        condition: i32,
         held: &str,
         rpm: f32,
         ignition: bool,

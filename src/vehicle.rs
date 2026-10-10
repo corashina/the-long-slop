@@ -15,7 +15,8 @@ use crate::simulation::{DriveInput, FIXED_DT};
 #[derive(Clone, Copy)]
 pub struct InstalledWheel {
     pub radius: f32,
-    pub condition: f32,
+    /// Source forward stiffness from `wheelscript`.
+    pub friction_slip: f32,
 }
 pub const VEHICLE_COLLIDER_FLAG: u128 = 1 << 127;
 pub const SLOT_SENSOR_FLAG: u128 = 1 << 126;
@@ -196,7 +197,7 @@ impl PhysicsWorld {
                         .find(|wheel| wheel.id == vehicle.wheel_slots[index])
                         .unwrap()
                         .radius,
-                    condition: 1.0,
+                    friction_slip: vehicle.wheel_slip[0],
                 })
             }),
             wheel_rotations: [0.0; 4],
@@ -264,8 +265,7 @@ impl PhysicsWorld {
             } else {
                 0.0
             };
-            wheel.friction_slip =
-                0.75 + 0.5 * self.installed[slot].unwrap().condition.clamp(0.0, 1.0);
+            wheel.friction_slip = self.installed[slot].unwrap().friction_slip;
         }
         let not_vehicle = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
             collider.user_data & VEHICLE_COLLIDER_FLAG == 0
@@ -384,7 +384,7 @@ impl PhysicsWorld {
             );
             *added = *wheel;
             added.radius = installed.radius;
-            added.friction_slip = 0.75 + 0.5 * installed.condition.clamp(0.0, 1.0);
+            added.friction_slip = installed.friction_slip;
             self.active_slots.push(slot);
         }
         self.controller = controller;

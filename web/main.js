@@ -129,7 +129,7 @@ window.gameDetail = (name, action, amount, condition, held, rpm, ignition, runni
   write(target, name);
   write(prompt, action);
   const roundedAmount=Math.round(amount*10)/10;
-  const roundedCondition=Math.round(condition*100);
+  const roundedCondition=100-condition*25;
   let changed=roundedAmount!==lastAmount || roundedCondition!==lastCondition;
   for (let i=0;i<6;i++) {const rounded=Math.round(volumes[i]*10)/10;if (rounded!==lastVolumes[i]) {lastVolumes[i]=rounded;changed=true;}}
   if (changed) {

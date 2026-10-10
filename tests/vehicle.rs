@@ -79,7 +79,7 @@ fn removed_slot_has_no_raycast_support_and_restores_without_duplicates() {
                     .find(|wheel| wheel.id == slot)
                     .unwrap()
                     .radius,
-                condition: 0.5,
+                friction_slip: reference.vehicle.wheel_slip[0],
             }),
         )
         .unwrap();

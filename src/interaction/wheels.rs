@@ -2,8 +2,7 @@
 
 use super::items::{ItemLocation, ItemStore, node_pose};
 use crate::reference::{
-    ColliderId, ItemId, ItemKind, ReferenceError, ReferenceManifest, TankRole, Transform,
-    WheelSlotId,
+    ColliderId, ItemId, ItemKind, ReferenceError, ReferenceManifest, Transform, WheelSlotId,
 };
 use crate::vehicle::{
     InstalledWheel, PhysicsWorld, SLOT_SENSOR_FLAG, VEHICLE_COLLIDER_FLAG, VehiclePose,
@@ -40,9 +39,9 @@ pub struct WheelAssemblies {
     indices: HashMap<ItemId, usize>,
     slots: Vec<Slot>,
     tire_fits: HashSet<(ItemId, ItemId)>,
-    vehicle_tanks: Vec<ItemId>,
-    base_mass: f32,
-    last_mass: f32,
+    /// `gumiscript` forward stiffness for a new and a rusty tire.
+    tire_slip: [f32; 2],
+    rim_slip: f32,
     bound: bool,
 }
 
@@ -115,7 +114,6 @@ impl WheelAssemblies {
             .ok_or_else(|| error("Missing chassis source pose"))?;
         let chassis_pose = pose(&chassis.pose);
         let mut slots = Vec::with_capacity(4);
-        let mut installed_mass = 0.0;
         for (index, id) in reference.vehicle.wheel_slots.iter().enumerate() {
             let record = reference
                 .wheel_slots
@@ -132,7 +130,6 @@ impl WheelAssemblies {
                 .get(&record.tire)
                 .ok_or_else(|| error("Missing installed tire"))?;
             parts[rim].tire = Some(tire);
-            installed_mass += parts[rim].mass + parts[tire].mass;
             let anchor = reference
                 .anchors
                 .iter()
@@ -201,26 +198,16 @@ impl WheelAssemblies {
                 }
             }
         }
-        let vehicle_tanks: Vec<_> = reference
-            .tanks
-            .iter()
-            .filter(|tank| tank.role == TankRole::Vehicle)
-            .map(|tank| tank.item)
-            .collect();
-        let initial_fluids: f32 = reference
-            .tanks
-            .iter()
-            .filter(|tank| tank.role == TankRole::Vehicle)
-            .map(|tank| tank.quantities_liters.iter().sum::<f32>())
-            .sum();
         Ok(Self {
             parts,
             indices,
             slots,
             tire_fits,
-            vehicle_tanks,
-            base_mass: reference.vehicle.mass_kg - installed_mass - initial_fluids,
-            last_mass: f32::NAN,
+            tire_slip: [
+                reference.vehicle.wheel_slip[0],
+                reference.vehicle.wheel_slip[1],
+            ],
+            rim_slip: reference.vehicle.rim_slip[0],
             bound: false,
         })
     }
@@ -536,7 +523,6 @@ impl WheelAssemblies {
         let snapshot = physics.snapshot();
         let chassis = physics.chassis_handle();
         let inverse = to_rapier(snapshot.pose).inverse();
-        let mut mass = self.base_mass;
         for slot in &mut self.slots {
             let support = if let Some(rim) = slot.rim {
                 let part = &self.parts[rim];
@@ -549,8 +535,7 @@ impl WheelAssemblies {
                 state.body = Some(chassis);
                 state.local_pose = from_rapier(&(inverse * rim_pose));
                 state.pose = from_rapier(&rim_pose);
-                mass += part.mass;
-                let (radius, quality) = if let Some(tire) = part.tire {
+                let (radius, slip) = if let Some(tire) = part.tire {
                     let tire_part = &self.parts[tire];
                     let tire_pose = rim_pose
                         * part
@@ -564,19 +549,25 @@ impl WheelAssemblies {
                     tire_state.local_pose = from_rapier(&(inverse * tire_pose));
                     tire_state.pose = from_rapier(&tire_pose);
                     tire_state.location = ItemLocation::Attached(part.item);
-                    mass += tire_part.mass;
-                    (tire_part.radius, tire_state.condition)
+                    let wear = f32::from(tire_state.condition) / 4.0;
+                    (
+                        tire_part.radius,
+                        self.tire_slip[0] + (self.tire_slip[1] - self.tire_slip[0]) * wear,
+                    )
                 } else {
-                    (part.radius, 1.0)
+                    (part.radius, self.rim_slip)
                 };
-                Some((radius, quality))
+                Some((radius, slip))
             } else {
                 None
             };
             if slot.last_support != support {
                 physics.set_wheel(
                     slot.id,
-                    support.map(|(radius, condition)| InstalledWheel { radius, condition }),
+                    support.map(|(radius, friction_slip)| InstalledWheel {
+                        radius,
+                        friction_slip,
+                    }),
                 )?;
                 slot.last_support = support;
             }
@@ -601,18 +592,6 @@ impl WheelAssemblies {
                     collider.set_position(world);
                 }
             }
-        }
-        for id in &self.vehicle_tanks {
-            mass += items
-                .get(*id)
-                .and_then(|item| item.fluid.as_ref())
-                .ok_or_else(|| error("Missing vehicle tank"))?
-                .mixture
-                .total();
-        }
-        if !self.last_mass.is_finite() || (mass - self.last_mass).abs() > 0.0001 {
-            physics.set_vehicle_mass(mass);
-            self.last_mass = mass;
         }
         Ok(())
     }

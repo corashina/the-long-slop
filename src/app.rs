@@ -414,6 +414,27 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
                 }
             },
             |item| match item.kind {
+                _ if runtime.parts.contains(item.id) => {
+                    let fitted = state.is_some_and(|state| {
+                        matches!(
+                            state.location,
+                            crate::interaction::items::ItemLocation::Attached(_)
+                        )
+                    });
+                    if target.is_some_and(|target| target.part_slot) {
+                        "F: fit part"
+                    } else if fitted
+                        && matches!(item.kind, ItemKind::Door | ItemKind::Hood | ItemKind::Trunk)
+                    {
+                        "Hold E + mouse: move · F: remove"
+                    } else if fitted {
+                        "F: remove"
+                    } else if held.is_empty() {
+                        "F: carry"
+                    } else {
+                        "F: drop"
+                    }
+                }
                 ItemKind::Door | ItemKind::Hood | ItemKind::Trunk => "Hold E + mouse: move",
                 ItemKind::Cap => {
                     if reference
@@ -478,7 +499,7 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
             .unwrap_or(""),
         action,
         amount,
-        state.map_or(-1.0, |item| item.condition),
+        state.map_or(-1, |item| i32::from(item.condition)),
         held,
         runtime.engine_output.rpm,
         runtime.engine_output.ignition,

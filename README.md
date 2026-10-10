@@ -42,7 +42,7 @@ The build script writes the browser package to `web/pkg`.
 | Space | Jump | Toggle handbrake |
 | E | Use cap or seat | Leave seat |
 | Hold E + mouse | Move an aimed door | Move an aimed door |
-| F | Carry, drop, remove, or install an aimed wheel | — |
+| F | Carry, drop, remove, or fit an aimed wheel or car part | — |
 | Mouse wheel / hold RMB + mouse | Change carry distance / rotate item | — |
 | X | Split a wheel or join compatible rim and tire | — |
 | Hold LMB | Fill an open container | — |
@@ -59,6 +59,9 @@ Its capacities are 39 L fuel, 5 L oil, and 5 L coolant.
 
 Focus loss pauses play and clears input. Resume captures the mouse again.
 Recovery preserves fluids, parts, condition, and trip distance.
+A hard crash can knock wheels and parts off. Worn parts and a worn car body break first.
+Carry a loose part to its own slot and press F to fit it.
+The car does not run without its engine. Without its radiator it gets no cooling.
 An empty fuel tank moves recovery to a station. Other recovery moves the car to the nearest road point.
 Restart restores the garage, supplies, car, origin, and trip distance.
 Close the driver door before reversing through the garage exit.

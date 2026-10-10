@@ -1254,7 +1254,8 @@
       "body": 2,
       "name": "Fixture 1",
       "kind": "container",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1268,7 +1269,8 @@
       "body": 2,
       "name": "Fixture 2",
       "kind": "container",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1282,7 +1284,8 @@
       "body": 2,
       "name": "Fixture 3",
       "kind": "container",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1296,7 +1299,8 @@
       "body": 2,
       "name": "Fixture 4",
       "kind": "engine",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": 0.7,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1310,7 +1314,8 @@
       "body": 2,
       "name": "Fixture 5",
       "kind": "decoration",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1324,7 +1329,8 @@
       "body": 2,
       "name": "Fixture 6",
       "kind": "decoration",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1338,7 +1344,8 @@
       "body": 2,
       "name": "Fixture 7",
       "kind": "decoration",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1352,7 +1359,8 @@
       "body": 2,
       "name": "Fixture 8",
       "kind": "decoration",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1366,7 +1374,8 @@
       "body": 2,
       "name": "Fixture 9",
       "kind": "tire",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1380,7 +1389,8 @@
       "body": 2,
       "name": "Fixture 10",
       "kind": "tire",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1394,7 +1404,8 @@
       "body": 2,
       "name": "Fixture 11",
       "kind": "tire",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1408,7 +1419,8 @@
       "body": 2,
       "name": "Fixture 12",
       "kind": "tire",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1422,7 +1434,8 @@
       "body": 2,
       "name": "Fixture 13",
       "kind": "rim",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": 0.6,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1436,7 +1449,8 @@
       "body": 2,
       "name": "Fixture 14",
       "kind": "rim",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": 0.6,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1450,7 +1464,8 @@
       "body": 2,
       "name": "Fixture 15",
       "kind": "rim",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": 0.6,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1464,7 +1479,8 @@
       "body": 2,
       "name": "Fixture 16",
       "kind": "rim",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": 0.6,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1478,7 +1494,8 @@
       "body": 2,
       "name": "Fixture 17",
       "kind": "seat",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1492,7 +1509,8 @@
       "body": 1,
       "name": "Synthetic faucet",
       "kind": "container",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 0,
       "attached_to": null
     },
@@ -1506,7 +1524,8 @@
       "body": 1,
       "name": "Synthetic faucet",
       "kind": "cap",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 0,
       "attached_to": null
     }
@@ -1982,6 +2001,15 @@
       1.25,
       0.75
     ],
+    "rim_slip": [0.4, 0.3],
+    "item": 1,
+    "crash": {
+      "fall_off_speed": [15, 40],
+      "max_fall_off_speed": 120,
+      "fall_off_counts": [[1, 5], [2, 6]],
+      "multiplier": 1,
+      "fall_off_multiplier": 1
+    },
     "auto_shift_stop_speed": 1,
     "auto_shift_min_rpm": 2700,
     "auto_shift_max_rpm": 3700,
@@ -2082,6 +2110,7 @@
     },
     "driveway_height": 0
   },
+  "parts": [],
   "wheel_parts": [
     {
       "item": 13,
