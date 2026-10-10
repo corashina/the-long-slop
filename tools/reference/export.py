@@ -107,7 +107,7 @@ def stage_source(steam_root: Path | None, verify: bool = False) -> Snapshot:
         raise ValueError(f'Installed inventory mismatch: {len(source.serialized_files)} serialized files, {len(catalog.objects)} objects')
     data = catalog_data(catalog, source, snapshot)
     catalog_path = work_root / 'catalog.json'
-    if verify:
+    if verify or catalog_path.exists():
         accepted = json.loads(catalog_path.read_text(encoding='utf-8'))
         for item in accepted['objects']:
             item['dependencies'] = []

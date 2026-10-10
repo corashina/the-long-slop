@@ -103,6 +103,52 @@ class LibrarySourceTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 main(['--stage', 'source', '--work-root', str(self.work)])
 
+    def test_catalog_source_catalog_verification_preserves_acceptance(self):
+        from tools.reference.export import stage_catalog, stage_source
+        class InstalledObjects(dict):
+            def __len__(self):
+                return 262784
+        a, b = ObjectId('owner', 1), ObjectId('owner', 2)
+        objects = InstalledObjects({identity: ObjectRecord(identity, 'Material', 21, 0, 32, 'container') for identity in (a, b)})
+        inventory = Catalog(objects, {'Material': 2}, {a: (), b: ()})
+        complete = Catalog(objects, {'Material': 2}, {a: (b,), b: (a,)})
+        snapshot = Snapshot(self.work / 'source', (), self.work / 'source-manifest.json', 'source')
+        self.work.mkdir()
+        snapshot.manifest_path.write_text('accepted source')
+        parsed = SimpleNamespace(serialized_files=dict.fromkeys(range(9)), resource_streams=tuple(range(7)))
+        def data(catalog, source, accepted):
+            return {'schema_version': 1, 'source_manifest_sha256': 'source', 'objects': [
+                {'source': {'file': identity.file, 'path_id': identity.path_id},
+                 'dependencies': [{'file': target.file, 'path_id': target.path_id} for target in catalog.dependencies[identity]]}
+                for identity in (a, b)]}
+        def build(source, accepted, root):
+            (root / 'manifest.json').write_text(json.dumps({'schema_version': 1, 'source_manifest_sha256': 'source'}))
+            return complete
+        def verify(source, accepted, catalog_path, records_root):
+            receipt = json.loads((records_root / 'manifest.json').read_bytes())
+            raw = catalog_path.read_bytes()
+            if hashlib.sha256(raw).hexdigest() != receipt['catalog_sha256']:
+                raise ValueError('Catalog hash mismatch')
+            self.assertEqual(json.loads(raw), data(complete, parsed, snapshot))
+            return complete
+        with patch('tools.reference.export.SOURCE_WORK_ROOT', self.work), patch('tools.reference.source.Source', return_value=parsed), \
+             patch('tools.reference.library.archive.load_snapshot', return_value=snapshot), patch('tools.reference.library.archive.verify_snapshot'), \
+             patch('tools.reference.library.archive.snapshot_source', return_value=snapshot), patch('tools.reference.library.inventory.inventory_source', return_value=inventory), \
+             patch('tools.reference.library.inventory.catalog_data', side_effect=data), patch('tools.reference.library.records.build_catalog', side_effect=build), \
+             patch('tools.reference.library.records.verify_catalog', side_effect=verify):
+            stage_catalog(None)
+            before = {path: (path.stat().st_mtime_ns, path.read_bytes()) for path in (self.work / 'catalog.json', self.work / 'records/manifest.json')}
+            stage_source(self.root)
+            self.assertEqual(stage_catalog(None, verify=True), complete)
+            stage_source(None, verify=True)
+            after = {path: (path.stat().st_mtime_ns, path.read_bytes()) for path in before}
+            self.assertEqual(before, after)
+            obsolete = json.loads((self.work / 'catalog.json').read_bytes())
+            obsolete['schema_version'] = 0
+            (self.work / 'catalog.json').write_text(json.dumps(obsolete))
+            with self.assertRaisesRegex(ValueError, 'complete inventory'):
+                stage_source(self.root)
+
     def test_cli_rejects_live_installation_output_before_staging(self):
         from tools.reference.export import main, _export_selected
         before = {path.relative_to(self.root).as_posix(): (path.stat().st_mtime_ns, path.read_bytes())
