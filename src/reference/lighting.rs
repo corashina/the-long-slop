@@ -82,6 +82,9 @@ pub struct CycleReference {
     pub night_fog_colors: [[f32; 4]; 3],
     pub day_fog_densities: [f32; 3],
     pub night_fog_densities: [f32; 3],
+    pub temp_days: [f32; 3],
+    pub temp_nights: [f32; 3],
+    pub temp_add_noons: [f32; 3],
     pub flare_dawn: [f32; 3],
     pub flare_day: [f32; 3],
     pub flare_dusk: [f32; 3],
@@ -95,6 +98,7 @@ pub struct CycleReference {
     pub clouds: Vec<CloudReference>,
     pub star_material: SkyMaterialReference,
     pub sky_resources: Vec<ResourceReference>,
+    pub sun_flares: Vec<SunFlareReference>,
     pub stars: Vec<StarReference>,
     pub sky_geometry: SkyGeometryReference,
     pub cloud_shadow_cookie: u32,
@@ -565,6 +569,9 @@ impl LightingRecord {
                 "biome scalars",
             )?;
         }
+        for values in [&c.temp_days, &c.temp_nights, &c.temp_add_noons] {
+            check(finite(values), &c.source, "visual temperature arrays")?;
+        }
         for values in [
             &c.day_color,
             &c.night_color,
@@ -738,14 +745,19 @@ impl LightingRecord {
                     "off material",
                 )?;
             }
+            check(
+                control.kind != LightControllerKind::Cabin || control.cabin_input.is_some(),
+                &control.source,
+                "cabin input missing",
+            )?;
             if let Some(input) = &control.cabin_input {
                 check(
                     valid_source(&input.source)
                         && valid_source(&input.switch_source)
                         && local(input.switch_node)
+                        && input.switch_node == control.node
                         && input.target == control.id
-                        && !input.modes.is_empty()
-                        && input.modes.iter().all(|m| *m <= 2)
+                        && input.modes == [0, 1, 2]
                         && input.startup_mode < input.modes.len()
                         && input.threshold.is_finite()
                         && input.door_nodes.iter().all(|id| local(*id))
@@ -757,7 +769,68 @@ impl LightingRecord {
                     &control.source,
                     "cabin input",
                 )?;
+                let level1 =
+                    |source: &SourceId, pid| source.file == "level1" && source.path_id == pid;
+                check(
+                    level1(&input.source, 73157)
+                        && level1(&input.switch_source, 69669)
+                        && input.door_slots.len() == 4
+                        && input.door_usable_sources.len() == 4
+                        && input.door_nodes.len() == 4,
+                    &control.source,
+                    "cabin door links",
+                )?;
+                let expected = [
+                    (77869, 76010, 38014),
+                    (77868, 70795, 24532),
+                    (77864, 66662, 33544),
+                    (77865, 69957, 24439),
+                ];
+                for (i, (slot, usable, transform_source)) in expected.into_iter().enumerate() {
+                    check(
+                        level1(&input.door_slots[i], slot)
+                            && level1(&input.door_usable_sources[i], usable)
+                            && node(input.door_nodes[i]).is_some_and(|n| {
+                                n.asset == asset && level1(&n.source, transform_source)
+                            }),
+                        &control.source,
+                        "cabin door links correspondence",
+                    )?;
+                }
             }
+        }
+        let expected_flares = [57088, 57090, 57089];
+        check(
+            c.sun_flares.len() == expected_flares.len(),
+            &c.source,
+            "sun flare chain",
+        )?;
+        for (flare, pid) in c.sun_flares.iter().zip(expected_flares) {
+            check(
+                flare.source.file == "level1"
+                    && flare.source.path_id == pid
+                    && flare.component.source == flare.source
+                    && c.sky_resources.iter().any(|r| {
+                        r.source == flare.component.source
+                            && r.path == flare.component.path
+                            && r.sha256 == flare.component.sha256
+                    })
+                    && valid_resource(
+                        &flare.component.source,
+                        &flare.component.path,
+                        &flare.component.sha256,
+                    )
+                    && flare.flare.source.file == "sharedassets1.assets"
+                    && flare.flare.source.path_id == 4516
+                    && valid_resource(&flare.flare.source, &flare.flare.path, &flare.flare.sha256)
+                    && self.textures.iter().any(|t| {
+                        t.id == flare.atlas
+                            && t.source.file == "sharedassets1.assets"
+                            && t.source.path_id == 744
+                    }),
+                &flare.source,
+                "sun flare resource links",
+            )?;
         }
         check(
             manifest
@@ -965,4 +1038,13 @@ pub struct SkyGeometryReference {
     pub asset: AssetId,
     pub root: NodeId,
     pub pose: Transform,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SunFlareReference {
+    pub source: SourceId,
+    pub component: ResourceReference,
+    pub flare: ResourceReference,
+    pub atlas: u32,
 }

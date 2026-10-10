@@ -1,6 +1,7 @@
 """Checked scene lighting and reusable desert road lamp records."""
 import hashlib
 import json
+import math
 from pathlib import Path
 from .source import Source, key, source_id, vector
 from .gltf import converted_transform, convert_point
@@ -74,6 +75,10 @@ def recover_cycle(source: Source, reader, output: Path) -> dict:
             'dayFogColors':'day_fog_colors','nightFogColors':'night_fog_colors'}.items():result[v]=[rgba(c) for c in f[k]]
     for k,v in {'fogDensityDays':'day_fog_densities','fogDensityNights':'night_fog_densities','sunFlareReggel':'flare_dawn','sunFlareDay':'flare_day','sunFlareEsteledik':'flare_dusk','sunFlareNight':'flare_night'}.items():result[v]=f[k]
     for k,v in {'dayColor':'day_color','nightColor':'night_color','dawnColor':'dawn_color','duskColor':'dusk_color','starColorDay':'star_color_day','starColorNight':'star_color_night'}.items():result[v]=rgba(f[k])
+    for source_field,field in [('tempDays','temp_days'),('tempNights','temp_nights'),('tempAddNoons','temp_add_noons')]:
+        values=f[source_field]
+        if len(values)!=3 or not all(math.isfinite(v) for v in values):raise ValueError(f'{key(reader)} {source_field} requires three finite values')
+        result[field]=values
     result['clouds']=[]
     for layer in ('Low','High'):
         cloud_node=source.get('level1',27215 if layer=='Low' else 27216)
@@ -83,6 +88,7 @@ def recover_cycle(source: Source, reader, output: Path) -> dict:
             'min_density':f['Cloud'+layer+'DensityMin'],'max_density':f['Cloud'+layer+'DensityMax']})
     result['star_material']=sky_material(source,source.resolve(reader,f['starMaterial']),output)
     result['sky_resources']=[]
+    result['sun_flares']=[]
     for field in ('stars','stars2','starTransform','cloudTransform','sunFlare',*['sunFlareFlare']):
         values=f[field] if isinstance(f[field],list) else [f[field]]
         for pointer in values:
@@ -90,6 +96,14 @@ def recover_cycle(source: Source, reader, output: Path) -> dict:
             if linked is None:raise ValueError(f'{key(reader)} {field} missing')
             data=source.read(linked)
             result['sky_resources'].append(resource(linked,output,'bin',linked.get_raw_data()))
+            if linked.type.name=='LensFlare':
+                flare=source.resolve(linked,data['m_Flare'])
+                if flare is None or flare.type.name!='Flare':raise ValueError(f'{key(linked)} m_Flare missing')
+                flare_data=source.read(flare)
+                atlas=source.resolve(flare,flare_data['m_FlareTexture'])
+                result['sun_flares'].append({'source':source_id(linked),'component':result['sky_resources'][-1],
+                    'flare':resource(flare,output,'flare.json',json.dumps(flare_data,allow_nan=False).encode()),
+                    'atlas':texture(source,atlas,output)})
             # Particle and flare renderer resources remain explicit, never inferred.
             if linked.type.name in ('ParticleSystem','GameObject'):
                 transform=source.transform_for(linked if linked.type.name=='GameObject' else source.resolve(linked,data['m_GameObject']))
@@ -359,9 +373,41 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
                     document=documents.get(m['asset']);index=m['gltf_material']
                     if m['asset']!=owner or not document or not 0<=index<len(document['materials']) or document['materials'][index]['extras']['source']!=m['source']:fail(c['source'],field)
         if c['kind']=='house' and not c['aim_colliders']:fail(c['source'],'aim colliders')
+        if c['kind']=='cabin':
+            cabin=c.get('cabin_input')
+            if not cabin:fail(c['source'],'cabin input missing')
+            def level1(identity,pid):return identity=={'file':'level1','path_id':pid}
+            if not (level1(cabin['source'],73157) and level1(cabin['switch_source'],69669)
+                    and cabin['switch_node']==c['node'] and cabin['switch_node'] in nodes and nodes[cabin['switch_node']]['asset']==owner
+                    and cabin['target']==c['id']):fail(c['source'],'cabin input links')
+            if cabin['modes']!=[0,1,2] or not 0<=cabin['startup_mode']<3:fail(c['source'],'cabin input modes')
+            fields=('door_slots','door_usable_sources','door_nodes')
+            if any(len(cabin[field])!=4 for field in fields):fail(c['source'],'cabin door links')
+            expected=[(77869,76010,38014),(77868,70795,24532),(77864,66662,33544),(77865,69957,24439)]
+            for slot,usable,nid,(slot_id,usable_id,node_source) in zip(cabin['door_slots'],cabin['door_usable_sources'],cabin['door_nodes'],expected):
+                if not (level1(slot,slot_id) and level1(usable,usable_id) and nid in nodes
+                        and nodes[nid]['asset']==owner and level1(nodes[nid]['source'],node_source)):
+                    fail(c['source'],'cabin door links correspondence')
     for l in lighting['lights']:
         if l['cookie'] is not None and l['cookie'] not in textures:fail(l['source'],'cookie')
         if l['node'] is not None and l['node'] not in nodes:fail(l['source'],'node')
+    for field in ('temp_days','temp_nights','temp_add_noons'):
+        values=lighting['cycle'].get(field)
+        if not isinstance(values,list) or len(values)!=3 or not all(isinstance(v,(int,float)) and math.isfinite(v) for v in values):
+            fail(lighting['cycle']['source'],field+' requires three finite values')
+    flares=lighting['cycle']['sun_flares']
+    expected_flares=[57088,57090,57089]
+    if len(flares)!=len(expected_flares):fail(lighting['cycle']['source'],'sun flare chain')
+    for flare,pid in zip(flares,expected_flares):
+        atlas=textures.get(flare['atlas'])
+        if not (flare['source']=={'file':'level1','path_id':pid} and flare['component']['source']==flare['source']
+                and flare['component'] in lighting['cycle']['sky_resources']
+                and flare['flare']['source']=={'file':'sharedassets1.assets','path_id':4516}
+                and atlas and atlas['source']=={'file':'sharedassets1.assets','path_id':744}):
+            fail(flare['source'],'sun flare resource links')
+        payload=json.loads((output/Path(flare['flare']['path']).name).read_text())
+        if payload['m_FlareTexture']!={'m_FileID':0,'m_PathID':atlas['source']['path_id']}:
+            fail(flare['source'],'sun flare atlas link')
     road=lighting['road_lamp']
     if assets[road['asset']]['usage']!='road_lamp_prototype' or controls[road['controller']]['kind']!='road':fail(road['source'],'prototype')
     if documents[road['asset']]['nodes'][0]['translation']!=IDENTITY['translation']:fail(road['source'],'prototype placement')

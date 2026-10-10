@@ -59,3 +59,113 @@ fn production_lighting_has_checked_source_links() {
     assert_eq!(manifest.lighting.lights.len(), 17);
     assert_eq!(manifest.lighting.cycle.startup_offset_seconds, 240.);
 }
+
+#[test]
+fn rejects_missing_cabin_input_and_incomplete_door_links() {
+    let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    let index = original
+        .lighting
+        .controllers
+        .iter()
+        .position(|c| c.kind == my_summer_slop::reference::LightControllerKind::Cabin)
+        .unwrap();
+    let mut m = original.clone();
+    m.lighting.controllers[index].cabin_input = None;
+    assert!(m.validate().is_err());
+    for field in 0..3 {
+        for empty in [true, false] {
+            let mut m = original.clone();
+            let input = m.lighting.controllers[index].cabin_input.as_mut().unwrap();
+            match field {
+                0 => {
+                    if empty {
+                        input.door_slots.clear();
+                    } else {
+                        input.door_slots.pop();
+                    }
+                }
+                1 => {
+                    if empty {
+                        input.door_usable_sources.clear();
+                    } else {
+                        input.door_usable_sources.pop();
+                    }
+                }
+                _ => {
+                    if empty {
+                        input.door_nodes.clear();
+                    } else {
+                        input.door_nodes.pop();
+                    }
+                }
+            }
+            assert!(m.validate().is_err());
+        }
+        let mut m = original.clone();
+        let input = m.lighting.controllers[index].cabin_input.as_mut().unwrap();
+        match field {
+            0 => input.door_slots.reverse(),
+            1 => input.door_usable_sources.reverse(),
+            _ => input.door_nodes.reverse(),
+        }
+        assert!(m.validate().is_err());
+    }
+    let mut m = original;
+    m.lighting.controllers[index]
+        .cabin_input
+        .as_mut()
+        .unwrap()
+        .modes = vec![0, 2, 1];
+    assert!(m.validate().is_err());
+}
+
+#[test]
+fn rejects_missing_flare_payload_and_atlas() {
+    let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    assert_eq!(original.lighting.cycle.sun_flares.len(), 3);
+    let mut m = original.clone();
+    m.lighting.cycle.sun_flares.clear();
+    assert!(m.validate().is_err());
+    let mut m = original.clone();
+    m.lighting.cycle.sun_flares[0].flare.sha256 = "0".repeat(64);
+    assert!(m.validate().is_err());
+    let mut m = original.clone();
+    let atlas = m.lighting.cycle.sun_flares[0].atlas;
+    m.lighting.textures.retain(|t| t.id != atlas);
+    assert!(m.validate().is_err());
+    let mut m = original;
+    m.lighting.cycle.sun_flares[0].atlas = 999999;
+    assert!(m.validate().is_err());
+}
+
+#[test]
+fn rejects_missing_incomplete_and_nonfinite_visual_temperature_arrays() {
+    let original: serde_json::Value =
+        serde_json::from_slice(include_bytes!("common/reference.json")).unwrap();
+    for field in ["temp_days", "temp_nights", "temp_add_noons"] {
+        let mut value = original.clone();
+        value["lighting"]["cycle"]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert!(ReferenceManifest::from_json(&serde_json::to_vec(&value).unwrap()).is_err());
+        for array in [
+            serde_json::json!([1., 2.]),
+            serde_json::json!([1., 2., 3., 4.]),
+        ] {
+            let mut value = original.clone();
+            value["lighting"]["cycle"][field] = array;
+            assert!(ReferenceManifest::from_json(&serde_json::to_vec(&value).unwrap()).is_err());
+        }
+    }
+    let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    for field in 0..3 {
+        let mut m = original.clone();
+        match field {
+            0 => m.lighting.cycle.temp_days[0] = f32::NAN,
+            1 => m.lighting.cycle.temp_nights[0] = f32::NAN,
+            _ => m.lighting.cycle.temp_add_noons[0] = f32::NAN,
+        }
+        assert!(m.validate().is_err());
+    }
+}

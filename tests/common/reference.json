@@ -334,6 +334,10 @@
           "sha256": "be4e7ac64ccd6ca41467ff8eb169de03592772e77aef2c49129dedfd6c9ff72d"
         },
         {
+          "file": "reference/lighting-sharedassets1.assets-4516.flare.json",
+          "sha256": "7765d15991e95c28d25dd8e185c0b1003002c9654c481548c4736b2886875a84"
+        },
+        {
           "file": "reference/lighting-sharedassets1.assets-735.png",
           "sha256": "14a45c4317d50b25b199f744964b366c2270a485fa90aa0c4ee4201af74da863"
         },
@@ -404,6 +408,14 @@
         {
           "file": "reference/lighting-sharedassets1.assets-701.texture.bin",
           "sha256": "7120d29a22dd998b8d69f3bb0ca561ab7b595aacede42949bea06b5c0e523106"
+        },
+        {
+          "file": "reference/lighting-sharedassets1.assets-744.png",
+          "sha256": "4e30bee4b6d623a56071e8a5b3ec92fa545a50d32d84869a70f89ba58ea66d81"
+        },
+        {
+          "file": "reference/lighting-sharedassets1.assets-744.texture.bin",
+          "sha256": "92dbb846ed81e4cb08851582cf49d1296452035e32be9b7c1ce8058ecd7bfc29"
         },
         {
           "file": "reference/lighting-unity default resources-10001.png",
@@ -6128,7 +6140,7 @@
     "startup_ambient": 0.20000000298023224,
     "startup_reflection": 0.0,
     "startup_fog_density": 5.767857296910845e-05,
-    "default_spot_cookie": 10,
+    "default_spot_cookie": 11,
     "skybox": {
       "source": {
         "file": "sharedassets1.assets",
@@ -7332,6 +7344,21 @@
         0.501960813999176,
         1.0
       ],
+      "temp_days": [
+        35.0,
+        0.0,
+        20.0
+      ],
+      "temp_nights": [
+        -9.0,
+        -15.0,
+        5.0
+      ],
+      "temp_add_noons": [
+        15.0,
+        10.0,
+        5.0
+      ],
       "clouds": [
         {
           "node": 109,
@@ -7869,6 +7896,77 @@
           },
           "path": "reference/lighting-level1-57089.bin",
           "sha256": "be4e7ac64ccd6ca41467ff8eb169de03592772e77aef2c49129dedfd6c9ff72d"
+        }
+      ],
+      "sun_flares": [
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 57088
+          },
+          "component": {
+            "source": {
+              "file": "level1",
+              "path_id": 57088
+            },
+            "path": "reference/lighting-level1-57088.bin",
+            "sha256": "0c3440d39e78c03fc2091599f201915afee4c71c63526900be42be93db5ffeec"
+          },
+          "flare": {
+            "source": {
+              "file": "sharedassets1.assets",
+              "path_id": 4516
+            },
+            "path": "reference/lighting-sharedassets1.assets-4516.flare.json",
+            "sha256": "7765d15991e95c28d25dd8e185c0b1003002c9654c481548c4736b2886875a84"
+          },
+          "atlas": 10
+        },
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 57090
+          },
+          "component": {
+            "source": {
+              "file": "level1",
+              "path_id": 57090
+            },
+            "path": "reference/lighting-level1-57090.bin",
+            "sha256": "5d2886f9d32caabbb2caca0ab2997c1f3919654aacdbb8543fd65516315dd99f"
+          },
+          "flare": {
+            "source": {
+              "file": "sharedassets1.assets",
+              "path_id": 4516
+            },
+            "path": "reference/lighting-sharedassets1.assets-4516.flare.json",
+            "sha256": "7765d15991e95c28d25dd8e185c0b1003002c9654c481548c4736b2886875a84"
+          },
+          "atlas": 10
+        },
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 57089
+          },
+          "component": {
+            "source": {
+              "file": "level1",
+              "path_id": 57089
+            },
+            "path": "reference/lighting-level1-57089.bin",
+            "sha256": "be4e7ac64ccd6ca41467ff8eb169de03592772e77aef2c49129dedfd6c9ff72d"
+          },
+          "flare": {
+            "source": {
+              "file": "sharedassets1.assets",
+              "path_id": 4516
+            },
+            "path": "reference/lighting-sharedassets1.assets-4516.flare.json",
+            "sha256": "7765d15991e95c28d25dd8e185c0b1003002c9654c481548c4736b2886875a84"
+          },
+          "atlas": 10
         }
       ],
       "sky_geometry": {
@@ -9476,6 +9574,34 @@
       },
       {
         "id": 10,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 744
+        },
+        "path": "reference/lighting-sharedassets1.assets-744.png",
+        "sha256": "4e30bee4b6d623a56071e8a5b3ec92fa545a50d32d84869a70f89ba58ea66d81",
+        "width": 512,
+        "height": 1024,
+        "source_format": 28,
+        "sample_channel": "rgba",
+        "color_space": 1,
+        "filter_mode": 1,
+        "wrap_u": 0,
+        "wrap_v": 0,
+        "source_data": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 744
+          },
+          "path": "reference/lighting-sharedassets1.assets-744.texture.bin",
+          "sha256": "92dbb846ed81e4cb08851582cf49d1296452035e32be9b7c1ce8058ecd7bfc29"
+        },
+        "mip_count": 11,
+        "aniso": 1,
+        "mip_bias": 0.0
+      },
+      {
+        "id": 11,
         "source": {
           "file": "unity default resources",
           "path_id": 10001
