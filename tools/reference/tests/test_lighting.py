@@ -125,3 +125,31 @@ class LightingTests(unittest.TestCase):
         s=self.source
         roots=[s.get('level1',21400),s.transform_for(s.get('level1',17687))]
         return recover_lighting(s,roots,self.output)
+
+class LightingExportAcceptanceTests(unittest.TestCase):
+    def test_failed_engine_check_removes_existing_manifest(self):
+        from unittest.mock import MagicMock, patch
+        from tools.reference.export import export_reference
+        source=MagicMock()
+        source.get.side_effect=lambda file,pid:(file,pid)
+        source.transform_for.side_effect=lambda reader:reader
+        source.resolve.return_value=('level1',123)
+        source.hierarchy.return_value=[{'path':str(i)} for i in range(697)]
+        records={('level1',71403):{'m_GameObject':{'m_PathID':123}},
+            ('level1',64896):{'FirstHome':{'m_PathID':21400}},
+            ('level1',64898):{'StartCar02':{'m_PathID':206}}}
+        source.read.side_effect=lambda reader:records[reader]
+        with TemporaryDirectory() as directory:
+            base=Path(directory);root=base/'steamapps'/'common'/'The Long Drive'
+            root.mkdir(parents=True)
+            (root.parents[1]/'appmanifest_1017180.acf').write_text('"AppState" { "appid" "1017180" "buildid" "11140890" }')
+            output=base/'export';output.mkdir()
+            manifest=output/'manifest.json';engine=root/'UnityPlayer.dll'
+            for payload,error in ((b'unchecked engine',ValueError),(None,FileNotFoundError)):
+                with self.subTest(engine_present=payload is not None):
+                    manifest.write_text('{"accepted":true}')
+                    if payload is None:engine.unlink(missing_ok=True)
+                    else:engine.write_bytes(payload)
+                    with patch('tools.reference.source.Source',return_value=source), patch('tools.reference.conditions.prepare_conditions'):
+                        with self.assertRaises(error):export_reference(root,output)
+                    self.assertFalse(manifest.exists(),'Failed export retained its old acceptance manifest')

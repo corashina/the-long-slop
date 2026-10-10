@@ -40,7 +40,6 @@ def export_reference(steam_root: Path, output: Path) -> None:
     if output.resolve().is_relative_to(steam_root.resolve()):
         raise ValueError('Keep generated files outside the Steam installation')
     validate_build(steam_root)
-    native_engine = native_engine_evidence(steam_root)
     source = Source(steam_root)
     def transform(go):return source.transform_for(source.get('level1',go))
     roots = {'home':[source.get('level1',21400)], 'lada':[transform(17687)],
