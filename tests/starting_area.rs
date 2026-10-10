@@ -1565,39 +1565,7 @@ fn focus_loss_cancels_throw_push_and_drag() {
         let (_, mut control_runtime) = initial();
         let item = reference.items[0].id;
         for runtime in [&mut runtime, &mut control_runtime] {
-            let point = runtime.area.items.get(item).unwrap().pose.position;
-            runtime
-                .area
-                .interaction
-                .pickup_item(
-                    item,
-                    point,
-                    &runtime.area.player,
-                    &mut runtime.area.items,
-                    &mut runtime.physics,
-                )
-                .unwrap();
-            runtime.area.interaction.step(
-                FrameInput::default(),
-                ResolvedAim::default(),
-                &mut runtime.area.player,
-                &mut runtime.area.items,
-                &mut runtime.physics,
-                0.02,
-            );
-            runtime.area.interaction.step(
-                FrameInput {
-                    held: keys::GRAB,
-                    pressed: keys::GRAB,
-                    ..Default::default()
-                },
-                ResolvedAim::default(),
-                &mut runtime.area.player,
-                &mut runtime.area.items,
-                &mut runtime.physics,
-                0.4,
-            );
-            assert!(runtime.area.interaction.throw_charge() > 0.2);
+            establish_throw_charge(runtime, item);
         }
         let mut pending = FrameInput {
             held: keys::GRAB | keys::FORWARD,
@@ -1849,4 +1817,134 @@ fn restart_cancels_latched_grip() {
     assert_eq!(runtime.area.interaction.push_steering(), None);
     assert!(runtime.physics.rapier().impulse_joints.is_empty());
     assert!(runtime.physics.rapier().bodies[runtime.area.player.body_handle()].is_kinematic());
+}
+
+fn establish_throw_charge(runtime: &mut GarageRuntime, item: my_summer_slop::reference::ItemId) {
+    use my_summer_slop::interaction::ResolvedAim;
+    let point = runtime.area.items.get(item).unwrap().pose.position;
+    runtime
+        .area
+        .interaction
+        .pickup_item(
+            item,
+            point,
+            &runtime.area.player,
+            &mut runtime.area.items,
+            &mut runtime.physics,
+        )
+        .unwrap();
+    runtime.area.interaction.step(
+        FrameInput::default(),
+        ResolvedAim::default(),
+        &mut runtime.area.player,
+        &mut runtime.area.items,
+        &mut runtime.physics,
+        0.02,
+    );
+    runtime.area.interaction.step(
+        FrameInput {
+            held: keys::GRAB,
+            pressed: keys::GRAB,
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+        &mut runtime.area.player,
+        &mut runtime.area.items,
+        &mut runtime.physics,
+        0.4,
+    );
+    assert!(runtime.area.interaction.throw_charge() > 0.2);
+}
+
+#[test]
+fn pause_cancels_established_throw_charge_without_delayed_release() {
+    use my_summer_slop::interaction::ResolvedAim;
+    let (reference, mut runtime) = initial();
+    let (_, mut control) = initial();
+    let item = reference.items[0].id;
+    for runtime in [&mut runtime, &mut control] {
+        establish_throw_charge(runtime, item);
+        runtime.started = true;
+    }
+    runtime.paused = true;
+    runtime.step(
+        &reference,
+        FrameInput {
+            held: keys::GRAB,
+            mouse: [20., -30.],
+            ..Default::default()
+        },
+    );
+    assert_eq!(runtime.area.interaction.throw_charge(), 0.0);
+    assert_eq!(runtime.area.interaction.held(), Some(item));
+    runtime.paused = false;
+    control.area.interaction.cancel_input();
+    let body = runtime.area.items.get(item).unwrap().body.unwrap();
+    let control_body = control.area.items.get(item).unwrap().body.unwrap();
+    let velocity = runtime.physics.rapier().bodies[body].linvel();
+    let release = FrameInput {
+        released: keys::GRAB,
+        ..Default::default()
+    };
+    let action = runtime.area.interaction.step(
+        release,
+        ResolvedAim::default(),
+        &mut runtime.area.player,
+        &mut runtime.area.items,
+        &mut runtime.physics,
+        0.02,
+    );
+    assert_eq!(action, None);
+    assert_eq!(runtime.physics.rapier().bodies[body].linvel(), velocity);
+    for _ in 0..3 {
+        runtime.step(&reference, release);
+        control.step(&reference, FrameInput::default());
+        assert_eq!(runtime.area.interaction.throw_charge(), 0.0);
+        assert_eq!(runtime.area.interaction.held(), Some(item));
+        assert_eq!(
+            runtime.physics.rapier().bodies[body].linvel(),
+            control.physics.rapier().bodies[control_body].linvel()
+        );
+    }
+}
+
+#[test]
+fn restart_cancels_established_throw_charge_without_delayed_release() {
+    use my_summer_slop::interaction::ResolvedAim;
+    let (reference, mut runtime) = initial();
+    let item = reference.items[0].id;
+    establish_throw_charge(&mut runtime, item);
+    runtime.restart(&reference).unwrap();
+    assert_eq!(runtime.area.interaction.throw_charge(), 0.0);
+    assert_eq!(runtime.area.interaction.held(), None);
+    assert!(runtime.physics.rapier().impulse_joints.is_empty());
+    let (_, mut control) = initial();
+    control.started = true;
+    let body = runtime.area.items.get(item).unwrap().body.unwrap();
+    let control_body = control.area.items.get(item).unwrap().body.unwrap();
+    let velocity = runtime.physics.rapier().bodies[body].linvel();
+    let release = FrameInput {
+        released: keys::GRAB,
+        ..Default::default()
+    };
+    let action = runtime.area.interaction.step(
+        release,
+        ResolvedAim::default(),
+        &mut runtime.area.player,
+        &mut runtime.area.items,
+        &mut runtime.physics,
+        0.02,
+    );
+    assert_eq!(action, None);
+    assert_eq!(runtime.physics.rapier().bodies[body].linvel(), velocity);
+    for _ in 0..3 {
+        runtime.step(&reference, release);
+        control.step(&reference, FrameInput::default());
+        assert_eq!(runtime.area.interaction.throw_charge(), 0.0);
+        assert_eq!(runtime.area.interaction.held(), None);
+        assert_eq!(
+            runtime.physics.rapier().bodies[body].linvel(),
+            control.physics.rapier().bodies[control_body].linvel()
+        );
+    }
 }
