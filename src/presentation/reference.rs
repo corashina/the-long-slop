@@ -1,4 +1,6 @@
-use crate::reference::{BodyId, ItemId, ItemKind, NodeId, OpeningId, ReferenceManifest, SourceId};
+use crate::reference::{
+    AssetUsage, BodyId, ItemId, ItemKind, NodeId, OpeningId, ReferenceManifest, SourceId,
+};
 use crate::starting_area::StartingArea;
 use crate::vehicle::PhysicsWorld;
 use bevy::camera::visibility::RenderLayers;
@@ -44,12 +46,16 @@ pub struct ReferenceVisuals {
     pub handles: Vec<(String, Handle<bevy::world_serialization::WorldAsset>)>,
     pub nodes: HashMap<NodeId, Entity>,
     pub instances: usize,
+    pub expected_instances: usize,
     pub bound: bool,
     pub failed: bool,
 }
 
 pub fn spawn(commands: &mut Commands, server: &AssetServer, reference: &ReferenceManifest) {
-    let mut visuals = ReferenceVisuals::default();
+    let mut visuals = ReferenceVisuals {
+        expected_instances: reference.expected_instances(),
+        ..Default::default()
+    };
     for asset in &reference.assets {
         let handle = server
             .load_builder()
@@ -64,6 +70,9 @@ pub fn spawn(commands: &mut Commands, server: &AssetServer, reference: &Referenc
             })
             .load(GltfAssetLabel::Scene(0).from_asset(asset.path.clone()));
         visuals.handles.push((asset.path.clone(), handle.clone()));
+        if asset.usage != AssetUsage::UniqueScene {
+            continue;
+        }
         commands
             .spawn((
                 ImportedRoot,
@@ -101,7 +110,7 @@ pub fn bind(
     if visuals.bound {
         return Ok(true);
     }
-    if visuals.instances != visuals.handles.len() {
+    if visuals.instances != visuals.expected_instances {
         return Ok(false);
     }
     for (entity, extra) in extras {
@@ -152,7 +161,12 @@ pub fn bind(
             }
         }
     }
-    for node in &reference.nodes {
+    for node in reference.nodes.iter().filter(|n| {
+        reference
+            .assets
+            .iter()
+            .any(|a| a.id == n.asset && a.usage == AssetUsage::UniqueScene)
+    }) {
         if !visuals.nodes.contains_key(&node.id) {
             return Err(format!(
                 "Missing glTF node {} ({})",

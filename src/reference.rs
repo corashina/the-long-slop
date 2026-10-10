@@ -6,6 +6,10 @@ use std::{
     fmt,
 };
 
+pub mod lighting;
+pub mod rendering;
+pub use lighting::*;
+
 pub const APP_ID: u32 = 1_017_180;
 pub const BUILD_ID: u32 = 11_140_890;
 
@@ -25,6 +29,8 @@ id!(AnchorId, u32);
 id!(SeatId, u32);
 id!(OpeningId, u32);
 id!(WheelSlotId, u8);
+id!(LightId, u32);
+id!(LightControlId, u32);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -48,9 +54,18 @@ pub struct Transform {
     pub scale: [f32; 3],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetUsage {
+    UniqueScene,
+    RoadLampPrototype,
+    SkyPrototype,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssetRecord {
+    pub usage: AssetUsage,
     pub id: AssetId,
     pub path: String,
     pub sha256: String,
@@ -504,6 +519,7 @@ pub struct StartingAreaReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
+    pub lighting: LightingRecord,
     pub app_id: u32,
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
@@ -567,6 +583,12 @@ fn hash(value: &str) -> bool {
 }
 
 impl ReferenceManifest {
+    pub fn expected_instances(&self) -> usize {
+        self.assets
+            .iter()
+            .filter(|a| a.usage == AssetUsage::UniqueScene)
+            .count()
+    }
     pub fn from_json(bytes: &[u8]) -> Result<Self, ReferenceError> {
         require(bytes.len() <= 64 * 1024 * 1024, "manifest size")?;
         let manifest: Self =
@@ -579,6 +601,19 @@ impl ReferenceManifest {
         require(
             self.app_id == APP_ID && self.build_id == BUILD_ID,
             "app/build",
+        )?;
+        self.lighting.validate(self)?;
+        require(
+            self.bodies.iter().all(|b| {
+                self.nodes.iter().any(|n| {
+                    n.id == b.node
+                        && self
+                            .assets
+                            .iter()
+                            .any(|a| a.id == n.asset && a.usage == AssetUsage::UniqueScene)
+                })
+            }),
+            "prototype body",
         )?;
         let asset_ids = ids(self.assets.iter().map(|r| r.id), "duplicate asset ID")?;
         let node_ids = ids(self.nodes.iter().map(|r| r.id), "duplicate node ID")?;

@@ -21,6 +21,8 @@ def validate_build(steam_root: Path):
 
 def export_reference(steam_root: Path, output: Path) -> None:
     from .gltf import export_gltf
+    from .lighting import recover_lighting, road_source, validate_lighting_export
+    from .source import key
     from .source import Source
     from .parameters import recover_parameters
     from .manifest import build_manifest
@@ -48,6 +50,16 @@ def export_reference(steam_root: Path, output: Path) -> None:
     output.mkdir(parents=True, exist_ok=True)
     # Remove acceptance before any export. A failed run cannot leave it usable.
     (output/'manifest.json').unlink(missing_ok=True)
+    source.lighting_root_assets={key(root):i for i,readers in enumerate(roots.values(),1) for root in readers}
+    _,pole=road_source(source)
+    clouds=source.get('level1',27217)
+    source.lighting_prototype_roots={key(pole),key(clouds)}
+    source.lighting_pole_root=key(pole)
+    source.lighting_root_assets[key(clouds)]=5
+    source.lighting_root_assets[key(pole)]=4
+    recover_lighting(source,[root for readers in roots.values() for root in readers],output)
+    roots['road_lamp']=[pole]
+    roots['sky']=[clouds]
     report = {}
     for name, readers in roots.items():
         report[name] = export_gltf((source,readers),output/f'{name}.gltf')
@@ -64,11 +76,14 @@ def export_reference(steam_root: Path, output: Path) -> None:
     data_root=steam_root/'TheLongDrive_Data'
     inputs=[path for path in data_root.iterdir() if path.is_file() and (path.name in {'level0','level1','globalgamemanagers'} or path.suffix in {'.assets','.resS'})]
     inputs.append(data_root/'Managed'/'Assembly-CSharp.dll')
+    inputs.extend(data_root/'Resources'/name for name in ('unity default resources','unity_builtin_extra'))
     hashes=[]
     for path in sorted(inputs):
         digest=hashlib.file_digest(path.open('rb'),'sha256').hexdigest()
         hashes.append({'file':str(path.relative_to(data_root)).replace('\\','/'),'sha256':digest})
     manifest=build_manifest(source,roots,report,hashes)
+    validate_lighting_export(manifest,output)
+    (output/'lighting-evidence.json').write_text(json.dumps({'lighting':manifest['lighting'],'byte_checks':source.evidence},indent=2,allow_nan=False),encoding='utf-8')
     parameters['controls']={
         'source':{'file':'level0','path_id':16865},
         'defaults':{'object_move':manifest['player']['obj_move_sensitivity'],'object_rotation':manifest['player']['obj_rotation_sensitivity'],

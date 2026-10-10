@@ -203,6 +203,8 @@ class GltfExporter:
         self.output.parent.mkdir(parents=True, exist_ok=True)
         records = []
         mapping = {}
+        asset = getattr(self.source,'lighting_assets',{}).get(key(roots[0]))
+        for material in getattr(self.source,'lighting_extra_materials',{}).get(asset,[]):self.material(material)
         for root in roots:
             records.extend(self.source.hierarchy(root, activate_root=True))
         hidden_lods=set()
@@ -226,7 +228,11 @@ class GltfExporter:
             transform = converted_transform(data)
             if record['parent'] is None:
                 from .collision import world_pose
-                transform=world_pose(self.source,reader)
+                from .lighting import IDENTITY
+                if key(reader)==getattr(self.source,'lighting_pole_root',None):
+                    transform=IDENTITY.copy()
+                elif key(reader) not in getattr(self.source,'lighting_prototype_roots',set()):
+                    transform=world_pose(self.source,reader)
             node = gl.Node(name=self.source.read(record['game_object'])['m_Name'],
                 extras={'reference_id': source_id(reader), 'active':record['active'], 'hierarchy_path':record['path'],
                     'layer':self.source.read(record['game_object'])['m_Layer']}, **transform)
@@ -242,11 +248,13 @@ class GltfExporter:
                     self.material_report.append({'source':source_id(renderer),
                         'adaptation':'Omitted obsolete editor TMP glyphs. Seeded plate text requires glyph regeneration.'})
                 node.extras['renderer_enabled'] = render_enabled
+                node.extras['cast_shadows'] = renderer_data['m_CastShadows']
+                node.extras['receive_shadows'] = bool(renderer_data['m_ReceiveShadows'])
                 owner = mesh_filter or renderer
                 mesh_reader = self.source.resolve(owner, self.source.read(owner)['m_Mesh'])
                 if mesh_reader and record['active'] and render_enabled:
                     materials=[self.source.resolve(renderer,p) for p in renderer_data['m_Materials']]
-                    selected=getattr(self.source,'condition_materials',{}).get(key(renderer))
+                    selected=getattr(self.source,'lighting_startup_materials',{}).get(key(renderer)) or getattr(self.source,'condition_materials',{}).get(key(renderer))
                     if selected:materials=[selected for _ in materials]
                     color=getattr(self.source,'condition_colors',{}).get(key(renderer))
                     condition=getattr(self.source,'condition_renderers',{}).get(key(renderer))

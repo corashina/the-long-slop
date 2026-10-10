@@ -12,7 +12,7 @@ def build_manifest(source, roots, reports, hashes):
     assets=[]
     for asset_id,(name,readers) in enumerate(roots.items(),1):
         report=reports[name]
-        assets.append({'id':asset_id,'path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
+        assets.append({'id':asset_id,'usage':'road_lamp_prototype' if name=='road_lamp' else 'sky_prototype' if name=='sky' else 'unique_scene','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
         records=[]
         for root in readers:records.extend(source.hierarchy(root,activate_root=True))
         for entry,record in zip(report['nodes'],records):
@@ -26,7 +26,7 @@ def build_manifest(source, roots, reports, hashes):
             for reader in record['components']:
                 name=source.class_name(reader) if reader.type.name=='MonoBehaviour' else reader.type.name
                 group.setdefault(name,[]).append(reader)
-            components[node_id]=group
+            components[node_id]=group if assets[-1]["usage"]=="unique_scene" else {}
     def data(node,name):
         values=components[node].get(name,[])
         return source.read(values[0]) if values else None
@@ -374,4 +374,20 @@ def build_manifest(source, roots, reports, hashes):
     result['vehicle'].update(gear_free_run=[bool(gear['freeRun']) for gear in car['gears']],
         dont_ignite_with_throttle_in_automatic=bool(car['dontIgniteWithThorttleInAutomatic']),auto_move_min=0.3)
     result['vehicle']['colliders']=[c['id'] for c in colliders if c['body']==car_body and c['enabled']]
+    result['lighting']=source.lighting
+    collider_ids={(c['source']['file'],c['source']['path_id']):c['id'] for c in colliders}
+    old_colliders={v:k for k,v in source.lighting_collider_ids.items()}
+    for controller in result['lighting']['controllers']:
+        missing=[old_colliders[i] for i in controller['aim_colliders'] if old_colliders[i] not in collider_ids]
+        if missing and controller['kind']!='road':raise ValueError(f"{controller['source']} required aim collider outside export: {missing}")
+        controller['aim_colliders']=[collider_ids[old_colliders[i]] for i in controller['aim_colliders'] if old_colliders[i] in collider_ids]
+    resources={}
+    def collect(value):
+        if isinstance(value,dict):
+            if 'path' in value and 'sha256' in value:resources[value['path']]={'file':value['path'],'sha256':value['sha256']}
+            for child in value.values():collect(child)
+        elif isinstance(value,list):
+            for child in value:collect(child)
+    collect(result['lighting'])
+    assets[0]['dependencies'].extend(resources.values())
     return result
