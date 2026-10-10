@@ -160,6 +160,9 @@ impl CarryState {
         let view = to_rapier(player.view_pose(physics));
         let rule = &self.rules[&held.item];
         let mass = physics.rapier().bodies[held.body].mass();
+        let movement_gain = ((mass - self.reference.carry_max_weight)
+            / (self.reference.carry_min_weight - self.reference.carry_max_weight))
+            .clamp(0.0, 1.0);
         let rotation_gain = ((mass - self.reference.carry_max_weight * 2.0)
             / (self.reference.carry_min_weight - self.reference.carry_max_weight * 2.0))
             .clamp(0.0, 1.0);
@@ -196,16 +199,19 @@ impl CarryState {
                         dt * 10.0 * self.reference.obj_rotation_sensitivity * rotation_gain;
                     let x = input.mouse[0] * sensitivity;
                     let y = input.mouse[1] * sensitivity;
-                    held.rotation = if moving {
+                    let rotation = if moving {
                         if rule.move_with_rotation {
                             held.rotation * Rotation::from_rotation_z(-x.to_radians())
                         } else {
                             Rotation::from_rotation_z(-x.to_radians()) * held.rotation
                         }
                     } else {
-                        Rotation::from_rotation_x(y.to_radians())
-                            * Rotation::from_rotation_y(x.to_radians())
-                            * held.rotation
+                        Rotation::from_rotation_y(x.to_radians()) * held.rotation
+                    };
+                    held.rotation = if !rule.move_with_rotation || !moving {
+                        Rotation::from_rotation_x(y.to_radians()) * rotation
+                    } else {
+                        rotation
                     };
                 } else if moving && !rotating {
                     if rule.move_with_rotation {
@@ -250,7 +256,7 @@ impl CarryState {
         }
         desired.translation = current.translation
             + ((desired.translation - current.translation) * self.reference.carry_force_multiplier)
-                .clamp_length_max(self.reference.carry_max_force)
+                .clamp_length_max(self.reference.carry_max_force * movement_gain)
                 * physics.rapier().integration_parameters.dt;
         let outside_player = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
             collider.parent() != Some(player.body_handle())

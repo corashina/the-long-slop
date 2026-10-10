@@ -1740,26 +1740,159 @@ fn carry_translation_roll_and_recenter_respect_collision() {
     assert_eq!(yawed.translation, centered.translation);
     assert!((yawed.rotation * -Vector::Z).x < 0.0);
 
-    physics.insert_box([10.35, 2.0, -1.0], [0.05, 2.0, 2.0]);
-    physics.refresh_queries();
-    for _ in 0..120 {
-        interaction.step(
-            FrameInput {
-                held: TRANSLATE | keys::ROTATE,
-                mouse: [100.0, 30.0],
-                wheel: 10.0,
-                ..Default::default()
-            },
-            common::resolved(None),
-            &mut player,
-            &mut items,
-            &mut physics,
-            1.0 / 60.0,
-        );
-        physics.step_physics();
+    for mode in 0..5 {
+        let mut free_pose = Pose::IDENTITY;
+        for blocked in [false, true] {
+            let (mut interaction, mut items, mut physics, mut player) = fixture_with(|reference| {
+                let head_height = reference.player.standing_height * 0.5;
+                let rule = reference.items[0].pickup.as_mut().unwrap();
+                rule.use_recenter_position = true;
+                rule.recenter_position = [0.75, 1.0 - head_height, 0.0];
+            });
+            let body = items.get(ItemId(1)).unwrap().body.unwrap();
+            let collider = physics.rapier().bodies[body].colliders()[0];
+            physics.rapier_mut().bodies[body].set_gravity_scale(0.0, true);
+            if mode >= 2 {
+                let half = if mode == 4 {
+                    [0.4, 0.08, 0.08]
+                } else {
+                    [0.08, 0.08, 0.4]
+                };
+                physics.rapier_mut().colliders[collider].set_shape(
+                    rapier3d::prelude::SharedShape::cuboid(half[0], half[1], half[2]),
+                );
+            }
+            let wall_pose = Pose::from_translation(if mode < 2 {
+                Vector::new(10.5, 2.0, -1.0)
+            } else if mode == 2 {
+                Vector::new(10.3, 2.0, -1.0)
+            } else {
+                Vector::new(10.0, 2.3, -1.0)
+            });
+            let wall_shape = rapier3d::prelude::SharedShape::cuboid(
+                if mode <= 2 { 0.05 } else { 2.0 },
+                if mode <= 2 { 2.0 } else { 0.05 },
+                2.0,
+            );
+            if blocked {
+                physics.rapier_mut().insert(
+                    RigidBodyBuilder::fixed().pose(wall_pose),
+                    ColliderBuilder::new(wall_shape.clone()),
+                );
+            }
+            physics.refresh_queries();
+            interaction.step(
+                input(keys::GRAB, keys::GRAB),
+                common::resolved(target(1)),
+                &mut player,
+                &mut items,
+                &mut physics,
+                1.0 / 60.0,
+            );
+            let anchor = physics
+                .rapier()
+                .bodies
+                .iter()
+                .find(|(id, rb)| *id != player.body_handle() && rb.is_kinematic())
+                .unwrap()
+                .0;
+            let requested = match mode {
+                0 => FrameInput {
+                    held: TRANSLATE,
+                    mouse: [180.0, 0.0],
+                    ..Default::default()
+                },
+                1 => FrameInput {
+                    held: RECENTER,
+                    ..Default::default()
+                },
+                2 => FrameInput {
+                    held: keys::ROTATE,
+                    mouse: [67.5, 0.0],
+                    ..Default::default()
+                },
+                3 => FrameInput {
+                    held: keys::ROTATE,
+                    mouse: [0.0, 67.5],
+                    ..Default::default()
+                },
+                _ => FrameInput {
+                    held: keys::ROTATE | TRANSLATE,
+                    mouse: [67.5, 0.0],
+                    ..Default::default()
+                },
+            };
+            for frame in 0..120 {
+                let input = if frame == 0 {
+                    requested
+                } else {
+                    FrameInput {
+                        held: requested.held,
+                        ..Default::default()
+                    }
+                };
+                interaction.step(
+                    input,
+                    common::resolved(None),
+                    &mut player,
+                    &mut items,
+                    &mut physics,
+                    1.0 / 60.0,
+                );
+                physics.step_physics();
+                if blocked {
+                    let shape = &physics.rapier().colliders[collider];
+                    if let Some(contact) = rapier3d::parry::query::contact(
+                        shape.position(),
+                        shape.shape(),
+                        &wall_pose,
+                        wall_shape.as_ref(),
+                        0.0,
+                    )
+                    .unwrap()
+                    {
+                        assert!(
+                            contact.dist >= -0.001,
+                            "mode {mode}, frame {frame}: {contact:?}"
+                        );
+                    }
+                }
+                assert_eq!(interaction.held(), Some(ItemId(1)), "mode {mode}");
+            }
+            let final_pose = *physics.rapier().bodies[anchor].next_position();
+            if !blocked {
+                free_pose = final_pose;
+                if mode < 2 {
+                    assert!(free_pose.translation.x > 10.6, "mode {mode}");
+                } else {
+                    assert_ne!(free_pose.rotation, Rotation::IDENTITY, "mode {mode}");
+                    let contact = rapier3d::parry::query::contact(
+                        &free_pose,
+                        physics.rapier().colliders[collider].shape(),
+                        &wall_pose,
+                        wall_shape.as_ref(),
+                        0.0,
+                    )
+                    .unwrap()
+                    .expect("Requested rotation crosses the wall");
+                    assert!(contact.dist < -0.01, "mode {mode}: {contact:?}");
+                }
+            } else if mode < 2 {
+                assert!(
+                    final_pose.translation.x > 10.0,
+                    "mode {mode}: movement was attempted"
+                );
+                assert!(final_pose.translation.x < 10.26, "mode {mode}");
+                assert!(
+                    final_pose.translation.x < free_pose.translation.x,
+                    "mode {mode}"
+                );
+            } else {
+                assert_eq!(final_pose.rotation, Rotation::IDENTITY, "mode {mode}");
+                assert_ne!(final_pose.rotation, free_pose.rotation, "mode {mode}");
+            }
+        }
     }
-    assert_eq!(interaction.held(), Some(ItemId(1)));
-    assert!(physics.rapier().bodies[body].translation().x < 10.3);
 }
 
 #[test]
@@ -1827,5 +1960,103 @@ fn carry_uses_item_recenter_pose_and_source_pickup_restrictions() {
         assert_eq!(interaction.held(), None);
         assert_eq!(items.get(ItemId(1)).unwrap().location, ItemLocation::World);
         assert!(physics.rapier().impulse_joints.is_empty());
+    }
+}
+
+#[test]
+fn carry_force_cap_uses_the_source_mass_gain() {
+    for (mass, expected_distance) in [(2.0, 0.1), (43.5, 0.05), (85.0, 0.0)] {
+        let (mut interaction, mut items, mut physics, mut player) = fixture();
+        let body = items.get(ItemId(1)).unwrap().body.unwrap();
+        let collider = physics.rapier().bodies[body].colliders()[0];
+        let world = physics.rapier_mut();
+        world.colliders[collider].set_density(0.0);
+        world.bodies[body].set_additional_mass(mass, true);
+        world.bodies[body].recompute_mass_properties_from_colliders(&world.colliders);
+        let initial = *world.bodies[body].position();
+        interaction.step(
+            input(keys::GRAB, keys::GRAB),
+            common::resolved(target(1)),
+            &mut player,
+            &mut items,
+            &mut physics,
+            1.0 / 60.0,
+        );
+        interaction.step(
+            FrameInput {
+                wheel: 100.0,
+                ..Default::default()
+            },
+            common::resolved(None),
+            &mut player,
+            &mut items,
+            &mut physics,
+            1.0 / 60.0,
+        );
+        let anchor = physics
+            .rapier()
+            .bodies
+            .iter()
+            .find(|(id, rb)| *id != player.body_handle() && rb.is_kinematic())
+            .unwrap()
+            .1;
+        let distance = (anchor.next_position().translation - initial.translation).length();
+        assert!(
+            (distance - expected_distance).abs() < 0.00001,
+            "{mass} kg: {distance}"
+        );
+        assert_eq!(interaction.held(), Some(ItemId(1)));
+    }
+}
+
+#[test]
+fn combined_carry_buttons_apply_source_pitch_exception() {
+    for move_with_rotation in [false, true] {
+        let (mut interaction, mut items, mut physics, mut player) = fixture_with(|reference| {
+            reference.items[0]
+                .pickup
+                .as_mut()
+                .unwrap()
+                .move_with_rotation = move_with_rotation;
+        });
+        interaction.step(
+            input(keys::GRAB, keys::GRAB),
+            common::resolved(target(1)),
+            &mut player,
+            &mut items,
+            &mut physics,
+            1.0 / 60.0,
+        );
+        interaction.step(
+            FrameInput {
+                held: keys::ROTATE | keys::TRANSLATE,
+                mouse: [20.0, 10.0],
+                ..Default::default()
+            },
+            common::resolved(None),
+            &mut player,
+            &mut items,
+            &mut physics,
+            1.0 / 60.0,
+        );
+        let anchor = physics
+            .rapier()
+            .bodies
+            .iter()
+            .find(|(id, rb)| *id != player.body_handle() && rb.is_kinematic())
+            .unwrap()
+            .1;
+        let roll = Rotation::from_rotation_z((-20.0_f32 * 4.0 * 10.0 / 60.0).to_radians());
+        let expected = if move_with_rotation {
+            roll
+        } else {
+            Rotation::from_rotation_x((10.0_f32 * 4.0 * 10.0 / 60.0).to_radians()) * roll
+        };
+        for axis in [Vector::X, Vector::Y, Vector::Z] {
+            assert!(
+                (anchor.next_position().rotation * axis - expected * axis).length() < 0.00001,
+                "moveWithRot={move_with_rotation}, axis={axis:?}"
+            );
+        }
     }
 }
