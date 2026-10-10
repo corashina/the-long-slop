@@ -37,7 +37,7 @@ export function createMenu({canvas,ui,clearInput,queueAction}) {
  }
  function paint(){
   const state=model.state;menu.hidden=state==='playing';controls.hidden=state!=='controls';initial.hidden=!['loading','start-menu','error'].includes(state);paused.hidden=state!=='pause-menu';
-  if(hud)hud.hidden=state!=='playing';
+  if(hud&&state!=='playing')hud.hidden=true;
   for(const id of ['#start','#resume','#restart'])document.querySelector(id).disabled=!model.readyFlag||model.pending;
   document.querySelector('#start-controls').disabled=!model.readyFlag||model.pending;document.querySelector('#recover').disabled=!model.readyFlag;
   error.hidden=!model.error;if(lastError!==model.error){error.textContent=model.error;lastError=model.error;}

@@ -1,14 +1,10 @@
 import {createInput} from './input.js';
 import {createMenu} from './menu.js';
+import {createFeedback} from './feedback.js';
 import {loadUiAssets} from './ui-layout.js';
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
-const hud=document.querySelector('#hud'),crosshair=document.querySelector('#crosshair');
-const prompt=document.querySelector('#action-prompt'),target=document.querySelector('#target'),detail=document.querySelector('#target-detail');
-const heldLabel=document.querySelector('#held'),engineLabel=document.querySelector('#engine'),speed=document.querySelector('#speed'),cameraMode=document.querySelector('#camera-mode'),fuel=document.querySelector('#fuel'),fuelLevel=document.querySelector('#fuel-level'),trip=document.querySelector('#trip');
-let menu,failed=false,timeout,actions=0,frame;
-let lastPaused,lastFuelNumber,lastTripNumber,lastSpeedNumber,lastAmount,lastCondition,lastHeld,lastRpm,lastIgnition,lastRunning,lastStarter,lastHandbrake;
-const lastVolumes=[-2,-2,-2,-2,-2,-2],fluidNames=['gasoline','oil','alcohol','water','blood','diesel'],cached=new Map();
-function write(element,value){if(cached.get(element)!==value){element.textContent=value;cached.set(element,value);}}
+let menu,feedback,failed=false,timeout,actions=0,frame;
+const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,quantities:[0,0,0,0,0,0]};
 const input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas);
 window.gameKeys=()=>{frame=input.takeFrame();return frame.held;};
 window.gamePressed=()=>frame.pressed;window.gameReleased=()=>frame.released;
@@ -17,8 +13,7 @@ window.gameActions=()=>{const a=actions;actions=0;return a;};
 window.gameState = { speedKmh: 0, camera: 'First person', x: 0, y: 0, z: 0, contacts: 0,
   frameSteps: 0, totalSteps: 0, activeChunks: 0, colliderCount: 0, absoluteX: 0, absoluteY: 0, absoluteZ: 0,
   originX: 0, originY: 0, originZ: 0, rebases: 0, travelM: 0, lateralBand: 0, fuelLiters: 0,
-  paused: false, started: false, target: '', targetAction: '', heldItem: '', rpm: 0, ignition: false,
-  running: false, starter: false, seated: false, handbrake: true, fluidVolumes:[0,0,0,0,0,0] };
+  paused: false, started: false, target: '', targetAction: 0, carrying:false, fluidVolumes:record.quantities };
 window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, chunks, colliders, absoluteX, absoluteY, absoluteZ,
   originX, originY, originZ, rebases, travelM, lateralBand, fuelLiters, paused, started) => {
   const state = window.gameState;
@@ -29,46 +24,14 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, chunks, colliders, abs
   state.originX = originX; state.originY = originY; state.originZ = originZ;
   state.rebases = rebases; state.travelM = travelM; state.lateralBand = lateralBand;
   state.fuelLiters = fuelLiters; state.paused = paused; state.started = started;
-  const roundedSpeed=Math.round(Math.abs(kmh));
-  if (roundedSpeed!==lastSpeedNumber) {write(speed,String(roundedSpeed));lastSpeedNumber=roundedSpeed;}
-  write(cameraMode, state.camera);
-  const liters = Math.round(fuelLiters * 10) / 10;
-  if (liters!==lastFuelNumber) {write(fuel,liters.toFixed(1));fuelLevel.value=liters;lastFuelNumber=liters;}
-  const distance=Math.round(travelM / 10) / 100;
-  if (distance!==lastTripNumber) {write(trip,distance.toFixed(2));lastTripNumber=distance;}
   menu?.sync(started,paused,travelM);
-  crosshair.hidden = paused || !started || !mode;
+  feedback?.setVisible(started&&!paused&&Boolean(mode)&&menu?.model.state==='playing');
 };
-window.gameDetail = (name, action, amount, condition, held, rpm, ignition, running, starter, seated, handbrake, gasoline,oil,alcohol,water,blood,diesel) => {
-  const state = window.gameState;
-  state.target = name; state.targetAction = action; state.heldItem = held;
-  state.rpm = rpm; state.ignition = ignition; state.running = running;
-  state.starter = starter; state.seated = seated; state.handbrake = handbrake;
-  const volumes=state.fluidVolumes;
-  volumes[0]=gasoline;volumes[1]=oil;volumes[2]=alcohol;volumes[3]=water;volumes[4]=blood;volumes[5]=diesel;
-  write(target, name);
-  write(prompt, action);
-  const roundedAmount=Math.round(amount*10)/10;
-  const roundedCondition=Math.round(condition*100);
-  let changed=roundedAmount!==lastAmount || roundedCondition!==lastCondition;
-  for (let i=0;i<6;i++) {const rounded=Math.round(volumes[i]*10)/10;if (rounded!==lastVolumes[i]) {lastVolumes[i]=rounded;changed=true;}}
-  if (changed) {
-    if (name==='Gasoline pump') write(detail,'Unlimited gasoline');
-    else if (amount>=0) {
-      const parts=[];
-      for (let i=0;i<6;i++) {if (volumes[i]>0.0001) parts.push(`${lastVolumes[i].toFixed(1)} L ${fluidNames[i]}`);}
-      write(detail,parts.length ? parts.join(' Â· ') : 'Empty');
-    } else write(detail,condition>=0 ? `Condition ${roundedCondition}%` : '');
-    lastAmount=roundedAmount;lastCondition=roundedCondition;
-  }
-  if (held!==lastHeld) {write(heldLabel,held ? `Carrying ${held}` : '');lastHeld=held;}
-  const roundedRpm=Math.round(rpm);
-  if (roundedRpm!==lastRpm || ignition!==lastIgnition || running!==lastRunning || starter!==lastStarter || handbrake!==lastHandbrake) {
-    write(engineLabel,`${starter ? 'Starter' : running ? 'Engine running' : ignition ? 'Ignition on' : 'Ignition off'} Â· ${roundedRpm} rpm${handbrake ? ' Â· Handbrake on' : ''}`);
-    lastRpm=roundedRpm;lastIgnition=ignition;lastRunning=running;lastStarter=starter;lastHandbrake=handbrake;
-  }
+window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,noText,gas,oil,alcohol,water,blood,diesel)=>{
+ record.actions=mask;record.context=context;record.name=name;record.notice=notice;record.carrying=carrying;record.amount=amount;record.capacity=capacity;record.hasName=hasName;record.noText=noText;
+ const q=record.quantities;q[0]=gas;q[1]=oil;q[2]=alcohol;q[3]=water;q[4]=blood;q[5]=diesel;
+ window.gameState.target=name;window.gameState.targetAction=mask;window.gameState.carrying=carrying;feedback?.update(record);
 };
-
 function fail(message){failed=true;clearTimeout(timeout);const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}}
 window.gameFailure=fail;
 window.gameReady=()=>{if(failed)return;clearTimeout(timeout);menu.ready();};
@@ -85,7 +48,7 @@ async function load(){
  status.textContent='Loading interface assets…';
  await loadUiAssets(manifest.ui);
  menu=createMenu({canvas,ui:manifest.ui,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
- const tank=manifest.tanks.find(t=>t.item===manifest.engine.fuel_tank);fuelLevel.max=tank.capacity_liters;fuelLevel.optimum=tank.capacity_liters;
+ feedback=createFeedback(manifest.ui);
  status.textContent='Loading game code…';
  const {default:init,run}=await import('./pkg/my_summer_slop.js');
  const wasm=await fetch('./pkg/my_summer_slop_bg.wasm');if(!wasm.ok)throw Error('Cannot load game code (HTTP '+wasm.status+').');

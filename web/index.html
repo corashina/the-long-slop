@@ -20,12 +20,9 @@
 </dl></section>
 <section><h3>Driving</h3><dl><div><dt>Accelerate / brake</dt><dd>W / S</dd></div><div><dt>Steer</dt><dd>A / D</dd></div><div><dt>Ignition / starter</dt><dd>I / Hold I</dd></div><div><dt>Handbrake</dt><dd>Space</dd></div><div><dt>Camera</dt><dd>C</dd></div><div><dt>Get out</dt><dd>E</dd></div><div><dt>Menu</dt><dd>Esc</dd></div></dl><button id="fullscreen" type="button">Fullscreen</button></section>
 </div><button id="back" type="button">Back</button></section></section>
-<div id="crosshair" aria-hidden="true" hidden>+</div>
-<aside id="hud" aria-label="Status" hidden>
-<div class="speed-row"><span><strong id="speed">0</strong> <span class="unit">km/h</span></span><span id="camera-mode">First person</span></div>
-<div class="readouts"><span>Fuel <span id="fuel">0.0</span> L</span><span>Trip <span id="trip">0.00</span> km</span></div>
-<meter id="fuel-level" aria-label="Fuel in liters" min="0" max="39" low="4" optimum="39" value="0"></meter>
-<p id="engine"></p><p id="held"></p><p><strong id="target"></strong> <span id="target-detail"></span></p><p id="action-prompt" role="status"></p>
+<aside id="hud" aria-label="Interaction feedback" hidden>
+<img id="crosshair" alt="" aria-hidden="true">
+<p id="fluid-text" hidden></p><p id="carry-help" hidden></p><p id="action-notice" role="status" hidden></p>
 </aside>
 <p id="runtime-error" role="alert" hidden></p><noscript>Enable JavaScript to load the game.</noscript>
 </main><script type="module" src="./main.js"></script></body></html>

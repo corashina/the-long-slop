@@ -5,7 +5,7 @@ use crate::presentation::{
     reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
     world::{ChunkVisual, WorldVisuals},
 };
-use crate::reference::{ItemId, ItemKind, ReferenceManifest};
+use crate::reference::{ItemId, OpeningId, ReferenceManifest};
 use crate::simulation::{FrameInput, StepClock, keys};
 use crate::starting_area::GarageRuntime;
 use crate::vehicle::VehiclePose;
@@ -31,6 +31,20 @@ struct Drive {
     frame_steps: u32,
     skip_elapsed: bool,
     ready: bool,
+    last_feedback: Option<FeedbackStamp>,
+}
+#[derive(Clone, Copy, PartialEq)]
+struct FeedbackStamp {
+    actions: u32,
+    context: u32,
+    item: Option<ItemId>,
+    opening: Option<OpeningId>,
+    carrying: bool,
+    notice: &'static str,
+    amount: u32,
+    empty: bool,
+    capacity: f32,
+    percents: [u32; 6],
 }
 
 #[wasm_bindgen]
@@ -55,6 +69,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
             frame_steps: 0,
             skip_elapsed: false,
             ready: false,
+            last_feedback: None,
         })
         .insert_resource(ClearColor(Color::srgb(0.64, 0.72, 0.73)))
         .add_plugins(
@@ -315,7 +330,7 @@ fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveC
             };
     }
 }
-fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
+fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let runtime = &drive.runtime;
     let snapshot = runtime.physics.snapshot();
     let position = runtime.area.player.focus_position(&runtime.physics);
@@ -355,215 +370,66 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
         runtime.paused,
         runtime.started,
     );
-    let target = runtime.target;
-    let record =
-        target.and_then(|target| reference.0.items.iter().find(|item| item.id == target.item));
-    let held = runtime
+    let available = runtime.area.interaction.available_actions(
+        runtime.target,
+        &runtime.area.player,
+        &runtime.area.items,
+        &runtime.physics,
+    );
+    let info = runtime
         .area
         .interaction
-        .held()
-        .map(|id| display_name(&reference.0, &runtime.area.items, id))
-        .unwrap_or("");
-    let state = target.and_then(|target| {
-        let id = reference
-            .0
-            .openings
-            .iter()
-            .find(|opening| opening.cap == target.item)
-            .map_or(target.item, |opening| opening.tank);
-        runtime.area.items.get(id)
-    });
-    let amount = state
-        .and_then(|item| item.fluid.as_ref())
-        .map_or(-1.0, |fluid| fluid.mixture.total());
-    let volumes = state
-        .and_then(|item| item.fluid.as_ref())
-        .map_or([-1.0; 6], |fluid| fluid.mixture.quantities_liters);
-    let usable_target =
-        record.is_some_and(|item| {
-            reference.0.hinges.iter().any(|hinge| hinge.item == item.id)
-                || reference.0.openings.iter().any(|opening| {
-                    opening.cap == item.id && (opening.can_toggle || opening.can_tune)
-                })
-        });
-    let action = if !runtime.notice.is_empty() {
-        runtime.notice
-    } else if runtime.area.player.seat().is_some() && !usable_target {
-        if runtime.area.player.driving() {
-            "E: exit · I: starter · Space: handbrake · C: camera"
-        } else {
-            "E: exit · C: camera"
-        }
-    } else {
-        record.map_or(
-            if target.is_some() && state.and_then(|item| item.fluid.as_ref()).is_some() {
-                "Open the container before pickup. Hold LMB: fill."
+        .feedback(&available, &runtime.area.items, &reference.0);
+    let (amount, capacity, quantities, name, has_name, no_text) =
+        info.fluid
+            .as_ref()
+            .map_or((0., 0., [0.; 6], info.name, false, true), |f| {
+                (
+                    f.amount,
+                    f.capacity,
+                    f.quantities,
+                    f.presentation.name.as_str(),
+                    f.presentation.has_name,
+                    f.presentation.no_text,
+                )
+            });
+    let stamp = FeedbackStamp {
+        actions: info.actions.0,
+        context: info.context as u32,
+        item: available.item,
+        opening: available.opening,
+        carrying: info.carrying,
+        notice: runtime.notice,
+        amount: (amount * 10.).round() as u32,
+        empty: amount <= 0.05,
+        capacity,
+        percents: std::array::from_fn(|i| {
+            let p = if amount > 0. {
+                quantities[i] / amount * 100.
             } else {
-                if held.is_empty() {
-                    ""
-                } else {
-                    "F: drop · Mouse wheel: distance · RMB + mouse: rotate"
-                }
-            },
-            |item| match item.kind {
-                ItemKind::Door | ItemKind::Hood | ItemKind::Trunk => "Hold E + mouse: move",
-                ItemKind::Cap => {
-                    if reference
-                        .0
-                        .openings
-                        .iter()
-                        .any(|opening| opening.cap == item.id && opening.can_tune)
-                    {
-                        "Hold E + mouse / Scroll: tune valve · Hold LMB: fill"
-                    } else {
-                        "E: cap · Hold LMB: fill"
-                    }
-                }
-                ItemKind::Seat => {
-                    if reference.0.seats.iter().any(|seat| seat.item == item.id) {
-                        "E: enter"
-                    } else {
-                        ""
-                    }
-                }
-                ItemKind::Wheel | ItemKind::Rim | ItemKind::Tire => {
-                    let mounted = state.is_some_and(|state| match state.location {
-                        crate::interaction::items::ItemLocation::WheelSlot(_) => true,
-                        crate::interaction::items::ItemLocation::Attached(parent) => {
-                            runtime.area.items.get(parent).is_some_and(|parent| {
-                                matches!(
-                                    parent.location,
-                                    crate::interaction::items::ItemLocation::WheelSlot(_)
-                                )
-                            })
-                        }
-                        _ => false,
-                    });
-                    if mounted {
-                        "F: remove wheel"
-                    } else if target.is_some_and(|target| target.slot.is_some()) {
-                        if held.is_empty() {
-                            "Carry a wheel. Aim here and release F."
-                        } else {
-                            "[F release]: Mount"
-                        }
-                    } else if held.is_empty() {
-                        "F: carry · X: split wheel"
-                    } else {
-                        "F: drop · X: split or assemble"
-                    }
-                }
-                ItemKind::Container => {
-                    if item.body == reference.0.vehicle.body {
-                        "Open the fuel cap to fill."
-                    } else {
-                        "F: carry"
-                    }
-                }
-                _ => "",
-            },
-        )
+                0.
+            };
+            if p >= 1. { p.round() as u32 } else { u32::MAX }
+        }),
     };
-    game_detail(
-        target
-            .map(|target| display_name(&reference.0, &runtime.area.items, target.item))
-            .unwrap_or(""),
-        action,
-        amount,
-        state.map_or(-1.0, |item| item.condition),
-        held,
-        runtime.engine_output.rpm,
-        runtime.engine_output.ignition,
-        runtime.engine_output.running,
-        runtime.engine_output.starter,
-        runtime.area.player.seat().is_some(),
-        runtime.handbrake,
-        volumes[0],
-        volumes[1],
-        volumes[2],
-        volumes[3],
-        volumes[4],
-        volumes[5],
-    );
-}
-
-fn display_name<'a>(
-    reference: &'a ReferenceManifest,
-    items: &'a crate::interaction::items::ItemStore,
-    id: ItemId,
-) -> &'a str {
-    let Some(item) = reference.items.iter().find(|item| item.id == id) else {
-        return items.name(id).unwrap_or("");
-    };
-    match item.kind {
-        ItemKind::Decoration => "",
-        ItemKind::Door => {
-            if item.body == reference.vehicle.body
-                || crate::starting_area::belongs_to_vehicle(reference, item.body)
-            {
-                "Car door"
-            } else {
-                item.name.as_str()
-            }
-        }
-        ItemKind::Hood => "Hood",
-        ItemKind::Trunk => "Trunk",
-        ItemKind::Engine => "Engine",
-        ItemKind::Radiator => "Radiator",
-        ItemKind::Tire => "Tire",
-        ItemKind::Rim => "Rim",
-        ItemKind::Wheel => "Wheel",
-        ItemKind::Seat => {
-            if reference
-                .seats
-                .iter()
-                .any(|seat| seat.item == id && seat.driver)
-            {
-                "Driver seat"
-            } else {
-                "Seat"
-            }
-        }
-        ItemKind::Cap => {
-            if reference
-                .openings
-                .iter()
-                .any(|opening| opening.cap == id && opening.can_tune)
-            {
-                return "Water tap";
-            }
-            let tank = reference
-                .openings
-                .iter()
-                .find(|opening| opening.cap == id)
-                .map(|opening| opening.tank);
-            if tank == Some(reference.engine.fuel_tank) {
-                "Fuel cap"
-            } else if tank == Some(reference.engine.oil_tank) {
-                "Oil cap"
-            } else if tank == Some(reference.engine.coolant_tank) {
-                "Coolant cap"
-            } else {
-                "Container cap"
-            }
-        }
-        ItemKind::Container => {
-            if item.body == reference.vehicle.body {
-                return "Fuel tank";
-            }
-            if let Some(tank) = reference.tanks.iter().find(|tank| tank.item == id) {
-                if tank.quantities_liters[0] > 0.0 {
-                    "Fuel can"
-                } else if tank.quantities_liters[1] > 0.0 {
-                    "Oil can"
-                } else if tank.quantities_liters[3] > 0.0 {
-                    "Water container"
-                } else {
-                    "Container"
-                }
-            } else {
-                "Container"
-            }
-        }
+    if drive.last_feedback != Some(stamp) {
+        game_feedback(
+            stamp.actions,
+            stamp.context,
+            name,
+            stamp.notice,
+            stamp.carrying,
+            amount,
+            capacity,
+            has_name,
+            no_text,
+            quantities[0],
+            quantities[1],
+            quantities[2],
+            quantities[3],
+            quantities[4],
+            quantities[5],
+        );
+        drive.last_feedback = Some(stamp);
     }
 }
