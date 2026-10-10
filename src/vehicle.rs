@@ -63,20 +63,25 @@ pub struct PhysicsWorld {
     wheel_rpm: [f32; 4],
     auto_move_min: f32,
     engine_brake_force: f32,
+    last_handbrake: bool,
 }
 
 impl PhysicsWorld {
     pub fn new(reference: &ReferenceManifest, pose: VehiclePose) -> Result<Self, ReferenceError> {
         let vehicle = &reference.vehicle;
+        let source_body = reference
+            .bodies
+            .iter()
+            .find(|body| body.id == vehicle.body)
+            .ok_or_else(|| ReferenceError("Missing chassis body".into()))?;
         let mut physics = rapier3d::prelude::PhysicsWorld::new();
         physics.integration_parameters.dt = FIXED_DT;
         let chassis = physics.insert_body(
             RigidBodyBuilder::dynamic()
                 .pose(to_rapier(pose))
-                .linear_damping(vehicle.linear_damping)
-                .angular_damping(vehicle.angular_damping)
-                .ccd_enabled(true)
-                .can_sleep(false),
+                .linear_damping(source_body.linear_damping)
+                .angular_damping(source_body.angular_damping)
+                .ccd_enabled(true),
         );
         for id in &vehicle.colliders {
             let collider = reference
@@ -198,10 +203,22 @@ impl PhysicsWorld {
             wheel_rpm: [0.0; 4],
             auto_move_min: vehicle.auto_move_min,
             engine_brake_force: 0.0,
+            last_handbrake: true,
         })
     }
 
     pub fn apply_vehicle_forces(&mut self, input: DriveInput, drive_force: f32) {
+        if input.accelerate
+            || input.brake_reverse
+            || input.steer != 0.0
+            || input.handbrake != self.last_handbrake
+        {
+            self.physics.bodies[self.chassis].wake_up(true);
+        }
+        self.last_handbrake = input.handbrake;
+        if self.physics.bodies[self.chassis].is_sleeping() {
+            return;
+        }
         let chassis = &self.physics.bodies[self.chassis];
         let speed = chassis
             .linvel()
@@ -371,6 +388,7 @@ impl PhysicsWorld {
             self.active_slots.push(slot);
         }
         self.controller = controller;
+        self.physics.bodies[self.chassis].wake_up(true);
         Ok(())
     }
 
@@ -497,6 +515,14 @@ impl PhysicsWorld {
     }
 
     pub fn remove_collider(&mut self, handle: ColliderHandle) {
+        if self
+            .controller
+            .wheels()
+            .iter()
+            .any(|wheel| wheel.raycast_info().ground_object == Some(handle))
+        {
+            self.physics.bodies[self.chassis].wake_up(true);
+        }
         self.physics.remove_collider(handle);
         self.refresh_queries();
     }

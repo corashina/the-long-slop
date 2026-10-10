@@ -310,6 +310,11 @@ fn removed_ground_cannot_support_wheels() {
         world.apply_vehicle_forces(DriveInput::default(), 2600.0);
         world.step_physics();
     }
+    for _ in 0..600 {
+        world.apply_vehicle_forces(DriveInput::default(), 0.0);
+        world.step_physics();
+    }
+    assert!(world.rapier().bodies[world.chassis_handle()].is_sleeping());
     world.remove_collider(ground);
     for _ in 0..60 {
         world.apply_vehicle_forces(DriveInput::default(), 2600.0);

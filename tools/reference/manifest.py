@@ -61,7 +61,10 @@ def build_manifest(source, roots, reports, hashes):
     def body(node,dynamic,mass,reader):
         if node in body_roots:return body_roots[node]
         pose=world_pose(source,node_readers[node]);pose['scale']=[1.,1.,1.]
-        value={'id':len(bodies)+1,'source':source_id(reader),'node':node,'dynamic':dynamic,'mass_kg':mass,'pose':pose}
+        rigidbody=source.read(reader) if reader.type.name=='Rigidbody' else None
+        value={'id':len(bodies)+1,'source':source_id(reader),'node':node,'dynamic':dynamic,'mass_kg':mass,'pose':pose,
+            'linear_damping':rigidbody['m_Drag'] if rigidbody is not None else 0.,
+            'angular_damping':rigidbody['m_AngularDrag'] if rigidbody is not None else 0.}
         bodies.append(value);body_roots[node]=value['id'];return value['id']
     body(home_root,False,0.,node_readers[home_root])
     car_body=body(car_root,True,total_mass(car_root),source.resolve(car_reader,car['RB']))
@@ -314,6 +317,10 @@ def build_manifest(source, roots, reports, hashes):
     player_record['scroll_sensitivity']=scroll_definition['defValue']*(scroll_definition['valueMultipler'] if scroll_definition['valueMultipler'] else 1.)
     player_record['camera_culling_mask']=recover_camera_visibility(source)['normal_view_mask']
     player_record['use_layer_mask']=player['useLayer']['m_Bits']
+    player_record['get_out_layer_mask']=player['getOutLayer']['m_Bits']
+    # fpscontroller.CanGetOut uses literal capsule endpoints and radius.
+    player_record['exit_capsule_half_height']=.568
+    player_record['exit_capsule_radius']=.3-.05
     home_pose=world_pose(source,node_readers[home_root]);car_pose=world_pose(source,node_readers[car_root])
     world_points=[]
     for collider in colliders:
@@ -364,7 +371,6 @@ def build_manifest(source, roots, reports, hashes):
         'vehicle':{'source':source_id(car_reader),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':[w['id'] for w in wheel_slots],'colliders':[c['id'] for c in colliders if c['body']==car_body],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')]},
         'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn,'car_pose':car_pose,'driveway_bounds':driveway_bounds,'driveway_height':driveway_height}}
     result['vehicle'].update(auto_shift_stop_speed=car['autoShiftStopSpeed'],auto_shift_min_rpm=car['autoShiftMinRpm'],auto_shift_max_rpm=car['autoShiftMaxRpm'])
-    rigidbody=source.read(source.resolve(car_reader,car['RB']));result['vehicle'].update(linear_damping=rigidbody['m_Drag'],angular_damping=rigidbody['m_AngularDrag'])
     result['vehicle'].update(gear_free_run=[bool(gear['freeRun']) for gear in car['gears']],
         dont_ignite_with_throttle_in_automatic=bool(car['dontIgniteWithThorttleInAutomatic']),auto_move_min=0.3)
     result['vehicle']['colliders']=[c['id'] for c in colliders if c['body']==car_body and c['enabled']]

@@ -416,10 +416,10 @@ impl InteractionState {
         let target = target.filter(|target| {
             target.distance.is_finite() && target.distance >= 0.0 && target.distance <= self.reach
         });
+        let released_hinge = input.released & keys::USE != 0 && self.latched_hinge.is_some();
         if input.held & keys::USE == 0 || input.released & keys::USE != 0 {
             self.latched_hinge = None;
         } else if self.latched_hinge.is_none()
-            && player.seat().is_none()
             && let Some(target) = target
             && let Some(index) = self
                 .hinges
@@ -466,7 +466,16 @@ impl InteractionState {
         let mut action = None;
         let mut carry_input = input;
         self.tuning_opening = None;
-        if input.pressed & keys::USE != 0 && player.seat().is_some() {
+        let can_use_target = use_target.is_some_and(|target| {
+            self.hinges
+                .iter()
+                .any(|hinge| hinge.reference.item == target.item)
+                || self.openings.iter().any(|opening| {
+                    opening.reference.cap == target.item
+                        && (opening.reference.can_toggle || opening.reference.can_tune)
+                })
+        });
+        if input.pressed & keys::USE != 0 && player.seat().is_some() && !can_use_target {
             if let Some(seat) = self
                 .seats
                 .iter()
@@ -511,6 +520,7 @@ impl InteractionState {
                 }
             }
             if input.released & keys::USE != 0
+                && !released_hinge
                 && self.held.is_none()
                 && let Some(seat) = self.seats.iter().find(|seat| seat.item == target.item)
                 && player.enter(seat.id, seat.pose, physics)
@@ -735,6 +745,13 @@ impl InteractionState {
         self.place_hinges(physics, true);
     }
 
+    pub fn hinge_local_pose(&self, body: BodyId) -> Option<Pose> {
+        self.hinges
+            .iter()
+            .find(|hinge| hinge.reference.body == body)
+            .map(local_hinge_pose)
+    }
+
     fn place_hinges(&self, physics: &mut PhysicsWorld, commit: bool) {
         for hinge in &self.hinges {
             let Some(handle) = self.bodies.get(&hinge.reference.body).copied() else {
@@ -752,11 +769,7 @@ impl InteractionState {
             } else {
                 Pose::IDENTITY
             };
-            let rotation = Pose::from_rotation(Rotation::from_axis_angle(
-                hinge.axis,
-                (hinge.angle - hinge.reference.closed_degrees).to_radians(),
-            ));
-            let pose = parent * hinge.closed_pose * hinge.anchor * rotation * hinge.anchor_inverse;
+            let pose = parent * local_hinge_pose(hinge);
             let body = &mut physics.rapier_mut().bodies[handle];
             if commit {
                 body.set_position(pose, false);
@@ -901,6 +914,14 @@ impl InteractionState {
         physics.rapier_mut().bodies[anchor].set_next_kinematic_position(desired);
         false
     }
+}
+
+fn local_hinge_pose(hinge: &HingeState) -> Pose {
+    let rotation = Pose::from_rotation(Rotation::from_axis_angle(
+        hinge.axis,
+        (hinge.angle - hinge.reference.closed_degrees).to_radians(),
+    ));
+    hinge.closed_pose * hinge.anchor * rotation * hinge.anchor_inverse
 }
 
 fn transform_pose(transform: &crate::reference::Transform) -> Pose {

@@ -581,18 +581,25 @@ impl WheelAssemblies {
                 slot.last_support = support;
             }
             if let Some(handle) = slot.sensor {
-                let local = inverse * to_rapier(snapshot.wheels[slot.index]) * slot.hub_to_mount;
+                let world = to_rapier(snapshot.wheels[slot.index]) * slot.hub_to_mount;
                 let collider = &mut physics.rapier_mut().colliders[handle];
-                collider.set_enabled(true);
-                collider.user_data &= !(SLOT_SENSOR_FLAG | u32::MAX as u128);
+                if !collider.is_enabled() {
+                    collider.set_enabled(true);
+                }
                 let item = slot
                     .rim
                     .map_or(slot.original_rim, |rim| self.parts[rim].item);
-                collider.user_data |= item.0 as u128 + 1;
+                let mut data = (collider.user_data & !(SLOT_SENSOR_FLAG | u32::MAX as u128))
+                    | (item.0 as u128 + 1);
                 if slot.rim.is_none() {
-                    collider.user_data |= SLOT_SENSOR_FLAG;
+                    data |= SLOT_SENSOR_FLAG;
                 }
-                collider.set_position_wrt_parent(local);
+                if collider.user_data != data {
+                    collider.user_data = data;
+                }
+                if *collider.position() != world {
+                    collider.set_position(world);
+                }
             }
         }
         for id in &self.vehicle_tanks {

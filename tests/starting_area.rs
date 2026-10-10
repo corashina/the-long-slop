@@ -587,7 +587,7 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
         1.0 / 60.0,
     );
     assert_eq!(runtime.area.interaction.hinge_angle(ItemId(90)), Some(45.0));
-    runtime.area.sync_compound(&mut runtime.physics, true);
+    runtime.area.sync_compound(&mut runtime.physics);
     runtime.physics.refresh_queries();
     let expected =
         *runtime.physics.rapier().bodies[runtime.area.bodies[&BodyId(90)]].next_position() * local;
@@ -853,11 +853,87 @@ fn walking_far_keeps_a_parked_road_car_supported() {
 
 #[test]
 #[ignore = "Requires exported Steam assets"]
-fn production_garage_exits_and_reverse_to_driveway() {
+fn production_parked_garage_car_stays_stable() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let reference = desert_drive::reference::ReferenceManifest::from_json(&bytes).unwrap();
     let mut runtime = GarageRuntime::new(&reference).unwrap();
     runtime.started = true;
+    let initial = runtime.physics.snapshot();
+    for _ in 0..300 {
+        runtime.step(&reference, FrameInput::default());
+    }
+    let settled = runtime.physics.snapshot();
+    let mut max_drift = 0.0_f32;
+    let mut max_rotation = 0.0_f32;
+    let mut unsupported_steps = 0;
+    for step in 0..5400 {
+        runtime.step(&reference, FrameInput::default());
+        let state = runtime.physics.snapshot();
+        if runtime.physics.rapier().bodies[runtime.physics.chassis_handle()].is_sleeping() {
+            assert_eq!(
+                state.linear_velocity, [0.0; 3],
+                "sleeping car accumulated a linear impulse"
+            );
+            assert_eq!(
+                state.angular_velocity, [0.0; 3],
+                "sleeping car accumulated an angular impulse"
+            );
+        }
+        let drift = ((state.pose.position[0] - settled.pose.position[0]).powi(2)
+            + (state.pose.position[2] - settled.pose.position[2]).powi(2))
+        .sqrt();
+        let rotation = desert_drive::vehicle::to_rapier(settled.pose)
+            .rotation
+            .angle_between(desert_drive::vehicle::to_rapier(state.pose).rotation)
+            .to_degrees();
+        max_drift = max_drift.max(drift);
+        max_rotation = max_rotation.max(rotation);
+        if !state.wheels_contact.iter().all(|contact| *contact) {
+            unsupported_steps += 1;
+        }
+        if (step + 1) % 900 == 0 {
+            println!(
+                "idle {}s pose {:?}, drift {drift}m, rotation {rotation}deg, contacts {:?}, velocity {:?}, trip {}m",
+                (step + 1) / 60,
+                state.pose.position,
+                state.wheels_contact,
+                state.linear_velocity,
+                runtime.trip_m
+            );
+        }
+    }
+    let final_state = runtime.physics.snapshot();
+    println!(
+        "parked source initial {:?}, settled {:?}, final {:?}, maximum drift {max_drift}m, rotation {max_rotation}deg, unsupported {unsupported_steps}/5400",
+        initial.pose.position, settled.pose.position, final_state.pose.position
+    );
+    assert!(runtime.handbrake);
+    assert!(!runtime.engine_output.ignition && !runtime.engine_output.running);
+    assert!(
+        max_drift < 0.05,
+        "parked source car moved {max_drift}m without input"
+    );
+    assert!(
+        max_rotation < 1.0,
+        "parked source car rotated {max_rotation}deg without input"
+    );
+    assert_eq!(unsupported_steps, 0, "parked source car lost wheel support");
+}
+
+#[test]
+#[ignore = "Requires exported Steam assets"]
+fn production_garage_exits_and_reverse_to_road() {
+    let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+    let reference = desert_drive::reference::ReferenceManifest::from_json(&bytes).unwrap();
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    runtime.started = true;
+    for _ in 0..5700 {
+        runtime.step(&reference, FrameInput::default());
+    }
+    assert!(
+        runtime.physics.rapier().bodies[runtime.physics.chassis_handle()].is_sleeping(),
+        "source car did not sleep during garage preparation"
+    );
     for source in [64783, 64777] {
         let hinge = reference
             .hinges
@@ -875,6 +951,22 @@ fn production_garage_exits_and_reverse_to_driveway() {
     }
     runtime.step(&reference, FrameInput::default());
     enter_source_driver(&mut runtime, &reference);
+    for step in 0..30 {
+        runtime.step(
+            &reference,
+            FrameInput {
+                held: if step == 0 { keys::RIGHT } else { 0 },
+                ..FrameInput::default()
+            },
+        );
+        let state = runtime.physics.snapshot();
+        assert!(
+            state.wheels_contact.iter().all(|contact| *contact),
+            "steering woke the resting car into the air at step {step}: {:?}, velocity {:?}",
+            state.pose.position,
+            state.linear_velocity
+        );
+    }
     for step in 0..240 {
         runtime.step(
             &reference,
@@ -888,6 +980,7 @@ fn production_garage_exits_and_reverse_to_driveway() {
     assert!(runtime.engine_output.running, "engine did not start");
     let start = runtime.physics.snapshot().pose.position;
     let mut crossed = false;
+    let mut joined = false;
     for step in 0..1200 {
         runtime.step(
             &reference,
@@ -898,8 +991,32 @@ fn production_garage_exits_and_reverse_to_driveway() {
                 ..FrameInput::default()
             },
         );
-        if runtime.physics.snapshot().pose.position[0] < 33.0 {
+        let state = runtime.physics.snapshot();
+        if state.pose.position[0] < 33.0 {
             crossed = true;
+        }
+        let absolute = runtime.stream.origin.absolute(state.pose.position);
+        let road = desert_drive::world::road_sample(runtime.stream.seed, -absolute[2]);
+        if (absolute[0] - road.center[0]).abs() <= 4.0 {
+            assert!(
+                state.wheels_contact.iter().all(|contact| *contact),
+                "car lost wheel support at the road join: {:?}, contacts {:?}",
+                state.pose.position,
+                state.wheels_contact
+            );
+            assert!(
+                state.pose.position.iter().all(|value| value.is_finite())
+                    && state.pose.position[1] > 0.0,
+                "car left the terrain at the road join"
+            );
+            println!(
+                "source road joined after {} reverse steps at {:?}; road centre {:?}; contacts {:?}",
+                step + 1,
+                absolute,
+                road.center,
+                state.wheels_contact
+            );
+            joined = true;
             break;
         }
     }
@@ -910,6 +1027,11 @@ fn production_garage_exits_and_reverse_to_driveway() {
         exit.pose.position, runtime.engine_output
     );
     assert!(exit.pose.position[0] < 35.21);
+    assert!(
+        joined,
+        "car did not join the road within 20 seconds: {:?}, engine {:?}",
+        exit.pose.position, runtime.engine_output
+    );
     for step in 0..180 {
         runtime.step(
             &reference,
@@ -922,12 +1044,12 @@ fn production_garage_exits_and_reverse_to_driveway() {
     let parked = runtime.physics.snapshot();
     assert!(
         parked.wheels_contact.iter().all(|contact| *contact),
-        "car lost driveway support: {:?}",
+        "car lost terrain support after braking: {:?}",
         parked.pose.position
     );
-    assert!(parked.pose.position[1] > 0.0, "car fell below the driveway");
+    assert!(parked.pose.position[1] > 0.0, "car fell below the terrain");
     println!(
-        "source Lada reversed {:?} -> {:?}; driveway contacts {:?}",
+        "source Lada reversed {:?} -> {:?}; terrain contacts after braking {:?}",
         start, parked.pose.position, parked.wheels_contact
     );
 }

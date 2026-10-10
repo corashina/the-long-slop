@@ -86,6 +86,28 @@ fn fixture_with(
     let player = PlayerState::new(&reference.player, pose([10.0, 1.0, 0.0]), &mut physics);
     (interaction, items, physics, player)
 }
+fn door_fixture() -> (InteractionState, ItemStore, PhysicsWorld, PlayerState) {
+    fixture_with(|reference| {
+        reference.hinges.push(HingeRecord {
+            item: ItemId(1),
+            source: reference.player.source.clone(),
+            anchor: AnchorId(1),
+            body: BodyId(90),
+            axis: [0.0, 1.0, 0.0],
+            closed_degrees: 0.0,
+            min_degrees: -30.0,
+            max_degrees: 0.0,
+            drag_axis: [1.0, 0.0, 0.0],
+            drag_input_axis: 0,
+            drag_sensitivity: 1.0,
+            input_inverted: [false, false],
+            rotation_axes: [[0.0, 1.0, 0.0], [0.0; 3]],
+            relative_drag: false,
+            drag_anchor: AnchorId(1),
+            motor_degrees_per_second: None,
+        });
+    })
+}
 fn input(held: u32, pressed: u32) -> FrameInput {
     FrameInput {
         held,
@@ -607,6 +629,169 @@ fn seat_enters_on_release_and_exits_on_press() {
         1.0 / 60.0,
     );
     assert!(player.seat().is_none());
+}
+
+#[test]
+fn door_release_over_a_seat_does_not_enter() {
+    let (mut interaction, mut items, mut physics, mut player) = door_fixture();
+    player.configure_seats(&common::reference().seats);
+    interaction.step(
+        FrameInput {
+            held: keys::USE,
+            pressed: keys::USE,
+            mouse: [3.0, 0.0],
+            ..Default::default()
+        },
+        target(1),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(interaction.dragging_hinge(), Some(ItemId(1)));
+    let action = interaction.step(
+        FrameInput {
+            released: keys::USE,
+            ..Default::default()
+        },
+        target(17),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(action, None);
+    assert!(player.seat().is_none());
+    assert_eq!(interaction.dragging_hinge(), None);
+}
+
+#[test]
+fn bare_seat_release_can_enter_after_an_empty_target_press() {
+    let (mut interaction, mut items, mut physics, mut player) = fixture();
+    player.configure_seats(&common::reference().seats);
+    interaction.step(
+        input(keys::USE, keys::USE),
+        None,
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    interaction.step(
+        FrameInput {
+            released: keys::USE,
+            ..Default::default()
+        },
+        target(17),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert!(player.driving());
+}
+
+#[test]
+fn seated_door_drag_keeps_the_player_in_the_seat() {
+    let (mut interaction, mut items, mut physics, mut player) = door_fixture();
+    let reference = common::reference();
+    player.configure_seats(&reference.seats);
+    assert!(player.enter(reference.seats[0].id, pose([10.0, 0.25, 0.0]), &mut physics));
+    player.step(
+        FrameInput {
+            mouse: [100.0, 0.0],
+            ..Default::default()
+        },
+        &mut physics,
+        1.0 / 60.0,
+    );
+    let action = interaction.step(
+        FrameInput {
+            held: keys::USE,
+            pressed: keys::USE,
+            mouse: [3.0, 0.0],
+            ..Default::default()
+        },
+        target(1),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(action, Some(InteractionAction::Hinge(ItemId(1))));
+    assert_eq!(player.seat(), Some(reference.seats[0].id));
+    assert_eq!(interaction.dragging_hinge(), Some(ItemId(1)));
+    assert_eq!(interaction.hinge_angle(ItemId(1)), Some(-3.0));
+    interaction.step(
+        FrameInput {
+            held: keys::USE,
+            mouse: [3.0, 0.0],
+            ..Default::default()
+        },
+        None,
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(interaction.hinge_angle(ItemId(1)), Some(-6.0));
+    assert_eq!(player.seat(), Some(reference.seats[0].id));
+    interaction.step(
+        FrameInput {
+            released: keys::USE,
+            ..Default::default()
+        },
+        None,
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    interaction.step(
+        input(keys::USE, keys::USE),
+        None,
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert!(player.seat().is_none());
+}
+
+#[test]
+fn seated_cap_tuning_keeps_the_player_in_the_seat() {
+    let (mut interaction, mut items, mut physics, mut player) = fixture_with(|reference| {
+        reference.openings[0].can_toggle = false;
+        reference.openings[0].can_tune = true;
+        reference.openings[0].tune_rate = 0.525;
+    });
+    let reference = common::reference();
+    player.configure_seats(&reference.seats);
+    assert!(player.enter(reference.seats[0].id, pose([10.0, 0.25, 0.0]), &mut physics));
+    player.step(
+        FrameInput {
+            mouse: [100.0, 0.0],
+            ..Default::default()
+        },
+        &mut physics,
+        1.0 / 60.0,
+    );
+    let action = interaction.step(
+        FrameInput {
+            held: keys::USE,
+            pressed: keys::USE,
+            mouse: [0.0, 5.0],
+            ..Default::default()
+        },
+        target(1),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(action, Some(InteractionAction::Cap(OpeningId(100))));
+    assert_eq!(player.seat(), Some(reference.seats[0].id));
+    assert!(interaction.opening_valve(OpeningId(100)) > 0.0);
 }
 
 #[test]

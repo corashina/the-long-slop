@@ -142,6 +142,66 @@ fn blocked_exit_retains_seat() {
 }
 
 #[test]
+fn exit_ignores_hidden_cabin_layer_but_keeps_solid_wall() {
+    use rapier3d::math::Vector;
+    use rapier3d::prelude::{ColliderBuilder, Group, InteractionGroups, InteractionTestMode};
+    let mut world = common::world();
+    let mut player = player(&mut world);
+    let driver = common::reference()
+        .seats
+        .into_iter()
+        .find(|seat| seat.driver)
+        .unwrap();
+    assert!(player.enter(driver.id, START, &mut world));
+    let view = player.view_pose(&world);
+    world.rapier_mut().colliders.insert(
+        ColliderBuilder::cuboid(5.0, 5.0, 5.0)
+            .translation(Vector::from_array(view.position))
+            .collision_groups(InteractionGroups::new(
+                Group::from_bits_retain(1 << 13),
+                Group::ALL,
+                InteractionTestMode::And,
+            )),
+    );
+    let wall = world.insert_box(view.position, [5.0; 3]);
+    let limits = ExitReference {
+        minimum_look_angle_degrees: 0.0,
+        ..exit_limits()
+    };
+    assert!(!player.try_exit(&mut world, &limits));
+    assert_eq!(player.seat(), Some(driver.id));
+    world.remove_collider(wall);
+    assert!(player.try_exit(&mut world, &limits));
+    assert_eq!(player.mode(), PlayerMode::Walking);
+    let reference = common::reference().player;
+    let expected_y = view.position[1] + reference.camera_height - reference.standing_height * 0.5;
+    assert!((player.body_pose(&world).position[1] - expected_y).abs() < 1e-5);
+}
+
+#[test]
+fn exit_uses_source_capsule_at_the_head_point() {
+    let mut world = common::world();
+    let mut player = player(&mut world);
+    let driver = common::reference()
+        .seats
+        .into_iter()
+        .find(|seat| seat.driver)
+        .unwrap();
+    assert!(player.enter(driver.id, START, &mut world));
+    let view = player.view_pose(&world);
+    world.insert_box(
+        [view.position[0], view.position[1] + 0.75, view.position[2]],
+        [5.0, 0.02, 5.0],
+    );
+    let limits = ExitReference {
+        minimum_look_angle_degrees: 0.0,
+        ..exit_limits()
+    };
+    assert!(!player.try_exit(&mut world, &limits));
+    assert_eq!(player.seat(), Some(driver.id));
+}
+
+#[test]
 fn look_clamps_walking_and_seated() {
     let mut world = common::world();
     let mut player = player(&mut world);

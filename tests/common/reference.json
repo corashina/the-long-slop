@@ -462,7 +462,9 @@
           1
         ]
       },
-      "parent_body": null
+      "parent_body": null,
+      "linear_damping": 0.0,
+      "angular_damping": 0.0
     },
     {
       "id": 2,
@@ -491,7 +493,9 @@
           1
         ]
       },
-      "parent_body": null
+      "parent_body": null,
+      "linear_damping": 0.004999999888241291,
+      "angular_damping": 0.05000000074505806
     }
   ],
   "colliders": [
@@ -1915,7 +1919,10 @@
     ],
     "scroll_sensitivity": 20,
     "camera_culling_mask": 349933363,
-    "use_layer_mask": 12747265
+    "use_layer_mask": 12747265,
+    "get_out_layer_mask": 10125313,
+    "exit_capsule_half_height": 0.568,
+    "exit_capsule_radius": 0.25
   },
   "seats": [
     {
@@ -1926,7 +1933,9 @@
       },
       "item": 17,
       "anchor": 5,
-      "hit_nodes": [1],
+      "hit_nodes": [
+        1
+      ],
       "driver": true,
       "yaw_limits_degrees": [
         -179,
@@ -1976,8 +1985,6 @@
     "auto_shift_stop_speed": 1,
     "auto_shift_min_rpm": 2700,
     "auto_shift_max_rpm": 3700,
-    "linear_damping": 0.004999999888241291,
-    "angular_damping": 0.05000000074505806,
     "gear_free_run": [
       false,
       false,

@@ -51,6 +51,7 @@ pub struct PlayerState {
     controller: KinematicCharacterController,
     standing: SharedShape,
     crouching: SharedShape,
+    exit_capsule: SharedShape,
     body: RigidBodyHandle,
     collider: ColliderHandle,
     pose: Pose,
@@ -76,6 +77,10 @@ impl PlayerState {
             reference.crouch_height * 0.5 - reference.crouch_radius,
             reference.crouch_radius,
         );
+        let exit_capsule = SharedShape::capsule_y(
+            reference.exit_capsule_half_height,
+            reference.exit_capsule_radius,
+        );
         let pose = to_rapier(pose);
         let (body, collider) = physics.rapier_mut().insert(
             RigidBodyBuilder::kinematic_position_based().pose(pose),
@@ -87,6 +92,7 @@ impl PlayerState {
             controller: KinematicCharacterController::default(),
             standing,
             crouching,
+            exit_capsule,
             body,
             collider,
             pose,
@@ -316,10 +322,13 @@ impl PlayerState {
             return false;
         }
         // Unity rays ignore colliders containing the ray origin.
+        let use_mask = self.reference.use_layer_mask;
         let ray_targets = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
-            !collider
-                .shape()
-                .contains_point(collider.position(), view.translation)
+            collider.is_enabled()
+                && collider.collision_groups().memberships.bits() & use_mask != 0
+                && !collider
+                    .shape()
+                    .contains_point(collider.position(), view.translation)
         };
         let queries = physics.queries(
             QueryFilter::default()
@@ -336,6 +345,16 @@ impl PlayerState {
                     .length()
                     .min(limits.distance)
             });
+        let exit_mask = self.reference.get_out_layer_mask;
+        let exit_targets = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
+            collider.is_enabled() && collider.collision_groups().memberships.bits() & exit_mask != 0
+        };
+        let exit_queries = physics.queries(
+            QueryFilter::default()
+                .exclude_sensors()
+                .exclude_rigid_body(self.body)
+                .predicate(&exit_targets),
+        );
         let mut vertical = 0.0;
         for horizontal_index in 0..limits.horizontal_steps {
             let distance = horizontal_index as f32 * limits.horizontal_step;
@@ -343,17 +362,19 @@ impl PlayerState {
                 break;
             }
             for _ in 0..limits.vertical_steps {
-                // Source hpoint places the body origin at a point along the head view.
-                let mut candidate = Pose::from_translation(
-                    view.translation
-                        + forward * distance
-                        + Vector::Y
-                            * (vertical + self.reference.camera_height
-                                - self.reference.standing_height * 0.5),
-                );
-                candidate.rotation =
-                    Rotation::from_rotation_y(-yaw_from_rotation(view.rotation).to_radians());
-                if self.clearance(candidate, self.standing.as_ref(), physics) {
+                let head = view.translation + forward * distance + Vector::Y * vertical;
+                if exit_queries
+                    .intersect_shape(Pose::from_translation(head), self.exit_capsule.as_ref())
+                    .next()
+                    .is_none()
+                {
+                    // Source GetOut places the body origin at the checked head point.
+                    let mut candidate = Pose::from_translation(
+                        head + Vector::Y
+                            * (self.reference.camera_height - self.reference.standing_height * 0.5),
+                    );
+                    candidate.rotation =
+                        Rotation::from_rotation_y(-yaw_from_rotation(view.rotation).to_radians());
                     self.pose = candidate;
                     self.yaw = yaw_from_rotation(candidate.rotation);
                     self.vertical_velocity =

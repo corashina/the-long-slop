@@ -19,6 +19,22 @@ use rapier3d::prelude::{
 };
 use std::collections::HashMap;
 
+struct CompoundCollider {
+    handle: crate::vehicle::ColliderHandle,
+    body: BodyId,
+    fixed_pose: rapier3d::math::Pose,
+    shape_pose: rapier3d::math::Pose,
+}
+
+impl CompoundCollider {
+    fn local_pose(&self, interaction: &InteractionState) -> rapier3d::math::Pose {
+        interaction
+            .hinge_local_pose(self.body)
+            .unwrap_or(self.fixed_pose)
+            * self.shape_pose
+    }
+}
+
 pub struct StartingArea {
     pub bodies: HashMap<BodyId, RigidBodyHandle>,
     pub items: ItemStore,
@@ -28,11 +44,7 @@ pub struct StartingArea {
     attachments: Vec<(RigidBodyHandle, RigidBodyHandle, rapier3d::math::Pose)>,
     pub render_poses: Vec<(BodyId, VehiclePose, VehiclePose)>,
     pub item_render_poses: Vec<(ItemId, VehiclePose, VehiclePose)>,
-    compound_colliders: Vec<(
-        crate::vehicle::ColliderHandle,
-        RigidBodyHandle,
-        rapier3d::math::Pose,
-    )>,
+    compound_colliders: Vec<CompoundCollider>,
     portable_mass: Vec<(RigidBodyHandle, f32, Vec<ItemId>, f32)>,
 }
 
@@ -61,6 +73,8 @@ impl StartingArea {
                 RigidBodyBuilder::dynamic()
                     .ccd_enabled(true)
                     .additional_mass(body.mass_kg)
+                    .linear_damping(body.linear_damping)
+                    .angular_damping(body.angular_damping)
             } else {
                 RigidBodyBuilder::fixed()
             };
@@ -114,7 +128,30 @@ impl StartingArea {
                     .colliders
                     .insert_with_parent(collider, physical_parent, &mut rapier.bodies);
             if physical_parent != owner {
-                compound_colliders.push((handle, owner, local));
+                let source = reference
+                    .bodies
+                    .iter()
+                    .find(|body| body.id == record.body)
+                    .unwrap();
+                let parent = reference
+                    .bodies
+                    .iter()
+                    .find(|body| body.id == reference.vehicle.body)
+                    .unwrap();
+                compound_colliders.push(CompoundCollider {
+                    handle,
+                    body: record.body,
+                    fixed_pose: to_rapier(VehiclePose {
+                        position: parent.pose.translation,
+                        rotation: parent.pose.rotation,
+                    })
+                    .inverse()
+                        * to_rapier(VehiclePose {
+                            position: source.pose.translation,
+                            rotation: source.pose.rotation,
+                        }),
+                    shape_pose: local,
+                });
             }
         }
         // The vehicle constructor owns these shapes. Add only their aim identity.
@@ -147,20 +184,13 @@ impl StartingArea {
                         | (slot.wheel.0 as u128 + 1),
                 );
             let rapier = physics.rapier_mut();
-            rapier.colliders.insert_with_parent(
-                builder,
-                bodies[&reference.vehicle.body],
-                &mut rapier.bodies,
-            );
+            rapier.colliders.insert(builder);
         }
         interaction.rebase(origin.map(|v| v as f32));
         interaction.sync_hinges(physics);
-        let inverse = physics.rapier().bodies[physics.chassis_handle()]
-            .position()
-            .inverse();
-        for &(handle, owner, local) in &compound_colliders {
-            let pose = *physics.rapier().bodies[owner].position();
-            physics.rapier_mut().colliders[handle].set_position_wrt_parent(inverse * pose * local);
+        for collider in &compound_colliders {
+            physics.rapier_mut().colliders[collider.handle]
+                .set_position_wrt_parent(collider.local_pose(&interaction));
         }
         physics.refresh_queries();
         items.sync_poses(physics);
@@ -316,18 +346,13 @@ impl StartingArea {
             }
         }
     }
-    pub fn sync_compound(&self, physics: &mut PhysicsWorld, next: bool) {
-        let inverse = physics.rapier().bodies[physics.chassis_handle()]
-            .position()
-            .inverse();
-        for &(handle, owner, local) in &self.compound_colliders {
-            let body = &physics.rapier().bodies[owner];
-            let pose = if next {
-                *body.next_position()
-            } else {
-                *body.position()
-            };
-            physics.rapier_mut().colliders[handle].set_position_wrt_parent(inverse * pose * local);
+    pub fn sync_compound(&self, physics: &mut PhysicsWorld) {
+        for record in &self.compound_colliders {
+            let local = record.local_pose(&self.interaction);
+            let collider = &mut physics.rapier_mut().colliders[record.handle];
+            if collider.position_wrt_parent() != Some(&local) {
+                collider.set_position_wrt_parent(local);
+            }
         }
     }
     pub fn commit_poses(&mut self, physics: &PhysicsWorld, teleport: bool) {
@@ -600,7 +625,7 @@ impl GarageRuntime {
             .player
             .step(walking_input, &mut self.physics, FIXED_DT);
         self.area.sync_attachments(&mut self.physics, true);
-        self.area.sync_compound(&mut self.physics, true);
+        self.area.sync_compound(&mut self.physics);
         let driving = self.area.player.driving();
         if driving && input.pressed & keys::SPACE != 0 {
             self.handbrake = !self.handbrake;
@@ -738,7 +763,7 @@ impl GarageRuntime {
         self.physics.step_physics();
         self.area.interaction.sync_hinges(&mut self.physics);
         self.area.sync_attachments(&mut self.physics, false);
-        self.area.sync_compound(&mut self.physics, false);
+        self.area.sync_compound(&mut self.physics);
         self.wheels
             .sync(&mut self.area.items, &mut self.physics)
             .expect("validated wheel bindings");
@@ -845,7 +870,7 @@ impl GarageRuntime {
         }
         self.area.interaction.sync_hinges(&mut self.physics);
         self.area.sync_attachments(&mut self.physics, false);
-        self.area.sync_compound(&mut self.physics, false);
+        self.area.sync_compound(&mut self.physics);
         self.wheels
             .sync(&mut self.area.items, &mut self.physics)
             .expect("validated wheel bindings");

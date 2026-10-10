@@ -80,6 +80,8 @@ pub struct BodyRecord {
     pub node: NodeId,
     pub dynamic: bool,
     pub mass_kg: f32,
+    pub linear_damping: f32,
+    pub angular_damping: f32,
     pub pose: Transform,
     pub parent_body: Option<BodyId>,
 }
@@ -371,6 +373,9 @@ pub struct PlayerReference {
     pub field_of_view_degrees: f32,
     pub aim_reach: f32,
     pub use_layer_mask: u32,
+    pub get_out_layer_mask: u32,
+    pub exit_capsule_half_height: f32,
+    pub exit_capsule_radius: f32,
     pub standing_radius: f32,
     pub standing_height: f32,
     pub crouch_radius: f32,
@@ -471,8 +476,6 @@ pub struct VehicleReference {
     pub auto_shift_stop_speed: f32,
     pub auto_shift_min_rpm: f32,
     pub auto_shift_max_rpm: f32,
-    pub linear_damping: f32,
-    pub angular_damping: f32,
     pub gear_free_run: Vec<bool>,
     pub dont_ignite_with_throttle_in_automatic: bool,
     pub auto_move_min: f32,
@@ -718,6 +721,12 @@ impl ReferenceManifest {
             require(
                 r.mass_kg.is_finite() && r.mass_kg >= 0.0 && (!r.dynamic || r.mass_kg > 0.0),
                 "body mass",
+            )?;
+            require(
+                finite(&[r.linear_damping, r.angular_damping])
+                    && r.linear_damping >= 0.0
+                    && r.angular_damping >= 0.0,
+                "body damping",
             )?;
             require(r.pose.scale == [1.0; 3], "body scale")?;
             let mut parent = r.parent_body;
@@ -1074,13 +1083,18 @@ impl ReferenceManifest {
                 p.camera_height,
                 p.field_of_view_degrees,
                 p.aim_reach,
+                p.exit_capsule_half_height,
+                p.exit_capsule_radius,
             ]) && p.walk_speed > 0.0
                 && p.capsule_radius > 0.0
                 && p.capsule_height >= p.capsule_radius * 2.0
                 && p.crouch_height >= p.capsule_radius * 2.0
                 && p.crouch_height < p.capsule_height
                 && p.aim_reach > 0.0
-                && p.use_layer_mask != 0,
+                && p.use_layer_mask != 0
+                && p.get_out_layer_mask != 0
+                && p.exit_capsule_half_height > 0.0
+                && p.exit_capsule_radius > 0.0,
             "player parameters",
         )?;
         let mut seat_hit_nodes = HashSet::new();

@@ -379,14 +379,16 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
     let volumes = state
         .and_then(|item| item.fluid.as_ref())
         .map_or([-1.0; 6], |fluid| fluid.mixture.quantities_liters);
-    let action = if runtime.area.player.seat().is_some()
-        && record.is_some_and(|item| {
-            matches!(item.kind, ItemKind::Door | ItemKind::Hood | ItemKind::Trunk)
-        }) {
-        "Hold E + mouse: move"
-    } else if !runtime.notice.is_empty() {
+    let usable_target =
+        record.is_some_and(|item| {
+            reference.0.hinges.iter().any(|hinge| hinge.item == item.id)
+                || reference.0.openings.iter().any(|opening| {
+                    opening.cap == item.id && (opening.can_toggle || opening.can_tune)
+                })
+        });
+    let action = if !runtime.notice.is_empty() {
         runtime.notice
-    } else if runtime.area.player.seat().is_some() {
+    } else if runtime.area.player.seat().is_some() && !usable_target {
         if runtime.area.player.driving() {
             "E: exit · I: starter · Space: handbrake · C: camera"
         } else {

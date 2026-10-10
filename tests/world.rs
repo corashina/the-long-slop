@@ -432,4 +432,28 @@ fn garage_terrain_keeps_interiors_clear_and_connects_driveway() {
             / 3.0;
         assert!(!(35.0..=38.0).contains(&x) || !(-67.0..=-64.0).contains(&z));
     }
+    for x in [34.9, 38.1] {
+        let ray = rapier3d::prelude::Ray::new(
+            rapier3d::math::Vector::new(x, 2.0, -65.0),
+            -rapier3d::math::Vector::Y,
+        );
+        assert!(
+            physics
+                .queries(rapier3d::prelude::QueryFilter::default())
+                .cast_ray(&ray, 3.0, true)
+                .is_some(),
+            "terrain must reach the exact room boundary at x{x}",
+        );
+    }
+    let ray = rapier3d::prelude::Ray::new(
+        rapier3d::math::Vector::new(35.1, 2.0, -65.0),
+        -rapier3d::math::Vector::Y,
+    );
+    assert!(
+        physics
+            .queries(rapier3d::prelude::QueryFilter::default())
+            .cast_ray(&ray, 3.0, true)
+            .is_none(),
+        "room must stay clear"
+    );
 }

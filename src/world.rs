@@ -1,6 +1,8 @@
 use crate::reference::{Bounds, ColliderGeometry, ReferenceManifest, StartingAreaReference};
 use crate::vehicle::{ColliderHandle, PhysicsWorld, VehiclePose};
 
+mod terrain;
+
 pub const CHUNK_LENGTH: f64 = 128.0;
 pub const STATION_SPACING: f64 = 640.0;
 pub const REBASE_LIMIT: f32 = 2048.0;
@@ -299,20 +301,11 @@ fn prepare_terrain(
             let c = a + columns as u32;
             let d = c + 1;
             for triangle in [[a, b, c], [b, d, c]] {
-                let center = std::array::from_fn(|axis| {
-                    triangle
-                        .iter()
-                        .map(|index| data.vertices[*index as usize][axis])
-                        .sum::<f32>()
-                        / 3.0
-                        + origin[axis] as f32
-                });
-                if !interiors.iter().any(|bounds| inside(center, bounds, 0.3)) {
-                    data.indices.push(triangle);
-                }
+                data.indices.push(triangle);
             }
         }
     }
+    terrain::carve_rooms(data, interiors);
     data.props
         .retain(|prop| !inside(prop.absolute_point.map(|x| x as f32), home, 4.0));
     data.stations

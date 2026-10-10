@@ -2,14 +2,81 @@ mod common;
 
 use desert_drive::interaction::items::ItemLocation;
 use desert_drive::interaction::wheels::WheelAssemblies;
-use desert_drive::reference::ItemId;
+use desert_drive::reference::{ItemId, WheelSlotId};
 use desert_drive::simulation::DriveInput;
 use desert_drive::starting_area::StartingArea;
+use desert_drive::vehicle::{PhysicsWorld, VehiclePose};
+use rapier3d::math::{Rotation, Vector};
+use rapier3d::prelude::ColliderHandle;
+
+fn slot_sensor(physics: &PhysicsWorld, slot: WheelSlotId) -> ColliderHandle {
+    physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, collider)| {
+            collider.is_sensor()
+                && (collider.user_data >> 96) as u8 == slot.0
+                && (collider.user_data >> 64) as u32 == 0
+                && collider.user_data & desert_drive::vehicle::VEHICLE_COLLIDER_FLAG != 0
+        })
+        .unwrap()
+        .0
+}
+
+fn assert_slot_aim(
+    area: &StartingArea,
+    physics: &mut PhysicsWorld,
+    slot: WheelSlotId,
+    item: ItemId,
+    empty: bool,
+) {
+    physics.refresh_queries();
+    let collider = &physics.rapier().colliders[slot_sensor(physics, slot)];
+    assert!(collider.parent().is_none());
+    let center = collider.translation();
+    let chassis = physics.rapier().bodies[physics.chassis_handle()].translation();
+    let mut outward = center - chassis;
+    outward.y = 0.0;
+    outward = outward.normalize();
+    let view = VehiclePose {
+        position: (center + outward * 0.6).to_array(),
+        rotation: Rotation::from_rotation_arc(-Vector::Z, -outward).to_array(),
+    };
+    let aim = area.interaction.aim(physics, view, 1.0).unwrap();
+    assert_eq!(aim.item, item);
+    assert_eq!(aim.slot, empty.then_some(slot));
+}
 
 fn reference() -> desert_drive::reference::ReferenceManifest {
     let mut reference = common::reference();
     reference.area.player_spawn.translation = [20.0, 1.0, 20.0];
     reference
+}
+
+#[test]
+fn wheel_sensors_are_unparented_and_keep_aim_after_rebase() {
+    let reference = reference();
+    let mut physics = common::world();
+    let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
+    let mut wheels = WheelAssemblies::new(&reference).unwrap();
+    wheels.sync(&mut area.items, &mut physics).unwrap();
+    let slot = reference.vehicle.wheel_slots[0];
+    let rim = reference.wheel_slots[0].rim;
+    assert_slot_aim(&area, &mut physics, slot, rim, false);
+    wheels.remove(slot, &mut area.items, &mut physics).unwrap();
+    // Move the loose wheel clear of its empty mount.
+    let body = area.items.get(rim).unwrap().body.unwrap();
+    physics.rapier_mut().bodies[body].set_translation(Vector::new(20.0, 1.0, 20.0), true);
+    assert_slot_aim(&area, &mut physics, slot, rim, true);
+    physics.rebase([1024.0, 0.0, 0.0]);
+    area.items.rebase([1024.0, 0.0, 0.0]);
+    wheels.sync(&mut area.items, &mut physics).unwrap();
+    assert_slot_aim(&area, &mut physics, slot, rim, true);
+    wheels
+        .install(rim, slot, &mut area.items, &mut physics)
+        .unwrap();
+    assert_slot_aim(&area, &mut physics, slot, rim, false);
 }
 
 #[test]
@@ -159,7 +226,21 @@ fn production_wheel_bindings_detach_and_restore() {
     wheels.sync(&mut area.items, &mut physics).unwrap();
     let slot = reference.vehicle.wheel_slots[0];
     let count = area.items.len();
+    let mounted = reference
+        .wheel_slots
+        .iter()
+        .find(|wheel| wheel.id == slot)
+        .unwrap();
+    assert_slot_aim(&area, &mut physics, slot, mounted.rim, false);
     let item = wheels.remove(slot, &mut area.items, &mut physics).unwrap();
+    let body = area.items.get(item).unwrap().body.unwrap();
+    let translation = physics.rapier().bodies[body].translation() + Vector::X * 20.0;
+    physics.rapier_mut().bodies[body].set_translation(translation, true);
+    assert_slot_aim(&area, &mut physics, slot, mounted.rim, true);
+    physics.rebase([1024.0, 0.0, 0.0]);
+    area.items.rebase([1024.0, 0.0, 0.0]);
+    wheels.sync(&mut area.items, &mut physics).unwrap();
+    assert_slot_aim(&area, &mut physics, slot, mounted.rim, true);
     let (rim, tire) = wheels.split(item, &mut area.items, &mut physics).unwrap();
     assert_eq!(
         wheels
@@ -170,6 +251,10 @@ fn production_wheel_bindings_detach_and_restore() {
     wheels
         .install(item, slot, &mut area.items, &mut physics)
         .unwrap();
+    physics.rebase([1024.0, 0.0, 0.0]);
+    area.items.rebase([1024.0, 0.0, 0.0]);
+    wheels.sync(&mut area.items, &mut physics).unwrap();
+    assert_slot_aim(&area, &mut physics, slot, mounted.rim, false);
     assert_eq!(physics.wheel_support_count(), 4);
     assert_eq!(area.items.len(), count);
 }

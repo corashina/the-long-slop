@@ -14,6 +14,30 @@ fn accepts_recovered_scalars_with_synthetic_geometry() {
     assert_eq!(manifest.tanks[0].quantities_liters[0], 0.5);
     assert_eq!(manifest.player.mass_kg, 72.0);
     assert_eq!(manifest.player.camera_culling_mask, 0x14db8f33);
+    let car = &manifest.bodies[manifest.vehicle.body.0 as usize - 1];
+    assert_eq!(car.linear_damping, 0.005);
+    assert_eq!(car.angular_damping, 0.05);
+}
+
+#[test]
+fn rejects_missing_negative_and_nonfinite_body_damping() {
+    for field in ["linear_damping", "angular_damping"] {
+        let mut input = fixture();
+        input["bodies"][0].as_object_mut().unwrap().remove(field);
+        assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+        let mut input = fixture();
+        input["bodies"][0][field] = serde_json::json!(-0.01);
+        assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    }
+    for value in [f32::NAN, f32::INFINITY] {
+        let mut manifest =
+            ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+        manifest.bodies[0].linear_damping = value;
+        assert!(manifest.validate().is_err());
+        manifest.bodies[0].linear_damping = 0.0;
+        manifest.bodies[0].angular_damping = value;
+        assert!(manifest.validate().is_err());
+    }
 }
 
 #[test]
@@ -107,6 +131,12 @@ fn rejects_invalid_seat_hit_nodes_and_empty_use_mask() {
     let mut input = fixture();
     input["player"]["use_layer_mask"] = serde_json::json!(0);
     assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    let mut input = fixture();
+    input["player"]["get_out_layer_mask"] = serde_json::json!(0);
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    let mut input = fixture();
+    input["player"]["exit_capsule_radius"] = serde_json::json!(0);
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
 }
 
 #[test]
@@ -123,6 +153,32 @@ fn production_export_matches_installed_contract() {
         697
     );
     assert!((manifest.vehicle.mass_kg - 961.6).abs() < 0.01);
+    for (source, mass, linear, angular) in [
+        (50613, 961.6, 0.005, 0.05),
+        (50394, 7.0, 0.0, 0.05),
+        (50395, 10.0, 0.0, 0.05),
+        (50411, 4.0, 0.0, 0.05),
+        (50393, 25.0, 0.0, 0.05),
+        (50513, 20.0, 0.0, 0.05),
+        (50540, 20.0, 0.0, 0.05),
+    ] {
+        let body = manifest
+            .bodies
+            .iter()
+            .find(|body| body.source.path_id == source)
+            .unwrap();
+        assert!(body.dynamic);
+        assert!((body.mass_kg - mass).abs() < 0.001);
+        assert_eq!(body.linear_damping, linear);
+        assert_eq!(body.angular_damping, angular);
+    }
+    let spare = &manifest.bodies[7];
+    assert_eq!(spare.id.0, 8);
+    assert_eq!(spare.source.path_id, 50540);
+    for body in manifest.bodies.iter().filter(|body| !body.dynamic) {
+        assert_eq!(body.linear_damping, 0.0);
+        assert_eq!(body.angular_damping, 0.0);
+    }
     assert_eq!(manifest.wheel_slots.len(), 4);
     assert_eq!(manifest.hinges.len(), 9);
     for (usable, pivot, collider_node) in [(64783, 21482, 21566), (64777, 21464, 21548)] {
@@ -169,6 +225,10 @@ fn production_export_matches_installed_contract() {
     assert_eq!(hit_sources, [33209, 31216, 39134]);
     assert_eq!(manifest.player.use_layer_mask, 12747265);
     assert_eq!(manifest.player.use_layer_mask & (1 << 13), 0);
+    assert_eq!(manifest.player.get_out_layer_mask, 10125313);
+    assert_eq!(manifest.player.get_out_layer_mask & (1 << 13), 0);
+    assert_eq!(manifest.player.exit_capsule_half_height, 0.568);
+    assert_eq!(manifest.player.exit_capsule_radius, 0.25);
     assert_eq!(manifest.player.camera_culling_mask & (1 << 18), 0);
     let gltf: serde_json::Value =
         serde_json::from_slice(&std::fs::read("web/assets/reference/lada.gltf").unwrap()).unwrap();
