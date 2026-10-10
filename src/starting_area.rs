@@ -570,32 +570,38 @@ impl GarageRuntime {
                     "This wheel does not fit the slot."
                 };
             }
-            Some(InteractionAction::WheelSplit(item)) => {
+            Some(InteractionAction::WheelSplit(rim)) => {
+                if let Ok((_, tire)) =
+                    self.wheels
+                        .split(rim, &mut self.area.items, &mut self.physics)
+                {
+                    self.notice = "";
+                    let mut part = target.expect("aimed tire");
+                    part.item = tire;
+                    part.slot = None;
+                    self.area.interaction.pickup(
+                        part,
+                        &self.area.player,
+                        &mut self.area.items,
+                        &mut self.physics,
+                    );
+                } else {
+                    self.notice = "Cannot dismount this tire.";
+                }
+            }
+            Some(InteractionAction::WheelJoin { rim, tire }) => {
                 self.area
                     .interaction
                     .drop_held(&mut self.area.items, &mut self.physics);
-                if self
+                self.notice = if self
                     .wheels
-                    .split(item, &mut self.area.items, &mut self.physics)
+                    .assemble(rim, tire, &mut self.area.items, &mut self.physics)
                     .is_ok()
                 {
-                    self.notice = "";
-                } else if let Some(tire) = target
-                    .filter(|target| target.item != item)
-                    .map(|target| target.item)
-                {
-                    self.notice = if self
-                        .wheels
-                        .assemble(item, tire, &mut self.area.items, &mut self.physics)
-                        .is_ok()
-                    {
-                        ""
-                    } else {
-                        "Carry a rim and aim at a matching tire."
-                    };
+                    ""
                 } else {
-                    self.notice = "Carry a rim and aim at a matching tire.";
-                }
+                    "This tire does not fit the rim."
+                };
             }
             _ => {}
         }
@@ -617,7 +623,8 @@ impl GarageRuntime {
         let mut walking_input = input;
         if (input.held & keys::USE != 0 && self.area.interaction.dragging_hinge().is_some())
             || (input.held & keys::USE != 0 && self.area.interaction.tuning_opening().is_some())
-            || (input.held & keys::ROTATE != 0 && self.area.interaction.held().is_some())
+            || (input.held & (keys::ROTATE | keys::MOVE) != 0
+                && self.area.interaction.held().is_some())
         {
             walking_input.mouse = [0.0; 2];
         }

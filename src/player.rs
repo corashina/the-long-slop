@@ -305,9 +305,9 @@ impl PlayerState {
         true
     }
 
-    pub fn try_exit(&mut self, physics: &mut PhysicsWorld, limits: &ExitReference) -> bool {
+    fn exit_pose(&self, physics: &PhysicsWorld, limits: &ExitReference) -> Option<Pose> {
         if self.occupancy.is_none() {
-            return false;
+            return None;
         }
         let view = to_rapier(self.view_pose(physics));
         let body = to_rapier(self.body_pose(physics));
@@ -319,7 +319,7 @@ impl PlayerState {
             .acos()
             .to_degrees();
         if angle < limits.minimum_look_angle_degrees {
-            return false;
+            return None;
         }
         // Unity rays ignore colliders containing the ray origin.
         let use_mask = self.reference.use_layer_mask;
@@ -375,27 +375,34 @@ impl PlayerState {
                     );
                     candidate.rotation =
                         Rotation::from_rotation_y(-yaw_from_rotation(view.rotation).to_radians());
-                    self.pose = candidate;
-                    self.yaw = yaw_from_rotation(candidate.rotation);
-                    self.vertical_velocity =
-                        physics.rapier().bodies[physics.chassis_handle()].linvel().y * 0.3;
-                    self.occupancy = None;
-                    self.crouched = false;
-                    self.grounded = false;
-                    self.running = false;
-                    let rapier = physics.rapier_mut();
-                    rapier.colliders[self.collider].set_shape(self.standing.clone());
-                    rapier.colliders[self.collider].set_enabled(true);
-                    rapier.bodies[self.body].set_position(candidate, false);
-                    physics.refresh_queries();
-                    return true;
+                    return Some(candidate);
                 }
                 vertical += limits.vertical_step;
             }
         }
-        false
+        None
     }
-
+    pub fn can_exit(&self, physics: &PhysicsWorld, limits: &ExitReference) -> bool {
+        self.exit_pose(physics, limits).is_some()
+    }
+    pub fn try_exit(&mut self, physics: &mut PhysicsWorld, limits: &ExitReference) -> bool {
+        let Some(candidate) = self.exit_pose(physics, limits) else {
+            return false;
+        };
+        self.pose = candidate;
+        self.yaw = yaw_from_rotation(candidate.rotation);
+        self.vertical_velocity = physics.rapier().bodies[physics.chassis_handle()].linvel().y * 0.3;
+        self.occupancy = None;
+        self.crouched = false;
+        self.grounded = false;
+        self.running = false;
+        let rapier = physics.rapier_mut();
+        rapier.colliders[self.collider].set_shape(self.standing.clone());
+        rapier.colliders[self.collider].set_enabled(true);
+        rapier.bodies[self.body].set_position(candidate, false);
+        physics.refresh_queries();
+        true
+    }
     pub fn seat(&self) -> Option<SeatId> {
         self.occupancy.map(|seat| seat.id)
     }

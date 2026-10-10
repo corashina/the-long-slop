@@ -443,9 +443,9 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
                         "F: remove wheel"
                     } else if target.is_some_and(|target| target.slot.is_some()) {
                         if held.is_empty() {
-                            "Carry a wheel. Aim here and press F."
+                            "Carry a wheel. Aim here and release F."
                         } else {
-                            "F: install wheel"
+                            "[F release]: Mount"
                         }
                     } else if held.is_empty() {
                         "F: carry · X: split wheel"

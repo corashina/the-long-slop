@@ -893,12 +893,38 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
         &mut physics,
         1.0 / 60.0,
     );
+    interaction.step(
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        None,
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
     let slot = AimTarget {
         slot: Some(WheelSlotId(0)),
         ..target(13).unwrap()
     };
+    interaction.step(
+        FrameInput {
+            pressed: keys::GRAB,
+            held: keys::GRAB,
+            ..Default::default()
+        },
+        Some(slot),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
     let action = interaction.step(
-        input(keys::GRAB, keys::GRAB),
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
         Some(slot),
         &mut player,
         &mut items,
@@ -912,16 +938,6 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
             target: WheelSlotId(0)
         })
     );
-    assert_eq!(interaction.held(), Some(wheel_id));
-    let action = interaction.step(
-        input(keys::ASSEMBLE, keys::ASSEMBLE),
-        None,
-        &mut player,
-        &mut items,
-        &mut physics,
-        1.0 / 60.0,
-    );
-    assert_eq!(action, Some(InteractionAction::WheelSplit(wheel_id)));
     assert_eq!(interaction.held(), Some(wheel_id));
 }
 
@@ -1229,7 +1245,10 @@ fn empty_slot_does_not_pick_up_a_remote_rim_and_tire_targets_its_assembly() {
         ..target(rim.0).unwrap()
     };
     interaction.step(
-        input(keys::GRAB, keys::GRAB),
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
         Some(slot),
         &mut player,
         &mut items,
@@ -1245,7 +1264,7 @@ fn empty_slot_does_not_pick_up_a_remote_rim_and_tire_targets_its_assembly() {
         &mut physics,
         1.0 / 60.0,
     );
-    assert_eq!(interaction.held(), Some(rim));
+    assert_eq!(interaction.held(), None);
 }
 
 #[test]
@@ -1446,4 +1465,93 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
         );
         assert_eq!(interaction.opening_valve(OpeningId(100)), expected);
     }
+}
+
+#[test]
+fn one_f_gesture_does_not_remount_pickup() {
+    let (mut interaction, mut items, mut physics, mut player) = fixture();
+    let count = items.iter().count();
+    let action = interaction.step(
+        FrameInput {
+            pressed: keys::GRAB,
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        target(1),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(action, Some(InteractionAction::Pickup(ItemId(1))));
+    assert_eq!(interaction.held(), Some(ItemId(1)));
+    assert_eq!(items.iter().count(), count);
+}
+#[test]
+fn source_mount_occurs_on_release() {
+    let (mut interaction, mut items, mut physics, mut player) = fixture();
+    let r = common::reference();
+    let rim = r.wheel_slots[0].rim;
+    let body = items.get(ItemId(1)).unwrap().body;
+    let part = items.get_mut(rim).unwrap();
+    part.location = ItemLocation::World;
+    part.body = body;
+    part.local_pose = pose([0.; 3]);
+    interaction.step(
+        FrameInput {
+            pressed: keys::GRAB,
+            ..Default::default()
+        },
+        target(rim.0),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    interaction.step(
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        None,
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    let at = Some(AimTarget {
+        slot: Some(r.wheel_slots[0].id),
+        ..target(rim.0).unwrap()
+    });
+    let pressed = interaction.step(
+        FrameInput {
+            pressed: keys::GRAB,
+            held: keys::GRAB,
+            ..Default::default()
+        },
+        at,
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(pressed, None);
+    let released = interaction.step(
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        at,
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(
+        released,
+        Some(InteractionAction::WheelInstall {
+            item: rim,
+            target: r.wheel_slots[0].id
+        })
+    );
 }

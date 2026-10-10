@@ -20,7 +20,7 @@ const crosshair = document.querySelector('#crosshair');
 const heldCodes = new Set();
 const keyBits = { KeyW: 1, ArrowUp: 1, KeyS: 2, ArrowDown: 2, KeyA: 4, ArrowLeft: 4,
   KeyD: 8, ArrowRight: 8, Space: 16, KeyE: 32, ShiftLeft: 64, ShiftRight: 64,
-  ControlLeft: 128, ControlRight: 128, KeyF: 256, Mouse0: 512, KeyI: 1024, KeyC: 2048, Mouse2: 4096, KeyX:8192 };
+  ControlLeft: 128, ControlRight: 128, KeyF: 256, Mouse0: 512, KeyI: 1024, KeyC: 2048, Mouse1: 8192, Mouse2: 4096 };
 let keys = 0;
 let pressed = 0;
 let released = 0;
@@ -178,10 +178,10 @@ window.addEventListener('keyup', (event) => {
 });
 canvas.addEventListener('mousedown', (event) => {
   if (!captured() || window.gameState.paused) return;
-  if (event.button === 0 || event.button === 2) { event.preventDefault(); setCode(`Mouse${event.button}`, true); }
+  if (event.button === 0 || event.button === 1 || event.button === 2) { event.preventDefault(); setCode(`Mouse${event.button}`, true); }
 });
 window.addEventListener('mouseup', (event) => {
-  if (event.button === 0 || event.button === 2) setCode(`Mouse${event.button}`, false);
+  if (event.button === 0 || event.button === 1 || event.button === 2) setCode(`Mouse${event.button}`, false);
 });
 canvas.addEventListener('contextmenu', (event) => event.preventDefault());
 canvas.addEventListener('mousemove', (event) => {
