@@ -195,7 +195,8 @@ impl StartingArea {
                         | (slot.wheel.0 as u128 + 1),
                 );
             let rapier = physics.rapier_mut();
-            rapier.colliders.insert(builder);
+            let handle = rapier.colliders.insert(builder);
+            interaction.bind_wheel_sensor(handle, slot.rim, physics);
         }
         for (handle, collider) in physics.rapier().colliders.iter() {
             let id = crate::reference::ColliderId((collider.user_data >> 64) as u32);
@@ -567,30 +568,59 @@ impl GarageRuntime {
         match action {
             Some(InteractionAction::WheelRemove(item)) => {
                 if let Some(slot) = self.wheels.slot_for_item(item) {
-                    self.notice = if self
-                        .wheels
-                        .remove(slot, &mut self.area.items, &mut self.physics)
-                        .is_ok()
-                    {
-                        ""
-                    } else {
-                        "Cannot remove this wheel."
-                    };
+                    self.notice =
+                        match self
+                            .wheels
+                            .remove(slot, &mut self.area.items, &mut self.physics)
+                        {
+                            Ok(rim) => {
+                                let point = aim.grab_target.map_or(
+                                    self.area.items.get(rim).unwrap().pose.position,
+                                    |target| target.point,
+                                );
+                                match self.area.interaction.pickup_item(
+                                    rim,
+                                    point,
+                                    &self.area.player,
+                                    &mut self.area.items,
+                                    &mut self.physics,
+                                ) {
+                                    Ok(()) => "",
+                                    Err(_) => "Cannot carry this wheel.",
+                                }
+                            }
+                            Err(_) => "Cannot remove this wheel.",
+                        };
                 }
             }
             Some(InteractionAction::WheelInstall { item, target }) => {
-                self.area
-                    .interaction
-                    .drop_held(&mut self.area.items, &mut self.physics);
-                self.notice = if self
+                if self
                     .wheels
-                    .install(item, target, &mut self.area.items, &mut self.physics)
-                    .is_ok()
+                    .can_install(item, target, &self.area.items)
+                    .is_err()
                 {
-                    ""
+                    self.notice = "This wheel does not fit the slot.";
                 } else {
-                    "This wheel does not fit the slot."
-                };
+                    self.area
+                        .interaction
+                        .drop_held(&mut self.area.items, &mut self.physics);
+                    self.notice = if self
+                        .wheels
+                        .install(item, target, &mut self.area.items, &mut self.physics)
+                        .is_ok()
+                    {
+                        if let Some(sensor) = self.wheels.sensor(target) {
+                            self.area.interaction.bind_wheel_sensor(
+                                sensor,
+                                item,
+                                &mut self.physics,
+                            );
+                        }
+                        ""
+                    } else {
+                        "This wheel does not fit the slot."
+                    };
+                }
             }
             Some(InteractionAction::WheelSplit(item)) => {
                 self.area
@@ -640,7 +670,8 @@ impl GarageRuntime {
         let mut walking_input = input;
         if (input.held & keys::USE != 0 && self.area.interaction.dragging_hinge().is_some())
             || (input.held & keys::USE != 0 && self.area.interaction.tuning_opening().is_some())
-            || (input.held & keys::ROTATE != 0 && self.area.interaction.held().is_some())
+            || (input.held & (keys::ROTATE | keys::TRANSLATE) != 0
+                && self.area.interaction.held().is_some())
         {
             walking_input.mouse = [0.0; 2];
         }

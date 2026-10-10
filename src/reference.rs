@@ -207,6 +207,23 @@ pub struct ItemRecord {
     pub condition: f32,
     pub mass_kg: f32,
     pub attached_to: Option<ItemId>,
+    pub pickup: Option<PickupReference>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PickupReference {
+    pub source: SourceId,
+    pub cant_pickup: bool,
+    pub cant_pickup_while_mounted: bool,
+    pub cant_pickup_while_seated: bool,
+    pub no_rotation: bool,
+    pub move_with_rotation: bool,
+    pub use_recenter_position: bool,
+    pub recenter_position: [f32; 3],
+    pub use_recenter_rotation: bool,
+    pub recenter_rotation: [f32; 4],
+    pub recenter_distance: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -403,6 +420,8 @@ pub struct PlayerReference {
     pub exit_steps_vertical: u32,
     pub exit_step_horizontal: f32,
     pub exit_steps_horizontal: u32,
+    pub carry_min_weight: f32,
+    pub carry_max_weight: f32,
     pub carry_anchor_offset: [f32; 3],
     pub carry_offset_radius: f32,
     pub carry_drop_distance: f32,
@@ -854,6 +873,19 @@ impl ReferenceManifest {
                 "item condition/mass",
             )?;
         }
+        for item in &self.items {
+            if let Some(pickup) = &item.pickup {
+                require(
+                    finite(&pickup.recenter_position)
+                        && finite(&pickup.recenter_rotation)
+                        && (pickup.recenter_rotation.iter().map(|v| v * v).sum::<f32>() - 1.0)
+                            .abs()
+                            < 0.001
+                        && pickup.recenter_distance.is_finite(),
+                    "pickup recenter pose",
+                )?;
+            }
+        }
         for r in &self.hinges {
             require(
                 item_ids.contains(&r.item)
@@ -1011,6 +1043,8 @@ impl ReferenceManifest {
             finite(&p.carry_anchor_offset)
                 && finite(&p.look_sensitivity)
                 && finite(&[
+                    p.carry_min_weight,
+                    p.carry_max_weight,
                     p.carry_offset_radius,
                     p.carry_drop_distance,
                     p.carry_force_multiplier,
@@ -1020,6 +1054,8 @@ impl ReferenceManifest {
                     p.obj_move_sensitivity,
                     p.obj_rotation_sensitivity,
                 ])
+                && p.carry_min_weight >= 0.0
+                && p.carry_max_weight > p.carry_min_weight
                 && p.carry_offset_radius > 0.0
                 && p.carry_drop_distance > 0.0
                 && p.carry_min_distance >= 0.0

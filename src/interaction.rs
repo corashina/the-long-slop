@@ -1,3 +1,4 @@
+pub mod carry;
 pub mod items;
 pub mod targets;
 pub mod wheels;
@@ -6,18 +7,14 @@ pub use targets::{InteractionBlock, ResolvedAim};
 use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
 use crate::reference::{
-    ActionBinding, BodyId, ColliderId, HingeRecord, ItemId, ItemKind, OpeningId, OpeningRecord,
-    PlayerReference, ReferenceError, ReferenceManifest, SeatId, TankRole, WheelSlotId,
+    ActionBinding, ActionMasks, BodyId, ColliderId, HingeRecord, ItemId, ItemKind, OpeningId,
+    OpeningRecord, ReferenceError, ReferenceManifest, SeatId, TankRole, WheelSlotId,
 };
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
 use items::{ItemLocation, ItemStore};
 use rapier3d::math::{Pose, Rotation, Vector};
-use rapier3d::parry::query::ShapeCastOptions;
-use rapier3d::prelude::{
-    ColliderHandle, FixedJointBuilder, ImpulseJointHandle, QueryFilter, RigidBodyBuilder,
-    RigidBodyHandle,
-};
+use rapier3d::prelude::{ColliderHandle, RigidBodyHandle};
 use std::collections::{HashMap, HashSet};
 
 pub use crate::vehicle::SLOT_SENSOR_FLAG;
@@ -106,18 +103,12 @@ struct SeatState {
     pose: VehiclePose,
     exit: ExitReference,
 }
-struct HeldState {
-    item: ItemId,
-    body: RigidBodyHandle,
-    offset: Vector,
-    rotation: Rotation,
-    joint: ImpulseJointHandle,
-}
 
 pub struct InteractionState {
     kinds: HashMap<ItemId, ItemKind>,
     source_bindings: HashMap<ColliderId, ActionBinding>,
     pickup_layers: HashMap<ItemId, u32>,
+    removal_layers: HashMap<ItemId, u32>,
     usable_items: HashSet<ItemId>,
     filling_items: HashSet<ItemId>,
     collider_bindings: HashMap<ColliderHandle, ActionBinding>,
@@ -125,11 +116,11 @@ pub struct InteractionState {
     hinges: Vec<HingeState>,
     openings: Vec<OpeningState>,
     seats: Vec<SeatState>,
-    held: Option<HeldState>,
-    carry_anchor: Option<RigidBodyHandle>,
+    carry: carry::CarryState,
     player_body: Option<RigidBodyHandle>,
     reach: f32,
-    carry: PlayerReference,
+    action_masks: ActionMasks,
+    scroll_sensitivity: f32,
     supplies: HashSet<ItemId>,
     tank_rules: HashMap<ItemId, TankRules>,
     slow_oil_modifier: f32,
@@ -261,8 +252,20 @@ impl InteractionState {
             .iter()
             .map(|opening| opening.cap)
             .collect();
+        let mut removal_layers = HashMap::new();
+        for binding in &reference.action_bindings {
+            if let Some(owner) = binding.removal_owner {
+                let collider = reference
+                    .colliders
+                    .iter()
+                    .find(|collider| collider.id == binding.collider)
+                    .ok_or_else(|| ReferenceError("Missing action collider".into()))?;
+                *removal_layers.entry(owner).or_insert(0) |= collider.membership;
+            }
+        }
         Ok(Self {
             pickup_layers,
+            removal_layers,
             usable_items,
             filling_items,
             source_bindings: reference
@@ -280,11 +283,11 @@ impl InteractionState {
             hinges,
             openings,
             seats,
-            held: None,
-            carry_anchor: None,
+            carry: carry::CarryState::new(reference)?,
             player_body: None,
             reach: reference.player.aim_reach,
-            carry: reference.player.clone(),
+            action_masks: reference.player.action_masks,
+            scroll_sensitivity: reference.player.scroll_sensitivity,
             supplies: reference
                 .tanks
                 .iter()
@@ -319,7 +322,7 @@ impl InteractionState {
         self.player_body = Some(handle);
     }
     pub fn held(&self) -> Option<ItemId> {
-        self.held.as_ref().map(|held| held.item)
+        self.carry.held()
     }
     pub fn register_supply(&mut self, item: ItemId) {
         self.supplies.insert(item);
@@ -397,13 +400,19 @@ impl InteractionState {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> Option<ItemId> {
-        let held = self.held.take()?;
-        physics.rapier_mut().impulse_joints.remove(held.joint, true);
-        if let Some(item) = items.get_mut(held.item) {
-            item.location = ItemLocation::World;
-        }
-        Some(held.item)
+        self.carry.drop(items, physics)
     }
+    pub fn pickup_item(
+        &mut self,
+        item: ItemId,
+        point: [f32; 3],
+        player: &PlayerState,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        self.carry.pickup(item, point, player, items, physics)
+    }
+
     pub fn rebase(&mut self, shift: [f32; 3]) {
         for hinge in &mut self.hinges {
             if hinge.parent.is_none() {
@@ -424,6 +433,7 @@ impl InteractionState {
         if !dt.is_finite() || dt <= 0.0 {
             return None;
         }
+        self.carry.release_acquisition(input);
         let valid = |target: AimTarget| {
             target.distance.is_finite() && target.distance >= 0.0 && target.distance <= self.reach
         };
@@ -518,7 +528,7 @@ impl InteractionState {
             {
                 carry_input.wheel = 0.0;
                 let delta = if input.wheel.is_finite() && input.wheel != 0.0 {
-                    input.wheel * self.carry.scroll_sensitivity
+                    input.wheel * self.scroll_sensitivity
                 } else if input.held & keys::USE != 0 {
                     input.mouse[1]
                 } else {
@@ -538,7 +548,7 @@ impl InteractionState {
             }
             if input.released & keys::USE != 0
                 && !released_hinge
-                && self.held.is_none()
+                && self.held().is_none()
                 && let Some(seat) = self.seats.iter().find(|seat| seat.item == target.item)
                 && player.enter(seat.id, seat.pose, physics)
             {
@@ -587,15 +597,18 @@ impl InteractionState {
                 }
             }
         }
-        if input.pressed & keys::GRAB != 0 && self.wheel_installation_block(&aim).is_none() {
-            if let Some(held) = self.held.as_ref()
+        if input.pressed & keys::GRAB != 0
+            && !self.carry.acquisition_held()
+            && self.wheel_installation_block(&aim).is_none()
+        {
+            if let Some(held) = self.held()
                 && let Some(slot) = installation_target.and_then(|target| target.slot)
             {
                 action = Some(InteractionAction::WheelInstall {
-                    item: held.item,
+                    item: held,
                     target: slot,
                 });
-            } else if self.held.is_none()
+            } else if self.held().is_none()
                 && let Some(target) = grab_target
                 && matches!(
                     self.kinds.get(&target.item),
@@ -605,12 +618,20 @@ impl InteractionState {
                     .get(target.item)
                     .is_some_and(|item| matches!(item.location, ItemLocation::WheelSlot(_)))
             {
-                action = Some(InteractionAction::WheelRemove(target.item));
+                if self
+                    .carry
+                    .allows_pickup(target.item, player.seat().is_some(), true)
+                {
+                    action = Some(InteractionAction::WheelRemove(target.item));
+                }
             } else if let Some(item) = self.drop_held(items, physics) {
                 action = Some(InteractionAction::Drop(item));
             } else if let Some(target) = grab_target
                 && target.slot.is_none()
-                && self.pickup(target, player, items, physics)
+                && self
+                    .carry
+                    .pickup(target.item, target.point, player, items, physics)
+                    .is_ok()
             {
                 action = Some(InteractionAction::Pickup(target.item));
             }
@@ -626,7 +647,7 @@ impl InteractionState {
         {
             action = Some(InteractionAction::WheelSplit(item));
         }
-        if self.update_carry(carry_input, player, physics, dt)
+        if self.carry.step(carry_input, player, physics, dt)
             && let Some(item) = self.drop_held(items, physics)
         {
             action = Some(InteractionAction::Drop(item));
@@ -643,7 +664,7 @@ impl InteractionState {
         items.sync_poses(physics);
         let mut filling = None;
         if input.held & keys::FILL != 0
-            && let Some(held) = self.held.as_ref()
+            && let Some(held) = self.held()
             && let Some(target) = filling_target
         {
             if let Some(opening) = self
@@ -654,19 +675,19 @@ impl InteractionState {
                 let (source_id, destination, flow) =
                     if self.supplies.contains(&opening.reference.tank) {
                         if !self.openings.iter().any(|destination| {
-                            destination.reference.tank == held.item && destination.valve > 0.0
+                            destination.reference.tank == held && destination.valve > 0.0
                         }) {
-                            (held.item, held.item, 0.0)
+                            (held, held, 0.0)
                         } else {
                             (
                                 opening.reference.tank,
-                                held.item,
+                                held,
                                 opening.reference.flow_liters_per_second * opening.valve,
                             )
                         }
                     } else {
                         (
-                            held.item,
+                            held,
                             opening.reference.tank,
                             opening.reference.flow_liters_per_second * opening.valve,
                         )
@@ -778,137 +799,6 @@ impl InteractionState {
             }
             body.set_next_kinematic_position(pose);
         }
-    }
-
-    fn pickup(
-        &mut self,
-        target: AimTarget,
-        player: &PlayerState,
-        items: &mut ItemStore,
-        physics: &mut PhysicsWorld,
-    ) -> bool {
-        let Some(item) = items.get_mut(target.item) else {
-            return false;
-        };
-        if item.location != ItemLocation::World {
-            return false;
-        }
-        let Some(body) = item.body else {
-            return false;
-        };
-        if body == physics.chassis_handle() || !physics.rapier().bodies[body].is_dynamic() {
-            return false;
-        }
-        let pose = *physics.rapier().bodies[body].position();
-        let anchor = *self.carry_anchor.get_or_insert_with(|| {
-            physics
-                .rapier_mut()
-                .insert_body(RigidBodyBuilder::kinematic_position_based().pose(pose))
-        });
-        physics.rapier_mut().bodies[anchor].set_position(pose, false);
-        let joint = physics.rapier_mut().impulse_joints.insert(
-            anchor,
-            body,
-            FixedJointBuilder::new(),
-            true,
-        );
-        let view = to_rapier(player.view_pose(physics));
-        physics.rapier_mut().bodies[body].enable_ccd(true);
-        self.held = Some(HeldState {
-            item: target.item,
-            body,
-            offset: (view.rotation.inverse() * (pose.translation - view.translation)
-                - Vector::from_array(self.carry.carry_anchor_offset))
-            .clamp_length_max(self.carry.carry_offset_radius),
-            rotation: view.rotation.inverse() * pose.rotation,
-            joint,
-        });
-        item.location = ItemLocation::Held;
-        true
-    }
-
-    fn update_carry(
-        &mut self,
-        input: FrameInput,
-        player: &PlayerState,
-        physics: &mut PhysicsWorld,
-        dt: f32,
-    ) -> bool {
-        let Some(held) = self.held.as_mut() else {
-            return false;
-        };
-        let Some(anchor) = self.carry_anchor else {
-            return false;
-        };
-        let view = to_rapier(player.view_pose(physics));
-        if input.wheel.is_finite() {
-            held.offset = (held.offset
-                - Vector::Z
-                    * input.wheel
-                    * self.carry.scroll_sensitivity
-                    * dt
-                    * self.carry.obj_move_sensitivity)
-                .clamp_length_max(self.carry.carry_offset_radius);
-        }
-        if input.held & keys::ROTATE != 0 && input.mouse.iter().all(|delta| delta.is_finite()) {
-            let sensitivity = dt * 10.0 * self.carry.obj_rotation_sensitivity;
-            held.rotation = Rotation::from_rotation_y((-input.mouse[0] * sensitivity).to_radians())
-                * held.rotation
-                * Rotation::from_rotation_x((input.mouse[1] * sensitivity).to_radians());
-        }
-        let current = *physics.rapier().bodies[held.body].position();
-        let mut desired = Pose::from_parts(
-            view.translation
-                + view.rotation
-                    * (Vector::from_array(self.carry.carry_anchor_offset) + held.offset)
-                        .clamp_length(self.carry.carry_min_distance, self.carry.carry_max_distance),
-            view.rotation * held.rotation,
-        );
-        if (desired.translation - current.translation).length() >= self.carry.carry_drop_distance {
-            return true;
-        }
-        desired.translation = current.translation
-            + ((desired.translation - current.translation) * self.carry.carry_force_multiplier)
-                .clamp_length_max(self.carry.carry_max_force)
-                * physics.rapier().integration_parameters.dt;
-        let outside_player = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
-            collider.parent() != Some(player.body_handle())
-        };
-        let queries = physics.queries(
-            QueryFilter::default()
-                .exclude_sensors()
-                .exclude_rigid_body(held.body)
-                .predicate(&outside_player),
-        );
-        for collider_handle in physics.rapier().bodies[held.body].colliders() {
-            let collider = &physics.rapier().colliders[*collider_handle];
-            let local = collider
-                .position_wrt_parent()
-                .copied()
-                .unwrap_or(Pose::IDENTITY);
-            let velocity = desired.translation - current.translation;
-            if let Some((_, hit)) = queries.cast_shape(
-                &(current * local),
-                velocity,
-                collider.shape(),
-                ShapeCastOptions {
-                    max_time_of_impact: 1.0,
-                    ..Default::default()
-                },
-            ) {
-                desired.translation =
-                    current.translation + velocity * (hit.time_of_impact - 0.01).max(0.0);
-            }
-            if queries
-                .intersect_shape(desired * local, collider.shape())
-                .next()
-                .is_some()
-            {
-                desired.rotation = current.rotation;
-            }
-        }
-        physics.rapier_mut().bodies[anchor].set_next_kinematic_position(desired);
-        false
     }
 }
 

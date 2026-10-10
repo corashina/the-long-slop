@@ -1,6 +1,8 @@
 param([string]$Test)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
+. "$PSScriptRoot/cargo-target.ps1"
+$cargoTarget = Get-CargoTargetDirectory $root
 $image = 'my-summer-slop-toolchain'
 try {
     & docker build --tag $image --file "$root/tools/Dockerfile" $root
@@ -12,7 +14,8 @@ try {
     }
     & docker run --rm --mount "type=bind,source=$root,target=/workspace" `
         --mount 'type=volume,source=tld-wasm-cargo,target=/cargo' `
-        --mount 'type=volume,source=tld-wasm-target,target=/target' $image `
+        --mount 'type=volume,source=tld-wasm-target,target=/target' `
+        --env "CARGO_TARGET_DIR=$cargoTarget" $image `
         sh -c $checks
     exit $LASTEXITCODE
 } catch {

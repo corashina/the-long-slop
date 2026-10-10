@@ -528,6 +528,17 @@ fn pickup_drop_preserves_identity_and_collision() {
             .is_enabled()
     );
     interaction.step(
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    interaction.step(
         input(keys::GRAB, keys::GRAB),
         common::resolved(None),
         &mut player,
@@ -880,6 +891,17 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
     interaction.step(
         input(keys::GRAB, keys::GRAB),
         common::resolved(target(wheel_id.0)),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    interaction.step(
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        common::resolved(None),
         &mut player,
         &mut items,
         &mut physics,
@@ -1617,4 +1639,193 @@ fn held_container_at_wheel_slot_shows_incompatibility_and_stays_held() {
     assert_eq!(interaction.held(), Some(can));
     assert_eq!(items.get(can).unwrap().location, ItemLocation::Held);
     assert_eq!(physics.rapier().impulse_joints.len(), joints);
+}
+
+#[test]
+fn carry_translation_roll_and_recenter_respect_collision() {
+    use keys::{RECENTER, TRANSLATE};
+    let (mut interaction, mut items, mut physics, mut player) = fixture();
+    let body = items.get(ItemId(1)).unwrap().body.unwrap();
+    physics.rapier_mut().bodies[body].set_gravity_scale(0.0, true);
+    interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        common::resolved(target(1)),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    let anchor = physics
+        .rapier()
+        .bodies
+        .iter()
+        .find(|(id, rb)| *id != player.body_handle() && rb.is_kinematic())
+        .unwrap()
+        .0;
+    let before = *physics.rapier().bodies[anchor].next_position();
+    interaction.step(
+        FrameInput {
+            held: TRANSLATE,
+            mouse: [20.0, 0.0],
+            ..Default::default()
+        },
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    let translated = *physics.rapier().bodies[anchor].next_position();
+    assert!(translated.translation.x > before.translation.x);
+    assert_eq!(translated.rotation, before.rotation);
+    interaction.step(
+        FrameInput {
+            held: keys::ROTATE | TRANSLATE,
+            mouse: [20.0, 0.0],
+            ..Default::default()
+        },
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    let rolled = *physics.rapier().bodies[anchor].next_position();
+    assert_eq!(rolled.translation, translated.translation);
+    assert!((rolled.rotation * Vector::Z - Vector::Z).length() < 0.0001);
+    assert_ne!(rolled.rotation, translated.rotation);
+    assert!((rolled.rotation * Vector::X).y < 0.0);
+    interaction.step(
+        FrameInput {
+            held: keys::ROTATE,
+            mouse: [0.0, 20.0],
+            ..Default::default()
+        },
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    let pitched = *physics.rapier().bodies[anchor].next_position();
+    assert_eq!(pitched.translation, rolled.translation);
+    assert_ne!(pitched.rotation * Vector::Z, rolled.rotation * Vector::Z);
+    interaction.step(
+        FrameInput {
+            pressed: RECENTER,
+            ..Default::default()
+        },
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    let centered = *physics.rapier().bodies[anchor].next_position();
+    assert!((centered.translation.x - 10.0).abs() < 0.001);
+    assert_eq!(centered.rotation, Rotation::IDENTITY);
+    interaction.step(
+        FrameInput {
+            held: keys::ROTATE,
+            mouse: [20.0, 0.0],
+            ..Default::default()
+        },
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    let yawed = *physics.rapier().bodies[anchor].next_position();
+    assert_eq!(yawed.translation, centered.translation);
+    assert!((yawed.rotation * -Vector::Z).x < 0.0);
+
+    physics.insert_box([10.35, 2.0, -1.0], [0.05, 2.0, 2.0]);
+    physics.refresh_queries();
+    for _ in 0..120 {
+        interaction.step(
+            FrameInput {
+                held: TRANSLATE | keys::ROTATE,
+                mouse: [100.0, 30.0],
+                wheel: 10.0,
+                ..Default::default()
+            },
+            common::resolved(None),
+            &mut player,
+            &mut items,
+            &mut physics,
+            1.0 / 60.0,
+        );
+        physics.step_physics();
+    }
+    assert_eq!(interaction.held(), Some(ItemId(1)));
+    assert!(physics.rapier().bodies[body].translation().x < 10.3);
+}
+
+#[test]
+fn carry_uses_item_recenter_pose_and_source_pickup_restrictions() {
+    let rotation = Rotation::from_rotation_y(0.4);
+    let (mut interaction, mut items, mut physics, mut player) = fixture_with(|reference| {
+        let rule = reference.items[0].pickup.as_mut().unwrap();
+        rule.use_recenter_position = true;
+        rule.recenter_position = [0.2, 0.1, 0.0];
+        rule.use_recenter_rotation = true;
+        rule.recenter_rotation = rotation.to_array();
+    });
+    let body = items.get(ItemId(1)).unwrap().body.unwrap();
+    interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        common::resolved(target(1)),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    interaction.step(
+        FrameInput {
+            pressed: keys::RECENTER,
+            ..Default::default()
+        },
+        common::resolved(None),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    let anchor = physics
+        .rapier()
+        .bodies
+        .iter()
+        .find(|(id, rb)| *id != player.body_handle() && rb.is_kinematic())
+        .unwrap()
+        .1;
+    let view = my_summer_slop::vehicle::to_rapier(player.view_pose(&physics));
+    let current = physics.rapier().bodies[body].translation();
+    let desired = view.translation + Vector::new(0.2, 0.1, -1.0);
+    let expected = current + (desired - current) * 10.0 / 60.0;
+    assert!((anchor.next_position().translation - expected).length() < 0.0001);
+    assert!((anchor.next_position().rotation * Vector::Z - rotation * Vector::Z).length() < 0.0001);
+    for restriction in [0, 1] {
+        let (mut interaction, mut items, mut physics, mut player) = fixture_with(|reference| {
+            if restriction == 0 {
+                reference.items[0].pickup.as_mut().unwrap().cant_pickup = true;
+            } else {
+                reference.items[0].pickup = None;
+            }
+        });
+        assert_eq!(
+            interaction.step(
+                input(keys::GRAB, keys::GRAB),
+                common::resolved(target(1)),
+                &mut player,
+                &mut items,
+                &mut physics,
+                1.0 / 60.0
+            ),
+            None
+        );
+        assert_eq!(interaction.held(), None);
+        assert_eq!(items.get(ItemId(1)).unwrap().location, ItemLocation::World);
+        assert!(physics.rapier().impulse_joints.is_empty());
+    }
 }

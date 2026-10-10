@@ -1256,7 +1256,32 @@
       "kind": "container",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 101
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 2,
@@ -1270,7 +1295,32 @@
       "kind": "container",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 102
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 3,
@@ -1284,7 +1334,32 @@
       "kind": "container",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 103
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 4,
@@ -1298,7 +1373,32 @@
       "kind": "engine",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 104
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 5,
@@ -1312,7 +1412,32 @@
       "kind": "decoration",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 105
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 6,
@@ -1326,7 +1451,32 @@
       "kind": "decoration",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 106
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 7,
@@ -1340,7 +1490,32 @@
       "kind": "decoration",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 107
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 8,
@@ -1354,7 +1529,32 @@
       "kind": "decoration",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 108
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 9,
@@ -1368,7 +1568,32 @@
       "kind": "tire",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 109
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 10,
@@ -1382,7 +1607,32 @@
       "kind": "tire",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 110
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 11,
@@ -1396,7 +1646,32 @@
       "kind": "tire",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 111
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 12,
@@ -1410,7 +1685,32 @@
       "kind": "tire",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 112
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 13,
@@ -1424,7 +1724,32 @@
       "kind": "rim",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 113
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 14,
@@ -1438,7 +1763,32 @@
       "kind": "rim",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 114
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 15,
@@ -1452,7 +1802,32 @@
       "kind": "rim",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 115
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 16,
@@ -1466,7 +1841,32 @@
       "kind": "rim",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 116
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 17,
@@ -1480,7 +1880,32 @@
       "kind": "seat",
       "condition": 1,
       "mass_kg": 1,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 117
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 18,
@@ -1494,7 +1919,32 @@
       "kind": "container",
       "condition": 1,
       "mass_kg": 0,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 10018
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     },
     {
       "id": 19,
@@ -1508,7 +1958,32 @@
       "kind": "cap",
       "condition": 1,
       "mass_kg": 0,
-      "attached_to": null
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 10019
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     }
   ],
   "openings": [
@@ -1927,7 +2402,9 @@
       "pickup_mask": 8388609,
       "attach_mask": 8552449,
       "push_mask": 163841
-    }
+    },
+    "carry_min_weight": 2.0,
+    "carry_max_weight": 85.0
   },
   "seats": [
     {

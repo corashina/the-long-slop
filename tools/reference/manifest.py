@@ -3,7 +3,7 @@ import math
 from .source import key, source_id, vector
 from .gltf import GltfExporter, convert_point, convert_rotation, transform_point
 from .collision import world_pose, quaternion_product, bake_points, geometry
-from .actions import recover_masks, recover_bindings
+from .actions import recover_masks, recover_bindings, recover_pickup
 from .caps import opening_metadata
 from .visibility import recover_camera_visibility
 
@@ -113,7 +113,7 @@ def build_manifest(source, roots, reports, hashes):
         raw=source.conditions[key(group['partconditionscript'][0])]['state'] if condition else 0
         mass=data(node,'massScript')
         value={'id':len(items)+1,'source':source_id(node_readers[node]),'node':node,'body':body_for(node),'name':name,'kind':kind,
-            'condition':1.-raw*0.25,'mass_kg':mass['mass'] if mass else 0.,'attached_to':None}
+            'condition':1.-raw*0.25,'mass_kg':mass['mass'] if mass else 0.,'attached_to':None,'pickup':recover_pickup(source,group['pickupable'][0]) if 'pickupable' in group else None}
         items.append(value);item_nodes[node]=value['id']
         for readers in group.values():
             for reader in readers:item_components[key(reader)]=value['id']
@@ -302,7 +302,7 @@ def build_manifest(source, roots, reports, hashes):
         exit_step_horizontal=player['GetOutStepH'],exit_steps_horizontal=player['GetOutStepTimesH'])
     head=source.resolve(player_reader,player['Th']);held=source.resolve(player_reader,player['TpickedUpPos'])
     held_offset=bake_points([(0.,0.,0.)],source.chain(held),world_pose(source,head))[0]
-    player_record.update(carry_anchor_offset=held_offset,carry_offset_radius=player['maxPickupDist'],carry_drop_distance=player['dropDist'],
+    player_record.update(carry_min_weight=player['minWeight'],carry_max_weight=player['maxWeight'],carry_anchor_offset=held_offset,carry_offset_radius=player['maxPickupDist'],carry_drop_distance=player['dropDist'],
         carry_force_multiplier=player['pickupForceM'],carry_max_force=player['maxPickupForce'])
     settings_reader=source.get('level0',16865);settings=source.read(settings_reader)
     if source.class_name(settings_reader)!='settingsscript':raise ValueError('Required default control settings differ')

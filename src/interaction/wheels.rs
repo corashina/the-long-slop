@@ -244,6 +244,13 @@ impl WheelAssemblies {
             .any(|candidate| candidate.id == slot && candidate.rim.is_some())
     }
 
+    pub fn sensor(&self, slot: WheelSlotId) -> Option<ColliderHandle> {
+        self.slots
+            .iter()
+            .find(|candidate| candidate.id == slot)
+            .and_then(|slot| slot.sensor)
+    }
+
     fn bind(
         &mut self,
         items: &ItemStore,
@@ -334,14 +341,12 @@ impl WheelAssemblies {
         Ok(self.parts[rim].item)
     }
 
-    pub fn install(
-        &mut self,
+    pub fn can_install(
+        &self,
         item: ItemId,
         id: WheelSlotId,
-        items: &mut ItemStore,
-        physics: &mut PhysicsWorld,
+        items: &ItemStore,
     ) -> Result<(), ReferenceError> {
-        self.bind(items, physics)?;
         let slot = self
             .slots
             .iter()
@@ -359,10 +364,30 @@ impl WheelAssemblies {
         }
         if items
             .get(item)
+            .is_none_or(|item| !matches!(item.location, ItemLocation::World | ItemLocation::Held))
+        {
+            return Err(error("Rim must be loose or held before installation"));
+        }
+        Ok(())
+    }
+
+    pub fn install(
+        &mut self,
+        item: ItemId,
+        id: WheelSlotId,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        self.bind(items, physics)?;
+        self.can_install(item, id, items)?;
+        if items
+            .get(item)
             .is_none_or(|item| item.location != ItemLocation::World)
         {
-            return Err(error("Rim must be loose before installation"));
+            return Err(error("Release the carry constraint before installation"));
         }
+        let slot = self.slots.iter().position(|slot| slot.id == id).unwrap();
+        let rim = self.indices[&item];
         let chassis = physics.chassis_handle();
         self.place_part(rim, chassis, Pose::IDENTITY, false, items, physics)?;
         if let Some(tire) = self.parts[rim].tire {

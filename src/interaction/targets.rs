@@ -95,6 +95,30 @@ impl InteractionState {
         self.collider_bindings.insert(handle, binding);
     }
 
+    pub fn bind_wheel_sensor(
+        &mut self,
+        handle: ColliderHandle,
+        rim: ItemId,
+        physics: &mut PhysicsWorld,
+    ) {
+        let layers = self.removal_layers.get(&rim).copied().unwrap_or(0);
+        let binding = ActionBinding {
+            collider: ColliderId(0),
+            use_owner: None,
+            pickup_owner: None,
+            removal_owner: (layers != 0).then_some(rim),
+            push_owner: None,
+        };
+        if self.collider_bindings.get(&handle) == Some(&binding) {
+            return;
+        }
+        let collider = &mut physics.rapier_mut().colliders[handle];
+        let mut groups = collider.collision_groups();
+        groups.memberships = rapier3d::prelude::Group::from_bits_truncate(layers);
+        collider.set_collision_groups(groups);
+        self.bind_surface(handle, binding);
+    }
+
     pub fn resolve(
         &self,
         physics: &PhysicsWorld,
@@ -126,15 +150,21 @@ impl InteractionState {
             let available = items
                 .get(target.item)
                 .is_some_and(|item| match item.location {
-                    ItemLocation::WheelSlot(_) => self.is_wheel(target.item),
-                    ItemLocation::World => item.body.is_some_and(|body| {
-                        body != physics.chassis_handle()
-                            && physics
-                                .rapier()
-                                .bodies
-                                .get(body)
-                                .is_some_and(|body| body.is_dynamic())
-                    }),
+                    ItemLocation::WheelSlot(_) => {
+                        self.is_wheel(target.item)
+                            && self.carry.allows_pickup(target.item, false, true)
+                    }
+                    ItemLocation::World => {
+                        self.carry.allows_pickup(target.item, false, false)
+                            && item.body.is_some_and(|body| {
+                                body != physics.chassis_handle()
+                                    && physics
+                                        .rapier()
+                                        .bodies
+                                        .get(body)
+                                        .is_some_and(|body| body.is_dynamic())
+                            })
+                    }
                     _ => false,
                 });
             if !available {
@@ -173,7 +203,7 @@ impl InteractionState {
         items: &ItemStore,
         action: QueryAction,
     ) -> Option<AimTarget> {
-        let masks = self.carry.action_masks;
+        let masks = self.action_masks;
         let mask = match action {
             QueryAction::Grab => masks.pickup_mask,
             QueryAction::Install => masks.attach_mask,
@@ -181,7 +211,7 @@ impl InteractionState {
             _ => masks.use_mask,
         };
         let visible = masks.use_mask | masks.pickup_mask | masks.attach_mask | masks.push_mask;
-        let held_body = self.held.as_ref().map(|held| held.body);
+        let held_body = self.carry.body();
         let owner = |handle: ColliderHandle, collider: &rapier3d::prelude::Collider| {
             let binding = self.collider_bindings.get(&handle);
             match action {

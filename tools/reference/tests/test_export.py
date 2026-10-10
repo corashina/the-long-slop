@@ -11,6 +11,27 @@ from tools.reference.collision import bake_points
 
 
 class ReferenceExportTests(unittest.TestCase):
+    def test_pickup_recenter_and_restrictions_keep_source_values(self):
+        from types import SimpleNamespace
+        from tools.reference.actions import recover_pickup
+        reader = SimpleNamespace(assets_file=SimpleNamespace(name='fixture'), path_id=19)
+        fields = {'cantPickup': 1, 'cantPickupWhileMount': 1, 'cantPickupWhileSitting': 1,
+            'noRot': 1, 'moveWithRot': 0, 'useRecenter': 1,
+            'recenterPos': {'x': .2, 'y': .4, 'z': .6}, 'useRecenterRot': 1,
+            'recenterRot': {'x': 0., 'y': 90., 'z': 0.}, 'recenterDist': -.5}
+        result = recover_pickup(SimpleNamespace(read=lambda r: fields), reader)
+        self.assertEqual(result['source'], {'file': 'fixture', 'path_id': 19})
+        self.assertEqual(result['recenter_position'], (.2, .4, -.6))
+        self.assertEqual(result['recenter_distance'], -.5)
+        self.assertAlmostEqual(result['recenter_rotation'][1], -math.sqrt(.5))
+        self.assertAlmostEqual(result['recenter_rotation'][3], math.sqrt(.5))
+        for field in ('cant_pickup', 'cant_pickup_while_mounted', 'cant_pickup_while_seated',
+                'no_rotation', 'use_recenter_position', 'use_recenter_rotation'):
+            self.assertTrue(result[field])
+        del fields['recenterDist']
+        with self.assertRaises(KeyError):
+            recover_pickup(SimpleNamespace(read=lambda r: fields), reader)
+
     def test_source_action_masks(self):
         from tools.reference.actions import recover_masks
         masks = recover_masks({'useLayer': {'m_Bits': 12747265},

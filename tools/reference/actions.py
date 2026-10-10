@@ -112,3 +112,23 @@ def recover_bindings(source, nodes, components, item_nodes, colliders, hinges, o
             'pickup_owner': pickup_owner, 'removal_owner': removal_owner,
             'push_owner': item(push, 'pushablescript')})
     return result
+
+
+def recover_pickup(source, reader):
+    import math
+    from .source import source_id, vector
+    from .gltf import convert_point, convert_rotation
+    from .collision import quaternion_product
+    fields = source.read(reader)
+    angles = [math.radians(v) * .5 for v in vector(fields['recenterRot'])]
+    x, y, z = angles
+    rotation = quaternion_product((0., math.sin(y), 0., math.cos(y)),
+        quaternion_product((math.sin(x), 0., 0., math.cos(x)), (0., 0., math.sin(z), math.cos(z))))
+    return {'source': source_id(reader), 'cant_pickup': bool(fields['cantPickup']),
+        'cant_pickup_while_mounted': bool(fields['cantPickupWhileMount']),
+        'cant_pickup_while_seated': bool(fields['cantPickupWhileSitting']),
+        'no_rotation': bool(fields['noRot']), 'move_with_rotation': bool(fields['moveWithRot']),
+        'use_recenter_position': bool(fields['useRecenter']),
+        'recenter_position': convert_point(vector(fields['recenterPos'])),
+        'use_recenter_rotation': bool(fields['useRecenterRot']),
+        'recenter_rotation': convert_rotation(rotation), 'recenter_distance': fields['recenterDist']}
