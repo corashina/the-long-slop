@@ -108,7 +108,10 @@ def stage_source(steam_root: Path | None, verify: bool = False) -> Snapshot:
     data = catalog_data(catalog, source, snapshot)
     catalog_path = work_root / 'catalog.json'
     if verify:
-        if json.loads(catalog_path.read_text(encoding='utf-8')) != data:
+        accepted = json.loads(catalog_path.read_text(encoding='utf-8'))
+        for item in accepted['objects']:
+            item['dependencies'] = []
+        if accepted != data:
             raise ValueError('Archived catalog differs from the complete inventory')
     else:
         temporary = work_root / '.catalog.json'
@@ -119,15 +122,63 @@ def stage_source(steam_root: Path | None, verify: bool = False) -> Snapshot:
     return snapshot
 
 
+def stage_catalog(steam_root: Path | None, verify: bool = False):
+    from .library.archive import load_snapshot, verify_snapshot
+    from .library.inventory import catalog_data
+    from .library.records import build_catalog, verify_catalog
+    from .source import Source
+    import shutil
+    work_root = SOURCE_WORK_ROOT
+    if not (work_root / 'source-manifest.json').exists():
+        if verify:
+            raise ValueError('No accepted source stage')
+        stage_source(steam_root)
+    snapshot = load_snapshot(work_root)
+    verify_snapshot(snapshot)
+    source = Source(snapshot.root)
+    catalog_path = work_root / 'catalog.json'
+    records_root = work_root / 'records'
+    if verify:
+        catalog = verify_catalog(source, snapshot, catalog_path, records_root)
+    else:
+        pending = work_root / 'work' / 'catalog-records'
+        if not pending.resolve().is_relative_to(work_root.resolve()):
+            raise ValueError('Catalog work path escapes work root')
+        if pending.exists():
+            shutil.rmtree(pending)
+        pending.mkdir(parents=True)
+        catalog = build_catalog(source, snapshot, pending)
+        data = catalog_data(catalog, source, snapshot)
+        content = (json.dumps(data, indent=2, allow_nan=False) + '\n').encode('utf-8')
+        receipt = json.loads((pending / 'manifest.json').read_bytes())
+        receipt['catalog_sha256'] = hashlib.sha256(content).hexdigest()
+        (pending / 'manifest.json').write_text(json.dumps(receipt, sort_keys=True, separators=(',', ':'), allow_nan=False) + '\n', encoding='utf-8')
+        temporary = work_root / 'work' / 'catalog.json'
+        temporary.write_bytes(content)
+        # Publish acceptance only after every required record and graph check passes.
+        if not records_root.resolve().is_relative_to(work_root.resolve()):
+            raise ValueError('Records path escapes work root')
+        if records_root.exists():
+            shutil.rmtree(records_root)
+        pending.replace(records_root)
+        temporary.replace(catalog_path)
+    action = 'Verified' if verify else 'Indexed'
+    edges = sum(len(value) for value in catalog.dependencies.values())
+    print(f'{action} catalog: {len(catalog.objects):,} records, {edges:,} dependency edges', flush=True)
+    return catalog
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--steam-root', type=Path)
     parser.add_argument('--output', type=Path, default=Path('web/assets/reference'))
-    parser.add_argument('--stage', choices=('runtime', 'source'), default='runtime')
+    parser.add_argument('--stage', choices=('runtime', 'source', 'catalog'), default='runtime')
     parser.add_argument('--verify', action='store_true')
     arguments = parser.parse_args(argv)
     if arguments.stage == 'source':
         stage_source(arguments.steam_root, verify=arguments.verify)
+    elif arguments.stage == 'catalog':
+        stage_catalog(arguments.steam_root, verify=arguments.verify)
     else:
         if arguments.steam_root is None:
             parser.error('Runtime export needs --steam-root')

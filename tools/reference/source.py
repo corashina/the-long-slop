@@ -1,4 +1,4 @@
-"""Resolve Unity identities once. Decode only selected custom components."""
+"""Resolve Unity identities and verify complete typed records."""
 from pathlib import Path
 
 
@@ -51,6 +51,8 @@ def vector(value, width=3):
 
 def normalize_arrays(node):
     """Restore array container types without changing scalar string layout."""
+    if node.m_Type == 'pair' and [child.m_Name for child in node.m_Children] != ['first', 'second']:
+        node.m_Type = 'managed_pair'
     if node.m_Children and node.m_Children[0].m_Type == 'Array':
         array = node.m_Children[0]
         scalar_string = node.m_Type == 'string' and len(array.m_Children) > 1 and array.m_Children[1].m_Type == 'char'
@@ -143,35 +145,51 @@ class Source:
             self.class_cache[identity] = head.m_Script.deref_parse_as_object().m_ClassName
         return self.class_cache[identity]
 
-    def read(self, reader):
+    def record_tree(self, reader):
+        """Cache repaired type trees without caching decoded payloads."""
+        if reader.type.name != 'MonoBehaviour':
+            return reader._get_typetree_node()
+        from UnityPy.helpers.Tpk import get_typetree_node
+        standard = get_typetree_node(reader.class_id, reader.version)
+        head = reader.parse_monobehaviour_head()
+        if not head.m_Script.path_id:
+            return standard
+        tree_key = key(head.m_Script.deref()), reader.version
+        if tree_key not in self.tree_cache:
+            node = reader.generate_monobehaviour_node()
+            header_names = {child.m_Name for child in standard.m_Children}
+            node.m_Children = [*standard.m_Children, *[child for child in node.m_Children if child.m_Name not in header_names]]
+            normalize_arrays(node)
+            self.tree_cache[tree_key] = node
+        return self.tree_cache[tree_key]
+
+    def read_record(self, reader) -> dict:
+        """Decode all bytes and verify MonoBehaviour header fields."""
         identity = key(reader)
-        if identity in self.data_cache:
-            return self.data_cache[identity]
+        data = reader.parse_as_dict(node=self.record_tree(reader), check_read=True)
         if reader.type.name == 'MonoBehaviour':
-            from UnityPy.helpers.Tpk import get_typetree_node
-            standard = get_typetree_node(reader.class_id, reader.version)
-            name = self.class_name(reader)
-            head = reader.parse_monobehaviour_head()
-            tree_key = key(head.m_Script.deref()), reader.version
-            if tree_key not in self.tree_cache:
-                node = reader.generate_monobehaviour_node()
-                header_names = {child.m_Name for child in standard.m_Children}
-                node.m_Children = [*standard.m_Children, *[child for child in node.m_Children if child.m_Name not in header_names]]
-                normalize_arrays(node)
-                self.tree_cache[tree_key] = node
-            data = reader.parse_as_dict(node=self.tree_cache[tree_key], check_read=True)
             head = reader.parse_monobehaviour_head()
             for field in ('m_Script', 'm_GameObject'):
                 pointer = getattr(head, field)
                 if data[field] != {'m_FileID': pointer.file_id, 'm_PathID': pointer.path_id}:
                     raise ValueError(f'Header mismatch: {identity} {field}')
-            self.evidence[f'{identity[0]}:{identity[1]}'] = {
-                'class': name, 'bytes': reader.byte_size, 'complete_byte_consumption': True,
-            }
-        else:
-            data = reader.parse_as_dict(check_read=True)
-        self.data_cache[identity] = data
+            for field in ('m_Enabled', 'm_Name'):
+                if data[field] != getattr(head, field):
+                    raise ValueError(f'Header mismatch: {identity} {field}')
         return data
+
+    def read(self, reader):
+        identity = key(reader)
+        if identity not in self.data_cache:
+            data = self.read_record(reader)
+            self.data_cache[identity] = data
+            if reader.type.name == 'MonoBehaviour':
+                head = reader.parse_monobehaviour_head()
+                name = self.class_name(reader) if head.m_Script.path_id else None
+                self.evidence[f'{identity[0]}:{identity[1]}'] = {
+                    'class': name, 'bytes': reader.byte_size, 'complete_byte_consumption': True,
+                }
+        return self.data_cache[identity]
 
     def components(self, transform):
         data = self.read(transform)
