@@ -14,6 +14,7 @@ def opening_metadata(source, reader, node_ids, fluid_tune_speed):
         x,y,z=vector(value)
         return [-x,-y,z]
     return {'valve':fields['valve'],'can_tune':bool(fields['canTune']),'tune_rate':fluid_tune_speed*fields['tuneSpeed'],
+        'presentation':{'has_name':bool(fields['hasName']),'name':fields['nameString'] or str(fields['nameText']),'no_text':bool(fields['noText'])},
         'visuals':{'open_nodes':[node(pointer) for pointer in fields['GOpen']],
             'closed_nodes':[node(pointer) for pointer in fields['GClosed']],
             'cap_node':node(fields['TCap']),'closed_node':node(fields['TClosed']),'open_node':node(fields['TOpen']),

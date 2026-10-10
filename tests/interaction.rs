@@ -45,6 +45,11 @@ fn fixture_with(
             valve: 0.0,
             can_tune: false,
             tune_rate: 0.0,
+            presentation: my_summer_slop::reference::FluidPresentation {
+                has_name: false,
+                name: String::new(),
+                no_text: false,
+            },
             visuals: my_summer_slop::reference::CapVisualReference {
                 open_nodes: vec![],
                 closed_nodes: vec![],
