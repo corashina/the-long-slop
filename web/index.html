@@ -3,26 +3,29 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Summer Slop</title><link rel="stylesheet" href="./style.css"></head>
 <body><main>
 <canvas id="game" aria-label="Garage and desert" tabindex="0"></canvas>
-<section id="start-screen" aria-labelledby="title">
-<h1 id="title">My Summer Slop</h1><p class="description">Prepare the Lada. Open the garage. Find the road.</p>
-<p id="status" role="status" aria-live="polite">Loading the gameâ€¦</p>
-<dl class="controls">
-<div><dt>WASD / Mouse</dt><dd>Move / look</dd></div>
-<div><dt>Shift / Ctrl / Space</dt><dd>Run / crouch / jump</dd></div>
-<div><dt>E / Hold E + mouse</dt><dd>Use / move a door</dd></div>
-<div><dt>F / RMB / MMB</dt><dd>Pickup / move / rotate</dd></div>
-<div><dt>F press / release</dt><dd>Dismount / mount a part</dd></div>
-<div><dt>Hold LMB</dt><dd>Fill an open tank</dd></div>
-<div><dt>I / Space / C</dt><dd>Starter / handbrake / camera</dd></div>
-<div><dt>R / P / Esc</dt><dd>Recover / pause</dd></div>
-</dl><button id="start" type="button" disabled>Start</button></section>
+<section id="menu" aria-label="Game menu">
+<div id="menu-art" aria-hidden="true"></div><div id="menu-frame" aria-hidden="true"></div>
+<h1>My Summer Slop</h1>
+<p id="status" role="status" aria-live="polite">Loading the game…</p>
+<p id="capture-error" role="alert" hidden></p>
+<div id="start-actions" class="menu-actions"><button id="start" type="button" disabled>Start</button><button id="start-controls" type="button" disabled>Controls</button></div>
+<div id="pause-actions" class="menu-actions" hidden><button id="resume" type="button">Continue</button><button id="controls" type="button">Controls</button><button id="restart" type="button">Restart</button><button id="recover" type="button">Recover</button><p id="session-distance"></p></div>
+<section id="controls-screen" aria-labelledby="controls-title" hidden>
+<h2 id="controls-title">Controls</h2>
+<div class="control-columns">
+<section><h3>On foot</h3><dl>
+<div><dt>Move</dt><dd>WASD</dd></div><div><dt>Look</dt><dd>Mouse</dd></div><div><dt>Run</dt><dd>Shift</dd></div><div><dt>Crouch</dt><dd>Ctrl</dd></div><div><dt>Jump</dt><dd>Space</dd></div>
+<div><dt>Use / move a door</dt><dd>E / Hold E + Mouse</dd></div><div><dt>Pickup, dismount / mount</dt><dd>F press / release</dd></div>
+<div><dt>Move item</dt><dd>RMB + Mouse</dd></div><div><dt>Rotate item</dt><dd>MMB + Mouse</dd></div><div><dt>Item distance / valve</dt><dd>Scroll</dd></div><div><dt>Fill</dt><dd>Hold LMB</dd></div><div><dt>Hide HUD</dt><dd>Backspace</dd></div><div><dt>Menu</dt><dd>Esc</dd></div>
+</dl></section>
+<section><h3>Driving</h3><dl><div><dt>Accelerate / brake</dt><dd>W / S</dd></div><div><dt>Steer</dt><dd>A / D</dd></div><div><dt>Ignition / starter</dt><dd>I / Hold I</dd></div><div><dt>Handbrake</dt><dd>Space</dd></div><div><dt>Camera</dt><dd>C</dd></div><div><dt>Get out</dt><dd>E</dd></div><div><dt>Menu</dt><dd>Esc</dd></div></dl><button id="fullscreen" type="button">Fullscreen</button></section>
+</div><button id="back" type="button">Back</button></section></section>
 <div id="crosshair" aria-hidden="true" hidden>+</div>
 <aside id="hud" aria-label="Status" hidden>
 <div class="speed-row"><span><strong id="speed">0</strong> <span class="unit">km/h</span></span><span id="camera-mode">First person</span></div>
 <div class="readouts"><span>Fuel <span id="fuel">0.0</span> L</span><span>Trip <span id="trip">0.00</span> km</span></div>
 <meter id="fuel-level" aria-label="Fuel in liters" min="0" max="39" low="4" optimum="39" value="0"></meter>
 <p id="engine"></p><p id="held"></p><p><strong id="target"></strong> <span id="target-detail"></span></p><p id="action-prompt" role="status"></p>
-<div class="actions"><button id="pause" type="button">Pause</button><button id="fullscreen" type="button">Fullscreen</button></div></aside>
-<section id="pause-screen" aria-labelledby="pause-title" hidden><h2 id="pause-title">Paused</h2><p>Select Resume to capture the mouse.</p><p id="capture-error" role="status"></p><div class="actions"><button id="resume" type="button">Resume</button><button id="restart" type="button" class="secondary">Restart</button></div></section>
+</aside>
 <p id="runtime-error" role="alert" hidden></p><noscript>Enable JavaScript to load the game.</noscript>
 </main><script type="module" src="./main.js"></script></body></html>

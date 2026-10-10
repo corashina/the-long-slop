@@ -229,14 +229,14 @@ fn read_input(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
         clear_input(&mut drive);
     }
-    if !drive.runtime.started || drive.runtime.paused {
-        drive.input.clear();
-        return;
-    }
     if actions & 16 != 0 {
         drive.runtime.recover(&reference.0);
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
         clear_input(&mut drive);
+    }
+    if !drive.runtime.started || drive.runtime.paused {
+        drive.input.clear();
+        return;
     }
     if frame.pressed & keys::CAMERA != 0 && drive.runtime.area.player.seat().is_some() {
         drive.camera = match drive.camera {
