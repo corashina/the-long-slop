@@ -222,3 +222,6 @@ fn terrain_mesh(chunk: &ChunkData) -> Mesh {
     mesh.compute_smooth_normals();
     mesh
 }
+
+mod lamps;
+pub(crate) use lamps::{RoadLamps, finish_road_lamp_warmup, prepare_road_lamp, sync_road_lamps};

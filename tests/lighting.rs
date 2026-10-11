@@ -643,3 +643,43 @@ fn rear_shared_material_follows_each_source_ignition_branch() {
         );
     }
 }
+
+#[test]
+fn night_late_loading_uses_current_enable_state() {
+    use my_summer_slop::lighting::LightingState;
+    let mut reference = ReferenceManifest::from_json(include_bytes!("common/reference.json"))
+        .unwrap()
+        .lighting;
+    reference.cycle.startup_offset_seconds = 0.;
+    let controller = reference
+        .controllers
+        .iter_mut()
+        .find(|c| c.id == reference.road_lamp.controller)
+        .unwrap();
+    controller.electronics_output = 0.3;
+    let mut state = LightingState::new(&reference);
+    state.cycle.advance(&reference.cycle, 1350.);
+    let night = state.road_lamp_output(&reference);
+    assert!(night.enabled);
+    close(night.intensity, 0.3);
+    state.cycle.reset(&reference.cycle);
+    state.cycle.advance(&reference.cycle, 120.);
+    assert!(!state.road_lamp_output(&reference).enabled);
+    state.cycle.advance(&reference.cycle, 1230.);
+    reference
+        .controllers
+        .iter_mut()
+        .find(|c| c.id == reference.road_lamp.controller)
+        .unwrap()
+        .electronics_output = 0.2;
+    assert!(!state.road_lamp_output(&reference).enabled);
+    reference
+        .controllers
+        .iter_mut()
+        .find(|c| c.id == reference.road_lamp.controller)
+        .unwrap()
+        .electronics_output = 1.5;
+    close(state.road_lamp_output(&reference).intensity, 1.5);
+    reference.road_lamp.global_enabled = false;
+    assert!(!state.road_lamp_output(&reference).enabled);
+}

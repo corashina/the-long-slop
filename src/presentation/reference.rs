@@ -114,6 +114,50 @@ struct NodeReference {
     reference_id: Option<SourceId>,
 }
 
+/// Apply checked source renderer flags without global node ownership.
+pub(crate) fn bind_node(
+    commands: &mut Commands,
+    node: &crate::reference::NodeRecord,
+    entity: Entity,
+    extra: &GltfExtras,
+    primitives: &Query<(Entity, &ChildOf), With<Mesh3d>>,
+) -> Result<(), String> {
+    let data: NodeExtras = serde_json::from_str(&extra.value)
+        .map_err(|error| format!("Invalid glTF node {} extras: {error}", node.id.0))?;
+    if !data.active {
+        commands.entity(entity).insert(Visibility::Hidden);
+    }
+    for (primitive, parent) in primitives {
+        if parent.parent() != entity {
+            continue;
+        }
+        let enabled = data
+            .renderer_enabled
+            .ok_or_else(|| format!("Missing renderer_enabled for glTF node {}", node.id.0))?;
+        let layer = data
+            .layer
+            .filter(|layer| *layer < 32)
+            .ok_or_else(|| format!("Missing source layer for glTF node {}", node.id.0))?;
+        let cast = data
+            .cast_shadows
+            .filter(|mode| *mode <= 3)
+            .ok_or_else(|| format!("Missing shadow mode for glTF node {}", node.id.0))?;
+        commands.entity(primitive).insert((
+            RenderLayers::layer(layer as usize),
+            super::materials::SourceShadowMode(cast),
+        ));
+        if data.receive_shadows == Some(false) {
+            commands
+                .entity(primitive)
+                .insert(bevy::light::NotShadowReceiver);
+        }
+        if !enabled {
+            commands.entity(primitive).insert(Visibility::Hidden);
+        }
+    }
+    Ok(())
+}
+
 pub fn bind(
     commands: &mut Commands,
     reference: &ReferenceManifest,
@@ -141,58 +185,22 @@ pub fn bind(
         let Some(source) = identity.reference_id else {
             continue;
         };
-        let data: NodeExtras = serde_json::from_str(&extra.value).map_err(|error| {
-            format!(
-                "Invalid glTF node {}:{} extras: {error}",
-                source.file, source.path_id
-            )
-        })?;
         let Some(node) = reference.nodes.iter().find(|node| node.source == source) else {
             return Err(format!(
                 "Unknown glTF node {}:{}",
                 source.file, source.path_id
             ));
         };
+        if !reference
+            .assets
+            .iter()
+            .any(|a| a.id == node.asset && a.usage == AssetUsage::UniqueScene)
+        {
+            continue;
+        }
+        bind_node(commands, node, entity, extra, primitives)?;
         if visuals.nodes.insert(node.id, entity).is_some() {
             return Err(format!("Duplicate glTF node {}", node.id.0));
-        }
-        if !data.active {
-            commands.entity(entity).insert(Visibility::Hidden);
-        }
-        for (primitive, parent) in primitives {
-            if parent.parent() != entity {
-                continue;
-            }
-            let enabled = data.renderer_enabled.ok_or_else(|| {
-                format!(
-                    "Missing renderer_enabled for glTF node {} ({})",
-                    node.id.0, node.hierarchy_path
-                )
-            })?;
-            let layer = data.layer.filter(|layer| *layer < 32).ok_or_else(|| {
-                format!(
-                    "Invalid or missing layer for glTF node {} ({})",
-                    node.id.0, node.hierarchy_path
-                )
-            })?;
-            commands
-                .entity(primitive)
-                .insert(RenderLayers::layer(layer as usize));
-            let cast = data
-                .cast_shadows
-                .filter(|mode| *mode <= 3)
-                .ok_or_else(|| format!("Missing shadow mode for glTF node {}", node.id.0))?;
-            commands
-                .entity(primitive)
-                .insert(super::materials::SourceShadowMode(cast));
-            if data.receive_shadows == Some(false) {
-                commands
-                    .entity(primitive)
-                    .insert(bevy::light::NotShadowReceiver);
-            }
-            if !enabled {
-                commands.entity(primitive).insert(Visibility::Hidden);
-            }
         }
     }
     for node in reference.nodes.iter().filter(|n| {

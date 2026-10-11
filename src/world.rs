@@ -1,7 +1,9 @@
 use crate::reference::{Bounds, ColliderGeometry, ReferenceManifest, StartingAreaReference};
 use crate::vehicle::{ColliderHandle, PhysicsWorld, VehiclePose};
 
+mod lamps;
 mod terrain;
+pub use lamps::{RoadLampId, RoadLampPlacement, road_lamp_placement, road_lamp_range};
 
 pub const CHUNK_LENGTH: f64 = 128.0;
 pub const STATION_SPACING: f64 = 640.0;

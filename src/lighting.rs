@@ -942,6 +942,22 @@ impl LightingState {
             select_material(&mut self.materials, lamp, energy > 0.);
         }
     }
+    /// New road instances use the current phase and electronics output.
+    pub fn road_lamp_output(&self, reference: &crate::reference::LightingRecord) -> LightOutput {
+        let road = &reference.road_lamp;
+        let controller = reference
+            .controllers
+            .iter()
+            .find(|c| c.id == road.controller)
+            .unwrap();
+        LightOutput {
+            id: road.lights[0],
+            enabled: road.global_enabled
+                && self.cycle.output().roadside_enabled
+                && controller.electronics_output > road.electronics_threshold,
+            intensity: controller.electronics_output,
+        }
+    }
     pub fn light_outputs(&self) -> &[LightOutput] {
         &self.lights
     }

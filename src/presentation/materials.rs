@@ -314,7 +314,11 @@ pub(crate) fn prepare_lamp_materials(
     >,
     casters: Query<(), With<SourceCaster>>,
 ) {
-    if !source.bound || source.materials_prepared || !source.materials_ready {
+    if !source.bound
+        || source.materials_prepared
+        || !source.materials_ready
+        || source.road_lamps.recipe.is_none()
+    {
         return;
     }
     if source.lamp_materials.iter().any(|target| {

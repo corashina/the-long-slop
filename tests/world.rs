@@ -457,3 +457,103 @@ fn garage_terrain_keeps_interiors_clear_and_connects_driveway() {
         "room must stay clear"
     );
 }
+
+#[test]
+fn road_lamp_intervals_have_one_owner_at_seams() {
+    use my_summer_slop::world::road_lamp_range;
+    assert_eq!(road_lamp_range(0., 128., 64.).collect::<Vec<_>>(), [0, 1]);
+    assert_eq!(road_lamp_range(128., 256., 64.).collect::<Vec<_>>(), [2, 3]);
+    assert!(road_lamp_range(-128., 0., 64.).is_empty());
+    assert_eq!(road_lamp_range(-64., 64., 64.).collect::<Vec<_>>(), [0]);
+}
+
+#[test]
+fn road_lamp_placement_is_absolute_after_rebase() {
+    use my_summer_slop::world::{RoadLampId, road_lamp_placement};
+    let reference = common::reference().lighting.road_lamp;
+    for id in [RoadLampId(13), RoadLampId(1_000_001)] {
+        let placement = road_lamp_placement(42, id, &reference);
+        let a = WorldOrigin {
+            offset: placement.absolute_point,
+        };
+        let b = WorldOrigin {
+            offset: [
+                placement.absolute_point[0] + 4.,
+                placement.absolute_point[1],
+                placement.absolute_point[2] - 8.,
+            ],
+        };
+        let local_a = a.local(placement.absolute_point);
+        let local_b = b.local(placement.absolute_point);
+        assert_ne!(local_a, local_b);
+        for origin in [a, b] {
+            for (actual, expected) in origin
+                .absolute(origin.local(placement.absolute_point))
+                .into_iter()
+                .zip(placement.absolute_point)
+            {
+                assert!((actual - expected).abs() < 1e-6);
+            }
+        }
+        assert_eq!(road_lamp_placement(42, id, &reference), placement);
+        assert_eq!(placement.id, id);
+        let road = road_sample(42, id.0 as f64 * reference.spacing_meters as f64);
+        let offset_length = placement
+            .absolute_point
+            .into_iter()
+            .zip(road.center)
+            .map(|(a, b)| (a - b).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        let authored_length = reference
+            .road_pose
+            .translation
+            .into_iter()
+            .map(|v| (v as f64).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert!(
+            (offset_length - authored_length).abs() < 1e-6,
+            "Apply the authored offset once"
+        );
+        assert!(placement.rotation.iter().all(|v| v.is_finite()));
+        if id.0 > 1_000_000 {
+            assert!(placement.absolute_point[2].abs() > 100_000_000.);
+        }
+    }
+}
+
+#[test]
+fn road_lamp_window_bound_comes_from_actual_chunks() {
+    use my_summer_slop::world::road_lamp_range;
+    let reference = common::reference();
+    let mut physics = PhysicsWorld::new(
+        &reference,
+        VehiclePose {
+            position: [0., 1.1, 0.],
+            rotation: [0., 0., 0., 1.],
+        },
+    )
+    .unwrap();
+    let mut stream = WorldStream::new(42);
+    let mut maximum = 0;
+    for distance in (-8..128).map(|i| i as f64 * 128.).chain([100_000_100.]) {
+        stream.sync_at(road_sample(42, distance).center, &mut physics);
+        let mut ids = Vec::new();
+        for chunk in stream.chunks() {
+            let start = chunk.data.key.0 as f64 * 128.;
+            ids.extend(road_lamp_range(
+                start,
+                start + 128.,
+                reference.lighting.road_lamp.spacing_meters as f64,
+            ));
+        }
+        let count = ids.len();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(count, ids.len());
+        assert!(count <= 15);
+        maximum = maximum.max(count);
+    }
+    assert_eq!(maximum, 15);
+}
