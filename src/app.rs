@@ -526,7 +526,7 @@ fn display_name<'a>(
             .iter()
             .find(|m| m.item == id)
             .and_then(|m| m.turn.as_ref())
-            .map_or(item.name.as_str(), |turn| match turn.action {
+            .map_or("", |turn| match turn.action {
                 crate::reference::TurnAction::ToggleHandbrake => "Handbrake",
                 crate::reference::TurnAction::CycleHeadlights => "Headlights",
                 crate::reference::TurnAction::InteriorLight => "Cabin light",

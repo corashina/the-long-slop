@@ -57,7 +57,9 @@ The build script writes the browser package to `web/pkg`.
 | P / Esc | Pause | Pause |
 
 Remove the hubcap before removing its wheel. Removed parts enter your hands.
-Aim a compatible empty slot and press F to install a part.
+Move a held part close to a compatible empty slot. Press F when the install prompt appears.
+Aim at an empty wheel slot to install a wheel.
+Some source items, including the fuel can, cannot rotate.
 
 Carry a fuel can. Open the fuel cap. Aim at the opening and hold LMB to fill it.
 Open carried containers before filling them at roadside pumps.

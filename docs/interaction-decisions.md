@@ -15,3 +15,7 @@ Ruling: Preserve selected-source seat and plate limits — Task5 recovered no pi
 Ruling: Ordinary point push stops on F release; source steering grip persists until next F press, excess distance, invalid target, or lifecycle cancellation — fpscontroller.cs3356-3388 explicitly latches the selected required grip, so the brief's broad release cancellation applies to ordinary push — cost if wrong: revise grip latch behavior and control wording.
 
 Grip invalidation means loss of the physical owner or collider. Changing the aim ray does not release the grip.
+
+Ruling: Replace general-part attachment-ray selection with the recovered held-part proximity scan — partscript.Scan uses scanLayer/radius and CanCraft, while attachTargetscript ray explicitly skips partslotscript triggers; this restores authorized source parity. Keep wheel targeting separate, shared HUD/F selection, atomic rejection, and cached query storage — cost if wrong: revise general-part scan selection, prompt wiring, and source acceptance tests.
+
+Ruling: General-part overlap installation has no added player-aim or line-of-sight gate — source Scan selects nearby CanCraft slots; preserve occlusion on existing action rays and collision-safe held-part motion instead of inventing a scan restriction — cost if wrong: add an explicit scan obstruction rule and revise its source-parity acceptance.

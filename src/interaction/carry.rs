@@ -125,6 +125,10 @@ impl CarryState {
     pub fn held(&self) -> Option<ItemId> {
         self.held.as_ref().map(|held| held.item)
     }
+    pub(super) fn allows_held_rotation(&self) -> bool {
+        self.held()
+            .is_some_and(|item| !self.rules[&item].no_rotation)
+    }
     pub fn body(&self) -> Option<RigidBodyHandle> {
         self.held.as_ref().map(|held| held.body)
     }

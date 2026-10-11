@@ -1,11 +1,11 @@
 //! General parts own slot occupancy and reuse one collider set when moved.
-use super::InteractionBlock;
 use super::items::{ItemLocation, ItemStore, node_pose};
 use super::mechanisms::MechanismState;
+use super::{AimTarget, InteractionBlock, SlotTarget};
 use crate::player::PlayerState;
 use crate::reference::*;
 use crate::vehicle::{PhysicsWorld, VEHICLE_COLLIDER_FLAG, from_rapier, to_rapier};
-use rapier3d::math::Pose;
+use rapier3d::math::{Pose, Vector};
 use rapier3d::prelude::{ColliderHandle, RigidBodyBuilder, RigidBodyHandle};
 use std::collections::HashMap;
 
@@ -17,7 +17,14 @@ struct Shape {
     part_local: Pose,
     enabled: bool,
 }
+struct ScanShape {
+    id: ColliderId,
+    handle: Option<ColliderHandle>,
+    node: Pose,
+    local_node: Pose,
+}
 struct Part {
+    scan_offset: Vector,
     reference: PartReference,
     slot: Option<usize>,
     body: Option<RigidBodyHandle>,
@@ -31,6 +38,7 @@ struct Part {
     assembly_fluids: Vec<ItemId>,
 }
 struct Slot {
+    scan_shapes: Vec<ScanShape>,
     reference: PartSlotReference,
     part: Option<usize>,
     mount_node: NodeId,
@@ -40,6 +48,8 @@ struct Slot {
     detach_pose: Option<Pose>,
 }
 pub struct PartAttachments {
+    scan_mask: u32,
+    scan_radius: f32,
     parts: Vec<Part>,
     indices: HashMap<ItemId, usize>,
     slots: Vec<Slot>,
@@ -103,6 +113,9 @@ impl PartAttachments {
                 });
             }
             parts.push(Part {
+                scan_offset: to_rapier(node_pose(r, item.node)?)
+                    .inverse()
+                    .transform_point(to_rapier(node_pose(r, p.node)?).translation),
                 reference: p.clone(),
                 slot: r.part_slots.iter().position(|s| s.part == Some(p.item)),
                 body: None,
@@ -138,6 +151,18 @@ impl PartAttachments {
                 collider_slots.insert(*c, s.id);
             }
             slots.push(Slot {
+                scan_shapes: s
+                    .colliders
+                    .iter()
+                    .map(|id| {
+                        Ok(ScanShape {
+                            id: *id,
+                            handle: None,
+                            node: to_rapier(node_pose(r, s.node)?),
+                            local_node: Pose::IDENTITY,
+                        })
+                    })
+                    .collect::<Result<_, ReferenceError>>()?,
                 reference: s.clone(),
                 part: s
                     .part
@@ -161,6 +186,8 @@ impl PartAttachments {
             });
         }
         Ok(Self {
+            scan_mask: r.part_scan.mask,
+            scan_radius: r.part_scan.radius,
             parts,
             indices,
             slots,
@@ -224,9 +251,86 @@ impl PartAttachments {
                     ItemLocation::PartSlot(self.slots[slot].reference.id);
             }
         }
+        for slot in &mut self.slots {
+            for shape in &mut slot.scan_shapes {
+                let handle = *handles
+                    .get(&shape.id)
+                    .ok_or_else(|| error("Missing slot scan collider"))?;
+                shape.handle = Some(handle);
+                shape.local_node =
+                    physics.rapier().colliders[handle].position().inverse() * shape.node;
+            }
+        }
         self.bound = true;
         self.cache_assembly_mass(items);
         Ok(())
+    }
+    /// Source partscript.Scan: sphere overlap, then nearest compatible collider transform.
+    /// Cache bindings once and select in one pass instead of allocating and sorting each frame.
+    pub fn scan(
+        &self,
+        item: ItemId,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+    ) -> (Option<AimTarget>, Option<InteractionBlock>) {
+        let Some(&index) = self.indices.get(&item) else {
+            return (None, None);
+        };
+        let Some(state) = items.get(item) else {
+            return (None, None);
+        };
+        let part = &self.parts[index];
+        let center = to_rapier(state.pose).transform_point(part.scan_offset);
+        let scale = if part.reference.scan_radius == 0. {
+            1.
+        } else {
+            part.reference.scan_radius
+        };
+        let radius = self.scan_radius * scale;
+        let mut nearest = f32::INFINITY;
+        let mut blocked_distance = f32::INFINITY;
+        let mut selected = None;
+        let mut blocked = None;
+        for slot in &self.slots {
+            for shape in &slot.scan_shapes {
+                let Some(handle) = shape.handle else {
+                    continue;
+                };
+                let Some(collider) = physics.rapier().colliders.get(handle) else {
+                    continue;
+                };
+                if !collider.is_enabled()
+                    || collider.collision_groups().memberships.bits() & self.scan_mask == 0
+                {
+                    continue;
+                }
+                let closest = collider
+                    .shape()
+                    .project_point(collider.position(), center, true)
+                    .point;
+                if closest.distance_squared(center) > radius * radius {
+                    continue;
+                }
+                let node = *collider.position() * shape.local_node;
+                let distance = node.translation.distance_squared(center);
+                if let Err(reason) = self.can_install(item, slot.reference.id, items) {
+                    if distance < blocked_distance {
+                        blocked_distance = distance;
+                        blocked = Some(reason);
+                    }
+                } else if distance < nearest {
+                    nearest = distance;
+                    selected = Some(AimTarget {
+                        collider: handle,
+                        item,
+                        distance: distance.sqrt(),
+                        point: closest.to_array(),
+                        slot: Some(SlotTarget::Part(slot.reference.id)),
+                    });
+                }
+            }
+        }
+        (selected, if selected.is_some() { None } else { blocked })
     }
     pub fn loose_body(&self, item: ItemId) -> Option<RigidBodyHandle> {
         self.parts

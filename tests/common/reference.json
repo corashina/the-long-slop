@@ -2958,5 +2958,13 @@
       "push_even_if_same_parent": false,
       "grip": null
     }
-  ]
+  ],
+  "part_scan": {
+    "source": {
+      "file": "level1",
+      "path_id": 64919
+    },
+    "mask": 513,
+    "radius": 0.2
+  }
 }

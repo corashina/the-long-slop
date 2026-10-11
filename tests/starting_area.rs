@@ -1990,6 +1990,17 @@ fn production_fuel_can_lifts_and_follows_after_recenter() {
             },
         );
     }
+    assert!(
+        !runtime
+            .area
+            .interaction
+            .prompt(
+                &my_summer_slop::interaction::ResolvedAim::default(),
+                &runtime.area.items,
+            )
+            .contains("MMB"),
+        "source can disables rotation"
+    );
     let lifted = *runtime.physics.rapier().bodies[body].position();
     assert_eq!(runtime.area.interaction.held(), Some(item));
     assert!(

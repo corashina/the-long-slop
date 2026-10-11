@@ -670,7 +670,15 @@ pub struct WheelSlotReference {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct PartScanReference {
+    pub source: SourceId,
+    pub mask: u32,
+    pub radius: f32,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PartReference {
+    pub scan_radius: f32,
     pub usable: Option<ItemId>,
     pub item: ItemId,
     pub source: SourceId,
@@ -786,6 +794,7 @@ pub struct ReferenceManifest {
     pub lighting: LightingReference,
     pub wheel_slots: Vec<WheelSlotReference>,
     pub wheel_parts: Vec<WheelPartReference>,
+    pub part_scan: PartScanReference,
     pub parts: Vec<PartReference>,
     pub part_slots: Vec<PartSlotReference>,
     pub items: Vec<ItemRecord>,
@@ -875,6 +884,12 @@ impl ReferenceManifest {
             "duplicate mounted wheel",
         )?;
         let part_ids = ids(self.parts.iter().map(|p| p.item), "duplicate part item")?;
+        require(
+            self.part_scan.mask != 0
+                && self.part_scan.radius.is_finite()
+                && self.part_scan.radius > 0.,
+            "part scan parameters",
+        )?;
         let part_slot_ids = ids(self.part_slots.iter().map(|s| s.id), "duplicate part slot")?;
         ids(
             self.part_slots.iter().filter_map(|s| s.part),
@@ -903,7 +918,9 @@ impl ReferenceManifest {
                 "part damping",
             )?;
             require(
-                p.local_rotation_after_mount.iter().all(|v| v.is_finite()),
+                p.scan_radius.is_finite()
+                    && p.scan_radius >= 0.
+                    && p.local_rotation_after_mount.iter().all(|v| v.is_finite()),
                 "part mount rotation",
             )?;
             require(
@@ -935,7 +952,11 @@ impl ReferenceManifest {
                 "part slot owner/occupant",
             )?;
             require(
-                s.colliders.iter().all(|id| collider_ids.contains(id)),
+                s.colliders.iter().all(|id| {
+                    self.colliders
+                        .iter()
+                        .any(|c| c.id == *id && c.node == s.node)
+                }),
                 "part slot collider",
             )?;
             require(

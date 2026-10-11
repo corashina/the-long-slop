@@ -34,7 +34,7 @@ def recover_parts(source,nodes,components,item_nodes,node_readers,colliders,car_
             while current!=node and current not in part_nodes:current=nodes[current-1]['parent']
             if current==node:owned.append(c['id'])
         parts.append({'item':item_nodes[node],'source':source_id(reader),'node':node,
-            'main_types':v['maintipus'],'part_types':v['tipus'],
+            'main_types':v['maintipus'],'part_types':v['tipus'],'scan_radius':v['scanRadius'],
             'usable':item_nodes[pointer_node(pickup,p['usable'])] if p['usable']['m_PathID'] else None,
             'cover_slot':v['cover_CantCraftIfCovered']['m_PathID'] or None,
             'local_rotation_after_mount':euler(vector(v['localRotationAfterMount'])),

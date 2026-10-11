@@ -309,6 +309,7 @@ fn occupied_removable_seat_fixture_rejects_the_transaction() {
     item.pickup = Some(pickup);
     let node = item.node;
     r.parts.push(PartReference {
+        scan_radius: 0.,
         usable: None,
         item: seat.item,
         source: seat.source.clone(),
@@ -1034,5 +1035,119 @@ fn restart_clears_constraints_and_restores_source_parts() {
         for slot in &r.part_slots {
             assert_eq!(g.area.interaction.parts.slot_item(slot.id), slot.part);
         }
+    }
+}
+
+#[test]
+#[ignore = "requires installed source export"]
+fn source_parts_scan_then_f_installs_after_removal() {
+    use my_summer_slop::interaction::SlotTarget;
+    use my_summer_slop::interaction::items::ItemLocation;
+    use my_summer_slop::vehicle::VehiclePose;
+    let r = installed();
+    for definition in r.parts.iter().filter(|p| {
+        p.part_types.iter().any(|tag| {
+            [
+                "engine",
+                "coolanttank",
+                "fldoor",
+                "frdoor",
+                "rldoor",
+                "rrdoor",
+                "roundheadlight",
+                "leftmirror",
+                "rightmirror",
+            ]
+            .contains(&tag.as_str())
+        })
+    }) {
+        let tag = definition.part_types.join(",");
+        let item = definition.item;
+        let slot = r.part_slots.iter().find(|s| s.part == Some(item)).unwrap();
+        let mut g = GarageRuntime::new(&r).unwrap();
+        detach(&mut g, item);
+        let handle = g
+            .physics
+            .rapier()
+            .colliders
+            .iter()
+            .find(|(_, c)| (c.user_data >> 64) as u32 == slot.colliders[0].0)
+            .unwrap()
+            .0;
+        let point = g.physics.rapier().colliders[handle].compute_aabb().center();
+        let old_player = Vector::from_array(g.area.player.body_pose(&g.physics).position);
+        g.area
+            .player
+            .rebase((old_player - point + Vector::Z).to_array());
+        let player_body = g.area.player.body_handle();
+        g.physics.rapier_mut().bodies[player_body].set_translation(point - Vector::Z, true);
+        let body = g.area.items.get(item).unwrap().body.unwrap();
+        g.physics.rapier_mut().bodies[body].set_translation(point, true);
+        g.area.items.sync_poses(&g.physics);
+        g.area
+            .interaction
+            .pickup_item(
+                item,
+                point.to_array(),
+                &g.area.player,
+                &mut g.area.items,
+                &mut g.physics,
+            )
+            .unwrap();
+        g.physics.refresh_queries();
+        let view = VehiclePose {
+            position: (point + Vector::Y).to_array(),
+            rotation: [0., 0., 0., 1.],
+        };
+        let aim = g.area.interaction.resolve(&g.physics, view, &g.area.items);
+        assert_eq!(
+            aim.installation_target.and_then(|t| t.slot),
+            Some(SlotTarget::Part(slot.id)),
+            "{tag}: {aim:?}"
+        );
+        assert_eq!(
+            g.area.interaction.prompt(&aim, &g.area.items),
+            "F: install part",
+            "{tag}"
+        );
+        g.area.interaction.step(
+            FrameInput::default(),
+            aim,
+            &mut g.area.player,
+            &mut g.area.items,
+            &mut g.physics,
+            0.02,
+        );
+        let outcome = g.area.interaction.step(
+            FrameInput {
+                pressed: keys::GRAB,
+                held: keys::GRAB,
+                ..Default::default()
+            },
+            aim,
+            &mut g.area.player,
+            &mut g.area.items,
+            &mut g.physics,
+            0.02,
+        );
+        assert!(outcome.is_some(), "{tag}");
+        assert_eq!(g.area.interaction.held(), None, "{tag}");
+        assert_eq!(
+            g.area.items.get(item).unwrap().location,
+            ItemLocation::PartSlot(slot.id),
+            "{tag}"
+        );
+        assert_eq!(
+            g.physics.rapier().colliders[handle]
+                .collision_groups()
+                .memberships
+                .bits(),
+            r.colliders
+                .iter()
+                .find(|c| c.id == slot.colliders[0])
+                .unwrap()
+                .membership,
+            "{tag}"
+        );
     }
 }

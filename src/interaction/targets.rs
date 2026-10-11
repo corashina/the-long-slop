@@ -176,7 +176,12 @@ impl InteractionState {
                 aim.grab_block = Some(InteractionBlock::Unavailable);
             }
         }
-        aim.installation_block = self.wheel_installation_block(&aim);
+        if let Some(item) = self.held().filter(|item| self.parts.contains(*item)) {
+            (aim.installation_target, aim.installation_block) =
+                self.parts.scan(item, items, physics);
+        } else {
+            aim.installation_block = self.wheel_installation_block(&aim);
+        }
         if let Some(SlotTarget::Part(slot)) = aim.installation_target.and_then(|t| t.slot)
             && let Some(item) = self.held()
         {
@@ -282,18 +287,6 @@ impl InteractionState {
                         && self.parts.slot_target(binding.unwrap().collider).is_none()
                         && collider.user_data & SLOT_SENSOR_FLAG == 0
                 }),
-                QueryAction::Install
-                    if self
-                        .parts
-                        .slot_target(ColliderId((collider.user_data >> 64) as u32))
-                        .is_some() =>
-                {
-                    self.held().or_else(|| {
-                        self.parts
-                            .slot_target(ColliderId((collider.user_data >> 64) as u32))
-                            .and_then(|s| self.parts.slot_item(s))
-                    })
-                }
                 QueryAction::Install if collider.user_data & SLOT_SENSOR_FLAG != 0 => {
                     (collider.user_data as u32).checked_sub(1).map(ItemId)
                 }
@@ -409,7 +402,11 @@ impl InteractionState {
             if aim.filling_target.is_some() {
                 return "Hold LMB: fill · F: drop";
             }
-            return "F: drop / hold to throw · MMB: rotate · RMB: move · Tab: recenter";
+            return if self.carry.allows_held_rotation() {
+                "F: drop / hold to throw · MMB: rotate · RMB: move · Tab: recenter"
+            } else {
+                "F: drop / hold to throw · RMB: move · Tab: recenter"
+            };
         }
         if let Some(target) = aim.grab_target {
             if items

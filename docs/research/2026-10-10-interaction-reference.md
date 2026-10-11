@@ -95,3 +95,24 @@ Origin changes update world anchors while preserving local part state.
 Read [verification](../verification.md) for checks and browser limits.
 Read [interaction decisions](../interaction-decisions.md) for the full ledger rulings and rework costs.
 The initial gap table records the pre-change code. Its line numbers are historical.
+
+
+## General-part scan correction
+
+The continuous browser route found that the removed engine had no installation target.
+The source attach mask excludes its slot layer. Changing that mask would break source parity.
+Recovered `partscript.Scan` IL uses `Physics.OverlapSphere` around the held part transform.
+Source `mainscript` 64919 sets `scanLayer` to 513 and `defScanRadius` to 0.2 m.
+Each part multiplies that radius by `scanRadius`; zero means a multiplier of one.
+The source sorts candidate collider transforms by squared distance, then selects the first `CanCraft` slot.
+The port uses cached collider bindings and one pass to select the same nearest valid slot.
+HUD and F dispatch share the result. Invalid candidates retain the held part and show a reason.
+General-part scanning adds no aim or line-of-sight gate. Existing action rays retain solid occlusion.
+Held-part movement still uses source collision groups. Wheel slots retain their specialized aim query.
+All 27 slot colliders retain their source layers. Five use layer 0; the others use layer 9.
+Four layer 0 colliders belong to hubcap slots. The fifth belongs to the right front door slot.
+Craft and UnCraft do not change those layers.
+
+The installed-source regression removes ten parts and tests real target resolution followed by F dispatch.
+It covers the engine, radiator, four doors, two round headlights, and both side mirrors.
+Native staging makes this a regression test, not continuous browser acceptance.

@@ -424,6 +424,7 @@ fn part_validation_fixture() -> ReferenceManifest {
     use my_summer_slop::reference::*;
     let mut r = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
     r.parts.push(PartReference {
+        scan_radius: 0.,
         usable: None,
         item: r.items[0].id,
         node: r.items[0].node,
