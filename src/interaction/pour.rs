@@ -4,7 +4,7 @@ use super::*;
 
 impl InteractionState {
     pub(super) fn fill(
-        &self,
+        &mut self,
         target: Option<AimTarget>,
         items: &mut ItemStore,
         dt: f32,
@@ -15,7 +15,8 @@ impl InteractionState {
             .openings
             .iter()
             .find(|opening| opening.reference.cap == target.item && opening.valve > 0.0)?;
-        let (source_id, destination, flow) = if self.supplies.contains(&opening.reference.tank) {
+        let supply = self.supplies.contains(&opening.reference.tank);
+        let (source_id, destination, flow) = if supply {
             if !self.openings.iter().any(|destination| {
                 destination.reference.tank == held.item && destination.valve > 0.0
             }) {
@@ -61,6 +62,22 @@ impl InteractionState {
             }
             let liters = transfer(source, destination_state, amount);
             if liters > 0.0 {
+                // The source cap pours. A held source pours from its open cap.
+                let pouring = if supply {
+                    Some(opening.reference.id)
+                } else {
+                    self.openings
+                        .iter()
+                        .find(|o| o.reference.tank == held.item && o.valve > 0.0)
+                        .map(|o| o.reference.id)
+                };
+                if let Some(opening) = self
+                    .openings
+                    .iter_mut()
+                    .find(|opening| Some(opening.reference.id) == pouring)
+                {
+                    opening.pour = flow;
+                }
                 return Some(InteractionAction::Fill {
                     source: source_id,
                     destination,
@@ -71,8 +88,8 @@ impl InteractionState {
         None
     }
 
-    pub(super) fn spill(&self, items: &mut ItemStore, filling: Option<ItemId>, dt: f32) {
-        for opening in &self.openings {
+    pub(super) fn spill(&mut self, items: &mut ItemStore, filling: Option<ItemId>, dt: f32) {
+        for opening in &mut self.openings {
             if opening.valve <= 0.0
                 || opening.reference.spill_disabled
                 || opening.reference.tube_connected
@@ -97,10 +114,10 @@ impl InteractionState {
                 if !opening.reference.angle_disabled && angle <= threshold {
                     continue;
                 }
-                spill(
-                    fluid,
-                    factor * opening.valve * opening.reference.flow_liters_per_second * dt,
-                );
+                let rate = factor * opening.valve * opening.reference.flow_liters_per_second;
+                if spill(fluid, rate * dt) > 0.0 {
+                    opening.pour = rate;
+                }
             }
         }
     }

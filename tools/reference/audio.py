@@ -61,8 +61,8 @@ def export_audio(source,manifest,output):
             raise ValueError(f'Unsupported audio source: {key(reader)}')
         if item is None:item=item_for(node_for(reader))
         return {'source':source_id(reader),'clip':clips.add(reader,value['m_audioClip']) if clip else None,'volume':value['m_Volume'],
-            'min_distance':value['MinDistance'],'max_distance':value['MaxDistance'],'spatial':spatial,
-            'item':item,'offset':offset(item,reader)}
+            'min_distance':value['MinDistance'],'max_distance':value['MaxDistance'],'spatial':spatial,'looping':bool(value['Loop']),
+            'doppler':value['DopplerLevel'],'item':item,'offset':offset(item,reader)}
     main_reader=source.get('level1',64919);main=source.read(main_reader)
     player_reader=source.get('level1',80125);player=source.read(player_reader)
     car_root=manifest['nodes'][manifest['vehicle']['root']-1]
@@ -76,7 +76,7 @@ def export_audio(source,manifest,output):
     prefab=source.read(next(p for p in source.components(source.transform_for(source.resolve(main_reader,main['Audio'])))[1] if p.type.name=='AudioSource'))
     record={'clips':clips.records}
     record['one_shot']={'min_distance':prefab['MinDistance'],'max_distance':prefab['MaxDistance'],
-        'spatial':prefab['panLevelCustomCurve']['m_Curve'][0]['value'],'random_pitch':[0.85,1.15]}
+        'spatial':prefab['panLevelCustomCurve']['m_Curve'][0]['value'],'doppler':prefab['DopplerLevel'],'random_pitch':[0.85,1.15]}
     # fpscontroller.SetOutSideAudio and mainscript.SetVolume.
     record['buses']={'default_interior':player['defInteriorM'],'interior_lerp':player['interiorLerpM'],'car_multiplier':player['FCarSoundM']}
     engine_item=manifest['engine']['item'];car_item=manifest['vehicle']['item']
@@ -107,7 +107,11 @@ def export_audio(source,manifest,output):
         'slide_angle':car['slideAngle'],'max_slide_volume_speed':car['maxSlideVolumeSpeed'],
         'skid_road':{'clip':clips.add(main_reader,main['SSkidRoad']),'volume':main['SkidRoadVolume'],'pitch':[main['SkidRoadPitchMin'],main['SkidRoadPitchMax']]},
         'skid_dirt':{'clip':clips.add(main_reader,main['SSkidDirt']),'volume':main['SkidDirtVolume'],'pitch':[main['SkidDirtPitchMin'],main['SkidDirtPitchMax']]},
-        'speed_difference':[main['CarMinSpeedDif'],main['CarMaxSpeedDif']]}
+        'speed_difference':[main['CarMinSpeedDif'],main['CarMaxSpeedDif']],
+        # carscript.HornHit without blood on the car.
+        'horn':{'voice':voice(car_reader,car['SHornSound'],car_item),'pitch':[car['HornPitchMin'],car['HornPitchMax']],
+            'crash_multiplier':car['crashHornMultiplier'],'crash_speed':[main['crashSpeedMinHorn'],main['crashSpeedMaxHorn']],
+            'crash_chance':main['crashHornChance'],'crash_seconds':[0.3,1.0]}}
     steps=source.read(source.resolve(player_reader,player['stepScript']))
     surfaces=[]
     for collider in manifest['colliders']:
@@ -136,15 +140,24 @@ def export_audio(source,manifest,output):
     hinges=[]
     for hinge in manifest['hinges']:
         reader=source.get(hinge['source']['file'],hinge['source']['path_id']);value=source.read(reader)
+        squeak=None
+        if value['moveSound'] and value['SSource']['m_PathID']:
+            # usablescript.RotMoveSound: only the Y axis rolls the skip chance.
+            y_axis=value['minY']!=value['maxY']
+            squeak={'clip':clips.add(reader,value['SMove']),'voice':voice(reader,value['SSource'],hinge['item'],clip=False),
+                'skip_chance':(value['dontSqueakChanceOverride'] if value['useDontSqueakChanceOverride'] else 0.75) if y_axis else 0.}
         hinges.append({'item':hinge['item'],'min_open':clips.add(reader,value['startPosStart']),'min_close':clips.add(reader,value['startPosEnd']),
-            'max_open':clips.add(reader,value['endPosStart']),'max_close':clips.add(reader,value['endPosEnd']),'modifier':value['audioM'],'inverted':bool(value['invY'])})
+            'max_open':clips.add(reader,value['endPosStart']),'max_close':clips.add(reader,value['endPosEnd']),'modifier':value['audioM'],'inverted':bool(value['invY']),
+            'squeak':squeak})
     record['hinges']=hinges
     openings=[]
     for opening in manifest['openings']:
         reader=source.get(opening['source']['file'],opening['source']['path_id']);value=source.read(reader)
         openings.append({'opening':opening['id'],'item':opening['cap'],'open':clips.add(reader,value['openSound']),'open_volume':value['openVolume'],
-            'close':clips.add(reader,value['closeSound']),'close_volume':value['closeVolume']})
+            'close':clips.add(reader,value['closeSound']),'close_volume':value['closeVolume'],
+            'tap':clips.add(reader,value['tekerSound']),'pour':voice(reader,value['SSource'],opening['cap'])})
     record['openings']=openings
+    record['pour_speed']=[main['minPourSpeedSound'],main['maxPourSpeedSound']]
     items=[]
     for item in manifest['items']:
         node=manifest['nodes'][item['node']-1]

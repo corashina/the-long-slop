@@ -26,6 +26,9 @@ pub struct VoiceReference {
     pub max_distance: f32,
     /// Unity spatial blend: 0 is flat, 1 is positional.
     pub spatial: f32,
+    pub looping: bool,
+    /// Unity `dopplerLevel`.
+    pub doppler: f32,
     pub item: Option<ItemId>,
     pub offset: [f32; 3],
 }
@@ -37,6 +40,7 @@ pub struct OneShotReference {
     pub min_distance: f32,
     pub max_distance: f32,
     pub spatial: f32,
+    pub doppler: f32,
     pub random_pitch: [f32; 2],
 }
 
@@ -116,6 +120,21 @@ pub struct CarSoundReference {
     pub skid_road: SkidReference,
     pub skid_dirt: SkidReference,
     pub speed_difference: [f32; 2],
+    pub horn: HornSoundReference,
+}
+
+/// `carscript` horn. A hard crash sounds the horn for a random time.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HornSoundReference {
+    pub voice: VoiceReference,
+    /// Pitch at night and by day.
+    pub pitch: [f32; 2],
+    pub crash_multiplier: f32,
+    /// Speed change range in km/h per frame.
+    pub crash_speed: [f32; 2],
+    pub crash_chance: f32,
+    pub crash_seconds: [f32; 2],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -217,6 +236,17 @@ pub struct HingeSoundReference {
     pub max_close: Option<ClipId>,
     pub modifier: f32,
     pub inverted: bool,
+    pub squeak: Option<SqueakReference>,
+}
+
+/// `usablescript.RotMoveSound`. The clip plays once while the hinge moves.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SqueakReference {
+    pub clip: ClipId,
+    pub voice: VoiceReference,
+    /// Chance that a new movement does not start the clip.
+    pub skip_chance: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -228,6 +258,10 @@ pub struct OpeningSoundReference {
     pub open_volume: f32,
     pub close: Option<ClipId>,
     pub close_volume: f32,
+    /// `tankcapscript.tekerSound` while the valve turns.
+    pub tap: Option<ClipId>,
+    /// `tankcapscript.SSource` while fluid pours.
+    pub pour: VoiceReference,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -266,6 +300,8 @@ pub struct AudioReference {
     pub interiors: Vec<InteriorReference>,
     pub hinges: Vec<HingeSoundReference>,
     pub openings: Vec<OpeningSoundReference>,
+    /// `mainscript.minPourSpeedSound` and `maxPourSpeedSound` in liters per second.
+    pub pour_speed: [f32; 2],
     pub items: Vec<ItemSoundReference>,
     pub menu: MenuSoundReference,
 }
@@ -289,7 +325,13 @@ impl AudioReference {
         let voice = |v: &VoiceReference| {
             optional(&v.clip)
                 && v.item.as_ref().is_none_or(|item| items.contains(item))
-                && finite(&[v.volume, v.min_distance, v.max_distance, v.spatial])
+                && finite(&[
+                    v.volume,
+                    v.min_distance,
+                    v.max_distance,
+                    v.spatial,
+                    v.doppler,
+                ])
                 && finite(&v.offset)
                 && v.min_distance > 0.0
                 && v.max_distance >= v.min_distance
@@ -324,7 +366,10 @@ impl AudioReference {
                 && clip(&car.skid_road.clip)
                 && clip(&car.skid_dirt.clip)
                 && car.slide_angle < 90.0
-                && car.speed_difference[0] < car.speed_difference[1],
+                && car.speed_difference[0] < car.speed_difference[1]
+                && voice(&car.horn.voice)
+                && car.horn.voice.looping
+                && car.horn.crash_speed[0] <= car.horn.crash_speed[1],
             "audio.car",
         )?;
         require(
@@ -368,15 +413,22 @@ impl AudioReference {
                     && [h.min_open, h.min_close, h.max_open, h.max_close]
                         .iter()
                         .all(optional)
+                    && h.squeak
+                        .as_ref()
+                        .is_none_or(|q| clip(&q.clip) && voice(&q.voice))
             }) && self.openings.iter().all(|o| {
                 openings.contains(&o.opening)
                     && items.contains(&o.item)
                     && optional(&o.open)
                     && optional(&o.close)
-            }) && self
-                .items
-                .iter()
-                .all(|i| items.contains(&i.item) && clip(&i.clip)),
+                    && optional(&o.tap)
+                    && voice(&o.pour)
+                    && o.pour.looping
+            }) && self.pour_speed[0] < self.pour_speed[1]
+                && self
+                    .items
+                    .iter()
+                    .all(|i| items.contains(&i.item) && clip(&i.clip)),
             "audio.objects",
         )?;
         let menu = &self.menu;

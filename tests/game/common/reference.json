@@ -6708,6 +6708,7 @@
       "min_distance": 0.5,
       "max_distance": 200.0,
       "spatial": 1.0,
+      "doppler": 1.0,
       "random_pitch": [
         0.85,
         1.15
@@ -6729,6 +6730,8 @@
         "min_distance": 1.0,
         "max_distance": 500.0,
         "spatial": 1.0,
+        "looping": true,
+        "doppler": 1.0,
         "item": 4,
         "offset": [
           0.0,
@@ -6746,6 +6749,8 @@
         "min_distance": 1.0,
         "max_distance": 500.0,
         "spatial": 1.0,
+        "looping": true,
+        "doppler": 1.0,
         "item": 4,
         "offset": [
           0.0,
@@ -6842,6 +6847,8 @@
         "min_distance": 1.0,
         "max_distance": 500.0,
         "spatial": 1.0,
+        "looping": true,
+        "doppler": 1.0,
         "item": 1,
         "offset": [
           0.0,
@@ -6860,6 +6867,8 @@
         "min_distance": 1.0,
         "max_distance": 500.0,
         "spatial": 1.0,
+        "looping": true,
+        "doppler": 1.0,
         "item": 1,
         "offset": [
           0.0,
@@ -6878,6 +6887,8 @@
         "min_distance": 1.0,
         "max_distance": 500.0,
         "spatial": 1.0,
+        "looping": true,
+        "doppler": 1.0,
         "item": 1,
         "offset": [
           0.0,
@@ -6895,6 +6906,8 @@
         "min_distance": 1.0,
         "max_distance": 500.0,
         "spatial": 1.0,
+        "looping": true,
+        "doppler": 1.0,
         "item": 1,
         "offset": [
           0.0,
@@ -6914,6 +6927,8 @@
           "min_distance": 1.0,
           "max_distance": 500.0,
           "spatial": 1.0,
+          "looping": true,
+          "doppler": 1.0,
           "item": 1,
           "offset": [
             0.0,
@@ -6931,6 +6946,8 @@
           "min_distance": 1.0,
           "max_distance": 500.0,
           "spatial": 1.0,
+          "looping": true,
+          "doppler": 1.0,
           "item": 1,
           "offset": [
             0.0,
@@ -6948,6 +6965,8 @@
           "min_distance": 1.0,
           "max_distance": 500.0,
           "spatial": 1.0,
+          "looping": true,
+          "doppler": 1.0,
           "item": 1,
           "offset": [
             0.0,
@@ -6980,7 +6999,42 @@
       "speed_difference": [
         5.0,
         30.0
-      ]
+      ],
+      "horn": {
+        "voice": {
+          "source": {
+            "file": "level1",
+            "path_id": 8004
+          },
+          "clip": 0,
+          "volume": 1.0,
+          "min_distance": 1.0,
+          "max_distance": 50.0,
+          "spatial": 1.0,
+          "looping": true,
+          "doppler": 1.0,
+          "item": 1,
+          "offset": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "pitch": [
+          0.9,
+          1.0
+        ],
+        "crash_multiplier": 1.0,
+        "crash_speed": [
+          60.0,
+          75.0
+        ],
+        "crash_chance": 0.3,
+        "crash_seconds": [
+          0.3,
+          1.0
+        ]
+      }
     },
     "steps": {
       "surfaces": [
@@ -7035,6 +7089,8 @@
         "min_distance": 1.0,
         "max_distance": 500.0,
         "spatial": 0.0,
+        "looping": true,
+        "doppler": 1.0,
         "item": null,
         "offset": [
           0.0,
@@ -7058,6 +7114,8 @@
           "min_distance": 1.0,
           "max_distance": 500.0,
           "spatial": 0.0,
+          "looping": true,
+          "doppler": 1.0,
           "item": null,
           "offset": [
             0.0,
@@ -7075,6 +7133,8 @@
           "min_distance": 1.0,
           "max_distance": 500.0,
           "spatial": 0.0,
+          "looping": true,
+          "doppler": 1.0,
           "item": null,
           "offset": [
             0.0,
@@ -7092,6 +7152,8 @@
           "min_distance": 1.0,
           "max_distance": 500.0,
           "spatial": 0.0,
+          "looping": true,
+          "doppler": 1.0,
           "item": null,
           "offset": [
             0.0,
@@ -7111,6 +7173,8 @@
           "min_distance": 1.0,
           "max_distance": 500.0,
           "spatial": 0.0,
+          "looping": true,
+          "doppler": 1.0,
           "item": null,
           "offset": [
             0.0,
@@ -7128,6 +7192,8 @@
           "min_distance": 1.0,
           "max_distance": 500.0,
           "spatial": 0.0,
+          "looping": true,
+          "doppler": 1.0,
           "item": null,
           "offset": [
             0.0,
@@ -7145,6 +7211,8 @@
           "min_distance": 1.0,
           "max_distance": 500.0,
           "spatial": 0.0,
+          "looping": true,
+          "doppler": 1.0,
           "item": null,
           "offset": [
             0.0,
@@ -7188,8 +7256,32 @@
         "open": 0,
         "open_volume": 0.5,
         "close": 1,
-        "close_volume": 0.5
+        "close_volume": 0.5,
+        "tap": 2,
+        "pour": {
+          "source": {
+            "file": "level1",
+            "path_id": 8005
+          },
+          "clip": 1,
+          "volume": 1.0,
+          "min_distance": 1.0,
+          "max_distance": 50.0,
+          "spatial": 1.0,
+          "looping": true,
+          "doppler": 1.0,
+          "item": 19,
+          "offset": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
       }
+    ],
+    "pour_speed": [
+      0.01,
+      0.1
     ],
     "items": [],
     "menu": {

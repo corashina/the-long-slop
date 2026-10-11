@@ -80,6 +80,8 @@ struct OpeningState {
     local_pose: Pose,
     tilt_axis: Vector,
     valve: f32,
+    /// Liters per second that leave this opening in the last step.
+    pour: f32,
 }
 struct OpeningRules {
     id: OpeningId,
@@ -223,6 +225,7 @@ impl InteractionState {
                 local_pose,
                 tilt_axis: Vector::from_array(opening.tilt_axis),
                 valve: opening.valve,
+                pour: 0.0,
             });
         }
         let mut seats = Vec::with_capacity(reference.seats.len());
@@ -388,6 +391,7 @@ impl InteractionState {
             local_pose: Pose::IDENTITY,
             tilt_axis: Vector::Y,
             valve: 1.0,
+            pour: 0.0,
         });
         Ok(())
     }
@@ -399,6 +403,13 @@ impl InteractionState {
             .iter()
             .find(|opening| opening.reference.id == id)
             .map_or(0.0, |opening| opening.valve)
+    }
+    /// `tankcapscript.speed` while fluid pours from the opening.
+    pub fn opening_pour(&self, id: OpeningId) -> f32 {
+        self.openings
+            .iter()
+            .find(|opening| opening.reference.id == id)
+            .map_or(0.0, |opening| opening.pour)
     }
     pub fn tuning_opening(&self) -> Option<OpeningId> {
         self.tuning_opening
@@ -676,6 +687,9 @@ impl InteractionState {
         }
         self.place_hinges(physics, false);
         items.sync_poses(physics);
+        for opening in &mut self.openings {
+            opening.pour = 0.0;
+        }
         if input.held & keys::FILL != 0
             && available.actions.0 & ActionMask::FILL != 0
             && let Some(fill) = self.fill(target, items, dt)

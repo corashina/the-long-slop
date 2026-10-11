@@ -65,7 +65,7 @@ The exporter keeps one LOD and does not reproduce Unity shader effects or live m
 Browser text uses Liberation Sans and Arial, not Unity's SDF renderer.
 The prompts do not show part condition or the headlight key.
 Not ported: distant terrain, the `TerrainBiome` blend shader, building holes, power lines, grass,
-street lamps, the interior light, rear lamps, stars, clouds, and the radio, horn, door squeak, pour sound, and Doppler shift.
+street lamps, the interior light, rear lamps, stars, clouds, the car radio, and the sandstorm sound.
 
 ## Performance
 

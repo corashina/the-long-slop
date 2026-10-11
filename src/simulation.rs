@@ -23,6 +23,7 @@ pub mod keys {
     pub const ROTATE: u32 = 4096;
     pub const MOVE: u32 = 8192;
     pub const LIGHTS: u32 = 16384;
+    pub const HORN: u32 = 32768;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
