@@ -25,7 +25,7 @@ Retain the shipped representation and document these distinctions.
 
 ## Evidence and baseline
 
-Use the [asset audit](../../research/2026-10-10-full-asset-audit.md) as the baseline.
+Use the [asset audit](../research/2026-10-10-full-asset-audit.md) as the baseline.
 Its nine serialized files contain 262,784 objects.
 Its payload checks establish decoding feasibility, not completed file export or browser parity.
 

@@ -70,7 +70,7 @@ Close the driver door before reversing through the garage exit.
 
 ## Scope and evidence
 
-Read [the approved scope](docs/superpowers/specs/2026-10-09-garage-start-design.md) and [verification](docs/verification.md).
+Read [the approved scope](docs/specs/2026-10-09-garage-start-design.md) and [verification](docs/verification.md).
 Imported layout and recovered rules do not establish identical Unity physics or full-game parity.
 Unity shader effects and live mirror reflections are not reproduced.
 Sound has no radio, horn, door squeak, pour sound, or Doppler shift.

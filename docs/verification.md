@@ -8,7 +8,7 @@ The garage section retains earlier physics and scene evidence.
 Reference: installed Steam build 11140890. Vehicle: fixed Lada 2101.
 Verification date: 2026-10-10, Europe/Warsaw.
 Verified implementation commit: `a8dd272`.
-The approved design is in `docs/superpowers/specs/2026-10-09-garage-start-design.md`.
+The approved design is in `docs/specs/2026-10-09-garage-start-design.md`.
 
 ## Reference recovery
 
@@ -107,7 +107,7 @@ See `docs/research/2026-10-09-garage-reference.md` for the recovery record.
 
 ## Source UI verification
 
-Scope: approved current features in docs/superpowers/specs/2026-10-10-source-ui-design.md.
+Scope: approved current features in docs/specs/2026-10-10-source-ui-design.md.
 Source: installed Steam build 11140890.
 Worktree: source-ui. Base: 743ef8b.
 Date: 2026-10-10, Europe/Warsaw.
