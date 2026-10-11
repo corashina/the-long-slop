@@ -19,6 +19,13 @@ def convert_triangles(values):
     return [(a, c, b) for a, b, c in values]
 
 
+def convert_bind_poses(matrices):
+    """Reflect Unity inverse bind matrices and store glTF column order."""
+    signs = (1, 1, -1, 1)
+    return [tuple(matrix[f'e{row}{column}'] * signs[row] * signs[column]
+                  for column in range(4) for row in range(4)) for matrix in matrices]
+
+
 def transform_point(point, translation, rotation, scale):
     x, y, z = [point[i] * scale[i] for i in range(3)]
     qx, qy, qz, qw = rotation
@@ -236,7 +243,7 @@ class GltfExporter:
             if renderer and (mesh_filter or renderer.type.name == 'SkinnedMeshRenderer'):
                 renderer_data = self.source.read(renderer)
                 render_enabled=bool(renderer_data['m_Enabled']) and key(renderer) not in hidden_lods
-                text_component=next((r for r in record['components'] if r.type.name=='MonoBehaviour' and self.source.class_name(r) in {'TextMeshPro','TMP_SubMesh'}),None)
+                text_component=next((r for r in record['components'] if r.type.name=='MonoBehaviour' and self.source.read(r)['m_Script']['m_PathID'] and self.source.class_name(r) in {'TextMeshPro','TMP_SubMesh'}),None)
                 if text_component:
                     render_enabled=False
                     self.material_report.append({'source':source_id(renderer),
@@ -263,10 +270,7 @@ class GltfExporter:
                             matrices = self.source.read(mesh_reader)['m_BindPose']
                             if len(matrices) != len(bones):
                                 raise ValueError(f'Skin bind pose count: {key(reader)}')
-                            converted = []
-                            signs = [1,1,-1,1]
-                            for matrix in matrices:
-                                converted.append(tuple(matrix[f'e{row}{column}']*signs[row]*signs[column] for column in range(4) for row in range(4)))
+                            converted = convert_bind_poses(matrices)
                             node.skin = len(self.document.skins)
                             root_bone = self.source.resolve(renderer,renderer_data['m_RootBone'])
                             self.document.skins.append(gl.Skin(joints=[mapping[key(bone)] for bone in bones],
@@ -298,21 +302,151 @@ class GltfExporter:
 
 
 def validate_gltf(path):
+    """Check generated glTF references, byte ranges, geometry, and rigs."""
+    import json
+    from urllib.parse import unquote
     import pygltflib as gl
     from pygltflib.validator import validate
     document = gl.GLTF2().load_json(str(path))
     validate(document)
+    raw_document = json.loads(path.read_text())
+    def index(value, collection, label):
+        if not isinstance(value, int) or not 0 <= value < len(collection):
+            raise ValueError(f'Invalid {label} index: {value}')
+        return collection[value]
+    buffers = []
     for buffer in document.buffers:
-        if (path.parent / buffer.uri).stat().st_size != buffer.byteLength:
+        content = (path.parent / unquote(buffer.uri)).read_bytes()
+        if buffer.byteLength <= 0 or len(content) != buffer.byteLength:
             raise ValueError(f'Buffer size mismatch: {buffer.uri}')
+        buffers.append(content)
+    for view in document.bufferViews:
+        content = index(view.buffer, buffers, 'buffer')
+        if view.byteLength < 0 or (view.byteOffset or 0) < 0 or (view.byteOffset or 0) + view.byteLength > len(content):
+            raise ValueError('Buffer view range exceeds buffer')
+    shapes = {'SCALAR':1, 'VEC2':2, 'VEC3':3, 'VEC4':4, 'MAT2':4, 'MAT3':9, 'MAT4':16}
+    components = {5120:('b',1),5121:('B',1),5122:('h',2),5123:('H',2),5125:('I',4),5126:('f',4)}
+    for accessor in document.accessors:
+        view = index(accessor.bufferView, document.bufferViews, 'accessor buffer view')
+        if accessor.sparse: raise ValueError('Generated accessors must be dense')
+        if accessor.type not in shapes or accessor.componentType not in components:
+            raise ValueError('Invalid accessor format')
+        width = shapes[accessor.type]
+        size = components[accessor.componentType][1]
+        stride = view.byteStride or width * size
+        offset = accessor.byteOffset or 0
+        if accessor.count <= 0 or offset < 0 or offset % size or ((view.byteOffset or 0) + offset) % size:
+            raise ValueError('Invalid accessor count or alignment')
+        if stride < width * size or stride % size:
+            raise ValueError('Invalid accessor stride')
+        if offset + (accessor.count-1)*stride + width*size > view.byteLength:
+            raise ValueError('Accessor range exceeds buffer view')
+        if (accessor.min and len(accessor.min) != width) or (accessor.max and len(accessor.max) != width):
+            raise ValueError('Invalid accessor bounds width')
+    def rows(accessor_index):
+        accessor = index(accessor_index,document.accessors,'accessor')
+        view = document.bufferViews[accessor.bufferView]
+        code,size = components[accessor.componentType]
+        width = shapes[accessor.type]
+        stride = view.byteStride or width*size
+        content = buffers[view.buffer]
+        start = (view.byteOffset or 0)+(accessor.byteOffset or 0)
+        for row in range(accessor.count):
+            values = struct.unpack_from('<'+str(width)+code,content,start+row*stride)
+            if any(not math.isfinite(value) for value in values): raise ValueError('Non-finite accessor value')
+            yield values
+    # Check float payloads, including mesh attributes and inverse bind matrices.
+    for i,accessor in enumerate(document.accessors):
+        if accessor.componentType == 5126:
+            for row in rows(i): pass
     for image in document.images:
-        if not (path.parent / image.uri).is_file():
+        if image.uri is not None and not (path.parent / unquote(image.uri)).is_file():
             raise ValueError(f'Missing texture: {image.uri}')
-    for node in document.nodes:
-        if node.mesh is not None and not 0 <= node.mesh < len(document.meshes):
-            raise ValueError('Invalid node mesh index')
-        if any(not 0 <= child < len(document.nodes) for child in node.children):
-            raise ValueError('Invalid child index')
+        if image.bufferView is not None: index(image.bufferView,document.bufferViews,'image buffer view')
+    for texture in document.textures:
+        index(texture.source,document.images,'texture image')
+        if texture.sampler is not None: index(texture.sampler,document.samplers,'texture sampler')
+    for material in document.materials:
+        if material.pbrMetallicRoughness:
+            pbr = material.pbrMetallicRoughness
+            if len(pbr.baseColorFactor) != 4 or any(not math.isfinite(v) or not 0 <= v <= 1 for v in (*pbr.baseColorFactor,pbr.metallicFactor,pbr.roughnessFactor)):
+                raise ValueError('Invalid PBR material factor')
+        if len(material.emissiveFactor) != 3 or any(not math.isfinite(v) or not 0 <= v <= 1 for v in material.emissiveFactor): raise ValueError('Invalid emissive factor')
+        infos = [material.normalTexture,material.occlusionTexture,material.emissiveTexture]
+        if material.pbrMetallicRoughness:
+            infos.extend((material.pbrMetallicRoughness.baseColorTexture,material.pbrMetallicRoughness.metallicRoughnessTexture))
+        for info in infos:
+            if info is not None: index(info.index,document.textures,'material texture')
+    for mesh in document.meshes:
+        if not mesh.primitives: raise ValueError('Mesh has no primitives')
+        target_counts = set()
+        for primitive in mesh.primitives:
+            attributes = {name:value for name,value in vars(primitive.attributes).items() if isinstance(value,int)}
+            position = index(attributes.get('POSITION'),document.accessors,'position accessor')
+            if position.type != 'VEC3' or position.componentType != 5126: raise ValueError('Invalid position accessor')
+            for name,value in attributes.items():
+                attribute = index(value,document.accessors,'attribute accessor')
+                if attribute.count != position.count: raise ValueError('Attribute count mismatch')
+                expected = 'VEC2' if name.startswith('TEXCOORD_') else {'NORMAL':'VEC3','TANGENT':'VEC4','JOINTS_0':'VEC4','WEIGHTS_0':'VEC4'}.get(name)
+                if expected and attribute.type != expected: raise ValueError(f'Invalid {name} shape')
+                if name.startswith('JOINTS_') and attribute.componentType not in (5121,5123): raise ValueError('Invalid joint component type')
+            count = position.count
+            if primitive.indices is not None:
+                indices = index(primitive.indices,document.accessors,'primitive indices')
+                if indices.type != 'SCALAR' or indices.componentType not in (5121,5123,5125): raise ValueError('Invalid index accessor')
+                count = indices.count
+                if any(row[0] >= position.count for row in rows(primitive.indices)): raise ValueError('Primitive vertex index exceeds vertex count')
+            mode = primitive.mode if primitive.mode is not None else 4
+            if mode not in range(7) or (mode == 1 and count % 2) or (mode == 4 and count % 3): raise ValueError('Invalid primitive topology')
+            if (mode in (2,3) and count < 2) or (mode in (5,6) and count < 3): raise ValueError('Insufficient primitive vertices')
+            if primitive.material is not None: index(primitive.material,document.materials,'primitive material')
+            target_counts.add(len(primitive.targets or []))
+            for target in primitive.targets or []:
+                for semantic,value in target.items():
+                    accessor = index(value,document.accessors,'morph accessor')
+                    if semantic not in ('POSITION','NORMAL','TANGENT') or accessor.type != 'VEC3' or accessor.componentType != 5126 or accessor.count != position.count:
+                        raise ValueError('Invalid morph target')
+        if len(target_counts) > 1: raise ValueError('Morph count differs between primitives')
+        if mesh.weights and target_counts and len(mesh.weights) != next(iter(target_counts)): raise ValueError('Mesh morph weight count mismatch')
+    parents = {}
+    for i,node in enumerate(document.nodes):
+        if node.mesh is not None: index(node.mesh,document.meshes,'node mesh')
+        for child in node.children:
+            index(child,document.nodes,'child node')
+            if child in parents: raise ValueError('Node has multiple parents')
+            parents[child] = i
+        weights = raw_document['nodes'][i].get('weights',[])
+        node.weights = weights
+        if weights:
+            mesh = index(node.mesh,document.meshes,'morph node mesh')
+            if len(weights) != len(mesh.weights) or any(not math.isfinite(v) for v in weights): raise ValueError('Node morph weight count mismatch')
+        if node.skin is not None:
+            skin = index(node.skin,document.skins,'node skin')
+            if node.mesh is None: raise ValueError('Skinned node has no mesh')
+            for primitive in document.meshes[node.mesh].primitives:
+                joints = primitive.attributes.JOINTS_0
+                weights_attribute = primitive.attributes.WEIGHTS_0
+                if joints is None or weights_attribute is None: raise ValueError('Skinned primitive lacks joints or weights')
+                if any(j >= len(skin.joints) for row in rows(joints) for j in row): raise ValueError('Skin joint attribute exceeds joint count')
+    for i in range(len(document.nodes)):
+        seen = set()
+        parent = i
+        while parent in parents:
+            if parent in seen: raise ValueError('Node hierarchy cycle')
+            seen.add(parent)
+            parent = parents[parent]
+    for skin in document.skins:
+        if not skin.joints: raise ValueError('Skin has no authored joints')
+        for joint in skin.joints: index(joint,document.nodes,'skin joint')
+        if skin.skeleton is not None: index(skin.skeleton,document.nodes,'skin skeleton')
+        if skin.inverseBindMatrices is not None:
+            accessor = index(skin.inverseBindMatrices,document.accessors,'inverse bind accessor')
+            if accessor.type != 'MAT4' or accessor.componentType != 5126 or accessor.count != len(skin.joints): raise ValueError('Skin bind pose count mismatch')
+    for scene in document.scenes:
+        for root in scene.nodes:
+            index(root,document.nodes,'scene root')
+            if root in parents: raise ValueError('Scene root has a parent')
+    if document.scene is not None: index(document.scene,document.scenes,'default scene')
     return document
 
 
