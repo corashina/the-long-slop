@@ -753,6 +753,7 @@ pub struct VehicleReference {
     pub gear_ratios: Vec<f32>,
     pub final_drive_ratio: f32,
     pub max_steer_degrees: f32,
+    pub keyboard_steering_rate: f32,
     pub brake_torque_nm: f32,
     pub handbrake_torque_nm: f32,
     pub wheel_slip: [f32; 4],
@@ -1881,12 +1882,14 @@ impl ReferenceManifest {
                 v.serialized_mass_kg,
                 v.final_drive_ratio,
                 v.max_steer_degrees,
+                v.keyboard_steering_rate,
                 v.brake_torque_nm,
                 v.handbrake_torque_nm,
             ]) && finite(&v.gear_ratios)
                 && v.gear_ratios.iter().any(|ratio| *ratio == 0.0)
                 && v.gear_free_run.len() == v.gear_ratios.len()
-                && v.mass_kg > 0.0,
+                && v.mass_kg > 0.0
+                && v.keyboard_steering_rate > 0.0,
             "vehicle parameters",
         )?;
         let a = &self.area;

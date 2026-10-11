@@ -453,3 +453,34 @@ Verified browser package SHA-256:
 - Manifest: `826fc55277c235a062acacfd0a47cebe3dff3a297577cb0acd32c644ff6ac0c0`.
 
 The managed interaction worktree and its local evidence remain available.
+
+## Keyboard steering verification
+
+Date: 2026-10-11, Europe/Warsaw. Scope: source keyboard steering for the selected Lada.
+The [REA audit](research/2026-10-11-rea-driving-audit.md) records the recovered default and separate remaining driving gaps.
+
+The critical steering regression failed on instant full lock before implementation.
+It passed after adding the fixed-step steering state.
+Checks cover rise, release, reversal, seat changes, capture clearing, pause, recovery, and restart.
+The clock test gives equal steering at 30, 60, and 144 render frames per second.
+These are native clock checks, not browser frame-rate measurements.
+
+Fresh checks passed: 162 native tests, 32 installed-source checks, 20 browser unit tests, and 19 exporter tests.
+The 32 installed-source checks include the existing 31 gates and one added steering gate.
+That gate enters the source driver seat, verifies the first steering step, reaches full lock, and returns to center.
+Formatting, the release WASM build, and browser package generation passed.
+The regenerated export contains `vehicle.keyboard_steering_rate = 1.25` and records the slider source.
+
+Isolated Linux Chromium 151.0.7922.34 passed startup, pointer lock, simulation progress, and pause at 960 by 540.
+Start enabled in 6892 ms. No page errors or gameplay asset HTTP errors occurred.
+The console recorded the excluded favicon 404.
+The container had no network or host display. Cleanup closed its owned browser and internal server.
+This smoke check does not establish a continuous browser driving route or identical Unity handling.
+
+Evidence is in ignored `.cache/rea-audit/`: `steering-red.log`, `steering-green.log`, `steering-checks.log`,
+`steering-installed.log`, `steering-python.log`, `steering-web.log`, `steering-export.log`, and `browser/smoke.json`.
+
+Verified package SHA-256:
+
+- WASM: `0aa817ef29683d1c0c9ce3e54f34a841629825445dc9f8c454b2ded5034440ea`.
+- Manifest: `0bd31e0f609768345f8a336a7bea2b305424264eec8684d95c66096cc5f8f33a`.

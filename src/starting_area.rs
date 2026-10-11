@@ -478,6 +478,7 @@ pub struct GarageRuntime {
     pub aim: ResolvedAim,
     pub wheels: crate::interaction::wheels::WheelAssemblies,
     ignition_held: bool,
+    steering: crate::simulation::input::KeyboardSteering,
     auto_gear: usize,
     recovery_bounds: crate::reference::Bounds,
     recovery_bodies: Vec<RigidBodyHandle>,
@@ -540,6 +541,9 @@ impl GarageRuntime {
             aim: ResolvedAim::default(),
             wheels,
             ignition_held: false,
+            steering: crate::simulation::input::KeyboardSteering::new(
+                reference.vehicle.keyboard_steering_rate,
+            ),
             auto_gear: reference
                 .vehicle
                 .gear_ratios
@@ -553,7 +557,7 @@ impl GarageRuntime {
 
     pub fn step(&mut self, reference: &ReferenceManifest, input: FrameInput) {
         if !self.started || self.paused {
-            self.area.interaction.cancel_input();
+            self.clear_input();
             return;
         }
         self.area
@@ -744,6 +748,14 @@ impl GarageRuntime {
             .sync_parts(&mut self.area.items, &mut self.physics)
             .expect("bound parts");
         let driving = self.area.player.driving();
+        let steering = self.steering.step(
+            if driving {
+                self.area.player.seat()
+            } else {
+                None
+            },
+            input.held,
+        );
         if driving && input.pressed & keys::SPACE != 0 {
             self.handbrake = !self.handbrake;
         }
@@ -866,10 +878,7 @@ impl GarageRuntime {
         let drive = DriveInput {
             accelerate: driving && input.held & keys::FORWARD != 0,
             brake_reverse: driving && input.held & keys::BACK != 0,
-            steer: self.area.interaction.push_steering().unwrap_or(
-                ((driving && input.held & keys::LEFT != 0) as u8 as f32)
-                    - ((driving && input.held & keys::RIGHT != 0) as u8 as f32),
-            ),
+            steer: self.area.interaction.push_steering().unwrap_or(steering),
             handbrake: self.handbrake,
         };
         let drive_count = self.physics.driven_wheel_count();
@@ -929,6 +938,11 @@ impl GarageRuntime {
         );
     }
 
+    pub fn clear_input(&mut self) {
+        self.steering.clear();
+        self.area.interaction.cancel_input();
+    }
+
     pub fn restart(&mut self, reference: &ReferenceManifest) -> Result<(), ReferenceError> {
         self.area
             .interaction
@@ -939,7 +953,7 @@ impl GarageRuntime {
     }
 
     pub fn recover(&mut self, reference: &ReferenceManifest) {
-        self.area.interaction.cancel_input();
+        self.clear_input();
         self.area
             .interaction
             .finish_cancelled_input(&mut self.area.player, &mut self.physics);

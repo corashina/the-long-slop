@@ -48,6 +48,131 @@ fn fluids(runtime: &GarageRuntime) -> Vec<(u32, [f32; 6])> {
         })
         .collect()
 }
+
+fn seated_steering() -> (my_summer_slop::reference::ReferenceManifest, GarageRuntime) {
+    let reference = common::reference();
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    let seat = reference.seats.iter().find(|seat| seat.driver).unwrap();
+    assert!(runtime.area.player.enter(
+        seat.id,
+        my_summer_slop::vehicle::VehiclePose {
+            position: [0.0, 1.0, 0.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+        },
+        &mut runtime.physics,
+    ));
+    runtime.started = true;
+    (reference, runtime)
+}
+
+fn steering_fraction(
+    reference: &my_summer_slop::reference::ReferenceManifest,
+    runtime: &GarageRuntime,
+) -> f32 {
+    use rapier3d::math::{Rotation, Vector};
+    let snapshot = runtime.physics.snapshot();
+    let slot = reference
+        .vehicle
+        .wheel_slots
+        .iter()
+        .position(|id| {
+            reference
+                .wheel_slots
+                .iter()
+                .any(|wheel| wheel.id == *id && wheel.steer)
+        })
+        .unwrap();
+    let relative = Rotation::from_array(snapshot.pose.rotation).inverse()
+        * Rotation::from_array(snapshot.wheels[slot].rotation);
+    let axle = relative * Vector::X;
+    (-axle.z).atan2(axle.x) / reference.vehicle.max_steer_degrees.to_radians()
+}
+
+#[test]
+fn keyboard_steering_rises_returns_and_reverses_at_source_rate() {
+    let (reference, mut runtime) = seated_steering();
+    let left = FrameInput {
+        held: keys::LEFT,
+        ..Default::default()
+    };
+    runtime.step(&reference, left);
+    assert!((steering_fraction(&reference, &runtime) - 1.25 / 60.0).abs() < 0.00001);
+    for _ in 1..24 {
+        runtime.step(&reference, left);
+    }
+    assert!((steering_fraction(&reference, &runtime) - 0.5).abs() < 0.00001);
+    runtime.step(&reference, FrameInput::default());
+    assert!((steering_fraction(&reference, &runtime) - (0.5 - 1.25 / 60.0)).abs() < 0.00001);
+    let right = FrameInput {
+        held: keys::RIGHT,
+        ..Default::default()
+    };
+    for _ in 0..71 {
+        runtime.step(&reference, right);
+    }
+    assert!((steering_fraction(&reference, &runtime) + 1.0).abs() < 0.00001);
+}
+
+#[test]
+fn keyboard_steering_resets_on_pause_recovery_and_restart() {
+    let (reference, mut runtime) = seated_steering();
+    let left = FrameInput {
+        held: keys::LEFT,
+        ..Default::default()
+    };
+    for _ in 0..24 {
+        runtime.step(&reference, left);
+    }
+    runtime.paused = true;
+    runtime.step(&reference, left);
+    runtime.paused = false;
+    runtime.step(&reference, FrameInput::default());
+    assert!(steering_fraction(&reference, &runtime).abs() < 0.00001);
+    for _ in 0..24 {
+        runtime.step(&reference, left);
+    }
+    runtime.clear_input();
+    runtime.step(&reference, FrameInput::default());
+    assert!(steering_fraction(&reference, &runtime).abs() < 0.00001);
+    for _ in 0..24 {
+        runtime.step(&reference, left);
+    }
+    runtime.recover(&reference);
+    runtime.step(&reference, FrameInput::default());
+    assert!(steering_fraction(&reference, &runtime).abs() < 0.00001);
+    for _ in 0..24 {
+        runtime.step(&reference, left);
+    }
+    runtime.restart(&reference).unwrap();
+    runtime.step(&reference, FrameInput::default());
+    assert!(steering_fraction(&reference, &runtime).abs() < 0.00001);
+}
+
+#[test]
+#[ignore = "Requires exported Steam assets"]
+fn production_keyboard_steering_uses_recovered_default() {
+    let reference = my_summer_slop::reference::ReferenceManifest::from_json(
+        &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+    )
+    .unwrap();
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    enter_source_driver(&mut runtime, &reference);
+    let left = FrameInput {
+        held: keys::LEFT,
+        ..Default::default()
+    };
+    runtime.step(&reference, left);
+    assert!((steering_fraction(&reference, &runtime) - 1.25 / 60.0).abs() < 0.00001);
+    for _ in 1..48 {
+        runtime.step(&reference, left);
+    }
+    assert!((steering_fraction(&reference, &runtime) - 1.0).abs() < 0.00001);
+    for _ in 0..48 {
+        runtime.step(&reference, FrameInput::default());
+    }
+    assert!(steering_fraction(&reference, &runtime).abs() < 0.00001);
+}
+
 #[test]
 fn pause_freezes_complete_state() {
     let (reference, mut runtime) = initial();

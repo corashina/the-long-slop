@@ -105,3 +105,42 @@ fn lifecycle_boundary_discards_the_sampled_frame() {
     assert!(boundary < merge);
     assert!(app[boundary..merge].contains("return;"));
 }
+
+#[test]
+fn steering_clears_between_seats_and_capture_sessions() {
+    use my_summer_slop::reference::SeatId;
+    use my_summer_slop::simulation::input::KeyboardSteering;
+    let mut steering = KeyboardSteering::new(1.25);
+    for _ in 0..24 {
+        steering.step(Some(SeatId(1)), keys::LEFT);
+    }
+    assert!((steering.step(Some(SeatId(2)), keys::RIGHT) + 1.25 / 60.0).abs() < 0.00001);
+    assert_eq!(steering.step(None, keys::LEFT), 0.0);
+    assert_eq!(steering.step(Some(SeatId(1)), 0), 0.0);
+    for _ in 0..24 {
+        steering.step(Some(SeatId(1)), keys::LEFT);
+    }
+    steering.clear();
+    assert_eq!(steering.step(Some(SeatId(1)), 0), 0.0);
+}
+
+#[test]
+fn steering_is_equal_at_different_render_rates() {
+    use my_summer_slop::reference::SeatId;
+    use my_summer_slop::simulation::StepClock;
+    use my_summer_slop::simulation::input::KeyboardSteering;
+    for fps in [30, 60, 144] {
+        let mut clock = StepClock::default();
+        let mut steering = KeyboardSteering::new(1.25);
+        let mut value = 0.0;
+        let mut steps = 0;
+        for _ in 0..fps / 2 {
+            for _ in 0..clock.advance(1.0 / fps as f64) {
+                value = steering.step(Some(SeatId(1)), keys::LEFT);
+                steps += 1;
+            }
+        }
+        assert_eq!(steps, 30);
+        assert!((value - 0.625).abs() < 0.00001);
+    }
+}
