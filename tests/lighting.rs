@@ -513,7 +513,6 @@ fn headlights_do_not_need_ignition_and_rear_lights_do() {
                 output.material_index,
                 rear.states
                     .iter()
-                    .rev()
                     .find(|last| last.renderers.contains(renderer))
                     .unwrap()
                     .off_material
@@ -576,5 +575,71 @@ fn source_low_and_high_keep_separate_nodes_and_ranges() {
         assert!(low.cookie.is_some() && high.cookie.is_some());
         assert_ne!(low.shadows.kind, 0);
         assert_ne!(high.shadows.kind, 0);
+    }
+}
+
+#[test]
+fn rear_shared_material_follows_each_source_ignition_branch() {
+    use my_summer_slop::reference::LampSignal;
+    let r = lamps();
+    let rear = r
+        .controllers
+        .iter()
+        .find(|c| c.kind == LightControllerKind::Rear)
+        .unwrap();
+    let tail = rear
+        .states
+        .iter()
+        .find(|s| s.signal == LampSignal::Tail)
+        .unwrap();
+    let reverse = rear
+        .states
+        .iter()
+        .find(|s| s.signal == LampSignal::Reverse)
+        .unwrap();
+    let renderer = *tail
+        .renderers
+        .iter()
+        .find(|id| reverse.renderers.contains(id))
+        .unwrap();
+    let tail_off = tail.off_material.as_ref().unwrap();
+    let reverse_off = reverse.off_material.as_ref().unwrap();
+    assert_eq!(tail_off.source.path_id, 121);
+    assert_eq!(reverse_off.source.path_id, 120);
+    assert_ne!(tail_off.gltf_material, reverse_off.gltf_material);
+    let material = |state: &LightingState| {
+        let out = state
+            .material_outputs()
+            .iter()
+            .find(|o| o.renderer == renderer)
+            .unwrap();
+        (out.asset, out.material_index)
+    };
+    let mut state = LightingState::new(&r);
+    assert_eq!(material(&state), (tail_off.asset, tail_off.gltf_material));
+    let mut sample = VehicleLightSample {
+        local_ignition: true,
+        brake: 1.,
+        gear_ratio: -1.,
+        electronics_output: 1.,
+    };
+    state.update_vehicle(&r, sample);
+    let reverse_on = reverse.on_material.as_ref().unwrap();
+    assert_eq!(
+        material(&state),
+        (reverse_on.asset, reverse_on.gltf_material)
+    );
+    sample.local_ignition = false;
+    state.update_vehicle(&r, sample);
+    assert_eq!(material(&state), (tail_off.asset, tail_off.gltf_material));
+    for id in 9..=12 {
+        assert!(
+            !state
+                .light_outputs()
+                .iter()
+                .find(|l| l.id.0 == id)
+                .unwrap()
+                .enabled
+        );
     }
 }

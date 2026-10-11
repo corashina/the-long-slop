@@ -715,7 +715,12 @@ impl LightingState {
             if control.kind != crate::reference::LightControllerKind::Rear {
                 continue;
             }
-            for lamp in &control.states {
+            let mut lamps = control.states.iter();
+            while let Some(lamp) = if sample.local_ignition {
+                lamps.next()
+            } else {
+                lamps.next_back()
+            } {
                 let on = sample.local_ignition
                     && match lamp.signal {
                         crate::reference::LampSignal::Tail => self.requested_headlights != 0,
