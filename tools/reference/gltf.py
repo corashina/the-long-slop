@@ -314,7 +314,11 @@ def validate_gltf(path):
     import pygltflib as gl
     from pygltflib.validator import validate
     document = gl.GLTF2().load_json(str(path))
-    validate(document)
+    # The pinned validator emits this notice even when validation succeeds.
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', message=r'^pygltf\.utils\.validator is a provisional function and may not exist in future versions\.$', category=UserWarning, module=r'^pygltflib\.validator$')
+        validate(document)
     for buffer in document.buffers:
         if (path.parent / buffer.uri).stat().st_size != buffer.byteLength:
             raise ValueError(f'Buffer size mismatch: {buffer.uri}')

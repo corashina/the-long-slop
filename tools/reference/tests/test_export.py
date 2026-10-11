@@ -11,6 +11,31 @@ from tools.reference.collision import bake_points
 
 
 class ReferenceExportTests(unittest.TestCase):
+    def test_validator_filters_only_its_provisional_notice(self):
+        import warnings
+        from unittest.mock import patch
+        import pygltflib
+        from pygltflib.validator import InvalidMeshPrimitiveMode
+        from tools.reference.gltf import validate_gltf
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'scene.gltf'
+            pygltflib.GLTF2().save_json(str(path))
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter('always')
+                validate_gltf(path)
+                self.assertEqual(caught, [])
+            document = pygltflib.GLTF2(meshes=[pygltflib.Mesh(primitives=[pygltflib.Primitive(mode=99)])])
+            document.save_json(str(path))
+            with self.assertRaises(InvalidMeshPrimitiveMode):
+                validate_gltf(path)
+            def warning(document):
+                warnings.warn('Unrelated validation warning')
+            with patch('pygltflib.validator.validate', side_effect=warning):
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter('always')
+                    validate_gltf(path)
+                    self.assertEqual(str(caught[0].message), 'Unrelated validation warning')
+
     def test_camera_layers_exclude_source_helper(self):
         from tools.reference.visibility import normal_view_mask, visible_to_camera
         masks=[0x04d28f33,0x10000000,0x00088001,0x00010000]

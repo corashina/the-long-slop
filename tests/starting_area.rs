@@ -1296,16 +1296,54 @@ fn active_cycle_is_independent_of_physics_cap() {
     assert!(steps <= 6);
 }
 #[test]
-fn pause_focus_and_restart_preserve_clock_rules() {
+fn lighting_lifecycle_preserves_and_resets_owned_state() {
     let (reference, mut runtime) = initial();
-    runtime.advance_lighting(&reference, 1.0);
-    assert_eq!(runtime.lighting.cycle.elapsed_seconds(), 0.0);
     runtime.started = true;
-    runtime.advance_lighting(&reference, 1.0);
+    let startup = lighting_snapshot(&runtime);
+    runtime.lighting.cycle_headlights(&reference.lighting);
+    runtime.lighting.use_control(
+        &reference.lighting,
+        my_summer_slop::reference::LightControlId(1),
+    );
+    runtime.advance_lighting(&reference, 1100.);
+    runtime.advance_light_fades(&reference, 0.001);
+    runtime.advance_light_fades(&reference, 0.01);
+    let active = lighting_snapshot(&runtime);
+    assert_ne!(active, startup);
     runtime.paused = true;
-    runtime.advance_lighting(&reference, 10.0);
-    assert_eq!(runtime.lighting.cycle.elapsed_seconds(), 1.0);
+    runtime.advance_lighting(&reference, 20.);
+    runtime.advance_light_fades(&reference, 20.);
+    runtime.step(
+        &reference,
+        FrameInput {
+            pressed: keys::LIGHTS,
+            ..Default::default()
+        },
+    );
+    assert_eq!(lighting_snapshot(&runtime), active);
+    runtime.paused = false;
+    runtime.recover(&reference);
+    assert_eq!(lighting_snapshot(&runtime), active);
+    runtime.advance_light_fades(&reference, 0.005);
+    assert_ne!(
+        lighting_snapshot(&runtime),
+        active,
+        "recovery must retain unfinished fades and switch movement"
+    );
     runtime.restart(&reference).unwrap();
-    assert_eq!(runtime.lighting.cycle.elapsed_seconds(), 0.0);
-    assert_eq!(runtime.lighting.cycle.output().cycle_seconds, 240.0);
+    assert_eq!(lighting_snapshot(&runtime), startup);
+    assert_eq!(runtime.lighting.cycle.elapsed_seconds(), 0.);
+    assert_eq!(runtime.lighting.cycle.output().cycle_seconds, 240.);
+}
+
+fn lighting_snapshot(runtime: &GarageRuntime) -> String {
+    format!(
+        "{:?}|{:?}|{:?}|{:?}|{:?}|{}",
+        runtime.lighting.cycle.output(),
+        runtime.lighting.light_outputs(),
+        runtime.lighting.material_outputs(),
+        runtime.lighting.control_poses(),
+        runtime.lighting.visibility_outputs(),
+        runtime.lighting.high_beam()
+    )
 }

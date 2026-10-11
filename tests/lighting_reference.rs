@@ -235,3 +235,177 @@ fn dashboard_contract_rejects_missing_and_wrong_source_links() {
     bad.lighting.high_beam.max_value = f32::NAN;
     assert!(bad.validate().is_err());
 }
+
+#[test]
+#[ignore = "Requires the installed export and Docker sha256sum"]
+fn production_lighting_records_match_selected_scene() {
+    let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+    let manifest = ReferenceManifest::from_json(&bytes).unwrap();
+    let actual: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let checked: serde_json::Value =
+        serde_json::from_slice(include_bytes!("common/reference.json")).unwrap();
+    assert_eq!(actual["source_hashes"], checked["source_hashes"]);
+    let a = &actual["lighting"];
+    let b = &checked["lighting"];
+    for field in [
+        "source",
+        "day_seconds",
+        "night_seconds",
+        "dawn_seconds",
+        "dusk_seconds",
+        "startup_offset_seconds",
+    ] {
+        assert_eq!(a["cycle"][field], b["cycle"][field], "cycle {field}");
+    }
+    assert_eq!(manifest.lighting.controllers.len(), 10);
+    assert_eq!(manifest.lighting.lights.len(), 17);
+    for (light, checked) in a["lights"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(b["lights"].as_array().unwrap())
+    {
+        for field in [
+            "id",
+            "source",
+            "kind",
+            "pose",
+            "range_meters",
+            "full_cone_degrees",
+            "inner_cone_degrees",
+            "shadows",
+            "culling_mask",
+            "cookie",
+        ] {
+            assert_eq!(
+                light[field], checked[field],
+                "light {} {field}",
+                light["id"]
+            );
+        }
+    }
+    for (control, checked) in a["controllers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(b["controllers"].as_array().unwrap())
+    {
+        for field in [
+            "id",
+            "source",
+            "kind",
+            "startup_on",
+            "requested_state",
+            "current_state",
+            "energy_move",
+            "electronics_threshold",
+        ] {
+            assert_eq!(
+                control[field], checked[field],
+                "controller {} {field}",
+                control["id"]
+            );
+        }
+        assert_eq!(
+            control["states"].as_array().unwrap().len(),
+            checked["states"].as_array().unwrap().len()
+        );
+        for (state, expected) in control["states"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(checked["states"].as_array().unwrap())
+        {
+            for field in ["on_material", "off_material"] {
+                assert_eq!(state[field]["source"], expected[field]["source"]);
+                if !state[field].is_null() {
+                    let asset = manifest
+                        .assets
+                        .iter()
+                        .find(|asset| asset.id.0 as u64 == state[field]["asset"].as_u64().unwrap())
+                        .unwrap();
+                    let gltf: serde_json::Value = serde_json::from_slice(
+                        &std::fs::read(format!("web/assets/{}", asset.path)).unwrap(),
+                    )
+                    .unwrap();
+                    let index = state[field]["gltf_material"].as_u64().unwrap() as usize;
+                    assert_eq!(
+                        gltf["materials"][index]["extras"]["source"],
+                        state[field]["source"]
+                    );
+                }
+            }
+        }
+    }
+    for field in [
+        "source",
+        "signal",
+        "on",
+        "off",
+        "min_value",
+        "max_value",
+        "stay_on",
+    ] {
+        assert_eq!(
+            a["high_beam"][field], b["high_beam"][field],
+            "dashboard {field}"
+        );
+    }
+    assert_eq!(a["default_spot_cookie"], b["default_spot_cookie"]);
+    assert_eq!(
+        a["cycle"]["cloud_shadow_cookie"],
+        b["cycle"]["cloud_shadow_cookie"]
+    );
+    assert_eq!(manifest.lighting.textures.len(), 11);
+    for (texture, expected) in a["textures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(b["textures"].as_array().unwrap())
+    {
+        for field in [
+            "id",
+            "source",
+            "sha256",
+            "source_data",
+            "width",
+            "height",
+            "mip_count",
+        ] {
+            assert_eq!(
+                texture[field], expected[field],
+                "texture {} {field}",
+                texture["id"]
+            );
+        }
+    }
+    // Use the toolchain's digest utility rather than add a runtime hash package.
+    for asset in &manifest.assets {
+        check_file_hash(&asset.path, &asset.sha256);
+        for dependency in &asset.dependencies {
+            check_file_hash(&dependency.file, &dependency.sha256);
+        }
+    }
+    for texture in &manifest.lighting.textures {
+        check_file_hash(&texture.path, &texture.sha256);
+        check_file_hash(&texture.mip_data.path, &texture.mip_data.sha256);
+        check_file_hash(&texture.source_data.path, &texture.source_data.sha256);
+    }
+}
+
+fn check_file_hash(path: &str, expected: &str) {
+    let output = std::process::Command::new("sha256sum")
+        .arg(format!("web/assets/{path}"))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "hash {path}");
+    assert_eq!(
+        std::str::from_utf8(&output.stdout)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap(),
+        expected,
+        "hash {path}"
+    );
+}

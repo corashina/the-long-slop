@@ -121,6 +121,23 @@ pub struct SourceLighting {
     pub cookie_handles: Option<[Handle<Image>; 3]>,
     pub status: Arc<Mutex<RenderingState>>,
 }
+impl SourceLighting {
+    /// Replace owned light instances. Retain loaded scenes and prepared assets.
+    pub fn reset_instances(&mut self, commands: &mut Commands) {
+        self.road_lamps.reset_instances(commands);
+        for light in self.lights.drain(..) {
+            commands.entity(light.entity).despawn();
+        }
+        self.uniform.lights.fill(GpuLight::default());
+        self.uniform.shadows.fill(GpuShadow::default());
+        self.uniform.counts.x = 0;
+        self.uniform.counts.y = 0;
+        for material in &mut self.lamp_materials {
+            material.current = None;
+        }
+        self.bound = false;
+    }
+}
 #[derive(Resource)]
 pub struct LightingGpu {
     pub uniform: UniformBuffer<LightingUniform>,
@@ -355,46 +372,48 @@ pub(crate) fn bind_lighting(
             .2
             .clone()
     }));
-    for (output_index, output) in drive.runtime.lighting.material_outputs().iter().enumerate() {
-        let Some(node) = visuals.nodes.get(&output.renderer) else {
-            // Road prototype outputs bind when a streamed instance registers.
-            continue;
-        };
-        let receivers = primitives
+    if !source.materials_prepared {
+        for (output_index, output) in drive.runtime.lighting.material_outputs().iter().enumerate() {
+            let Some(node) = visuals.nodes.get(&output.renderer) else {
+                // Road prototype outputs bind when a streamed instance registers.
+                continue;
+            };
+            let receivers = primitives
+                .iter()
+                .filter(|(_, parent)| parent.parent() == *node)
+                .map(|(e, _)| e)
+                .collect();
+            source.lamp_materials.push(BoundLampMaterial {
+                output_index,
+                receivers,
+                current: None,
+                choices: Vec::new(),
+            });
+        }
+        for (index, pose) in drive.runtime.lighting.control_poses().iter().enumerate() {
+            source.control_poses.push((
+                index,
+                *visuals
+                    .nodes
+                    .get(&pose.node)
+                    .expect("source control pose node"),
+            ));
+        }
+        for (index, output) in drive
+            .runtime
+            .lighting
+            .visibility_outputs()
             .iter()
-            .filter(|(_, parent)| parent.parent() == *node)
-            .map(|(e, _)| e)
-            .collect();
-        source.lamp_materials.push(BoundLampMaterial {
-            output_index,
-            receivers,
-            current: None,
-            choices: Vec::new(),
-        });
-    }
-    for (index, pose) in drive.runtime.lighting.control_poses().iter().enumerate() {
-        source.control_poses.push((
-            index,
-            *visuals
-                .nodes
-                .get(&pose.node)
-                .expect("source control pose node"),
-        ));
-    }
-    for (index, output) in drive
-        .runtime
-        .lighting
-        .visibility_outputs()
-        .iter()
-        .enumerate()
-    {
-        source.visibility.push((
-            index,
-            *visuals
-                .nodes
-                .get(&output.node)
-                .expect("source lamp visibility node"),
-        ));
+            .enumerate()
+        {
+            source.visibility.push((
+                index,
+                *visuals
+                    .nodes
+                    .get(&output.node)
+                    .expect("source lamp visibility node"),
+            ));
+        }
     }
     let mut shadow_start = 0;
     for (source_index, light) in r.lights.iter().enumerate() {
@@ -440,12 +459,14 @@ pub(crate) fn bind_lighting(
                 enabled: light.enabled,
             },
             pose,
-            bevy::camera::visibility::NoFrustumCulling,
             (0..32)
                 .filter(|layer| light.culling_mask & (1u32 << layer) != 0)
                 .flat_map(|layer| [layer, layer + 32])
                 .collect::<RenderLayers>(),
         ));
+        if source.warming {
+            entity.insert(bevy::camera::visibility::NoFrustumCulling);
+        }
         match light.kind {
             LightKind::Directional => {
                 entity.insert((

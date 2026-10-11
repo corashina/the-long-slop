@@ -93,7 +93,7 @@ components:
 The player sees a rust-painted car, sand, and a hazy sky through the live game view.
 Dark panels keep controls and fuel state readable over the scene.
 
-Use original procedural geometry for the car, road, terrain, and roadside stops.
+Use imported home, car, and source pole geometry. Keep procedural road, terrain, and roadside stops.
 Use the existing warm palette when adding approved scene details.
 
 **Key Characteristics:**
@@ -124,14 +124,21 @@ Use sand tones for actions and pale text over dark brown panels.
 - **Secondary brown:** HUD buttons, Restart, and the fuel meter track.
 - **Dark button text:** Primary button labels and selected text.
 
-**The Scene Palette Rule.** Use warm material colors with the existing gray-blue sky and fog.
+### Scene lighting
 
-Scene materials use sRGB values in `src/presentation/car.rs` and `src/presentation/world.rs`.
-The car uses rust paint (0.55, 0.25, 0.13) and faded paint (0.65, 0.41, 0.25).
-The terrain uses sand (0.59, 0.44, 0.28) with small spatial color variation.
-The road uses brown-gray (0.22, 0.21, 0.18) and sand-colored stripes (0.86, 0.75, 0.48).
-The sky and fog share sRGB (0.64, 0.72, 0.73).
-These are material inputs. Lighting and Reinhard tonemapping change their rendered appearance.
+Use the installed build's material and lighting records for imported objects.
+Keep the existing procedural terrain and road materials.
+Source sky, clouds, stars, ambient light, and fog follow the active cycle.
+Source lamp choices retain authored material links, emission, cookies, and shadow flags.
+Use one `SourceLighting` owner and one shared material cache.
+Keep cycle values in persistent uniform buffers. Select prepared lamp handles during updates.
+Retain imported scene nodes and shared assets through recovery and restart.
+Replace light proxies and road pole instances on restart.
+Keep loading markers on warmup instances only.
+
+The renderer uses WebGL2 and a shared 4000-square shadow atlas.
+Each shadow cell has a 398-square usable viewport.
+Read `docs/verification.md` before claiming source pixel parity.
 
 ## Typography
 
@@ -179,8 +186,7 @@ Use a 106px key column and an 8px control row gap at that width.
 
 Use dark translucent backgrounds to separate controls from the game.
 The current control panels have no box shadows, blur, or animated state transitions.
-Use the existing directional light and linear distance fog for scene depth.
-Fog starts at 110 world units and reaches its full value at 430 world units.
+Use source directional illumination and cycle-driven fog for scene depth.
 Car materials vary roughness and metal content. Glass uses alpha blending.
 
 ## Shapes
@@ -207,6 +213,7 @@ Disabled buttons use 0.5 opacity and the default cursor.
 Start and pause panels use the shared dark background and 28px padding.
 The start button fills the panel width.
 Control descriptions use muted text beside pale key labels.
+Show L as off, low beam, and high beam.
 
 ### Driving HUD
 

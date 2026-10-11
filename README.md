@@ -40,7 +40,7 @@ The build script writes the browser package to `web/pkg`.
 | Mouse | Look | Look |
 | Shift / Ctrl | Run / crouch | — |
 | Space | Jump | Toggle handbrake |
-| E | Use cap or seat | Leave seat |
+| E | Use cap, seat, or switch | Use aimed switch or leave seat |
 | Hold E + mouse | Move an aimed door | Move an aimed door |
 | F | Carry, drop, remove, or install an aimed wheel | — |
 | Mouse wheel / hold RMB + mouse | Change carry distance / rotate item | — |
@@ -58,16 +58,20 @@ The Lada starts with 0.5 L gasoline, 2.5 L oil, and 3.6 L water.
 Its capacities are 39 L fuel, 5 L oil, and 5 L coolant.
 
 Focus loss pauses play and clears input. Resume captures the mouse again.
-Recovery preserves fluids, parts, condition, and trip distance.
+Recovery preserves fluids, parts, condition, trip distance, cycle time, and lamp state.
 An empty fuel tank moves recovery to a station.
-Restart restores the garage, supplies, car, origin, and trip distance.
+Restart restores the garage, supplies, car, origin, trip distance, source cycle time, and lamp state.
 Close the driver door before reversing through the garage exit.
 
 ## Scope and evidence
 
 Read [the approved scope](docs/superpowers/specs/2026-10-09-garage-start-design.md) and [verification](docs/verification.md).
 Imported layout and recovered rules do not establish identical Unity physics or full-game parity.
-Unity shader effects, live mirror reflections, and audio are not reproduced.
+Lighting follows the approved [day cycle scope](docs/superpowers/specs/2026-10-10-day-night-lighting-design.md).
+The source cycle controls sun, moon, clouds, stars, fog, headlights, cabin lights, house lamps, and roadside lamps.
+Pause freezes cycle time, lamp fades, and switch movement.
+Restart restores the source startup offset of 240 seconds.
+Live mirror reflections and audio remain outside this stage.
 The final browser walking route was skipped at the user's request. It remains unverified.
 The build has no survival system, save system, multiplayer, or public deployment.
 

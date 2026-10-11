@@ -243,7 +243,12 @@ fn clear_input(drive: &mut Drive) {
     drive.runtime.area.begin_step();
     drive.skip_elapsed = true;
 }
-fn read_input(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
+fn read_input(
+    mut commands: Commands,
+    reference: Res<RuntimeReference>,
+    mut drive: ResMut<Drive>,
+    mut source: ResMut<presentation::lighting::SourceLighting>,
+) {
     let actions = game_actions();
     let frame = FrameInput {
         held: game_keys(),
@@ -269,6 +274,7 @@ fn read_input(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             game_failure(&error.to_string());
             return;
         }
+        source.reset_instances(&mut commands);
         drive.camera = CameraMode::default();
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
         clear_input(&mut drive);

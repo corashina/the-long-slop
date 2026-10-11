@@ -58,6 +58,13 @@ pub(crate) struct RoadLamps {
     origin: [f64; 3],
 }
 impl RoadLamps {
+    pub fn reset_instances(&mut self, commands: &mut Commands) {
+        for instance in self.instances.drain(..) {
+            commands.entity(instance.root).despawn();
+        }
+        self.keys = None;
+        self.origin = [f64::INFINITY; 3];
+    }
     pub fn new(spacing: f64) -> Self {
         // Eleven consecutive source intervals span 1408 metres: ceil(1408 / 100) = 15.
         let capacity = (active_chunks(0.).len() as f64 * CHUNK_LENGTH / spacing).ceil() as usize;
@@ -371,7 +378,8 @@ pub(crate) fn sync_road_lamps(
     mut source: ResMut<SourceLighting>,
     mut roots: Query<&mut Transform>,
 ) {
-    if source.warming
+    if !source.bound
+        || source.warming
         || source.road_lamps.recipe.is_none()
         || matches!(source.state, RenderingState::Failed(_))
     {

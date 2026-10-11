@@ -18,14 +18,22 @@ The approved garage spawn takes precedence over the original bedroom spawn.
 The build includes walking, first person look, crouching, jumping, seating, carrying, and aimed use.
 Preparation includes doors, fluid caps, filling, spilling, ignition, and wheel assembly.
 It retains the road, stations, chase camera, pause, recovery, and restart.
-Recovery preserves state. Restart restores the garage.
+The source cycle changes sky, illumination, ambient light, and fog during active play.
+Lights include headlights, cabin lights, rear lamps, five house switches, and automatic roadside lamps.
+L and the two physical headlight controls share one car request.
+House switches use E or eligible LMB. Cabin controls follow source modes and door links.
+Pause freezes cycle time, fades, and switch movement. Recovery preserves these states.
+Restart restores the garage and source startup state at 240 seconds.
 
-Survival, weapons, other vehicles, multiplayer, saves, audio, and deployment remain outside this stage.
+Portable flashlights, survival, sleep, weather events, weapons, other vehicles, multiplayer, saves, audio, and deployment remain outside this stage.
+Engine heat and fluid rules retain their current behavior.
 The build does not claim identical Unity physics or full-game parity.
 
 ## Evidence
 
-The approved design and plan are in `docs/superpowers`.
+The user approved the [lighting specification](docs/superpowers/specs/2026-10-10-day-night-lighting-design.md) on 2026-10-10.
+The earlier garage approval remains in `docs/superpowers`.
+Read [verification](docs/verification.md) for source checks, browser evidence, and rendering limits.
 The installed build uses Unity 2021.3.18f1 and Mono.
 The exporter records input hashes, source IDs, geometry, and recovered parameters.
 Generated original assets remain outside version control.
