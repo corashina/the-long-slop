@@ -16,6 +16,11 @@ Keep gameplay, physics, controls, and the existing road unchanged.
 5. Keep one owner for app registration, graph wiring, and shared builds.
 6. Use separate file ownership when independent effect work can run in parallel.
 
+Ignored evidence stays in the retained worktree:
+`C:/Users/Corashina/.codex/worktrees/material-parity/the-long-drive-wasm`.
+Read relative evidence paths from that directory.
+Git does not copy these files into a new worktree.
+
 Local records are in `.superpowers/sdd/2026-10-10-material-parity/`.
 Source evidence and fixtures are in `.cache/lighting-research/`.
 The current renderer inventory and unfinished interfaces are preserved on the recovery branch.
