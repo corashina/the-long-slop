@@ -42,20 +42,18 @@ extern "C" {
         paused: bool,
         started: bool,
     );
-    #[wasm_bindgen(js_namespace = window, js_name = gameDetail)]
-    pub fn game_detail(
-        target: &str,
-        action: &str,
+    #[wasm_bindgen(js_namespace = window, js_name = gameFeedback)]
+    pub fn game_feedback(
+        actions: u32,
+        context: u32,
+        name: &str,
+        notice: &str,
+        carrying: bool,
         amount: f32,
-        condition: i32,
-        held: &str,
-        rpm: f32,
-        ignition: bool,
-        running: bool,
-        starter: bool,
-        seated: bool,
-        handbrake: bool,
-        gasoline: f32,
+        capacity: f32,
+        has_name: bool,
+        no_text: bool,
+        gas: f32,
         oil: f32,
         alcohol: f32,
         water: f32,

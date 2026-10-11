@@ -139,7 +139,7 @@ class GltfExporter:
             if info:
                 material.normalTexture = gl.NormalMaterialTexture(scale=floats.get('_BumpScale',1.), **info)
         emission = colors.get('_EmissionColor')
-        if emission:
+        if emission and '_EMISSION' in data['m_ValidKeywords']:
             material.emissiveFactor = [emission[n] for n in ('r','g','b')]
             if '_EmissionMap' in environments:
                 info = self.texture(reader, environments['_EmissionMap'], 'srgb')
@@ -280,8 +280,22 @@ class GltfExporter:
                 root_nodes.append(index)
             else:
                 self.document.nodes[mapping[key(record['parent'])]].children.append(index)
+        # Cache all instrument material variants in the same imported glTF.
+        for record in records:
+            for component in record['components']:
+                if component.type.name!='MonoBehaviour' or not component.parse_monobehaviour_head().m_Script.path_id:continue
+                cname=self.source.class_name(component)
+                if cname not in ('meterscript','mutatoscript','ledkijelzoscript','forgoszamlap'):continue
+                data=self.source.read(component)
+                pointers=[]
+                if cname in ('meterscript','mutatoscript'):pointers=[data['OnM'],data['OffM']]
+                elif cname=='ledkijelzoscript':pointers=[v[k] for v in data['leds'] for k in ('on','off')]
+                else:pointers=[v[k] for v in data['szamok'] for k in ('MOn','MOff')]
+                for ptr in pointers:
+                    if ptr['m_PathID']:self.material(self.source.resolve(component,ptr))
         result = self.save(root_nodes)
         return {**result,
+                'material_count':len(self.document.materials), 'materials':{f'{identity[0][0]}:{identity[0][1]}':index for identity,index in self.materials.items() if identity[1] is None},
                 'node_count':len(records), 'mesh_count':len(self.meshes), 'material_adaptations':self.material_report,
                 'nodes':[{'source':source_id(r['reader']),'gltf_node':mapping[key(r['reader'])],
                     'parent':source_id(r['parent']) if r['parent'] else None,'hierarchy_path':r['path'],

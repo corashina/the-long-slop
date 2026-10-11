@@ -286,3 +286,36 @@ fn production_export_matches_installed_contract() {
         }
     }
 }
+
+#[test]
+fn rejects_missing_ui_and_instrument_contract() {
+    for field in ["ui", "instruments"] {
+        let mut input = fixture();
+        input.as_object_mut().unwrap().remove(field);
+        assert!(
+            ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err(),
+            "missing {field}"
+        );
+    }
+}
+
+#[test]
+fn rejects_invalid_ui_and_instrument_links() {
+    let mut m = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    m.ui.sprites[0].sha256 = "broken".into();
+    assert!(m.validate().is_err());
+    let mut m = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    m.instruments.needles[0].node = my_summer_slop::reference::NodeId(999999);
+    assert!(m.validate().is_err());
+    let mut m = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    m.instruments.lamps[0].on.asset = my_summer_slop::reference::AssetId(999999);
+    assert!(m.validate().is_err());
+}
+
+#[test]
+fn rejects_lamp_material_outside_exported_count() {
+    let mut input = fixture();
+    input["assets"][1]["material_count"] = serde_json::json!(1);
+    input["instruments"]["lamps"][0]["on"]["gltf_material"] = serde_json::json!(1);
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+}

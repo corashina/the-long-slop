@@ -1,4 +1,9 @@
-# Garage verification
+# Verification record
+
+The source UI section records the latest UI checks.
+The garage section retains earlier physics and scene evidence.
+
+## Garage verification
 
 Reference: installed Steam build 11140890. Vehicle: fixed Lada 2101.
 Verification date: 2026-10-10, Europe/Warsaw.
@@ -98,6 +103,130 @@ The [Starting House](https://the-long-drive.fandom.com/wiki/Starting_House),
 [Lada 2101](https://the-long-drive.fandom.com/wiki/Lada_2101) wiki pages provided secondary context.
 The site is a community wiki. Installed-build evidence controls conflicting values.
 See `docs/research/2026-10-09-garage-reference.md` for the recovery record.
+
+
+## Source UI verification
+
+Scope: approved current features in docs/superpowers/specs/2026-10-10-source-ui-design.md.
+Source: installed Steam build 11140890.
+Worktree: source-ui. Base: 743ef8b.
+Date: 2026-10-10, Europe/Warsaw.
+
+The UI now uses recovered menu sprites, canvas layouts, action icons, and fluid presentation flags.
+The old serif shell, persistent vehicle card, X assembly action, and P/R shortcuts are removed.
+F press picks up, drops, or dismounts. F release mounts.
+RMB moves a held item. MMB rotates it.
+Esc opens the menu. Backspace toggles feedback.
+Recover remains in the pause menu. Fullscreen remains in Controls.
+
+### Final checks
+
+| Check | Result |
+| --- | --- |
+| Rust formatting and native suite | 109 passed; six installed-source gates skipped by default |
+| Explicit installed-source gates | Six passed |
+| Browser module suite | 14 passed |
+| Python exporter suite | 11 passed |
+| Complete installed-build export | Passed |
+| Release WASM and browser package | Passed |
+| Independent source review | One Important finding fixed; no Critical findings |
+| Final diff and source-asset exclusions | Checked before the integration commit |
+
+Commands use the source-ui worktree and its separate Cargo target volume.
+The ignored .cache/check.ps1 and .cache/build.ps1 pin that volume.
+The tracked scripts contain the same checks with the normal project cache.
+
+- Python: unittest discover -s tools/reference/tests -v.
+- Browser modules: node --test tests/web/menu.test.mjs tests/web/input.test.mjs tests/web/feedback.test.mjs.
+- Native and release: .cache/check.ps1.
+- Installed gates: cargo test --locked -- --ignored in the toolchain container.
+- Export: tools.reference.export with the installed Steam root.
+- Package: .cache/build.ps1.
+
+Final logs are retained under ignored .cache/source-ui-verification.
+They include final-check.log, final-source.log, final-python.log, final-node.log, final-export.log, and final-package.log.
+
+### Review corrections
+
+The independent reviewer found emission on the source warning lamps' Off materials.
+Unity's _EMISSION keyword now controls both emission factor and texture export.
+A focused regression test failed before the fix and passed afterward.
+Regenerated Off materials have zero emission for fuel, oil, battery, and headlight2.
+Their On materials retain the recovered emission values.
+
+Browser startup exposed a late glTF material load that reloaded the vehicle scene.
+The renderer now retains raw glTF handles during initial loading.
+A startup adapter creates and caches the used lamp materials.
+The final browser reaches the ready menu with the vehicle present.
+
+Static review found clipped carrying text.
+Its bottom alignment now follows the recovered lower-right text rectangle.
+The confirmation capture shows all three lines above the bottom margin.
+
+### Browser evidence
+
+The final browser starts at http://127.0.0.1:4174/.
+Desktop review used 1280 by 720 pixels. Narrow review used 390 by 720.
+Start and Controls were inspected over the actual loaded garage.
+Pause, failure, and fluid feedback were inspected with an isolated UI fixture.
+That fixture contains no WASM runtime, simulated input, or product capture bypass.
+It was removed after review.
+
+Captures are under ignored .impeccable/review:
+
+- source-ui-start-final.png: actual ready menu and vehicle.
+- source-ui-controls-desktop.png and source-ui-controls-narrow.png: actual Controls.
+- source-ui-pause-fixture.png: source pause geometry and session distance.
+- source-ui-error-fixture.png: disabled actions and a readable failure.
+- source-ui-fluid-fixture.png: source fluid text, fill icon, and complete carrying help.
+
+The Impeccable detector ran once over web.
+It reported three Arial warnings and one unrecorded error color.
+Arial is the recovered gameplay font. The error color is now recorded in the palette.
+Two files had invalid ellipsis bytes. They were repaired and validated as UTF-8.
+The detector could not inspect those files before repair. It was not rerun.
+
+The embedded browser rejects pointer lock.
+Live pause and contextual gameplay remain covered by state and native tests, plus static layout review.
+The approved final continuous browser route waiver remains.
+No live pixel-parity claim is made.
+
+### Instruments and limits
+
+| Instrument | Source range | Unity Y angle |
+| --- | --- | --- |
+| Speed | 0 to 160 km/h | -64 to 64 degrees |
+| Temperature | 10 to 130 degrees Celsius | -30 to 30 degrees |
+| Fuel | 0 to 39 L | -26 to 26 degrees |
+
+Needles use source signal smoothing at 5 times dt and value smoothing at 8 times dt.
+The five odometer digits use base 10, one fractional digit, and source carry rules.
+They use source X rotations and angle smoothing at 20 times dt.
+The display starts from the recovered value and adds session travel.
+Recovery and coordinate rebasing preserve it. Restart resets it.
+The source fuel, oil, and battery guards use local ignition and recovered thresholds.
+The unsupported headlight indicator remains off. The Lada has no RPM needle.
+
+Entity and material binding occurs during loading.
+Instrument updates use fixed arrays and cached handles.
+Feedback retains display values and changes DOM text only when needed.
+Browser text uses Liberation Sans and Arial. It differs from Unity's SDF renderer.
+Liberation Sans 2.1.5 provenance and license remain in web/fonts.
+Generated original assets remain excluded from Git.
+
+### Execution rulings
+
+- PowerShell briefs replace unavailable Bash bookkeeping helpers.
+- A separate Cargo target cache prevents stale metadata from concurrent work.
+- Menu synchronization uses three scalars to avoid a new frame object.
+- Recovered Gas, empty, and (full) labels override illustrative plan wording.
+- Cached startup material conversion replaces late subasset loading. Bevy's converter is private.
+- Design documentation ran inline under the approved native workflow.
+
+The design record uses the actual source palette, menu and gameplay fonts, canvas rules, and source text shadows.
+Its sidecar records color metadata, motion, breakpoints, and standalone text components.
+Original sprite previews require the ignored local export and remain outside the sidecar.
+No independent-review Minor findings remain deferred.
 
 ## World generation
 

@@ -19,6 +19,7 @@ The build includes walking, first person look, crouching, jumping, seating, carr
 Preparation includes doors, fluid caps, filling, spilling, ignition, and wheel assembly.
 The road and terrain follow the source generator: seed, noise, road path, biomes, and power poles.
 Placeholder stations sit beside the road. The build retains the chase camera, pause, recovery, and restart.
+The interface uses source menus, action icons, fluid percentages, and animated Lada instruments.
 Recovery preserves state. Restart restores the garage.
 Part condition follows the source states. Hard crashes knock worn wheels and parts off.
 The player can remove a part and fit it again into its own slot.

@@ -15,7 +15,7 @@ def build_manifest(source, roots, reports, hashes):
     assets=[]
     for asset_id,(name,readers) in enumerate(roots.items(),1):
         report=reports[name]
-        assets.append({'id':asset_id,'path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
+        assets.append({'id':asset_id,'material_count':report['material_count'],'path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
         records=[]
         for root in readers:records.extend(source.hierarchy(root,activate_root=True))
         for entry,record in zip(report['nodes'],records):

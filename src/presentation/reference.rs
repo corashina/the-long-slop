@@ -1,4 +1,6 @@
-use crate::reference::{BodyId, ItemId, ItemKind, NodeId, OpeningId, ReferenceManifest, SourceId};
+use crate::reference::{
+    AssetId, BodyId, ItemId, ItemKind, NodeId, OpeningId, ReferenceManifest, SourceId,
+};
 use crate::starting_area::StartingArea;
 use crate::vehicle::PhysicsWorld;
 use bevy::camera::visibility::RenderLayers;
@@ -42,6 +44,7 @@ pub struct CapVisual {
 #[derive(Resource, Default)]
 pub struct ReferenceVisuals {
     pub handles: Vec<(String, Handle<bevy::world_serialization::WorldAsset>)>,
+    pub gltfs: Vec<(AssetId, Handle<bevy::gltf::Gltf>)>,
     pub nodes: HashMap<NodeId, Entity>,
     pub instances: usize,
     pub bound: bool,
@@ -63,6 +66,19 @@ pub fn spawn(commands: &mut Commands, server: &AssetServer, reference: &Referenc
                 });
             })
             .load(GltfAssetLabel::Scene(0).from_asset(asset.path.clone()));
+        let gltf = server
+            .load_builder()
+            .with_settings(|settings: &mut GltfLoaderSettings| {
+                settings.load_cameras = false;
+                settings.load_lights = false;
+                settings.load_animations = false;
+                settings.convert_coordinates = Some(GltfConvertCoordinates {
+                    rotate_scene_entity: false,
+                    rotate_meshes: false,
+                });
+            })
+            .load::<bevy::gltf::Gltf>(asset.path.clone());
+        visuals.gltfs.push((asset.id, gltf));
         visuals.handles.push((asset.path.clone(), handle.clone()));
         commands
             .spawn((

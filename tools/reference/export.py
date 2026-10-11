@@ -26,9 +26,13 @@ def export_reference(steam_root: Path, output: Path) -> None:
     from .manifest import build_manifest
     from .conditions import prepare_conditions
     from .visibility import recover_camera_visibility
+    from .ui import export_ui
+    from .instruments import recover_instruments
     from .world import export_world
     if output.resolve().is_relative_to(steam_root.resolve()):
         raise ValueError('Keep generated files outside the Steam installation')
+    output.mkdir(parents=True, exist_ok=True)
+    (output/'manifest.json').unlink(missing_ok=True)
     validate_build(steam_root)
     source = Source(steam_root)
     def transform(go):return source.transform_for(source.get('level1',go))
@@ -46,9 +50,6 @@ def export_reference(steam_root: Path, output: Path) -> None:
     if source.read(source.get('level1',64898))['StartCar02']['m_PathID']!=206:
         raise ValueError('Selected Lada starter link differs from the required car')
     prepare_conditions(source,[root for readers in roots.values() for root in readers])
-    output.mkdir(parents=True, exist_ok=True)
-    # Remove acceptance before any export. A failed run cannot leave it usable.
-    (output/'manifest.json').unlink(missing_ok=True)
     report = {}
     for name, readers in roots.items():
         report[name] = export_gltf((source,readers),output/f'{name}.gltf')
@@ -70,6 +71,8 @@ def export_reference(steam_root: Path, output: Path) -> None:
         digest=hashlib.file_digest(path.open('rb'),'sha256').hexdigest()
         hashes.append({'file':str(path.relative_to(data_root)).replace('\\','/'),'sha256':digest})
     manifest=build_manifest(source,roots,report,hashes)
+    manifest['ui']=export_ui(source,output)
+    manifest['instruments']=recover_instruments(source,manifest,report)
     manifest['world']=export_world(source,output/'world.gltf')
     print(f'Exported world: {len(manifest["world"]["road"]["biomes"])} road biomes',flush=True)
     parameters['controls']={

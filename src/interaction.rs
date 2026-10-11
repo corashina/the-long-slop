@@ -1,6 +1,8 @@
+pub mod feedback;
 pub mod items;
 pub mod parts;
 pub mod wheels;
+use feedback::ActionMask;
 
 use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
@@ -49,6 +51,10 @@ pub enum InteractionAction {
         target: WheelSlotId,
     },
     WheelSplit(ItemId),
+    WheelJoin {
+        rim: ItemId,
+        tire: ItemId,
+    },
     PartRemove(ItemId),
     PartFit(ItemId),
 }
@@ -118,6 +124,9 @@ struct HeldState {
 
 pub struct InteractionState {
     kinds: HashMap<ItemId, ItemKind>,
+    slot_fits: HashMap<WheelSlotId, HashSet<ItemId>>,
+    tire_fits: HashSet<(ItemId, ItemId)>,
+    f_gesture_consumed: bool,
     parts: HashSet<ItemId>,
     bodies: HashMap<BodyId, RigidBodyHandle>,
     hinges: Vec<HingeState>,
@@ -230,7 +239,56 @@ impl InteractionState {
                 exit: ExitReference::from_reference(&reference.player, seat),
             });
         }
+        let is_rim = |id: ItemId| {
+            reference
+                .items
+                .iter()
+                .any(|i| i.id == id && matches!(i.kind, ItemKind::Rim | ItemKind::Wheel))
+        };
+        let slot_fits = reference
+            .wheel_slots
+            .iter()
+            .map(|s| {
+                (
+                    s.id,
+                    reference
+                        .wheel_parts
+                        .iter()
+                        .filter(|p| {
+                            is_rim(p.item)
+                                && wheels::fits(
+                                    &s.rim_main_types,
+                                    &s.rim_types,
+                                    &p.main_types,
+                                    &p.part_types,
+                                )
+                        })
+                        .map(|p| p.item)
+                        .collect(),
+                )
+            })
+            .collect();
+        let mut tire_fits = HashSet::new();
+        for rim in &reference.wheel_parts {
+            if is_rim(rim.item) {
+                for tire in &reference.wheel_parts {
+                    if !is_rim(tire.item)
+                        && wheels::fits(
+                            &rim.tire_main_types,
+                            &rim.tire_types,
+                            &tire.main_types,
+                            &tire.part_types,
+                        )
+                    {
+                        tire_fits.insert((rim.item, tire.item));
+                    }
+                }
+            }
+        }
         Ok(Self {
+            slot_fits,
+            tire_fits,
+            f_gesture_consumed: false,
             kinds: reference
                 .items
                 .iter()
@@ -592,74 +650,46 @@ impl InteractionState {
                 }
             }
         }
+        let available = self.available_actions(target, player, items, physics);
         if input.pressed & keys::GRAB != 0 {
-            let grab_target = target.map(|mut target| {
-                if let Some(ItemLocation::Attached(parent)) =
-                    items.get(target.item).map(|item| item.location)
-                    && ((matches!(self.kinds.get(&target.item), Some(ItemKind::Tire))
-                        && matches!(
-                            self.kinds.get(&parent),
-                            Some(ItemKind::Rim | ItemKind::Wheel)
-                        ))
-                        || (!self.parts.contains(&target.item) && self.parts.contains(&parent)))
-                {
-                    target.item = parent;
-                }
-                target
-            });
-            if let Some(held) = self.held.as_ref()
-                && let Some(target) = target
-                && target.part_slot
-                && target.item == held.item
-            {
-                action = Some(InteractionAction::PartFit(held.item));
-            } else if self.held.is_none()
-                && let Some(target) = grab_target
-                && !target.part_slot
-                && self.parts.contains(&target.item)
-                && fitted(&self.parts, items, target.item)
-            {
-                action = Some(InteractionAction::PartRemove(target.item));
-            } else if let Some(held) = self.held.as_ref()
-                && let Some(slot) = target.and_then(|target| target.slot)
-                && matches!(
-                    self.kinds.get(&held.item),
-                    Some(ItemKind::Wheel | ItemKind::Rim)
-                )
-            {
-                action = Some(InteractionAction::WheelInstall {
-                    item: held.item,
-                    target: slot,
+            self.f_gesture_consumed = false;
+            if available.actions.0 & ActionMask::DISMOUNT != 0 && self.held.is_none() {
+                let part = available.part.expect("dismount part");
+                action = Some(if let Some(rim) = available.rim {
+                    InteractionAction::WheelSplit(rim)
+                } else if self.parts.contains(&part) {
+                    InteractionAction::PartRemove(part)
+                } else {
+                    InteractionAction::WheelRemove(part)
                 });
-            } else if self.held.is_none()
-                && let Some(target) = grab_target
-                && matches!(
-                    self.kinds.get(&target.item),
-                    Some(ItemKind::Wheel | ItemKind::Rim)
-                )
-                && items
-                    .get(target.item)
-                    .is_some_and(|item| matches!(item.location, ItemLocation::WheelSlot(_)))
-            {
-                action = Some(InteractionAction::WheelRemove(target.item));
-            } else if let Some(item) = self.drop_held(items, physics) {
-                action = Some(InteractionAction::Drop(item));
-            } else if let Some(target) = grab_target
-                && target.slot.is_none()
-                && !target.part_slot
-                && self.pickup(target, player, items, physics)
-            {
-                action = Some(InteractionAction::Pickup(target.item));
+                self.f_gesture_consumed = true;
+            } else if available.actions.0 & ActionMask::MOUNT == 0 {
+                if let Some(item) = self.drop_held(items, physics) {
+                    action = Some(InteractionAction::Drop(item));
+                    self.f_gesture_consumed = true;
+                } else if available.actions.0 & ActionMask::PICKUP != 0
+                    && let Some(t) = target
+                    && self.pickup(t, player, items, physics)
+                {
+                    action = Some(InteractionAction::Pickup(t.item));
+                    self.f_gesture_consumed = true;
+                }
             }
         }
-        if input.pressed & keys::ASSEMBLE != 0
-            && let Some(item) = self.held().or_else(|| target.map(|target| target.item))
-            && matches!(self.kinds.get(&item), Some(ItemKind::Wheel | ItemKind::Rim))
-            && items.get(item).is_some_and(|item| {
-                matches!(item.location, ItemLocation::Held | ItemLocation::World)
-            })
-        {
-            action = Some(InteractionAction::WheelSplit(item));
+        if input.released & keys::GRAB != 0 {
+            if !self.f_gesture_consumed && available.actions.0 & ActionMask::MOUNT != 0 {
+                if let Some(slot) = available.slot {
+                    action = Some(InteractionAction::WheelInstall {
+                        item: available.rim.expect("mount rim"),
+                        target: slot,
+                    });
+                } else if let (Some(rim), Some(tire)) = (available.rim, available.tire) {
+                    action = Some(InteractionAction::WheelJoin { rim, tire });
+                } else if let Some(part) = available.part {
+                    action = Some(InteractionAction::PartFit(part));
+                }
+            }
+            self.f_gesture_consumed = false;
         }
         if self.update_carry(carry_input, player, physics, dt)
             && let Some(item) = self.drop_held(items, physics)
@@ -678,6 +708,7 @@ impl InteractionState {
         items.sync_poses(physics);
         let mut filling = None;
         if input.held & keys::FILL != 0
+            && available.actions.0 & ActionMask::FILL != 0
             && let Some(held) = self.held.as_ref()
             && let Some(target) = target
         {
@@ -815,7 +846,7 @@ impl InteractionState {
         }
     }
 
-    fn pickup(
+    pub(crate) fn pickup(
         &mut self,
         target: AimTarget,
         player: &PlayerState,
@@ -887,6 +918,12 @@ impl InteractionState {
                     * dt
                     * self.carry.obj_move_sensitivity)
                 .clamp_length_max(self.carry.carry_offset_radius);
+        }
+        if input.held & keys::MOVE != 0 && input.mouse.iter().all(|n| n.is_finite()) {
+            held.offset += Vector::new(input.mouse[0], -input.mouse[1], 0.)
+                * dt
+                * self.carry.obj_move_sensitivity;
+            held.offset = held.offset.clamp_length_max(self.carry.carry_offset_radius);
         }
         if input.held & keys::ROTATE != 0 && input.mouse.iter().all(|delta| delta.is_finite()) {
             let sensitivity = dt * 10.0 * self.carry.obj_rotation_sensitivity;

@@ -1,7 +1,7 @@
 # Garage material parity
 
 Date: 2026-10-10, Europe/Warsaw.
-Status: The user approved the design direction. This written specification awaits review.
+Status: The user approved this written specification in chat on 2026-10-10.
 
 ## Intent and scope
 

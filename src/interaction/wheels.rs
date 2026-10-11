@@ -315,7 +315,9 @@ impl WheelAssemblies {
                 ItemLocation::Attached(self.parts[rim].item);
         }
         self.slots[slot].rim = None;
-        self.update_body_mass(rim, body, physics);
+        if body != physics.chassis_handle() {
+            self.update_body_mass(rim, body, physics);
+        }
         self.sync(items, physics)?;
         physics.refresh_queries();
         Ok(self.parts[rim].item)
@@ -377,11 +379,14 @@ impl WheelAssemblies {
             .get(&item)
             .ok_or_else(|| error("Unknown rim"))?;
         if !self.parts[rim].rim
-            || items
-                .get(item)
-                .is_none_or(|item| item.location != ItemLocation::World)
+            || items.get(item).is_none_or(|item| {
+                !matches!(
+                    item.location,
+                    ItemLocation::World | ItemLocation::WheelSlot(_)
+                )
+            })
         {
-            return Err(error("Split requires a loose rim"));
+            return Err(error("Split requires a loose or mounted rim"));
         }
         let tire = self.parts[rim]
             .tire
@@ -400,7 +405,9 @@ impl WheelAssemblies {
         self.place_part(tire, body, Pose::IDENTITY, true, items, physics)?;
         items.get_mut(self.parts[tire].item).unwrap().location = ItemLocation::World;
         self.parts[rim].tire = None;
-        self.update_body_mass(rim, rim_body, physics);
+        if rim_body != physics.chassis_handle() {
+            self.update_body_mass(rim, rim_body, physics);
+        }
         self.update_body_mass(tire, body, physics);
         self.sync(items, physics)?;
         physics.refresh_queries();
@@ -423,11 +430,13 @@ impl WheelAssemblies {
         if self.parts[rim].tire.is_some() {
             return Err(error("Rim already has a tire"));
         }
-        if [rim_id, tire_id].iter().any(|id| {
-            items
-                .get(*id)
-                .is_none_or(|item| item.location != ItemLocation::World)
-        }) {
+        if items
+            .get(rim_id)
+            .is_none_or(|i| !matches!(i.location, ItemLocation::World | ItemLocation::WheelSlot(_)))
+            || items
+                .get(tire_id)
+                .is_none_or(|i| i.location != ItemLocation::World)
+        {
             return Err(error("Assembly requires loose parts"));
         }
         let body = items
@@ -447,7 +456,9 @@ impl WheelAssemblies {
         }
         items.get_mut(tire_id).unwrap().location = ItemLocation::Attached(rim_id);
         self.parts[rim].tire = Some(tire);
-        self.update_body_mass(rim, body, physics);
+        if body != physics.chassis_handle() {
+            self.update_body_mass(rim, body, physics);
+        }
         self.sync(items, physics)?;
         physics.refresh_queries();
         Ok(rim_id)
@@ -597,7 +608,7 @@ impl WheelAssemblies {
     }
 }
 
-fn fits(
+pub(super) fn fits(
     slot_main: &[String],
     slot_types: &[String],
     part_main: &[String],
