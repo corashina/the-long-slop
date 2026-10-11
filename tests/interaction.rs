@@ -1331,6 +1331,8 @@ fn runtime_pump_stays_open_and_fills_the_held_container() {
             .abs()
             < 1e-6
     );
+    // The pump cap pours and plays its pour sound.
+    assert_eq!(interaction.opening_pour(OpeningId(pump.0)), 0.5);
 }
 
 #[test]

@@ -1525,4 +1525,17 @@ fn production_driver_hears_starter_and_handbrake_inside_the_car() {
     if runtime.engine_output.running {
         assert!(audio.voice(slot::IDLE).volume > 0.0);
     }
+    for _ in 0..10 {
+        runtime.step(
+            &reference,
+            FrameInput {
+                held: keys::HORN,
+                ..FrameInput::default()
+            },
+        );
+        audio.step(&reference, &runtime, false, 1.0 / 60.0);
+    }
+    let horn = audio.voice(slot::HORN);
+    assert_eq!(horn.clip, reference.audio.car.horn.voice.clip, "horn clip");
+    assert!(horn.volume > 0.9, "horn volume {}", horn.volume);
 }
