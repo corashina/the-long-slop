@@ -16,7 +16,7 @@ pub fn display_name<'a>(
             Some("Garage door")
         }
         "TireDisztarcsa" => Some("Hubcap"),
-        "SideMirror" => Some("Side mirror"),
+        "SideMirror" | "LeftMirror" | "RightMirror" => Some("Side mirror"),
         "FrontMirror" => Some("Rearview mirror"),
         "Kesztyutarto" => Some("Glovebox"),
         "napellenzo" => Some("Sun visor"),

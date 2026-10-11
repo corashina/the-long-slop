@@ -1359,13 +1359,61 @@ fn removable_mechanism_prompt_shows_drag_and_removal() {
 fn garage_door_use_labels_keep_passive_house_hidden() {
     use my_summer_slop::interaction::labels::display_name;
     let r = installed();
-    let g = GarageRuntime::new(&r).unwrap();
+    let mut g = GarageRuntime::new(&r).unwrap();
     for name in ["GarageDoorRightCollider", "GarageDoorLeftCollider"] {
         let item = r.items.iter().find(|i| i.name == name).unwrap();
         assert_eq!(display_name(&r, &g.area.items, item.id), "Garage door");
     }
     let house = r.items.iter().find(|i| i.name == "haz02").unwrap();
     assert_eq!(display_name(&r, &g.area.items, house.id), "");
+    for name in ["LeftMirror", "RightMirror"] {
+        let mirror = r.items.iter().find(|i| i.name == name).unwrap();
+        assert!(matches!(
+            mirror.kind,
+            my_summer_slop::reference::ItemKind::Decoration
+        ));
+        let usable = r
+            .parts
+            .iter()
+            .find(|p| p.item == mirror.id)
+            .unwrap()
+            .usable
+            .unwrap();
+        let mechanism = r.mechanisms.iter().find(|m| m.item == usable).unwrap();
+        assert_eq!(mechanism.parent_item, Some(mirror.id));
+        assert!(mechanism.turn.is_none());
+        let binding = *r
+            .action_bindings
+            .iter()
+            .find(|b| b.use_owner == Some(usable))
+            .unwrap();
+        assert_eq!(binding.removal_owner, Some(mirror.id));
+        // Isolate the source binding from neighboring garage geometry.
+        let point = Vector::new(100. + mirror.id.0 as f32, 10., 100.);
+        let (_, collider) = g.physics.rapier_mut().insert(
+            rapier3d::prelude::RigidBodyBuilder::fixed().translation(point),
+            rapier3d::prelude::ColliderBuilder::ball(0.1)
+                .sensor(true)
+                .user_data(usable.0 as u128 + 1),
+        );
+        g.area.interaction.bind_surface(collider, binding);
+        g.physics.refresh_queries();
+        let aim = g.area.interaction.resolve(
+            &g.physics,
+            my_summer_slop::vehicle::VehiclePose {
+                position: (point + Vector::Z).to_array(),
+                rotation: [0., 0., 0., 1.],
+            },
+            &g.area.items,
+        );
+        assert_eq!(aim.use_target.map(|t| t.item), Some(usable));
+        assert_eq!(aim.grab_target.map(|t| t.item), Some(mirror.id));
+        assert_eq!(
+            display_name(&r, &g.area.items, aim.use_target.unwrap().item),
+            "Side mirror"
+        );
+        assert_eq!(display_name(&r, &g.area.items, mirror.id), "Side mirror");
+    }
 }
 
 #[test]
