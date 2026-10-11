@@ -153,6 +153,45 @@ class LibraryValidationTests(unittest.TestCase):
         self.assertEqual((output / 'manifest.json').read_bytes(), b'accepted')
         self.assertTrue(self.work.is_dir())
 
+    def test_backup_cleanup_failure_keeps_committed_output(self):
+        from tools.reference.library.validation import _publish_directory
+        output = self.root / 'web/assets/library'
+        output.mkdir(parents=True)
+        (output / 'manifest.json').write_bytes(b'previous')
+        (self.work / 'manifest.json').write_bytes(b'committed')
+        with patch('tools.reference.library.validation.shutil.rmtree', side_effect=PermissionError('locked backup')):
+            with self.assertLogs('tools.reference.library.validation', level='WARNING') as logs:
+                _publish_directory(self.work, output)
+        self.assertEqual((output / 'manifest.json').read_bytes(), b'committed')
+        backups = list(self.work.parent.glob('previous-library-*'))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual((backups[0] / 'manifest.json').read_bytes(), b'previous')
+        self.assertIn(str(backups[0]), logs.output[0])
+        self.assertIn('locked backup', logs.output[0])
+
+    def test_partial_backup_cleanup_does_not_block_next_publication(self):
+        from tools.reference.library.validation import _publish_directory
+        output = self.root / 'web/assets/library'
+        output.mkdir(parents=True)
+        (output / 'manifest.json').write_bytes(b'previous')
+        (output / 'retained.bin').write_bytes(b'recovery data')
+        (self.work / 'manifest.json').write_bytes(b'first commit')
+        def partial_cleanup(backup):
+            (backup / 'manifest.json').unlink()
+            raise PermissionError('partial cleanup')
+        with patch('tools.reference.library.validation.shutil.rmtree', side_effect=partial_cleanup):
+            with self.assertLogs('tools.reference.library.validation', level='WARNING'):
+                _publish_directory(self.work, output)
+        self.assertEqual((output / 'manifest.json').read_bytes(), b'first commit')
+        retained = list(self.work.parent.glob('previous-library-*'))
+        self.assertEqual(len(retained), 1)
+        self.work.mkdir()
+        (self.work / 'manifest.json').write_bytes(b'second commit')
+        _publish_directory(self.work, output)
+        self.assertEqual((output / 'manifest.json').read_bytes(), b'second commit')
+        self.assertEqual((retained[0] / 'retained.bin').read_bytes(), b'recovery data')
+        self.assertEqual(list(self.work.parent.glob('previous-library-*')), retained)
+
     def test_native_text_requires_exact_payload_file(self):
         from tools.reference.library.validation import _required
         native = replace(self.export, category='native', files=(), details={

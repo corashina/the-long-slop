@@ -446,10 +446,11 @@ def _verify_managed(snapshot, root):
 
 
 def _publish_directory(work, output):
+    import logging
+    from uuid import uuid4
+
     output.parent.mkdir(parents=True, exist_ok=True)
-    backup = work.parent / f'previous-{output.name}'
-    if backup.exists():
-        raise ValueError(f'Previous publication recovery exists: {backup}')
+    backup = work.parent / f'previous-{output.name}-{uuid4().hex}'
     had_output = output.exists()
     if had_output:
         output.replace(backup)
@@ -460,7 +461,12 @@ def _publish_directory(work, output):
             backup.replace(output)
         raise
     if had_output:
-        shutil.rmtree(backup)
+        # The swap committed. Cleanup cannot roll back a partially deleted backup.
+        try:
+            shutil.rmtree(backup)
+        except OSError as error:
+            logging.getLogger(__name__).warning(
+                'Published %s; backup cleanup failed at %s: %s', output, backup, error)
 
 
 def publish_library(snapshot: Snapshot, catalog: Catalog, exports: tuple[AssetExport, ...], work: Path, output: Path) -> LibraryReceipt:
