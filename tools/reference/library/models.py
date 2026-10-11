@@ -257,7 +257,17 @@ def _import_geometry(writer, output, identity):
     return mesh
 
 
-def _texture(writer, owner, environment, role, floats):
+def _normal_rgb(image):
+    from math import sqrt
+    from PIL import Image
+    result = Image.new('RGB', image.size)
+    result.putdata([(round(r*a/255), g,
+                     round((sqrt(max(0., 1.-(2*r*a/65025-1)**2-(2*g/255-1)**2))+1)*127.5))
+                    for r,g,_,a in image.convert('RGBA').getdata()])
+    return result
+
+
+def _texture(writer, owner, environment, role, floats, standard, coordinates):
     from PIL import Image
     reader = writer.source.resolve(owner, environment['m_Texture'])
     if reader is None: return None
@@ -270,20 +280,27 @@ def _texture(writer, owner, environment, role, floats):
     if not data.get('m_CompleteImageSize',0):
         writer.texture_limits.append({'source':asdict(identity),'role':role,'reason':'Source texture contains no stored pixels.'})
         return None
+    if role == 'normal' and not standard:
+        writer.texture_limits.append({'source':asdict(identity),'role':role,
+            'reason':'Normal packing needs a supported Unity shader adapter.'})
+        return None
     settings = data['m_TextureSettings']
     color_space = 'linear' if role in ('normal','metallic_roughness','occlusion') else 'srgb'
     adaptation = floats.get('_GlossMapScale',1.) if role == 'metallic_roughness' else None
-    texture_key = (identity,role,adaptation)
+    conversion = 'rg-or-ag' if standard and role == 'normal' else 'unity-g' if standard and role == 'occlusion' else ''
+    texture_key = (identity,role,adaptation,conversion)
     if texture_key not in writer.textures:
         original = writer.library_output / f'images/{identity.file}/{identity.path_id}/source.png'
-        name = role + (f'-{adaptation.hex()}' if isinstance(adaptation,float) else '')
+        name = role + (f'-{conversion}' if conversion else '') + (f'-{adaptation.hex()}' if isinstance(adaptation,float) else '')
         derived = writer.library_output / f'models/textures/{identity.file}/{identity.path_id}/{name}.png'
         if not original.is_file() or not derived.is_file():
-            texture = writer.source.object(reader)
-            image = texture.image
-            original.parent.mkdir(parents=True,exist_ok=True)
-            if not original.is_file(): image.save(original)
-            image = image.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+            if not original.is_file():
+                original.parent.mkdir(parents=True,exist_ok=True)
+                writer.source.object(reader).image.save(original)
+            with Image.open(original) as stored:
+                image = stored.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+            if conversion == 'rg-or-ag': image = _normal_rgb(image)
+            elif conversion == 'unity-g': image = image.convert('RGB').getchannel('G')
             if role == 'metallic_roughness':
                 red,_,_,alpha = image.convert('RGBA').split()
                 roughness = alpha.point(lambda value:round(255-value*adaptation))
@@ -304,14 +321,16 @@ def _texture(writer, owner, environment, role, floats):
         writer.document.images.append(gl.Image(uri=quote(Path(os.path.relpath(derived,writer.output.parent)).as_posix(),safe='/'),
             extras={'source':asdict(identity),'source_image':original.relative_to(writer.library_output).as_posix(),
                     'role':role,'color_space':color_space,'orientation':'flip_y',
-                    'adaptation':'Unity metallic R and smoothness A to glTF roughness G and metallic B' if role == 'metallic_roughness' else 'source pixels'}))
+                    'adaptation':'Unity RG/AG packed normal to glTF RGB XYZ' if conversion == 'rg-or-ag' else
+                                 'Unity occlusion G to glTF R' if conversion == 'unity-g' else
+                                 'Unity metallic R and smoothness A to glTF roughness G and metallic B' if role == 'metallic_roughness' else 'source pixels'}))
         writer.textures[texture_key] = len(writer.document.textures)
         writer.document.textures.append(gl.Texture(source=image_index,sampler=sampler))
         getattr(writer.source,'object_cache',{}).pop(key(reader),None)
     if 'KHR_texture_transform' not in writer.document.extensionsUsed: writer.document.extensionsUsed.append('KHR_texture_transform')
     return {'index':writer.textures[texture_key], 'extensions':{'KHR_texture_transform':{
-        'offset':[environment['m_Offset']['x'],environment['m_Offset']['y']],
-        'scale':[environment['m_Scale']['x'],environment['m_Scale']['y']]}}}
+        'offset':[coordinates['m_Offset']['x'],coordinates['m_Offset']['y']],
+        'scale':[coordinates['m_Scale']['x'],coordinates['m_Scale']['y']]}}}
 
 
 def _material(writer, reader, cache):
@@ -331,6 +350,9 @@ def _material(writer, reader, cache):
         links.append({'property':name,'source':source_id(texture) if texture else None,
                       'scale':environment['m_Scale'],'offset':environment['m_Offset']})
     shader = writer.source.resolve(reader,data['m_Shader'])
+    standard = shader is not None and writer.source.read(shader).get('m_ParsedForm',{}).get('m_Name') in ('Standard','Standard (Specular setup)')
+    if standard and '_MainTex' not in environments:
+        raise ValueError(f'Standard material lacks primary UV coordinates: {identity}')
     def unit(value): return min(1.,max(0.,value))
     factors = [color[n] for n in ('r','g','b','a')]
     adapted = any(unit(v) != v for v in factors) or unit(floats.get('_Metallic',0.)) != floats.get('_Metallic',0.) or unit(1.-floats.get('_Glossiness',.5)) != 1.-floats.get('_Glossiness',.5)
@@ -342,15 +364,16 @@ def _material(writer, reader, cache):
             metallicFactor=unit(floats.get('_Metallic',0.)),roughnessFactor=unit(1.-floats.get('_Glossiness',.5))),
         extras={'source':asdict(identity),'typed_record':typed_record(identity),
                 'shader':source_id(shader) if shader else None,'textures':links,
+                'texture_adapter':'unity_standard_primary' if standard else 'authored_map_transforms',
                 'factor_adaptation':'Clamp out-of-range Unity factors to glTF bounds; native values retain typed links.' if adapted else 'none'})
     for name in ('_MainTex','_BaseMap'):
         if name in environments:
-            info = _texture(writer,reader,environments[name],'base_color',floats)
+            info = _texture(writer,reader,environments[name],'base_color',floats,standard,environments['_MainTex'] if standard else environments[name])
             if info: material.pbrMetallicRoughness.baseColorTexture = gl.TextureInfo(**info)
             break
     for name,role in (('_BumpMap','normal'),('_MetallicGlossMap','metallic_roughness'),('_OcclusionMap','occlusion'),('_EmissionMap','emission')):
         if name not in environments: continue
-        info = _texture(writer,reader,environments[name],role,floats)
+        info = _texture(writer,reader,environments[name],role,floats,standard,environments['_MainTex'] if standard else environments[name])
         if not info: continue
         if role == 'normal': material.normalTexture = gl.NormalMaterialTexture(scale=floats.get('_BumpScale',1.),**info)
         elif role == 'metallic_roughness':

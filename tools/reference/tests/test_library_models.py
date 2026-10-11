@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import patch
+from urllib.parse import unquote
 
 from tools.reference.library.types import Catalog, ObjectId, ObjectRecord
 from tools.reference.library.models import export_models, collect_model_hierarchy
@@ -294,3 +295,90 @@ class ModelTests(unittest.TestCase):
             doc=validate_gltf(path)
             self.assertIn('test%20assets',doc.buffers[0].uri)
             self.assertNotIn(' ',doc.buffers[0].uri)
+
+
+    def material_fixture(self, shader='Standard'):
+        from PIL import Image
+        source = Fixture()
+        source.add(27, 'Shader', {'m_ParsedForm': {'m_Name': shader}})
+        maps = []
+        for name in ('_MainTex', '_BumpMap', '_MetallicGlossMap', '_OcclusionMap', '_EmissionMap'):
+            maps.append([name, {'m_Texture': ptr(21), 'm_Scale': {'x': 3., 'y': 4.} if name == '_MainTex' else {'x': 1., 'y': 2.},
+                                'm_Offset': {'x': .2, 'y': .3} if name == '_MainTex' else {'x': .7, 'y': .8}}])
+        source.add(20, 'Material', {'m_Name': 'paint', 'm_Shader': ptr(27),
+            'm_SavedProperties': {'m_Floats': [['_GlossMapScale', 1.]], 'm_Colors': [], 'm_TexEnvs': maps}})
+        source.add(21, 'Texture2D', {'m_CompleteImageSize': 8, 'm_MipCount': 1, 'm_TextureFormat': 29,
+            'm_TextureSettings': {'m_WrapU': 0, 'm_WrapV': 1, 'm_FilterMode': 1, 'm_Aniso': 1, 'm_MipBias': 0}})
+        source.data[3]['m_Materials'] = [ptr(20)]
+        image = Image.new('RGBA', (1, 2))
+        image.putdata([(192, 64, 37, 255), (255, 64, 37, 192)])
+        original = source.object
+        source.object = lambda r: NS(image=image) if r.path_id == 21 else original(r)
+        return source
+
+    def material_document(self, source, root):
+        exports = self.run_export(source, root)
+        package = next(e for e in exports if e.source.path_id == 1)
+        path = root / next(f.file for f in package.files if f.file.endswith('.gltf'))
+        return exports, path, validate_gltf(path)
+
+    def test_standard_packed_normal_reconstructs_rgb(self):
+        from PIL import Image
+        import math
+        source = self.material_fixture()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            _, path, doc = self.material_document(source, root)
+            normal = doc.images[doc.textures[doc.materials[0].normalTexture.index].source]
+            with Image.open(path.parent / unquote(normal.uri)) as image:
+                z = math.sqrt(1 - (2*192/255-1)**2 - (2*64/255-1)**2)
+                expected = (192, 64, round((z+1)*127.5))
+                self.assertEqual(image.getpixel((0, 0)), expected)
+                self.assertEqual(image.getpixel((0, 1)), expected)
+            with Image.open(root / 'images/test.assets/21/source.png') as image:
+                self.assertEqual(image.getpixel((0, 1)), (255, 64, 37, 192))
+
+    def test_standard_occlusion_uses_green(self):
+        from PIL import Image
+        source = self.material_fixture()
+        with tempfile.TemporaryDirectory() as temp:
+            _, path, doc = self.material_document(source, Path(temp))
+            occlusion = doc.images[doc.textures[doc.materials[0].occlusionTexture.index].source]
+            with Image.open(path.parent / unquote(occlusion.uri)) as image:
+                self.assertEqual(image.convert('RGB').getpixel((0, 0))[0], 64)
+
+    def test_standard_primary_maps_use_main_uv_and_retain_native_uv(self):
+        source = self.material_fixture()
+        with tempfile.TemporaryDirectory() as temp:
+            _, _, doc = self.material_document(source, Path(temp))
+            material = doc.materials[0]
+            infos = [material.pbrMetallicRoughness.baseColorTexture, material.normalTexture,
+                     material.pbrMetallicRoughness.metallicRoughnessTexture, material.occlusionTexture, material.emissiveTexture]
+            for info in infos:
+                self.assertEqual(info.extensions['KHR_texture_transform'], {'scale': [3., 4.], 'offset': [.2, .3]})
+            native = next(t for t in material.extras['textures'] if t['property'] == '_BumpMap')
+            self.assertEqual(native['scale'], {'x': 1., 'y': 2.})
+            self.assertEqual(native['offset'], {'x': .7, 'y': .8})
+
+    def test_unrelated_shader_keeps_map_uv_and_role_receipts_are_deterministic(self):
+        source = self.material_fixture('Custom/Other')
+        with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:
+            exports, _, doc = self.material_document(source, Path(first))
+            material = doc.materials[0]
+            self.assertEqual(material.emissiveTexture.extensions['KHR_texture_transform'], {'scale': [1., 2.], 'offset': [.7, .8]})
+            self.assertIsNone(material.normalTexture)
+            package = next(e for e in exports if e.source.path_id == 1)
+            self.assertEqual(package.details['texture_limits'][0]['role'], 'normal')
+            self.assertEqual(next(t for t in material.extras['textures'] if t['property'] == '_BumpMap')['source']['path_id'], 21)
+            repeated, _, _ = self.material_document(source, Path(second))
+            self.assertEqual([e.files for e in exports], [e.files for e in repeated])
+
+
+    def test_standard_role_files_and_receipts_are_deterministic(self):
+        source = self.material_fixture()
+        with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:
+            exports, _, doc = self.material_document(source, Path(first))
+            self.assertEqual(len({image.uri for image in doc.images}), 5)
+            self.assertEqual({image.extras['role'] for image in doc.images}, {'base_color', 'normal', 'metallic_roughness', 'occlusion', 'emission'})
+            repeated, _, _ = self.material_document(source, Path(second))
+            self.assertEqual([e.files for e in exports], [e.files for e in repeated])
