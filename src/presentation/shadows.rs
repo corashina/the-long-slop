@@ -95,9 +95,9 @@ fn reserve_views(
 ) {
     for slot in &mut views.slots {
         if let Some(key) = slot.key {
-            slot.phase = phases.remove(&key);
-            slot.light_key = keys.remove(&key);
-            slot.pipeline = pipelines.remove(&key);
+            super::shadow_cache::retain_removed(&mut slot.phase, phases.remove(&key));
+            super::shadow_cache::retain_removed(&mut slot.light_key, keys.remove(&key));
+            super::shadow_cache::retain_removed(&mut slot.pipeline, pipelines.remove(&key));
         }
     }
     // Main-world flags still drive caster visibility. The atlas owns GPU allocation.

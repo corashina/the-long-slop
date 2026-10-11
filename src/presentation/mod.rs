@@ -2,6 +2,7 @@ pub mod camera;
 pub mod lighting;
 pub mod materials;
 pub mod reference;
+mod shadow_cache;
 pub mod shadows;
 pub mod world;
 
