@@ -18,6 +18,7 @@ struct Part {
     rim: bool,
     radius: f32,
     mass: f32,
+    last_mass: f32,
     rotation: Rotation,
     tire_mount: Option<Pose>,
     tire: Option<usize>,
@@ -94,6 +95,7 @@ impl WheelAssemblies {
                 rim,
                 radius: record.radius,
                 mass: item.mass_kg,
+                last_mass: f32::NAN,
                 rotation: Rotation::from_array(record.local_rotation_after_mount),
                 tire_mount,
                 tire: None,
@@ -374,7 +376,7 @@ impl WheelAssemblies {
                 ItemLocation::Attached(self.parts[rim].item);
         }
         self.slots[slot].rim = None;
-        self.update_body_mass(rim, body, physics);
+        self.update_body_mass(rim, body, items, physics);
         self.sync(items, physics)?;
         physics.refresh_queries();
         Ok(self.parts[rim].item)
@@ -480,8 +482,8 @@ impl WheelAssemblies {
         self.place_part(tire, body, Pose::IDENTITY, true, items, physics)?;
         items.get_mut(self.parts[tire].item).unwrap().location = ItemLocation::World;
         self.parts[rim].tire = None;
-        self.update_body_mass(rim, rim_body, physics);
-        self.update_body_mass(tire, body, physics);
+        self.update_body_mass(rim, rim_body, items, physics);
+        self.update_body_mass(tire, body, items, physics);
         self.sync(items, physics)?;
         physics.refresh_queries();
         Ok((item, self.parts[tire].item))
@@ -527,7 +529,7 @@ impl WheelAssemblies {
         }
         items.get_mut(tire_id).unwrap().location = ItemLocation::Attached(rim_id);
         self.parts[rim].tire = Some(tire);
-        self.update_body_mass(rim, body, physics);
+        self.update_body_mass(rim, body, items, physics);
         self.sync(items, physics)?;
         physics.refresh_queries();
         Ok(rim_id)
@@ -584,14 +586,34 @@ impl WheelAssemblies {
         }
         Ok(())
     }
-    fn update_body_mass(&self, rim: usize, body: RigidBodyHandle, physics: &mut PhysicsWorld) {
+    // This module owns complete loose-wheel mass, including general part descendants.
+    // The source member list is cached at construction; transactions move their body ownership.
+    fn update_body_mass(
+        &mut self,
+        rim: usize,
+        body: RigidBodyHandle,
+        items: &ItemStore,
+        physics: &mut PhysicsWorld,
+    ) {
         let mass = self.parts[rim].mass
             + self.parts[rim]
                 .tire
-                .map_or(0.0, |tire| self.parts[tire].mass);
-        let world = physics.rapier_mut();
-        world.bodies[body].set_additional_mass(mass, true);
-        world.bodies[body].recompute_mass_properties_from_colliders(&world.colliders);
+                .map_or(0.0, |tire| self.parts[tire].mass)
+            + self
+                .general_mass
+                .iter()
+                .filter_map(|(id, dry)| {
+                    let item = items.get(*id)?;
+                    (item.body == Some(body))
+                        .then(|| dry + item.fluid.as_ref().map_or(0., |f| f.mixture.total()))
+                })
+                .sum::<f32>();
+        if self.parts[rim].last_mass != mass {
+            let world = physics.rapier_mut();
+            world.bodies[body].set_additional_mass(mass, true);
+            world.bodies[body].recompute_mass_properties_from_colliders(&world.colliders);
+            self.parts[rim].last_mass = mass;
+        }
     }
 
     pub fn sync(
@@ -667,6 +689,14 @@ impl WheelAssemblies {
                 if *collider.position() != world {
                     collider.set_position(world);
                 }
+            }
+        }
+        for index in 0..self.parts.len() {
+            if let Some(item) = items.get(self.parts[index].item)
+                && matches!(item.location, ItemLocation::World | ItemLocation::Held)
+                && let Some(body) = item.body
+            {
+                self.update_body_mass(index, body, items, physics);
             }
         }
         for &(id, dry) in &self.general_mass {

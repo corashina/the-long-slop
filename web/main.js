@@ -10,6 +10,8 @@ const prompt = document.querySelector('#action-prompt');
 const target = document.querySelector('#target');
 const detail = document.querySelector('#target-detail');
 const heldLabel = document.querySelector('#held');
+const throwCharge = document.querySelector('#throw-charge');
+const throwLevel = document.querySelector('#throw-level');
 const engineLabel = document.querySelector('#engine');
 const speed = document.querySelector('#speed');
 const cameraMode = document.querySelector('#camera-mode');
@@ -98,7 +100,7 @@ window.gameState = { speedKmh: 0, camera: 'First person', x: 0, y: 0, z: 0, cont
   frameSteps: 0, totalSteps: 0, activeChunks: 0, colliderCount: 0, absoluteX: 0, absoluteY: 0, absoluteZ: 0,
   originX: 0, originY: 0, originZ: 0, rebases: 0, travelM: 0, lateralBand: 0, fuelLiters: 0,
   paused: false, started: false, target: '', targetAction: '', heldItem: '', rpm: 0, ignition: false,
-  running: false, starter: false, seated: false, handbrake: true, fluidVolumes:[0,0,0,0,0,0] };
+  running: false, starter: false, seated: false, handbrake: true, throwCharge: 0, throwActive: false, fluidVolumes:[0,0,0,0,0,0] };
 window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, chunks, colliders, absoluteX, absoluteY, absoluteZ,
   originX, originY, originZ, rebases, travelM, lateralBand, fuelLiters, paused, started) => {
   const state = window.gameState;
@@ -119,9 +121,12 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, chunks, colliders, abs
   if (lastPaused !== paused) { pauseScreen.hidden = !paused || !started; lastPaused = paused; }
   crosshair.hidden = paused || !started || !mode;
 };
-window.gameDetail = (name, action, amount, condition, held, rpm, ignition, running, starter, seated, handbrake, gasoline,oil,alcohol,water,blood,diesel) => {
+window.gameDetail = (name, action, amount, condition, held, charge, throwing, rpm, ignition, running, starter, seated, handbrake, gasoline,oil,alcohol,water,blood,diesel) => {
   const state = window.gameState;
   state.target = name; state.targetAction = action; state.heldItem = held;
+  state.throwCharge = charge; state.throwActive = throwing;
+  throwCharge.hidden = !throwing;
+  throwLevel.value = Math.max(0, Math.min(1, charge));
   state.rpm = rpm; state.ignition = ignition; state.running = running;
   state.starter = starter; state.seated = seated; state.handbrake = handbrake;
   const volumes=state.fluidVolumes;

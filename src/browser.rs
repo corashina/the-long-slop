@@ -50,6 +50,8 @@ extern "C" {
         amount: f32,
         condition: f32,
         held: &str,
+        throw_charge: f32,
+        throw_active: bool,
         rpm: f32,
         ignition: bool,
         running: bool,

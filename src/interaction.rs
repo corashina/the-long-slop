@@ -1,5 +1,6 @@
 pub mod carry;
 pub mod items;
+pub mod labels;
 pub mod lighting;
 pub mod mechanisms;
 pub mod parts;
@@ -360,6 +361,9 @@ impl InteractionState {
     pub fn throw_charge(&self) -> f32 {
         self.carry.throw_charge()
     }
+    pub fn throw_active(&self) -> bool {
+        self.carry.throw_active()
+    }
     pub fn push_steering(&self) -> Option<f32> {
         self.push.steering()
     }
@@ -640,7 +644,9 @@ impl InteractionState {
                 action = Some(InteractionAction::Pickup(target.item));
             }
         }
-        if blocked_install && (input.held | input.pressed) & keys::GRAB != 0 {
+        if blocked_install
+            && (self.carry.throw_active() || (input.held | input.pressed) & keys::GRAB != 0)
+        {
             self.carry.cancel_input();
         }
         let push_target = aim.push_target.filter(|target| valid(*target));

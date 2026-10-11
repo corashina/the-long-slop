@@ -66,6 +66,9 @@ impl CarryState {
     pub fn throw_charge(&self) -> f32 {
         self.throw_charge
     }
+    pub fn throw_active(&self) -> bool {
+        self.throwing && self.held.is_some()
+    }
     pub fn cancel_input(&mut self) {
         self.throw_charge = 0.0;
         self.throwing = false;

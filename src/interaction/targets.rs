@@ -168,7 +168,13 @@ impl InteractionState {
                     }
                     _ => false,
                 });
-            if self.parts.covered(target.item) {
+            if items.get(target.item).is_some_and(|item| {
+                matches!(
+                    item.location,
+                    ItemLocation::WheelSlot(_) | ItemLocation::PartSlot(_)
+                )
+            }) && self.parts.covered(target.item)
+            {
                 aim.grab_target = None;
                 aim.grab_block = Some(InteractionBlock::Covered);
             } else if !available {
@@ -266,8 +272,17 @@ impl InteractionState {
                             && self.is_wheel(parent)
                         {
                             parent
-                        } else {
+                        } else if matches!(action, QueryAction::Removal)
+                            && items.get(id).is_some_and(|item| {
+                                matches!(
+                                    item.location,
+                                    ItemLocation::WheelSlot(_) | ItemLocation::PartSlot(_)
+                                )
+                            })
+                        {
                             self.parts.covering_item(id).unwrap_or(id)
+                        } else {
+                            id
                         }
                     })
                     .filter(|id| {
@@ -366,6 +381,8 @@ impl InteractionState {
                     "E / LMB: switch"
                 } else if self.mechanisms.turn_state(target.item).is_some() {
                     "E: switch"
+                } else if self.held().is_none() && aim.grab_target.is_some() {
+                    "Hold E + mouse: move · F: remove"
                 } else {
                     "Hold E + mouse: move"
                 };

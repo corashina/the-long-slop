@@ -245,6 +245,8 @@ impl PartAttachments {
                 let collider = &physics.rapier().colliders[h];
                 shape.part_local = to_rapier(items.get(p.reference.item).unwrap().pose).inverse()
                     * *collider.position();
+                // Source dry mass already includes these shapes.
+                physics.rapier_mut().colliders[h].set_density(0.);
             }
             if let Some(slot) = p.slot {
                 items.get_mut(p.reference.item).unwrap().location =

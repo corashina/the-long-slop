@@ -1151,3 +1151,251 @@ fn source_parts_scan_then_f_installs_after_removal() {
         );
     }
 }
+
+fn fit_spare_hubcap(g: &mut GarageRuntime, r: &ReferenceManifest) -> (ItemId, ItemId, ItemId) {
+    let rim = ItemId(126);
+    let cap = ItemId(44);
+    let tire = r
+        .items
+        .iter()
+        .find(|i| {
+            i.attached_to == Some(rim)
+                && matches!(i.kind, my_summer_slop::reference::ItemKind::Tire)
+        })
+        .unwrap()
+        .id;
+    detach(g, cap);
+    let slot = r
+        .wheel_parts
+        .iter()
+        .find(|p| p.item == rim)
+        .unwrap()
+        .cover_slot
+        .unwrap();
+    g.area
+        .interaction
+        .parts
+        .install(cap, slot, &mut g.area.items, &mut g.physics)
+        .unwrap();
+    g.area
+        .interaction
+        .parts
+        .mount_mechanism(cap, &mut g.area.interaction.mechanisms);
+    g.area
+        .interaction
+        .sync_parts(&mut g.area.items, &mut g.physics)
+        .unwrap();
+    g.wheels.sync(&mut g.area.items, &mut g.physics).unwrap();
+    (rim, tire, cap)
+}
+fn body_mass(g: &mut GarageRuntime, item: ItemId) -> f32 {
+    let body = g.area.items.get(item).unwrap().body.unwrap();
+    let world = g.physics.rapier_mut();
+    world.bodies[body].recompute_mass_properties_from_colliders(&world.colliders);
+    world.bodies[body].mass()
+}
+#[test]
+#[ignore = "requires installed source export"]
+fn covered_loose_wheel_mass_conserves_add_remove_and_transfer() {
+    let r = installed();
+    let mut g = GarageRuntime::new(&r).unwrap();
+    let rim = ItemId(126);
+    let before = body_mass(&mut g, rim);
+    let (_, _, cap) = fit_spare_hubcap(&mut g, &r);
+    let cap_mass = r.items.iter().find(|i| i.id == cap).unwrap().mass_kg;
+    assert!((body_mass(&mut g, rim) - before - cap_mass).abs() < 1e-4);
+    detach(&mut g, cap);
+    g.wheels.sync(&mut g.area.items, &mut g.physics).unwrap();
+    assert!((body_mass(&mut g, rim) - before).abs() < 1e-4);
+    let detached = body_mass(&mut g, cap);
+    assert!(
+        (detached - cap_mass).abs() < 1e-4,
+        "cap mass {detached}, expected {cap_mass}, body {:?}, location {:?}",
+        g.area.items.get(cap).unwrap().body,
+        g.area.items.get(cap).unwrap().location
+    );
+    let target = &r.wheel_slots[0];
+    let old_cap = g.area.interaction.parts.covering_item(target.rim).unwrap();
+    detach(&mut g, old_cap);
+    g.wheels
+        .remove(target.id, &mut g.area.items, &mut g.physics)
+        .unwrap();
+    g.area
+        .interaction
+        .sync_parts(&mut g.area.items, &mut g.physics)
+        .unwrap();
+    let target_before = body_mass(&mut g, target.rim);
+    let slot = r
+        .wheel_parts
+        .iter()
+        .find(|p| p.item == target.rim)
+        .unwrap()
+        .cover_slot
+        .unwrap();
+    g.area
+        .interaction
+        .parts
+        .install(cap, slot, &mut g.area.items, &mut g.physics)
+        .unwrap();
+    g.area
+        .interaction
+        .parts
+        .mount_mechanism(cap, &mut g.area.interaction.mechanisms);
+    g.area
+        .interaction
+        .sync_parts(&mut g.area.items, &mut g.physics)
+        .unwrap();
+    g.wheels.sync(&mut g.area.items, &mut g.physics).unwrap();
+    assert!((body_mass(&mut g, target.rim) - target_before - cap_mass).abs() < 1e-4);
+    assert!((body_mass(&mut g, rim) - before).abs() < 1e-4);
+}
+#[test]
+#[ignore = "requires installed source export"]
+fn covered_loose_wheel_resolve_and_f_pick_up_rim_and_tire_surfaces() {
+    use my_summer_slop::reference::{ActionBinding, ColliderId};
+    use my_summer_slop::vehicle::VehiclePose;
+    use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder};
+    let r = installed();
+    for tire_surface in [false, true] {
+        let mut g = GarageRuntime::new(&r).unwrap();
+        let (rim, tire, cap) = fit_spare_hubcap(&mut g, &r);
+        let surface = if tire_surface { tire } else { rim };
+        // Isolate the selected source action binding from neighboring geometry.
+        let point = Vector::new(100., 10., 100.);
+        let (_, collider) = g.physics.rapier_mut().insert(
+            RigidBodyBuilder::fixed().translation(point),
+            ColliderBuilder::ball(0.1)
+                .sensor(true)
+                .user_data(surface.0 as u128 + 1),
+        );
+        g.area.interaction.bind_surface(
+            collider,
+            ActionBinding {
+                collider: ColliderId(0),
+                use_owner: None,
+                pickup_owner: Some(surface),
+                removal_owner: Some(surface),
+                push_owner: None,
+            },
+        );
+        g.physics.refresh_queries();
+        let aim = g.area.interaction.resolve(
+            &g.physics,
+            VehiclePose {
+                position: (point + Vector::Z).to_array(),
+                rotation: [0., 0., 0., 1.],
+            },
+            &g.area.items,
+        );
+        assert_eq!(
+            aim.grab_target.map(|t| t.item),
+            Some(rim),
+            "surface {surface:?}: {aim:?}"
+        );
+        g.area.interaction.step(
+            FrameInput {
+                pressed: keys::GRAB,
+                held: keys::GRAB,
+                ..Default::default()
+            },
+            aim,
+            &mut g.area.player,
+            &mut g.area.items,
+            &mut g.physics,
+            0.02,
+        );
+        assert_eq!(g.area.interaction.held(), Some(rim));
+        let body = g.area.items.get(rim).unwrap().body;
+        assert_eq!(g.area.items.get(tire).unwrap().body, body);
+        assert_eq!(g.area.items.get(cap).unwrap().body, body);
+        assert!(g.area.interaction.parts.covered(rim));
+    }
+}
+#[test]
+#[ignore = "requires installed source export"]
+fn removable_mechanism_prompt_shows_drag_and_removal() {
+    let r = installed();
+    let g = GarageRuntime::new(&r).unwrap();
+    let door = part(&r, "frdoor");
+    let collider = g.physics.rapier().colliders.iter().next().unwrap().0;
+    let target = AimTarget {
+        collider,
+        item: door,
+        distance: 1.,
+        point: [0.; 3],
+        slot: None,
+    };
+    let usable = r
+        .parts
+        .iter()
+        .find(|p| p.item == door)
+        .unwrap()
+        .usable
+        .unwrap();
+    let aim = ResolvedAim {
+        use_target: Some(AimTarget {
+            item: usable,
+            ..target
+        }),
+        grab_target: Some(target),
+        ..Default::default()
+    };
+    assert_eq!(
+        g.area.interaction.prompt(&aim, &g.area.items),
+        "Hold E + mouse: move · F: remove"
+    );
+    let aim = ResolvedAim {
+        grab_target: None,
+        ..aim
+    };
+    assert_eq!(
+        g.area.interaction.prompt(&aim, &g.area.items),
+        "Hold E + mouse: move"
+    );
+}
+
+#[test]
+#[ignore = "requires installed source export"]
+fn garage_door_use_labels_keep_passive_house_hidden() {
+    use my_summer_slop::interaction::labels::display_name;
+    let r = installed();
+    let g = GarageRuntime::new(&r).unwrap();
+    for name in ["GarageDoorRightCollider", "GarageDoorLeftCollider"] {
+        let item = r.items.iter().find(|i| i.name == name).unwrap();
+        assert_eq!(display_name(&r, &g.area.items, item.id), "Garage door");
+    }
+    let house = r.items.iter().find(|i| i.name == "haz02").unwrap();
+    assert_eq!(display_name(&r, &g.area.items, house.id), "");
+}
+
+#[test]
+#[ignore = "requires installed source export"]
+fn loose_wheel_mass_includes_nested_general_parts() {
+    let mut r = installed();
+    let cap = ItemId(44);
+    let mirror = part(&r, "rightmirror");
+    // Exercise a nested general part under the cover with source part records.
+    r.part_slots
+        .iter_mut()
+        .find(|s| s.part == Some(mirror))
+        .unwrap()
+        .owner = Some(cap);
+    let mut g = GarageRuntime::new(&r).unwrap();
+    let before = body_mass(&mut g, ItemId(126));
+    let (rim, _, _) = fit_spare_hubcap(&mut g, &r);
+    let extra: f32 = r
+        .items
+        .iter()
+        .filter(|i| i.id == cap || i.id == mirror)
+        .map(|i| i.mass_kg)
+        .sum();
+    assert_eq!(
+        g.area.items.get(mirror).unwrap().body,
+        g.area.items.get(rim).unwrap().body
+    );
+    assert!((body_mass(&mut g, rim) - before - extra).abs() < 1e-4);
+    detach(&mut g, mirror);
+    g.wheels.sync(&mut g.area.items, &mut g.physics).unwrap();
+    let detached = body_mass(&mut g, mirror);
+    assert!((body_mass(&mut g, rim) + detached - before - extra).abs() < 1e-4);
+}

@@ -2846,3 +2846,83 @@ fn carry_lifts_a_grounded_item_out_of_contact() {
         physics.rapier().bodies[body].translation()
     );
 }
+
+#[test]
+fn throw_hud_state_tracks_release_block_cancel_and_lost_hand() {
+    use my_summer_slop::interaction::{InteractionBlock, ResolvedAim};
+    for finish in 0..5 {
+        let (mut interaction, mut items, mut physics, mut player) = fixture();
+        interaction
+            .pickup_item(ItemId(1), [10., 2., -1.], &player, &mut items, &mut physics)
+            .unwrap();
+        interaction.step(
+            FrameInput::default(),
+            ResolvedAim::default(),
+            &mut player,
+            &mut items,
+            &mut physics,
+            0.02,
+        );
+        assert!(!interaction.throw_active());
+        interaction.step(
+            input(keys::GRAB, keys::GRAB),
+            ResolvedAim::default(),
+            &mut player,
+            &mut items,
+            &mut physics,
+            0.02,
+        );
+        assert!(interaction.throw_active());
+        assert!((interaction.throw_charge() - 0.03).abs() < 1e-6);
+        match finish {
+            0 => {
+                interaction.step(
+                    FrameInput {
+                        released: keys::GRAB,
+                        ..Default::default()
+                    },
+                    ResolvedAim::default(),
+                    &mut player,
+                    &mut items,
+                    &mut physics,
+                    0.02,
+                );
+            }
+            1 => {
+                interaction.step(
+                    input(keys::GRAB, 0),
+                    ResolvedAim {
+                        installation_block: Some(InteractionBlock::Occupied),
+                        ..Default::default()
+                    },
+                    &mut player,
+                    &mut items,
+                    &mut physics,
+                    0.02,
+                );
+            }
+            2 => interaction.cancel_input(),
+            4 => {
+                interaction.step(
+                    FrameInput {
+                        released: keys::GRAB,
+                        ..Default::default()
+                    },
+                    ResolvedAim {
+                        installation_block: Some(InteractionBlock::Occupied),
+                        ..Default::default()
+                    },
+                    &mut player,
+                    &mut items,
+                    &mut physics,
+                    0.02,
+                );
+            }
+            _ => {
+                interaction.drop_held(&mut items, &mut physics);
+            }
+        }
+        assert!(!interaction.throw_active(), "finish {finish}");
+        assert_eq!(interaction.throw_charge(), 0., "finish {finish}");
+    }
+}
