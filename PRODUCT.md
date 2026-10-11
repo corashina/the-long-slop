@@ -27,6 +27,9 @@ The source day cycle drives the sun, ambient light, and fog color. The car headl
 Sound follows the source rules with the original clips. It covers the engine, car, steps, doors, caps, wind, ambience, and menu buttons.
 
 Survival, weapons, other vehicles, multiplayer, saves, and deployment remain outside this stage.
+Unity shader effects and live mirror reflections are not reproduced.
+Terrain uses the source sand texture only. Biome blending and distant terrain are not reproduced.
+Sound has no radio, horn, door squeak, pour sound, or Doppler shift.
 The build does not claim identical Unity physics or full-game parity.
 
 ## Evidence

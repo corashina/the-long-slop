@@ -68,15 +68,9 @@ An empty fuel tank moves recovery to a station. Other recovery moves the car to 
 Restart restores the garage, supplies, car, origin, and trip distance.
 Close the driver door before reversing through the garage exit.
 
-## Scope and evidence
+## Scope
 
-Read [the approved scope](docs/specs/2026-10-09-garage-start-design.md) and [verification](docs/verification.md).
-Imported layout and recovered rules do not establish identical Unity physics or full-game parity.
-Unity shader effects and live mirror reflections are not reproduced.
-Sound has no radio, horn, door squeak, pour sound, or Doppler shift.
-Terrain uses the source sand texture only. Biome blending and distant terrain are not reproduced.
-The final browser walking route was skipped at the user's request. It remains unverified.
-The build has no survival system, save system, multiplayer, or public deployment.
+[PRODUCT.md](PRODUCT.md) defines the scope. [Verification](docs/verification.md) records checks and limits.
 
 ## Toolchain
 
