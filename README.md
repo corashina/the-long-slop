@@ -47,6 +47,7 @@ The build script writes the browser package to `web/pkg`.
 | X | Split a wheel or join compatible rim and tire | — |
 | Hold LMB | Fill an open container | — |
 | I | — | Tap ignition; hold starter |
+| L | — | Switch headlights: off, low beam, high beam |
 | C | — | Switch first person / chase view |
 | R | Recover car | Recover car |
 | P / Esc | Pause | Pause |

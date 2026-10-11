@@ -10,7 +10,7 @@ Rows marked out of scope need a `PRODUCT.md` change before work starts.
 | 2 | Material parity in the garage | `conditionmaterial`, `materialChangeScript` | Planned |
 | 3 | Original road, terrain, and biome generation | `roadGenScript`, `TerrainGenerator`, `TerrainGenerationJob` | Done for near terrain |
 | 4 | Roadside buildings, villages, and loot | `buildingscript`, `falugenscript`, `roadBuildingScript`, `newRandomStuffSpawnScript` | Next after 3 |
-| 5 | Day and night, headlights, and lamps | `napszakvaltakozas`, `headlightscript`, `interiorLightScript` | Open |
+| 5 | Day and night, headlights, and lamps | `napszakvaltakozas`, `headlightscript`, `interiorLightScript` | Day cycle and headlights done; lamps open |
 | 6 | Part wear, condition, and repair | `partconditionscript`, `partscript`, `carscript.DamageStuff` | Crashes and fitting done; repair open |
 | 7 | Audio: engine, steps, ambience, and radio | `soundMainScript`, `stepSoundScript`, `radioscript` | Out of scope |
 | 8 | Survival: hunger, thirst, food, and death | `survivalscript`, `ediblescript`, `wound` | Out of scope |
@@ -27,4 +27,5 @@ Feature 6 knocks wheels and car parts off in crashes. Each part fits again only 
 The source also lets some parts fit other slots, such as hood and trunk. Hubcaps stay on.
 Repair needs source tools such as the wire brush. They come with feature 4 loot.
 The source engine and battery have no condition.
+Feature 5 leaves street lamps, the interior light, rear lamps, stars, and clouds open.
 Multiplayer and VR stay out. They do not fit a single-player browser build.

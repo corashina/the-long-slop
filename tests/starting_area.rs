@@ -1436,3 +1436,32 @@ fn production_parts_come_off_and_fit_again() {
         runtime.area.items.get(part.item).unwrap().location == ItemLocation::World
     }));
 }
+
+#[test]
+#[ignore = "Requires exported Steam assets"]
+fn production_lights_key_cycles_headlights() {
+    let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+    let reference = my_summer_slop::reference::ReferenceManifest::from_json(&bytes).unwrap();
+    assert_eq!(reference.headlights.len(), 2);
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    let lights = FrameInput {
+        pressed: keys::LIGHTS,
+        ..FrameInput::default()
+    };
+    // Outside the car the key does nothing.
+    runtime.started = true;
+    runtime.step(&reference, lights);
+    assert_eq!(runtime.lamps, 0);
+    enter_source_driver(&mut runtime, &reference);
+    for lamps in [1, 2, 0] {
+        runtime.step(&reference, lights);
+        assert_eq!(runtime.lamps, lamps);
+        for _ in 0..60 {
+            runtime.step(&reference, FrameInput::default());
+        }
+        for headlight in &runtime.headlights {
+            assert_eq!(headlight.current, lamps);
+            assert_eq!(headlight.energy, 1.0);
+        }
+    }
+}

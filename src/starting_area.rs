@@ -457,6 +457,14 @@ pub struct GarageRuntime {
     pub target: Option<AimTarget>,
     pub wheels: crate::interaction::wheels::WheelAssemblies,
     pub parts: PartSlots,
+    /// Seconds into the source day cycle.
+    pub day_seconds: f32,
+    /// Terrain color at the player. The source samples it once per second.
+    pub terrain_color: [f32; 4],
+    /// `carscript.lampak`: off, low beam, or high beam.
+    pub lamps: usize,
+    pub headlights: Vec<crate::simulation::lights::Headlight>,
+    color_steps: u32,
     ignition_held: bool,
     auto_gear: usize,
     recovery_bounds: crate::reference::Bounds,
@@ -490,6 +498,11 @@ impl GarageRuntime {
         physics.refresh_queries();
         area.items.sync_poses(&physics);
         area.commit_poses(&physics, true);
+        let terrain_color = stream.generator.terrain_color(
+            stream
+                .origin
+                .absolute(reference.area.player_spawn.translation),
+        );
         let base_mass_kg =
             reference.vehicle.mass_kg - area.items.mounted_mass(reference.vehicle.item);
         let mut recovery_bounds = crate::reference::Bounds {
@@ -527,6 +540,15 @@ impl GarageRuntime {
             target: None,
             wheels,
             parts,
+            day_seconds: reference.day_cycle.start_seconds,
+            terrain_color,
+            lamps: 0,
+            headlights: reference
+                .headlights
+                .iter()
+                .map(crate::simulation::lights::Headlight::new)
+                .collect(),
+            color_steps: 0,
             ignition_held: false,
             auto_gear: reference
                 .vehicle
@@ -682,6 +704,19 @@ impl GarageRuntime {
         if driving && input.pressed & keys::SPACE != 0 {
             self.handbrake = !self.handbrake;
         }
+        if driving && input.pressed & keys::LIGHTS != 0 {
+            self.lamps = (self.lamps + 1) % crate::simulation::lights::LAMP_STATES;
+        }
+        let car = reference.vehicle.item;
+        for light in &mut self.headlights {
+            // Only a fitted headlight follows the switch.
+            if self.area.items.mounted(car, light.item) {
+                light.switch(self.lamps);
+            }
+            light.step(FIXED_DT);
+        }
+        self.day_seconds =
+            crate::simulation::day::advance(&reference.day_cycle, self.day_seconds, FIXED_DT);
         let snapshot = self.physics.snapshot();
         let speed = snapshot.speed_mps;
         let axis = ((driving && input.held & keys::FORWARD != 0) as u8 as f32)
@@ -731,7 +766,6 @@ impl GarageRuntime {
                 / reference.engine.auto_shift_clutch_rpm_range)
                 .clamp(0.0, 1.0)
         };
-        let car = reference.vehicle.item;
         let radiator_condition = self
             .area
             .items
@@ -852,6 +886,11 @@ impl GarageRuntime {
             self.area.player.focus_position(&self.physics)
         };
         let absolute = self.stream.origin.absolute(focus);
+        self.color_steps += 1;
+        if self.color_steps >= 60 {
+            self.color_steps = 0;
+            self.terrain_color = self.stream.generator.terrain_color(absolute);
+        }
         if self.stream.rebase(focus, &mut self.physics).is_some() {
             let old_origin = self.area.origin;
             self.area.sync_origin(self.stream.origin.offset);

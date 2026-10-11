@@ -2,6 +2,7 @@ use crate::browser::*;
 use crate::presentation::{
     self,
     camera::{CameraMode, DriveCamera},
+    lighting::{HeadlightBeam, HeadlightLens, Sun},
     reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
     world::{WorldVisual, WorldVisuals},
 };
@@ -84,6 +85,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
                 advance_physics,
                 sync_world,
                 sync_imported,
+                update_lighting,
                 update_camera,
                 update_hud,
             )
@@ -106,12 +108,9 @@ fn setup(
     commands.insert_resource(visuals);
     presentation::reference::spawn(&mut commands, &server, &reference.0);
     commands.spawn((
-        DirectionalLight {
-            color: Color::srgb(1.0, 0.91, 0.77),
-            illuminance: 9000.0,
-            ..default()
-        },
-        Transform::from_xyz(6.0, 9.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+        DirectionalLight::default(),
+        Sun,
+        Transform::IDENTITY,
         (0..32).collect::<RenderLayers>(),
     ));
     commands.spawn((
@@ -187,6 +186,9 @@ fn check_ready(
     ) {
         Ok(true) => {
             *frames += 1;
+            if *frames == 1 {
+                presentation::lighting::bind(&mut commands, &reference.0, &visuals.nodes);
+            }
             if *frames >= 2 {
                 drive.ready = true;
                 game_ready();
@@ -314,6 +316,37 @@ fn sync_imported(
     presentation::reference::sync_items(&drive.runtime.area, drive.clock.alpha(), &mut items);
     presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
 }
+fn update_lighting(
+    reference: Res<RuntimeReference>,
+    drive: Res<Drive>,
+    mut sun: Query<(&mut DirectionalLight, &mut Transform), With<Sun>>,
+    mut ambient: ResMut<GlobalAmbientLight>,
+    mut clear: ResMut<ClearColor>,
+    mut fog: Query<&mut DistanceFog>,
+    mut beams: Query<(&HeadlightBeam, &mut SpotLight, &mut Visibility)>,
+    mut lenses: Query<(&mut HeadlightLens, &Children)>,
+    primitives: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    presentation::lighting::sync_sky(
+        &reference.0,
+        &drive.runtime,
+        &mut sun,
+        &mut ambient,
+        &mut clear,
+        &mut fog,
+    );
+    presentation::lighting::sync_headlights(
+        &reference.0,
+        &drive.runtime,
+        &mut beams,
+        &mut lenses,
+        &primitives,
+        &mut commands,
+        &mut materials,
+    );
+}
 fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveCamera>>) {
     for mut transform in &mut query {
         *transform =
@@ -398,7 +431,7 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
         runtime.notice
     } else if runtime.area.player.seat().is_some() && !usable_target {
         if runtime.area.player.driving() {
-            "E: exit · I: starter · Space: handbrake · C: camera"
+            "E: exit · I: starter · L: lights · Space: handbrake · C: camera"
         } else {
             "E: exit · C: camera"
         }
