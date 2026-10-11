@@ -36,6 +36,7 @@ pub struct GarageRuntime {
     pub horn: bool,
     /// `carscript.DamageStuff` input: the forward speed change in km/h this step.
     pub crash_kmh: f32,
+    pub radio: crate::simulation::radio::Radio,
     color_steps: u32,
     ignition_held: bool,
     auto_gear: usize,
@@ -123,6 +124,7 @@ impl GarageRuntime {
             clutch: 0.0,
             horn: false,
             crash_kmh: 0.0,
+            radio: crate::simulation::radio::Radio::new(&reference.audio.radio),
             color_steps: 0,
             ignition_held: false,
             auto_gear: reference
@@ -163,6 +165,11 @@ impl GarageRuntime {
             &mut self.area.player,
             &mut self.area.items,
             &mut self.physics,
+            FIXED_DT,
+        );
+        self.radio.step(
+            &reference.audio,
+            self.area.interaction.radio_input(),
             FIXED_DT,
         );
         match action {
@@ -272,6 +279,7 @@ impl GarageRuntime {
         let mut walking_input = input;
         if (input.held & keys::USE != 0 && self.area.interaction.dragging_hinge().is_some())
             || (input.held & keys::USE != 0 && self.area.interaction.tuning_opening().is_some())
+            || self.area.interaction.tuning_radio()
             || (input.held & (keys::ROTATE | keys::MOVE) != 0
                 && self.area.interaction.held().is_some())
         {

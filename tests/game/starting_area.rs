@@ -102,6 +102,7 @@ fn restart_after_carry_detach_rebase() {
                 point: [10.0, 2.0, -1.0],
                 slot: None,
                 part_slot: false,
+                collider: None,
             }),
             &mut runtime.area.player,
             &mut runtime.area.items,
@@ -582,6 +583,7 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
             point: [0.8, 0.7, 0.0],
             slot: None,
             part_slot: false,
+            collider: None,
         }),
         &mut runtime.area.player,
         &mut runtime.area.items,
@@ -625,6 +627,7 @@ fn dry_recovery_keeps_a_carried_can_reachable() {
             point: [10.0, 2.0, -1.0],
             slot: None,
             part_slot: false,
+            collider: None,
         }),
         &mut runtime.area.player,
         &mut runtime.area.items,
@@ -1538,4 +1541,74 @@ fn production_driver_hears_starter_and_handbrake_inside_the_car() {
     let horn = audio.voice(slot::HORN);
     assert_eq!(horn.clip, reference.audio.car.horn.voice.clip, "horn clip");
     assert!(horn.volume > 0.9, "horn volume {}", horn.volume);
+}
+
+fn aim_at_collider(
+    runtime: &mut GarageRuntime,
+    reference: &my_summer_slop::reference::ReferenceManifest,
+    id: my_summer_slop::reference::ColliderId,
+) {
+    let center = runtime
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, collider)| (collider.user_data >> 64) as u32 == id.0)
+        .map(|(_, collider)| collider.compute_aabb().center())
+        .unwrap();
+    let view = my_summer_slop::vehicle::to_rapier(runtime.area.player.view_pose(&runtime.physics));
+    let body = my_summer_slop::vehicle::to_rapier(runtime.area.player.body_pose(&runtime.physics));
+    let delta = body.rotation.inverse() * (center - view.translation);
+    let yaw = delta.x.atan2(-delta.z).to_degrees();
+    let pitch = (-delta.y)
+        .atan2((delta.x * delta.x + delta.z * delta.z).sqrt())
+        .to_degrees();
+    runtime.step(
+        reference,
+        FrameInput {
+            mouse: [
+                yaw - runtime.area.player.yaw_degrees(),
+                pitch - runtime.area.player.pitch_degrees(),
+            ],
+            ..FrameInput::default()
+        },
+    );
+}
+
+#[test]
+#[ignore = "Requires exported Steam assets"]
+fn production_radio_knobs_tune_a_station() {
+    use my_summer_slop::audio::{AudioState, slot};
+    let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+    let reference = my_summer_slop::reference::ReferenceManifest::from_json(&bytes).unwrap();
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    enter_source_driver(&mut runtime, &reference);
+    let mut audio = AudioState::new(&reference, &runtime);
+    let mut scroll = |runtime: &mut GarageRuntime, button, wheel: f32, notches| {
+        aim_at_collider(runtime, &reference, button);
+        for _ in 0..notches {
+            runtime.step(
+                &reference,
+                FrameInput {
+                    wheel,
+                    ..FrameInput::default()
+                },
+            );
+            audio.step(&reference, runtime, false, 1.0 / 60.0);
+        }
+    };
+    let radio = &reference.audio.radio;
+    scroll(&mut runtime, radio.volume_button, 1.0, 5);
+    assert!(
+        runtime.radio.on,
+        "scroll on the volume knob turns the radio on"
+    );
+    assert!((runtime.radio.volume - 0.5).abs() < 1e-3);
+    // FM 94.5 is at the edge of Rock at 94.1, so only static plays.
+    scroll(&mut runtime, radio.tune_button, -1.0, 4);
+    assert!((runtime.radio.frequency(radio) - 94.1).abs() < 1e-3);
+    assert!(runtime.area.player.seat().is_some());
+    let station = audio.voice(slot::RADIO);
+    assert!(station.clip.is_some() && station.volume > 0.0);
+    assert!(audio.voice(slot::RADIO_NOISE).volume < 1e-3);
 }

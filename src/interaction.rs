@@ -10,9 +10,10 @@ use feedback::ActionMask;
 use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
 use crate::reference::{
-    BodyId, HingeRecord, ItemId, ItemKind, OpeningId, OpeningRecord, PlayerReference,
+    BodyId, ColliderId, HingeRecord, ItemId, ItemKind, OpeningId, OpeningRecord, PlayerReference,
     ReferenceError, ReferenceManifest, SeatId, TankRole, WheelSlotId,
 };
+use crate::simulation::radio::RadioInput;
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
 use items::{ItemLocation, ItemStore};
@@ -26,6 +27,9 @@ use std::collections::{HashMap, HashSet};
 
 pub use crate::vehicle::SLOT_SENSOR_FLAG;
 
+/// `fpscontroller` turns a held knob once per 0.2 seconds of mouse movement.
+const RADIO_MOUSE_SECONDS: f32 = 0.2;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AimTarget {
     pub item: ItemId,
@@ -34,6 +38,8 @@ pub struct AimTarget {
     pub slot: Option<WheelSlotId>,
     /// The ray hit the empty slot of `item`.
     pub part_slot: bool,
+    /// The source collider the ray hit.
+    pub collider: Option<ColliderId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -148,6 +154,20 @@ pub struct InteractionState {
     latched_hinge: Option<(usize, Vector)>,
     hinge_release_distance_squared: f32,
     tuning_opening: Option<OpeningId>,
+    radio: RadioButtons,
+    radio_input: RadioInput,
+    radio_tuning: bool,
+    /// Seconds until the held radio knob turns again with the mouse.
+    radio_wait: f32,
+}
+
+/// `radioscript` buttons: two tune knobs and the band switch.
+#[derive(Clone, Copy)]
+struct RadioButtons {
+    item: ItemId,
+    volume: ColliderId,
+    tune: ColliderId,
+    band: ColliderId,
 }
 
 #[derive(Clone, Copy)]
@@ -334,6 +354,15 @@ impl InteractionState {
             latched_hinge: None,
             hinge_release_distance_squared: (reference.player.aim_reach * 1.5).powi(2),
             tuning_opening: None,
+            radio: RadioButtons {
+                item: reference.audio.radio.item,
+                volume: reference.audio.radio.volume_button,
+                tune: reference.audio.radio.tune_button,
+                band: reference.audio.radio.band_button,
+            },
+            radio_input: RadioInput::default(),
+            radio_tuning: false,
+            radio_wait: 0.0,
         })
     }
 
@@ -414,6 +443,14 @@ impl InteractionState {
     pub fn tuning_opening(&self) -> Option<OpeningId> {
         self.tuning_opening
     }
+    /// The player holds USE on a radio knob.
+    pub fn tuning_radio(&self) -> bool {
+        self.radio_tuning
+    }
+    /// Radio button presses from the last step.
+    pub fn radio_input(&self) -> RadioInput {
+        self.radio_input
+    }
     pub fn rebase(&mut self, shift: [f32; 3]) {
         for hinge in &mut self.hinges {
             if hinge.parent.is_none() {
@@ -454,6 +491,7 @@ impl InteractionState {
             point: ray.point_at(hit.time_of_impact).to_array(),
             slot: (data & SLOT_SENSOR_FLAG != 0).then_some(WheelSlotId((data >> 96) as u8)),
             part_slot: data & parts::PART_SLOT_FLAG != 0,
+            collider: Some(ColliderId((data >> 64) as u32)).filter(|id| id.0 != 0),
         })
     }
 
@@ -509,6 +547,7 @@ impl InteractionState {
                         point: point.to_array(),
                         slot: None,
                         part_slot: false,
+                        collider: None,
                     })
                 } else {
                     self.latched_hinge = None;
@@ -524,17 +563,26 @@ impl InteractionState {
         let mut action = None;
         let mut carry_input = input;
         self.tuning_opening = None;
-        let can_use_target = use_target.is_some_and(|target| {
-            (self
-                .hinges
-                .iter()
-                .any(|hinge| hinge.reference.item == target.item)
-                && fitted(&self.parts, items, target.item))
-                || self.openings.iter().any(|opening| {
-                    opening.reference.cap == target.item
-                        && (opening.reference.can_toggle || opening.reference.can_tune)
-                })
-        });
+        self.radio_input = RadioInput::default();
+        self.radio_tuning = false;
+        self.radio_wait -= dt;
+        let radio = self.radio;
+        let radio_button = use_target
+            .filter(|target| target.item == radio.item)
+            .and_then(|target| target.collider)
+            .filter(|id| [radio.volume, radio.tune, radio.band].contains(id));
+        let can_use_target = radio_button.is_some()
+            || use_target.is_some_and(|target| {
+                (self
+                    .hinges
+                    .iter()
+                    .any(|hinge| hinge.reference.item == target.item)
+                    && fitted(&self.parts, items, target.item))
+                    || self.openings.iter().any(|opening| {
+                        opening.reference.cap == target.item
+                            && (opening.reference.can_toggle || opening.reference.can_tune)
+                    })
+            });
         if input.pressed & keys::USE != 0 && player.seat().is_some() && !can_use_target {
             if let Some(seat) = self
                 .seats
@@ -577,6 +625,28 @@ impl InteractionState {
                         opening.valve = 0.0;
                     }
                     action = Some(InteractionAction::Cap(opening.reference.id));
+                }
+            }
+            // `fpscontroller`: scroll turns a knob one notch. Held USE turns it with the mouse.
+            if let Some(button) = radio_button {
+                if button == radio.band {
+                    self.radio_input.band = input.pressed & keys::USE != 0;
+                } else {
+                    carry_input.wheel = 0.0;
+                    self.radio_tuning = input.held & keys::USE != 0;
+                    let notch = if input.wheel.is_finite() && input.wheel != 0.0 {
+                        input.wheel.signum() as i32
+                    } else if self.radio_tuning && input.mouse[1] != 0.0 && self.radio_wait <= 0.0 {
+                        self.radio_wait = RADIO_MOUSE_SECONDS;
+                        input.mouse[1].signum() as i32
+                    } else {
+                        0
+                    };
+                    if button == radio.volume {
+                        self.radio_input.volume = notch;
+                    } else {
+                        self.radio_input.tune = notch;
+                    }
                 }
             }
             if input.released & keys::USE != 0

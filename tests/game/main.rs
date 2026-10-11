@@ -11,6 +11,7 @@ mod instruments;
 mod interaction;
 mod items;
 mod player;
+mod radio;
 mod reference;
 mod starting_area;
 mod vehicle;

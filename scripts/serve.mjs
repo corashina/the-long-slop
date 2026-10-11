@@ -15,6 +15,7 @@ const types = new Map([
   ['.bin', 'application/octet-stream'],
   ['.png', 'image/png'],
   ['.wav', 'audio/wav'],
+  ['.mp3', 'audio/mpeg'],
 ]);
 
 createServer(async (request, response) => {

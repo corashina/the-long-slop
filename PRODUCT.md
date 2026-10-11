@@ -24,12 +24,12 @@ Recovery preserves state. Restart restores the garage.
 Part condition follows the source states. Hard crashes knock worn wheels and parts off.
 The player can remove a part and fit it again into its own slot.
 The source day cycle drives the sun, ambient light, and fog color. The car headlights have low and high beams.
-Sound follows the source rules with the original clips. It covers the engine, car, horn, steps, doors, caps, pouring, wind, ambience, and menu buttons.
+Sound follows the source rules with the original clips. It covers the engine, car, horn, radio, steps, doors, caps, pouring, wind, ambience, and menu buttons.
 
 Survival, weapons, other vehicles, multiplayer, saves, and deployment remain outside this stage.
 Unity shader effects and live mirror reflections are not reproduced.
 Terrain uses the source sand texture only. Biome blending and distant terrain are not reproduced.
-Sound has no car radio or sandstorm sound.
+Sound has no sandstorm sound. The radio has no custom station, holiday songs, or moving needle.
 The build does not claim identical Unity physics or full-game parity.
 
 ## Evidence

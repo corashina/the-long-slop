@@ -272,6 +272,53 @@ pub struct ItemSoundReference {
     pub modifier: f32,
 }
 
+/// A `mainscript.radioCH` song or talk clip.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RadioClip {
+    pub clip: ClipId,
+    pub volume: f32,
+}
+
+/// `mainscript.radioCH`. A custom station has no clips.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RadioStation {
+    pub name: String,
+    pub frequency: f32,
+    pub custom: bool,
+    pub music: Vec<RadioClip>,
+    pub talk: Vec<RadioClip>,
+}
+
+/// `radioscript`. Buttons are the aimed colliders of the radio item.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RadioReference {
+    pub item: ItemId,
+    pub volume_button: ColliderId,
+    pub tune_button: ColliderId,
+    pub band_button: ColliderId,
+    pub am: [f32; 2],
+    pub fm: [f32; 2],
+    pub am_step: f32,
+    pub fm_step: f32,
+    /// Start dial position from zero to one.
+    pub tune: f32,
+    pub volume_step: f32,
+    pub turn: ClipId,
+    pub turn_volume: f32,
+    /// `radioscript.SS`, the static between stations.
+    pub noise: VoiceReference,
+    pub channel: VoiceReference,
+    pub second: VoiceReference,
+    /// `mainscript.FRTFM` and `FRTAM`: the distance where a station fades out.
+    pub tolerance_fm: f32,
+    pub tolerance_am: f32,
+    pub fm_stations: Vec<RadioStation>,
+    pub am_stations: Vec<RadioStation>,
+}
+
 /// `buttonSoundMain` menu sounds. The browser plays them.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -302,6 +349,7 @@ pub struct AudioReference {
     pub openings: Vec<OpeningSoundReference>,
     /// `mainscript.minPourSpeedSound` and `maxPourSpeedSound` in liters per second.
     pub pour_speed: [f32; 2],
+    pub radio: RadioReference,
     pub items: Vec<ItemSoundReference>,
     pub menu: MenuSoundReference,
 }
@@ -430,6 +478,30 @@ impl AudioReference {
                     .iter()
                     .all(|i| items.contains(&i.item) && clip(&i.clip)),
             "audio.objects",
+        )?;
+        let radio = &self.radio;
+        require(
+            items.contains(&radio.item)
+                && [radio.volume_button, radio.tune_button, radio.band_button]
+                    .iter()
+                    .all(|id| colliders.contains(id))
+                && clip(&radio.turn)
+                && voice(&radio.noise)
+                && voice(&radio.channel)
+                && voice(&radio.second)
+                && radio.am[0] < radio.am[1]
+                && radio.fm[0] < radio.fm[1]
+                && radio.am_step > 0.0
+                && radio.fm_step > 0.0
+                && radio.volume_step > 0.0
+                && !radio.fm_stations.is_empty()
+                && !radio.am_stations.is_empty()
+                && radio
+                    .fm_stations
+                    .iter()
+                    .chain(&radio.am_stations)
+                    .all(|s| s.music.iter().chain(&s.talk).all(|c| clip(&c.clip))),
+            "audio.radio",
         )?;
         let menu = &self.menu;
         require(

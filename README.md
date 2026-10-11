@@ -47,6 +47,9 @@ The build script writes the browser package to `web/pkg`.
 | Hold LMB | Fill an open container | — |
 | I | — | Tap ignition; hold starter |
 | L | — | Switch headlights: off, low beam, high beam |
+| Hold H | — | Sound the horn |
+| Mouse wheel / hold E + mouse | — | Turn an aimed radio knob: volume or tuning |
+| E | — | Switch the aimed radio band: FM or AM |
 | C | — | Switch first person / chase view |
 | Backspace | Hide or show feedback | Hide or show feedback |
 | Esc | Pause menu | Pause menu |

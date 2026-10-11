@@ -4,6 +4,7 @@ pub mod day;
 pub mod engine;
 pub mod instruments;
 pub mod lights;
+pub mod radio;
 const MAX_FRAME_SECONDS: f64 = 0.1;
 const STEP_SECONDS: f64 = 1.0 / 60.0;
 

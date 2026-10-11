@@ -1,5 +1,7 @@
 """Export original sound clips and the source sound rules."""
 import hashlib
+import io
+import re
 from .source import key, source_id
 from .collision import world_pose, bake_points
 
@@ -7,6 +9,8 @@ from .collision import world_pose, bake_points
 SAND_LAYERS={8,23}
 # mainscript.walkSoundType order.
 SURFACES=('road','desert','winter','grass','wood')
+# Sample rates that MPEG audio supports.
+MP3_RATES=(8000,11025,12000,16000,22050,24000,32000,44100,48000)
 
 
 class Clips:
@@ -14,7 +18,8 @@ class Clips:
         self.source=source;self.output=output;self.records=[];self.ids={}
         output.mkdir(parents=True,exist_ok=True)
 
-    def add(self,owner,pointer):
+    def add(self,owner,pointer,compressed=False):
+        """A compressed clip is MP3. Radio songs would take gigabytes as WAV."""
         reader=self.source.resolve(owner,pointer)
         if reader is None:return None
         if key(reader) in self.ids:return self.ids[key(reader)]
@@ -28,11 +33,22 @@ class Clips:
         from fmod_toolkit import raw_to_wav
         samples=list(raw_to_wav(data,clip.m_Name,clip.m_Channels or 2,clip.m_Frequency or 44100).values())
         if len(samples)!=1:raise ValueError(f'Clip must have one sample set: {clip.m_Name}')
-        name=f'{len(self.records)}-{clip.m_Name}.wav'
-        (self.output/name).write_bytes(samples[0])
+        data=samples[0]
+        if compressed:
+            import soundfile
+            sound,rate=soundfile.read(io.BytesIO(data))
+            if rate not in MP3_RATES:
+                import numpy
+                target=next(r for r in MP3_RATES if r>=rate)
+                time=numpy.arange(round(len(sound)*target/rate))*rate/target
+                frames=numpy.arange(len(sound))
+                sound=numpy.stack([numpy.interp(time,frames,c) for c in sound.reshape(len(sound),-1).T],axis=1);rate=target
+            stream=io.BytesIO();soundfile.write(stream,sound,rate,format='MP3');data=stream.getvalue()
+        name=f"{len(self.records)}-{re.sub(r'[^A-Za-z0-9_-]+','_',clip.m_Name)}.{'mp3' if compressed else 'wav'}"
+        (self.output/name).write_bytes(data)
         self.ids[key(reader)]=len(self.records)
         self.records.append({'id':len(self.records),'source':source_id(reader),'name':clip.m_Name,'path':f'reference/audio/{name}',
-            'seconds':clip.m_Length,'sha256':hashlib.sha256(samples[0]).hexdigest()})
+            'seconds':clip.m_Length,'sha256':hashlib.sha256(data).hexdigest()})
         return self.ids[key(reader)]
 
     def many(self,owner,pointers):
@@ -158,6 +174,7 @@ def export_audio(source,manifest,output):
             'tap':clips.add(reader,value['tekerSound']),'pour':voice(reader,value['SSource'],opening['cap'])})
     record['openings']=openings
     record['pour_speed']=[main['minPourSpeedSound'],main['maxPourSpeedSound']]
+    record['radio']=export_radio(source,manifest,clips,main_reader,main,car_parts,voice)
     items=[]
     for item in manifest['items']:
         node=manifest['nodes'][item['node']-1]
@@ -202,3 +219,30 @@ def export_interiors(source,manifest,nodes):
         if value['invertindividual'] or value['invertindividual2']:
             if any(value['invertindividual']+value['invertindividual2']):raise ValueError('Inverted interior doors are not supported')
     return result
+
+
+def export_radio(source,manifest,clips,main_reader,main,car_parts,voice):
+    """radioscript and the mainscript stations. Custom radio and holiday clips are left out."""
+    reader=car_parts['radioscript'][0];value=source.read(reader)
+    colliders={(manifest['nodes'][c['node']-1]['source']['file'],manifest['nodes'][c['node']-1]['source']['path_id']):c['id'] for c in manifest['colliders']}
+    def button(pointer):
+        usable=source.resolve(reader,pointer)
+        return colliders[key(source.transform_for(source.resolve(usable,source.read(usable)['m_GameObject'])))]
+    def entries(clips_field,volumes,holidays):
+        result=[]
+        for i,pointer in enumerate(clips_field):
+            if not pointer['m_PathID'] or holidays[i]!=0:continue
+            volume=volumes[i] if i<len(volumes) and volumes[i]!=0. else 1.
+            result.append({'clip':clips.add(main_reader,pointer,compressed=True),'volume':volume})
+        return result
+    def stations(field):
+        return [{'name':ch['name'],'frequency':ch['FR'],'custom':bool(ch['custom']),
+            'music':entries(ch['music'],ch['musicVolume'],ch['musicHoliday']),
+            'talk':entries(ch['talk'],ch['talkVolume'],ch['talkHoliday'])} for ch in main[field]]
+    main_object=key(source.resolve(reader,value['DefMainObj']))
+    radio=next(item['id'] for item in manifest['items'] if (item['source']['file'],item['source']['path_id'])==main_object)
+    return {'item':radio,'volume_button':button(value['Bvolume']),'tune_button':button(value['Btune']),'band_button':button(value['BChangeAMFM']),
+        'am':[value['AMmin'],value['AMmax']],'fm':[value['FMmin'],value['FMmax']],'am_step':value['AMStep'],'fm_step':value['FMStep'],
+        'tune':value['currentTeker'],'volume_step':value['vSpeed'],'turn':clips.add(reader,value['Cturned']),'turn_volume':value['turnVolume'],
+        'noise':voice(reader,value['SS'],radio),'channel':voice(reader,value['SC'],radio),'second':voice(reader,value['SC2'],radio),
+        'tolerance_fm':main['FRTFM'],'tolerance_am':main['FRTAM'],'fm_stations':stations('radioChs'),'am_stations':stations('radioChsAM')}

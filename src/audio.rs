@@ -11,9 +11,10 @@ use crate::vehicle::{
 use rapier3d::math::Vector;
 use rapier3d::prelude::{QueryFilter, Ray};
 
-/// Floats per sound: clip, volume, pitch, position, distances, spatial blend, bus, play.
+/// Floats per sound: clip, volume, pitch, position, distances, spatial blend, bus, play, time.
 /// Play is zero for a loop. Otherwise it numbers one playback of the clip.
-pub const SOUND_FLOATS: usize = 11;
+/// Time is the clip position of a playback in seconds.
+pub const SOUND_FLOATS: usize = 12;
 /// Listener position and rotation, two bus gains, voice count, one-shot count.
 pub const HEADER_FLOATS: usize = 11;
 /// `mainscript.maxAudioCount`.
@@ -47,7 +48,10 @@ pub mod slot {
     pub const DAY: usize = 18;
     pub const NIGHT: usize = 21;
     pub const HORN: usize = 24;
-    pub const COUNT: usize = 25;
+    pub const RADIO_NOISE: usize = 25;
+    pub const RADIO: usize = 26;
+    pub const RADIO_SECOND: usize = 27;
+    pub const COUNT: usize = 28;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -61,6 +65,7 @@ pub struct Sound {
     pub spatial: f32,
     pub bus: u8,
     pub play: u32,
+    pub time: f32,
     /// Unity `dopplerLevel` times the spatial blend.
     pub doppler: f32,
 }
@@ -85,6 +90,7 @@ pub struct AudioState {
     squeaks: Vec<Squeak>,
     horn: f32,
     horn_hit: Option<(f32, f32)>,
+    radio_clicks: u32,
     one_shots: Vec<Sound>,
     frame: Vec<f32>,
     outside: f32,
@@ -134,6 +140,7 @@ impl AudioState {
             ],
             horn: 0.0,
             horn_hit: None,
+            radio_clicks: runtime.radio.clicks,
             one_shots: Vec::with_capacity(MAX_ONE_SHOTS),
             frame: Vec::with_capacity(HEADER_FLOATS + (count + MAX_ONE_SHOTS) * SOUND_FLOATS),
             outside: 1.0,
@@ -190,6 +197,7 @@ impl AudioState {
         self.engine(reference, runtime, dt);
         self.car(reference, runtime, dt);
         self.horn(reference, runtime, dt);
+        self.radio(reference, runtime);
         self.impacts(reference, runtime);
         self.steps(reference, runtime, dt);
         self.objects(reference, runtime, dt);
@@ -226,6 +234,7 @@ impl AudioState {
                 sound.spatial,
                 sound.bus as f32,
                 sound.play as f32,
+                sound.time,
             ]);
         }
         self.one_shots.clear();
@@ -286,6 +295,7 @@ impl AudioState {
             spatial: audio.one_shot.spatial,
             bus: bus as u8,
             play: 0,
+            time: 0.0,
             doppler: audio.one_shot.doppler * audio.one_shot.spatial,
         });
     }
@@ -522,6 +532,7 @@ impl AudioState {
                 spatial: source.spatial,
                 bus: bus as u8,
                 play: 0,
+                time: 0.0,
                 doppler: source.doppler * source.spatial,
             });
         }
@@ -780,6 +791,76 @@ impl AudioState {
         self.voices[slot::HORN] = voice(&horn.voice, position, self.horn, pitch, self.car_bus);
     }
 
+    /// `radioscript.SetRadio`: static, the nearest station, and the station it replaced.
+    fn radio(&mut self, reference: &ReferenceManifest, runtime: &GarageRuntime) {
+        let audio = &reference.audio;
+        let radio = &audio.radio;
+        let state = &runtime.radio;
+        let bus = self.car_bus;
+        let noise_point = voice_point(runtime, &radio.noise);
+        if state.clicks != self.radio_clicks {
+            self.radio_clicks = state.clicks;
+            let pitch = self.random_pitch(audio);
+            self.play(
+                audio,
+                radio.turn,
+                noise_point,
+                radio.turn_volume,
+                pitch,
+                bus,
+            );
+        }
+        let silent = |source| voice(source, noise_point, 0.0, 1.0, bus);
+        if !state.on {
+            self.voices[slot::RADIO_NOISE] = silent(&radio.noise);
+            self.voices[slot::RADIO] = silent(&radio.channel);
+            self.voices[slot::RADIO_SECOND] = silent(&radio.second);
+            return;
+        }
+        let tolerance = if state.am {
+            radio.tolerance_am
+        } else {
+            radio.tolerance_fm
+        };
+        let stations = state.stations(radio);
+        let ((first, distance), second) = state.nearest(radio);
+        let channel = inverse_lerp(tolerance, 0.0, distance);
+        self.voices[slot::RADIO_NOISE] = voice(
+            &radio.noise,
+            noise_point,
+            (1.0 - channel) * state.volume,
+            1.0,
+            bus,
+        );
+        let station = |index: usize, gain: f32, clip_volume: bool, source: &VoiceReference| {
+            let position = voice_point(runtime, source);
+            let mut sound = voice(source, position, 0.0, 1.0, bus);
+            if let Some(playing) = state.playing(index) {
+                let level = if clip_volume {
+                    playing.clip.volume
+                } else {
+                    1.0
+                };
+                sound = voice(source, position, gain * state.volume * level, 1.0, bus);
+                sound.clip = Some(playing.clip.clip);
+                sound.play = playing.play;
+                sound.time = playing.seconds;
+            }
+            sound
+        };
+        let custom = |index: usize| if stations[index].custom { 0.5 } else { 1.0 };
+        self.voices[slot::RADIO] = station(first, channel * custom(first), true, &radio.channel);
+        self.voices[slot::RADIO_SECOND] = match second {
+            Some((index, distance)) => station(
+                index,
+                inverse_lerp(tolerance, 0.0, distance) * custom(index),
+                false,
+                &radio.second,
+            ),
+            None => silent(&radio.second),
+        };
+    }
+
     /// Doppler shift from the motion of each source and the listener.
     fn doppler(&mut self, listener: [f32; 3], shots: usize, dt: f32) {
         let listener_velocity = velocity(self.listener, listener, dt);
@@ -929,6 +1010,7 @@ impl AudioState {
         );
         sound.clip = Some(squeak.clip);
         sound.play = state.play;
+        sound.time = state.elapsed * state.pitch;
         self.voices[slot::COUNT + index] = sound;
     }
 
@@ -1126,6 +1208,7 @@ fn voice(source: &VoiceReference, position: [f32; 3], volume: f32, pitch: f32, b
         spatial: source.spatial,
         bus: bus as u8,
         play: 0,
+        time: 0.0,
         doppler: source.doppler * source.spatial,
     }
 }

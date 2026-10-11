@@ -7283,6 +7283,110 @@
       0.01,
       0.1
     ],
+    "radio": {
+      "item": 18,
+      "volume_button": 7,
+      "tune_button": 8,
+      "band_button": 9,
+      "am": [
+        540.0,
+        1600.0
+      ],
+      "fm": [
+        88.0,
+        108.0
+      ],
+      "am_step": 5.0,
+      "fm_step": 0.1,
+      "tune": 0.325,
+      "volume_step": 0.1,
+      "turn": 2,
+      "turn_volume": 1.0,
+      "noise": {
+        "source": {
+          "file": "level1",
+          "path_id": 8006
+        },
+        "clip": 3,
+        "volume": 0.4,
+        "min_distance": 1.5,
+        "max_distance": 600.0,
+        "spatial": 1.0,
+        "looping": true,
+        "doppler": 1.0,
+        "item": 18,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "channel": {
+        "source": {
+          "file": "level1",
+          "path_id": 8007
+        },
+        "clip": 3,
+        "volume": 0.4,
+        "min_distance": 1.5,
+        "max_distance": 600.0,
+        "spatial": 1.0,
+        "looping": true,
+        "doppler": 1.0,
+        "item": 18,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "second": {
+        "source": {
+          "file": "level1",
+          "path_id": 8008
+        },
+        "clip": 3,
+        "volume": 0.4,
+        "min_distance": 1.5,
+        "max_distance": 600.0,
+        "spatial": 1.0,
+        "looping": true,
+        "doppler": 1.0,
+        "item": 18,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tolerance_fm": 0.4,
+      "tolerance_am": 20.0,
+      "fm_stations": [
+      {
+        "name": "Rock",
+        "frequency": 94.1,
+        "custom": false,
+        "music": [{"clip": 1, "volume": 1.0}, {"clip": 2, "volume": 1.0}],
+        "talk": [{"clip": 0, "volume": 1.0}]
+      },
+      {
+        "name": "Talk",
+        "frequency": 95.0,
+        "custom": false,
+        "music": [],
+        "talk": [{"clip": 3, "volume": 1.0}]
+      }
+      ],
+      "am_stations": [
+      {
+        "name": "custom",
+        "frequency": 1080.0,
+        "custom": true,
+        "music": [],
+        "talk": []
+      }
+      ]
+    },
     "items": [],
     "menu": {
       "pitch": [

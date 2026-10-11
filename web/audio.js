@@ -1,10 +1,12 @@
 // Web Audio player for the source sound frame. Rust decides every voice and one-shot.
 // Frame: listener position and rotation, outside gain, car gain, voice count, one-shot count,
-// then eleven floats per sound: clip, volume, pitch, x, y, z, min distance, max distance, spatial, bus, play.
-// Play is zero for a loop. A new play number starts the clip once from its start.
-export const HEADER=11,SOUND=11,MAX_ONE_SHOTS=32;
-// Long ambient loops stream from media elements so the page does not hold their decoded samples.
+// then twelve floats per sound: clip, volume, pitch, x, y, z, min distance, max distance, spatial, bus, play, time.
+// Play is zero for a loop. A new play number starts the clip once at its time in seconds.
+export const HEADER=11,SOUND=12,MAX_ONE_SHOTS=32;
+// Long clips stream from media elements so the page does not hold their decoded samples.
 const STREAM_SECONDS=30;
+// radioscript moves a playing channel when it is more than half a second from its station.
+const SEEK_SECONDS=0.5;
 
 export function rotate(q,v){
  const [x,y,z,w]=q,tx=2*(y*v[2]-z*v[1]),ty=2*(z*v[0]-x*v[2]),tz=2*(x*v[1]-y*v[0]);
@@ -15,10 +17,10 @@ export function createAudio(audio){
  const context=new AudioContext(),master=context.createGain(),world=context.createGain();
  world.connect(master);master.connect(context.destination);world.gain.value=0;
  const buses=[0,1,2].map(()=>{const g=context.createGain();g.connect(world);return g;});
- const buffers=[],streams=[],media=[];let oneShots=0,playing=false;
+ const buffers=[],streams=[];let oneShots=0,playing=false;
  audio.clips.forEach((clip,i)=>{
   const url='./assets/'+clip.path;
-  if(clip.seconds>STREAM_SECONDS){const element=new Audio(url);element.loop=true;element.preservesPitch=false;streams[i]=element;media[i]=context.createMediaElementSource(element);return;}
+  if(clip.seconds>STREAM_SECONDS){streams[i]=url;return;}
   fetch(url).then(r=>{if(!r.ok)throw Error('Cannot load sound '+clip.name);return r.arrayBuffer();})
    .then(data=>context.decodeAudioData(data)).then(buffer=>{buffers[i]=buffer;}).catch(error=>console.warn(error.message));
  });
@@ -30,21 +32,28 @@ export function createAudio(audio){
  function place(panner,f,o){if(panner){panner.positionX.value=f[o+3];panner.positionY.value=f[o+4];panner.positionZ.value=f[o+5];}}
  const voices=[];
  function voice(index,f,o){
-  const clip=f[o],volume=f[o+1],play=f[o+10],key=clip+':'+f[o+8]+':'+f[o+9]+':'+play;let v=voices[index];
+  const clip=f[o],volume=f[o+1],play=f[o+10],time=f[o+11],key=clip+':'+f[o+8]+':'+f[o+9]+':'+play;let v=voices[index];
   if(v&&(v.key!==key||volume<=0)){stop(v);voices[index]=v=null;}
-  if(!v&&volume>0&&clip>=0){
-   const nodes=route(f[o+8],f[o+6],f[o+7],f[o+9]);v={key,...nodes,source:null,element:null};
-   if(streams[clip]){v.element=streams[clip];v.media=media[clip];v.media.connect(v.gain);v.element.play().catch(()=>{});}
-   else if(buffers[clip]){const s=context.createBufferSource();s.buffer=buffers[clip];s.loop=play===0;s.connect(v.gain);s.start(0,s.loop?Math.random()*s.buffer.duration:0);v.source=s;}
-   else return;
+  // A clip that is still loading, or a stream that another voice plays, waits.
+  if(!v&&volume>0&&clip>=0&&(streams[clip]?!stream(clip).busy:buffers[clip])){
+   const nodes=route(f[o+8],f[o+6],f[o+7],f[o+9]);v={key,...nodes,source:null,element:null,stream:null};
+   if(streams[clip]){const m=stream(clip);m.busy=true;v.stream=m;v.element=m.element;m.element.loop=play===0;m.element.currentTime=play===0?0:time;m.source.connect(v.gain);if(playing)m.element.play().catch(()=>{});}
+   else{const s=context.createBufferSource();s.buffer=buffers[clip];s.loop=play===0;s.connect(v.gain);s.start(0,s.loop?Math.random()*s.buffer.duration:Math.min(time,s.buffer.duration));v.source=s;}
    voices[index]=v;
   }
   if(!v)return;
   v.gain.gain.value=volume;
-  if(v.source)v.source.playbackRate.value=f[o+2];else v.element.playbackRate=f[o+2];
+  if(v.source)v.source.playbackRate.value=f[o+2];
+  else{v.element.playbackRate=f[o+2];if(play!==0&&Math.abs(v.element.currentTime-time)>SEEK_SECONDS)v.element.currentTime=time;}
   place(v.panner,f,o);
  }
- function stop(v){if(v.source)v.source.stop();if(v.element){v.element.pause();v.media.disconnect(v.gain);}v.gain.disconnect();v.panner?.disconnect();}
+ function stop(v){if(v.source)v.source.stop();if(v.stream){v.element.pause();v.stream.source.disconnect(v.gain);v.stream.busy=false;}v.gain.disconnect();v.panner?.disconnect();}
+ // A media element can feed only one source node, so each streamed clip keeps one element.
+ const elements=[];
+ function stream(clip){
+  if(!elements[clip]){const element=new Audio(streams[clip]);element.preload='auto';element.preservesPitch=false;elements[clip]={element,source:context.createMediaElementSource(element),busy:false};}
+  return elements[clip];
+ }
  function oneShot(f,o){
   const buffer=buffers[f[o]];if(!buffer||oneShots>=MAX_ONE_SHOTS)return;
   const nodes=route(f[o+8],f[o+6],f[o+7],f[o+9]),s=context.createBufferSource();
