@@ -339,23 +339,23 @@ Preserve the recorded specification approval.
 - Produce `SourceLighting::reset_instances(&mut self, commands: &mut Commands)`; remove old light entities and retain loaded shared assets.
 - Add no new save, debug, renderer-selection, or deployment interface.
 
-- [ ] Add `lighting_lifecycle_preserves_and_resets_owned_state`.
+- [x] Add `lighting_lifecycle_preserves_and_resets_owned_state`.
   Assert pause freezes time, fades, and switch movement; recovery preserves them; restart restores source startup state.
-- [ ] Add `restart_replaces_road_and_attached_light_instances` through the existing diagnostic browser harness.
+- [x] Add `restart_replaces_road_and_attached_light_instances` through the existing diagnostic browser harness.
   Assert old entities disappear and each active identity has one instance after restart.
-- [ ] Add ignored installed test `production_lighting_records_match_selected_scene`.
+- [x] Add ignored installed test `production_lighting_records_match_selected_scene`.
   Verify phase durations, source IDs, controller counts, material/cookie hashes, ranges, cones, and source shadow flags.
-- [ ] Wire `reset_instances` into restart before rebuilding bindings. Keep recovery on existing light instances.
-- [ ] Run the targeted lifecycle and installed tests. Fix integration faults before the complete suite.
-- [ ] Run Python tests, all native tests, installed-export tests, formatting, and the release WASM build.
-- [ ] Capture walking and cockpit views at dawn, noon, dusk, and night with matched camera and material conditions.
-- [ ] Check L, both physical car controls, every house switch, rear lamps, and roadside late loading.
-- [ ] Check missing-resource and shader failures leave Start disabled. Restore all temporary faults before delivery.
-- [ ] Compare source views where a live reference is available. Record timing evidence separately from image evidence.
-- [ ] Measure warm frame time, active light count, material count, and texture bytes during movement, rebase, recovery, and restart.
+- [x] Wire `reset_instances` into restart before rebuilding bindings. Keep recovery on existing light instances.
+- [x] Run the targeted lifecycle and installed tests. Fix integration faults before the complete suite.
+- [x] Run Python tests, all native tests, installed-export tests, formatting, and the release WASM build.
+- [x] Capture walking and cockpit views at dawn, noon, dusk, and night with matched camera and material conditions.
+- [x] Check L, both physical car controls, every house switch, rear lamps, and roadside late loading.
+- [x] Check missing-resource and shader failures leave Start disabled. Restore all temporary faults before delivery.
+- [x] Compare source views where a live reference is available. Record timing evidence separately from image evidence.
+- [x] Measure warm frame time, active light count, material count, and texture bytes during movement, rebase, recovery, and restart.
   Verify counts remain bounded and covered steady update paths do not allocate resources.
-- [ ] Document controls, source authority, rendering differences, and any unverified live comparisons.
-- [ ] Commit as `Verify source day cycle and lamp integration`.
+- [x] Document controls, source authority, rendering differences, and any unverified live comparisons.
+- [x] Commit as `Verify source day cycle and lamp integration`.
 
 ## Plan review
 
