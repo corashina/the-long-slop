@@ -2,7 +2,8 @@
 
 Reference: installed Steam build 11140890. Vehicle: fixed Lada 2101.
 Verification date: 2026-10-11, Europe/Warsaw. Final product commit: `d402a09`.
-Final `d402a09` code passed fresh independent checks: 137 native tests, 31 installed-source tests, formatting, and release WASM.
+Final `d402a09` code passed fresh independent checks: 137 native tests and 31 installed-source tests.
+Fresh independent formatting, release WASM, and 12 exporter tests also passed.
 The earlier full checks and focused label regression remain recorded below.
 Worktree: `C:/Users/Corashina/.codex/worktrees/interaction-parity/the-long-drive-wasm`.
 Read the [approved interaction scope](superpowers/specs/2026-10-10-interaction-parity-design.md), [garage scope](superpowers/specs/2026-10-09-garage-start-design.md), and [decision record](interaction-decisions.md).
@@ -26,6 +27,7 @@ The car has 955 kg dry mass and 6.6 kg initial fluid mass.
 | Task, full-branch, and final code reviews | Passed |
 
 The final label-only change passed its installed label regression, formatting, and WASM/package build.
+The independent final exporter rerun passed all 12 tests in 22.016 seconds. Earlier logs remain preserved.
 Native checks cover fluids, ignition, heat, collisions, carry, mechanisms, lamps, parts, push, throw, pause, recovery, and rebasing.
 Source tests use the actual export. Some tests stage clear player positions.
 They do not prove a continuous browser route.
@@ -57,6 +59,17 @@ The earlier abd2f5c helper had read a partial command file. Atomic command write
 The d402a09 Windows session later lost its graphics context after a GPU process exit.
 Windows headless pointer lock also confined the desktop cursor. Testing stopped, and only the owned browser/helper were closed.
 Evidence remains in `.cache/task8-d402a09-context-lost/`. No Windows browser was launched afterward.
+
+The active Windows harness entries `.cache/task8-session.cjs` and `.cache/task8-route-input.cjs` are retired.
+Both fail before loading Playwright. Their scan and sequence callers inherit that failure.
+Historical harness copies remain unchanged as evidence and are for inspection only.
+The supported runner is `.cache/task8-run-linux.ps1`.
+Its Linux helper rejects Windows, non-container Linux, and DISPLAY or WAYLAND_DISPLAY environments.
+A normal `shutdown` command releases pointer lock and closes only the browser owned by that session.
+Startup failures and session cleanup use the same owned-browser close path.
+Four syntax checks and nine stub guard/cleanup checks passed. No real browser was launched for these checks.
+Guard evidence: `.cache/task8-harness-guard-check.cjs` and `.cache/task8-harness-guard-check.log`.
+
 Preparation-to-road continuity is unavailable. These split routes do not prove full continuous acceptance.
 
 The remaining route used Linux Chromium 151.0.7922.34, Playwright 1.62.1, and ANGLE SwiftShader.
