@@ -1,4 +1,5 @@
 use crate::browser::*;
+use crate::interaction::labels::display_name;
 use crate::presentation::instruments::InstrumentVisuals;
 use crate::presentation::{
     self,
@@ -21,6 +22,8 @@ use wasm_bindgen::prelude::*;
 
 #[derive(Resource)]
 struct RuntimeReference(Arc<ReferenceManifest>);
+#[derive(Resource)]
+struct LampMaterials(Vec<Vec<Option<Handle<StandardMaterial>>>>);
 #[derive(Resource)]
 struct Drive {
     runtime: GarageRuntime,
@@ -48,6 +51,12 @@ struct FeedbackStamp {
     empty: bool,
     capacity: f32,
     percents: [u32; 6],
+    condition: u32,
+    held: Option<ItemId>,
+    throw_charge: u32,
+    throw_active: bool,
+    rpm: u32,
+    engine_flags: [bool; 5],
 }
 
 #[wasm_bindgen]
@@ -126,6 +135,10 @@ fn setup(
     commands.insert_resource(visuals);
     commands.insert_resource(InstrumentVisuals::default());
     presentation::reference::spawn(&mut commands, &server, &reference.0);
+    commands.insert_resource(LampMaterials(presentation::lighting::load_materials(
+        &server,
+        &reference.0,
+    )));
     commands.spawn((
         DirectionalLight {
             color: Color::srgb(1.0, 0.91, 0.77),
@@ -172,6 +185,7 @@ fn check_ready(
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
     mut frames: Local<u8>,
+    lamp_materials: Res<LampMaterials>,
 ) {
     if drive.ready || visuals.failed {
         return;
@@ -194,6 +208,20 @@ fn check_ready(
             return;
         }
     }
+    for handle in lamp_materials.0.iter().flatten().flatten() {
+        if matches!(
+            server.get_load_state(handle.id()),
+            Some(LoadState::Failed(_))
+        ) {
+            game_failure("Cannot load lamp material.");
+            visuals.failed = true;
+            return;
+        }
+        if !server.is_loaded_with_dependencies(handle.id()) {
+            return;
+        }
+    }
+    let bind_lights = !visuals.bound;
     match presentation::reference::bind(
         &mut commands,
         &reference.0,
@@ -202,6 +230,15 @@ fn check_ready(
         &primitives,
     ) {
         Ok(true) => {
+            if bind_lights {
+                presentation::lighting::bind(
+                    &mut commands,
+                    &reference.0,
+                    &visuals,
+                    &primitives,
+                    &lamp_materials.0,
+                );
+            }
             match instruments.bind(
                 &reference.0,
                 &visuals.nodes,
@@ -235,6 +272,7 @@ fn check_ready(
 
 fn clear_input(drive: &mut Drive) {
     drive.input.clear();
+    drive.runtime.area.interaction.cancel_input();
     drive.clock = StepClock::default();
     drive.previous = drive.current;
     drive.rendered = drive.current;
@@ -279,6 +317,10 @@ fn read_input(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     }
     if !drive.runtime.started || drive.runtime.paused {
         drive.input.clear();
+        return;
+    }
+    // Discard the frame sampled before the lifecycle input clear.
+    if actions & 31 != 0 {
         return;
     }
     if frame.pressed & keys::CAMERA != 0 && drive.runtime.area.player.seat().is_some() {
@@ -336,8 +378,35 @@ fn sync_imported(
     drive: Res<Drive>,
     mut query: Query<(&BodyVisual, &mut Transform)>,
     mut items: Query<(&ItemVisual, &mut Transform), Without<BodyVisual>>,
-    mut caps: Query<(&CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
-    mut visibility: Query<(&ValveVisibility, &mut Visibility)>,
+    mut caps: Query<
+        (&CapVisual, &mut Transform),
+        (
+            Without<BodyVisual>,
+            Without<ItemVisual>,
+            Without<presentation::lighting::LampButtonVisual>,
+        ),
+    >,
+    mut visibility: Query<
+        (&ValveVisibility, &mut Visibility),
+        Without<presentation::lighting::LampVisual>,
+    >,
+    mut lamps: Query<
+        (
+            &presentation::lighting::LampVisual,
+            &mut Visibility,
+            Option<&mut PointLight>,
+            Option<&mut SpotLight>,
+        ),
+        Without<ValveVisibility>,
+    >,
+    mut lamp_materials: Query<(
+        &presentation::lighting::LampMaterialVisual,
+        &mut MeshMaterial3d<StandardMaterial>,
+    )>,
+    mut lamp_buttons: Query<
+        (&presentation::lighting::LampButtonVisual, &mut Transform),
+        (Without<BodyVisual>, Without<ItemVisual>, Without<CapVisual>),
+    >,
 ) {
     presentation::reference::sync(
         &drive.runtime.area,
@@ -347,6 +416,12 @@ fn sync_imported(
     );
     presentation::reference::sync_items(&drive.runtime.area, drive.clock.alpha(), &mut items);
     presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
+    presentation::lighting::sync(
+        &drive.runtime.lighting,
+        &mut lamps,
+        &mut lamp_materials,
+        &mut lamp_buttons,
+    );
 }
 fn sync_instruments(
     time: Res<Time<Real>>,
@@ -371,6 +446,7 @@ fn sync_instruments(
         oil_liters: amount(reference.0.engine.oil_tank),
         temperature: run.engine_output.temperature,
         rpm: run.engine_output.rpm,
+        headlights: run.lighting.controls.headlights,
         local_ignition: run.engine_output.ignition
             && r.electronics_output > r.electronics_off_threshold,
         distance_m: run.trip_m,
@@ -436,7 +512,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         runtime.started,
     );
     let available = runtime.area.interaction.available_actions(
-        runtime.target,
+        &runtime.aim,
         &runtime.area.player,
         &runtime.area.items,
         &runtime.physics,
@@ -445,7 +521,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         .area
         .interaction
         .feedback(&available, &runtime.area.items, &reference.0);
-    let (amount, capacity, quantities, name, has_name, no_text) =
+    let (amount, capacity, quantities, fluid_name, has_name, no_text) =
         info.fluid
             .as_ref()
             .map_or((0., 0., [0.; 6], info.name, false, true), |f| {
@@ -458,13 +534,37 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
                     f.presentation.no_text,
                 )
             });
+    let condition = available
+        .item
+        .and_then(|id| runtime.area.items.get(id))
+        .map_or(-1.0, |item| item.condition);
+    let held = runtime.area.interaction.held();
+    let notice = if !runtime.notice.is_empty() {
+        runtime.notice
+    } else if let Some(block) = runtime.aim.installation_block.or(runtime.aim.grab_block) {
+        block.notice()
+    } else {
+        ""
+    };
     let stamp = FeedbackStamp {
+        condition: condition.to_bits(),
+        held,
+        throw_charge: runtime.area.interaction.throw_charge().to_bits(),
+        throw_active: runtime.area.interaction.throw_active(),
+        rpm: runtime.engine_output.rpm.to_bits(),
+        engine_flags: [
+            runtime.engine_output.ignition,
+            runtime.engine_output.running,
+            runtime.engine_output.starter,
+            runtime.area.player.seat().is_some(),
+            runtime.handbrake,
+        ],
         actions: info.actions.0,
         context: info.context as u32,
         item: available.item,
         opening: available.opening,
         carrying: info.carrying,
-        notice: runtime.notice,
+        notice,
         amount: (amount * 10.).round() as u32,
         empty: amount <= 0.05,
         capacity,
@@ -481,13 +581,25 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         game_feedback(
             stamp.actions,
             stamp.context,
-            name,
+            info.name,
             stamp.notice,
             stamp.carrying,
             amount,
             capacity,
             has_name,
             no_text,
+            fluid_name,
+            condition,
+            held.map(|id| display_name(&reference.0, &runtime.area.items, id))
+                .unwrap_or(""),
+            runtime.area.interaction.throw_charge(),
+            runtime.area.interaction.throw_active(),
+            runtime.engine_output.rpm,
+            runtime.engine_output.ignition,
+            runtime.engine_output.running,
+            runtime.engine_output.starter,
+            runtime.area.player.seat().is_some(),
+            runtime.handbrake,
             quantities[0],
             quantities[1],
             quantities[2],

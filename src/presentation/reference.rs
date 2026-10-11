@@ -51,32 +51,26 @@ pub struct ReferenceVisuals {
     pub failed: bool,
 }
 
+pub fn configure_import(settings: &mut GltfLoaderSettings) {
+    settings.load_cameras = false;
+    settings.load_lights = false;
+    settings.load_animations = false;
+    settings.convert_coordinates = Some(GltfConvertCoordinates {
+        rotate_scene_entity: false,
+        rotate_meshes: false,
+    });
+}
+
 pub fn spawn(commands: &mut Commands, server: &AssetServer, reference: &ReferenceManifest) {
     let mut visuals = ReferenceVisuals::default();
     for asset in &reference.assets {
         let handle = server
             .load_builder()
-            .with_settings(|settings: &mut GltfLoaderSettings| {
-                settings.load_cameras = false;
-                settings.load_lights = false;
-                settings.load_animations = false;
-                settings.convert_coordinates = Some(GltfConvertCoordinates {
-                    rotate_scene_entity: false,
-                    rotate_meshes: false,
-                });
-            })
+            .with_settings(configure_import)
             .load(GltfAssetLabel::Scene(0).from_asset(asset.path.clone()));
         let gltf = server
             .load_builder()
-            .with_settings(|settings: &mut GltfLoaderSettings| {
-                settings.load_cameras = false;
-                settings.load_lights = false;
-                settings.load_animations = false;
-                settings.convert_coordinates = Some(GltfConvertCoordinates {
-                    rotate_scene_entity: false,
-                    rotate_meshes: false,
-                });
-            })
+            .with_settings(configure_import)
             .load::<bevy::gltf::Gltf>(asset.path.clone());
         visuals.gltfs.push((asset.id, gltf));
         visuals.handles.push((asset.path.clone(), handle.clone()));
@@ -178,27 +172,12 @@ pub fn bind(
     }
     // Each physical group becomes a render root. Its descendants retain their source transforms.
     for body in &reference.bodies {
-        let mut scale = Vec3::ONE;
-        let mut current = Some(body.node);
-        while let Some(id) = current {
-            let node = reference
-                .nodes
-                .iter()
-                .find(|node| node.id == id)
-                .expect("validated node");
-            scale *= Vec3::from_array(node.transform.scale);
-            current = node.parent;
-        }
-        commands
-            .entity(visuals.nodes[&body.node])
-            .remove::<ChildOf>()
-            .insert(BodyVisual {
-                body: body.id,
-                scale,
-            });
+        super::mechanisms::bind_body(commands, reference, visuals, body);
     }
     for item in &reference.items {
-        if !matches!(item.kind, ItemKind::Wheel | ItemKind::Rim | ItemKind::Tire) {
+        if !matches!(item.kind, ItemKind::Wheel | ItemKind::Rim | ItemKind::Tire)
+            && !reference.parts.iter().any(|p| p.item == item.id)
+        {
             continue;
         }
         let mut scale = Vec3::ONE;
@@ -288,8 +267,18 @@ pub fn bind(
 
 pub fn sync_caps(
     area: &StartingArea,
-    caps: &mut Query<(&CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
-    visibility: &mut Query<(&ValveVisibility, &mut Visibility)>,
+    caps: &mut Query<
+        (&CapVisual, &mut Transform),
+        (
+            Without<BodyVisual>,
+            Without<ItemVisual>,
+            Without<super::lighting::LampButtonVisual>,
+        ),
+    >,
+    visibility: &mut Query<
+        (&ValveVisibility, &mut Visibility),
+        Without<super::lighting::LampVisual>,
+    >,
 ) {
     for (cap, mut transform) in caps {
         let valve = area.interaction.opening_valve(cap.opening);

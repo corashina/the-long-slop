@@ -1,20 +1,32 @@
 mod common;
-use my_summer_slop::interaction::AimTarget;
 use my_summer_slop::interaction::feedback::ActionMask;
+use my_summer_slop::interaction::{AimTarget, ResolvedAim, SlotTarget};
 use my_summer_slop::starting_area::GarageRuntime;
 
 #[test]
 fn closed_destination_has_no_fill_action() {
     let r = common::reference();
-    let run = GarageRuntime::new(&r).unwrap();
+    let mut run = GarageRuntime::new(&r).unwrap();
     let cap = r.openings[0].cap;
+    // The native fixture omits the tap hit surface. Bind a real cap proxy.
+    let body = run.area.items.get(cap).unwrap().body.unwrap();
+    let collider = run.physics.rapier_mut().insert_collider(
+        rapier3d::prelude::ColliderBuilder::ball(0.05)
+            .sensor(true)
+            .user_data(cap.0 as u128 + 1),
+        Some(body),
+    );
     let a = run.area.interaction.available_actions(
-        Some(AimTarget {
-            item: cap,
-            distance: 0.5,
-            point: [0.; 3],
-            slot: None,
-        }),
+        &ResolvedAim {
+            use_target: Some(AimTarget {
+                collider,
+                item: cap,
+                distance: 0.5,
+                point: [0.; 3],
+                slot: None,
+            }),
+            ..Default::default()
+        },
         &run.area.player,
         &run.area.items,
         &run.physics,
@@ -46,17 +58,22 @@ fn occupied_slot_has_no_mount_action() {
         .get_mut(r.wheel_slots[1].rim)
         .unwrap()
         .location = ItemLocation::WheelSlot(slot.id);
+    let collider = item_collider(&run, spare);
     run.area.interaction.step(
         FrameInput {
             pressed: keys::GRAB,
             ..Default::default()
         },
-        Some(AimTarget {
-            item: spare,
-            distance: 0.5,
-            point: pose.translation.to_array(),
-            slot: None,
-        }),
+        ResolvedAim {
+            grab_target: Some(AimTarget {
+                collider,
+                item: spare,
+                distance: 0.5,
+                point: pose.translation.to_array(),
+                slot: None,
+            }),
+            ..Default::default()
+        },
         &mut run.area.player,
         &mut run.area.items,
         &mut run.physics,
@@ -64,12 +81,16 @@ fn occupied_slot_has_no_mount_action() {
     );
     assert_eq!(run.area.interaction.held(), Some(spare));
     let a = run.area.interaction.available_actions(
-        Some(AimTarget {
-            item: slot.rim,
-            distance: 0.5,
-            point: [0.; 3],
-            slot: Some(slot.id),
-        }),
+        &ResolvedAim {
+            installation_target: Some(AimTarget {
+                collider: run.wheels.sensor(slot.id).unwrap(),
+                item: slot.rim,
+                distance: 0.5,
+                point: [0.; 3],
+                slot: Some(SlotTarget::Wheel(slot.id)),
+            }),
+            ..Default::default()
+        },
         &run.area.player,
         &run.area.items,
         &run.physics,
@@ -83,12 +104,16 @@ fn attached_tire_selects_tire_dismount() {
     let run = GarageRuntime::new(&r).unwrap();
     let tire = r.wheel_slots[0].tire;
     let a = run.area.interaction.available_actions(
-        Some(AimTarget {
-            item: tire,
-            distance: 0.5,
-            point: [0.; 3],
-            slot: None,
-        }),
+        &ResolvedAim {
+            focus_target: Some(AimTarget {
+                collider: item_collider(&run, tire),
+                item: tire,
+                distance: 0.5,
+                point: [0.; 3],
+                slot: None,
+            }),
+            ..Default::default()
+        },
         &run.area.player,
         &run.area.items,
         &run.physics,
@@ -111,7 +136,7 @@ fn blocked_exit_has_no_exit_action() {
         &mut run.physics
     ));
     let a = run.area.interaction.available_actions(
-        None,
+        &ResolvedAim::default(),
         &run.area.player,
         &run.area.items,
         &run.physics,
@@ -141,17 +166,22 @@ fn mount_action_hides_drop_until_target_changes() {
     item.body = Some(body);
     item.location = ItemLocation::World;
 
+    let collider = item_collider(&run, spare);
     run.area.interaction.step(
         FrameInput {
             pressed: keys::GRAB,
             ..Default::default()
         },
-        Some(AimTarget {
-            item: spare,
-            distance: 0.5,
-            point: pose.translation.to_array(),
-            slot: None,
-        }),
+        ResolvedAim {
+            grab_target: Some(AimTarget {
+                collider,
+                item: spare,
+                distance: 0.5,
+                point: pose.translation.to_array(),
+                slot: None,
+            }),
+            ..Default::default()
+        },
         &mut run.area.player,
         &mut run.area.items,
         &mut run.physics,
@@ -159,16 +189,130 @@ fn mount_action_hides_drop_until_target_changes() {
     );
     assert_eq!(run.area.interaction.held(), Some(spare));
     let a = run.area.interaction.available_actions(
-        Some(AimTarget {
-            item: slot.rim,
-            distance: 0.5,
-            point: [0.; 3],
-            slot: Some(slot.id),
-        }),
+        &ResolvedAim {
+            installation_target: Some(AimTarget {
+                collider: run.wheels.sensor(slot.id).unwrap(),
+                item: slot.rim,
+                distance: 0.5,
+                point: [0.; 3],
+                slot: Some(SlotTarget::Wheel(slot.id)),
+            }),
+            ..Default::default()
+        },
         &run.area.player,
         &run.area.items,
         &run.physics,
     );
     assert_ne!(a.actions.0 & ActionMask::MOUNT, 0);
     assert_eq!(a.actions.0 & ActionMask::DROP, 0);
+}
+
+fn item_collider(
+    run: &GarageRuntime,
+    item: my_summer_slop::reference::ItemId,
+) -> rapier3d::prelude::ColliderHandle {
+    run.physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, c)| (c.user_data as u32) == item.0 + 1)
+        .map(|(handle, _)| handle)
+        .unwrap_or_else(|| {
+            let body = run.area.items.get(item).unwrap().body.unwrap();
+            *run.physics.rapier().bodies[body]
+                .colliders()
+                .first()
+                .unwrap()
+        })
+}
+
+#[test]
+fn charged_throw_over_valid_slot_does_not_mount() {
+    use my_summer_slop::interaction::InteractionAction;
+    use my_summer_slop::interaction::items::ItemLocation;
+    use my_summer_slop::simulation::{FrameInput, keys};
+    use my_summer_slop::vehicle::to_rapier;
+    use rapier3d::math::{Pose, Vector};
+    use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder};
+    let r = common::reference();
+    let mut run = GarageRuntime::new(&r).unwrap();
+    let slot = &r.wheel_slots[0];
+    let rim = slot.rim;
+    let pose = to_rapier(run.area.player.view_pose(&run.physics))
+        * Pose::from_translation(Vector::new(0., 0., -0.5));
+    let mass = r.items.iter().find(|item| item.id == rim).unwrap().mass_kg;
+    let (body, _) = run.physics.rapier_mut().insert(
+        RigidBodyBuilder::dynamic().pose(pose),
+        ColliderBuilder::ball(0.1).mass(mass),
+    );
+    let item = run.area.items.get_mut(rim).unwrap();
+    item.body = Some(body);
+    item.location = ItemLocation::World;
+    run.area
+        .interaction
+        .pickup_item(
+            rim,
+            pose.translation.to_array(),
+            &run.area.player,
+            &mut run.area.items,
+            &mut run.physics,
+        )
+        .unwrap();
+    run.area.interaction.step(
+        FrameInput::default(),
+        ResolvedAim::default(),
+        &mut run.area.player,
+        &mut run.area.items,
+        &mut run.physics,
+        0.02,
+    );
+    run.area.interaction.step(
+        FrameInput {
+            pressed: keys::GRAB,
+            held: keys::GRAB,
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+        &mut run.area.player,
+        &mut run.area.items,
+        &mut run.physics,
+        0.2,
+    );
+    assert!(run.area.interaction.throw_charge() > r.player.throw_minimum);
+    let aim = ResolvedAim {
+        installation_target: Some(AimTarget {
+            collider: run.wheels.sensor(slot.id).unwrap(),
+            item: rim,
+            distance: 0.5,
+            point: pose.translation.to_array(),
+            slot: Some(SlotTarget::Wheel(slot.id)),
+        }),
+        ..Default::default()
+    };
+    let available = run.area.interaction.available_actions(
+        &aim,
+        &run.area.player,
+        &run.area.items,
+        &run.physics,
+    );
+    assert_eq!(available.slot, Some(SlotTarget::Wheel(slot.id)));
+    assert_eq!(available.actions.0 & ActionMask::MOUNT, 0);
+    let action = run.area.interaction.step(
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        aim,
+        &mut run.area.player,
+        &mut run.area.items,
+        &mut run.physics,
+        0.02,
+    );
+    assert_eq!(action, Some(InteractionAction::Throw(rim)));
+    assert_eq!(run.area.interaction.held(), None);
+    assert_eq!(
+        run.area.items.get(rim).unwrap().location,
+        ItemLocation::World
+    );
+    assert!(run.physics.rapier().bodies[body].linvel().length() > 0.);
 }

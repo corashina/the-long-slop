@@ -21,6 +21,7 @@ macro_rules! id {
         pub struct $name(pub $inner);
     };
 }
+id!(MechanismId, u32);
 id!(ItemId, u32);
 id!(AssetId, u32);
 id!(NodeId, u32);
@@ -30,6 +31,7 @@ id!(AnchorId, u32);
 id!(SeatId, u32);
 id!(OpeningId, u32);
 id!(WheelSlotId, u8);
+id!(PartSlotId, u32);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -134,6 +136,25 @@ pub struct ColliderRecord {
     pub geometry: ColliderGeometry,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionMasks {
+    pub use_mask: u32,
+    pub pickup_mask: u32,
+    pub attach_mask: u32,
+    pub push_mask: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionBinding {
+    pub collider: ColliderId,
+    pub use_owner: Option<ItemId>,
+    pub pickup_owner: Option<ItemId>,
+    pub removal_owner: Option<ItemId>,
+    pub push_owner: Option<ItemId>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnchorRecord {
@@ -146,23 +167,177 @@ pub struct AnchorRecord {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct HingeRecord {
-    pub item: ItemId,
+pub struct MechanismReference {
+    pub id: MechanismId,
     pub source: SourceId,
-    pub anchor: AnchorId,
-    pub body: BodyId,
+    pub item: ItemId,
+    pub parent_item: Option<ItemId>,
+    pub driven_nodes: Vec<NodeId>,
+    pub enabled: bool,
+    pub child: Option<ItemId>,
+    pub invert_child: bool,
+    pub invert_value: bool,
+    pub disable_on_craft: bool,
+    pub disable_on_uncraft: bool,
+    pub drag: MechanismDrag,
+    pub rotation: Option<RotationReference>,
+    pub slide: Option<SlideReference>,
+    pub turn: Option<TurnReference>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TurnReference {
+    pub action: TurnAction,
+    pub max_state: u8,
+    pub initial_state: u8,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TurnAction {
+    ToggleHandbrake,
+    CycleHeadlights,
+    InteriorLight,
+    ToggleHomeLight { source: SourceId },
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LightingReference {
+    pub headlights: u8,
+    pub handbrake: bool,
+    pub interior_light_mode: u8,
+    pub door_items: Vec<ItemId>,
+    pub door_limit: f32,
+    pub home_electronics_threshold: f32,
+    pub groups: Vec<LampGroupReference>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LampControl {
+    Headlights,
+    Interior,
+    Home,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LampGroupReference {
+    pub source: SourceId,
+    pub owner: Option<ItemId>,
+    pub control: LampControl,
+    pub electronics_source: Option<SourceId>,
+    pub electronics_output: f32,
+    pub initial_on: bool,
+    pub initial_state: u8,
+    pub initial_target: u8,
+    pub initial_energy: f32,
+    pub energy_move: f32,
+    pub button: Option<LampButtonReference>,
+    pub states: Vec<LampStateReference>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LampButtonReference {
+    pub node: NodeId,
+    pub on: NodeId,
+    pub off: NodeId,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LampStateReference {
+    pub intensity: f32,
+    pub lamps: Vec<LampReference>,
+    pub renderers: Vec<NodeId>,
+    pub material: Option<LampMaterialReference>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LampMaterialReference {
+    pub source: SourceId,
+    pub asset: AssetId,
+    pub index: u32,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LampType {
+    Spot,
+    Point,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LampReference {
+    pub source: SourceId,
+    pub node: NodeId,
+    pub lamp_type: LampType,
+    pub color: [f32; 3],
+    pub intensity: f32,
+    pub range: f32,
+    pub outer_degrees: f32,
+    pub inner_degrees: f32,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MechanismDrag {
+    pub mode: DragMode,
+    pub node: NodeId,
+    pub node2: NodeId,
     pub axis: [f32; 3],
-    pub closed_degrees: f32,
-    pub min_degrees: f32,
-    pub max_degrees: f32,
-    pub drag_axis: [f32; 3],
-    pub drag_input_axis: u8,
-    pub drag_sensitivity: f32,
-    pub input_inverted: [bool; 2],
-    pub rotation_axes: [[f32; 3]; 2],
-    pub relative_drag: bool,
-    pub drag_anchor: AnchorId,
-    pub motor_degrees_per_second: Option<f32>,
+    pub axes2: [[f32; 3]; 2],
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DragMode {
+    Direct,
+    Relative,
+    RelativeTwo,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RotationReference {
+    pub targets: Vec<RotationTarget>,
+    pub sum_axes: bool,
+    pub limits_degrees: [[f32; 2]; 2],
+    pub initial_degrees: [f32; 2],
+    pub inverted: [bool; 2],
+    pub sensitivity: f32,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RotationTarget {
+    pub node: NodeId,
+    pub mapping: [[bool; 3]; 2],
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SlideReference {
+    pub initial_value: f32,
+    pub speed: f32,
+    pub sensitivity: f32,
+    pub axes: [bool; 6],
+    pub multiplier: [f32; 3],
+    pub scroll_without_use: bool,
+    pub animation_source: Option<SourceId>,
+    pub paths: Vec<SlidePath>,
+    pub rotations: Vec<SlideRotation>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SlidePath {
+    pub node: NodeId,
+    pub points: Vec<SlidePoint>,
+    pub rotate: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SlidePoint {
+    pub node: NodeId,
+    pub value: f32,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SlideRotation {
+    pub node: NodeId,
+    pub reference: NodeId,
+    pub axis: [f32; 3],
+    pub angle_degrees: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -194,6 +369,23 @@ pub struct ItemRecord {
     pub condition: f32,
     pub mass_kg: f32,
     pub attached_to: Option<ItemId>,
+    pub pickup: Option<PickupReference>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PickupReference {
+    pub source: SourceId,
+    pub cant_pickup: bool,
+    pub cant_pickup_while_mounted: bool,
+    pub cant_pickup_while_seated: bool,
+    pub no_rotation: bool,
+    pub move_with_rotation: bool,
+    pub use_recenter_position: bool,
+    pub recenter_position: [f32; 3],
+    pub use_recenter_rotation: bool,
+    pub recenter_rotation: [f32; 4],
+    pub recenter_distance: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -361,6 +553,30 @@ pub struct FluidRulesReference {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct PushGripReference {
+    pub source: SourceId,
+    pub node: NodeId,
+    pub hand_node: NodeId,
+    pub colliders: Vec<ColliderId>,
+    pub local_pose: Transform,
+    pub in_use: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PushReference {
+    pub source: SourceId,
+    pub owner: ItemId,
+    pub body: BodyId,
+    pub mask: u32,
+    pub modifier: f32,
+    pub only_projected: bool,
+    pub both: bool,
+    pub push_even_if_same_parent: bool,
+    pub grip: Option<PushGripReference>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PlayerReference {
     pub source: SourceId,
     pub capsule_source: SourceId,
@@ -379,7 +595,7 @@ pub struct PlayerReference {
     pub camera_height: f32,
     pub field_of_view_degrees: f32,
     pub aim_reach: f32,
-    pub use_layer_mask: u32,
+    pub action_masks: ActionMasks,
     pub get_out_layer_mask: u32,
     pub exit_capsule_half_height: f32,
     pub exit_capsule_radius: f32,
@@ -391,6 +607,17 @@ pub struct PlayerReference {
     pub exit_steps_vertical: u32,
     pub exit_step_horizontal: f32,
     pub exit_steps_horizontal: u32,
+    pub source_force_interval: f32,
+    pub throw_minimum: f32,
+    pub throw_gain: f32,
+    pub throw_multiplier: f32,
+    pub push_force: f32,
+    pub airborne_push_force: f32,
+    pub grip_force: f32,
+    pub grip_speed: f32,
+    pub grip_distance: f32,
+    pub carry_min_weight: f32,
+    pub carry_max_weight: f32,
     pub carry_anchor_offset: [f32; 3],
     pub carry_offset_radius: f32,
     pub carry_drop_distance: f32,
@@ -450,7 +677,56 @@ pub struct WheelSlotReference {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct PartScanReference {
+    pub source: SourceId,
+    pub mask: u32,
+    pub radius: f32,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PartReference {
+    pub scan_radius: f32,
+    pub usable: Option<ItemId>,
+    pub item: ItemId,
+    pub source: SourceId,
+    pub node: NodeId,
+    pub main_types: Vec<String>,
+    pub part_types: Vec<String>,
+    pub cover_slot: Option<PartSlotId>,
+    pub local_rotation_after_mount: [f32; 4],
+    pub colliders: Vec<ColliderId>,
+    pub linear_damping: f32,
+    pub angular_damping: f32,
+    pub enable_if_mounted: Vec<NodeId>,
+    pub enable_if_dismounted: Vec<NodeId>,
+    pub disable_if_mounted: Vec<NodeId>,
+    pub disable_if_dismounted: Vec<NodeId>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PartSlotReference {
+    pub id: PartSlotId,
+    pub source: SourceId,
+    pub node: NodeId,
+    pub owner: Option<ItemId>,
+    pub part: Option<ItemId>,
+    pub mount_anchor: AnchorId,
+    pub detach_anchor: Option<AnchorId>,
+    pub fixed_detach: bool,
+    pub detach_position: [f32; 3],
+    pub detach_rotation: [f32; 4],
+    pub main_types: Vec<String>,
+    pub part_types: Vec<String>,
+    pub cant_craft: bool,
+    pub cant_uncraft: bool,
+    pub disable_colliders_on_craft: bool,
+    pub colliders: Vec<ColliderId>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WheelPartReference {
+    pub cover_slot: Option<PartSlotId>,
     pub item: ItemId,
     pub source: SourceId,
     pub radius: f32,
@@ -520,10 +796,16 @@ pub struct ReferenceManifest {
     pub nodes: Vec<NodeRecord>,
     pub bodies: Vec<BodyRecord>,
     pub colliders: Vec<ColliderRecord>,
+    pub action_bindings: Vec<ActionBinding>,
+    pub pushables: Vec<PushReference>,
     pub anchors: Vec<AnchorRecord>,
-    pub hinges: Vec<HingeRecord>,
+    pub mechanisms: Vec<MechanismReference>,
+    pub lighting: LightingReference,
     pub wheel_slots: Vec<WheelSlotReference>,
     pub wheel_parts: Vec<WheelPartReference>,
+    pub part_scan: PartScanReference,
+    pub parts: Vec<PartReference>,
+    pub part_slots: Vec<PartSlotReference>,
     pub items: Vec<ItemRecord>,
     pub openings: Vec<OpeningRecord>,
     pub tanks: Vec<TankReference>,
@@ -612,6 +894,113 @@ impl ReferenceManifest {
             self.wheel_slots.iter().map(|r| r.wheel),
             "duplicate mounted wheel",
         )?;
+        let part_ids = ids(self.parts.iter().map(|p| p.item), "duplicate part item")?;
+        require(
+            self.part_scan.mask != 0
+                && self.part_scan.radius.is_finite()
+                && self.part_scan.radius > 0.,
+            "part scan parameters",
+        )?;
+        let part_slot_ids = ids(self.part_slots.iter().map(|s| s.id), "duplicate part slot")?;
+        ids(
+            self.part_slots.iter().filter_map(|s| s.part),
+            "duplicate slot occupant",
+        )?;
+        let mechanism_items: HashSet<_> = self.mechanisms.iter().map(|m| m.item).collect();
+        let mut owned_shapes = HashSet::new();
+        for p in &self.parts {
+            require(
+                item_ids.contains(&p.item) && node_ids.contains(&p.node),
+                "part item/node",
+            )?;
+            require(
+                p.usable.is_none_or(|id| mechanism_items.contains(&id)),
+                "part usable mechanism",
+            )?;
+            require(
+                !p.part_types.is_empty() && p.cover_slot.is_none_or(|s| part_slot_ids.contains(&s)),
+                "part types/cover",
+            )?;
+            require(
+                p.linear_damping.is_finite()
+                    && p.linear_damping >= 0.
+                    && p.angular_damping.is_finite()
+                    && p.angular_damping >= 0.,
+                "part damping",
+            )?;
+            require(
+                p.scan_radius.is_finite()
+                    && p.scan_radius >= 0.
+                    && p.local_rotation_after_mount.iter().all(|v| v.is_finite()),
+                "part mount rotation",
+            )?;
+            require(
+                p.colliders
+                    .iter()
+                    .all(|id| collider_ids.contains(id) && owned_shapes.insert(*id)),
+                "part collider ownership",
+            )?;
+            require(
+                p.enable_if_mounted
+                    .iter()
+                    .chain(&p.disable_if_mounted)
+                    .chain(&p.enable_if_dismounted)
+                    .chain(&p.disable_if_dismounted)
+                    .all(|id| node_ids.contains(id)),
+                "part visibility node",
+            )?;
+        }
+        for s in &self.part_slots {
+            require(
+                node_ids.contains(&s.node)
+                    && anchor_ids.contains(&s.mount_anchor)
+                    && s.detach_anchor.is_none_or(|id| anchor_ids.contains(&id)),
+                "part slot anchors",
+            )?;
+            require(
+                s.part.is_none_or(|id| part_ids.contains(&id))
+                    && s.owner.is_none_or(|id| item_ids.contains(&id)),
+                "part slot owner/occupant",
+            )?;
+            require(
+                s.colliders.iter().all(|id| {
+                    self.colliders
+                        .iter()
+                        .any(|c| c.id == *id && c.node == s.node)
+                }),
+                "part slot collider",
+            )?;
+            require(
+                s.detach_position
+                    .iter()
+                    .chain(&s.detach_rotation)
+                    .all(|v| v.is_finite()),
+                "part detach pose",
+            )?;
+            let mut owner = s.owner;
+            for _ in 0..=self.part_slots.len() {
+                let Some(item) = owner else {
+                    break;
+                };
+                require(s.part != Some(item), "cyclic part slots")?;
+                owner = self
+                    .part_slots
+                    .iter()
+                    .find(|s| s.part == Some(item))
+                    .and_then(|s| s.owner);
+            }
+            require(owner.is_none(), "cyclic part slots")?;
+        }
+        for p in &self.wheel_parts {
+            require(
+                p.colliders.iter().all(|id| owned_shapes.insert(*id)),
+                "part collider ownership",
+            )?;
+            require(
+                p.cover_slot.is_none_or(|id| part_slot_ids.contains(&id)),
+                "wheel cover slot",
+            )?;
+        }
         require(
             self.assets
                 .iter()
@@ -802,6 +1191,27 @@ impl ReferenceManifest {
             };
             require(valid, "collider geometry")?;
         }
+        let action_ids = ids(
+            self.action_bindings.iter().map(|r| r.collider),
+            "duplicate action collider",
+        )?;
+        require(
+            action_ids == collider_ids,
+            "complete action collider bindings",
+        )?;
+        for binding in &self.action_bindings {
+            require(
+                [
+                    binding.use_owner,
+                    binding.pickup_owner,
+                    binding.removal_owner,
+                    binding.push_owner,
+                ]
+                .iter()
+                .all(|owner| owner.is_none_or(|id| item_ids.contains(&id))),
+                "action owner binding",
+            )?;
+        }
         for r in &self.anchors {
             require(
                 node_ids.contains(&r.node) && body_ids.contains(&r.body) && transform(&r.transform),
@@ -824,31 +1234,206 @@ impl ReferenceManifest {
                 "item condition/mass",
             )?;
         }
-        for r in &self.hinges {
+        for item in &self.items {
+            if let Some(pickup) = &item.pickup {
+                require(
+                    finite(&pickup.recenter_position)
+                        && finite(&pickup.recenter_rotation)
+                        && (pickup.recenter_rotation.iter().map(|v| v * v).sum::<f32>() - 1.0)
+                            .abs()
+                            < 0.001
+                        && pickup.recenter_distance.is_finite(),
+                    "pickup recenter pose",
+                )?;
+            }
+        }
+        ids(
+            self.mechanisms.iter().map(|m| m.id),
+            "duplicate mechanism ID",
+        )?;
+        ids(
+            self.mechanisms.iter().map(|m| m.item),
+            "duplicate mechanism item",
+        )?;
+        let mechanism_items: HashSet<_> = self.mechanisms.iter().map(|m| m.item).collect();
+        for r in &self.mechanisms {
             require(
                 item_ids.contains(&r.item)
-                    && anchor_ids.contains(&r.anchor)
-                    && body_ids.contains(&r.body),
-                "hinge binding",
+                    && r.parent_item.is_none_or(|id| item_ids.contains(&id))
+                    && r.child
+                        .is_none_or(|id| mechanism_items.contains(&id) && id != r.item)
+                    && (!r.driven_nodes.is_empty() || r.turn.is_some())
+                    && r.driven_nodes.iter().all(|id| {
+                        node_ids.contains(id) && self.bodies.iter().any(|b| b.node == *id)
+                    })
+                    && node_ids.contains(&r.drag.node)
+                    && node_ids.contains(&r.drag.node2)
+                    && finite(&r.drag.axis)
+                    && r.drag.axes2.iter().all(|a| finite(a)),
+                "mechanism binding",
             )?;
             require(
-                finite(&r.axis)
-                    && finite(&[
-                        r.closed_degrees,
-                        r.min_degrees,
-                        r.max_degrees,
-                        r.drag_sensitivity,
-                    ])
-                    && r.min_degrees <= r.max_degrees
-                    && r.drag_sensitivity > 0.0
-                    && r.drag_input_axis < 2
-                    && finite(&r.drag_axis)
-                    && r.rotation_axes.iter().all(|axis| finite(axis))
-                    && anchor_ids.contains(&r.drag_anchor)
-                    && r.motor_degrees_per_second
-                        .is_none_or(|speed| speed.is_finite() && speed > 0.0),
-                "hinge parameters",
+                r.rotation.is_some() || r.slide.is_some() || r.turn.is_some(),
+                "empty mechanism",
             )?;
+            if let Some(turn) = &r.turn {
+                require(turn.initial_state <= turn.max_state, "switch state")?;
+                match &turn.action {
+                    TurnAction::ToggleHomeLight { source } => require(
+                        self.lighting
+                            .groups
+                            .iter()
+                            .any(|g| g.source == *source && g.control == LampControl::Home),
+                        "switch lamp link",
+                    )?,
+                    TurnAction::InteriorLight => {
+                        require(turn.max_state == 2, "cabin switch modes")?
+                    }
+                    _ => require(turn.max_state == 0, "event switch state")?,
+                }
+            }
+            if let Some(rotation) = &r.rotation {
+                require(
+                    !rotation.targets.is_empty()
+                        && rotation
+                            .targets
+                            .iter()
+                            .all(|t| r.driven_nodes.contains(&t.node))
+                        && rotation
+                            .limits_degrees
+                            .iter()
+                            .all(|v| finite(v) && v[0] <= v[1])
+                        && finite(&rotation.initial_degrees)
+                        && rotation.sensitivity.is_finite()
+                        && rotation.sensitivity > 0.0,
+                    "mechanism rotation",
+                )?;
+            }
+            if let Some(slide) = &r.slide {
+                require(
+                    slide.initial_value.is_finite()
+                        && (0.0..=1.0).contains(&slide.initial_value)
+                        && slide.speed.is_finite()
+                        && slide.sensitivity.is_finite()
+                        && slide.speed > 0.0
+                        && slide.sensitivity > 0.0
+                        && finite(&slide.multiplier)
+                        && (!slide.paths.is_empty() || !slide.rotations.is_empty()),
+                    "mechanism slide",
+                )?;
+                for path in &slide.paths {
+                    require(
+                        r.driven_nodes.contains(&path.node)
+                            && path.points.len() >= 2
+                            && path
+                                .points
+                                .iter()
+                                .all(|p| node_ids.contains(&p.node) && p.value.is_finite())
+                            && path.points.windows(2).all(|p| p[0].value < p[1].value)
+                            && path.points[0].value == 0.0
+                            && path.points.last().unwrap().value == 1.0,
+                        "mechanism path",
+                    )?;
+                }
+                for track in &slide.rotations {
+                    require(
+                        r.driven_nodes.contains(&track.node)
+                            && node_ids.contains(&track.reference)
+                            && finite(&track.axis)
+                            && track.axis.iter().any(|v| *v != 0.0)
+                            && track.angle_degrees.is_finite(),
+                        "mechanism animation",
+                    )?;
+                }
+            }
+            let mut child = r.child;
+            for depth in 0..=self.mechanisms.len() {
+                let Some(id) = child else {
+                    break;
+                };
+                require(depth < self.mechanisms.len(), "mechanism child cycle")?;
+                child = self
+                    .mechanisms
+                    .iter()
+                    .find(|m| m.item == id)
+                    .and_then(|m| m.child);
+            }
+        }
+        let lighting = &self.lighting;
+        require(
+            lighting.home_electronics_threshold.is_finite()
+                && lighting.home_electronics_threshold >= 0.0
+                && lighting.headlights <= 2
+                && lighting.interior_light_mode <= 2
+                && lighting.door_limit.is_finite()
+                && lighting.door_limit >= 0.0
+                && lighting
+                    .door_items
+                    .iter()
+                    .all(|id| mechanism_items.contains(id)),
+            "lighting controls",
+        )?;
+        ids(
+            lighting
+                .groups
+                .iter()
+                .map(|g| (&g.source.file, g.source.path_id)),
+            "lamp group source",
+        )?;
+        for g in &lighting.groups {
+            let state_count = match g.control {
+                LampControl::Headlights => 3,
+                LampControl::Interior | LampControl::Home => 2,
+            };
+            require(g.states.len() == state_count, "lamp state count")?;
+            require(
+                g.owner.is_none_or(|id| item_ids.contains(&id))
+                    && usize::from(g.initial_state) < g.states.len()
+                    && usize::from(g.initial_target) < g.states.len()
+                    && g.initial_energy.is_finite()
+                    && (0.0..=1.0).contains(&g.initial_energy)
+                    && g.electronics_output.is_finite()
+                    && g.electronics_output >= 0.0
+                    && g.energy_move.is_finite()
+                    && g.energy_move >= 0.0,
+                "lamp group",
+            )?;
+            if let Some(b) = &g.button {
+                require(
+                    [b.node, b.on, b.off].iter().all(|id| node_ids.contains(id)),
+                    "lamp button nodes",
+                )?;
+            }
+            for state in &g.states {
+                require(
+                    state.intensity.is_finite()
+                        && state.intensity >= 0.0
+                        && state.renderers.iter().all(|id| node_ids.contains(id))
+                        && state
+                            .material
+                            .as_ref()
+                            .is_none_or(|m| asset_ids.contains(&m.asset)),
+                    "lamp state",
+                )?;
+                for l in &state.lamps {
+                    require(
+                        node_ids.contains(&l.node)
+                            && finite(&l.color)
+                            && l.color.iter().all(|v| *v >= 0.0)
+                            && l.intensity.is_finite()
+                            && l.intensity >= 0.0
+                            && l.range.is_finite()
+                            && l.range > 0.0
+                            && l.outer_degrees.is_finite()
+                            && l.inner_degrees.is_finite()
+                            && l.inner_degrees >= 0.0
+                            && l.outer_degrees > 0.0
+                            && l.outer_degrees < 180.0
+                            && l.inner_degrees <= l.outer_degrees,
+                        "lamp parameters",
+                    )?;
+                }
+            }
         }
         for r in &self.openings {
             let visuals = &r.visuals;
@@ -981,6 +1566,8 @@ impl ReferenceManifest {
             finite(&p.carry_anchor_offset)
                 && finite(&p.look_sensitivity)
                 && finite(&[
+                    p.carry_min_weight,
+                    p.carry_max_weight,
                     p.carry_offset_radius,
                     p.carry_drop_distance,
                     p.carry_force_multiplier,
@@ -990,6 +1577,8 @@ impl ReferenceManifest {
                     p.obj_move_sensitivity,
                     p.obj_rotation_sensitivity,
                 ])
+                && p.carry_min_weight >= 0.0
+                && p.carry_max_weight > p.carry_min_weight
                 && p.carry_offset_radius > 0.0
                 && p.carry_drop_distance > 0.0
                 && p.carry_min_distance >= 0.0
@@ -1102,11 +1691,77 @@ impl ReferenceManifest {
                 && p.crouch_height >= p.capsule_radius * 2.0
                 && p.crouch_height < p.capsule_height
                 && p.aim_reach > 0.0
-                && p.use_layer_mask != 0
+                && p.action_masks.use_mask != 0
+                && p.action_masks.pickup_mask != 0
+                && p.action_masks.attach_mask != 0
+                && p.action_masks.push_mask != 0
                 && p.get_out_layer_mask != 0
                 && p.exit_capsule_half_height > 0.0
                 && p.exit_capsule_radius > 0.0,
             "player parameters",
+        )?;
+        require(
+            finite(&[
+                p.source_force_interval,
+                p.throw_minimum,
+                p.throw_gain,
+                p.throw_multiplier,
+                p.push_force,
+                p.airborne_push_force,
+                p.grip_force,
+                p.grip_speed,
+                p.grip_distance,
+            ]) && p.source_force_interval > 0.0
+                && p.throw_minimum > 0.0
+                && p.throw_minimum < 1.0
+                && p.throw_gain > 0.0
+                && p.throw_multiplier > 0.0
+                && p.push_force > 0.0
+                && p.airborne_push_force > 0.0
+                && p.grip_force > 0.0
+                && p.grip_speed > 0.0
+                && p.grip_distance > 0.0,
+            "push and throw parameters",
+        )?;
+        let mut push_owners = HashSet::new();
+        for push in &self.pushables {
+            require(
+                item_ids.contains(&push.owner)
+                    && self
+                        .items
+                        .iter()
+                        .find(|item| item.id == push.owner)
+                        .is_some_and(|item| item.body == push.body)
+                    && self
+                        .bodies
+                        .iter()
+                        .find(|body| body.id == push.body)
+                        .is_some_and(|body| body.dynamic)
+                    && body_ids.contains(&push.body)
+                    && push_owners.insert(push.owner)
+                    && push.mask == p.action_masks.push_mask
+                    && push.modifier.is_finite()
+                    && push.modifier >= 0.0,
+                "push record",
+            )?;
+            if let Some(grip) = &push.grip {
+                require(
+                    node_ids.contains(&grip.node)
+                        && node_ids.contains(&grip.hand_node)
+                        && transform(&grip.local_pose)
+                        && !grip.colliders.is_empty()
+                        && grip.colliders.iter().all(|id| collider_ids.contains(id)),
+                    "push grip",
+                )?;
+            }
+        }
+        require(
+            self.action_bindings.iter().all(|binding| {
+                binding
+                    .push_owner
+                    .is_none_or(|owner| push_owners.contains(&owner))
+            }),
+            "push action owner",
         )?;
         let mut seat_hit_nodes = HashSet::new();
         for r in &self.seats {

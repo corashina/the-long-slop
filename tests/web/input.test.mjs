@@ -7,13 +7,18 @@ test('blur_discards_pending_edges',()=>{
 });
 test('mm_button_is_rotate_and_rmb_moves',()=>{
  const i=new InputState();i.code('Mouse1',true);assert.equal(i.takeFrame().held,4096);
- i.clear();i.code('Mouse2',true);assert.equal(i.takeFrame().held,8192);
+ i.clear();i.code('Mouse2',true);assert.equal(i.takeFrame().held,16384);
 });
 test('backspace_and_obsolete_controls_are_interface_only',()=>{
- const i=new InputState();for(const key of ['Backspace','KeyX','KeyR','KeyP','ArrowUp'])i.code(key,true);
+ const i=new InputState();for(const key of ['Backspace','KeyR','KeyP','ArrowUp'])i.code(key,true);
  assert.equal(i.takeFrame().held,0);
 });
 test('release_survives_a_frame_without_physics',()=>{
  const i=new InputState();i.code('KeyF',true);i.code('KeyF',false);
  const f=i.takeFrame();assert.equal(f.pressed,256);assert.equal(f.released,256);assert.equal(f.held,0);
+});
+
+test('wheel_assembly_and_carry_recenter_use_distinct_bits',()=>{
+ const i=new InputState();i.code('KeyX',true);i.code('Tab',true);
+ assert.equal(i.takeFrame().held,8192|32768);
 });

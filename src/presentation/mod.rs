@@ -1,5 +1,7 @@
 pub mod camera;
 pub mod instruments;
+pub mod lighting;
+pub mod mechanisms;
 pub mod reference;
 pub mod world;
 

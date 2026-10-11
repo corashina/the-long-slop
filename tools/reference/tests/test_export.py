@@ -11,6 +11,87 @@ from tools.reference.collision import bake_points
 
 
 class ReferenceExportTests(unittest.TestCase):
+    def test_required_switch_callbacks_reject_unknown_methods_and_skip_audio(self):
+        from types import SimpleNamespace
+        from tools.reference.mechanisms import recover_turn
+        reader=SimpleNamespace(assets_file=SimpleNamespace(name='level1'),path_id=70733,type=SimpleNamespace(name='MonoBehaviour'))
+        target=SimpleNamespace(assets_file=reader.assets_file,path_id=77839,type=SimpleNamespace(name='MonoBehaviour'))
+        audio=SimpleNamespace(assets_file=reader.assets_file,path_id=17,type=SimpleNamespace(name='AudioSource'))
+        source=SimpleNamespace(resolve=lambda r,p: target if p['m_PathID']==77839 else audio,
+            class_name=lambda r:'carscript',read=lambda r:{'m_GameObject':{'m_PathID':20}})
+        def call(method,identity=77839,mode=1):
+            return {'m_Target':{'m_PathID':identity},'m_MethodName':method,'m_Mode':mode,'m_CallState':2}
+        def recover(calls):
+            fields={'turnable':True,'maxTurnState':0,'currentTurnState':0,
+                'turnedEvent':{'m_PersistentCalls':{'m_Calls':calls}}}
+            return recover_turn(source,reader,fields,{1:{}},1,lambda r,p:1)
+        with self.assertRaisesRegex(ValueError,r'usablescript level1:70733.*turnedEvent.*m_MethodName.*UnknownLights'):
+            recover([call('UnknownLights')])
+        with self.assertRaisesRegex(ValueError,r'usablescript level1:70733.*turnedEvent.*m_Mode'):
+            recover([call('InteractSwitchLights',mode=2)])
+        self.assertIsNone(recover([call('Play',identity=17)]))
+        mixed=recover([call('Play',identity=17),call('InteractSwitchLights')])
+        self.assertEqual(mixed['action'],{'kind':'cycle_headlights'})
+        with self.assertRaisesRegex(ValueError,r'turnedEvent.*m_MethodName'):
+            recover([call('InteractSwitchLights'),call('UnknownLights')])
+
+    def test_pickup_recenter_and_restrictions_keep_source_values(self):
+        from types import SimpleNamespace
+        from tools.reference.actions import recover_pickup
+        reader = SimpleNamespace(assets_file=SimpleNamespace(name='fixture'), path_id=19)
+        fields = {'cantPickup': 1, 'cantPickupWhileMount': 1, 'cantPickupWhileSitting': 1,
+            'noRot': 1, 'moveWithRot': 0, 'useRecenter': 1,
+            'recenterPos': {'x': .2, 'y': .4, 'z': .6}, 'useRecenterRot': 1,
+            'recenterRot': {'x': 0., 'y': 90., 'z': 0.}, 'recenterDist': -.5}
+        result = recover_pickup(SimpleNamespace(read=lambda r: fields), reader)
+        self.assertEqual(result['source'], {'file': 'fixture', 'path_id': 19})
+        self.assertEqual(result['recenter_position'], (.2, .4, -.6))
+        self.assertEqual(result['recenter_distance'], -.5)
+        self.assertAlmostEqual(result['recenter_rotation'][1], -math.sqrt(.5))
+        self.assertAlmostEqual(result['recenter_rotation'][3], math.sqrt(.5))
+        for field in ('cant_pickup', 'cant_pickup_while_mounted', 'cant_pickup_while_seated',
+                'no_rotation', 'use_recenter_position', 'use_recenter_rotation'):
+            self.assertTrue(result[field])
+        del fields['recenterDist']
+        with self.assertRaises(KeyError):
+            recover_pickup(SimpleNamespace(read=lambda r: fields), reader)
+
+    def test_source_action_masks(self):
+        from tools.reference.actions import recover_masks
+        masks = recover_masks({'useLayer': {'m_Bits': 12747265},
+            'pickupLayer': {'m_Bits': 8388609}, 'attachLayer': {'m_Bits': 8552449},
+            'pushLayer': {'m_Bits': 163841}})
+        self.assertEqual(masks, {'use_mask': 12747265, 'pickup_mask': 8388609,
+            'attach_mask': 8552449, 'push_mask': 163841})
+
+    def test_cap_binding_follows_pickupable_parent_and_startup_layer_link(self):
+        from types import SimpleNamespace
+        from tools.reference.actions import recover_bindings
+        def reader(identity, name):
+            return SimpleNamespace(assets_file=SimpleNamespace(name='fixture'), path_id=identity,
+                type=SimpleNamespace(name=name))
+        pick, cap, layer, collider = [reader(identity, name) for identity, name in
+            [(1, 'MonoBehaviour'), (2, 'MonoBehaviour'), (3, 'MonoBehaviour'), (4, 'BoxCollider')]]
+        null = {'m_FileID': 0, 'm_PathID': 0}
+        fields = {1: {'cantPickup': False, 'cols': [{'m_PathID': 3}], 'part': null},
+            2: {}, 3: {'col': null, 'p': null}}
+        readers = {r.path_id: r for r in (pick, cap, layer, collider)}
+        classes = {1: 'pickupable', 2: 'tankcapscript', 3: 'layerScript'}
+        source = SimpleNamespace(read=lambda r: fields[r.path_id],
+            resolve=lambda r, p: readers.get(p['m_PathID']),
+            class_name=lambda r: classes[r.path_id], get=lambda file, identity: readers[identity])
+        nodes = [{'id': 1, 'parent': None, 'active': True}, {'id': 2, 'parent': 1, 'active': True}]
+        components = {1: {'pickupable': [pick]},
+            2: {'tankcapscript': [cap], 'layerScript': [layer], 'BoxCollider': [collider]}}
+        bindings = recover_bindings(source, nodes, components, {1: 10, 2: 11},
+            [{'id': 1, 'node': 2, 'source': {'file': 'fixture', 'path_id': 4}}], [],
+            [{'source': {'file': 'fixture', 'path_id': 2}, 'cap': 11}], [])
+        self.assertEqual(bindings, [{'collider': 1, 'use_owner': 11, 'pickup_owner': 10,
+            'removal_owner': None, 'push_owner': None}])
+        fields[1]['cols'] = [{'m_PathID': 2}]
+        with self.assertRaisesRegex(ValueError, 'pickupable.cols'):
+            recover_bindings(source, nodes, components, {1: 10, 2: 11}, [], [], [], [])
+
     def test_camera_layers_exclude_source_helper(self):
         from tools.reference.visibility import normal_view_mask, visible_to_camera
         masks=[0x04d28f33,0x10000000,0x00088001,0x00010000]

@@ -1,6 +1,6 @@
 //! Persistent imported home bodies and preparation state.
 use crate::interaction::{
-    AimTarget, InteractionAction, InteractionState,
+    InteractionAction, InteractionState, ResolvedAim,
     items::{ItemStore, node_pose},
 };
 use crate::player::PlayerState;
@@ -22,6 +22,7 @@ use std::collections::HashMap;
 struct CompoundCollider {
     handle: crate::vehicle::ColliderHandle,
     body: BodyId,
+    root: BodyId,
     fixed_pose: rapier3d::math::Pose,
     shape_pose: rapier3d::math::Pose,
 }
@@ -29,7 +30,8 @@ struct CompoundCollider {
 impl CompoundCollider {
     fn local_pose(&self, interaction: &InteractionState) -> rapier3d::math::Pose {
         interaction
-            .hinge_local_pose(self.body)
+            .mechanisms
+            .body_local_pose(self.body, self.root)
             .unwrap_or(self.fixed_pose)
             * self.shape_pose
     }
@@ -87,7 +89,12 @@ impl StartingArea {
             if reference.vehicle.colliders.contains(&record.id) {
                 continue;
             }
-            let item = collider_item(reference, record.node);
+            let item = reference
+                .action_bindings
+                .iter()
+                .find(|binding| binding.collider == record.id)
+                .and_then(|binding| binding.use_owner)
+                .or_else(|| collider_item(reference, record.node));
             let flag = if belongs_to_vehicle(reference, record.body) {
                 VEHICLE_COLLIDER_FLAG
             } else {
@@ -141,6 +148,7 @@ impl StartingArea {
                 compound_colliders.push(CompoundCollider {
                     handle,
                     body: record.body,
+                    root: reference.vehicle.body,
                     fixed_pose: to_rapier(VehiclePose {
                         position: parent.pose.translation,
                         rotation: parent.pose.rotation,
@@ -163,8 +171,14 @@ impl StartingArea {
                     .iter()
                     .find(|record| record.id.0 == source)
                 {
-                    collider.user_data |=
-                        collider_item(reference, record.node).map_or(0, |id| id.0 as u128 + 1);
+                    let item = reference
+                        .action_bindings
+                        .iter()
+                        .find(|binding| binding.collider == record.id)
+                        .and_then(|binding| binding.use_owner)
+                        .or_else(|| collider_item(reference, record.node));
+                    collider.user_data = (collider.user_data & !(u32::MAX as u128))
+                        | item.map_or(0, |id| id.0 as u128 + 1);
                 }
             }
         }
@@ -184,14 +198,23 @@ impl StartingArea {
                         | (slot.wheel.0 as u128 + 1),
                 );
             let rapier = physics.rapier_mut();
-            rapier.colliders.insert(builder);
+            let handle = rapier.colliders.insert(builder);
+            interaction.bind_wheel_sensor(handle, slot.rim, physics);
+        }
+        for (handle, collider) in physics.rapier().colliders.iter() {
+            let id = crate::reference::ColliderId((collider.user_data >> 64) as u32);
+            if id.0 != 0 {
+                interaction.bind_collider(id, handle);
+            }
         }
         interaction.rebase(origin.map(|v| v as f32));
-        interaction.sync_hinges(physics);
+        interaction.sync_mechanisms(physics);
         for collider in &compound_colliders {
-            physics.rapier_mut().colliders[collider.handle]
-                .set_position_wrt_parent(collider.local_pose(&interaction));
+            let local = collider.local_pose(&interaction);
+            physics.rapier_mut().colliders[collider.handle].set_position_wrt_parent(local);
         }
+        interaction.parts.bind(&mut items, physics)?;
+        interaction.sync_parts(&mut items, physics)?;
         physics.refresh_queries();
         items.sync_poses(physics);
         let spawn = &reference.area.player_spawn;
@@ -210,7 +233,11 @@ impl StartingArea {
             .iter()
             .filter_map(|record| {
                 let parent = record.parent_body?;
-                if reference.hinges.iter().any(|hinge| hinge.body == record.id) {
+                if reference
+                    .mechanisms
+                    .iter()
+                    .any(|m| m.driven_nodes.contains(&record.node))
+                {
                     return None;
                 }
                 let parent_record = reference
@@ -348,6 +375,10 @@ impl StartingArea {
     }
     pub fn sync_compound(&self, physics: &mut PhysicsWorld) {
         for record in &self.compound_colliders {
+            if physics.rapier().colliders[record.handle].parent() != Some(physics.chassis_handle())
+            {
+                continue;
+            }
             let local = record.local_pose(&self.interaction);
             let collider = &mut physics.rapier_mut().colliders[record.handle];
             if collider.position_wrt_parent() != Some(&local) {
@@ -371,7 +402,7 @@ impl StartingArea {
         }
     }
 
-    /// Attached bodies without hinges follow the authoritative vehicle pose.
+    /// Attached bodies without mechanisms follow the authoritative vehicle pose.
     pub fn sync_attachments(&self, physics: &mut PhysicsWorld, next: bool) {
         for &(handle, parent, local) in &self.attachments {
             let parent_pose = if next {
@@ -438,12 +469,13 @@ pub struct GarageRuntime {
     pub engine_output: EngineOutput,
     pub trip_m: f64,
     pub handbrake: bool,
+    pub lighting: crate::interaction::lighting::LightingState,
     pub paused: bool,
     pub started: bool,
     pub attempts: u64,
     pub rebases: u32,
     pub notice: &'static str,
-    pub target: Option<AimTarget>,
+    pub aim: ResolvedAim,
     pub wheels: crate::interaction::wheels::WheelAssemblies,
     ignition_held: bool,
     auto_gear: usize,
@@ -498,13 +530,14 @@ impl GarageRuntime {
             engine: EngineState::new(&reference.engine),
             engine_output: EngineOutput::default(),
             trip_m: 0.0,
-            handbrake: true,
+            handbrake: reference.lighting.handbrake,
+            lighting: crate::interaction::lighting::LightingState::new(&reference.lighting),
             paused: false,
             started: false,
             attempts: 0,
             rebases: 0,
             notice: "",
-            target: None,
+            aim: ResolvedAim::default(),
             wheels,
             ignition_held: false,
             auto_gear: reference
@@ -520,71 +553,130 @@ impl GarageRuntime {
 
     pub fn step(&mut self, reference: &ReferenceManifest, input: FrameInput) {
         if !self.started || self.paused {
+            self.area.interaction.cancel_input();
             return;
         }
+        self.area
+            .interaction
+            .finish_cancelled_input(&mut self.area.player, &mut self.physics);
         let previous = self
             .stream
             .origin
             .absolute(self.physics.snapshot().pose.position);
         self.area.begin_step();
-        let target = self.area.interaction.aim(
+        let aim = self.area.interaction.resolve(
             &self.physics,
             self.area.player.view_pose(&self.physics),
-            reference.player.aim_reach,
+            &self.area.items,
         );
-        self.target = target;
+        if !self.aim.same_actions(&aim)
+            || input.pressed & (keys::GRAB | keys::USE | keys::ASSEMBLE) != 0
+        {
+            self.notice = "";
+        }
+        self.aim = aim;
         let seated = self.area.player.seat().is_some();
         let action = self.area.interaction.step(
             input,
-            target,
+            aim,
             &mut self.area.player,
             &mut self.area.items,
             &mut self.physics,
             FIXED_DT,
         );
+        if action.is_none()
+            && (input.pressed | input.released) & keys::GRAB != 0
+            && let Some(block) = aim.installation_block.or(aim.grab_block)
+        {
+            self.notice = block.notice();
+        }
         match action {
             Some(InteractionAction::WheelRemove(item)) => {
                 if let Some(slot) = self.wheels.slot_for_item(item) {
-                    self.notice = if self
-                        .wheels
-                        .remove(slot, &mut self.area.items, &mut self.physics)
-                        .is_ok()
-                    {
-                        ""
-                    } else {
-                        "Cannot remove this wheel."
-                    };
+                    self.notice =
+                        match self
+                            .wheels
+                            .remove(slot, &mut self.area.items, &mut self.physics)
+                        {
+                            Ok(rim) => {
+                                let point = aim.grab_target.map_or(
+                                    self.area.items.get(rim).unwrap().pose.position,
+                                    |target| target.point,
+                                );
+                                match self.area.interaction.pickup_item(
+                                    rim,
+                                    point,
+                                    &self.area.player,
+                                    &mut self.area.items,
+                                    &mut self.physics,
+                                ) {
+                                    Ok(()) => "",
+                                    Err(_) => "Cannot carry this wheel.",
+                                }
+                            }
+                            Err(_) => "Cannot remove this wheel.",
+                        };
                 }
             }
             Some(InteractionAction::WheelInstall { item, target }) => {
+                if self
+                    .wheels
+                    .can_install(item, target, &self.area.items)
+                    .is_err()
+                {
+                    self.notice = "This wheel does not fit the slot.";
+                } else {
+                    self.area
+                        .interaction
+                        .drop_held(&mut self.area.items, &mut self.physics);
+                    self.notice = if self
+                        .wheels
+                        .install(item, target, &mut self.area.items, &mut self.physics)
+                        .is_ok()
+                    {
+                        if let Some(sensor) = self.wheels.sensor(target) {
+                            self.area.interaction.bind_wheel_sensor(
+                                sensor,
+                                item,
+                                &mut self.physics,
+                            );
+                        }
+                        ""
+                    } else {
+                        "This wheel does not fit the slot."
+                    };
+                }
+            }
+            Some(InteractionAction::WheelSplit(rim)) => {
                 self.area
                     .interaction
                     .drop_held(&mut self.area.items, &mut self.physics);
-                self.notice = if self
-                    .wheels
-                    .install(item, target, &mut self.area.items, &mut self.physics)
-                    .is_ok()
-                {
-                    ""
-                } else {
-                    "This wheel does not fit the slot."
-                };
-            }
-            Some(InteractionAction::WheelSplit(rim)) => {
                 if let Ok((_, tire)) =
                     self.wheels
                         .split(rim, &mut self.area.items, &mut self.physics)
                 {
                     self.notice = "";
-                    let mut part = target.expect("aimed tire");
-                    part.item = tire;
-                    part.slot = None;
-                    self.area.interaction.pickup(
-                        part,
-                        &self.area.player,
-                        &mut self.area.items,
-                        &mut self.physics,
-                    );
+                    if input.pressed & keys::GRAB != 0 {
+                        let point =
+                            aim.focus_target.or(aim.grab_target).map_or(
+                                self.area.items.get(tire).unwrap().pose.position,
+                                |target| target.point,
+                            );
+                        if self
+                            .area
+                            .interaction
+                            .pickup_item(
+                                tire,
+                                point,
+                                &self.area.player,
+                                &mut self.area.items,
+                                &mut self.physics,
+                            )
+                            .is_err()
+                        {
+                            self.notice = "Cannot carry this tire.";
+                        }
+                    }
                 } else {
                     self.notice = "Cannot dismount this tire.";
                 }
@@ -605,11 +697,25 @@ impl GarageRuntime {
             }
             _ => {}
         }
+        if let Some(action) = self.area.interaction.mechanisms.take_control_action() {
+            if matches!(
+                action,
+                crate::interaction::mechanisms::ControlAction::ToggleHandbrake
+            ) {
+                self.handbrake = !self.handbrake;
+            }
+            self.lighting.apply(&action);
+        }
+        self.lighting.step(
+            &self.area.interaction.mechanisms,
+            &self.area.items,
+            FIXED_DT,
+        );
         self.area.sync_portable_mass(&mut self.physics);
         if seated
             && input.pressed & keys::USE != 0
             && matches!(action, None | Some(InteractionAction::Seat(_)))
-            && self.area.interaction.dragging_hinge().is_none()
+            && self.area.interaction.dragging_mechanism().is_none()
             && self.area.interaction.tuning_opening().is_none()
         {
             self.notice = if self.area.player.seat().is_some() {
@@ -621,9 +727,9 @@ impl GarageRuntime {
             self.notice = "";
         }
         let mut walking_input = input;
-        if (input.held & keys::USE != 0 && self.area.interaction.dragging_hinge().is_some())
+        if (input.held & keys::USE != 0 && self.area.interaction.dragging_mechanism().is_some())
             || (input.held & keys::USE != 0 && self.area.interaction.tuning_opening().is_some())
-            || (input.held & (keys::ROTATE | keys::MOVE) != 0
+            || (input.held & (keys::ROTATE | keys::TRANSLATE) != 0
                 && self.area.interaction.held().is_some())
         {
             walking_input.mouse = [0.0; 2];
@@ -633,6 +739,10 @@ impl GarageRuntime {
             .step(walking_input, &mut self.physics, FIXED_DT);
         self.area.sync_attachments(&mut self.physics, true);
         self.area.sync_compound(&mut self.physics);
+        self.area
+            .interaction
+            .sync_parts(&mut self.area.items, &mut self.physics)
+            .expect("bound parts");
         let driving = self.area.player.driving();
         if driving && input.pressed & keys::SPACE != 0 {
             self.handbrake = !self.handbrake;
@@ -697,6 +807,8 @@ impl GarageRuntime {
         let was_running = self.engine_output.running;
         self.engine_output = self.engine.step(
             EngineInput {
+                engine_present: self.area.items.mounted(reference.engine.item),
+                radiator_present: self.area.items.mounted(reference.engine.coolant_tank),
                 ignition_held,
                 ignition_pressed,
                 ignition_released,
@@ -714,6 +826,11 @@ impl GarageRuntime {
             start_sample(DEFAULT_SEED, self.attempts),
             FIXED_DT,
         );
+        self.area
+            .items
+            .get_mut(reference.engine.item)
+            .expect("engine item")
+            .temperature = Some(self.engine.temperature);
         if self.engine_output.running && !was_running {
             let engine = to_rapier(
                 self.area
@@ -749,8 +866,10 @@ impl GarageRuntime {
         let drive = DriveInput {
             accelerate: driving && input.held & keys::FORWARD != 0,
             brake_reverse: driving && input.held & keys::BACK != 0,
-            steer: ((driving && input.held & keys::LEFT != 0) as u8 as f32)
-                - ((driving && input.held & keys::RIGHT != 0) as u8 as f32),
+            steer: self.area.interaction.push_steering().unwrap_or(
+                ((driving && input.held & keys::LEFT != 0) as u8 as f32)
+                    - ((driving && input.held & keys::RIGHT != 0) as u8 as f32),
+            ),
             handbrake: self.handbrake,
         };
         let drive_count = self.physics.driven_wheel_count();
@@ -768,9 +887,13 @@ impl GarageRuntime {
             ),
         );
         self.physics.step_physics();
-        self.area.interaction.sync_hinges(&mut self.physics);
+        self.area.interaction.sync_mechanisms(&mut self.physics);
         self.area.sync_attachments(&mut self.physics, false);
         self.area.sync_compound(&mut self.physics);
+        self.area
+            .interaction
+            .sync_parts(&mut self.area.items, &mut self.physics)
+            .expect("bound parts");
         self.wheels
             .sync(&mut self.area.items, &mut self.physics)
             .expect("validated wheel bindings");
@@ -792,11 +915,9 @@ impl GarageRuntime {
         if self.stream.rebase(focus, &mut self.physics).is_some() {
             let old_origin = self.area.origin;
             self.area.sync_origin(self.stream.origin.offset);
-            if let Some(target) = &mut self.target {
-                for i in 0..3 {
-                    target.point[i] -= (self.area.origin[i] - old_origin[i]) as f32;
-                }
-            }
+            self.aim.rebase(std::array::from_fn(|i| {
+                (self.area.origin[i] - old_origin[i]) as f32
+            }));
             self.rebases += 1;
         }
         self.stream.sync_at(absolute, &mut self.physics);
@@ -818,7 +939,11 @@ impl GarageRuntime {
     }
 
     pub fn recover(&mut self, reference: &ReferenceManifest) {
-        self.target = None;
+        self.area.interaction.cancel_input();
+        self.area
+            .interaction
+            .finish_cancelled_input(&mut self.area.player, &mut self.physics);
+        self.aim = ResolvedAim::default();
         let held = self
             .area
             .interaction
@@ -875,9 +1000,13 @@ impl GarageRuntime {
         for &body in &self.recovery_bodies {
             transport_body(&mut self.physics, body, cargo_delta);
         }
-        self.area.interaction.sync_hinges(&mut self.physics);
+        self.area.interaction.sync_mechanisms(&mut self.physics);
         self.area.sync_attachments(&mut self.physics, false);
         self.area.sync_compound(&mut self.physics);
+        self.area
+            .interaction
+            .sync_parts(&mut self.area.items, &mut self.physics)
+            .expect("bound parts");
         self.wheels
             .sync(&mut self.area.items, &mut self.physics)
             .expect("validated wheel bindings");
@@ -931,6 +1060,10 @@ impl GarageRuntime {
             let player_delta =
                 to_rapier(self.area.player.view_pose(&self.physics)) * old_view.inverse();
             transport_body(&mut self.physics, body, player_delta);
+            self.area
+                .interaction
+                .sync_parts(&mut self.area.items, &mut self.physics)
+                .expect("bound parts");
         }
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);

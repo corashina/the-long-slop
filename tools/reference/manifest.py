@@ -3,8 +3,11 @@ import math
 from .source import key, source_id, vector
 from .gltf import GltfExporter, convert_point, convert_rotation, transform_point
 from .collision import world_pose, quaternion_product, bake_points, geometry
+from .actions import recover_masks, recover_bindings, recover_pickup, recover_pushables
 from .caps import opening_metadata
+from .mechanisms import recover_mechanisms, bind_mechanisms, recover_lighting
 from .visibility import recover_camera_visibility
+from .parts import recover_parts
 
 
 def build_manifest(source, roots, reports, hashes):
@@ -35,7 +38,7 @@ def build_manifest(source, roots, reports, hashes):
         return by_source[key(source.transform_for(go))]
     def pointer_node(owner,pointer):
         reader=source.resolve(owner,pointer)
-        return by_source[key(reader)] if reader.type.name=='Transform' else node_of(reader)
+        return by_source[key(reader)] if reader.type.name=='Transform' else by_source[key(source.transform_for(reader))] if reader.type.name=='GameObject' else node_of(reader)
     def descendants(node):
         result={node}
         for entry in nodes:
@@ -71,23 +74,9 @@ def build_manifest(source, roots, reports, hashes):
     for root in roots['items']:
         node=by_source[key(root)];rigidbody=components[node].get('Rigidbody',[])
         body(node,bool(rigidbody),total_mass(node),rigidbody[0] if rigidbody else root)
-    hinge_sources=[]
-    for node,group in components.items():
-        if not nodes[node-1]['active']:continue
-        for reader in group.get('usablescript',[]):
-            value=source.read(reader)
-            if not value['rotateAble']:continue
-            if nodes[node-1]['asset']==1 and key(reader) not in {('level1',64783),('level1',64777),('level1',64790)}:continue
-            if 'Door' not in nodes[node-1]['hierarchy_path'] and 'Hood' not in nodes[node-1]['hierarchy_path'] and 'Trunk' not in nodes[node-1]['hierarchy_path']:continue
-            target=pointer_node(reader,value['RT1'])
-            if value['RT2']['m_PathID'] and pointer_node(reader,value['RT2'])!=target:
-                continue  # Window and mirror adjustment remain outside this stage.
-            axes=[]
-            for input_axis in ('X','Y'):
-                axis=[int(value[f'{input_axis}to1{c}']) for c in ('X','Y','Z')]
-                if any(axis):axes.append((axis,value[f'min{input_axis}'],value[f'max{input_axis}'],0 if input_axis=='X' else 1))
-            if len(axes)!=1:continue  # Mirror aim uses two axes.
-            body(target,False,0.,node_readers[target]);hinge_sources.append((reader,target,axes[0]))
+    mechanisms=recover_mechanisms(source,nodes,components,pointer_node,node_of,main)
+    driven_nodes={node for mechanism in mechanisms for node in mechanism['driven_nodes']}
+    for node in sorted(driven_nodes):body(node,False,0.,node_readers[node])
     def body_for(node):
         while node not in body_roots:
             node=nodes[node-1]['parent']
@@ -97,22 +86,22 @@ def build_manifest(source, roots, reports, hashes):
         parent=nodes[value['node']-1]['parent']
         value['parent_body']=body_for(parent) if parent is not None else None
     items=[];item_nodes={};item_components={}
-    item_classes={'tosaveitemscript','massScript','tankscript','enginescript','coolantTankscript','seatscript','tankcapscript','gumiscript','wheelscript'}
-    hinge_nodes={node for _,node,_ in hinge_sources}
+    item_classes={'tosaveitemscript','massScript','tankscript','enginescript','coolantTankscript','seatscript','tankcapscript','gumiscript','wheelscript','pickupable','usablescript','flashlightscript','pushablescript'}
+    mechanism_nodes=driven_nodes
     for node,group in components.items():
-        if not nodes[node-1]['active'] or not (item_classes.intersection(group) or node in hinge_nodes):continue
+        if not nodes[node-1]['active'] or not (item_classes.intersection(group) or node in mechanism_nodes):continue
         name=nodes[node-1]['name'];kind='decoration'
         if key(node_readers[node])==('level1',21482):name='Garage door right'
         elif key(node_readers[node])==('level1',21464):name='Garage door left'
         elif key(node_readers[node])==('level1',21450):name='Door'
         for class_name,kind_name in [('tankscript','container'),('enginescript','engine'),('coolantTankscript','radiator'),('gumiscript','tire'),('wheelscript','rim'),('seatscript','seat'),('tankcapscript','cap')]:
             if class_name in group:kind=kind_name
-        if node in hinge_nodes:kind='hood' if 'Hood' in nodes[node-1]['hierarchy_path'] else 'trunk' if 'Trunk' in nodes[node-1]['hierarchy_path'] else 'door'
+        if node in mechanism_nodes:kind='hood' if 'Hood' in nodes[node-1]['hierarchy_path'] else 'trunk' if 'Trunk' in nodes[node-1]['hierarchy_path'] else 'door'
         condition=data(node,'partconditionscript')
         raw=source.conditions[key(group['partconditionscript'][0])]['state'] if condition else 0
         mass=data(node,'massScript')
         value={'id':len(items)+1,'source':source_id(node_readers[node]),'node':node,'body':body_for(node),'name':name,'kind':kind,
-            'condition':1.-raw*0.25,'mass_kg':mass['mass'] if mass else 0.,'attached_to':None}
+            'condition':1.-raw*0.25,'mass_kg':mass['mass'] if mass else 0.,'attached_to':None,'pickup':recover_pickup(source,group['pickupable'][0]) if 'pickupable' in group else None}
         items.append(value);item_nodes[node]=value['id']
         for readers in group.values():
             for reader in readers:item_components[key(reader)]=value['id']
@@ -132,7 +121,7 @@ def build_manifest(source, roots, reports, hashes):
         return anchor_nodes[node]
     colliders=[];exporter=GltfExporter(source,None);wheel_parts_source=[];detachable_colliders=set()
     for node,group in components.items():
-        if not nodes[node-1]['active'] or not ('wheelscript' in group or 'gumiscript' in group):continue
+        if not nodes[node-1]['active'] or 'partscript' not in group:continue
         part=group['partscript'][0];part_data=source.read(part);pick=source.resolve(part,part_data['p']);pick_data=source.read(pick)
         identities=[]
         for pointer in pick_data['cols']:
@@ -145,10 +134,10 @@ def build_manifest(source, roots, reports, hashes):
                 owner=source.resolve(layer,layer_data['m_GameObject']);transform=source.transform_for(owner)
                 _,owner_components=source.components(transform)
                 candidates=[component for component in owner_components if component.type.name in {'BoxCollider','SphereCollider','CapsuleCollider','MeshCollider'}]
-                if len(candidates)!=1:raise ValueError(f'Ambiguous layerScript collider owner: {key(layer)}')
+                if not candidates:raise ValueError(f'Missing layerScript collider owner: {key(layer)}')
                 collider=candidates[0]
             identities.append(key(collider));detachable_colliders.add(key(collider))
-        wheel_parts_source.append((node,part,part_data,identities))
+        if 'wheelscript' in group or 'gumiscript' in group:wheel_parts_source.append((node,part,part_data,identities))
     for node,group in components.items():
         if not nodes[node-1]['active'] and not any(key(reader) in detachable_colliders for readers in group.values() for reader in readers):continue
         layer=source.read(objects[node]['game_object'])['m_Layer']
@@ -189,15 +178,7 @@ def build_manifest(source, roots, reports, hashes):
             tank_record['openings'].append(opening['id'])
             if not value['canToggle'] and value['noAngle'] and not tank_record['no_fill_from'] and not bodies[body_for(node)-1]['dynamic']:
                 tank_record['role']='supply'
-    hinges=[]
-    for reader,node,(axis,minimum,maximum,input_axis) in hinge_sources:
-        value=source.read(reader);drag_node=pointer_node(reader,value['MouseT']) if value['MouseT']['m_PathID'] else node_of(reader)
-        hinges.append({'item':item_nodes[node],'source':source_id(reader),'anchor':anchor(node),'body':body_for(node),
-            'axis':[-axis[0],-axis[1],axis[2]],'closed_degrees':0.,'min_degrees':minimum,'max_degrees':maximum,
-            'drag_axis':list(convert_point(vector(value['MouseAxis']))),'drag_input_axis':input_axis,'drag_sensitivity':main['rotSens'],
-            'input_inverted':[bool(value['invX']),bool(value['invY'])],
-            'rotation_axes':[[-value[f'{input}to1X'],-value[f'{input}to1Y'],value[f'{input}to1Z']] for input in ('X','Y')],
-            'relative_drag':bool(value['relativeRot']),'drag_anchor':anchor(drag_node),'motor_degrees_per_second':None})
+    bind_mechanisms(source,mechanisms,nodes,components,items,item_nodes)
     seats=[]
     seat_hits={}
     for node,group in components.items():
@@ -264,7 +245,7 @@ def build_manifest(source, roots, reports, hashes):
         else:radius=source.read(components[node]['gumiscript'][0])['radius']
         wheel_parts.append({'item':item_nodes[node],'source':source_id(part),'radius':radius,'main_types':value['maintipus'],'part_types':value['tipus'],
             'colliders':[collider_ids[identity] for identity in identities],'tire_slot_anchor':tire_anchor,'tire_mount':tire_mount,
-            'tire_main_types':tire_main,'tire_types':tire_types,'local_rotation_after_mount':euler_quaternion(vector(value['localRotationAfterMount']))})
+            'tire_main_types':tire_main,'tire_types':tire_types,'local_rotation_after_mount':euler_quaternion(vector(value['localRotationAfterMount'])),'cover_slot':value['cover_CantCraftIfCovered']['m_PathID'] or None})
     for slot in wheel_slots:
         owner=source.get(slot['source']['file'],slot['source']['path_id'])
         if source.read(owner)['disableCollidersOnCraft']:
@@ -275,6 +256,7 @@ def build_manifest(source, roots, reports, hashes):
     tire_colliders={collider_id for part in wheel_parts if 'gumi' in part['part_types'] for collider_id in part['colliders']}
     for part in wheel_parts:
         if 'felni' in part['part_types']:part['colliders']=[collider_id for collider_id in part['colliders'] if collider_id not in tire_colliders]
+    parts,part_slots=recover_parts(source,nodes,components,item_nodes,node_readers,colliders,car_root,pointer_node,anchor,euler_quaternion)
     engine_reader=next(r for group in components.values() for r in group.get('enginescript',[]));engine=source.read(engine_reader)
     radiator_reader=next(r for group in components.values() for r in group.get('coolantTankscript',[]));radiator=source.read(radiator_reader)
     oil=source.resolve(engine_reader,engine['T']);coolant=source.resolve(radiator_reader,radiator['coolant']);fuel=components[car_root]['tankscript'][0]
@@ -301,7 +283,7 @@ def build_manifest(source, roots, reports, hashes):
         exit_step_horizontal=player['GetOutStepH'],exit_steps_horizontal=player['GetOutStepTimesH'])
     head=source.resolve(player_reader,player['Th']);held=source.resolve(player_reader,player['TpickedUpPos'])
     held_offset=bake_points([(0.,0.,0.)],source.chain(held),world_pose(source,head))[0]
-    player_record.update(carry_anchor_offset=held_offset,carry_offset_radius=player['maxPickupDist'],carry_drop_distance=player['dropDist'],
+    player_record.update(carry_min_weight=player['minWeight'],carry_max_weight=player['maxWeight'],carry_anchor_offset=held_offset,carry_offset_radius=player['maxPickupDist'],carry_drop_distance=player['dropDist'],
         carry_force_multiplier=player['pickupForceM'],carry_max_force=player['maxPickupForce'])
     settings_reader=source.get('level0',16865);settings=source.read(settings_reader)
     if source.class_name(settings_reader)!='settingsscript':raise ValueError('Required default control settings differ')
@@ -316,7 +298,13 @@ def build_manifest(source, roots, reports, hashes):
     scroll_slider=source.resolve(settings_reader,settings['tabControls']['sliders'][3]);scroll_definition=source.read(scroll_slider)
     player_record['scroll_sensitivity']=scroll_definition['defValue']*(scroll_definition['valueMultipler'] if scroll_definition['valueMultipler'] else 1.)
     player_record['camera_culling_mask']=recover_camera_visibility(source)['normal_view_mask']
-    player_record['use_layer_mask']=player['useLayer']['m_Bits']
+    player_record['action_masks']=recover_masks(player)
+    time_reader=source.get('globalgamemanagers',8)
+    if time_reader.type.name != 'TimeManager':raise ValueError('Source TimeManager differs')
+    player_record.update(source_force_interval=source.read(time_reader)['Fixed Timestep'],
+        throw_minimum=player['minThrowForce'],throw_gain=player['throwForceGain'],throw_multiplier=1000.,
+        push_force=main['pushForce'],airborne_push_force=main['selfNotGroundedPushForce'],
+        grip_force=player['pushgripForce'],grip_speed=player['FspeedM'],grip_distance=player['pushGripDistance'])
     player_record['get_out_layer_mask']=player['getOutLayer']['m_Bits']
     # fpscontroller.CanGetOut uses literal capsule endpoints and radius.
     player_record['exit_capsule_half_height']=.568
@@ -366,12 +354,14 @@ def build_manifest(source, roots, reports, hashes):
     driveway_points=[point for height,points in wheel_floors if abs(height-driveway_height)<0.001 for point in points]
     driveway_bounds={'min':[min(p[i] for p in driveway_points) for i in range(3)],'max':[max(p[i] for p in driveway_points) for i in range(3)]}
     driveway_bounds['min'][1]=driveway_height;driveway_bounds['max'][1]=driveway_height
-    result={'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'hinges':hinges,'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'items':items,'openings':openings,'tanks':tanks,
+    result={'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'lighting':recover_lighting(source,nodes,components,pointer_node,item_nodes,car,car_reader,reports),'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'parts':parts,'part_slots':part_slots,'part_scan':{'source':source_id(main_reader),'mask':main['scanLayer']['m_Bits'],'radius':main['defScanRadius']},'items':items,'openings':openings,'tanks':tanks,
         'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed']},'engine':engine_record,'player':player_record,'seats':seats,
         'vehicle':{'source':source_id(car_reader),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':[w['id'] for w in wheel_slots],'colliders':[c['id'] for c in colliders if c['body']==car_body],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')]},
         'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn,'car_pose':car_pose,'driveway_bounds':driveway_bounds,'driveway_height':driveway_height}}
     result['vehicle'].update(auto_shift_stop_speed=car['autoShiftStopSpeed'],auto_shift_min_rpm=car['autoShiftMinRpm'],auto_shift_max_rpm=car['autoShiftMaxRpm'])
     result['vehicle'].update(gear_free_run=[bool(gear['freeRun']) for gear in car['gears']],
         dont_ignite_with_throttle_in_automatic=bool(car['dontIgniteWithThorttleInAutomatic']),auto_move_min=0.3)
+    result['pushables']=recover_pushables(source,nodes,components,item_nodes,colliders,bodies,player_record['action_masks']['push_mask'])
+    result['action_bindings']=recover_bindings(source,nodes,components,item_nodes,colliders,mechanisms,openings,seats)
     result['vehicle']['colliders']=[c['id'] for c in colliders if c['body']==car_body and c['enabled']]
     return result

@@ -264,3 +264,54 @@ fn missing_coolant_changes_cooling_without_a_start_lock() {
     assert!(dry_output.temperature > wet_output.temperature);
     assert!(wet_output.consumed_fuel_liters > 0.0);
 }
+
+#[test]
+fn removed_engine_stops_and_removed_radiator_cannot_cool_or_consume_contents() {
+    let r = common::reference().engine;
+    let mut tanks = fluids();
+    let mut state = EngineState::new(&r);
+    state.rpm = 3000.;
+    state.ignition = true;
+    state.temperature = 110.;
+    let before = tanks.clone();
+    let output = step(
+        &mut state,
+        EngineInput {
+            engine_present: false,
+            ignition_held: true,
+            throttle: 1.,
+            ..Default::default()
+        },
+        &mut tanks,
+        &r,
+    );
+    assert!(!output.running);
+    assert_eq!(output.rpm, 0.);
+    assert_eq!(output.torque_nm, 0.);
+    assert_eq!(tanks, before);
+    let mut connected = EngineState::new(&r);
+    connected.rpm = 3000.;
+    connected.ignition = true;
+    connected.temperature = 110.;
+    let mut disconnected = connected.clone();
+    let mut other = tanks.clone();
+    let input = EngineInput {
+        throttle: 1.,
+        ambient_temperature: 20.,
+        ..Default::default()
+    };
+    for _ in 0..30 {
+        step(&mut connected, input, &mut tanks, &r);
+        step(
+            &mut disconnected,
+            EngineInput {
+                radiator_present: false,
+                ..input
+            },
+            &mut other,
+            &r,
+        );
+    }
+    assert!(disconnected.temperature > connected.temperature);
+    assert_eq!(other[2], before[2]);
+}

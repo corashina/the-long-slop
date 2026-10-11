@@ -18,7 +18,9 @@ pub mod keys {
     pub const IGNITION: u32 = 1024;
     pub const CAMERA: u32 = 2048;
     pub const ROTATE: u32 = 4096;
-    pub const MOVE: u32 = 8192;
+    pub const ASSEMBLE: u32 = 8192;
+    pub const TRANSLATE: u32 = 16384;
+    pub const RECENTER: u32 = 32768;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

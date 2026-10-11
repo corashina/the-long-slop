@@ -40,16 +40,26 @@ The build script writes the browser package to `web/pkg`.
 | Mouse | Look | Look |
 | Shift / Ctrl | Run / crouch | — |
 | Space | Jump | Toggle handbrake |
-| E | Use cap or seat | Leave seat |
-| Hold E + mouse | Move an aimed door | Move an aimed door |
-| F | Carry, drop, remove, or install an aimed wheel | — |
-| Mouse wheel / hold RMB + mouse | Change carry distance / rotate item | — |
-| X | Split a wheel or join compatible rim and tire | — |
-| Hold LMB | Fill an open container | — |
+| E | Use cap, switch, or seat | Use control or leave seat |
+| Hold E + mouse | Move an aimed mechanism | Move an aimed mechanism |
+| F | Carry or remove a part; release to install; tap to drop | - |
+| Hold F, then release | Charge and throw a held item | - |
+| Hold F at the car body | Push while held | - |
+| F at the steering grip | Latch grip; WASD pushes and steers; F releases | - |
+| Mouse wheel / Tab | Change carry distance / recenter | - |
+| Hold MMB / RMB + mouse | Rotate / move held item | - |
+| Hold MMB and RMB + mouse | Roll held item | - |
+| X | Split a wheel | - |
+| Hold LMB | Fill an open container | Use an aimed switch |
 | I | — | Tap ignition; hold starter |
 | C | — | Switch first person / chase view |
 | Backspace | Hide or show feedback | Hide or show feedback |
 | Esc | Pause menu | Pause menu |
+
+Remove the hubcap before removing its wheel. Removed parts enter your hands.
+Move a held part close to a compatible empty slot. Tap F when the install prompt appears.
+Aim at an empty wheel slot to install a wheel.
+Some source items, including the fuel can, cannot rotate.
 
 Carry a fuel can. Open the fuel cap. Aim at the opening and hold LMB to fill it.
 Open carried containers before filling them at roadside pumps.
@@ -67,10 +77,10 @@ Close the driver door before reversing through the garage exit.
 
 ## Scope and evidence
 
-Read [the approved scope](docs/superpowers/specs/2026-10-09-garage-start-design.md) and [verification](docs/verification.md).
+Read the [approved interaction scope](docs/superpowers/specs/2026-10-10-interaction-parity-design.md), [garage scope](docs/superpowers/specs/2026-10-09-garage-start-design.md), and [verification](docs/verification.md).
 Imported layout and recovered rules do not establish identical Unity physics or full-game parity.
 Unity shader effects, live mirror reflections, and audio are not reproduced.
-The final browser walking route was skipped at the user's request. It remains unverified.
+See the verification record for current browser coverage and renderer limits.
 The build has no survival system, save system, multiplayer, or public deployment.
 
 ## Toolchain

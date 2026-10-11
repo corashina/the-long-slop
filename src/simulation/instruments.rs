@@ -8,6 +8,7 @@ pub struct InstrumentSample {
     pub temperature: f32,
     pub rpm: f32,
     pub local_ignition: bool,
+    pub headlights: u8,
     pub distance_m: f64,
 }
 pub struct InstrumentState {
@@ -17,6 +18,7 @@ pub struct InstrumentState {
     pub needle_angles: [f32; 3],
     pub digit_angles: [f32; 5],
     pub lamp_bits: u32,
+    pub digits_lit: bool,
     pub distance_km: f32,
 }
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
@@ -52,6 +54,7 @@ impl InstrumentState {
             needle_angles: std::array::from_fn(|i| needle_angle(&r.needles[i], 0.)),
             digit_angles: std::array::from_fn(|i| r.odometer.digits[i].initial_angle),
             lamp_bits: 0,
+            digits_lit: false,
             distance_km: r.odometer.initial_value,
         }
     }
@@ -101,6 +104,9 @@ impl InstrumentState {
                 "fuel" => s.local_ignition && s.fuel_liters < r.low_fuel,
                 "oil" => s.local_ignition && (s.oil_liters < r.low_oil || s.rpm < r.oil_test_rpm),
                 "battery" => s.local_ignition && s.rpm < r.battery_test_rpm,
+                "headlight2" => {
+                    s.headlights == 2 && r.electronics_output > r.electronics_off_threshold
+                }
                 _ => false,
             };
             let v = if on { 1. } else { 0. };
@@ -108,6 +114,7 @@ impl InstrumentState {
                 self.lamp_bits |= 1 << i;
             }
         }
+        self.digits_lit = s.local_ignition && matches!(s.headlights, 1 | 2);
         self.distance_km = r.odometer.initial_value + (s.distance_m / 1000.) as f32;
         let o = &r.odometer;
         let value = if o.use_multiplier {

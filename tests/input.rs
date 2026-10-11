@@ -48,7 +48,7 @@ fn frames_without_physics_keep_edges_and_accumulate_look() {
 #[test]
 fn pause_clear_discards_held_keys_edges_and_look() {
     let mut pending = FrameInput {
-        held: keys::FORWARD,
+        held: keys::FORWARD | keys::ROTATE | keys::TRANSLATE | keys::RECENTER,
         pressed: keys::GRAB,
         released: keys::SPACE,
         mouse: [12.0, 15.0],
@@ -56,4 +56,52 @@ fn pause_clear_discards_held_keys_edges_and_look() {
     };
     pending.clear();
     assert_eq!(pending.take_step(), FrameInput::default());
+}
+
+#[test]
+fn carry_input_preserves_modes_and_consumes_recenter_once() {
+    let mut pending = FrameInput {
+        held: keys::ROTATE | keys::TRANSLATE | keys::RECENTER,
+        pressed: keys::RECENTER,
+        mouse: [2.0, -3.0],
+        ..Default::default()
+    };
+    let first = pending.take_step();
+    let second = pending.take_step();
+    assert_eq!(first.pressed, keys::RECENTER);
+    assert_eq!(second.pressed, 0);
+    assert_eq!(second.held, first.held);
+    assert_eq!(second.mouse, [0.0; 2]);
+}
+
+#[test]
+fn f_release_edge_runs_once_across_catch_up_steps() {
+    let mut pending = FrameInput::default();
+    pending.merge(FrameInput {
+        held: keys::GRAB,
+        pressed: keys::GRAB,
+        ..Default::default()
+    });
+    pending.merge(FrameInput {
+        released: keys::GRAB,
+        ..Default::default()
+    });
+    let first = pending.take_step();
+    assert_eq!(first.pressed, keys::GRAB);
+    assert_eq!(first.released, keys::GRAB);
+    assert_eq!(first.held, 0);
+    for _ in 0..5 {
+        assert_eq!(pending.take_step(), FrameInput::default());
+    }
+}
+
+#[test]
+fn lifecycle_boundary_discards_the_sampled_frame() {
+    let app = include_str!("../src/app.rs");
+    let boundary = app
+        .find("if actions & 31 != 0")
+        .expect("lifecycle actions must discard the frame sampled before input clear");
+    let merge = app.find("drive.input.merge(frame)").unwrap();
+    assert!(boundary < merge);
+    assert!(app[boundary..merge].contains("return;"));
 }

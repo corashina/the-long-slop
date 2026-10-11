@@ -46,3 +46,6 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
  #capture-error {font-size:16px;top:140px;}
  #menu.narrow #back {left:16px!important;top:auto!important;bottom:16px;width:150px!important;height:44px!important;font-size:18px!important;}
 }
+
+#target-name,#target-condition,#throw-charge {position:absolute;margin:0;transform:translateX(-50%);white-space:nowrap;text-align:center;text-shadow:2px 2px 2px #000;}
+#throw-level {vertical-align:middle;width:120px;}

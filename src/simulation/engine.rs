@@ -67,8 +67,10 @@ fn temperature_change(
         * globals.awake_heat_modifier
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct EngineInput {
+    pub engine_present: bool,
+    pub radiator_present: bool,
     pub ignition_held: bool,
     pub ignition_pressed: bool,
     pub ignition_released: bool,
@@ -81,6 +83,26 @@ pub struct EngineInput {
     pub ambient_temperature: f32,
     pub ambient_heat_modifier: f32,
     pub radiator_condition: u8,
+}
+
+impl Default for EngineInput {
+    fn default() -> Self {
+        Self {
+            engine_present: true,
+            radiator_present: true,
+            ignition_held: false,
+            ignition_pressed: false,
+            ignition_released: false,
+            throttle: 0.,
+            clutch: 0.,
+            wheel_rpm: 0.,
+            free_run: false,
+            speed_kmh: 0.,
+            ambient_temperature: 0.,
+            ambient_heat_modifier: 0.,
+            radiator_condition: 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -147,6 +169,28 @@ impl EngineState {
             return self.last_output;
         }
         self.elapsed += dt;
+        if !input.engine_present {
+            self.ignition = false;
+            self.starter = false;
+            self.rpm = 0.;
+            self.supplied_fuel = 0.;
+            self.last_run_time = -1.;
+            self.last_ignition_held = false;
+            self.ignition_hold_seconds = 0.;
+            self.temperature += temperature_change(
+                self.temperature,
+                0.,
+                reference.heat_loss,
+                input,
+                reference,
+                dt,
+            );
+            self.last_output = EngineOutput {
+                temperature: self.temperature,
+                ..EngineOutput::default()
+            };
+            return self.last_output;
+        }
         if input.ignition_pressed {
             self.ignition_hold_seconds = 0.0;
         }
@@ -296,7 +340,7 @@ impl EngineState {
                     * dt,
             );
         }
-        if self.temperature > reference.globals.min_steam_temperature {
+        if input.radiator_present && self.temperature > reference.globals.min_steam_temperature {
             spill(
                 fluids.coolant,
                 reference.globals.coolant_evaporate_rate / 60.0
@@ -308,7 +352,7 @@ impl EngineState {
                     ),
             );
         }
-        if running {
+        if running && input.radiator_present {
             let radiator = &reference.radiator;
             let condition = usize::from(input.radiator_condition.min(4));
             let value_factor = [1.0, 0.75, 0.5, 0.25, 0.125][condition];

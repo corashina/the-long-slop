@@ -2,8 +2,8 @@
 
 use super::items::{ItemLocation, ItemStore, node_pose};
 use crate::reference::{
-    ColliderId, ItemId, ItemKind, ReferenceError, ReferenceManifest, TankRole, Transform,
-    WheelSlotId,
+    ColliderId, ItemId, ItemKind, PartSlotId, ReferenceError, ReferenceManifest, TankRole,
+    Transform, WheelSlotId,
 };
 use crate::vehicle::{
     InstalledWheel, PhysicsWorld, SLOT_SENSOR_FLAG, VEHICLE_COLLIDER_FLAG, VehiclePose,
@@ -18,6 +18,7 @@ struct Part {
     rim: bool,
     radius: f32,
     mass: f32,
+    last_mass: f32,
     rotation: Rotation,
     tire_mount: Option<Pose>,
     tire: Option<usize>,
@@ -44,6 +45,8 @@ pub struct WheelAssemblies {
     base_mass: f32,
     last_mass: f32,
     bound: bool,
+    general_mass: Vec<(ItemId, f32)>,
+    covers: HashMap<ItemId, PartSlotId>,
 }
 
 impl WheelAssemblies {
@@ -92,6 +95,7 @@ impl WheelAssemblies {
                 rim,
                 radius: record.radius,
                 mass: item.mass_kg,
+                last_mass: f32::NAN,
                 rotation: Rotation::from_array(record.local_rotation_after_mount),
                 tire_mount,
                 tire: None,
@@ -213,15 +217,49 @@ impl WheelAssemblies {
             .filter(|tank| tank.role == TankRole::Vehicle)
             .map(|tank| tank.quantities_liters.iter().sum::<f32>())
             .sum();
+        let general_mass: Vec<_> = reference
+            .items
+            .iter()
+            .filter(|item| {
+                let mut node = Some(item.node);
+                while let Some(id) = node {
+                    if reference.parts.iter().any(|p| p.node == id) {
+                        return true;
+                    }
+                    node = reference
+                        .nodes
+                        .iter()
+                        .find(|n| n.id == id)
+                        .and_then(|n| n.parent);
+                }
+                false
+            })
+            .map(|i| (i.id, i.mass_kg))
+            .collect();
+        let general_dry: f32 = general_mass.iter().map(|(_, mass)| mass).sum();
         Ok(Self {
             parts,
             indices,
             slots,
             tire_fits,
             vehicle_tanks,
-            base_mass: reference.vehicle.mass_kg - installed_mass - initial_fluids,
+            base_mass: reference.vehicle.mass_kg - installed_mass - initial_fluids - general_dry,
+            general_mass,
+            covers: reference
+                .wheel_parts
+                .iter()
+                .filter_map(|p| p.cover_slot.map(|slot| (p.item, slot)))
+                .collect(),
             last_mass: f32::NAN,
             bound: false,
+        })
+    }
+
+    fn covered(&self, item: ItemId, items: &ItemStore) -> bool {
+        self.covers.get(&item).is_some_and(|slot| {
+            items
+                .iter()
+                .any(|state| state.location == ItemLocation::PartSlot(*slot))
         })
     }
 
@@ -242,6 +280,13 @@ impl WheelAssemblies {
         self.slots
             .iter()
             .any(|candidate| candidate.id == slot && candidate.rim.is_some())
+    }
+
+    pub fn sensor(&self, slot: WheelSlotId) -> Option<ColliderHandle> {
+        self.slots
+            .iter()
+            .find(|candidate| candidate.id == slot)
+            .and_then(|slot| slot.sensor)
     }
 
     fn bind(
@@ -312,6 +357,9 @@ impl WheelAssemblies {
         let rim = self.slots[slot]
             .rim
             .ok_or_else(|| error("Wheel slot is empty"))?;
+        if self.covered(self.parts[rim].item, items) {
+            return Err(error("Remove the wheel cover first"));
+        }
         let world = item_pose(items, self.parts[rim].item, physics)?;
         let body = self.free_body(rim, world, physics);
         let velocity =
@@ -328,22 +376,18 @@ impl WheelAssemblies {
                 ItemLocation::Attached(self.parts[rim].item);
         }
         self.slots[slot].rim = None;
-        if body != physics.chassis_handle() {
-            self.update_body_mass(rim, body, physics);
-        }
+        self.update_body_mass(rim, body, items, physics);
         self.sync(items, physics)?;
         physics.refresh_queries();
         Ok(self.parts[rim].item)
     }
 
-    pub fn install(
-        &mut self,
+    pub fn can_install(
+        &self,
         item: ItemId,
         id: WheelSlotId,
-        items: &mut ItemStore,
-        physics: &mut PhysicsWorld,
+        items: &ItemStore,
     ) -> Result<(), ReferenceError> {
-        self.bind(items, physics)?;
         let slot = self
             .slots
             .iter()
@@ -356,15 +400,38 @@ impl WheelAssemblies {
             .indices
             .get(&item)
             .ok_or_else(|| error("Unknown rim"))?;
+        if self.covered(item, items) {
+            return Err(error("Remove the wheel cover first"));
+        }
         if !self.parts[rim].rim || !self.slots[slot].compatible.contains(&item) {
             return Err(error("Rim does not fit wheel slot"));
         }
         if items
             .get(item)
+            .is_none_or(|item| !matches!(item.location, ItemLocation::World | ItemLocation::Held))
+        {
+            return Err(error("Rim must be loose or held before installation"));
+        }
+        Ok(())
+    }
+
+    pub fn install(
+        &mut self,
+        item: ItemId,
+        id: WheelSlotId,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        self.bind(items, physics)?;
+        self.can_install(item, id, items)?;
+        if items
+            .get(item)
             .is_none_or(|item| item.location != ItemLocation::World)
         {
-            return Err(error("Rim must be loose before installation"));
+            return Err(error("Release the carry constraint before installation"));
         }
+        let slot = self.slots.iter().position(|slot| slot.id == id).unwrap();
+        let rim = self.indices[&item];
         let chassis = physics.chassis_handle();
         self.place_part(rim, chassis, Pose::IDENTITY, false, items, physics)?;
         if let Some(tire) = self.parts[rim].tire {
@@ -418,10 +485,8 @@ impl WheelAssemblies {
         self.place_part(tire, body, Pose::IDENTITY, true, items, physics)?;
         items.get_mut(self.parts[tire].item).unwrap().location = ItemLocation::World;
         self.parts[rim].tire = None;
-        if rim_body != physics.chassis_handle() {
-            self.update_body_mass(rim, rim_body, physics);
-        }
-        self.update_body_mass(tire, body, physics);
+        self.update_body_mass(rim, rim_body, items, physics);
+        self.update_body_mass(tire, body, items, physics);
         self.sync(items, physics)?;
         physics.refresh_queries();
         Ok((item, self.parts[tire].item))
@@ -469,9 +534,7 @@ impl WheelAssemblies {
         }
         items.get_mut(tire_id).unwrap().location = ItemLocation::Attached(rim_id);
         self.parts[rim].tire = Some(tire);
-        if body != physics.chassis_handle() {
-            self.update_body_mass(rim, body, physics);
-        }
+        self.update_body_mass(rim, body, items, physics);
         self.sync(items, physics)?;
         physics.refresh_queries();
         Ok(rim_id)
@@ -528,14 +591,37 @@ impl WheelAssemblies {
         }
         Ok(())
     }
-    fn update_body_mass(&self, rim: usize, body: RigidBodyHandle, physics: &mut PhysicsWorld) {
+    // This module owns complete loose-wheel mass, including general part descendants.
+    // The source member list is cached at construction; transactions move their body ownership.
+    fn update_body_mass(
+        &mut self,
+        rim: usize,
+        body: RigidBodyHandle,
+        items: &ItemStore,
+        physics: &mut PhysicsWorld,
+    ) {
+        if body == physics.chassis_handle() {
+            return;
+        }
         let mass = self.parts[rim].mass
             + self.parts[rim]
                 .tire
-                .map_or(0.0, |tire| self.parts[tire].mass);
-        let world = physics.rapier_mut();
-        world.bodies[body].set_additional_mass(mass, true);
-        world.bodies[body].recompute_mass_properties_from_colliders(&world.colliders);
+                .map_or(0.0, |tire| self.parts[tire].mass)
+            + self
+                .general_mass
+                .iter()
+                .filter_map(|(id, dry)| {
+                    let item = items.get(*id)?;
+                    (item.body == Some(body))
+                        .then(|| dry + item.fluid.as_ref().map_or(0., |f| f.mixture.total()))
+                })
+                .sum::<f32>();
+        if self.parts[rim].last_mass != mass {
+            let world = physics.rapier_mut();
+            world.bodies[body].set_additional_mass(mass, true);
+            world.bodies[body].recompute_mass_properties_from_colliders(&world.colliders);
+            self.parts[rim].last_mass = mass;
+        }
     }
 
     pub fn sync(
@@ -613,7 +699,23 @@ impl WheelAssemblies {
                 }
             }
         }
+        for index in 0..self.parts.len() {
+            if let Some(item) = items.get(self.parts[index].item)
+                && matches!(item.location, ItemLocation::World | ItemLocation::Held)
+                && let Some(body) = item.body
+            {
+                self.update_body_mass(index, body, items, physics);
+            }
+        }
+        for &(id, dry) in &self.general_mass {
+            if items.get(id).is_some_and(|i| i.body == Some(chassis)) {
+                mass += dry;
+            }
+        }
         for id in &self.vehicle_tanks {
+            if items.get(*id).is_some_and(|i| i.body != Some(chassis)) {
+                continue;
+            }
             mass += items
                 .get(*id)
                 .and_then(|item| item.fluid.as_ref())

@@ -129,7 +129,7 @@ fn rejects_invalid_seat_hit_nodes_and_empty_use_mask() {
         assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
     }
     let mut input = fixture();
-    input["player"]["use_layer_mask"] = serde_json::json!(0);
+    input["player"]["action_masks"]["use_mask"] = serde_json::json!(0);
     assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
     let mut input = fixture();
     input["player"]["get_out_layer_mask"] = serde_json::json!(0);
@@ -180,17 +180,16 @@ fn production_export_matches_installed_contract() {
         assert_eq!(body.angular_damping, 0.0);
     }
     assert_eq!(manifest.wheel_slots.len(), 4);
-    assert_eq!(manifest.hinges.len(), 9);
     for (usable, pivot, collider_node) in [(64783, 21482, 21566), (64777, 21464, 21548)] {
         let hinge = manifest
-            .hinges
+            .mechanisms
             .iter()
             .find(|hinge| hinge.source.path_id == usable)
             .expect("source garage leaf hinge");
         let body = manifest
             .bodies
             .iter()
-            .find(|body| body.id == hinge.body)
+            .find(|body| hinge.driven_nodes.contains(&body.node))
             .unwrap();
         assert_eq!(body.source.path_id, pivot);
         assert_ne!(body.node, manifest.area.home_root);
@@ -203,7 +202,7 @@ fn production_export_matches_installed_contract() {
             manifest
                 .colliders
                 .iter()
-                .any(|collider| collider.node == node.id && collider.body == hinge.body)
+                .any(|collider| collider.node == node.id && collider.body == body.id)
         );
     }
     assert!(manifest.openings.len() >= 8);
@@ -223,8 +222,41 @@ fn production_export_matches_installed_contract() {
         })
         .collect();
     assert_eq!(hit_sources, [33209, 31216, 39134]);
-    assert_eq!(manifest.player.use_layer_mask, 12747265);
-    assert_eq!(manifest.player.use_layer_mask & (1 << 13), 0);
+    assert_eq!(manifest.player.action_masks.use_mask, 12747265);
+    assert_eq!(manifest.player.action_masks.pickup_mask, 8388609);
+    assert_eq!(manifest.player.action_masks.attach_mask, 8552449);
+    assert_eq!(manifest.player.action_masks.push_mask, 163841);
+    for opening in &manifest.openings {
+        let tank = manifest
+            .items
+            .iter()
+            .find(|item| item.id == opening.tank)
+            .unwrap();
+        let body = manifest
+            .bodies
+            .iter()
+            .find(|body| body.id == tank.body)
+            .unwrap();
+        if !body.dynamic || body.id == manifest.vehicle.body {
+            continue;
+        }
+        let bindings: Vec<_> = manifest
+            .action_bindings
+            .iter()
+            .filter(|binding| binding.use_owner == Some(opening.cap))
+            .collect();
+        assert!(
+            !bindings.is_empty(),
+            "cap must have a source action collider"
+        );
+        assert!(
+            bindings
+                .iter()
+                .all(|binding| binding.pickup_owner == Some(opening.tank)),
+            "cap must resolve its source container"
+        );
+    }
+    assert_eq!(manifest.player.action_masks.use_mask & (1 << 13), 0);
     assert_eq!(manifest.player.get_out_layer_mask, 10125313);
     assert_eq!(manifest.player.get_out_layer_mask & (1 << 13), 0);
     assert_eq!(manifest.player.exit_capsule_half_height, 0.568);
@@ -318,4 +350,161 @@ fn rejects_lamp_material_outside_exported_count() {
     input["assets"][1]["material_count"] = serde_json::json!(1);
     input["instruments"]["lamps"][0]["on"]["gltf_material"] = serde_json::json!(1);
     assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+}
+
+#[test]
+fn rejects_missing_masks_and_invalid_action_owners() {
+    for field in ["use_mask", "pickup_mask", "attach_mask", "push_mask"] {
+        let mut input = fixture();
+        input["player"]["action_masks"]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+        let mut input = fixture();
+        input["player"]["action_masks"][field] = serde_json::json!(0);
+        assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    }
+    for field in ["use_owner", "pickup_owner", "removal_owner", "push_owner"] {
+        let mut input = fixture();
+        input["action_bindings"][0][field] = serde_json::json!(999999);
+        assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    }
+    let mut input = fixture();
+    input["action_bindings"].as_array_mut().unwrap().pop();
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+}
+
+#[test]
+#[ignore = "requires installed reference export"]
+fn installed_mechanisms_keep_source_controls_and_window_tracks() {
+    let json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read("web/assets/reference/manifest.json").unwrap())
+            .unwrap();
+    let mechanisms = json["mechanisms"]
+        .as_array()
+        .expect("source rotation and slide mechanisms");
+    for source in [
+        64783, 64777, 64811, 64916, 64797, 75324, 77425, 71545, 71291, 66558, 73523, 67612, 70647,
+        79151, 74645, 76322,
+    ] {
+        assert!(
+            mechanisms.iter().any(|m| m["source"]["path_id"] == source),
+            "missing source mechanism {source}"
+        );
+    }
+    for source in [70647, 79151, 74645, 76322] {
+        let window = mechanisms
+            .iter()
+            .find(|m| m["source"]["path_id"] == source)
+            .unwrap();
+        assert_eq!(window["slide"]["paths"].as_array().unwrap().len(), 1);
+        assert_eq!(window["slide"]["rotations"][0]["angle_degrees"], -810.0);
+        assert!(window["parent_item"].is_number());
+    }
+}
+
+#[test]
+fn lighting_state_counts_match_reachable_control_states() {
+    use my_summer_slop::reference::{LampControl, LampGroupReference, LampStateReference};
+    for (control, expected) in [
+        (LampControl::Headlights, 3),
+        (LampControl::Interior, 2),
+        (LampControl::Home, 2),
+    ] {
+        let mut manifest =
+            ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+        manifest.lighting.groups.push(LampGroupReference {
+            source: manifest.player.source.clone(),
+            owner: None,
+            control,
+            electronics_source: None,
+            electronics_output: 1.0,
+            initial_on: false,
+            initial_state: 0,
+            initial_target: 0,
+            initial_energy: 0.0,
+            energy_move: 10.0,
+            button: None,
+            states: vec![
+                LampStateReference {
+                    intensity: 1.0,
+                    lamps: vec![],
+                    renderers: vec![],
+                    material: None
+                };
+                expected
+            ],
+        });
+        assert!(manifest.validate().is_ok());
+        for count in [1, expected - 1, expected + 1] {
+            let mut invalid = manifest.clone();
+            let state = invalid.lighting.groups[0].states[0].clone();
+            invalid.lighting.groups[0].states.resize(count, state);
+            let bytes = serde_json::to_vec(&invalid).unwrap();
+            let error = ReferenceManifest::from_json(&bytes)
+                .err()
+                .expect("Malformed state count must fail before Start");
+            assert!(
+                error.to_string().contains("lamp state count"),
+                "{control:?}: {error}"
+            );
+        }
+    }
+}
+
+fn part_validation_fixture() -> ReferenceManifest {
+    use my_summer_slop::reference::*;
+    let mut r = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    r.parts.push(PartReference {
+        scan_radius: 0.,
+        usable: None,
+        item: r.items[0].id,
+        node: r.items[0].node,
+        source: SourceId {
+            file: "level1".into(),
+            path_id: 999900,
+        },
+        main_types: vec![],
+        part_types: vec!["fixture".into()],
+        cover_slot: None,
+        local_rotation_after_mount: [0., 0., 0., 1.],
+        colliders: vec![],
+        linear_damping: 0.,
+        angular_damping: 0.,
+        enable_if_mounted: vec![],
+        enable_if_dismounted: vec![],
+        disable_if_mounted: vec![],
+        disable_if_dismounted: vec![],
+    });
+    r.validate().unwrap();
+    r
+}
+
+#[test]
+fn rejects_unknown_part_usable() {
+    let mut r = part_validation_fixture();
+    r.parts[0].usable = Some(my_summer_slop::reference::ItemId(999999));
+    assert!(r.validate().is_err());
+}
+
+#[test]
+fn rejects_shared_general_and_wheel_collider() {
+    let mut r = part_validation_fixture();
+    r.parts[0].colliders.push(r.wheel_parts[0].colliders[0]);
+    assert!(r.validate().is_err());
+}
+
+#[test]
+fn rejects_invalid_push_owner_and_source_force_interval() {
+    let mut r = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    r.player.source_force_interval = 0.0;
+    assert!(r.validate().is_err());
+    let mut r = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    r.pushables[0].body = r.bodies[0].id;
+    assert!(r.validate().is_err());
+    let mut r = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    r.action_bindings[0].push_owner = Some(r.items[0].id);
+    r.pushables.clear();
+    assert!(r.validate().is_err());
 }

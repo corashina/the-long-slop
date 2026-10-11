@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {formatTank,FeedbackState,selectIcon} from '../../web/feedback.js';
-const tank=(amount,capacity=39)=>({amount,capacity,quantities:[amount,0,0,0,0,0],hasName:false,name:'',noText:false});
+const tank=(amount,capacity=39)=>({amount,capacity,quantities:[amount,0,0,0,0,0],hasName:false,name:'',fluidName:'',noText:false});
 test('empty_full_and_fractional_source_format',()=>{
  assert.equal(formatTank(tank(Math.fround(.05))),'empty');
  assert.equal(formatTank(tank(.5)),'0.5 / 39 L\n100% Gas');
@@ -14,9 +14,9 @@ test('mixture_filters_below_one_percent_and_keeps_source_order',()=>{
 });
 test('same_volume_new_container_refreshes_capacity_and_name',()=>{
  const m=new FeedbackState();
- m.update({...tank(.5),hasName:true,name:'Fuel Tank',actions:1,context:2,carrying:false,notice:''});
+ m.update({...tank(.5),hasName:true,name:'Fuel cap',fluidName:'Fuel Tank',actions:1,context:2,carrying:false,notice:''});
  assert.match(m.fluidText,/Fuel Tank:\n0.5 \/ 39 L/);
- m.update({...tank(.5,5),hasName:true,name:'Oil Tank',actions:1,context:2,carrying:false,notice:''});
+ m.update({...tank(.5,5),hasName:true,name:'Oil cap',fluidName:'Oil Tank',actions:1,context:2,carrying:false,notice:''});
  assert.match(m.fluidText,/Oil Tank:\n0.5 \/ 5 L/);
 });
 test('chase_and_menu_hide_feedback_and_restart_preserves_choice',()=>{
@@ -30,4 +30,17 @@ test('context_icons_prioritize_mount_fill_and_use',()=>{
  assert.equal(selectIcon(512,4,false),'exit');
  assert.equal(selectIcon(0,0,false),'default');
  assert.equal(selectIcon(0,0,true),'carrying');
+});
+
+test('fluid_label_and_action_owner_have_independent_caches',()=>{
+ const m=new FeedbackState();
+ const r={...tank(.5),hasName:true,name:'Fuel cap',fluidName:'Fuel Tank',actions:1,context:2,carrying:false,notice:'',condition:-1,throwCharge:0,throwActive:false};
+ m.update(r);
+ assert.equal(m.targetName,'Fuel cap');
+ assert.match(m.fluidText,/Fuel Tank:/);
+ assert.equal(m.update({...r,name:'Oil cap'}),true);
+ assert.equal(m.targetName,'Oil cap');
+ assert.match(m.fluidText,/Fuel Tank:/);
+ assert.equal(m.update({...r,name:'Oil cap',fluidName:'Oil Tank'}),true);
+ assert.match(m.fluidText,/Oil Tank:/);
 });

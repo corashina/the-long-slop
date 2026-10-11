@@ -31,7 +31,7 @@ fn source_material(m: &GltfMaterial) -> StandardMaterial {
         ..Default::default()
     }
 }
-struct LampVisual {
+struct MaterialVisual {
     entities: Vec<Entity>,
     on: Handle<StandardMaterial>,
     off: Handle<StandardMaterial>,
@@ -41,9 +41,11 @@ pub struct InstrumentVisuals {
     pub bound: bool,
     needles: Vec<Entity>,
     digits: Vec<Entity>,
-    lamps: Vec<LampVisual>,
+    lamps: Vec<MaterialVisual>,
+    digit_materials: Vec<MaterialVisual>,
 
     last_lamps: Option<u32>,
+    last_digits_lit: Option<bool>,
 }
 impl InstrumentVisuals {
     pub fn bind(
@@ -148,13 +150,30 @@ impl InstrumentVisuals {
                     lamp.node.0
                 )));
             }
-            self.lamps.push(LampVisual {
+            self.lamps.push(MaterialVisual {
                 entities,
                 on: material(&lamp.on),
                 off: material(&lamp.off),
             });
         }
-        // Retain only used lamp variants. Digit illumination stays off with unsupported headlights.
+        for digit in &reference.instruments.odometer.digits {
+            let parent = node(digit.node)?;
+            let entities: Vec<_> = primitives
+                .iter()
+                .filter_map(|(e, p)| (p.parent() == parent).then_some(e))
+                .collect();
+            if entities.is_empty() {
+                return Err(ReferenceError(format!(
+                    "Missing instrument renderer {}",
+                    digit.node.0
+                )));
+            }
+            self.digit_materials.push(MaterialVisual {
+                entities,
+                on: material(&digit.on),
+                off: material(&digit.off),
+            });
+        }
         self.bound = true;
         Ok(true)
     }
@@ -189,6 +208,21 @@ impl InstrumentVisuals {
                     t.rotation = rotation;
                 }
             }
+        }
+        if self.last_digits_lit != Some(state.digits_lit) {
+            for digit in &self.digit_materials {
+                let handle = if state.digits_lit {
+                    &digit.on
+                } else {
+                    &digit.off
+                };
+                for entity in &digit.entities {
+                    if let Ok(mut m) = materials.get_mut(*entity) {
+                        m.0 = handle.clone();
+                    }
+                }
+            }
+            self.last_digits_lit = Some(state.digits_lit);
         }
         if self.last_lamps != Some(state.lamp_bits) {
             for (i, lamp) in self.lamps.iter().enumerate() {

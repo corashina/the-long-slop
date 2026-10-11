@@ -62,6 +62,9 @@ pub struct PlayerState {
     pitch: f32,
     vertical_velocity: f32,
     grounded: bool,
+    support_body: Option<RigidBodyHandle>,
+    recoil_velocity: Vector,
+    push_gripping: bool,
     crouched: bool,
     running: bool,
 }
@@ -103,6 +106,9 @@ impl PlayerState {
             pitch: 0.0,
             vertical_velocity: 0.0,
             grounded: false,
+            support_body: None,
+            recoil_velocity: Vector::ZERO,
+            push_gripping: false,
             crouched: false,
             running: false,
         }
@@ -137,6 +143,30 @@ impl PlayerState {
             physics.rapier_mut().bodies[self.body].set_next_kinematic_position(self.pose);
             return;
         }
+        if self.push_gripping {
+            self.pose.translation = physics.rapier().bodies[self.body].position().translation;
+            self.pose.rotation = Rotation::from_rotation_y(-self.yaw.to_radians());
+            let filter = QueryFilter::default()
+                .exclude_sensors()
+                .exclude_rigid_body(self.body);
+            let ground = physics.queries(filter).cast_ray(
+                &Ray::new(self.pose.translation, -Vector::Y),
+                self.reference.standing_height * 0.5 + 0.1,
+                true,
+            );
+            self.grounded =
+                ground.is_some() && physics.rapier().bodies[self.body].linvel().y <= 0.1;
+            self.support_body =
+                ground.and_then(|(collider, _)| physics.rapier().colliders[collider].parent());
+            if self.grounded && input.pressed & keys::SPACE != 0 {
+                physics.rapier_mut().bodies[self.body].apply_impulse(
+                    Vector::Y * self.reference.jump_force * self.reference.source_force_interval,
+                    true,
+                );
+                self.grounded = false;
+            }
+            return;
+        }
         self.yaw = (self.yaw + 180.0).rem_euclid(360.0) - 180.0;
         self.pose.rotation = Rotation::from_rotation_y(-self.yaw.to_radians());
         self.update_crouch(input.held & keys::CROUCH != 0, physics);
@@ -165,8 +195,10 @@ impl PlayerState {
             } else {
                 1.0
             };
-        let desired =
-            self.pose.rotation * direction * speed * dt + Vector::Y * self.vertical_velocity * dt;
+        let desired = self.pose.rotation * direction * speed * dt
+            + self.recoil_velocity * dt
+            + Vector::Y * self.vertical_velocity * dt;
+        let mut support_body = None;
         self.collisions.clear();
         let shape = if self.crouched {
             &self.crouching
@@ -184,6 +216,9 @@ impl PlayerState {
             &self.pose,
             desired,
             |collision| {
+                if collision.hit.normal1.y > 0.5 {
+                    support_body = rapier.colliders[collision.handle].parent();
+                }
                 let dynamic = rapier.colliders[collision.handle]
                     .parent()
                     .is_some_and(|body| rapier.bodies[body].is_dynamic());
@@ -204,6 +239,10 @@ impl PlayerState {
         }
         self.pose.translation += movement.translation;
         self.grounded = movement.grounded && self.vertical_velocity <= 0.0;
+        self.support_body = if self.grounded { support_body } else { None };
+        if self.grounded {
+            self.recoil_velocity = Vector::ZERO;
+        }
         if self.grounded
             || (self.vertical_velocity > 0.0 && movement.translation.y < desired.y - 1.0e-5)
         {
@@ -322,7 +361,7 @@ impl PlayerState {
             return None;
         }
         // Unity rays ignore colliders containing the ray origin.
-        let use_mask = self.reference.use_layer_mask;
+        let use_mask = self.reference.action_masks.use_mask;
         let ray_targets = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
             collider.is_enabled()
                 && collider.collision_groups().memberships.bits() & use_mask != 0
@@ -419,6 +458,38 @@ impl PlayerState {
     pub fn crouched(&self) -> bool {
         self.crouched
     }
+    pub fn support_body(&self) -> Option<RigidBodyHandle> {
+        self.support_body
+    }
+    pub fn apply_recoil(&mut self, impulse: Vector) {
+        self.recoil_velocity += impulse / self.reference.mass_kg;
+    }
+    pub fn set_push_gripping(&mut self, active: bool, physics: &mut PhysicsWorld) {
+        if self.push_gripping == active {
+            return;
+        }
+        let body = &mut physics.rapier_mut().bodies[self.body];
+        if active {
+            body.set_body_type(rapier3d::prelude::RigidBodyType::Dynamic, true);
+            body.set_enabled_rotations(false, false, false, true);
+        } else {
+            self.pose.translation = body.position().translation;
+            let velocity = body.linvel();
+            self.recoil_velocity = Vector::new(velocity.x, 0.0, velocity.z);
+            self.vertical_velocity = velocity.y;
+            body.set_body_type(
+                rapier3d::prelude::RigidBodyType::KinematicPositionBased,
+                true,
+            );
+            body.set_enabled_rotations(true, true, true, true);
+            body.set_next_kinematic_position(self.pose);
+        }
+        self.push_gripping = active;
+    }
+    pub fn follow_push_grip(&mut self, turn_degrees: f32) {
+        self.yaw -= turn_degrees;
+        self.pose.rotation = Rotation::from_rotation_y(-self.yaw.to_radians());
+    }
     pub fn grounded(&self) -> bool {
         self.grounded
     }
@@ -435,7 +506,11 @@ impl PlayerState {
         self.body
     }
     pub fn body_pose(&self, physics: &PhysicsWorld) -> VehiclePose {
-        let pose = self.occupancy.map_or(self.pose, |seat| {
+        let mut walking_pose = self.pose;
+        if self.push_gripping {
+            walking_pose.translation = physics.rapier().bodies[self.body].position().translation;
+        }
+        let pose = self.occupancy.map_or(walking_pose, |seat| {
             *physics.rapier().bodies[physics.chassis_handle()].position() * seat.local_pose
         });
         from_rapier(pose)

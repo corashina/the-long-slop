@@ -293,6 +293,17 @@ class GltfExporter:
                 else:pointers=[v[k] for v in data['szamok'] for k in ('MOn','MOff')]
                 for ptr in pointers:
                     if ptr['m_PathID']:self.material(self.source.resolve(component,ptr))
+        switch_materials={}
+        for record in records:
+            for reader in record['components']:
+                if reader.type.name!='MonoBehaviour':continue
+                cls=self.source.class_name(reader)
+                if cls not in {'headlightscript','flashlightscript'}:continue
+                fields=self.source.read(reader)
+                pointers=[fields['MOFF']]+[state['M'] for state in fields['states']] if cls=='headlightscript' else [fields['mON'],fields['mOFF']]
+                for pointer in pointers:
+                    material=self.source.resolve(reader,pointer)
+                    if material:switch_materials[key(material)]={'source':source_id(material),'index':self.material(material)}
         self.document.scenes.append(gl.Scene(nodes=root_nodes))
         self.document.scene = 0
         self.document.buffers.append(gl.Buffer(uri=self.output.with_suffix('.bin').name,byteLength=len(self.binary)))
@@ -304,6 +315,7 @@ class GltfExporter:
         return {'path': self.output.name, 'sha256': hashlib.sha256(self.output.read_bytes()).hexdigest(),
                 'dependencies':dependencies,
                 'material_count':len(self.document.materials), 'materials':{f'{identity[0][0]}:{identity[0][1]}':index for identity,index in self.materials.items() if identity[1] is None}, 'node_count':len(records), 'mesh_count':len(self.meshes), 'material_adaptations':self.material_report,
+                'switch_materials':list(switch_materials.values()),
                 'nodes':[{'source':source_id(r['reader']),'gltf_node':mapping[key(r['reader'])],
                     'parent':source_id(r['parent']) if r['parent'] else None,'hierarchy_path':r['path'],
                     'active':r['active'],'transform':{'translation':self.document.nodes[mapping[key(r['reader'])]].translation,

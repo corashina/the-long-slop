@@ -1,0 +1,129 @@
+# Interaction comparison
+
+Date: 2026-10-10, Europe/Warsaw.
+Stage: Initial comparison, followed by the implementation record below.
+Reference: installed The Long Drive Steam build 11140890.
+Base commit: d4cdefc.
+
+## Intent
+
+The user wants useful interactions with the current home, car, and supplies.
+The user requested a separate worktree and permitted subagents.
+Two subagents inspected recovered code and the current interaction path.
+
+## Confirmed gaps
+
+| Gap | Current implementation | Recovered source |
+| --- | --- | --- |
+| Pickup uses the use target | `src/interaction.rs:358` selects with the use mask | `.cache/reference/fpscontroller.cs:4318` uses useLayer; line 4645 uses pickupLayer |
+| Can caps reject pickup | `src/starting_area.rs:409` selects the nearest item; `src/interaction.rs:788` rejects Cap | `fpscontroller.cs:4647` searches parent pickupable components |
+| Wheel centers can select inactive hubcaps | Decoration items 23, 26, 29, and 32 own colliders; wheel rewriting covers wheel-part colliders | `fpscontroller.cs:4330` searches the part owner before removal |
+| Carry movement lacks translation and roll | `src/interaction.rs:848` changes distance; line 857 changes yaw and pitch | `fpscontroller.cs:4118` rotates; line 4121 rolls; line 4148 moves; line 4167 changes distance |
+| Wheel removal leaves the wheel on the ground | `src/starting_area.rs:546` removes without pickup | `fpscontroller.cs:4338` removes, then line 4340 picks up |
+| Cabin controls have no runtime actions | `src/interaction.rs:32` has no generic slider or switch action | `fpscontroller.cs:4383`, 4405, and 4424 handle rotation, sliding, and switches |
+| Export omits cabin mechanisms | `tools/reference/manifest.py:79` filters home controls; lines 81 and 90 restrict mechanisms | Recovered usablescript records include windows, mirrors, glovebox, ashtray, and visors |
+| Part removal covers wheels | `tools/reference/manifest.py:132` exports wheel parts; runtime accepts selected item kinds | `fpscontroller.cs:4330` handles part slots; `partslotscript.cs:248` checks compatibility |
+| Push and throw have no input path | `src/interaction.rs:573` processes F presses; no push or charged-throw action exists | `fpscontroller.cs:3502` charges throws; line 5149 applies force; line 4891 handles pushing |
+
+Source masks: use 12747265; pickup 8388609; attachment 8552449.
+The generated parameter evidence records these values under `level1:80125`.
+The manifest contains 19 decoration items. This count includes the home root and several car parts.
+A decoration label does not prove that the original object has a gameplay action.
+
+## Existing scope
+
+The approved garage specification covers doors, caps, fluids, seats, carrying, and wheels.
+It permits home decoration as geometry. It excludes survival, weapons, other vehicles, saves, multiplayer, and deployment.
+The exporter also omits window and mirror adjustment. Audio remains outside the current stage.
+The new request can extend interactions for the selected home and Lada.
+Any extension needs explicit scope in the new design.
+
+## Proposed layers for review
+
+1. Resolve use, pickup, and attachment owners from source components and masks.
+2. Use the same resolved actions for input and prompts.
+3. Complete carry movement and place removed wheels in hand.
+4. Add recovered rotation, sliding, and switch actions for the current home and cabin.
+5. Add source-compatible removal and installation for the current Lada parts.
+6. Add push and throw using recovered rules.
+
+Each layer must leave the preparation and driving flow working.
+Keep walls as aim blockers. Resolve parents on the hit object; do not select targets through walls.
+Keep item identity, fluids, condition, and mass across attachment changes.
+Cache component bindings during load. Avoid per-frame allocations and repeated setup.
+Remove obsolete item-kind action filters after explicit bindings replace them.
+
+## Alternatives
+
+Repairing selected targets costs less but leaves the requested missing mechanisms inactive.
+Adding source component bindings supports the current home and car without full-game expansion.
+Full-game interaction parity would include excluded systems and exceeds this task's proposed scope.
+
+## Verification needed
+
+Critical checks must cover cap-to-container pickup and hubcap-to-wheel removal.
+Check occlusion, wrong-slot rejection, part identity, fluid conservation, restart, pause, and origin changes.
+Check detached engine and radiator effects on vehicle operation.
+Run formatting, native tests, exporter tests, installed-source checks, and the WASM build.
+Verify a continuous browser route with common aim positions, then drive through the garage exit.
+Existing source tests stage clear player positions. They do not establish ordinary browser aiming or a continuous walking route.
+
+## Research limits
+
+The input bits match between JavaScript and Rust. Research found no global input-loss defect.
+This comparison uses recovered code and exported assets. It does not establish identical Unity physics.
+No product tests or browser checks ran during this research stage.
+The worktree is `C:/Users/Corashina/.codex/worktrees/interaction-parity/the-long-drive-wasm`.
+Recovered C# and assets remain ignored in the primary checkout.
+
+## Implementation record
+
+The interaction update now resolves use, grab, fill, attachment, and push owners from recovered source bindings.
+Can-cap pickup selects the container. Wheel removal first selects an installed cover, then acquires the uncovered wheel.
+Carry supports distance, rotation, translation, roll, recenter, and charged throw.
+Mechanisms retain recovered drag signs, limits, animation tracks, and source parent ownership.
+Vehicle switches use recovered callbacks for headlights, handbrake, and the three-state cabin lamp.
+General parts preserve nested ownership, fluid membership, condition, and mass through removal and installation.
+Selected Lada seats lack source pickup links. Plate slots start empty. The implementation adds no invented removable seats or plates.
+
+Source steering grip latches until another F press, excess distance, owner invalidation, or lifecycle cancellation.
+Ordinary body push stops on F release. Grip does not stop when aim changes or ground contact ends.
+Source evidence: recovered fpscontroller.cs lines 3356-3388 and the selected steering-grip component.
+Pause, capture loss, recovery, and restart clear sampled input before the next simulation step.
+Origin changes update world anchors while preserving local part state.
+
+Read [verification](../verification.md) for checks and browser limits.
+Read [interaction decisions](../interaction-decisions.md) for the full ledger rulings and rework costs.
+The initial gap table records the pre-change code. Its line numbers are historical.
+
+
+## General-part scan correction
+
+The continuous browser route found that the removed engine had no installation target.
+The source attach mask excludes its slot layer. Changing that mask would break source parity.
+Recovered `partscript.Scan` IL uses `Physics.OverlapSphere` around the held part transform.
+Source `mainscript` 64919 sets `scanLayer` to 513 and `defScanRadius` to 0.2 m.
+Each part multiplies that radius by `scanRadius`; zero means a multiplier of one.
+The source sorts candidate collider transforms by squared distance, then selects the first `CanCraft` slot.
+The port uses cached collider bindings and one pass to select the same nearest valid slot.
+HUD and F dispatch share the result. Invalid candidates retain the held part and show a reason.
+General-part scanning adds no aim or line-of-sight gate. Existing action rays retain solid occlusion.
+Held-part movement still uses source collision groups. Wheel slots retain their specialized aim query.
+All 27 slot colliders retain their source layers. Five use layer 0; the others use layer 9.
+Four layer 0 colliders belong to hubcap slots. The fifth belongs to the right front door slot.
+Craft and UnCraft do not change those layers.
+
+The installed-source regression removes ten parts and tests real target resolution followed by F dispatch.
+It covers the engine, radiator, four doors, two round headlights, and both side mirrors.
+Native staging makes this a regression test, not continuous browser acceptance.
+
+## Final browser evidence, 2026-10-11
+
+The final product is d402a09. Its change from 53a9a4e only corrects mirror labels.
+Windows preparation and cabin captures, then isolated Linux input checks, cover the implemented interactions.
+Linux checks include latched grip, held-can pause, garage exit, off-road rebasing, recovery, and physical return home.
+The open garage leaves survived the return. A later held-can Restart cleared the shifted origin and restored startup state.
+A fixed 1280 by 720 headlight pair shows beam pools appearing with the engine running.
+No rendered Unity comparison was captured. Native source checks and port screenshots remain distinct evidence.
+Browser interruptions prevent a full preparation-to-road continuity claim.
+Read [verification](../verification.md) for exact versions, captures, measurements, and remaining limits.

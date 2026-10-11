@@ -582,6 +582,16 @@ pub fn sync_station_supplies(
                 item
             };
             physics.rapier_mut().colliders[handle].user_data = item.0 as u128 + 1;
+            interaction.bind_surface(
+                handle,
+                crate::reference::ActionBinding {
+                    collider: crate::reference::ColliderId(0),
+                    use_owner: Some(item),
+                    pickup_owner: None,
+                    removal_owner: None,
+                    push_owner: None,
+                },
+            );
             let state = items.get_mut(item).expect("registered station supply");
             state.pose = crate::vehicle::from_rapier(physics.rapier().colliders[handle].position());
             state

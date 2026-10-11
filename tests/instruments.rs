@@ -40,6 +40,7 @@ fn ignition_gates_fuel_temperature_and_lamps() {
             rpm: 1000.,
             local_ignition: true,
             distance_m: 0.,
+            headlights: 0,
         },
         1.,
     );
@@ -161,4 +162,45 @@ fn runtime_recovery_and_rebase_preserve_odometer() {
     s.reset(&r.instruments);
     assert_eq!(run.trip_m, 0.);
     assert_eq!(s.digit_angles, [0.; 5]);
+}
+
+#[test]
+fn headlights_gate_high_beam_indicator_and_digit_illumination() {
+    let mut r = common::reference();
+    let mut state = InstrumentState::new(&r.instruments);
+    for (headlights, ignition, high_beam, digits_lit) in [
+        (0, true, false, false),
+        (1, true, false, true),
+        (2, true, true, true),
+        (2, false, true, false),
+        (1, false, false, false),
+        (0, false, false, false),
+    ] {
+        state.update(
+            &r.instruments,
+            InstrumentSample {
+                headlights,
+                local_ignition: ignition,
+                ..Default::default()
+            },
+            1.,
+        );
+        assert_eq!(state.lamp_bits & 8 != 0, high_beam);
+        assert_eq!(state.digits_lit, digits_lit);
+    }
+    r.instruments.electronics_output = r.instruments.electronics_off_threshold;
+    state.update(
+        &r.instruments,
+        InstrumentSample {
+            headlights: 2,
+            local_ignition: false,
+            ..Default::default()
+        },
+        1.,
+    );
+    assert_eq!(state.lamp_bits & 8, 0);
+    assert!(!state.digits_lit);
+    state.reset(&r.instruments);
+    assert_eq!(state.lamp_bits, 0);
+    assert!(!state.digits_lit);
 }
