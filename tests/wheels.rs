@@ -44,7 +44,7 @@ fn assert_slot_aim(
         rotation: Rotation::from_rotation_arc(-Vector::Z, -outward).to_array(),
     };
     let aim = area.interaction.aim(physics, view, 1.0).unwrap();
-    assert_eq!(aim.item, item);
+    assert_eq!(aim.item, Some(item));
     assert_eq!(aim.slot, empty.then_some(slot));
 }
 

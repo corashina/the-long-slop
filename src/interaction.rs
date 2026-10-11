@@ -1,11 +1,13 @@
+pub mod feedback;
 pub mod items;
 pub mod wheels;
 
 use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
 use crate::reference::{
-    BodyId, HingeRecord, ItemId, ItemKind, OpeningId, OpeningRecord, PlayerReference,
-    ReferenceError, ReferenceManifest, SeatId, TankRole, WheelSlotId,
+    BodyId, ColliderId, HingeRecord, ItemId, ItemKind, LightControlId, LightControllerKind, NodeId,
+    OpeningId, OpeningRecord, PlayerReference, ReferenceError, ReferenceManifest, SeatId, TankRole,
+    WheelSlotId,
 };
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
@@ -22,14 +24,33 @@ pub use crate::vehicle::SLOT_SENSOR_FLAG;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AimTarget {
-    pub item: ItemId,
+    pub node: NodeId,
+    pub collider: ColliderId,
+    pub item: Option<ItemId>,
     pub distance: f32,
     pub point: [f32; 3],
     pub slot: Option<WheelSlotId>,
 }
 
+#[derive(Clone, Copy)]
+struct ItemTarget {
+    item: ItemId,
+    point: [f32; 3],
+    slot: Option<WheelSlotId>,
+}
+impl AimTarget {
+    fn item_target(self) -> Option<ItemTarget> {
+        self.item.map(|item| ItemTarget {
+            item,
+            point: self.point,
+            slot: self.slot,
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum InteractionAction {
+    LightControl(LightControlId),
     Pickup(ItemId),
     Drop(ItemId),
     Cap(OpeningId),
@@ -113,6 +134,12 @@ struct HeldState {
 
 pub struct InteractionState {
     kinds: HashMap<ItemId, ItemKind>,
+    collider_nodes: HashMap<ColliderId, NodeId>,
+    item_nodes: HashMap<ItemId, NodeId>,
+    light_controls: HashMap<ColliderId, LightControlId>,
+    cabin_doors: Option<[usize; 4]>,
+    seat_action_latched: bool,
+    usable_light_controls: HashSet<LightControlId>,
     bodies: HashMap<BodyId, RigidBodyHandle>,
     hinges: Vec<HingeState>,
     openings: Vec<OpeningState>,
@@ -128,10 +155,12 @@ pub struct InteractionState {
     latched_hinge: Option<(usize, Vector)>,
     hinge_release_distance_squared: f32,
     tuning_opening: Option<OpeningId>,
+    fill_opening: Option<OpeningId>,
 }
 
 #[derive(Clone, Copy)]
 struct TankRules {
+    no_drink: bool,
     no_fill_this: bool,
     no_fill_from: bool,
     slow_oil: bool,
@@ -224,7 +253,63 @@ impl InteractionState {
                 exit: ExitReference::from_reference(&reference.player, seat),
             });
         }
+        let mut light_controls = HashMap::new();
+        for control in &reference.lighting.controllers {
+            for &collider in &control.aim_colliders {
+                if let Some(previous) = light_controls.get(&collider) {
+                    let previous = reference
+                        .lighting
+                        .controllers
+                        .iter()
+                        .find(|c| c.id == *previous)
+                        .unwrap();
+                    if control.kind != LightControllerKind::Headlight
+                        || previous.kind != control.kind
+                        || previous.usable_source != control.usable_source
+                        || previous.usable_event != control.usable_event
+                    {
+                        return Err(ReferenceError("Conflicting light control collider".into()));
+                    }
+                    if previous.id.0 < control.id.0 {
+                        continue;
+                    }
+                }
+                light_controls.insert(collider, control.id);
+            }
+        }
+        let cabin_doors = reference
+            .lighting
+            .controllers
+            .iter()
+            .find_map(|c| c.cabin_input.as_ref())
+            .map(|c| {
+                let mut links = [usize::MAX; 4];
+                for (index, source) in c.door_usable_sources.iter().enumerate() {
+                    links[index] = hinges
+                        .iter()
+                        .position(|h| h.reference.source == *source)
+                        .unwrap_or(usize::MAX);
+                }
+                links
+            });
         Ok(Self {
+            collider_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
+            item_nodes: reference.items.iter().map(|i| (i.id, i.node)).collect(),
+            light_controls,
+            cabin_doors,
+            seat_action_latched: false,
+            usable_light_controls: reference
+                .lighting
+                .controllers
+                .iter()
+                .filter(|c| {
+                    matches!(
+                        c.kind,
+                        LightControllerKind::Cabin | LightControllerKind::Headlight
+                    )
+                })
+                .map(|c| c.id)
+                .collect(),
             kinds: reference
                 .items
                 .iter()
@@ -252,6 +337,7 @@ impl InteractionState {
                     (
                         tank.item,
                         TankRules {
+                            no_drink: tank.no_drink,
                             no_fill_this: tank.no_fill_this,
                             no_fill_from: tank.no_fill_from,
                             slow_oil: tank.slow_oil,
@@ -263,6 +349,7 @@ impl InteractionState {
             latched_hinge: None,
             hinge_release_distance_squared: (reference.player.aim_reach * 1.5).powi(2),
             tuning_opening: None,
+            fill_opening: None,
         })
     }
 
@@ -297,6 +384,7 @@ impl InteractionState {
         self.tank_rules.insert(
             item,
             TankRules {
+                no_drink: true,
                 no_fill_this: true,
                 no_fill_from: false,
                 slow_oil: false,
@@ -341,6 +429,22 @@ impl InteractionState {
             .find(|hinge| hinge.reference.item == id)
             .map(|hinge| hinge.angle)
     }
+    pub fn cabin_door_values(&self) -> [f32; 4] {
+        self.cabin_doors.map_or([0.; 4], |links| {
+            links.map(|index| {
+                self.hinges.get(index).map_or(0., |h| {
+                    let span = (h.reference.max_degrees - h.reference.closed_degrees)
+                        .abs()
+                        .max((h.reference.min_degrees - h.reference.closed_degrees).abs());
+                    if span == 0. {
+                        0.
+                    } else {
+                        ((h.angle - h.reference.closed_degrees).abs() / span).clamp(0., 1.)
+                    }
+                })
+            })
+        })
+    }
     pub fn dragging_hinge(&self) -> Option<ItemId> {
         self.latched_hinge
             .map(|(index, _)| self.hinges[index].reference.item)
@@ -379,7 +483,11 @@ impl InteractionState {
         };
         let surfaces = |handle: ColliderHandle, collider: &rapier3d::prelude::Collider| {
             valid(handle, collider)
-                && (!collider.is_sensor() || (collider.user_data as u32) != 0)
+                && (!collider.is_sensor()
+                    || (collider.user_data as u32) != 0
+                    || self
+                        .light_controls
+                        .contains_key(&ColliderId((collider.user_data >> 64) as u32)))
                 && !collider
                     .shape()
                     .contains_point(collider.position(), view.translation)
@@ -388,10 +496,23 @@ impl InteractionState {
         let (handle, hit) = physics
             .queries(QueryFilter::default().predicate(&surfaces))
             .cast_ray_and_get_normal(&ray, reach, true)?;
-        let encoded = physics.rapier().colliders[handle].user_data as u32;
-        let item = ItemId(encoded.checked_sub(1)?);
-        self.kinds.get(&item)?;
+        let data = physics.rapier().colliders[handle].user_data;
+        let collider = ColliderId((data >> 64) as u32);
+        let item = (data as u32)
+            .checked_sub(1)
+            .map(ItemId)
+            .filter(|id| self.kinds.contains_key(id));
+        let node = if collider.0 == 0 && physics.rapier().colliders[handle].is_sensor() {
+            *self.item_nodes.get(&item?)?
+        } else {
+            *self.collider_nodes.get(&collider)?
+        };
+        if item.is_none() && !self.light_controls.contains_key(&collider) {
+            return None;
+        }
         Some(AimTarget {
+            node,
+            collider,
             item,
             distance: hit.time_of_impact,
             point: ray.point_at(hit.time_of_impact).to_array(),
@@ -417,6 +538,18 @@ impl InteractionState {
             target.distance.is_finite() && target.distance >= 0.0 && target.distance <= self.reach
         });
         let released_hinge = input.released & keys::USE != 0 && self.latched_hinge.is_some();
+        if input.held & keys::USE == 0 {
+            self.seat_action_latched = false;
+        }
+        if input.held & keys::USE == 0 || input.released & keys::USE != 0 {
+            self.latched_hinge = None;
+        }
+        let availability = self.available_actions(target, player, items, physics);
+        let light_action = availability.light_control.filter(|_| {
+            input.pressed & keys::USE != 0
+                || (input.pressed & keys::FILL != 0 && availability.lmb_use)
+        });
+        let target = target.and_then(AimTarget::item_target);
         if input.held & keys::USE == 0 || input.released & keys::USE != 0 {
             self.latched_hinge = None;
         } else if self.latched_hinge.is_none()
@@ -446,9 +579,8 @@ impl InteractionState {
                 let distance = (point - Vector::from_array(player.body_pose(physics).position))
                     .length_squared();
                 if distance < self.hinge_release_distance_squared {
-                    Some(AimTarget {
+                    Some(ItemTarget {
                         item: hinge.reference.item,
-                        distance: distance.sqrt(),
                         point: point.to_array(),
                         slot: None,
                     })
@@ -463,18 +595,19 @@ impl InteractionState {
         } else {
             target
         };
-        let mut action = None;
+        let mut action = light_action.map(InteractionAction::LightControl);
         let mut carry_input = input;
         self.tuning_opening = None;
-        let can_use_target = use_target.is_some_and(|target| {
-            self.hinges
-                .iter()
-                .any(|hinge| hinge.reference.item == target.item)
-                || self.openings.iter().any(|opening| {
-                    opening.reference.cap == target.item
-                        && (opening.reference.can_toggle || opening.reference.can_tune)
-                })
-        });
+        let can_use_target = availability.light_control.is_some()
+            || use_target.is_some_and(|target| {
+                self.hinges
+                    .iter()
+                    .any(|hinge| hinge.reference.item == target.item)
+                    || self.openings.iter().any(|opening| {
+                        opening.reference.cap == target.item
+                            && (opening.reference.can_toggle || opening.reference.can_tune)
+                    })
+            });
         if input.pressed & keys::USE != 0 && player.seat().is_some() && !can_use_target {
             if let Some(seat) = self
                 .seats
@@ -482,10 +615,13 @@ impl InteractionState {
                 .find(|seat| Some(seat.id) == player.seat())
                 && player.try_exit(physics, &seat.exit)
             {
+                self.seat_action_latched = true;
                 action = Some(InteractionAction::Seat(seat.id));
             }
         } else if let Some(target) = use_target {
-            if input.pressed & keys::USE != 0 {
+            if input.pressed & keys::USE != 0
+                || (input.pressed & keys::FILL != 0 && availability.lmb_use)
+            {
                 for opening in &mut self.openings {
                     if opening.reference.cap == target.item && opening.reference.can_toggle {
                         opening.valve = if opening.valve > 0.0 { 0.0 } else { 1.0 };
@@ -525,6 +661,7 @@ impl InteractionState {
                 && let Some(seat) = self.seats.iter().find(|seat| seat.item == target.item)
                 && player.enter(seat.id, seat.pose, physics)
             {
+                self.seat_action_latched = true;
                 action = Some(InteractionAction::Seat(seat.id));
             }
             if input.held & keys::USE != 0
@@ -738,6 +875,7 @@ impl InteractionState {
                 );
             }
         }
+        self.fill_opening = availability.fill_reservation;
         action
     }
 
@@ -780,7 +918,7 @@ impl InteractionState {
 
     fn pickup(
         &mut self,
-        target: AimTarget,
+        target: ItemTarget,
         player: &PlayerState,
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,

@@ -171,7 +171,7 @@ def build_manifest(source, roots, reports, hashes):
             for fluid in value['fluids']:quantities[fluid['type']]+=fluid['amount']
             owner=body_for(node)
             tanks.append({'item':item_components[key(reader)],'source':source_id(reader),'capacity_liters':value['maxC'],'quantities_liters':quantities,'openings':[],
-                'no_fill_this':bool(full['noFillThis']),'no_fill_from':bool(full['noFillFrom']),'slow_oil':bool(full['slowOil']),
+                'no_drink':bool(full['noDrink']),'no_fill_this':bool(full['noFillThis']),'no_fill_from':bool(full['noFillFrom']),'slow_oil':bool(full['slowOil']),
                 'role':'vehicle' if owner==car_body else 'portable' if bodies[owner-1]['dynamic'] else 'fixed'})
     for node,group in components.items():
         if not nodes[node-1]['active']:continue

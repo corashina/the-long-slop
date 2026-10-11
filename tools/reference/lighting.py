@@ -229,6 +229,8 @@ def recover_controllers(source: Source, roots: list, node_ids: dict, material_id
                 for n in source.hierarchy(record['reader']):
                     c['aim_colliders'].extend(source.lighting_collider_ids[key(col)] for col in n['components'] if key(col) in source.lighting_collider_ids)
                 if f['GButton']['m_PathID']:
+                    parents=[source.read(linked(reader,f[field]))['m_Father'] for field in ('GButton','GButtonOff','GButtonOn')]
+                    if parents[1:]!=parents[:-1]:raise ValueError(f'{key(reader)} house button parent frame')
                     c['animated_poses'].append({'node':node(linked(reader,f['GButton'])),'states':[converted_transform(source.read(linked(reader,f['GButtonOff']))),converted_transform(source.read(linked(reader,f['GButtonOn'])))],'rule':'current_pose_lerp','speed':25.})
             elif kind in ('headlight','cabin'):
                 for i,s in enumerate(f['states']):
@@ -254,6 +256,11 @@ def recover_controllers(source: Source, roots: list, node_ids: dict, material_id
                         pick=linked(part,part_data['p']);pick_data=source.read(pick)
                         usable_door=linked(pick,pick_data['usable'])
                         if usable_door is None:raise ValueError(f'{key(pick)} cabin door usable missing')
+                        df=source.read(usable_door)
+                        expected=((0.,60.,False),(-60.,0.,True),(0.,60.,False),(-60.,0.,True))[len(doors)]
+                        if ((df['minY'],df['maxY'],bool(df['invY']))!=expected or df['minX']!=0. or df['maxX']!=0.
+                                or df['invX'] or df['veryInvert'] or df['onlyInvertDoorValue'] or not df['rotateAble'] or df['slideAble']):
+                            raise ValueError(f'{key(usable_door)} cabin GetValue mapping')
                         doors.append(node(usable_door));door_usables.append(source_id(usable_door))
                     c['usable_event']=None
                     c['cabin_input']={'source':source_id(route),'switch_source':source_id(switch),'switch_node':node(switch),
@@ -326,6 +333,13 @@ def recover_lighting(source: Source, roots: list, output: Path) -> dict:
                 for child in value:walk(child)
         walk(source.read(r))
     high_beam=recover_high_beam(source,material_ids)
+    menu=source.get('level1',74691);switch_reader=source.resolve(menu,source.read(menu)['ISwitch'])
+    switch_data=source.read(switch_reader);switch_image=source.object(switch_reader).image
+    switch_path=output/f'lighting-switch-{switch_reader.assets_file.name}-{switch_reader.path_id}.png'
+    switch_image.save(switch_path)
+    switch_icon={'source':source_id(switch_reader),'path':f'reference/{switch_path.name}',
+        'sha256':hashlib.sha256(switch_path.read_bytes()).hexdigest(),
+        'crop':[switch_data['m_Rect'][n] for n in ('x','y','width','height')],'size':list(switch_image.size)}
     lights=[source.get('level1',56812),*[c for r in records for c in r['components'] if c.type.name=='Light']]
     source.lighting_light_ids={key(r):i for i,r in enumerate(lights,1)};source.lighting_lights=[]
     for r in lights:
@@ -352,7 +366,7 @@ def recover_lighting(source: Source, roots: list, output: Path) -> dict:
                                 if comp.type.name in ('MeshRenderer','SkinnedMeshRenderer'):source.lighting_startup_materials[key(comp)]=source.get(state['off_material']['source']['file'],state['off_material']['source']['path_id'])
     cycle=recover_cycle(source,source.get('level1',64920),output)
     render=source.get('level1',56810);f=source.read(render);settings=source.get('globalgamemanagers',1);p=source.read(settings)
-    result={'source':source_id(render),'color_space':p['m_ActiveColorSpace'],'ambient_mode':f['m_AmbientMode'],'ambient_intensity':f['m_AmbientIntensity'],
+    result={'switch_icon':switch_icon,'source':source_id(render),'color_space':p['m_ActiveColorSpace'],'ambient_mode':f['m_AmbientMode'],'ambient_intensity':f['m_AmbientIntensity'],
         'ambient_sky':rgba(f['m_AmbientSkyColor']),'ambient_equator':rgba(f['m_AmbientEquatorColor']),'ambient_ground':rgba(f['m_AmbientGroundColor']),
         'ambient_probe':list(f['m_AmbientProbe'].values()),'reflection_intensity':f['m_ReflectionIntensity'],
         'fog':{'enabled':bool(f['m_Fog']),'mode':f['m_FogMode'],'density':f['m_FogDensity'],'color':rgba(f['m_FogColor']),'start':f['m_LinearFogStart'],'end':f['m_LinearFogEnd']},
@@ -393,6 +407,10 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
     if len(lights)!=len(lighting['lights']) or len(controls)!=len(lighting['controllers']):raise ValueError('Duplicate lighting ID')
     documents={a['id']:json.loads((output/Path(a['path']).name).read_text()) for a in manifest['assets']}
     def fail(source,field):raise ValueError(f"{source['file']}:{source['path_id']} {field}")
+    icon=lighting['switch_icon'];icon_path=output/Path(icon['path']).name
+    if (icon['source']!={'file':'sharedassets1.assets','path_id':4594} or icon['crop']!=[0.,0.,160.,160.]
+            or icon['size']!=[156,160] or not icon_path.is_file()
+            or hashlib.sha256(icon_path.read_bytes()).hexdigest()!=icon['sha256']):fail(icon['source'],'switch sprite')
     def walk(value):
         if isinstance(value,dict):
             if 'path' in value and 'sha256' in value:

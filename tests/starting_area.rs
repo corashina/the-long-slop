@@ -97,7 +97,9 @@ fn restart_after_carry_detach_rebase() {
                 ..FrameInput::default()
             },
             Some(my_summer_slop::interaction::AimTarget {
-                item: reference.items[0].id,
+                node: my_summer_slop::reference::NodeId(0),
+                collider: my_summer_slop::reference::ColliderId(0),
+                item: Some(reference.items[0].id),
                 distance: 1.0,
                 point: [10.0, 2.0, -1.0],
                 slot: None,
@@ -463,7 +465,7 @@ fn aim_at(
             &runtime.physics,
             runtime.area.player.view_pose(&runtime.physics),
             reference.player.aim_reach,
-        ) && target.item == item
+        ) && target.item == Some(item)
         {
             return target;
         }
@@ -576,7 +578,9 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
             ..FrameInput::default()
         },
         Some(my_summer_slop::interaction::AimTarget {
-            item: ItemId(90),
+            node: my_summer_slop::reference::NodeId(0),
+            collider: my_summer_slop::reference::ColliderId(0),
+            item: Some(ItemId(90)),
             distance: 1.0,
             point: [0.8, 0.7, 0.0],
             slot: None,
@@ -618,7 +622,9 @@ fn dry_recovery_keeps_a_carried_can_reachable() {
             ..FrameInput::default()
         },
         Some(my_summer_slop::interaction::AimTarget {
-            item: can,
+            node: my_summer_slop::reference::NodeId(0),
+            collider: my_summer_slop::reference::ColliderId(0),
+            item: Some(can),
             distance: 1.0,
             point: [10.0, 2.0, -1.0],
             slot: None,
@@ -1102,7 +1108,7 @@ fn enter_source_driver(
     open_source_hinge(runtime, reference, 76010);
     let driver = reference.seats.iter().find(|seat| seat.driver).unwrap();
     let target = aim_at(runtime, reference, driver.item);
-    assert_eq!(target.item, driver.item);
+    assert_eq!(target.item, Some(driver.item));
     runtime.started = true;
     runtime.step(
         reference,
@@ -1270,7 +1276,7 @@ fn aim_from_seat(
         reference.player.aim_reach,
     );
     assert_eq!(
-        target.map(|target| target.item),
+        target.and_then(|target| target.item),
         Some(item),
         "seated door control must use real aim"
     );

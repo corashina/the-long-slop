@@ -87,6 +87,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
                 advance_physics,
                 sync_world,
                 sync_imported,
+                presentation::lighting::sync_control_visuals,
                 update_camera,
                 update_hud,
             )
@@ -405,21 +406,34 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
         runtime.started,
     );
     let target = runtime.target;
-    let record =
-        target.and_then(|target| reference.0.items.iter().find(|item| item.id == target.item));
+    let availability = runtime.area.interaction.available_actions(
+        target,
+        &runtime.area.player,
+        &runtime.area.items,
+        &runtime.physics,
+    );
+    game_feedback(
+        availability.context as u32,
+        availability.actions.0,
+        availability.light_control.map_or(0, |id| id.0),
+        availability.lmb_use,
+    );
+    let record = availability
+        .item
+        .and_then(|id| reference.0.items.iter().find(|item| item.id == id));
     let held = runtime
         .area
         .interaction
         .held()
         .map(|id| display_name(&reference.0, &runtime.area.items, id))
         .unwrap_or("");
-    let state = target.and_then(|target| {
+    let state = availability.item.and_then(|id| {
         let id = reference
             .0
             .openings
             .iter()
-            .find(|opening| opening.cap == target.item)
-            .map_or(target.item, |opening| opening.tank);
+            .find(|opening| opening.cap == id)
+            .map_or(id, |opening| opening.tank);
         runtime.area.items.get(id)
     });
     let amount = state
@@ -428,14 +442,16 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
     let volumes = state
         .and_then(|item| item.fluid.as_ref())
         .map_or([-1.0; 6], |fluid| fluid.mixture.quantities_liters);
+    use crate::interaction::feedback::ActionMask;
     let usable_target =
-        record.is_some_and(|item| {
-            reference.0.hinges.iter().any(|hinge| hinge.item == item.id)
-                || reference.0.openings.iter().any(|opening| {
-                    opening.cap == item.id && (opening.can_toggle || opening.can_tune)
-                })
-        });
-    let action = if !runtime.notice.is_empty() {
+        availability.actions.0 & (ActionMask::USE | ActionMask::DOOR | ActionMask::TUNE) != 0;
+    let action = if availability.light_control.is_some() {
+        if availability.lmb_use {
+            "E / LMB: switch lights"
+        } else {
+            "E: switch lights"
+        }
+    } else if !runtime.notice.is_empty() {
         runtime.notice
     } else if runtime.area.player.seat().is_some() && !usable_target {
         if runtime.area.player.driving() {
@@ -514,8 +530,9 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
         )
     };
     game_detail(
-        target
-            .map(|target| display_name(&reference.0, &runtime.area.items, target.item))
+        availability
+            .item
+            .map(|id| display_name(&reference.0, &runtime.area.items, id))
             .unwrap_or(""),
         action,
         amount,

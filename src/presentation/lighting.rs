@@ -107,6 +107,8 @@ pub struct SourceLighting {
     pub warming: bool,
     pub warmups: Vec<(Entity, bool)>,
     pub lamp_materials: Vec<BoundLampMaterial>,
+    control_poses: Vec<(usize, Entity)>,
+    visibility: Vec<(usize, Entity)>,
     pub state: RenderingState,
     pub bound: bool,
     pub lights: Vec<BoundLight>,
@@ -214,6 +216,8 @@ pub fn load_lighting(commands: &mut Commands, server: &AssetServer, lighting: &L
         warming: true,
         warmups: Vec::new(),
         lamp_materials: Vec::new(),
+        control_poses: Vec::new(),
+        visibility: Vec::new(),
         state: RenderingState::Loading,
         bound: false,
         lights: Vec::with_capacity(MAX_LIGHTS),
@@ -359,6 +363,30 @@ pub(crate) fn bind_lighting(
             choices: Vec::new(),
         });
     }
+    for (index, pose) in drive.runtime.lighting.control_poses().iter().enumerate() {
+        source.control_poses.push((
+            index,
+            *visuals
+                .nodes
+                .get(&pose.node)
+                .expect("source control pose node"),
+        ));
+    }
+    for (index, output) in drive
+        .runtime
+        .lighting
+        .visibility_outputs()
+        .iter()
+        .enumerate()
+    {
+        source.visibility.push((
+            index,
+            *visuals
+                .nodes
+                .get(&output.node)
+                .expect("source lamp visibility node"),
+        ));
+    }
     let mut shadow_start = 0;
     for (source_index, light) in r.lights.iter().enumerate() {
         if light.node.is_some_and(|id| {
@@ -403,6 +431,7 @@ pub(crate) fn bind_lighting(
                 enabled: light.enabled,
             },
             pose,
+            bevy::camera::visibility::NoFrustumCulling,
             (0..32)
                 .filter(|layer| light.culling_mask & (1u32 << layer) != 0)
                 .flat_map(|layer| [layer, layer + 32])
@@ -520,6 +549,31 @@ pub(crate) fn bind_lighting(
     );
     source.uniform.counts.z = far.culling_mask;
     source.bound = true;
+}
+pub(crate) fn sync_control_visuals(
+    drive: Res<Drive>,
+    source: Res<SourceLighting>,
+    mut poses: Query<&mut Transform>,
+    mut nodes: Query<&mut Visibility>,
+) {
+    for &(index, entity) in &source.control_poses {
+        if let Ok(mut pose) = poses.get_mut(entity) {
+            let output = &drive.runtime.lighting.control_poses()[index].local_pose;
+            pose.translation = Vec3::from_array(output.translation);
+            pose.rotation = Quat::from_array(output.rotation);
+        }
+    }
+    for &(index, entity) in &source.visibility {
+        if let Ok(mut visibility) = nodes.get_mut(entity) {
+            visibility.set_if_neq(
+                if drive.runtime.lighting.visibility_outputs()[index].visible {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                },
+            );
+        }
+    }
 }
 pub(crate) fn sync_lighting(
     reference: Res<RuntimeReference>,
@@ -718,6 +772,11 @@ pub fn lighting_readiness(
     if source.bound && source.materials_prepared {
         let state = source.status.lock().unwrap().clone();
         if source.warming && state == RenderingState::Ready {
+            for light in &source.lights {
+                commands
+                    .entity(light.entity)
+                    .remove::<bevy::camera::visibility::NoFrustumCulling>();
+            }
             for (entity, _) in source.warmups.drain(..) {
                 commands.entity(entity).despawn();
             }

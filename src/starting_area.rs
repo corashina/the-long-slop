@@ -560,6 +560,10 @@ impl GarageRuntime {
             FIXED_DT,
         );
         match action {
+            Some(InteractionAction::LightControl(control)) => {
+                self.lighting.use_control(&reference.lighting, control);
+                self.notice = "";
+            }
             Some(InteractionAction::WheelRemove(item)) => {
                 if let Some(slot) = self.wheels.slot_for_item(item) {
                     self.notice = if self
@@ -598,8 +602,8 @@ impl GarageRuntime {
                 {
                     self.notice = "";
                 } else if let Some(tire) = target
-                    .filter(|target| target.item != item)
-                    .map(|target| target.item)
+                    .and_then(|target| target.item)
+                    .filter(|target| *target != item)
                 {
                     self.notice = if self
                         .wheels
@@ -616,6 +620,10 @@ impl GarageRuntime {
             }
             _ => {}
         }
+        self.lighting.update_cabin(
+            &reference.lighting,
+            self.area.interaction.cabin_door_values(),
+        );
         self.area.sync_portable_mass(&mut self.physics);
         if seated
             && input.pressed & keys::USE != 0

@@ -5351,7 +5351,8 @@
       "no_fill_this": false,
       "no_fill_from": false,
       "slow_oil": true,
-      "role": "vehicle"
+      "role": "vehicle",
+      "no_drink": false
     },
     {
       "item": 2,
@@ -5372,7 +5373,8 @@
       "no_fill_this": false,
       "no_fill_from": false,
       "slow_oil": false,
-      "role": "vehicle"
+      "role": "vehicle",
+      "no_drink": false
     },
     {
       "item": 3,
@@ -5393,7 +5395,8 @@
       "no_fill_this": false,
       "no_fill_from": false,
       "slow_oil": false,
-      "role": "vehicle"
+      "role": "vehicle",
+      "no_drink": false
     },
     {
       "item": 18,
@@ -5416,7 +5419,8 @@
       "no_fill_this": false,
       "no_fill_from": false,
       "slow_oil": false,
-      "role": "supply"
+      "role": "supply",
+      "no_drink": true
     }
   ],
   "fluid_rules": {
@@ -10968,6 +10972,24 @@
       "min_value": 1.0,
       "max_value": 0.0,
       "stay_on": true
+    },
+    "switch_icon": {
+      "source": {
+        "file": "sharedassets1.assets",
+        "path_id": 4594
+      },
+      "path": "reference/lighting-switch-sharedassets1.assets-4594.png",
+      "sha256": "ebd83e5df8964eb4e2ac173a92ea3509a10efcb221e795480f825ab79908ac2d",
+      "crop": [
+        0.0,
+        0.0,
+        160.0,
+        160.0
+      ],
+      "size": [
+        156,
+        160
+      ]
     }
   }
 }

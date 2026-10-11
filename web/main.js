@@ -17,6 +17,8 @@ const fuel = document.querySelector('#fuel');
 const fuelLevel = document.querySelector('#fuel-level');
 const trip = document.querySelector('#trip');
 const crosshair = document.querySelector('#crosshair');
+const switchIcon = document.querySelector('#switch-icon');
+const reticle = document.querySelector('#reticle');
 const heldCodes = new Set();
 const keyBits = { KeyW: 1, ArrowUp: 1, KeyS: 2, ArrowDown: 2, KeyA: 4, ArrowLeft: 4,
   KeyD: 8, ArrowRight: 8, Space: 16, KeyE: 32, ShiftLeft: 64, ShiftRight: 64,
@@ -118,6 +120,13 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, chunks, colliders, abs
   if (distance!==lastTripNumber) {write(trip,distance.toFixed(2));lastTripNumber=distance;}
   if (lastPaused !== paused) { pauseScreen.hidden = !paused || !started; lastPaused = paused; }
   crosshair.hidden = paused || !started || !mode;
+};
+window.gameFeedback = (context, actions, control, lmbUse) => {
+  const state = window.gameState;
+  state.feedbackContext = context; state.availableActions = actions;
+  state.lightControl = control; state.lmbUse = lmbUse;
+  const visible = context === 7 && control !== 0 && (actions & 1) !== 0;
+  switchIcon.hidden = !visible; reticle.hidden = visible;
 };
 window.gameDetail = (name, action, amount, condition, held, rpm, ignition, running, starter, seated, handbrake, gasoline,oil,alcohol,water,blood,diesel) => {
   const state = window.gameState;
@@ -221,6 +230,8 @@ async function load() {
   if (!response.ok) throw new Error(`Cannot load reference/manifest.json (HTTP ${response.status}).`);
   const text = await response.text();
   const manifest=JSON.parse(text);
+  switchIcon.src = './assets/' + manifest.lighting.switch_icon.path;
+  await switchIcon.decode();
   const tank=manifest.tanks.find((tank)=>tank.item===manifest.engine.fuel_tank);
   fuelLevel.max=tank.capacity_liters;fuelLevel.optimum=tank.capacity_liters;
   timeout = setTimeout(() => fail('The garage did not load within 120 seconds.'), 120_000);

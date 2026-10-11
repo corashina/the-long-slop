@@ -22,7 +22,9 @@ fn pose(position: [f32; 3]) -> VehiclePose {
 }
 fn target(id: u32) -> Option<AimTarget> {
     Some(AimTarget {
-        item: ItemId(id),
+        node: my_summer_slop::reference::NodeId(0),
+        collider: my_summer_slop::reference::ColliderId(0),
+        item: Some(ItemId(id)),
         distance: 1.0,
         point: [10.0, 2.0, -1.0],
         slot: None,
@@ -78,7 +80,7 @@ fn fixture_with(
     let mut physics = common::world();
     let (handle, _) = physics.rapier_mut().insert(
         RigidBodyBuilder::dynamic().translation(Vector::new(10.0, 2.0, -1.0)),
-        ColliderBuilder::ball(0.2).user_data(2),
+        ColliderBuilder::ball(0.2).user_data((2u128 << 64) | 2),
     );
     let mut items = ItemStore::new(&reference).unwrap();
     items.bind_body(BodyId(90), handle);
@@ -148,7 +150,7 @@ fn source_use_mask_skips_hidden_cabin_envelope() {
     );
     physics.refresh_queries();
     let target = interaction.aim(&physics, pose([10.0, 2.0, 0.0]), 3.0);
-    assert_eq!(target.map(|target| target.item), Some(ItemId(1)));
+    assert_eq!(target.and_then(|target| target.item), Some(ItemId(1)));
 }
 
 #[test]
@@ -171,7 +173,9 @@ fn target_sensor_is_usable_but_empty_trigger_is_skipped() {
     );
     physics.rapier_mut().insert(
         RigidBodyBuilder::fixed().translation(Vector::new(10.0, 2.0, -0.7)),
-        ColliderBuilder::ball(0.1).sensor(true).user_data(3),
+        ColliderBuilder::ball(0.1)
+            .sensor(true)
+            .user_data((3u128 << 64) | 3),
     );
     physics.refresh_queries();
     assert_eq!(
@@ -179,7 +183,7 @@ fn target_sensor_is_usable_but_empty_trigger_is_skipped() {
             .aim(&physics, pose([10.0, 2.0, 0.0]), 3.0)
             .unwrap()
             .item,
-        ItemId(2)
+        Some(ItemId(2))
     );
 }
 
@@ -817,7 +821,9 @@ fn aim_excludes_the_player_body() {
     let (mut interaction, _, mut physics, player) = fixture();
     physics.rapier_mut().insert(
         RigidBodyBuilder::fixed().translation(Vector::new(10.0, -1.0, 0.0)),
-        ColliderBuilder::ball(0.2).sensor(true).user_data(3),
+        ColliderBuilder::ball(0.2)
+            .sensor(true)
+            .user_data((3u128 << 64) | 3),
     );
     physics.refresh_queries();
     interaction.bind_player_body(player.body_handle());
@@ -825,7 +831,7 @@ fn aim_excludes_the_player_body() {
     view.rotation = Rotation::from_rotation_x(-std::f32::consts::FRAC_PI_2).to_array();
     assert_eq!(
         interaction.aim(&physics, view, 6.0).unwrap().item,
-        ItemId(2)
+        Some(ItemId(2))
     );
 }
 
@@ -842,11 +848,11 @@ fn aim_slot_flag_does_not_mark_a_loose_rim() {
     let selected = interaction
         .aim(&physics, pose([10.0, 2.0, 0.0]), 1.0)
         .unwrap();
-    assert_eq!(selected.item, ItemId(13));
+    assert_eq!(selected.item, Some(ItemId(13)));
     assert_eq!(selected.slot, Some(WheelSlotId(2)));
     physics.rapier_mut().insert(
         RigidBodyBuilder::dynamic().translation(Vector::new(10.0, 2.0, -0.3)),
-        ColliderBuilder::ball(0.1).user_data(14),
+        ColliderBuilder::ball(0.1).user_data((9u128 << 64) | 14),
     );
     physics.refresh_queries();
     assert_eq!(
@@ -1441,4 +1447,214 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
         );
         assert_eq!(interaction.opening_valve(OpeningId(100)), expected);
     }
+}
+
+fn light_target() -> Option<AimTarget> {
+    let r = common::reference();
+    let c = &r.lighting.controllers[0];
+    let collider = c.aim_colliders[0];
+    Some(AimTarget {
+        node: r
+            .colliders
+            .iter()
+            .find(|record| record.id == collider)
+            .unwrap()
+            .node,
+        collider,
+        item: None,
+        distance: 1.,
+        point: [10., 2., -1.],
+        slot: None,
+    })
+}
+#[test]
+fn switch_input_preserves_latched_door_cap_and_fill_actions() {
+    use my_summer_slop::interaction::feedback::{ActionMask, FeedbackContext};
+    let (mut i, mut items, mut w, mut p) = door_fixture();
+    i.step(
+        input(keys::USE, keys::USE),
+        target(1),
+        &mut p,
+        &mut items,
+        &mut w,
+        0.1,
+    );
+    let a = i.available_actions(light_target(), &p, &items, &w);
+    assert_eq!(a.light_control, None);
+    assert_eq!(a.context, FeedbackContext::Door);
+    assert!(matches!(
+        i.step(
+            input(keys::USE, 0),
+            light_target(),
+            &mut p,
+            &mut items,
+            &mut w,
+            0.1
+        ),
+        Some(InteractionAction::Hinge(_))
+    ));
+    i.step(
+        FrameInput {
+            released: keys::USE,
+            ..Default::default()
+        },
+        None,
+        &mut p,
+        &mut items,
+        &mut w,
+        0.1,
+    );
+    assert!(
+        i.available_actions(light_target(), &p, &items, &w)
+            .light_control
+            .is_some()
+    );
+    let (mut i, mut items, mut w, mut p) = fixture_with(|r| r.tanks[0].no_drink = true);
+    i.step(
+        input(keys::GRAB, keys::GRAB),
+        target(1),
+        &mut p,
+        &mut items,
+        &mut w,
+        0.1,
+    );
+    i.step(
+        input(keys::USE, keys::USE),
+        target(2),
+        &mut p,
+        &mut items,
+        &mut w,
+        0.1,
+    );
+    let a = i.available_actions(target(2), &p, &items, &w);
+    assert_ne!(a.actions.0 & ActionMask::FILL, 0);
+    assert!(!a.lmb_use);
+    assert!(matches!(
+        i.step(
+            input(keys::FILL, keys::FILL),
+            target(2),
+            &mut p,
+            &mut items,
+            &mut w,
+            0.1
+        ),
+        Some(InteractionAction::Fill { .. })
+    ));
+    assert!(i.opening_is_open(OpeningId(101)));
+    assert_eq!(
+        i.available_actions(light_target(), &p, &items, &w)
+            .light_control,
+        Some(my_summer_slop::reference::LightControlId(1))
+    );
+}
+#[test]
+fn switch_left_click_guard_checks_empty_and_full_drinkable_tanks() {
+    for no_drink in [false, true] {
+        for empty in [false, true] {
+            let (mut i, mut items, mut w, mut p) = fixture_with(|r| r.tanks[0].no_drink = no_drink);
+            if empty {
+                items
+                    .get_mut(ItemId(1))
+                    .unwrap()
+                    .fluid
+                    .as_mut()
+                    .unwrap()
+                    .mixture
+                    .quantities_liters = [0.; 6];
+            }
+            i.step(
+                input(keys::GRAB, keys::GRAB),
+                target(1),
+                &mut p,
+                &mut items,
+                &mut w,
+                0.1,
+            );
+            let a = i.available_actions(light_target(), &p, &items, &w);
+            assert_eq!(a.lmb_use, no_drink);
+            assert!(a.light_control.is_some());
+            assert_eq!(
+                i.step(
+                    input(keys::FILL, keys::FILL),
+                    light_target(),
+                    &mut p,
+                    &mut items,
+                    &mut w,
+                    0.1
+                ),
+                no_drink.then_some(InteractionAction::LightControl(
+                    my_summer_slop::reference::LightControlId(1)
+                ))
+            );
+            assert_eq!(
+                i.step(
+                    input(keys::USE, keys::USE),
+                    light_target(),
+                    &mut p,
+                    &mut items,
+                    &mut w,
+                    0.1
+                ),
+                Some(InteractionAction::LightControl(
+                    my_summer_slop::reference::LightControlId(1)
+                ))
+            );
+        }
+    }
+}
+#[test]
+fn full_destination_keeps_the_source_left_click_fill_reservation() {
+    let (mut i, mut items, mut w, mut p) = fixture_with(|r| r.tanks[0].no_drink = true);
+    let full = items.get_mut(ItemId(2)).unwrap().fluid.as_mut().unwrap();
+    full.mixture.quantities_liters = [full.capacity_liters, 0., 0., 0., 0., 0.];
+    i.step(
+        input(keys::GRAB, keys::GRAB),
+        target(1),
+        &mut p,
+        &mut items,
+        &mut w,
+        0.1,
+    );
+    i.step(
+        input(keys::USE, keys::USE),
+        target(2),
+        &mut p,
+        &mut items,
+        &mut w,
+        0.1,
+    );
+    i.step(
+        FrameInput::default(),
+        target(2),
+        &mut p,
+        &mut items,
+        &mut w,
+        0.1,
+    );
+    assert!(!i.available_actions(target(2), &p, &items, &w).lmb_use);
+    assert!(!i.available_actions(light_target(), &p, &items, &w).lmb_use);
+    assert_eq!(
+        i.step(
+            input(keys::FILL, keys::FILL),
+            light_target(),
+            &mut p,
+            &mut items,
+            &mut w,
+            0.1
+        ),
+        None
+    );
+    assert_eq!(
+        i.step(
+            input(keys::USE, keys::USE),
+            light_target(),
+            &mut p,
+            &mut items,
+            &mut w,
+            0.1
+        ),
+        Some(InteractionAction::LightControl(
+            my_summer_slop::reference::LightControlId(1)
+        ))
+    );
 }

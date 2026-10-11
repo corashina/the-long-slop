@@ -550,6 +550,11 @@ pub struct VehicleLightSample {
     pub gear_ratio: f32,
     pub electronics_output: f32,
 }
+#[derive(Clone, Copy, Debug)]
+pub struct NodeVisibilityOutput {
+    pub node: crate::reference::NodeId,
+    pub visible: bool,
+}
 pub struct LightingState {
     pub cycle: CycleState,
     requested_headlights: u8,
@@ -560,11 +565,37 @@ pub struct LightingState {
     pub(crate) lights: Vec<LightOutput>,
     pub(crate) materials: Vec<LampMaterialOutput>,
     pub(crate) poses: Vec<ControlPoseOutput>,
+    visibility: Vec<NodeVisibilityOutput>,
+    cabin_modes: Vec<usize>,
+    pose_progress: Vec<Option<f32>>,
 }
 impl LightingState {
     pub fn new(reference: &crate::reference::LightingRecord) -> Self {
         let mut state = Self {
             cycle: CycleState::new(&reference.cycle),
+            visibility: reference
+                .controllers
+                .iter()
+                .flat_map(|c| &c.states)
+                .flat_map(|s| {
+                    s.working_nodes
+                        .iter()
+                        .map(|node| NodeVisibilityOutput {
+                            node: *node,
+                            visible: !s.broken,
+                        })
+                        .chain(s.broken_nodes.iter().map(|node| NodeVisibilityOutput {
+                            node: *node,
+                            visible: s.broken,
+                        }))
+                })
+                .collect(),
+            cabin_modes: reference
+                .controllers
+                .iter()
+                .map(|c| c.cabin_input.as_ref().map_or(0, |input| input.startup_mode))
+                .collect(),
+            pose_progress: vec![None; reference.controllers.len()],
             requested_headlights: 0,
             vehicle: VehicleLightSample::default(),
             high_beam: false,
@@ -607,6 +638,10 @@ impl LightingState {
         self.cycle.reset(&reference.cycle);
         self.materials.clear();
         self.poses.clear();
+        for (index, c) in reference.controllers.iter().enumerate() {
+            self.cabin_modes[index] = c.cabin_input.as_ref().map_or(0, |input| input.startup_mode);
+            self.pose_progress[index] = None;
+        }
         for (out, light) in self.lights.iter_mut().zip(&reference.lights) {
             *out = LightOutput {
                 id: light.id,
@@ -644,10 +679,17 @@ impl LightingState {
                 }
             }
             for pose in &control.animated_poses {
-                if let Some(local_pose) = pose.states.get(control.current_state) {
+                if let Some(local_pose) = pose
+                    .states
+                    .get(usize::from(control.startup_on ^ control.reverse_switch))
+                {
                     self.poses.push(ControlPoseOutput {
                         node: pose.node,
-                        local_pose: local_pose.clone(),
+                        local_pose: crate::reference::Transform {
+                            translation: local_pose.translation,
+                            rotation: local_pose.rotation,
+                            scale: [1.; 3],
+                        },
                     });
                 }
             }
@@ -670,6 +712,11 @@ impl LightingState {
             .find(|c| c.kind == crate::reference::LightControllerKind::Rear)
             .unwrap()
             .electronics_output;
+        for index in 0..reference.controllers.len() {
+            if reference.controllers[index].kind == crate::reference::LightControllerKind::House {
+                self.refresh_house(reference, index);
+            }
+        }
         self.update_vehicle(
             reference,
             VehicleLightSample {
@@ -677,6 +724,78 @@ impl LightingState {
                 ..Default::default()
             },
         );
+    }
+    pub fn use_control(
+        &mut self,
+        reference: &crate::reference::LightingRecord,
+        control: crate::reference::LightControlId,
+    ) {
+        let Some(index) = reference.controllers.iter().position(|c| c.id == control) else {
+            return;
+        };
+        let c = &reference.controllers[index];
+        match c.kind {
+            crate::reference::LightControllerKind::House => {
+                self.controllers[index].on = !self.controllers[index].on;
+                if self.pose_progress[index].is_none() {
+                    self.pose_progress[index] = Some(0.);
+                }
+                self.refresh_house(reference, index);
+            }
+            crate::reference::LightControllerKind::Cabin => {
+                let input = c.cabin_input.as_ref().unwrap();
+                self.cabin_modes[index] = (self.cabin_modes[index] + 1) % input.modes.len();
+            }
+            crate::reference::LightControllerKind::Headlight => self.cycle_headlights(reference),
+            _ => {}
+        }
+    }
+    fn refresh_house(&mut self, reference: &crate::reference::LightingRecord, index: usize) {
+        let c = &reference.controllers[index];
+        let on = self.controllers[index].on
+            && (c.electronics_source.is_none() || c.electronics_output > c.electronics_threshold);
+        for lamp in &c.states {
+            for id in &lamp.lights {
+                let output = self.lights.iter_mut().find(|o| o.id == *id).unwrap();
+                output.enabled = on && !lamp.broken;
+                output.intensity = lamp.intensity;
+            }
+            select_material(&mut self.materials, lamp, on && !lamp.broken);
+            for node in &lamp.working_nodes {
+                self.visibility
+                    .iter_mut()
+                    .find(|o| o.node == *node)
+                    .unwrap()
+                    .visible = !lamp.broken;
+            }
+            for node in &lamp.broken_nodes {
+                self.visibility
+                    .iter_mut()
+                    .find(|o| o.node == *node)
+                    .unwrap()
+                    .visible = lamp.broken;
+            }
+        }
+    }
+    pub fn update_cabin(
+        &mut self,
+        reference: &crate::reference::LightingRecord,
+        door_values: [f32; 4],
+    ) {
+        for (index, c) in reference.controllers.iter().enumerate() {
+            let Some(input) = &c.cabin_input else {
+                continue;
+            };
+            let on = match input.modes[self.cabin_modes[index]] {
+                1 => true,
+                2 => false,
+                _ => door_values.iter().any(|value| *value > input.threshold),
+            };
+            self.controllers[index].request(u8::from(on));
+        }
+    }
+    pub fn visibility_outputs(&self) -> &[NodeVisibilityOutput] {
+        &self.visibility
     }
     pub fn cycle_headlights(&mut self, reference: &crate::reference::LightingRecord) {
         self.requested_headlights = (self.requested_headlights + 1) % 3;
@@ -740,11 +859,51 @@ impl LightingState {
         }
     }
     pub fn advance_fades(&mut self, reference: &crate::reference::LightingRecord, dt: f32) {
-        for (state, control) in self.controllers.iter_mut().zip(&reference.controllers) {
-            if control.kind != crate::reference::LightControllerKind::Headlight {
+        if !dt.is_finite() || dt <= 0. {
+            return;
+        }
+        for (index, control) in reference.controllers.iter().enumerate() {
+            if control.kind == crate::reference::LightControllerKind::House {
+                let progress = self.pose_progress[index];
+                if let Some(progress) = progress {
+                    if progress >= 1. {
+                        let target =
+                            usize::from(self.controllers[index].on ^ control.reverse_switch);
+                        for pose in &control.animated_poses {
+                            let out = self.poses.iter_mut().find(|o| o.node == pose.node).unwrap();
+                            out.local_pose.translation = pose.states[target].translation;
+                            out.local_pose.rotation = pose.states[target].rotation;
+                        }
+                        self.pose_progress[index] = None;
+                        continue;
+                    }
+                    let target = usize::from(self.controllers[index].on ^ control.reverse_switch);
+                    for pose in &control.animated_poses {
+                        let out = self.poses.iter_mut().find(|o| o.node == pose.node).unwrap();
+                        let next = pose.states[target];
+                        for i in 0..3 {
+                            out.local_pose.translation[i] =
+                                lerp(out.local_pose.translation[i], next.translation[i], progress);
+                        }
+                        let a = rapier3d::math::Rotation::from_array(out.local_pose.rotation);
+                        let b = rapier3d::math::Rotation::from_array(next.rotation);
+                        out.local_pose.rotation = a.lerp(b, progress).normalize().to_array();
+                    }
+                    self.pose_progress[index] = Some(progress + dt * 25.);
+                }
                 continue;
             }
-            state.request(self.requested_headlights);
+            if !matches!(
+                control.kind,
+                crate::reference::LightControllerKind::Headlight
+                    | crate::reference::LightControllerKind::Cabin
+            ) {
+                continue;
+            }
+            let state = &mut self.controllers[index];
+            if control.kind == crate::reference::LightControllerKind::Headlight {
+                state.request(self.requested_headlights);
+            }
             state.update(dt);
             let energy = state.energy
                 * if control.electronics_source.is_some() {

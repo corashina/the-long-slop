@@ -43,6 +43,8 @@ extern "C" {
         paused: bool,
         started: bool,
     );
+    #[wasm_bindgen(js_namespace = window, js_name = gameFeedback)]
+    pub fn game_feedback(context: u32, actions: u32, control: u32, lmb_use: bool);
     #[wasm_bindgen(js_namespace = window, js_name = gameDetail)]
     pub fn game_detail(
         target: &str,

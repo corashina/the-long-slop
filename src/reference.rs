@@ -249,6 +249,7 @@ pub struct TankReference {
     /// Gasoline, oil, alcohol, water, blood, diesel.
     pub quantities_liters: [f32; 6],
     pub openings: Vec<OpeningId>,
+    pub no_drink: bool,
     pub no_fill_this: bool,
     pub no_fill_from: bool,
     pub slow_oil: bool,
