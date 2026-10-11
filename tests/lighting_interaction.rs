@@ -676,3 +676,73 @@ fn exported_cabin_door_values_keep_all_four_source_mappings() {
         );
     }
 }
+#[test]
+fn house_switch_uses_resumed_intervals_and_snaps_at_completion() {
+    let r = common::reference().lighting;
+    let c = &r.controllers[0];
+    let p = &c.animated_poses[0];
+    let mut state = LightingState::new(&r);
+    let initial = state
+        .control_poses()
+        .iter()
+        .find(|o| o.node == p.node)
+        .unwrap()
+        .local_pose;
+    let on = p.states[1];
+    state.use_control(&r, c.id);
+    state.advance_fades(&r, 0.1);
+    let click = state
+        .control_poses()
+        .iter()
+        .find(|o| o.node == p.node)
+        .unwrap()
+        .local_pose;
+    assert_eq!(click.translation, initial.translation);
+    state.advance_fades(&r, 0.01);
+    let resumed = state
+        .control_poses()
+        .iter()
+        .find(|o| o.node == p.node)
+        .unwrap()
+        .local_pose;
+    for n in 0..3 {
+        let expected = initial.translation[n] + (on.translation[n] - initial.translation[n]) * 0.25;
+        assert!(
+            (resumed.translation[n] - expected).abs() < 1e-7,
+            "resumed axis {n}: expected {expected}, actual {}",
+            resumed.translation[n]
+        );
+    }
+    state.advance_fades(&r, 0.02);
+    let later = state
+        .control_poses()
+        .iter()
+        .find(|o| o.node == p.node)
+        .unwrap()
+        .local_pose;
+    for n in 0..3 {
+        let expected = resumed.translation[n] + (on.translation[n] - resumed.translation[n]) * 0.75;
+        assert!(
+            (later.translation[n] - expected).abs() < 1e-7,
+            "later axis {n}"
+        );
+    }
+    state.advance_fades(&r, 0.01);
+    let completed = state
+        .control_poses()
+        .iter()
+        .find(|o| o.node == p.node)
+        .unwrap()
+        .local_pose;
+    assert_eq!(completed.translation, on.translation);
+    assert_eq!(completed.rotation, on.rotation);
+    state.advance_fades(&r, 0.5);
+    let settled = state
+        .control_poses()
+        .iter()
+        .find(|o| o.node == p.node)
+        .unwrap()
+        .local_pose;
+    assert_eq!(settled.translation, on.translation);
+    assert_eq!(settled.rotation, on.rotation);
+}

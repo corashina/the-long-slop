@@ -555,6 +555,11 @@ pub struct NodeVisibilityOutput {
     pub node: crate::reference::NodeId,
     pub visible: bool,
 }
+#[derive(Clone, Copy)]
+enum SwitchMotion {
+    Initial,
+    Moving(f32),
+}
 pub struct LightingState {
     pub cycle: CycleState,
     requested_headlights: u8,
@@ -567,7 +572,7 @@ pub struct LightingState {
     pub(crate) poses: Vec<ControlPoseOutput>,
     visibility: Vec<NodeVisibilityOutput>,
     cabin_modes: Vec<usize>,
-    pose_progress: Vec<Option<f32>>,
+    pose_progress: Vec<Option<SwitchMotion>>,
 }
 impl LightingState {
     pub fn new(reference: &crate::reference::LightingRecord) -> Self {
@@ -738,7 +743,7 @@ impl LightingState {
             crate::reference::LightControllerKind::House => {
                 self.controllers[index].on = !self.controllers[index].on;
                 if self.pose_progress[index].is_none() {
-                    self.pose_progress[index] = Some(0.);
+                    self.pose_progress[index] = Some(SwitchMotion::Initial);
                 }
                 self.refresh_house(reference, index);
             }
@@ -864,8 +869,11 @@ impl LightingState {
         }
         for (index, control) in reference.controllers.iter().enumerate() {
             if control.kind == crate::reference::LightControllerKind::House {
-                let progress = self.pose_progress[index];
-                if let Some(progress) = progress {
+                if let Some(motion) = self.pose_progress[index] {
+                    let progress = match motion {
+                        SwitchMotion::Initial => 0.,
+                        SwitchMotion::Moving(progress) => progress + dt * 25.,
+                    };
                     if progress >= 1. {
                         let target =
                             usize::from(self.controllers[index].on ^ control.reverse_switch);
@@ -889,7 +897,7 @@ impl LightingState {
                         let b = rapier3d::math::Rotation::from_array(next.rotation);
                         out.local_pose.rotation = a.lerp(b, progress).normalize().to_array();
                     }
-                    self.pose_progress[index] = Some(progress + dt * 25.);
+                    self.pose_progress[index] = Some(SwitchMotion::Moving(progress));
                 }
                 continue;
             }
