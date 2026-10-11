@@ -13,6 +13,16 @@ from .types import Catalog, DATA_DIRECTORY, FileRecord, ObjectId, SCHEMA_VERSION
 SCRIPT = Path(__file__).resolve().parents[1] / 'decompile.ps1'
 
 
+def preflight_managed() -> None:
+    script = SCRIPT.with_name('preflight-managed.ps1')
+    try:
+        result = subprocess.run(['pwsh', '-NoProfile', '-File', str(script)], capture_output=True, text=True)
+    except OSError as error:
+        raise ValueError('Managed tools need host pwsh; see tools/reference/README.md') from error
+    if result.returncode:
+        raise ValueError(f'Managed tool preflight failed: {result.stderr.strip()}; see tools/reference/README.md')
+
+
 def index_managed(snapshot: Snapshot, output: Path) -> tuple[FileRecord, ...]:
     assemblies = tuple(item for item in snapshot.files if item.file.startswith(f'{DATA_DIRECTORY}/Managed/')
                        and item.file.lower().endswith('.dll'))

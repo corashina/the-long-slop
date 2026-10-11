@@ -35,6 +35,9 @@ def derive_reference(snapshot: Snapshot, library: LibraryReceipt, output: Path) 
     for protected in (snapshot.manifest_path.parent.resolve(), reader.root):
         if target.is_relative_to(protected) or protected.is_relative_to(target):
             raise ValueError('Runtime output overlaps accepted library storage')
+    from .library.storage import RUNTIME_BYTES, check_space, tree_bytes
+    check_space('runtime: selected scene staging', reader.records_root.parent,
+                RUNTIME_BYTES, retained=tree_bytes(output))
     output.parent.mkdir(parents=True, exist_ok=True)
     staged = Path(tempfile.mkdtemp(prefix='runtime-', dir=reader.records_root.parent / 'work'))
     _export_selected(LibrarySource(reader), staged, reader, snapshot)
@@ -220,9 +223,14 @@ def stage_catalog(steam_root: Path | None, verify: bool = False):
     source = Source(snapshot.root)
     catalog_path = work_root / 'catalog.json'
     records_root = work_root / 'records'
-    if verify:
+    if verify or (records_root / 'manifest.json').exists():
         catalog = verify_catalog(source, snapshot, catalog_path, records_root)
     else:
+        if records_root.exists():
+            raise ValueError('Unaccepted records tree; keep it for diagnosis')
+        from .library.storage import CATALOG_BYTES, check_space, tree_bytes
+        check_space('catalog: typed records and catalog staging', work_root,
+                    CATALOG_BYTES, retained=tree_bytes(work_root))
         pending = work_root / 'work' / 'catalog-records'
         if not pending.resolve().is_relative_to(work_root.resolve()):
             raise ValueError('Catalog work path escapes work root')
@@ -240,10 +248,14 @@ def stage_catalog(steam_root: Path | None, verify: bool = False):
         # Publish acceptance only after every required record and graph check passes.
         if not records_root.resolve().is_relative_to(work_root.resolve()):
             raise ValueError('Records path escapes work root')
-        if records_root.exists():
-            shutil.rmtree(records_root)
-        pending.replace(records_root)
-        temporary.replace(catalog_path)
+        from .library.validation import _publish_directory
+        _publish_directory(pending, records_root)
+        try:
+            temporary.replace(catalog_path)
+        except BaseException:
+            # No previous accepted record stage exists on this path.
+            records_root.replace(pending)
+            raise
     action = 'Verified' if verify else 'Indexed'
     edges = sum(len(value) for value in catalog.dependencies.values())
     print(f'{action} catalog: {len(catalog.objects):,} records, {edges:,} dependency edges', flush=True)
@@ -333,6 +345,11 @@ def stage_library(steam_root: Path | None, output: Path, verify: bool = False):
         check_installed_counts(load_catalog(SOURCE_WORK_ROOT / 'catalog.json'))
         print(f'Verified library: {len(receipt.exports):,} owners; {receipt.manifest_sha256}', flush=True)
         return receipt
+    from .library.managed import preflight_managed
+    from .library.storage import (library_space, assembly_bytes, check_space, tree_bytes, with_headroom)
+    if not (SOURCE_WORK_ROOT / 'category-stages.json').exists() and not (SOURCE_WORK_ROOT / 'records/managed/manifest.json').exists():
+        preflight_managed()
+    library_space(SOURCE_WORK_ROOT, library)
     if not (SOURCE_WORK_ROOT / 'source-manifest.json').exists():
         stage_source(steam_root)
     if not (SOURCE_WORK_ROOT / 'records/manifest.json').exists():
@@ -341,6 +358,8 @@ def stage_library(steam_root: Path | None, output: Path, verify: bool = False):
     catalog = load_catalog(SOURCE_WORK_ROOT / 'catalog.json')
     check_installed_counts(catalog)
     stages = _category_stages(snapshot, catalog)
+    check_space('library assembly: complete category receipts plus acceptance metadata', SOURCE_WORK_ROOT,
+                with_headroom(assembly_bytes(stages)), retained=tree_bytes(SOURCE_WORK_ROOT) + tree_bytes(library))
     pending = Path(tempfile.mkdtemp(prefix='library-', dir=SOURCE_WORK_ROOT / 'work'))
     exports = assemble_library(snapshot, stages, pending)
     print(f'Assembled library: {len(exports):,} owners', flush=True)
@@ -356,6 +375,11 @@ def main(argv=None):
     parser.add_argument('--stage', choices=('runtime', 'source', 'catalog', 'library'), default='runtime')
     parser.add_argument('--verify', action='store_true')
     arguments = parser.parse_args(argv)
+    if arguments.stage in ('library', 'runtime') and arguments.steam_root:
+        steam = arguments.steam_root.resolve()
+        destinations = (arguments.output.resolve(), (arguments.output.parent / 'library').resolve())
+        if any(path.is_relative_to(steam) or steam.is_relative_to(path) for path in destinations):
+            parser.error('Keep runtime and library output separate from the Steam installation')
     if arguments.stage == 'source':
         stage_source(arguments.steam_root, verify=arguments.verify)
     elif arguments.stage == 'catalog':
@@ -363,8 +387,6 @@ def main(argv=None):
     elif arguments.stage == 'library':
         stage_library(arguments.steam_root, arguments.output, verify=arguments.verify)
     else:
-        if arguments.steam_root and arguments.output.resolve().is_relative_to(arguments.steam_root.resolve()):
-            parser.error('Keep runtime output outside the Steam installation')
         library_path = arguments.output.parent / 'library/manifest.json'
         receipt = stage_library(arguments.steam_root, arguments.output,
                                 verify=arguments.verify or library_path.is_file())

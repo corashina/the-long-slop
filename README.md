@@ -7,7 +7,9 @@ Rust, Bevy, and Rapier run the browser game through WebAssembly.
 ## Export, build, and run
 
 Start Docker Desktop. Install Node.js and Python 3.12 or later.
-Keep Steam build 11140890 installed. Build the toolchain image, then export the complete library and selected runtime:
+Keep Steam build 11140890 installed.
+Prepare [host PowerShell and pinned ILSpy](tools/reference/README.md#host-managed-analysis-tools) before export.
+Build the toolchain image, then export the complete library and selected runtime:
 
 ```powershell
 python -m venv tools/reference/.venv

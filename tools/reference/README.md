@@ -1,6 +1,7 @@
 # Installed reference export
 
 Use Python 3.12. Run these commands from the repository root.
+Prepare the host tools below before export.
 
 ```powershell
 python -m venv tools/reference/.venv
@@ -10,6 +11,39 @@ tools/reference/.venv/Scripts/python.exe -m tools.reference.export --steam-root 
 tools/reference/.venv/Scripts/python.exe -m unittest discover -s tools/reference/tests
 ./scripts/check.ps1 -Test reference
 ```
+
+## Host managed-analysis tools
+
+Install host PowerShell (`pwsh`). The verified host uses PowerShell 7.6.5 and .NET 10.0.11.
+Python packages and the Docker image do not supply these host tools.
+Use ICSharpCode.Decompiler NuGet package **11.1.0.9782**.
+It needs System.Collections.Immutable and System.Reflection.Metadata version 9.0.0 or later.
+The verified PowerShell host supplies version 10.0.0.0 for both assemblies.
+
+Prepare an existing, trusted package archive:
+
+```powershell
+$packageArchive = Read-Host 'Path to ICSharpCode.Decompiler 11.1.0.9782 .nupkg'
+$expected = '1f76df4d35193ba4eeb50ffcd84eae381a2c48c67f95c1104dc406759448a811'
+if ((Get-FileHash -LiteralPath $packageArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Package hash mismatch' }
+New-Item -ItemType Directory -Force .cache/ilspy | Out-Null
+Copy-Item -LiteralPath $packageArchive -Destination .cache/ilspy/package.zip
+Expand-Archive -LiteralPath .cache/ilspy/package.zip -DestinationPath .cache/ilspy/package
+pwsh -NoProfile -File tools/reference/preflight-managed.ps1
+```
+
+Keep the package layout intact:
+
+```text
+.cache/ilspy/package/ICSharpCode.Decompiler.nuspec
+.cache/ilspy/package/lib/netstandard2.0/ICSharpCode.Decompiler.dll
+```
+
+The nuspec SHA-256 is `73342037762503908bbb041748678e709071f82ff8568770920f63dbfe42847a`.
+The DLL SHA-256 is `38e6abf7497845d79d9d01d56351a3203991356de1d3496b8c51142f495e9f9c`.
+You can also copy the complete `package` directory from a prepared checkout, then run the preflight command.
+The preflight loads tool assemblies and checks package, assembly, and dependency versions before missing library prerequisites run.
+It does not read game assemblies or write analysis output.
 
 Runtime derivation and `--stage runtime --verify` require Docker and the project toolchain image.
 Build the image with `docker build --tag my-summer-slop-toolchain --file tools/Dockerfile .`.
@@ -47,6 +81,16 @@ Library verification checks source hashes, typed records, dependencies, required
 Runtime verification also checks the native gameplay contract, selected file hashes, and exact scene dependencies.
 Runtime derivation reads accepted typed records, glTF buffers, and PNG files. It does not decode Unity meshes again.
 Prerequisite library verification still reads archived source data for semantic checks.
+
+Before writes, the exporter prints additional bytes, retained bytes, estimated peak bytes, and available disk bytes.
+The free-space check charges only additional bytes. Existing files already consume disk space.
+Fresh estimates cover build 11140890: 640 MiB source, 1 GiB records, 5 GiB categories, and 4 GiB assembly.
+Category estimates include decoded media, managed analysis, and temporary native inputs.
+Before assembly, complete category receipts include shared payloads, indexes, languages, and source text.
+The assembly estimate adds 25 percent and 64 MiB for acceptance metadata and allocation overhead.
+Runtime staging reserves 128 MiB. Existing output remains allocated until promotion succeeds.
+Estimates cover file bytes and headroom; other processes can change available space during export.
+Repeated catalog commands verify accepted records and keep managed analysis. Invalid stages fail without rebuilding accepted data.
 
 The accepted source archive contains 183 files and 529,237,089 bytes.
 Shared records and managed analysis contain 268,954 files and 698,121,145 bytes.

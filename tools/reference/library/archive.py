@@ -169,6 +169,8 @@ def snapshot_source(steam_root: Path, work_root: Path) -> Snapshot:
     _check_path(work_root, work_root.resolve())
     required = sum(record.bytes for record in before) + len(evidence) + 1024 * 1024
     available = shutil.disk_usage(work_root).free
+    print(f'Storage estimate [source archive staging]: additional={required} bytes; '
+          f'retained=0 bytes; peak={required} bytes; available={available} bytes', flush=True)
     if available < required:
         raise OSError(f'Insufficient archive space: need {required} bytes, have {available}')
     with tempfile.TemporaryDirectory(prefix='.source-', dir=work_root) as temporary:

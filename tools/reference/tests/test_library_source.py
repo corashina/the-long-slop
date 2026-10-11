@@ -126,7 +126,12 @@ class LibrarySourceTests(unittest.TestCase):
              patch('tools.reference.library.records.verify_catalog', side_effect=verify):
             stage_catalog(None)
             before = {path: (path.stat().st_mtime_ns, path.read_bytes()) for path in (self.work / 'catalog.json', self.work / 'records/manifest.json')}
+            managed = self.work / 'records/managed/analysis.json'
+            managed.parent.mkdir()
+            managed.write_bytes(b'accepted managed analysis')
+            before[managed] = (managed.stat().st_mtime_ns, managed.read_bytes())
             stage_source(self.root)
+            self.assertEqual(stage_catalog(None), complete)
             self.assertEqual(stage_catalog(None, verify=True), complete)
             stage_source(None, verify=True)
             after = {path: (path.stat().st_mtime_ns, path.read_bytes()) for path in before}
