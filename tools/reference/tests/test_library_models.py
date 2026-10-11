@@ -382,3 +382,27 @@ class ModelTests(unittest.TestCase):
             self.assertEqual({image.extras['role'] for image in doc.images}, {'base_color', 'normal', 'metallic_roughness', 'occlusion', 'emission'})
             repeated, _, _ = self.material_document(source, Path(second))
             self.assertEqual([e.files for e in exports], [e.files for e in repeated])
+
+
+class ValidatorWarningTests(unittest.TestCase):
+    def test_only_known_validator_notice_is_filtered(self):
+        import warnings
+        import pygltflib.validator as validator
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'scene.gltf'
+            path.write_text(json.dumps({'asset': {'version': '2.0'}}))
+            with warnings.catch_warnings(record=True) as observed:
+                warnings.simplefilter('always')
+                validate_gltf(path)
+            self.assertEqual(observed, [])
+            original = validator.validate_accessors
+            def warn(document):
+                warnings.warn('unrelated validator warning', UserWarning)
+                return original(document)
+            with patch.object(validator, 'validate_accessors', warn), warnings.catch_warnings(record=True) as observed:
+                warnings.simplefilter('always')
+                validate_gltf(path)
+            self.assertEqual([str(item.message) for item in observed], ['unrelated validator warning'])
+            with patch.object(validator, 'validate_accessors', side_effect=ValueError('invalid accessor')):
+                with self.assertRaisesRegex(ValueError, 'invalid accessor'):
+                    validate_gltf(path)

@@ -20,8 +20,16 @@ Preparation includes doors, fluid caps, filling, spilling, ignition, and wheel a
 It retains the road, stations, chase camera, pause, recovery, and restart.
 Recovery preserves state. Restart restores the garage.
 
-Survival, weapons, other vehicles, multiplayer, saves, audio, and deployment remain outside this stage.
+Survival, weapons, other vehicles, multiplayer, saves, game audio, animation playback, and deployment remain outside this stage.
 The build does not claim identical Unity physics or full-game parity.
+
+## Development assets
+
+The complete local library covers installed build 11140890.
+It preserves source files and typed records, and supplies converted media and model files for development.
+The game uses the selected garage, fixed Lada, and preparation items.
+Library availability does not expand gameplay scope.
+Engine-dependent records require separate browser adapters before use.
 
 ## Evidence
 

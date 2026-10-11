@@ -161,7 +161,9 @@ class RecordsTests(unittest.TestCase):
         self.assertEqual(native.m_Type, 'pair')
         from UnityPy.helpers import TypeTreeHelper
         from UnityPy.streams import EndianBinaryReader
-        TypeTreeHelper.read_typetree_boost = None
+        boost = patch.object(TypeTreeHelper, 'read_typetree_boost', None)
+        boost.start()
+        self.addCleanup(boost.stop)
         decoded = TypeTreeHelper.read_typetree(custom, EndianBinaryReader(struct.pack('<Iii', 2, 7, 8), endian='<'), byte_size=12)
         self.assertEqual(decoded, {'m': [7, 8]})
         decoded = TypeTreeHelper.read_typetree(native, EndianBinaryReader(struct.pack('<ii', 7, 8), endian='<'), byte_size=8)

@@ -346,7 +346,12 @@ def validate_gltf(path):
     import pygltflib as gl
     from pygltflib.validator import validate
     document = gl.GLTF2().load_json(str(path))
-    validate(document)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore',
+            message=r'^pygltf\.utils\.validator is a provisional function and may not exist in future versions\.$',
+            category=UserWarning, module=r'^pygltflib\.validator$')
+        validate(document)
     raw_document = json.loads(path.read_text())
     def index(value, collection, label):
         if not isinstance(value, int) or not 0 <= value < len(collection):

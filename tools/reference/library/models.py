@@ -263,7 +263,7 @@ def _normal_rgb(image):
     result = Image.new('RGB', image.size)
     result.putdata([(round(r*a/255), g,
                      round((sqrt(max(0., 1.-(2*r*a/65025-1)**2-(2*g/255-1)**2))+1)*127.5))
-                    for r,g,_,a in image.convert('RGBA').getdata()])
+                    for r,g,_,a in image.convert('RGBA').get_flattened_data()])
     return result
 
 

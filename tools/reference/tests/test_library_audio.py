@@ -79,6 +79,25 @@ class AudioTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         validate_wav(path, {**clip, field: value})
 
+    def test_long_clip_allows_only_binary32_duration_rounding(self):
+        # Sparse samples keep this boundary fixture small in memory.
+        frames, frequency = 2 ** 25 + 4, 48000
+        path = self.root / 'long.wav'
+        header = bytearray(wav(bits=8, frequency=frequency, frames=0))
+        struct.pack_into('<I', header, 4, frames + 36)
+        struct.pack_into('<I', header, 40, frames)
+        with path.open('wb') as stream:
+            stream.write(header)
+            stream.seek(frames + 43)
+            stream.write(b'\0')
+        clip = {**self.clip, 'm_BitsPerSample': 8, 'm_Frequency': frequency,
+                'm_Length': struct.unpack('<f', struct.pack('<f', frames / frequency))[0]}
+        result = validate_wav(path, clip)
+        self.assertGreater(abs(result['duration_delta_frames']), 1)
+        self.assertGreater(result['duration_tolerance_frames'], 1)
+        with self.assertRaisesRegex(ValueError, 'WAV duration mismatch'):
+            validate_wav(path, {**clip, 'm_Length': (frames + 5) / frequency})
+
     def test_empty_samples_and_stream_range_fail(self):
         identity = ObjectId('a.assets', 1)
         with self.assertRaisesRegex(ValueError, 'No decoded samples'):

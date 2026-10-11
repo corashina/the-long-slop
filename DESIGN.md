@@ -234,3 +234,17 @@ Allow long error text to wrap within the panel.
 
 - **Don't** substitute procedural assets when the required export is missing.
 - **Don't** add interface features outside the approved product scope.
+
+
+## Reference library availability
+
+The local library includes embedded Liberation Sans Regular at `sharedassets0.assets:769`.
+Its 350,200 bytes retain SHA-256 `e5b0af421ea2bfbc1ac8d251d647268087ae82786234c57f757d1f0b90fa8b49`.
+Chrome loaded this font in the isolated fixture.
+The current shell retains the typography specified above. Pending source UI work uses the recovered font.
+The TMP asset's null font pointer does not mean that the installed build lacks font bytes.
+
+The library preserves sprite borders, pivots, atlas links, UI layouts, and native material properties.
+These records support later adapters. They do not establish current Unity UI or shader parity.
+Six-face cubemap previews use clipped 8-bit PNGs. Native DDS faces retain BC6H HDR data and mip levels.
+Read [the asset audit](docs/research/2026-10-10-full-asset-audit.md) for measured coverage and support limits.

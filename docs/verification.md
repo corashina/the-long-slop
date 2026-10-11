@@ -1,4 +1,115 @@
-# Garage verification
+# Asset library verification
+
+Target: Steam app `1017180`, build `11140890`, Unity `2021.3.18f1`.
+Date: 2026-10-11, Europe/Warsaw. Runtime implementation base: `63dff0a`.
+The [asset audit](research/2026-10-10-full-asset-audit.md) contains complete counts, hashes, indexes, and conversion limits.
+
+## Final command checks
+
+Use the reference Python environment and run commands from the repository root.
+Runtime checks require Docker, `my-summer-slop-toolchain`, `tld-wasm-cargo`, and `tld-wasm-target`.
+
+```powershell
+python -m tools.reference.export --stage runtime --verify
+python -m unittest discover -s tools/reference/tests -v
+node --test tests/web/server.test.mjs
+./scripts/check.ps1
+./scripts/build.ps1
+docker run --rm --pull=never --mount "type=bind,source=$PWD,target=/workspace,readonly" --mount type=volume,source=tld-wasm-cargo,target=/cargo --mount type=volume,source=tld-wasm-target,target=/target my-summer-slop-toolchain cargo test --locked --test reference -- --ignored
+```
+
+The runtime verification command calls complete `verify_library`, checks installed counts, then runs the native runtime contract validator.
+Use `python -m tools.reference.export --stage library --verify` for library-only verification without Docker.
+The final proof records unchanged accepted source, record, library, and runtime paths, sizes, and modification times.
+It compares all selected runtime hashes with Task 9 and checks the unchanged accepted library manifest hash.
+The complete verifier validates accepted file content against source, typed-record, and library receipts.
+
+| Check | Result |
+| --- | --- |
+| Complete library and native runtime verification | Passed; 262,784 owners; 642.802 seconds |
+| Accepted-file protection | 277,800 paths, lengths, and modification times unchanged |
+| Exporter suite | 109 passed; no warning output |
+| Node server suite | One passed |
+| Project checks | Formatting, 94 native tests, and release WASM compilation passed; six source gates skipped by default |
+| Browser package build | Passed |
+| Installed reference gate | One passed |
+
+Command exits were zero. Logs use `task-10-final-*.log` under `.cache/reference-library/work/`.
+`task-10-final-checks.json` records commands and durations; `task-10-final-proof.json` records hashes, counts, and protection.
+`task-10-validator-revision.json` records the exporter source hashes used by the final verifier.
+
+## Isolated browser fixtures
+
+Temporary source, build output, and pages live under ignored `.cache/reference-library/browser-check/`.
+A separate server uses loopback port 4201 and an explicit asset allowlist.
+The fixture checks library file hashes before serving the selected files.
+It leaves `web/index.html`, the production entry, and accepted asset bytes unchanged.
+The fixture uses Bevy 0.19.1 and the exact product Bevy feature list, including glTF, PNG, and WebGL2.
+It does not enable animation playback.
+
+The capture uses Playwright 1.62.1 and isolated headless Chrome 155.0.8059.40 with `chromiumSandbox: true`.
+It uses no user profile or security-bypass flags. Each capture has a 55-second external deadline.
+Captures retain all console levels, request outcomes, completed response-body lengths, and screenshots.
+
+Bevy loaded the static `pohar` hierarchy (`sharedassets1.assets:21505`): three nodes, one mesh, and one scene.
+It loaded skinned `RandomBat` (`sharedassets1.assets:32394`): 25 nodes, one mesh, one skin, and one scene.
+Both passed `AssetServer::is_loaded_with_dependencies` and exposed their loaded glTF assets.
+The loader capture completed all 21 HTTP 200 response bodies with no fatal loader or page error.
+Bevy logged expected WebGL compute and storage capability limits.
+A separate render capture displayed the static cup with the production camera's Reinhard tonemapping and Msaa::Off.
+That capture completed all 21 HTTP 200 bodies without console errors or page errors.
+I inspected the screenshot. This establishes representative static rendering, not Unity material parity.
+Skinned loading passed; skinned rendering and animation playback remain unverified.
+
+The media capture completed 13 response bodies with HTTP 200 and no console or page errors.
+Chrome loaded embedded Liberation Sans and used it for the font sample.
+The WAV `sharedassets1.assets:4164` decoded to 1,868 mono frames at 8 kHz and reached its muted playback end.
+Its duration was 0.2335 seconds. Audible output and game audio integration remain unverified.
+Six labeled 128 by 128 cubemap PNG faces decoded and appeared in the screenshot.
+Those previews clip to 8-bit color. Native BC6H DDS/HDR rendering remains unverified.
+
+The rotated sprite uses six known pixels through UnityPy's sprite rotation and flip operations.
+Chrome's canvas pixels match the expected 2 by 3 image.
+This fixture is synthetic because the installed index has zero sprites with nonzero packing rotation.
+The installed source also contains zero morph channels.
+Synthetic morph tests cover deltas and glTF channels; complete source checks validate all 42 clips and their normalized samples.
+These checks do not establish animation playback or humanoid retargeting.
+
+Evidence lives under `.cache/reference-library/work/`:
+`task-10-media.json/png`, `task-10-loader.json/png`, and `task-10-render.json/png`.
+The fixture source and allowlist remain in `browser-check/` for local reproduction.
+
+## Garage startup limit
+
+Task 9 captured 92 startup requests with HTTP 200, including the exact 86 selected asset URLs.
+It found no library, catalog, unused-model, or audio preload.
+The bounded readiness check remained at the loading screen; Start stayed disabled.
+A corrected prior-payload comparison also remained loading, with all 94 response bodies completed.
+It retained the current validated manifest, so obsolete schema differences did not affect that comparison.
+
+Chrome used WebGL2 through ANGLE/D3D11 on NVIDIA GeForce RTX 4070 Ti.
+A 40.256-second CPU profile attributed 38.832 seconds, about 96.5%, to synchronous WebGL program-link status checks.
+The caller chain runs through wgpu's GLES pipeline creation and Bevy's pipeline cache.
+No fatal loader or page error occurred. The evidence does not justify an exporter correction.
+This task retains those measured results and does not repeat the long stalled capture.
+Garage readiness remains unverified on this path.
+The user's continuous garage-to-road browser route waiver remains in effect.
+
+Evidence: `task-9-startup-network.json`, `task-9-prior-payloads.json`, `task-9-startup.cpuprofile`, and `task-9-profile-summary.json`.
+These files live under `.cache/reference-library/work/`.
+
+## Deferred verification fixes
+
+The typed-schema cache fix from Task 8 remains covered by the complete suite.
+The type-tree test now restores its prior boost state through test cleanup.
+A long WAV fixture covers binary32 duration error above one frame and rejects error outside that bound.
+The glTF helper filters only pygltflib's exact provisional-validator notice. Unrelated warnings and validation exceptions remain visible.
+The normal-map helper uses Pillow's supported `get_flattened_data` API.
+The runtime audio exclusion test now passes the scene gate before adding a WAV dependency.
+
+The historical garage evidence below predates the complete library and does not establish current browser readiness.
+
+# Earlier garage verification
 
 Reference: installed Steam build 11140890. Vehicle: fixed Lada 2101.
 Verification date: 2026-10-10, Europe/Warsaw.

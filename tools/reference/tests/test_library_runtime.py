@@ -17,7 +17,12 @@ class RuntimeTests(unittest.TestCase):
     def test_only_selected_assets_in_runtime(self):
         from tools.reference.export import validate_runtime_paths
         with self.assertRaises(ValueError): validate_runtime_paths({'assets':[{'path':'library/models/unused.gltf','dependencies':[]}]})
-        with self.assertRaises(ValueError): validate_runtime_paths({'assets':[{'path':'reference/home.gltf','dependencies':[{'file':'reference/unused.wav'}]}]})
+        manifest = {'assets': [{'path': f'reference/{name}.gltf', 'dependencies': []}
+                               for name in ('home', 'lada', 'items')]}
+        validate_runtime_paths(manifest)
+        manifest['assets'][0]['dependencies'].append({'file': 'reference/unused.wav'})
+        with self.assertRaisesRegex(ValueError, 'Invalid selected runtime dependency'):
+            validate_runtime_paths(manifest)
 
     def test_failed_runtime_promotion_restores_previous_directory(self):
         with tempfile.TemporaryDirectory() as tmp:

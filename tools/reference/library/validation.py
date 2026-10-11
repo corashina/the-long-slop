@@ -368,11 +368,7 @@ def _gltf_references(output, files):
             if 'byteLength' in resource and files[key].bytes != resource['byteLength']:
                 raise ValueError(f'glTF buffer size mismatch: {uri}')
         from ..gltf import validate_gltf
-        import warnings
-        with warnings.catch_warnings():
-            warnings.filterwarnings('ignore', message='pygltf.utils.validator is a provisional function.*',
-                                    category=UserWarning, module=r'pygltflib\.validator')
-            validate_gltf(path)
+        validate_gltf(path)
 
 
 def validate_library(snapshot: Snapshot, catalog: Catalog, exports: tuple[AssetExport, ...], output: Path) -> dict:
