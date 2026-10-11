@@ -31,7 +31,7 @@ The build does not claim identical Unity physics or full-game parity.
 
 ## Evidence
 
-The approved design and plan are in `docs/superpowers`.
+The approved designs and open plans are in `docs/superpowers`.
 The installed build uses Unity 2021.3.18f1 and Mono.
 The exporter records input hashes, source IDs, geometry, and recovered parameters.
 Generated original assets remain outside version control.
