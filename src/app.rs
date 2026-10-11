@@ -423,7 +423,12 @@ fn update_hud(reference: Res<RuntimeReference>, drive: Res<Drive>) {
         runtime.paused,
         runtime.started,
     );
-    let target = runtime.aim.focus_target;
+    let target = runtime
+        .aim
+        .use_target
+        .or(runtime.aim.grab_target)
+        .or(runtime.aim.push_target)
+        .or(runtime.aim.focus_target);
     let held = runtime
         .area
         .interaction
@@ -498,13 +503,30 @@ fn display_name<'a>(
     let Some(item) = reference.items.iter().find(|item| item.id == id) else {
         return items.name(id).unwrap_or("");
     };
+    let label = match item.name.as_str() {
+        "TireDisztarcsa" => Some("Hubcap"),
+        "SideMirror" => Some("Side mirror"),
+        "FrontMirror" => Some("Rearview mirror"),
+        "Kesztyutarto" => Some("Glovebox"),
+        "napellenzo" => Some("Sun visor"),
+        _ => None,
+    };
+    if let Some(label) = label {
+        return label;
+    }
+    if let Some(mechanism) = reference.mechanisms.iter().find(|m| m.item == id)
+        && mechanism.turn.is_none()
+        && let Some(parent) = mechanism.parent_item
+    {
+        return display_name(reference, items, parent);
+    }
     match item.kind {
         ItemKind::Decoration => reference
             .mechanisms
             .iter()
             .find(|m| m.item == id)
             .and_then(|m| m.turn.as_ref())
-            .map_or("", |turn| match turn.action {
+            .map_or(item.name.as_str(), |turn| match turn.action {
                 crate::reference::TurnAction::ToggleHandbrake => "Handbrake",
                 crate::reference::TurnAction::CycleHeadlights => "Headlights",
                 crate::reference::TurnAction::InteriorLight => "Cabin light",

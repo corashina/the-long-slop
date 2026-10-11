@@ -409,7 +409,7 @@ impl InteractionState {
             if aim.filling_target.is_some() {
                 return "Hold LMB: fill · F: drop";
             }
-            return "F: drop · Mouse wheel: distance · RMB + mouse: rotate";
+            return "F: drop / hold to throw · MMB: rotate · RMB: move · Tab: recenter";
         }
         if let Some(target) = aim.grab_target {
             if items
@@ -434,7 +434,7 @@ impl InteractionState {
             return "Hold F: push";
         }
         if aim.installation_target.is_some() {
-            return "Carry a wheel. Aim here and press F.";
+            return "Carry a part. Aim here and press F.";
         }
         if aim.grab_block.is_some() {
             return "Cannot carry this item.";

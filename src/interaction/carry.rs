@@ -348,14 +348,15 @@ impl CarryState {
         let outside_player = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
             collider.parent() != Some(player.body_handle())
         };
-        let queries = physics.queries(
-            QueryFilter::default()
-                .exclude_sensors()
-                .exclude_rigid_body(held.body)
-                .predicate(&outside_player),
-        );
         for collider_handle in physics.rapier().bodies[held.body].colliders() {
             let collider = &physics.rapier().colliders[*collider_handle];
+            let queries = physics.queries(
+                QueryFilter::default()
+                    .exclude_sensors()
+                    .exclude_rigid_body(held.body)
+                    .groups(collider.collision_groups())
+                    .predicate(&outside_player),
+            );
             let local = collider
                 .position_wrt_parent()
                 .copied()
@@ -367,6 +368,7 @@ impl CarryState {
                 collider.shape(),
                 ShapeCastOptions {
                     max_time_of_impact: 1.0,
+                    stop_at_penetration: false,
                     ..Default::default()
                 },
             ) {

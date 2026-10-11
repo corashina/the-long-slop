@@ -1948,3 +1948,62 @@ fn restart_cancels_established_throw_charge_without_delayed_release() {
         );
     }
 }
+
+#[test]
+#[ignore = "Requires exported Steam assets"]
+fn production_fuel_can_lifts_and_follows_after_recenter() {
+    use my_summer_slop::reference::ItemId;
+    let reference = my_summer_slop::reference::ReferenceManifest::from_json(
+        &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+    )
+    .unwrap();
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    runtime.started = true;
+    for _ in 0..180 {
+        runtime.step(&reference, FrameInput::default());
+    }
+    let item = ItemId(116);
+    let cap = reference
+        .openings
+        .iter()
+        .find(|o| o.tank == item)
+        .unwrap()
+        .cap;
+    aim_at(&mut runtime, &reference, cap);
+    let body = runtime.area.items.get(item).unwrap().body.unwrap();
+    let before = *runtime.physics.rapier().bodies[body].position();
+    runtime.step(
+        &reference,
+        FrameInput {
+            held: keys::GRAB,
+            pressed: keys::GRAB,
+            ..Default::default()
+        },
+    );
+    runtime.step(&reference, FrameInput::default());
+    for _ in 0..120 {
+        runtime.step(
+            &reference,
+            FrameInput {
+                held: keys::RECENTER,
+                ..Default::default()
+            },
+        );
+    }
+    let lifted = *runtime.physics.rapier().bodies[body].position();
+    assert_eq!(runtime.area.interaction.held(), Some(item));
+    assert!(
+        (lifted.translation - before.translation).length() > 0.2,
+        "source can did not move after recenter"
+    );
+    for _ in 0..60 {
+        runtime.step(
+            &reference,
+            FrameInput {
+                held: keys::BACK,
+                ..Default::default()
+            },
+        );
+    }
+    assert_eq!(runtime.area.interaction.held(), Some(item));
+}

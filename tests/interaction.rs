@@ -2805,3 +2805,44 @@ fn grip_jump_retains_joint_and_dynamic_body() {
     );
     assert!(interaction.push_gripping());
 }
+
+#[test]
+fn carry_lifts_a_grounded_item_out_of_contact() {
+    let (mut interaction, mut items, mut physics, mut player) = fixture();
+    let body = items.get(ItemId(1)).unwrap().body.unwrap();
+    // A small resting penetration matches a settled dynamic body.
+    physics.rapier_mut().insert(
+        RigidBodyBuilder::fixed().translation(Vector::new(10.0, 1.71, -1.0)),
+        ColliderBuilder::cuboid(2.0, 0.1, 2.0),
+    );
+    physics.refresh_queries();
+    interaction.step(
+        input(keys::GRAB, keys::GRAB),
+        common::resolved(target(1)),
+        &mut player,
+        &mut items,
+        &mut physics,
+        1.0 / 60.0,
+    );
+    for _ in 0..60 {
+        interaction.step(
+            FrameInput {
+                held: keys::TRANSLATE,
+                mouse: [0.0, -10.0],
+                ..Default::default()
+            },
+            common::resolved(None),
+            &mut player,
+            &mut items,
+            &mut physics,
+            1.0 / 60.0,
+        );
+        physics.step_physics();
+    }
+    assert_eq!(interaction.held(), Some(ItemId(1)));
+    assert!(
+        physics.rapier().bodies[body].translation().y > 2.2,
+        "held item must separate from floor contact: {:?}",
+        physics.rapier().bodies[body].translation()
+    );
+}

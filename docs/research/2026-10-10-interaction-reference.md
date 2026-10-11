@@ -1,7 +1,7 @@
 # Interaction comparison
 
 Date: 2026-10-10, Europe/Warsaw.
-Stage: Research for the requested interaction update. Product code has not changed.
+Stage: Initial comparison, followed by the implementation record below.
 Reference: installed The Long Drive Steam build 11140890.
 Base commit: d4cdefc.
 
@@ -75,3 +75,23 @@ This comparison uses recovered code and exported assets. It does not establish i
 No product tests or browser checks ran during this research stage.
 The worktree is `C:/Users/Corashina/.codex/worktrees/interaction-parity/the-long-drive-wasm`.
 Recovered C# and assets remain ignored in the primary checkout.
+
+## Implementation record
+
+The interaction update now resolves use, grab, fill, attachment, and push owners from recovered source bindings.
+Can-cap pickup selects the container. Wheel removal first selects an installed cover, then acquires the uncovered wheel.
+Carry supports distance, rotation, translation, roll, recenter, and charged throw.
+Mechanisms retain recovered drag signs, limits, animation tracks, and source parent ownership.
+Vehicle switches use recovered callbacks for headlights, handbrake, and the three-state cabin lamp.
+General parts preserve nested ownership, fluid membership, condition, and mass through removal and installation.
+Selected Lada seats lack source pickup links. Plate slots start empty. The implementation adds no invented removable seats or plates.
+
+Source steering grip latches until another F press, excess distance, owner invalidation, or lifecycle cancellation.
+Ordinary body push stops on F release. Grip does not stop when aim changes or ground contact ends.
+Source evidence: recovered fpscontroller.cs lines 3356-3388 and the selected steering-grip component.
+Pause, capture loss, recovery, and restart clear sampled input before the next simulation step.
+Origin changes update world anchors while preserving local part state.
+
+Read [verification](../verification.md) for checks and browser limits.
+Read [interaction decisions](../interaction-decisions.md) for the full ledger rulings and rework costs.
+The initial gap table records the pre-change code. Its line numbers are historical.
