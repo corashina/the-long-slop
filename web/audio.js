@@ -1,7 +1,8 @@
 // Web Audio player for the source sound frame. Rust decides every voice and one-shot.
 // Frame: listener position and rotation, outside gain, car gain, voice count, one-shot count,
-// then ten floats per sound: clip, volume, pitch, x, y, z, min distance, max distance, spatial, bus.
-export const HEADER=11,SOUND=10,MAX_ONE_SHOTS=32;
+// then eleven floats per sound: clip, volume, pitch, x, y, z, min distance, max distance, spatial, bus, play.
+// Play is zero for a loop. A new play number starts the clip once from its start.
+export const HEADER=11,SOUND=11,MAX_ONE_SHOTS=32;
 // Long ambient loops stream from media elements so the page does not hold their decoded samples.
 const STREAM_SECONDS=30;
 
@@ -29,12 +30,12 @@ export function createAudio(audio){
  function place(panner,f,o){if(panner){panner.positionX.value=f[o+3];panner.positionY.value=f[o+4];panner.positionZ.value=f[o+5];}}
  const voices=[];
  function voice(index,f,o){
-  const clip=f[o],volume=f[o+1],key=clip+':'+f[o+8]+':'+f[o+9];let v=voices[index];
+  const clip=f[o],volume=f[o+1],play=f[o+10],key=clip+':'+f[o+8]+':'+f[o+9]+':'+play;let v=voices[index];
   if(v&&(v.key!==key||volume<=0)){stop(v);voices[index]=v=null;}
   if(!v&&volume>0&&clip>=0){
    const nodes=route(f[o+8],f[o+6],f[o+7],f[o+9]);v={key,...nodes,source:null,element:null};
    if(streams[clip]){v.element=streams[clip];v.media=media[clip];v.media.connect(v.gain);v.element.play().catch(()=>{});}
-   else if(buffers[clip]){const s=context.createBufferSource();s.buffer=buffers[clip];s.loop=true;s.connect(v.gain);s.start(0,Math.random()*s.buffer.duration);v.source=s;}
+   else if(buffers[clip]){const s=context.createBufferSource();s.buffer=buffers[clip];s.loop=play===0;s.connect(v.gain);s.start(0,s.loop?Math.random()*s.buffer.duration:0);v.source=s;}
    else return;
    voices[index]=v;
   }

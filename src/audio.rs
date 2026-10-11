@@ -11,14 +11,17 @@ use crate::vehicle::{
 use rapier3d::math::Vector;
 use rapier3d::prelude::{QueryFilter, Ray};
 
-/// Floats per sound: clip, volume, pitch, position, distances, spatial blend, bus.
-pub const SOUND_FLOATS: usize = 10;
+/// Floats per sound: clip, volume, pitch, position, distances, spatial blend, bus, play.
+/// Play is zero for a loop. Otherwise it numbers one playback of the clip.
+pub const SOUND_FLOATS: usize = 11;
 /// Listener position and rotation, two bus gains, voice count, one-shot count.
 pub const HEADER_FLOATS: usize = 11;
 /// `mainscript.maxAudioCount`.
 pub const MAX_ONE_SHOTS: usize = 32;
 const WHEEL_SAMPLES: usize = 5;
 const SEED: u64 = 0x5eed_a0d1_0000_0001;
+/// FMOD speed of sound in meters per second.
+const SOUND_SPEED: f32 = 340.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Bus {
@@ -30,7 +33,7 @@ pub enum Bus {
     Car = 2,
 }
 
-/// Looping voice slots in frame order.
+/// Fixed voice slots in frame order. Hinge squeaks and pour sounds follow them.
 pub mod slot {
     pub const IDLE: usize = 0;
     pub const MOTOR: usize = 1;
@@ -43,7 +46,8 @@ pub mod slot {
     pub const WIND: usize = 17;
     pub const DAY: usize = 18;
     pub const NIGHT: usize = 21;
-    pub const COUNT: usize = 24;
+    pub const HORN: usize = 24;
+    pub const COUNT: usize = 25;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -56,11 +60,31 @@ pub struct Sound {
     pub max_distance: f32,
     pub spatial: f32,
     pub bus: u8,
+    pub play: u32,
+    /// Unity `dopplerLevel` times the spatial blend.
+    pub doppler: f32,
+}
+
+/// `usablescript.SSource` while it plays `SMove` once.
+#[derive(Clone, Copy, Debug)]
+struct Squeak {
+    volume: f32,
+    pitch: f32,
+    elapsed: f32,
+    play: u32,
 }
 
 pub struct AudioState {
     samples: u64,
-    voices: [Sound; slot::COUNT],
+    voices: Vec<Sound>,
+    /// Pitch factor from relative motion, one per voice.
+    shifts: Vec<f32>,
+    positions: Vec<[f32; 3]>,
+    listener: [f32; 3],
+    plays: u32,
+    squeaks: Vec<Squeak>,
+    horn: f32,
+    horn_hit: Option<(f32, f32)>,
     one_shots: Vec<Sound>,
     frame: Vec<f32>,
     outside: f32,
@@ -91,11 +115,27 @@ pub struct AudioState {
 impl AudioState {
     pub fn new(reference: &ReferenceManifest, runtime: &GarageRuntime) -> Self {
         let audio = &reference.audio;
+        let count = slot::COUNT + audio.hinges.len() + audio.openings.len();
         Self {
             samples: 0,
-            voices: [Sound::default(); slot::COUNT],
+            voices: vec![Sound::default(); count],
+            shifts: vec![1.0; count],
+            positions: vec![[0.0; 3]; count],
+            listener: runtime.area.player.view_pose(&runtime.physics).position,
+            plays: 0,
+            squeaks: vec![
+                Squeak {
+                    volume: 0.0,
+                    pitch: 1.0,
+                    elapsed: f32::MAX,
+                    play: 0,
+                };
+                audio.hinges.len()
+            ],
+            horn: 0.0,
+            horn_hit: None,
             one_shots: Vec::with_capacity(MAX_ONE_SHOTS),
-            frame: Vec::with_capacity(HEADER_FLOATS + (slot::COUNT + MAX_ONE_SHOTS) * SOUND_FLOATS),
+            frame: Vec::with_capacity(HEADER_FLOATS + (count + MAX_ONE_SHOTS) * SOUND_FLOATS),
             outside: 1.0,
             doors: 1.0,
             car_bus: Bus::Outside,
@@ -145,15 +185,18 @@ impl AudioState {
         // A world rebase moves the player by hundreds of meters in one step.
         self.player_speed = if moved < 10.0 { moved / dt } else { 0.0 };
         self.player = position;
+        let shots = self.one_shots.len();
         self.buses(reference, runtime, listener, dt);
         self.engine(reference, runtime, dt);
         self.car(reference, runtime, dt);
+        self.horn(reference, runtime, dt);
         self.impacts(reference, runtime);
         self.steps(reference, runtime, dt);
         self.objects(reference, runtime, dt);
         self.ambient_fade = (self.ambient_fade + dt * audio.ambient.fade_rate).clamp(0.0, 1.0);
         self.wind(reference, runtime, listener, chase, dt);
         self.ambient(reference, runtime, listener);
+        self.doppler(listener, shots, dt);
     }
 
     /// Writes the frame for the browser and clears the one-shots.
@@ -166,14 +209,15 @@ impl AudioState {
         self.frame.extend_from_slice(&[
             outside,
             car,
-            slot::COUNT as f32,
+            self.voices.len() as f32,
             self.one_shots.len() as f32,
         ]);
-        for sound in self.voices.iter().chain(&self.one_shots) {
+        let shifts = self.shifts.iter().copied().chain(std::iter::repeat(1.0));
+        for (sound, shift) in self.voices.iter().chain(&self.one_shots).zip(shifts) {
             self.frame.extend_from_slice(&[
                 sound.clip.map_or(-1.0, |clip| clip.0 as f32),
                 sound.volume,
-                sound.pitch,
+                sound.pitch * shift,
                 sound.position[0],
                 sound.position[1],
                 sound.position[2],
@@ -181,6 +225,7 @@ impl AudioState {
                 sound.max_distance,
                 sound.spatial,
                 sound.bus as f32,
+                sound.play as f32,
             ]);
         }
         self.one_shots.clear();
@@ -240,6 +285,8 @@ impl AudioState {
             max_distance: audio.one_shot.max_distance * scale,
             spatial: audio.one_shot.spatial,
             bus: bus as u8,
+            play: 0,
+            doppler: audio.one_shot.doppler * audio.one_shot.spatial,
         });
     }
 
@@ -474,6 +521,8 @@ impl AudioState {
                 max_distance: source.max_distance,
                 spatial: source.spatial,
                 bus: bus as u8,
+                play: 0,
+                doppler: source.doppler * source.spatial,
             });
         }
         self.handbrake = runtime.handbrake;
@@ -706,7 +755,63 @@ impl AudioState {
         self.play(audio, walk.clips[index], feet, volume, pitch, Bus::Main);
     }
 
-    /// `usablescript.RotSound` limit clips and `tankcapscript.USE`.
+    /// `carscript` horn input, `HornHit`, and the horn source.
+    fn horn(&mut self, reference: &ReferenceManifest, runtime: &GarageRuntime, dt: f32) {
+        let horn = &reference.audio.car.horn;
+        let target = if runtime.horn { 1.0 } else { 0.0 };
+        let step = dt * 10.0;
+        self.horn += (target - self.horn).clamp(-step, step);
+        if runtime.area.player.driving()
+            && runtime.crash_kmh * horn.crash_multiplier > self.range(horn.crash_speed)
+            && self.sample() < horn.crash_chance
+        {
+            self.horn_hit = Some((0.0, self.range(horn.crash_seconds)));
+        }
+        if let Some((elapsed, seconds)) = &mut self.horn_hit {
+            if *elapsed < *seconds {
+                self.horn = 1.0 - *elapsed / *seconds;
+            }
+            *elapsed += dt;
+        }
+        // The pitch follows the day temperature, which tracks the night weight.
+        let night = crate::simulation::day::night_weight(&reference.day_cycle, runtime.day_seconds);
+        let pitch = mix(horn.pitch[0], horn.pitch[1], 1.0 - night);
+        let position = voice_point(runtime, &horn.voice);
+        self.voices[slot::HORN] = voice(&horn.voice, position, self.horn, pitch, self.car_bus);
+    }
+
+    /// Doppler shift from the motion of each source and the listener.
+    fn doppler(&mut self, listener: [f32; 3], shots: usize, dt: f32) {
+        let listener_velocity = velocity(self.listener, listener, dt);
+        self.listener = listener;
+        for ((sound, last), shift) in self
+            .voices
+            .iter()
+            .zip(&mut self.positions)
+            .zip(&mut self.shifts)
+        {
+            let motion = velocity(*last, sound.position, dt);
+            *last = sound.position;
+            *shift = doppler_shift(
+                listener,
+                listener_velocity,
+                sound.position,
+                motion,
+                sound.doppler,
+            );
+        }
+        for sound in &mut self.one_shots[shots..] {
+            sound.pitch *= doppler_shift(
+                listener,
+                listener_velocity,
+                sound.position,
+                Vector::ZERO,
+                sound.doppler,
+            );
+        }
+    }
+
+    /// `usablescript` limit clips and squeaks, and `tankcapscript` sounds.
     fn objects(&mut self, reference: &ReferenceManifest, runtime: &GarageRuntime, dt: f32) {
         let audio = &reference.audio;
         for index in 0..audio.hinges.len() {
@@ -715,6 +820,9 @@ impl AudioState {
                 continue;
             };
             let last = std::mem::replace(&mut self.hinges[index], angle);
+            if let Some(squeak) = &sound.squeak {
+                self.squeak(audio, runtime, index, squeak, angle - last, dt);
+            }
             if angle == last {
                 continue;
             }
@@ -741,10 +849,23 @@ impl AudioState {
         }
         for index in 0..audio.openings.len() {
             let sound = &audio.openings[index];
-            let valve = runtime.area.interaction.opening_valve(sound.opening);
+            let interaction = &runtime.area.interaction;
+            let valve = interaction.opening_valve(sound.opening);
             let last = std::mem::replace(&mut self.valves[index], valve);
             let position = item_point(runtime, sound.item, [0.0; 3]);
-            let (clip, volume) = if last <= 0.0 && valve > 0.0 {
+            let toggle = reference
+                .openings
+                .iter()
+                .find(|opening| opening.id == sound.opening)
+                .is_some_and(|opening| opening.can_toggle);
+            // `USE` toggles with a clip. `TUNE` turns a part-open valve with the tap clip.
+            let (clip, volume) = if !toggle {
+                if last > 0.0 && last < 1.0 && valve != last {
+                    (sound.tap, (valve - last).abs())
+                } else {
+                    (None, 0.0)
+                }
+            } else if last <= 0.0 && valve > 0.0 {
                 (sound.open, sound.open_volume)
             } else if last > 0.0 && valve <= 0.0 {
                 (sound.close, sound.close_volume)
@@ -754,7 +875,61 @@ impl AudioState {
             if let Some(clip) = clip {
                 self.play(audio, clip, position, volume, 1.0, Bus::Main);
             }
+            let pour = inverse_lerp(
+                audio.pour_speed[0],
+                audio.pour_speed[1],
+                interaction.opening_pour(sound.opening),
+            );
+            let position = voice_point(runtime, &sound.pour);
+            let slot = slot::COUNT + audio.hinges.len() + index;
+            self.voices[slot] = voice(&sound.pour, position, pour, 1.0, Bus::Main);
         }
+    }
+
+    /// `usablescript.RotMoveSound`. `change` is the hinge movement in degrees this step.
+    fn squeak(
+        &mut self,
+        audio: &AudioReference,
+        runtime: &GarageRuntime,
+        index: usize,
+        squeak: &crate::reference::SqueakReference,
+        change: f32,
+        dt: f32,
+    ) {
+        let seconds = audio.clips[squeak.clip.0 as usize].seconds;
+        let target = audio.hinges[index].modifier * change.abs() * 0.1;
+        let skip = self.sample();
+        let pitch = mix(0.95, 1.05, self.sample());
+        let state = &mut self.squeaks[index];
+        state.volume += (target - state.volume) * (dt * 3.0).min(1.0);
+        let playing = state.elapsed * state.pitch < seconds;
+        if change != 0.0 && !playing && skip > squeak.skip_chance {
+            self.plays = self.plays.wrapping_add(1).max(1);
+            *state = Squeak {
+                volume: state.volume,
+                pitch,
+                elapsed: 0.0,
+                play: self.plays,
+            };
+        } else if change == 0.0 {
+            state.elapsed = f32::MAX;
+        }
+        let state = *state;
+        let playing = state.elapsed * state.pitch < seconds;
+        if playing {
+            self.squeaks[index].elapsed += dt;
+        }
+        let position = voice_point(runtime, &squeak.voice);
+        let mut sound = voice(
+            &squeak.voice,
+            position,
+            if playing { state.volume } else { 0.0 },
+            state.pitch,
+            Bus::Main,
+        );
+        sound.clip = Some(squeak.clip);
+        sound.play = state.play;
+        self.voices[slot::COUNT + index] = sound;
     }
 
     /// `fpscontroller` wind source.
@@ -926,6 +1101,15 @@ fn item_point(runtime: &GarageRuntime, item: ItemId, offset: [f32; 3]) -> [f32; 
     (to_rapier(pose) * Vector::from_array(offset)).to_array()
 }
 
+/// The world point of a voice that follows its item.
+fn voice_point(runtime: &GarageRuntime, source: &VoiceReference) -> [f32; 3] {
+    source
+        .item
+        .map_or(runtime.physics.snapshot().pose.position, |item| {
+            item_point(runtime, item, source.offset)
+        })
+}
+
 fn voice(source: &VoiceReference, position: [f32; 3], volume: f32, pitch: f32, bus: Bus) -> Sound {
     Sound {
         clip: source.clip,
@@ -941,6 +1125,37 @@ fn voice(source: &VoiceReference, position: [f32; 3], volume: f32, pitch: f32, b
         max_distance: source.max_distance,
         spatial: source.spatial,
         bus: bus as u8,
+        play: 0,
+        doppler: source.doppler * source.spatial,
+    }
+}
+
+/// FMOD Doppler pitch for a source at `position` that moves at `velocity`.
+fn doppler_shift(
+    listener: [f32; 3],
+    listener_velocity: Vector,
+    position: [f32; 3],
+    velocity: Vector,
+    level: f32,
+) -> f32 {
+    let toward = Vector::from_array(listener) - Vector::from_array(position);
+    if level <= 0.0 || toward.length_squared() < 1.0e-8 {
+        return 1.0;
+    }
+    let toward = toward.normalize();
+    let limit = SOUND_SPEED * 0.5;
+    let source = (velocity.dot(toward) * level).clamp(-limit, limit);
+    let receiver = (listener_velocity.dot(toward) * level).clamp(-limit, limit);
+    (SOUND_SPEED - receiver) / (SOUND_SPEED - source)
+}
+
+/// Velocity from two positions. A world rebase jumps hundreds of meters.
+fn velocity(from: [f32; 3], to: [f32; 3], dt: f32) -> Vector {
+    let delta = Vector::from_array(to) - Vector::from_array(from);
+    if delta.length() < 10.0 {
+        delta / dt
+    } else {
+        Vector::ZERO
     }
 }
 

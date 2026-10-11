@@ -468,6 +468,10 @@ pub struct GarageRuntime {
     /// Gear index and clutch engagement from the last step.
     pub gear: usize,
     pub clutch: f32,
+    /// `inputscript.horn` while the player drives.
+    pub horn: bool,
+    /// `carscript.DamageStuff` input: the forward speed change in km/h this step.
+    pub crash_kmh: f32,
     color_steps: u32,
     ignition_held: bool,
     auto_gear: usize,
@@ -554,6 +558,8 @@ impl GarageRuntime {
                 .collect(),
             gear: 0,
             clutch: 0.0,
+            horn: false,
+            crash_kmh: 0.0,
             color_steps: 0,
             ignition_held: false,
             auto_gear: reference
@@ -717,6 +723,7 @@ impl GarageRuntime {
         if driving && input.pressed & keys::SPACE != 0 {
             self.handbrake = !self.handbrake;
         }
+        self.horn = driving && input.held & keys::HORN != 0;
         if driving && input.pressed & keys::LIGHTS != 0 {
             self.lamps = (self.lamps + 1) % crate::simulation::lights::LAMP_STATES;
         }
@@ -930,6 +937,7 @@ impl GarageRuntime {
         let speed = self.physics.snapshot().speed_mps.abs() * 3.6;
         let change = (speed - self.last_speed_kmh).abs();
         self.last_speed_kmh = speed;
+        self.crash_kmh = change * reference.vehicle.crash.multiplier;
         let car = reference.vehicle.item;
         let samples = [self.crash_sample(), self.crash_sample()];
         let Some(crash) = crate::simulation::crash::crash(

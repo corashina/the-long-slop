@@ -77,6 +77,8 @@ struct OpeningState {
     local_pose: Pose,
     tilt_axis: Vector,
     valve: f32,
+    /// Liters per second that leave this opening in the last step.
+    pour: f32,
 }
 struct OpeningRules {
     id: OpeningId,
@@ -220,6 +222,7 @@ impl InteractionState {
                 local_pose,
                 tilt_axis: Vector::from_array(opening.tilt_axis),
                 valve: opening.valve,
+                pour: 0.0,
             });
         }
         let mut seats = Vec::with_capacity(reference.seats.len());
@@ -385,6 +388,7 @@ impl InteractionState {
             local_pose: Pose::IDENTITY,
             tilt_axis: Vector::Y,
             valve: 1.0,
+            pour: 0.0,
         });
         Ok(())
     }
@@ -396,6 +400,13 @@ impl InteractionState {
             .iter()
             .find(|opening| opening.reference.id == id)
             .map_or(0.0, |opening| opening.valve)
+    }
+    /// `tankcapscript.speed` while fluid pours from the opening.
+    pub fn opening_pour(&self, id: OpeningId) -> f32 {
+        self.openings
+            .iter()
+            .find(|opening| opening.reference.id == id)
+            .map_or(0.0, |opening| opening.pour)
     }
     pub fn tuning_opening(&self) -> Option<OpeningId> {
         self.tuning_opening
@@ -706,7 +717,11 @@ impl InteractionState {
         }
         self.place_hinges(physics, false);
         items.sync_poses(physics);
+        for opening in &mut self.openings {
+            opening.pour = 0.0;
+        }
         let mut filling = None;
+        let mut pouring = None;
         if input.held & keys::FILL != 0
             && available.actions.0 & ActionMask::FILL != 0
             && let Some(held) = self.held.as_ref()
@@ -717,26 +732,26 @@ impl InteractionState {
                 .iter()
                 .find(|opening| opening.reference.cap == target.item && opening.valve > 0.0)
             {
-                let (source_id, destination, flow) =
-                    if self.supplies.contains(&opening.reference.tank) {
-                        if !self.openings.iter().any(|destination| {
-                            destination.reference.tank == held.item && destination.valve > 0.0
-                        }) {
-                            (held.item, held.item, 0.0)
-                        } else {
-                            (
-                                opening.reference.tank,
-                                held.item,
-                                opening.reference.flow_liters_per_second * opening.valve,
-                            )
-                        }
+                let supply = self.supplies.contains(&opening.reference.tank);
+                let (source_id, destination, flow) = if supply {
+                    if !self.openings.iter().any(|destination| {
+                        destination.reference.tank == held.item && destination.valve > 0.0
+                    }) {
+                        (held.item, held.item, 0.0)
                     } else {
                         (
-                            held.item,
                             opening.reference.tank,
+                            held.item,
                             opening.reference.flow_liters_per_second * opening.valve,
                         )
-                    };
+                    }
+                } else {
+                    (
+                        held.item,
+                        opening.reference.tank,
+                        opening.reference.flow_liters_per_second * opening.valve,
+                    )
+                };
                 let source_allowed = self
                     .tank_rules
                     .get(&source_id)
@@ -766,6 +781,15 @@ impl InteractionState {
                     let liters = transfer(source, destination_state, amount);
                     if liters > 0.0 {
                         filling = Some(source_id);
+                        // The source cap pours. A held source pours from its open cap.
+                        pouring = if supply {
+                            Some((opening.reference.id, flow))
+                        } else {
+                            self.openings
+                                .iter()
+                                .find(|o| o.reference.tank == held.item && o.valve > 0.0)
+                                .map(|o| (o.reference.id, flow))
+                        };
                         action = Some(InteractionAction::Fill {
                             source: source_id,
                             destination,
@@ -775,7 +799,12 @@ impl InteractionState {
                 }
             }
         }
-        for opening in &self.openings {
+        for opening in &mut self.openings {
+            if let Some((id, flow)) = pouring
+                && opening.reference.id == id
+            {
+                opening.pour = flow;
+            }
             if opening.valve <= 0.0
                 || opening.reference.spill_disabled
                 || opening.reference.tube_connected
@@ -800,10 +829,10 @@ impl InteractionState {
                 if !opening.reference.angle_disabled && angle <= threshold {
                     continue;
                 }
-                spill(
-                    fluid,
-                    factor * opening.valve * opening.reference.flow_liters_per_second * dt,
-                );
+                let rate = factor * opening.valve * opening.reference.flow_liters_per_second;
+                if spill(fluid, rate * dt) > 0.0 {
+                    opening.pour = rate;
+                }
             }
         }
         action
