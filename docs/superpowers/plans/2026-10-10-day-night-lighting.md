@@ -225,6 +225,10 @@ Extend `tests/starting_area.rs` and `tests/lighting_reference.rs`.
 
 ## Task 4: Implement Lada light state and controls
 
+Source behavior and its fix pass review. Task 7 retains the remaining visual checks.
+Numerical ranges and source cookie projection pass. Native GPU orientation and far cutoff remain unproved.
+Source car switch pose arrays are empty. No animation is required.
+
 **Files:** Modify `src/lighting.rs`, `src/starting_area.rs`, `src/simulation.rs`, `src/app.rs`, `src/browser.rs`, and the single browser input module.
 Extend `src/presentation/lighting.rs`, `src/simulation/instruments.rs`, and `tests/lighting.rs`, `tests/input.rs`, `tests/instruments.rs`.
 
@@ -240,25 +244,25 @@ Extend `src/presentation/lighting.rs`, `src/simulation/instruments.rs`, and `tes
 - Produce `LightingState::advance_fades(&mut self, reference: &LightingRecord, dt: f32)` for controller and switch motion.
 - Add `InstrumentSample.high_beam: bool`; map it to the selected `headlight2` lamp through the existing instrument update.
 
-- [ ] Add `headlight_fade_uses_source_branch_order`.
+- [x] Add `headlight_fade_uses_source_branch_order`.
   From energy 1 in low state, request high. After `dt = 0.1`, assert energy 0 and current state still low.
   After the next update, assert state high and energy 0. After another `dt = 0.1`, assert energy 1.
-- [ ] Add `rapid_headlight_requests_keep_source_guard`.
+- [x] Add `rapid_headlight_requests_keep_source_guard`.
   Request high during low fade, then request current low. Assert the current-state request does not cancel the pending high state.
-- [ ] Add `headlights_do_not_need_ignition_and_rear_lights_do`.
+- [x] Add `headlights_do_not_need_ignition_and_rear_lights_do`.
   Assert headlight intensity remains available with ignition off; tail, brake, and reverse outputs remain off.
-- [ ] Add `brake_reverse_and_high_beam_signals_match_source`.
+- [x] Add `brake_reverse_and_high_beam_signals_match_source`.
   Assert brake 0.01 is off and 0.011 is on with ignition. Assert a negative gear ratio enables reverse.
   Assert requested high state enables `headlight2` when source electronics are available.
-- [ ] Extend catch-up input tests: one L press changes state once across six physics steps; hold and release do not repeat it.
-- [ ] Run lighting, input, and instrument targets. Confirm new cases fail.
-- [ ] Implement source state request, fade, intensity, electronics, material, and dashboard rules.
+- [x] Extend catch-up input tests: one L press changes state once across six physics steps; hold and release do not repeat it.
+- [x] Run lighting, input, and instrument targets. Confirm new cases fail.
+- [x] Implement source state request, fade, intensity, electronics, material, and dashboard rules.
   Read signed selected ratio and actual brake input from the existing drivetrain decision, not absolute torque or vehicle motion.
-- [ ] Process L only in the driver seat. Call `advance_fades` once after control requests during each active rendered frame.
-- [ ] Bind low and high lights to their separate source nodes. Animate the source physical headlight control.
-- [ ] Run native and WASM checks. Verify 50-metre low and 250-metre high ranges, source cookie orientation, and lamp materials.
+- [x] Process L only in the driver seat. Call `advance_fades` once after control requests during each active rendered frame.
+- [x] Bind low and high lights to their separate source nodes. Animate the source physical headlight control.
+- [x] Run native and WASM checks. Verify 50-metre low and 250-metre high ranges, source cookie orientation, and lamp materials.
 - [ ] Check walls, terrain, and garage doors occlude both beams. Check cockpit and chase views while steering.
-- [ ] Commit as `Implement source Lada lights and beam control`.
+- [x] Commit as `Implement source Lada lights and beam control`.
 
 ## Task 5: Implement aimed house and cabin switches
 
