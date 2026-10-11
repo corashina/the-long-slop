@@ -278,21 +278,21 @@ Extend `src/presentation/lighting.rs`, UI sprite binding, `tests/lighting_intera
 - Produce `LightingState::use_control(&mut self, reference: &LightingRecord, control: LightControlId)`.
 - Use `InteractionState::available_actions` for both execution and feedback, retaining the source UI plan's signature.
 
-- [ ] Add `switch_aim_obeys_reach_and_occlusion`: a wall blocks use and prompts; a reachable unobstructed collider permits both.
-- [ ] Add `use_and_click_toggle_once`: simultaneous Use and allowed left-click press produce one controller action.
-- [ ] Add `cabin_switch_does_not_exit_seat`: aimed cabin Use toggles its controller while preserving seat occupancy.
-- [ ] Add `switch_input_preserves_latched_door_cap_and_fill_actions`.
+- [x] Add `switch_aim_obeys_reach_and_occlusion`: a wall blocks use and prompts; a reachable unobstructed collider permits both.
+- [x] Add `use_and_click_toggle_once`: simultaneous Use and allowed left-click press produce one controller action.
+- [x] Add `cabin_switch_does_not_exit_seat`: aimed cabin Use toggles its controller while preserving seat occupancy.
+- [x] Add `switch_input_preserves_latched_door_cap_and_fill_actions`.
   Assert the shared availability result follows source precedence, including the original left-click guard.
-- [ ] Add `switch_feedback_matches_execution`: both paths select the same control and exclude blocked targets.
-- [ ] Run lighting interaction, existing interaction, feedback, wheel, and player targets. Confirm new cases fail before implementation.
-- [ ] Replace item-only aim decoding with cached collider/node resolution. Preserve sensor, layer mask, held-body, and player exclusions.
-- [ ] Bind source usable events for physical car controls and parent switch ancestry for house controls.
-- [ ] Implement house on/off state, working/broken visibility, materials, and source button pose interpolation through `advance_fades`.
+- [x] Add `switch_feedback_matches_execution`: both paths select the same control and exclude blocked targets.
+- [x] Run lighting interaction, existing interaction, feedback, wheel, and player targets. Confirm new cases fail before implementation.
+- [x] Replace item-only aim decoding with cached collider/node resolution. Preserve sensor, layer mask, held-body, and player exclusions.
+- [x] Bind source usable events for physical car controls and parent switch ancestry for house controls.
+- [x] Implement house on/off state, working/broken visibility, materials, and source button pose interpolation through `advance_fades`.
   Implement the cabin controller's two-state headlight fade. Keep L reserved for driving headlights.
-- [ ] Publish the source switch icon and valid action through the shared feedback bridge. Remove stale prompt text.
-- [ ] Run native and WASM checks. Use each of the five house controls and the cabin control in the browser.
-- [ ] Verify six house lamp entries start off, turn on through their controls, and preserve source shadows and materials.
-- [ ] Commit as `Implement source house and cabin light switches`.
+- [x] Publish the source switch icon and valid action through the shared feedback bridge. Remove stale prompt text.
+- [x] Run native and WASM checks. Use each of the five house controls and the cabin control in the browser.
+- [x] Verify six house lamp entries start off, turn on through their controls, and preserve source shadows and materials.
+- [x] Commit as `Implement source house and cabin light switches`.
 
 ## Task 6: Stream source roadside lamps
 
