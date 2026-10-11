@@ -1465,3 +1465,58 @@ fn production_lights_key_cycles_headlights() {
         }
     }
 }
+
+#[test]
+#[ignore = "Requires exported Steam assets"]
+fn production_driver_hears_starter_and_handbrake_inside_the_car() {
+    use my_summer_slop::audio::{AudioState, Bus, HEADER_FLOATS, SOUND_FLOATS, slot};
+    let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+    let reference = my_summer_slop::reference::ReferenceManifest::from_json(&bytes).unwrap();
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    enter_source_driver(&mut runtime, &reference);
+    let mut audio = AudioState::new(&reference, &runtime);
+    let mut clips = Vec::new();
+    for step in 0..120 {
+        runtime.step(
+            &reference,
+            FrameInput {
+                held: keys::IGNITION,
+                pressed: if step == 0 {
+                    keys::IGNITION | keys::SPACE
+                } else {
+                    0
+                },
+                ..FrameInput::default()
+            },
+        );
+        audio.step(&reference, &runtime, false, 1.0 / 60.0);
+        clips.extend(audio.one_shots().iter().map(|sound| sound.clip.unwrap()));
+        let frame = audio.frame(&reference, runtime.area.player.view_pose(&runtime.physics));
+        assert_eq!(
+            frame.len(),
+            HEADER_FLOATS + frame[9] as usize * SOUND_FLOATS + frame[10] as usize * SOUND_FLOATS
+        );
+    }
+    assert!(
+        clips.contains(&reference.audio.engine.start),
+        "starter sound"
+    );
+    assert!(
+        clips.contains(&reference.audio.car.handbrake),
+        "handbrake sound"
+    );
+    assert_eq!(
+        audio.car_bus(),
+        Bus::Car,
+        "the driver sits in the car interior"
+    );
+    // Closed doors muffle the outside: 0.5 + (1 - 0.8) * 0.
+    assert!(
+        (audio.outside() - 0.5).abs() < 0.05,
+        "outside {}",
+        audio.outside()
+    );
+    if runtime.engine_output.running {
+        assert!(audio.voice(slot::IDLE).volume > 0.0);
+    }
+}

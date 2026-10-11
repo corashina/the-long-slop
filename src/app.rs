@@ -1,3 +1,4 @@
+use crate::audio::AudioState;
 use crate::browser::*;
 use crate::presentation::instruments::InstrumentVisuals;
 use crate::presentation::{
@@ -25,6 +26,7 @@ struct RuntimeReference(Arc<ReferenceManifest>);
 #[derive(Resource)]
 struct Drive {
     runtime: GarageRuntime,
+    audio: AudioState,
     instruments: InstrumentState,
     input: FrameInput,
     clock: StepClock,
@@ -60,11 +62,13 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
     );
     let runtime = GarageRuntime::new(&reference).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let current = runtime.area.player.view_pose(&runtime.physics);
+    let audio = AudioState::new(&reference, &runtime);
     App::new()
         .insert_resource(RuntimeReference(reference.clone()))
         .insert_resource(Drive {
             instruments: InstrumentState::new(&reference.instruments),
             runtime,
+            audio,
             input: FrameInput::default(),
             clock: StepClock::default(),
             previous: current,
@@ -107,6 +111,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
                 sync_instruments,
                 update_lighting,
                 update_camera,
+                update_audio,
                 update_hud,
             )
                 .chain(),
@@ -279,6 +284,7 @@ fn read_input(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             return;
         }
         drive.instruments.reset(&reference.0.instruments);
+        drive.audio = AudioState::new(&reference.0, &drive.runtime);
         drive.camera = CameraMode::default();
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
         clear_input(&mut drive);
@@ -320,6 +326,9 @@ fn advance_physics(
         let old_origin = drive.runtime.stream.origin.offset;
         let input = drive.input.take_step();
         drive.runtime.step(&reference.0, input);
+        let chase = drive.camera == CameraMode::Chase && drive.runtime.area.player.seat().is_some();
+        let Drive { runtime, audio, .. } = &mut *drive;
+        audio.step(&reference.0, runtime, chase, crate::simulation::FIXED_DT);
         let new_origin = drive.runtime.stream.origin.offset;
         for i in 0..3 {
             drive.previous.position[i] -= (new_origin[i] - old_origin[i]) as f32;
@@ -436,6 +445,18 @@ fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveC
                 presentation::transform(drive.rendered)
             };
     }
+}
+fn update_audio(
+    reference: Res<RuntimeReference>,
+    mut drive: ResMut<Drive>,
+    query: Query<&Transform, With<DriveCamera>>,
+) {
+    let Ok(camera) = query.single() else { return };
+    let listener = VehiclePose {
+        position: camera.translation.to_array(),
+        rotation: camera.rotation.to_array(),
+    };
+    game_audio(drive.audio.frame(&reference.0, listener));
 }
 fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let runtime = &drive.runtime;

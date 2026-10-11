@@ -32,6 +32,9 @@ id!(SeatId, u32);
 id!(OpeningId, u32);
 id!(WheelSlotId, u8);
 
+pub mod audio;
+pub use audio::*;
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceId {
@@ -629,6 +632,7 @@ pub struct ReferenceManifest {
     pub vehicle: VehicleReference,
     pub area: StartingAreaReference,
     pub world: world::WorldReference,
+    pub audio: AudioReference,
 }
 
 #[derive(Debug)]
@@ -1414,6 +1418,8 @@ impl ReferenceManifest {
         }
         require(a.driveway_height.is_finite(), "driveway height")?;
         self.world.validate()?;
+        self.audio
+            .validate(&item_ids, &collider_ids, &opening_ids)?;
         Ok(())
     }
 }

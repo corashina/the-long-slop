@@ -268,14 +268,18 @@ impl TerrainNoise {
 
     /// `TerrainGenerator.GetBiome`: 0 desert, 1 winter, 2 grass.
     pub fn biome(&self, c: [f32; 2], height: f32) -> usize {
-        let color = self.vertex_color(c, height);
-        if color[2] > 0.25 {
-            1
-        } else if color[0] > 0.5 {
-            0
-        } else {
-            2
-        }
+        biome_of(self.vertex_color(c, height))
+    }
+}
+
+/// `TerrainGenerator.GetBiome` from a terrain color: 0 desert, 1 winter, 2 grass.
+pub fn biome_of(color: [f32; 4]) -> usize {
+    if color[2] > 0.25 {
+        1
+    } else if color[0] > 0.5 {
+        0
+    } else {
+        2
     }
 }
 

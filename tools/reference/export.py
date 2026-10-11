@@ -29,6 +29,7 @@ def export_reference(steam_root: Path, output: Path) -> None:
     from .ui import export_ui
     from .instruments import recover_instruments
     from .world import export_world
+    from .audio import export_audio
     if output.resolve().is_relative_to(steam_root.resolve()):
         raise ValueError('Keep generated files outside the Steam installation')
     output.mkdir(parents=True, exist_ok=True)
@@ -75,6 +76,8 @@ def export_reference(steam_root: Path, output: Path) -> None:
     manifest['instruments']=recover_instruments(source,manifest,report)
     manifest['world']=export_world(source,output/'world.gltf')
     print(f'Exported world: {len(manifest["world"]["road"]["biomes"])} road biomes',flush=True)
+    manifest['audio']=export_audio(source,manifest,output)
+    print(f'Exported audio: {len(manifest["audio"]["clips"])} clips',flush=True)
     parameters['controls']={
         'source':{'file':'level0','path_id':16865},
         'defaults':{'object_move':manifest['player']['obj_move_sensitivity'],'object_rotation':manifest['player']['obj_rotation_sensitivity'],

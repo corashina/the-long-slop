@@ -365,7 +365,8 @@ impl WorldStream {
                         tile.indices.clone(),
                     )
                     .expect("terrain tile triangles")
-                    .translation(Vector::from_array(self.origin.local(tile.center))),
+                    .translation(Vector::from_array(self.origin.local(tile.center)))
+                    .user_data(crate::vehicle::TERRAIN_COLLIDER_FLAG),
                 );
                 self.tiles.push(LoadedTile { tile, collider });
             }

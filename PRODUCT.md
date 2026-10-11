@@ -24,8 +24,9 @@ Recovery preserves state. Restart restores the garage.
 Part condition follows the source states. Hard crashes knock worn wheels and parts off.
 The player can remove a part and fit it again into its own slot.
 The source day cycle drives the sun, ambient light, and fog color. The car headlights have low and high beams.
+Sound follows the source rules with the original clips. It covers the engine, car, steps, doors, caps, wind, ambience, and menu buttons.
 
-Survival, weapons, other vehicles, multiplayer, saves, audio, and deployment remain outside this stage.
+Survival, weapons, other vehicles, multiplayer, saves, and deployment remain outside this stage.
 The build does not claim identical Unity physics or full-game parity.
 
 ## Evidence

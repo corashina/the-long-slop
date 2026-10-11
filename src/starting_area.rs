@@ -110,6 +110,7 @@ impl StartingArea {
                     Group::from_bits_truncate(record.filter),
                     InteractionTestMode::And,
                 ))
+                .active_events(rapier3d::prelude::ActiveEvents::COLLISION_EVENTS)
                 .user_data(
                     flag | ((record.id.0 as u128) << 64)
                         | item.map_or(0, |item| item.0 as u128 + 1),
@@ -464,6 +465,9 @@ pub struct GarageRuntime {
     /// `carscript.lampak`: off, low beam, or high beam.
     pub lamps: usize,
     pub headlights: Vec<crate::simulation::lights::Headlight>,
+    /// Gear index and clutch engagement from the last step.
+    pub gear: usize,
+    pub clutch: f32,
     color_steps: u32,
     ignition_held: bool,
     auto_gear: usize,
@@ -548,6 +552,8 @@ impl GarageRuntime {
                 .iter()
                 .map(crate::simulation::lights::Headlight::new)
                 .collect(),
+            gear: 0,
+            clutch: 0.0,
             color_steps: 0,
             ignition_held: false,
             auto_gear: reference
@@ -773,6 +779,8 @@ impl GarageRuntime {
                 / reference.engine.auto_shift_clutch_rpm_range)
                 .clamp(0.0, 1.0)
         };
+        self.gear = gear;
+        self.clutch = clutch;
         let radiator_condition = self
             .area
             .items
@@ -1124,7 +1132,7 @@ fn transport_body(
     body.set_angvel(rapier3d::math::Vector::ZERO, true);
 }
 
-fn start_sample(seed: u64, attempt: u64) -> f32 {
+pub(crate) fn start_sample(seed: u64, attempt: u64) -> f32 {
     (hash(seed ^ attempt) >> 40) as f32 / 16_777_216.0
 }
 

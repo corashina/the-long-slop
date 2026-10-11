@@ -2,8 +2,9 @@ import {createInput} from './input.js';
 import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
 import {loadUiAssets} from './ui-layout.js';
+import {createAudio} from './audio.js';
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
-let menu,feedback,failed=false,timeout,actions=0,frame;
+let menu,feedback,audio,failed=false,timeout,actions=0,frame;
 const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,quantities:[0,0,0,0,0,0]};
 const input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas);
 window.gameKeys=()=>{frame=input.takeFrame();return frame.held;};
@@ -25,6 +26,7 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, tiles, colliders, abso
   state.rebases = rebases; state.travelM = travelM;
   state.fuelLiters = fuelLiters; state.paused = paused; state.started = started;
   menu?.sync(started,paused,travelM);
+  audio?.setPlaying(started&&!paused&&menu?.model.state==='playing');
   feedback?.setVisible(started&&!paused&&Boolean(mode)&&menu?.model.state==='playing');
 };
 window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,noText,gas,oil,alcohol,water,blood,diesel)=>{
@@ -33,6 +35,7 @@ window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,n
  window.gameState.target=name;window.gameState.targetAction=mask;window.gameState.carrying=carrying;feedback?.update(record);
 };
 function fail(message){failed=true;clearTimeout(timeout);const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}}
+window.gameAudio=view=>audio?.frame(view);
 window.gameFailure=fail;
 window.gameReady=()=>{if(failed)return;clearTimeout(timeout);menu.ready();};
 window.addEventListener('error',event=>fail(event.message||'The runtime stopped.'));
@@ -48,6 +51,8 @@ async function load(){
  status.textContent='Loading interface assets...';
  await loadUiAssets(manifest.ui);
  menu=createMenu({canvas,ui:manifest.ui,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ audio=createAudio(manifest.audio);audio.bindButtons(document.querySelector('#menu'));
+ for(const type of ['pointerdown','keydown'])window.addEventListener(type,()=>audio.unlock());
  feedback=createFeedback(manifest.ui);
  status.textContent='Loading game code...';
  const {default:init,run}=await import('./pkg/my_summer_slop.js');

@@ -82,6 +82,21 @@ pub fn sky(rules: &DayCycleReference, t: f32, terrain: [f32; 4]) -> Sky {
     }
 }
 
+/// Night share of the phase values: 0 in the day phase, 1 in the night phase.
+/// Dusk and dawn blend with the phase lerp.
+pub fn night_weight(rules: &DayCycleReference, t: f32) -> f32 {
+    let (day, dawn, dusk) = (rules.day_seconds, rules.dawn_seconds, rules.dusk_seconds);
+    if t > day {
+        1.0
+    } else if t > day - dusk {
+        inverse_lerp(day - dusk, day, t)
+    } else if t > dawn {
+        0.0
+    } else {
+        1.0 - inverse_lerp(0.0, dawn, t)
+    }
+}
+
 /// `napszakvaltakozas.LerpColor`: R picks desert, B picks winter.
 fn biome(colors: &[[f32; 3]; 3], terrain: [f32; 4]) -> [f32; 3] {
     mix3(
