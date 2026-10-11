@@ -34,7 +34,6 @@ struct Drive {
     current: VehiclePose,
     rendered: VehiclePose,
     camera: CameraMode,
-    frame_steps: u32,
     skip_elapsed: bool,
     ready: bool,
     last_feedback: Option<FeedbackStamp>,
@@ -75,7 +74,6 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
             current,
             rendered: current,
             camera: CameraMode::default(),
-            frame_steps: 0,
             skip_elapsed: false,
             ready: false,
             last_feedback: None,
@@ -312,7 +310,6 @@ fn advance_physics(
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
 ) {
-    drive.frame_steps = 0;
     if !drive.runtime.started || drive.runtime.paused {
         return;
     }
@@ -321,7 +318,6 @@ fn advance_physics(
         return;
     }
     let steps = drive.clock.advance(time.delta_secs_f64());
-    drive.frame_steps = steps as u32;
     for _ in 0..steps {
         drive.previous = drive.current;
         let old_origin = drive.runtime.stream.origin.offset;
@@ -462,40 +458,9 @@ fn update_audio(
 }
 fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let runtime = &drive.runtime;
-    let snapshot = runtime.physics.snapshot();
-    let position = runtime.area.player.focus_position(&runtime.physics);
-    let absolute = runtime.stream.origin.absolute(position);
-    let origin = runtime.stream.origin.offset;
-    let contacts = snapshot
-        .wheels_contact
-        .iter()
-        .enumerate()
-        .fold(0, |bits, (i, contact)| bits | ((*contact as u32) << i));
-    let fuel = runtime
-        .area
-        .items
-        .get(reference.0.engine.fuel_tank)
-        .and_then(|item| item.fluid.as_ref())
-        .map_or(0.0, |fluid| fluid.mixture.total());
     game_update(
-        snapshot.speed_mps * 3.6,
-        (drive.camera == CameraMode::Cockpit || runtime.area.player.seat().is_none()) as u32,
-        position[0],
-        position[1],
-        position[2],
-        contacts,
-        drive.frame_steps,
-        runtime.stream.tiles().count() as u32,
-        runtime.physics.collider_count() as u32,
-        absolute[0],
-        absolute[1],
-        absolute[2],
-        origin[0],
-        origin[1],
-        origin[2],
-        runtime.rebases,
+        drive.camera == CameraMode::Cockpit || runtime.area.player.seat().is_none(),
         runtime.trip_m,
-        fuel,
         runtime.paused,
         runtime.started,
     );

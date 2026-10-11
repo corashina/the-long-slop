@@ -110,6 +110,11 @@ impl ReferenceManifest {
                     .enumerate()
                     .all(|(i, r)| r.id.0 == i as u32 + 1)
                 && self
+                    .openings
+                    .iter()
+                    .enumerate()
+                    .all(|(i, r)| r.id.0 == i as u32 + 1)
+                && self
                     .seats
                     .iter()
                     .enumerate()

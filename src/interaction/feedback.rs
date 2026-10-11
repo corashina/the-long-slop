@@ -249,11 +249,11 @@ impl InteractionState {
     ) -> InteractionFeedback<'a> {
         let name = a
             .item
-            .and_then(|id| reference.items.iter().find(|i| i.id == id))
+            .and_then(|id| reference.item(id))
             .map_or("", |i| i.name.as_str());
         let fluid = a
             .opening
-            .and_then(|id| reference.openings.iter().find(|o| o.id == id))
+            .and_then(|id| reference.opening(id))
             .and_then(|o| {
                 items
                     .get(o.tank)

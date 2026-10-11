@@ -11,28 +11,15 @@ window.gameKeys=()=>{frame=input.takeFrame();return frame.held;};
 window.gamePressed=()=>frame.pressed;window.gameReleased=()=>frame.released;
 window.gameMouseX=()=>frame.mouseX;window.gameMouseY=()=>frame.mouseY;window.gameWheel=()=>frame.wheel;
 window.gameActions=()=>{const a=actions;actions=0;return a;};
-window.gameState = { speedKmh: 0, camera: 'First person', x: 0, y: 0, z: 0, contacts: 0,
-  frameSteps: 0, totalSteps: 0, activeTiles: 0, colliderCount: 0, absoluteX: 0, absoluteY: 0, absoluteZ: 0,
-  originX: 0, originY: 0, originZ: 0, rebases: 0, travelM: 0, fuelLiters: 0,
-  paused: false, started: false, target: '', targetAction: 0, carrying:false, fluidVolumes:record.quantities };
-window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, tiles, colliders, absoluteX, absoluteY, absoluteZ,
-  originX, originY, originZ, rebases, travelM, fuelLiters, paused, started) => {
-  const state = window.gameState;
-  state.speedKmh = kmh; state.camera = mode ? 'First person' : 'Chase';
-  state.x = x; state.y = y; state.z = z; state.contacts = contacts;
-  state.frameSteps = steps; state.totalSteps += steps; state.activeTiles = tiles; state.colliderCount = colliders;
-  state.absoluteX = absoluteX; state.absoluteY = absoluteY; state.absoluteZ = absoluteZ;
-  state.originX = originX; state.originY = originY; state.originZ = originZ;
-  state.rebases = rebases; state.travelM = travelM;
-  state.fuelLiters = fuelLiters; state.paused = paused; state.started = started;
+window.gameUpdate = (firstPerson, travelM, paused, started) => {
   menu?.sync(started,paused,travelM);
   audio?.setPlaying(started&&!paused&&menu?.model.state==='playing');
-  feedback?.setVisible(started&&!paused&&Boolean(mode)&&menu?.model.state==='playing');
+  feedback?.setVisible(started&&!paused&&firstPerson&&menu?.model.state==='playing');
 };
 window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,noText,gas,oil,alcohol,water,blood,diesel)=>{
  record.actions=mask;record.context=context;record.name=name;record.notice=notice;record.carrying=carrying;record.amount=amount;record.capacity=capacity;record.hasName=hasName;record.noText=noText;
  const q=record.quantities;q[0]=gas;q[1]=oil;q[2]=alcohol;q[3]=water;q[4]=blood;q[5]=diesel;
- window.gameState.target=name;window.gameState.targetAction=mask;window.gameState.carrying=carrying;feedback?.update(record);
+ feedback?.update(record);
 };
 function fail(message){failed=true;clearTimeout(timeout);const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}}
 window.gameAudio=view=>audio?.frame(view);

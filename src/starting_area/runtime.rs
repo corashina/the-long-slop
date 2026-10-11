@@ -18,7 +18,6 @@ pub struct GarageRuntime {
     pub paused: bool,
     pub started: bool,
     pub attempts: u64,
-    pub rebases: u32,
     pub notice: &'static str,
     pub target: Option<AimTarget>,
     pub wheels: crate::interaction::wheels::WheelAssemblies,
@@ -104,7 +103,6 @@ impl GarageRuntime {
             paused: false,
             started: false,
             attempts: 0,
-            rebases: 0,
             notice: "",
             target: None,
             wheels,
@@ -479,7 +477,6 @@ impl GarageRuntime {
                     target.point[i] -= (self.area.origin[i] - old) as f32;
                 }
             }
-            self.rebases += 1;
         }
         self.stream.sync_at(absolute, &mut self.physics);
         crate::world::sync_station_supplies(

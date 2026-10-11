@@ -637,3 +637,14 @@ pub struct ReferenceManifest {
     pub world: world::WorldReference,
     pub audio: AudioReference,
 }
+
+impl ReferenceManifest {
+    /// Validation keeps item IDs dense from 1.
+    pub fn item(&self, id: ItemId) -> Option<&ItemRecord> {
+        self.items.get((id.0 as usize).checked_sub(1)?)
+    }
+    /// Validation keeps opening IDs dense from 1.
+    pub fn opening(&self, id: OpeningId) -> Option<&OpeningRecord> {
+        self.openings.get((id.0 as usize).checked_sub(1)?)
+    }
+}
