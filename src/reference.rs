@@ -473,6 +473,67 @@ pub struct PartReference {
     pub local_rotation_after_mount: [f32; 4],
 }
 
+/// One `headlightscript` state. `carscript.lampak` picks the state.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeadlightStateReference {
+    pub intensity: f32,
+    pub light: Option<SpotLightReference>,
+    /// Lens `_EmissionColor` in this state. `None` is the dark lens.
+    pub lens_emission: Option<[f32; 3]>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpotLightReference {
+    pub node: NodeId,
+    pub color: [f32; 3],
+    pub range: f32,
+    /// Unity full cone angle.
+    pub spot_degrees: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeadlightReference {
+    pub item: ItemId,
+    pub source: SourceId,
+    /// `energyMove`: light energy change per second.
+    pub energy_rate: f32,
+    pub lens_node: NodeId,
+    pub states: Vec<HeadlightStateReference>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SunColorKey {
+    pub time: f32,
+    pub color: [f32; 3],
+}
+
+/// `napszakvaltakozas` values. Biome arrays are desert, winter, and grass.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DayCycleReference {
+    pub source: SourceId,
+    pub day_seconds: f32,
+    pub night_seconds: f32,
+    pub dawn_seconds: f32,
+    pub dusk_seconds: f32,
+    pub start_seconds: f32,
+    pub day_intensity: f32,
+    pub noon_intensity: f32,
+    pub night_intensity: f32,
+    pub day_ambient: f32,
+    pub night_ambient: f32,
+    pub day_angles: [f32; 2],
+    pub midnight_angles: [f32; 2],
+    pub moon_angles: [f32; 2],
+    pub sun_colors: Vec<SunColorKey>,
+    pub day_fog_colors: [[f32; 3]; 3],
+    pub night_fog_colors: [[f32; 3]; 3],
+}
+
 /// `carscript.DamageStuff` values. Speeds are in km/h per frame.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -548,6 +609,8 @@ pub struct ReferenceManifest {
     pub wheel_slots: Vec<WheelSlotReference>,
     pub wheel_parts: Vec<WheelPartReference>,
     pub parts: Vec<PartReference>,
+    pub headlights: Vec<HeadlightReference>,
+    pub day_cycle: DayCycleReference,
     pub items: Vec<ItemRecord>,
     pub openings: Vec<OpeningRecord>,
     pub tanks: Vec<TankReference>,
@@ -1206,6 +1269,67 @@ impl ReferenceManifest {
             )?;
         }
         ids(self.parts.iter().map(|part| part.item), "duplicate part")?;
+        ids(
+            self.headlights.iter().map(|light| light.item),
+            "duplicate headlight",
+        )?;
+        for light in &self.headlights {
+            require(
+                item_ids.contains(&light.item)
+                    && node_ids.contains(&light.lens_node)
+                    && !light.states.is_empty()
+                    && light.energy_rate.is_finite()
+                    && light.energy_rate > 0.0
+                    && light.states.iter().all(|state| {
+                        state.intensity.is_finite()
+                            && state.intensity >= 0.0
+                            && state.lens_emission.as_ref().is_none_or(|c| finite(c))
+                            && state.light.as_ref().is_none_or(|spot| {
+                                node_ids.contains(&spot.node)
+                                    && finite(&spot.color)
+                                    && spot.range > 0.0
+                                    && spot.spot_degrees > 0.0
+                                    && spot.spot_degrees < 180.0
+                            })
+                    }),
+                "headlight bindings",
+            )?;
+        }
+        let d = &self.day_cycle;
+        require(
+            [
+                d.day_seconds,
+                d.night_seconds,
+                d.dawn_seconds,
+                d.dusk_seconds,
+            ]
+            .iter()
+            .all(|v| v.is_finite() && *v > 0.0)
+                && d.dawn_seconds + d.dusk_seconds < d.day_seconds
+                && (0.0..d.day_seconds).contains(&d.start_seconds)
+                && finite(&[
+                    d.day_intensity,
+                    d.noon_intensity,
+                    d.night_intensity,
+                    d.day_ambient,
+                    d.night_ambient,
+                ])
+                && finite(&d.day_angles)
+                && finite(&d.midnight_angles)
+                && finite(&d.moon_angles)
+                && !d.sun_colors.is_empty()
+                && d.sun_colors
+                    .windows(2)
+                    .all(|keys| keys[0].time <= keys[1].time)
+                && d.sun_colors
+                    .iter()
+                    .all(|key| key.time.is_finite() && finite(&key.color))
+                && d.day_fog_colors
+                    .iter()
+                    .chain(&d.night_fog_colors)
+                    .all(|c| finite(c)),
+            "day cycle",
+        )?;
         for part in &self.parts {
             require(
                 self.items

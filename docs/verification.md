@@ -153,3 +153,41 @@ The car does not run without the engine. Without the radiator it has no radiator
 
 A headless Chromium run loaded the garage with the part export. The car parts render in place.
 That run did not drive a crash or fit a part. Native and source checks cover those steps.
+
+## Day cycle and headlights
+
+Verification date: 2026-10-11, Europe/Warsaw.
+Sources: `napszakvaltakozas`, `carscript.InteractSwitchLights`, and `headlightscript` in `Assembly-CSharp.dll`.
+Cycle values come from the `napszakvaltakozas` component in `level1`.
+
+A cycle is 20 minutes of day and 5 minutes of night. Dawn takes 4 minutes. Dusk takes 3 minutes.
+The game starts 4 minutes into the cycle, as the source does.
+The sun angle, color gradient, intensity, and flat ambient follow the four source phases.
+At night the light follows the source moon angles.
+The fog color mixes the source desert, grass, and winter colors by the terrain color at the player.
+The terrain color is sampled once per second.
+
+L cycles the source lamp states while the player drives: off, low beam, high beam.
+Each fitted headlight fades out, changes state, and fades in at the source rate.
+A removed headlight keeps its last state, as in the source.
+The lens glows with the source emission color of each state.
+
+Unity light units have no exact Bevy match. This build uses these approximations:
+
+- One Unity intensity unit is 8000 lux of sun light.
+- One Unity ambient unit is 400 nits. The source day ambient then equals the Bevy default.
+- A spot light matches the Unity falloff at one fifth of its range. Bevy uses inverse square falloff, so near surfaces are brighter than in the source.
+- The lens emission is the source emission color times 8000 / π nits.
+
+WebGL2 has no Bevy atmosphere. The sky color is the source fog color. The fog keeps the linear 110 to 430 meter range.
+Not ported: street lamps, the interior light, rear lamps, stars, clouds, the sun flare, heat haze, sandstorm changes, light cookies, shadows, and the debug time keys.
+
+| Check | Result |
+| --- | --- |
+| Formatting and native suite | 93 passed; eight source gates skipped by default |
+| Installed-source gates | Eight passed in explicit runs |
+| Exporter suite | Four passed |
+| Release WASM | Passed |
+
+A headless Chromium run showed the garage in day light and at the end of dusk.
+A test build with the high beam on lit the garage wall in front of the car.

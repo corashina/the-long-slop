@@ -20,7 +20,7 @@ const crosshair = document.querySelector('#crosshair');
 const heldCodes = new Set();
 const keyBits = { KeyW: 1, ArrowUp: 1, KeyS: 2, ArrowDown: 2, KeyA: 4, ArrowLeft: 4,
   KeyD: 8, ArrowRight: 8, Space: 16, KeyE: 32, ShiftLeft: 64, ShiftRight: 64,
-  ControlLeft: 128, ControlRight: 128, KeyF: 256, Mouse0: 512, KeyI: 1024, KeyC: 2048, Mouse2: 4096, KeyX:8192 };
+  ControlLeft: 128, ControlRight: 128, KeyF: 256, Mouse0: 512, KeyI: 1024, KeyC: 2048, Mouse2: 4096, KeyX: 8192, KeyL: 16384 };
 let keys = 0;
 let pressed = 0;
 let released = 0;

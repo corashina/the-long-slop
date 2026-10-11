@@ -150,6 +150,14 @@ impl Generator {
         )
     }
 
+    /// `TerrainGenerator.GetTerrainColor` at an absolute game point on the surface.
+    pub fn terrain_color(&self, point: [f64; 3]) -> [f32; 4] {
+        self.noise.vertex_color(
+            [point[0] as f32, -point[2] as f32],
+            (point[1] + self.lift) as f32,
+        )
+    }
+
     /// Converts an absolute Unity point to game space.
     pub fn game(&self, point: [f64; 3]) -> [f64; 3] {
         [point[0], point[1] - self.lift, -point[2]]
