@@ -10,6 +10,13 @@ tools/reference/.venv/Scripts/python.exe -m unittest discover -s tools/reference
 ./scripts/check.ps1 -Test reference
 ```
 
+Runtime derivation and `--stage runtime --verify` require Docker and the project toolchain image.
+Build the image with `docker build --tag my-summer-slop-toolchain --file tools/Dockerfile .`.
+Runtime verification sends manifest bytes to the native `validate-reference` command through stdin.
+It uses the game's `ReferenceManifest` contract, the existing Cargo volumes, and a read-only checkout mount.
+Missing Docker, failed validation, or an unavailable image stops acceptance before promotion.
+Library-only verification does not use Docker.
+
 The exporter reads Steam app `1017180`, build `11140890`.
 It writes `home.gltf`, `lada.gltf`, `items.gltf`, buffers, textures, and `manifest.json` into `web/assets/reference/`.
 Git ignores these files. Steam files remain unchanged.

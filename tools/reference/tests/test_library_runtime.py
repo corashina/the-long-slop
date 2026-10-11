@@ -119,3 +119,95 @@ class LibraryInputTests(unittest.TestCase):
             self.assertTrue(writer.document.images[0].extras['conversion']['flip_y'])
             original.write_bytes(b'changed image')
             with self.assertRaisesRegex(ValueError,'hash mismatch'): reader.texture(ObjectId('test',2))
+
+class RuntimeContractTests(unittest.TestCase):
+    def runtime(self, root):
+        import hashlib
+        from types import SimpleNamespace as NS
+        from tools.reference.export import provenance
+        receipt=NS(manifest_sha256='a'*64,catalog_sha256='b'*64,source_manifest_sha256='c'*64)
+        manifest=json.loads((Path(__file__).resolve().parents[3]/'tests/common/reference.json').read_bytes())
+        manifest['library']=provenance(receipt)
+        manifest['assets'].append({'id':3,'path':'reference/items.gltf','sha256':'a'*64,'root':{'file':'fixture','path_id':999},'dependencies':[]})
+        for asset in manifest['assets']:
+            scene={'asset':{'version':'2.0'},'nodes':[],'scenes':[{'nodes':[]}],'scene':0}
+            content=json.dumps(scene).encode()
+            (root/Path(asset['path']).name).write_bytes(content)
+            asset['sha256']=hashlib.sha256(content).hexdigest();asset['dependencies']=[]
+        for name in ('geometry-evidence.json','parameter-evidence.json','library-selection.json'):
+            (root/name).write_text('{}')
+        return manifest,receipt
+
+    def save(self, root, manifest):
+        (root/'manifest.json').write_text(json.dumps(manifest))
+
+    def test_runtime_contract_accepts_current_fixture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);manifest,receipt=self.runtime(root);self.save(root,manifest)
+            verify_reference(root,receipt)
+
+    def test_runtime_contract_rejects_missing_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);manifest,receipt=self.runtime(root)
+            for field in ('app_id','build_id','nodes','player','vehicle','colliders'):
+                incomplete=dict(manifest);del incomplete[field];self.save(root,incomplete)
+                with self.subTest(field=field),self.assertRaisesRegex(ValueError,'Runtime manifest contract'):
+                    verify_reference(root,receipt)
+            self.save(root,{key:manifest[key] for key in ('library','assets')})
+            with self.assertRaisesRegex(ValueError,'Runtime manifest contract'):verify_reference(root,receipt)
+
+    def test_runtime_contract_rejects_wrong_build_and_broken_relationships(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);manifest,receipt=self.runtime(root)
+            manifest['build_id']=0;self.save(root,manifest)
+            with self.assertRaisesRegex(ValueError,'Runtime manifest contract'):verify_reference(root,receipt)
+            manifest['build_id']=11140890;manifest['nodes'][0]['parent']=999999;self.save(root,manifest)
+            with self.assertRaisesRegex(ValueError,'Runtime manifest contract'):verify_reference(root,receipt)
+
+    def test_runtime_cli_verify_rejects_missing_gameplay_records(self):
+        from tools.reference.export import main
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);manifest,receipt=self.runtime(root);del manifest['player'];self.save(root,manifest)
+            before={p.name:(p.read_bytes(),p.stat().st_mtime_ns) for p in root.iterdir()}
+            with patch('tools.reference.export.stage_library',return_value=receipt),self.assertRaisesRegex(ValueError,'Runtime manifest contract'):
+                main(['--stage','runtime','--verify','--output',str(root)])
+            self.assertEqual(before,{p.name:(p.read_bytes(),p.stat().st_mtime_ns) for p in root.iterdir()})
+
+    def test_validator_delegates_exact_bytes_with_read_only_checkout(self):
+        from types import SimpleNamespace as NS
+        from tools.reference.export import validate_runtime_manifest
+        content=b'{"runtime":"unchanged bytes"}\n'
+        with patch('tools.reference.export.subprocess.run',return_value=NS(returncode=0)) as run:
+            validate_runtime_manifest(content)
+        args,kwargs=run.call_args
+        self.assertEqual(kwargs['input'],content)
+        self.assertIn('-i',args[0])
+        self.assertIn(f'type=bind,source={Path(__file__).resolve().parents[3]},target=/workspace,readonly',args[0])
+        self.assertEqual(args[0][-6:],['cargo','run','--quiet','--locked','--bin','validate-reference'])
+        with patch('tools.reference.export.subprocess.run',return_value=NS(returncode=1,stderr=b'missing field player')):
+            with self.assertRaisesRegex(ValueError,'missing field player'):validate_runtime_manifest(content)
+
+    def test_unavailable_validator_preserves_accepted_runtime_before_promotion(self):
+        from types import SimpleNamespace as NS
+        from tools.reference.export import derive_reference
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);accepted=root/'reference';accepted.mkdir()
+            (accepted/'manifest.json').write_text('accepted runtime')
+            before=(accepted/'manifest.json').read_bytes(),(accepted/'manifest.json').stat().st_mtime_ns
+            _,receipt=self.runtime(root)
+            snapshot=NS(manifest_sha256=receipt.source_manifest_sha256,files=(),root=root/'cache/source',manifest_path=root/'cache/source-manifest.json')
+            reader=NS(snapshot=snapshot,root=root/'library',records_root=root/'cache/records')
+            (root/'cache/work').mkdir(parents=True)
+            def export(source,staged,library,snapshot):
+                manifest,_=self.runtime(staged);self.save(staged,manifest)
+            with patch('tools.reference.library.reader.LibraryReader',return_value=reader),patch('tools.reference.source.LibrarySource'),patch('tools.reference.export._export_selected',side_effect=export),patch('tools.reference.export.subprocess.run',side_effect=FileNotFoundError('docker')),patch('tools.reference.export.promote_reference') as promote:
+                with self.assertRaisesRegex(ValueError,'needs Docker'):derive_reference(snapshot,receipt,accepted)
+                promote.assert_not_called()
+            self.assertEqual(before,((accepted/'manifest.json').read_bytes(),(accepted/'manifest.json').stat().st_mtime_ns))
+
+    def test_library_only_verification_does_not_call_runtime_validator(self):
+        from tools.reference.export import main
+        with patch('tools.reference.export.stage_library') as library,patch('tools.reference.export.subprocess.run') as run:
+            main(['--stage','library','--verify'])
+            library.assert_called_once()
+            run.assert_not_called()

@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 from pathlib import Path
 from .library.types import Snapshot, LibraryReceipt
 
@@ -62,14 +63,34 @@ def validate_runtime_paths(manifest):
                 raise ValueError('Invalid selected runtime dependency')
 
 
+def validate_runtime_manifest(content: bytes) -> None:
+    """Use the game's contract before accepting runtime output."""
+    root = Path(__file__).resolve().parents[2]
+    command = ['docker', 'run', '--rm', '--pull=never', '-i',
+        '--mount', f'type=bind,source={root},target=/workspace,readonly',
+        '--mount', 'type=volume,source=tld-wasm-cargo,target=/cargo',
+        '--mount', 'type=volume,source=tld-wasm-target,target=/target',
+        'my-summer-slop-toolchain', 'cargo', 'run', '--quiet', '--locked',
+        '--bin', 'validate-reference']
+    try:
+        result = subprocess.run(command, input=content, capture_output=True, check=False)
+    except OSError as error:
+        raise ValueError('Runtime manifest contract validation needs Docker and the project toolchain image') from error
+    if result.returncode:
+        detail = result.stderr.decode('utf-8', errors='replace').strip()
+        raise ValueError(f'Runtime manifest contract validation failed: {detail}')
+
+
 def verify_reference(output: Path, library) -> None:
     from .library.reader import checked
     from .gltf import validate_gltf
-    manifest = json.loads((output / 'manifest.json').read_bytes())
+    content = (output / 'manifest.json').read_bytes()
+    manifest = json.loads(content)
     if library is None or manifest.get('library') != provenance(library):
         raise ValueError('Missing or mismatched runtime library provenance')
     if manifest['library']['schema_version'] != 1 or any(not re.fullmatch('[0-9a-f]{64}', manifest['library'][k]) for k in ('manifest_sha256','catalog_sha256','source_manifest_sha256')):
         raise ValueError('Unsupported runtime provenance')
+    validate_runtime_manifest(content)
     validate_runtime_paths(manifest)
     names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json'}
     for asset in manifest['assets']:
