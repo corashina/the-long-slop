@@ -199,28 +199,29 @@ Extend `tests/starting_area.rs` and `tests/lighting_reference.rs`.
 - Produce `LightingState::light_outputs(&self) -> &[LightOutput]` and `LightingState::material_outputs(&self) -> &[LampMaterialOutput]`.
 - Produce `LightingState::control_poses(&self) -> &[ControlPoseOutput]`. Allocate these buffers once in `LightingState::new`.
 
-- [ ] Add `active_cycle_is_independent_of_physics_cap`.
+- [x] Add `active_cycle_is_independent_of_physics_cap`.
   Advance an active runtime by 1 second. Assert cycle time advances 1 second while physics advances at most six steps.
-- [ ] Add `pause_focus_and_restart_preserve_clock_rules`.
+- [x] Add `pause_focus_and_restart_preserve_clock_rules`.
   Assert pre-Start and paused calls do not advance time. Assert restart returns the cycle to the 240-second offset.
-- [ ] Add `required_sky_dependency_is_validated` by removing a required sky texture from the fixture.
-- [ ] Run starting-area and lighting reference tests. Expect new cases to fail.
-- [ ] Wire active elapsed time once per rendered frame, respecting `started`, `paused`, and `skip_elapsed`.
+- [x] Add `required_sky_dependency_is_validated` by removing a required sky texture from the fixture.
+- [x] Run starting-area and lighting reference tests. Expect new cases to fail.
+- [x] Wire active elapsed time once per rendered frame, respecting `started`, `paused`, and `skip_elapsed`.
   Advance lighting before physics catch-up. Keep physics and source fade inputs separate.
-- [ ] Replace fixed sun, clear color, ambient, linear fog, and tonemapping assumptions with the shared source lighting output.
-- [ ] Bind source sky, cloud layers, stars, sun disk, and flare resources once. Update transforms and uniforms without rebuilding geometry.
-- [ ] Implement source cookie and falloff projection in the shared lighting shader using ordinary textures and WebGL2 uniform buffers.
+- [x] Replace fixed sun, clear color, ambient, linear fog, and tonemapping assumptions with the shared source lighting output.
+- [x] Bind source sky, cloud layers, stars, sun disk, and flare resources once. Update transforms and uniforms without rebuilding geometry.
+- [x] Implement source cookie and falloff projection in the shared lighting shader using ordinary textures and WebGL2 uniform buffers.
   Bevy's cached `decal/clustered.rs` requires bindless textures; `render/mesh.rs` enables `LIGHT_TEXTURES` only when those bindings work.
   Do not enable `pbr_light_textures` as the browser solution. Keep one source shader path for covered lights.
-- [ ] Reuse Bevy shadow maps and light transforms. Replace covered direct-light contributions so the source contribution is not counted twice.
+- [x] Reuse Bevy shadow maps and light transforms. Replace covered direct-light contributions so the source contribution is not counted twice.
   Apply cookies to direct light, including diffuse and specular response. Keep emission separate from illumination.
-- [ ] Apply the shared path to procedural ground, road, station, and prop materials as well as imported receivers.
-- [ ] Document angle, intensity, fog, and output conversions. Validate shadow masks and WebGL2 binding limits before Start.
-- [ ] Run native tests and release WASM checks. Load the browser and capture dawn, noon, dusk, and night.
-- [ ] Break one required cookie path and one shader in temporary diagnostics. Confirm named loading errors and Start remaining disabled.
+- [x] Apply the shared path to procedural ground, road, station, and prop materials as well as imported receivers.
+- [x] Document angle, intensity, fog, and output conversions. Validate shadow masks and WebGL2 binding limits before Start.
+- [x] Run native tests and release WASM checks. Load the browser and capture dawn, noon, dusk, and night.
+- [x] Break one required cookie path and one shader in temporary diagnostics. Confirm named loading errors and Start remaining disabled.
   Restore the files before proceeding.
 - [ ] Verify a parked car and closed garage door cast shadows through all four phases. Record renderer differences.
-- [ ] Commit as `Render source day cycle and shared lighting`.
+  Task 7 owns the final night shadow check. Night edges remain unverified in the current dark capture.
+- [x] Commit as `Render source day cycle and shared lighting`.
 
 ## Task 4: Implement Lada light state and controls
 
