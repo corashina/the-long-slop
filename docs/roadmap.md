@@ -39,7 +39,9 @@ This branch contains unfinished rendering code. It is not a release.
 All 36 changed or new product files were preserved and verified against the recovery commit.
 The local manifest is `.superpowers/sdd/2026-10-10-material-parity/recovery-product-manifest.json`.
 Its SHA256 is `f82768b4ac0e0acc05f7578355b2a4bdd901b04698bf2a56333c98d9c63d5e47`.
-Ignored exports, source evidence, diagnostics, and reports remain in this worktree.
+Ignored exports, source evidence, diagnostics, and reports remain in the retained worktree:
+C:/Users/Corashina/.codex/worktrees/material-parity/the-long-drive-wasm.
+Relative evidence paths below use that directory.
 These files are local. Git does not contain recovered game assets.
 
 Fixture results apply to their audited revisions.
@@ -48,7 +50,7 @@ Copy/TAA stores, effect interface changes, and the Uber draft lack combined-tree
 
 | Area | Verified progress | Remaining work |
 | --- | --- | --- |
-| Texture storage color | Source sRGB/linear sampling audit and correction are preserved. | Port the correction; nine RGB-affecting slots remain incorrect in the checkpoint. |
+| Texture storage color | Source sRGB/linear sampling audit and correction are preserved. | Verify the preserved correction during integration; nine RGB-affecting slots remain incorrect in the checkpoint. |
 | Source records | Lighting, camera, sky, sun, probes, and postprocessing contracts recovered. | Final combined export and runtime integration. |
 | Surface passes | Nine-view draw issuance, generated-material routing, and ordinary-transform raster checks passed. | Connect final lighting and verify readiness. |
 | Camera depth | Seven raster views and known-clear controls passed 219 checks. | Connect final graph inputs. |

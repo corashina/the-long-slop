@@ -22,7 +22,7 @@ The current renderer inventory and unfinished interfaces are preserved on the re
 
 ## 1. Finish texture storage reconciliation
 
-- Port the source sRGB/linear storage correction from the recovery branch.
+- Verify the source sRGB/linear storage correction already present on the recovery branch.
 - Preserve separate decoded-normal and color identities.
 - Verify five metallic, three AO, and one parallax RGB slot.
 - Retain source alpha handling for the three alpha-only masks.
