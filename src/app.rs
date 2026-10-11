@@ -5,7 +5,7 @@ use crate::presentation::{
     self,
     camera::{CameraMode, DriveCamera},
     lighting::{HeadlightBeam, HeadlightLens, Sun},
-    reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
+    reference::{BodyVisual, CapQuery, ItemVisual, ReferenceVisuals, ValveVisibility},
     world::{WorldVisual, WorldVisuals},
 };
 use crate::reference::{ItemId, OpeningId, ReferenceManifest};
@@ -163,6 +163,8 @@ fn setup(
     ));
 }
 
+// Bevy systems take each resource as a parameter.
+#[allow(clippy::too_many_arguments)]
 fn check_ready(
     mut commands: Commands,
     server: Res<AssetServer>,
@@ -217,9 +219,8 @@ fn check_ready(
         Ok(true) => {
             match instruments.bind(
                 &reference.0,
-                &visuals.nodes,
+                &visuals,
                 &primitives,
-                &visuals.gltfs,
                 &gltfs,
                 &gltf_materials,
                 &mut standard_materials,
@@ -356,7 +357,7 @@ fn sync_imported(
     drive: Res<Drive>,
     mut query: Query<(&BodyVisual, &mut Transform)>,
     mut items: Query<(&ItemVisual, &mut Transform), Without<BodyVisual>>,
-    mut caps: Query<(&CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
+    mut caps: CapQuery,
     mut visibility: Query<(&ValveVisibility, &mut Visibility)>,
 ) {
     presentation::reference::sync(
@@ -405,6 +406,7 @@ fn sync_instruments(
         &mut materials,
     );
 }
+#[allow(clippy::too_many_arguments)]
 fn update_lighting(
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,

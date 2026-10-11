@@ -1397,7 +1397,7 @@ impl ReferenceManifest {
                 v.brake_torque_nm,
                 v.handbrake_torque_nm,
             ]) && finite(&v.gear_ratios)
-                && v.gear_ratios.iter().any(|ratio| *ratio == 0.0)
+                && v.gear_ratios.contains(&0.0)
                 && v.gear_free_run.len() == v.gear_ratios.len()
                 && v.mass_kg > 0.0,
             "vehicle parameters",

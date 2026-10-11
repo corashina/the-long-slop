@@ -309,15 +309,15 @@ impl StartingArea {
         self.interaction.rebase(shift);
         self.items.rebase(shift);
         for (_, previous, current) in &mut self.render_poses {
-            for i in 0..3 {
-                previous.position[i] -= shift[i];
-                current.position[i] -= shift[i];
+            for (i, shift) in shift.iter().enumerate() {
+                previous.position[i] -= shift;
+                current.position[i] -= shift;
             }
         }
         for (_, previous, current) in &mut self.item_render_poses {
-            for i in 0..3 {
-                previous.position[i] -= shift[i];
-                current.position[i] -= shift[i];
+            for (i, shift) in shift.iter().enumerate() {
+                previous.position[i] -= shift;
+                current.position[i] -= shift;
             }
         }
         self.origin = origin;
@@ -910,8 +910,8 @@ impl GarageRuntime {
             let old_origin = self.area.origin;
             self.area.sync_origin(self.stream.origin.offset);
             if let Some(target) = &mut self.target {
-                for i in 0..3 {
-                    target.point[i] -= (self.area.origin[i] - old_origin[i]) as f32;
+                for (i, old) in old_origin.iter().enumerate() {
+                    target.point[i] -= (self.area.origin[i] - old) as f32;
                 }
             }
             self.rebases += 1;

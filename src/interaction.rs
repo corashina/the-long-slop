@@ -711,67 +711,65 @@ impl InteractionState {
             && available.actions.0 & ActionMask::FILL != 0
             && let Some(held) = self.held.as_ref()
             && let Some(target) = target
-        {
-            if let Some(opening) = self
+            && let Some(opening) = self
                 .openings
                 .iter()
                 .find(|opening| opening.reference.cap == target.item && opening.valve > 0.0)
+        {
+            let (source_id, destination, flow) = if self.supplies.contains(&opening.reference.tank)
             {
-                let (source_id, destination, flow) =
-                    if self.supplies.contains(&opening.reference.tank) {
-                        if !self.openings.iter().any(|destination| {
-                            destination.reference.tank == held.item && destination.valve > 0.0
-                        }) {
-                            (held.item, held.item, 0.0)
-                        } else {
-                            (
-                                opening.reference.tank,
-                                held.item,
-                                opening.reference.flow_liters_per_second * opening.valve,
-                            )
-                        }
-                    } else {
-                        (
-                            held.item,
-                            opening.reference.tank,
-                            opening.reference.flow_liters_per_second * opening.valve,
-                        )
-                    };
-                let source_allowed = self
-                    .tank_rules
-                    .get(&source_id)
-                    .is_some_and(|rules| !rules.no_fill_from);
-                let destination_rules = self.tank_rules.get(&destination);
-                if source_id != destination
-                    && source_allowed
-                    && destination_rules.is_some_and(|rules| !rules.no_fill_this)
-                    && let Some((source, destination_state)) =
-                        items.get_pair_mut(source_id, destination)
-                    && let (Some(source), Some(destination_state)) =
-                        (source.fluid.as_mut(), destination_state.fluid.as_mut())
+                if !self.openings.iter().any(|destination| {
+                    destination.reference.tank == held.item && destination.valve > 0.0
+                }) {
+                    (held.item, held.item, 0.0)
+                } else {
+                    (
+                        opening.reference.tank,
+                        held.item,
+                        opening.reference.flow_liters_per_second * opening.valve,
+                    )
+                }
+            } else {
+                (
+                    held.item,
+                    opening.reference.tank,
+                    opening.reference.flow_liters_per_second * opening.valve,
+                )
+            };
+            let source_allowed = self
+                .tank_rules
+                .get(&source_id)
+                .is_some_and(|rules| !rules.no_fill_from);
+            let destination_rules = self.tank_rules.get(&destination);
+            if source_id != destination
+                && source_allowed
+                && destination_rules.is_some_and(|rules| !rules.no_fill_this)
+                && let Some((source, destination_state)) =
+                    items.get_pair_mut(source_id, destination)
+                && let (Some(source), Some(destination_state)) =
+                    (source.fluid.as_mut(), destination_state.fluid.as_mut())
+            {
+                let mut amount = flow * dt;
+                let source_total = source.mixture.total();
+                let destination_total = destination_state.mixture.total();
+                if destination_rules.is_some_and(|rules| rules.slow_oil)
+                    && source_total > 0.0
+                    && source.mixture.amount(1) / source_total > 0.25
+                    && destination_total > 0.05
+                    && destination_state.mixture.amount(1) / destination_total < 1.0
                 {
-                    let mut amount = flow * dt;
-                    let source_total = source.mixture.total();
-                    let destination_total = destination_state.mixture.total();
-                    if destination_rules.is_some_and(|rules| rules.slow_oil)
-                        && source_total > 0.0
-                        && source.mixture.amount(1) / source_total > 0.25
-                        && destination_total > 0.05
-                        && destination_state.mixture.amount(1) / destination_total < 1.0
-                    {
-                        amount = (amount * destination_total * self.slow_oil_modifier)
-                            .max(0.0001)
-                            .min(amount);
-                    }
-                    let liters = transfer(source, destination_state, amount);
-                    if liters > 0.0 {
-                        filling = Some(source_id);
-                        action = Some(InteractionAction::Fill {
-                            source: source_id,
-                            destination,
-                            liters,
-                        });
-                    }
+                    amount = (amount * destination_total * self.slow_oil_modifier)
+                        .max(0.0001)
+                        .min(amount);
+                }
+                let liters = transfer(source, destination_state, amount);
+                if liters > 0.0 {
+                    filling = Some(source_id);
+                    action = Some(InteractionAction::Fill {
+                        source: source_id,
+                        destination,
+                        liters,
+                    });
                 }
             }
         }

@@ -288,9 +288,16 @@ pub fn bind(
     Ok(true)
 }
 
+pub type CapQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static CapVisual, &'static mut Transform),
+    (Without<BodyVisual>, Without<ItemVisual>),
+>;
+
 pub fn sync_caps(
     area: &StartingArea,
-    caps: &mut Query<(&CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
+    caps: &mut CapQuery,
     visibility: &mut Query<(&ValveVisibility, &mut Visibility)>,
 ) {
     for (cap, mut transform) in caps {

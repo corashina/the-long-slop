@@ -315,8 +315,8 @@ fn seated_view_follows_chassis_and_rebase() {
     world.rebase(shift);
     player.rebase(shift);
     let after = player.view_pose(&world);
-    for i in 0..3 {
-        assert!((before.position[i] - shift[i] - after.position[i]).abs() < 1.0e-5);
+    for (i, shift) in shift.iter().enumerate() {
+        assert!((before.position[i] - shift - after.position[i]).abs() < 1.0e-5);
     }
     assert_eq!(before.rotation, after.rotation);
 }
