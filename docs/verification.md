@@ -16,8 +16,9 @@ Last run: 2026-10-11, Europe/Warsaw.
 | Exporter suite | `python -m unittest discover -s tools/reference/tests` | 8 passed; 3 need the installed build |
 | Release WASM | `cargo build --locked --release --target wasm32-unknown-unknown --lib` | Passed |
 
-`scripts/check.ps1` runs the Rust checks and browser modules in Docker. CI runs every row except the installed-source gates.
-Source gates and the exporter need the installed build. They stay local.
+`scripts/check.ps1` runs the Rust checks and browser modules in Docker.
+`.github/workflows/check.yml` runs every row except the installed-source gates on each PR and on master.
+The source gates and three exporter tests need the installed build. They run only locally.
 
 ## Evidence by feature
 
