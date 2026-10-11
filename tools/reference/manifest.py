@@ -10,7 +10,7 @@ from .visibility import recover_camera_visibility
 from .parts import recover_parts
 
 
-def build_manifest(source, roots, reports, hashes):
+def build_manifest(source, roots, reports, hashes, library):
     nodes=[]; by_source={}; objects={}; components={}; node_readers={}
     assets=[]
     for asset_id,(name,readers) in enumerate(roots.items(),1):
@@ -57,7 +57,7 @@ def build_manifest(source, roots, reports, hashes):
     car_reader=components[car_root]['carscript'][0];car=source.read(car_reader)
     main_reader=source.get('level1',64919);main=source.read(main_reader)
     player_reader=source.get('level1',80125);player=source.read(player_reader)
-    physics=next(reader for reader in source.env.objects if reader.type.name=='PhysicsManager')
+    physics=next(reader for reader in source.objects.values() if reader.type.name=='PhysicsManager')
     matrix=source.read(physics)['m_LayerCollisionMatrix']
     if len(matrix)!=32:raise ValueError('Physics layer matrix must have 32 masks')
     body_roots={};bodies=[]
@@ -119,7 +119,7 @@ def build_manifest(source, roots, reports, hashes):
             value={'id':len(anchors)+1,'source':source_id(node_readers[node]),'node':node,'body':body_id,'transform':pose}
             anchors.append(value);anchor_nodes[node]=value['id']
         return anchor_nodes[node]
-    colliders=[];exporter=GltfExporter(source,None);wheel_parts_source=[];detachable_colliders=set()
+    colliders=[];exporter=GltfExporter(source,None,library);wheel_parts_source=[];detachable_colliders=set()
     for node,group in components.items():
         if not nodes[node-1]['active'] or 'partscript' not in group:continue
         part=group['partscript'][0];part_data=source.read(part);pick=source.resolve(part,part_data['p']);pick_data=source.read(pick)

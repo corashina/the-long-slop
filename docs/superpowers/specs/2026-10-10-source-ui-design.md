@@ -26,9 +26,11 @@ Use `fpscontroller` for interaction precedence and `carscript` for instrument si
 Use `meterscript`, `mutatoscript`, `forgoszamlap`, and `ledkijelzoscript` for instrument presentation.
 
 The source menu uses LiberationSans SDF. Gameplay text uses Unity's built-in Arial.
-The TMP asset contains no source font pointer, so it cannot supply a browser font file.
-Self-host Liberation Sans from the [upstream font project](https://github.com/liberationfonts/liberation-fonts).
-Ship its license and record its version and hash. Use Arial for gameplay text on the Windows target.
+Use the embedded Liberation Sans Regular font at `sharedassets0.assets:769` from the accepted asset library.
+The stored font contains 350,200 bytes.
+Its SHA-256 is `e5b0af421ea2bfbc1ac8d251d647268087ae82786234c57f757d1f0b90fa8b49`.
+The TMP source-font pointer is null; the separate Font record supplies the browser font bytes.
+Keep the font license and source provenance. Use Arial for gameplay text on the Windows target.
 Match source font weight, size, alignment, wrapping, and shadow.
 Record the browser text renderer as a difference from Unity's SDF renderer.
 Remove the obsolete Libre Baskerville file and license when nothing references them.

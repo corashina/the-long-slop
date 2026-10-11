@@ -5,6 +5,7 @@ import struct
 from pathlib import Path
 
 from .source import key, source_id, vector
+from .library.reader import LibraryReader
 
 
 def convert_point(value: tuple[float, float, float]) -> tuple[float, float, float]:
@@ -17,6 +18,13 @@ def convert_rotation(value):
 
 def convert_triangles(values):
     return [(a, c, b) for a, b, c in values]
+
+
+def convert_bind_poses(matrices):
+    """Reflect Unity inverse bind matrices and store glTF column order."""
+    signs = (1, 1, -1, 1)
+    return [tuple(matrix[f'e{row}{column}'] * signs[row] * signs[column]
+                  for column in range(4) for row in range(4)) for matrix in matrices]
 
 
 def transform_point(point, translation, rotation, scale):
@@ -34,7 +42,7 @@ def converted_transform(data):
             'scale': list(vector(data['m_LocalScale']))}
 
 
-class GltfExporter:
+class GltfBuilder:
     def __init__(self, source, output):
         import pygltflib as gl
         self.gl = gl
@@ -49,7 +57,7 @@ class GltfExporter:
         self.material_report = []
         self.samplers = {}
 
-    def accessor(self, values, shape, component=5126, target=34962):
+    def accessor(self, values, shape, component=5126, target=34962, buffer_index=0):
         gl = self.gl
         width = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4, 'MAT4':16}[shape]
         rows = [tuple(value) if width > 1 else (value,) for value in values]
@@ -61,11 +69,16 @@ class GltfExporter:
         code = {5126:'f',5125:'I',5123:'H'}[component]
         self.binary.extend(struct.pack(f'<{len(flat)}{code}', *flat))
         view = len(self.document.bufferViews)
-        self.document.bufferViews.append(gl.BufferView(buffer=0, byteOffset=offset, byteLength=len(self.binary)-offset, target=target))
+        self.document.bufferViews.append(gl.BufferView(buffer=buffer_index, byteOffset=offset, byteLength=len(self.binary)-offset, target=target))
         accessor = len(self.document.accessors)
         self.document.accessors.append(gl.Accessor(bufferView=view, componentType=component, count=len(rows), type=shape,
             min=[min(row[i] for row in rows) for i in range(width)], max=[max(row[i] for row in rows) for i in range(width)]))
         return accessor
+
+class GltfExporter(GltfBuilder):
+    def __init__(self, source, output, library: LibraryReader):
+        super().__init__(source, output)
+        self.library = library
 
     def texture(self, owner, environment, color_space):
         from PIL import Image
@@ -78,23 +91,29 @@ class GltfExporter:
             return None
         identity = key(reader), color_space
         if identity not in self.textures:
-            texture = self.source.object(reader)
-            settings=texture.m_TextureSettings
-            sampler_key=(settings.m_FilterMode,settings.m_WrapU,settings.m_WrapV,texture.m_MipCount>1,settings.m_Aniso,settings.m_MipBias)
+            texture = self.source.read(reader)
+            settings=texture['m_TextureSettings']
+            sampler_key=(settings['m_FilterMode'],settings['m_WrapU'],settings['m_WrapV'],texture['m_MipCount']>1,settings['m_Aniso'],settings['m_MipBias'])
             if sampler_key not in self.samplers:
                 wrapping={0:10497,1:33071,2:33648}
-                if settings.m_WrapU not in wrapping or settings.m_WrapV not in wrapping:
+                if settings['m_WrapU'] not in wrapping or settings['m_WrapV'] not in wrapping:
                     raise ValueError(f'Unsupported texture wrap mode: {key(reader)}')
                 filtering={0:(9728,9984),1:(9729,9985),2:(9729,9987)}
-                mag,minimum=filtering[settings.m_FilterMode]
-                if texture.m_MipCount<=1:minimum=mag
+                mag,minimum=filtering[settings['m_FilterMode']]
+                if texture['m_MipCount']<=1:minimum=mag
                 self.samplers[sampler_key]=len(self.document.samplers)
-                self.document.samplers.append(gl.Sampler(wrapS=wrapping[settings.m_WrapU],wrapT=wrapping[settings.m_WrapV],
-                    magFilter=mag,minFilter=minimum,extras={'unity_aniso':settings.m_Aniso,'unity_mip_bias':settings.m_MipBias}))
+                self.document.samplers.append(gl.Sampler(wrapS=wrapping[settings['m_WrapU']],wrapT=wrapping[settings['m_WrapV']],
+                    magFilter=mag,minFilter=minimum,extras={'unity_aniso':settings['m_Aniso'],'unity_mip_bias':settings['m_MipBias']}))
             name = f'texture-{reader.assets_file.name}-{reader.path_id}-{color_space}.png'
-            texture.image.transpose(Image.Transpose.FLIP_TOP_BOTTOM).save(self.output.parent / name)
+            from .library.types import ObjectId
+            with Image.open(self.library.texture(ObjectId(*key(reader)))) as stored:
+                image = stored.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+                if color_space == 'normal':
+                    from .library.models import _normal_rgb
+                    image = _normal_rgb(image)
+                image.save(self.output.parent / name)
             image = len(self.document.images)
-            self.document.images.append(gl.Image(uri=name, extras={'source': source_id(reader), 'color_space': color_space,'unity_color_space':texture.m_ColorSpace}))
+            self.document.images.append(gl.Image(uri=name, extras={'source': source_id(reader), 'color_space': color_space,'unity_color_space':texture['m_ColorSpace'], 'conversion':{'input':'stored_source_png','flip_y':True,'channels':'unity_normal_to_rgb' if color_space == 'normal' else 'unchanged'}}))
             self.textures[identity] = len(self.document.textures)
             self.document.textures.append(gl.Texture(source=image, sampler=self.samplers[sampler_key]))
         scale, offset = environment['m_Scale'], environment['m_Offset']
@@ -119,7 +138,7 @@ class GltfExporter:
         if color_override:color=color_override
         mode = int(floats.get('_Mode', 0))
         shader = self.source.resolve(reader, data['m_Shader'])
-        shader_name = (self.source.object(shader).m_Name or self.source.object(shader).m_ParsedForm.m_Name) if shader else 'Unity built-in shader'
+        shader_name = (self.source.read(shader)['m_Name'] or self.source.read(shader)['m_ParsedForm']['m_Name']) if shader else 'Unity built-in shader'
         if mode == 0 and data.get('m_CustomRenderQueue', -1) >= 3000:
             mode = 2
         material = gl.Material(name=data['m_Name'], alphaMode={0:'OPAQUE',1:'MASK',2:'BLEND',3:'BLEND'}.get(mode,'OPAQUE'),
@@ -135,12 +154,18 @@ class GltfExporter:
                     material.pbrMetallicRoughness.baseColorTexture = gl.TextureInfo(**info)
                 break
         if '_BumpMap' in environments:
-            info = self.texture(reader, environments['_BumpMap'], 'linear')
+            info = self.texture(reader, environments['_BumpMap'], 'normal')
             if info:
                 material.normalTexture = gl.NormalMaterialTexture(scale=floats.get('_BumpScale',1.), **info)
         emission = colors.get('_EmissionColor')
         if emission and '_EMISSION' in data['m_ValidKeywords']:
-            material.emissiveFactor = [emission[n] for n in ('r','g','b')]
+            factors = [emission[n] for n in ('r','g','b')]
+            strength = max(1., *factors)
+            material.emissiveFactor = [value / strength for value in factors]
+            if strength > 1:
+                extension = 'KHR_materials_emissive_strength'
+                material.extensions[extension] = {'emissiveStrength':strength}
+                if extension not in self.document.extensionsUsed:self.document.extensionsUsed.append(extension)
             if '_EmissionMap' in environments:
                 info = self.texture(reader, environments['_EmissionMap'], 'srgb')
                 if info:
@@ -151,52 +176,78 @@ class GltfExporter:
             'adaptation': 'Unity shader properties retained in extras; base color, normal, emission, alpha mapped to glTF PBR.'})
         return self.materials[identity]
 
+    def accepted_mesh(self, reader):
+        from .library.types import ObjectId
+        identity = key(reader)
+        if identity not in self.mesh_data:
+            self.mesh_data[identity] = self.library.mesh(ObjectId(*identity))
+        return self.mesh_data[identity]
+
+    def rows(self, document, directory, index):
+        from urllib.parse import unquote
+        accessor = document.accessors[index]
+        view = document.bufferViews[accessor.bufferView]
+        content = (directory / unquote(document.buffers[view.buffer].uri)).read_bytes()
+        code,size = {5126:('f',4),5125:('I',4),5123:('H',2),5121:('B',1)}[accessor.componentType]
+        width = {'SCALAR':1,'VEC3':3}[accessor.type]
+        start = (view.byteOffset or 0)+(accessor.byteOffset or 0)
+        stride = view.byteStride or size*width
+        return [struct.unpack_from('<'+str(width)+code,content,start+i*stride) for i in range(accessor.count)]
+
     def geometry(self, reader):
-        if key(reader) not in self.mesh_data:
-            from UnityPy.helpers.MeshHelper import MeshHandler
-            handler = MeshHandler(self.source.object(reader))
-            handler.process()
-            if not handler.m_Vertices:
-                raise ValueError(f'Mesh has no vertices: {key(reader)}')
-            triangles = handler.get_triangles()
-            triangles=[[(a+submesh.baseVertex,b+submesh.baseVertex,c+submesh.baseVertex) for a,b,c in group]
-                for submesh,group in zip(handler.src.m_SubMeshes,triangles)]
-            count = len(handler.m_Vertices)
-            if any(i < 0 or i >= count for group in triangles for triangle in group for i in triangle):
-                raise ValueError(f'Mesh index outside vertices: {key(reader)}')
-            self.mesh_data[key(reader)] = handler, list(map(convert_point, handler.m_Vertices)), [convert_triangles(group) for group in triangles]
-        return self.mesh_data[key(reader)]
+        document,directory,index = self.accepted_mesh(reader)
+        mesh = document.meshes[index]
+        positions = {p.attributes.POSITION for p in mesh.primitives}
+        if len(positions) != 1: raise ValueError('Collision mesh requires shared vertices')
+        points = self.rows(document,directory,next(iter(positions)))
+        groups = []
+        for primitive in mesh.primitives:
+            if primitive.mode != 4: raise ValueError('Collision mesh requires triangles')
+            values = [r[0] for r in self.rows(document,directory,primitive.indices)]
+            groups.append(list(zip(values[::3],values[1::3],values[2::3])))
+        return None,points,groups
 
     def mesh(self, mesh_reader, material_readers, color_override=None):
+        import copy
+        from urllib.parse import unquote
         identity = key(mesh_reader), tuple(key(r) if r else None for r in material_readers), tuple(color_override.values()) if color_override else None
-        if identity in self.meshes:
-            return self.meshes[identity]
-        gl = self.gl
-        handler, points, submeshes = self.geometry(mesh_reader)
-        position = self.accessor(points,'VEC3')
-        normal = self.accessor([convert_point(v[:3]) for v in handler.m_Normals], 'VEC3') if handler.m_Normals else None
-        tangent = self.accessor([(*convert_point(v[:3]),-v[3]) for v in handler.m_Tangents], 'VEC4') if handler.m_Tangents else None
-        uvs={f'TEXCOORD_{index}':self.accessor(values,'VEC2') for index in range(8) if (values:=getattr(handler,f'm_UV{index}'))}
-        colors=self.accessor(handler.m_Colors,'VEC4') if handler.m_Colors else None
-        joints = self.accessor(handler.m_BoneIndices, 'VEC4',5123) if handler.m_BoneIndices else None
-        weights = self.accessor(handler.m_BoneWeights, 'VEC4') if handler.m_BoneWeights else None
-        primitives = []
-        if len(material_readers) < len(submeshes):
-            raise ValueError(f'Missing submesh material: {key(mesh_reader)}')
-        for index, triangles in enumerate(submeshes):
-            if not triangles:
-                continue
-            material = self.material(material_readers[index],color_override) if material_readers[index] else None
-            if material is None:
-                self.material_report.append({'source':source_id(mesh_reader), 'submesh':index,
-                    'unresolved':'Serialized material is null. Original startup creates the material.'})
-            attributes = gl.Attributes(POSITION=position, NORMAL=normal, TANGENT=tangent, COLOR_0=colors, JOINTS_0=joints, WEIGHTS_0=weights, **uvs)
-            primitives.append(gl.Primitive(attributes=attributes, indices=self.accessor([i for t in triangles for i in t], 'SCALAR',5125,34963),
-                material=material, extras={'submesh': index, 'source': source_id(mesh_reader), 'material_resolved':material is not None}))
-        mesh_id = len(self.document.meshes)
-        self.document.meshes.append(gl.Mesh(primitives=primitives, name=self.source.object(mesh_reader).m_Name))
-        self.meshes[identity] = mesh_id
-        return mesh_id
+        if identity in self.meshes: return self.meshes[identity]
+        document,directory,index = self.accepted_mesh(mesh_reader)
+        mesh = copy.deepcopy(document.meshes[index])
+        accessors = {}
+        views = {}
+        def accessor(old):
+            if old in accessors: return accessors[old]
+            value = copy.deepcopy(document.accessors[old])
+            if value.bufferView not in views:
+                view = copy.deepcopy(document.bufferViews[value.bufferView])
+                raw = (directory / unquote(document.buffers[view.buffer].uri)).read_bytes()
+                start = view.byteOffset or 0
+                self.binary.extend(b'\0' * (-len(self.binary)%4))
+                offset = len(self.binary)
+                self.binary.extend(raw[start:start+view.byteLength])
+                view.buffer = 0; view.byteOffset = offset
+                views[value.bufferView] = len(self.document.bufferViews)
+                self.document.bufferViews.append(view)
+            value.bufferView = views[value.bufferView]
+            accessors[old] = len(self.document.accessors)
+            self.document.accessors.append(value)
+            return accessors[old]
+        for primitive in mesh.primitives:
+            submesh = primitive.extras['submesh']
+            if submesh >= len(material_readers): raise ValueError('Missing submesh material')
+            material = material_readers[submesh]
+            primitive.material = self.material(material,color_override) if material else None
+            if primitive.indices is not None: primitive.indices = accessor(primitive.indices)
+            for name,value in vars(primitive.attributes).items():
+                if isinstance(value,int): setattr(primitive.attributes,name,accessor(value))
+            primitive.targets = [{name:accessor(value) for name,value in target.items()} for target in primitive.targets]
+        if mesh.extras.get('inverse_bind_accessor') is not None:
+            mesh.extras['inverse_bind_accessor'] = accessor(mesh.extras['inverse_bind_accessor'])
+        result = len(self.document.meshes)
+        self.document.meshes.append(mesh)
+        self.meshes[identity] = result
+        return result
 
     def export(self, roots):
         gl = self.gl
@@ -236,7 +287,7 @@ class GltfExporter:
             if renderer and (mesh_filter or renderer.type.name == 'SkinnedMeshRenderer'):
                 renderer_data = self.source.read(renderer)
                 render_enabled=bool(renderer_data['m_Enabled']) and key(renderer) not in hidden_lods
-                text_component=next((r for r in record['components'] if r.type.name=='MonoBehaviour' and self.source.class_name(r) in {'TextMeshPro','TMP_SubMesh'}),None)
+                text_component=next((r for r in record['components'] if r.type.name=='MonoBehaviour' and self.source.read(r)['m_Script']['m_PathID'] and self.source.class_name(r) in {'TextMeshPro','TMP_SubMesh'}),None)
                 if text_component:
                     render_enabled=False
                     self.material_report.append({'source':source_id(renderer),
@@ -263,10 +314,7 @@ class GltfExporter:
                             matrices = self.source.read(mesh_reader)['m_BindPose']
                             if len(matrices) != len(bones):
                                 raise ValueError(f'Skin bind pose count: {key(reader)}')
-                            converted = []
-                            signs = [1,1,-1,1]
-                            for matrix in matrices:
-                                converted.append(tuple(matrix[f'e{row}{column}']*signs[row]*signs[column] for column in range(4) for row in range(4)))
+                            converted = convert_bind_poses(matrices)
                             node.skin = len(self.document.skins)
                             root_bone = self.source.resolve(renderer,renderer_data['m_RootBone'])
                             self.document.skins.append(gl.Skin(joints=[mapping[key(bone)] for bone in bones],
@@ -283,7 +331,7 @@ class GltfExporter:
         # Cache all instrument material variants in the same imported glTF.
         for record in records:
             for component in record['components']:
-                if component.type.name!='MonoBehaviour' or not component.parse_monobehaviour_head().m_Script.path_id:continue
+                if component.type.name!='MonoBehaviour' or not self.source.read(component)['m_Script']['m_PathID']:continue
                 cname=self.source.class_name(component)
                 if cname not in ('meterscript','mutatoscript','ledkijelzoscript','forgoszamlap'):continue
                 data=self.source.read(component)
@@ -323,25 +371,208 @@ class GltfExporter:
 
 
 def validate_gltf(path):
+    """Check generated glTF references, byte ranges, geometry, and rigs."""
+    import json
+    from urllib.parse import unquote
     import pygltflib as gl
     from pygltflib.validator import validate
     document = gl.GLTF2().load_json(str(path))
-    validate(document)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore',
+            message=r'^pygltf\.utils\.validator is a provisional function and may not exist in future versions\.$',
+            category=UserWarning, module=r'^pygltflib\.validator$')
+        validate(document)
+    raw_document = json.loads(path.read_text())
+    def index(value, collection, label):
+        if not isinstance(value, int) or not 0 <= value < len(collection):
+            raise ValueError(f'Invalid {label} index: {value}')
+        return collection[value]
+    buffers = []
     for buffer in document.buffers:
-        if (path.parent / buffer.uri).stat().st_size != buffer.byteLength:
+        content = (path.parent / unquote(buffer.uri)).read_bytes()
+        if buffer.byteLength <= 0 or len(content) != buffer.byteLength:
             raise ValueError(f'Buffer size mismatch: {buffer.uri}')
+        buffers.append(content)
+    for view in document.bufferViews:
+        content = index(view.buffer, buffers, 'buffer')
+        if view.byteLength < 0 or (view.byteOffset or 0) < 0 or (view.byteOffset or 0) + view.byteLength > len(content):
+            raise ValueError('Buffer view range exceeds buffer')
+    shapes = {'SCALAR':1, 'VEC2':2, 'VEC3':3, 'VEC4':4, 'MAT2':4, 'MAT3':9, 'MAT4':16}
+    components = {5120:('b',1),5121:('B',1),5122:('h',2),5123:('H',2),5125:('I',4),5126:('f',4)}
+    for accessor in document.accessors:
+        view = index(accessor.bufferView, document.bufferViews, 'accessor buffer view')
+        if accessor.sparse: raise ValueError('Generated accessors must be dense')
+        if accessor.type not in shapes or accessor.componentType not in components:
+            raise ValueError('Invalid accessor format')
+        width = shapes[accessor.type]
+        size = components[accessor.componentType][1]
+        stride = view.byteStride or width * size
+        offset = accessor.byteOffset or 0
+        if accessor.count <= 0 or offset < 0 or offset % size or ((view.byteOffset or 0) + offset) % size:
+            raise ValueError('Invalid accessor count or alignment')
+        if stride < width * size or stride % size:
+            raise ValueError('Invalid accessor stride')
+        if offset + (accessor.count-1)*stride + width*size > view.byteLength:
+            raise ValueError('Accessor range exceeds buffer view')
+        if (accessor.min and len(accessor.min) != width) or (accessor.max and len(accessor.max) != width):
+            raise ValueError('Invalid accessor bounds width')
+    def rows(accessor_index):
+        accessor = index(accessor_index,document.accessors,'accessor')
+        view = document.bufferViews[accessor.bufferView]
+        code,size = components[accessor.componentType]
+        width = shapes[accessor.type]
+        stride = view.byteStride or width*size
+        content = buffers[view.buffer]
+        start = (view.byteOffset or 0)+(accessor.byteOffset or 0)
+        for row in range(accessor.count):
+            values = struct.unpack_from('<'+str(width)+code,content,start+row*stride)
+            if any(not math.isfinite(value) for value in values): raise ValueError('Non-finite accessor value')
+            yield values
+    # Check float payloads, including mesh attributes and inverse bind matrices.
+    for i,accessor in enumerate(document.accessors):
+        if accessor.componentType == 5126:
+            for row in rows(i): pass
     for image in document.images:
-        if not (path.parent / image.uri).is_file():
+        if image.uri is not None and not (path.parent / unquote(image.uri)).is_file():
             raise ValueError(f'Missing texture: {image.uri}')
-    for node in document.nodes:
-        if node.mesh is not None and not 0 <= node.mesh < len(document.meshes):
-            raise ValueError('Invalid node mesh index')
-        if any(not 0 <= child < len(document.nodes) for child in node.children):
-            raise ValueError('Invalid child index')
+        if image.bufferView is not None: index(image.bufferView,document.bufferViews,'image buffer view')
+    for texture in document.textures:
+        index(texture.source,document.images,'texture image')
+        if texture.sampler is not None: index(texture.sampler,document.samplers,'texture sampler')
+    for material in document.materials:
+        if material.pbrMetallicRoughness:
+            pbr = material.pbrMetallicRoughness
+            if len(pbr.baseColorFactor) != 4 or any(not math.isfinite(v) or not 0 <= v <= 1 for v in (*pbr.baseColorFactor,pbr.metallicFactor,pbr.roughnessFactor)):
+                raise ValueError('Invalid PBR material factor')
+        strength = material.extensions.get('KHR_materials_emissive_strength', {}).get('emissiveStrength', 1.)
+        if not math.isfinite(strength) or strength < 0:raise ValueError('Invalid emissive strength')
+        if len(material.emissiveFactor) != 3 or any(not math.isfinite(v) or not 0 <= v <= 1 for v in material.emissiveFactor): raise ValueError('Invalid emissive factor')
+        infos = [material.normalTexture,material.occlusionTexture,material.emissiveTexture]
+        if material.pbrMetallicRoughness:
+            infos.extend((material.pbrMetallicRoughness.baseColorTexture,material.pbrMetallicRoughness.metallicRoughnessTexture))
+        for info in infos:
+            if info is not None: index(info.index,document.textures,'material texture')
+    for mesh in document.meshes:
+        if not mesh.primitives: raise ValueError('Mesh has no primitives')
+        target_counts = set()
+        for primitive in mesh.primitives:
+            attributes = {name:value for name,value in vars(primitive.attributes).items() if isinstance(value,int)}
+            position = index(attributes.get('POSITION'),document.accessors,'position accessor')
+            if position.type != 'VEC3' or position.componentType != 5126: raise ValueError('Invalid position accessor')
+            for name,value in attributes.items():
+                attribute = index(value,document.accessors,'attribute accessor')
+                if attribute.count != position.count: raise ValueError('Attribute count mismatch')
+                expected = 'VEC2' if name.startswith('TEXCOORD_') else {'NORMAL':'VEC3','TANGENT':'VEC4','JOINTS_0':'VEC4','WEIGHTS_0':'VEC4'}.get(name)
+                if expected and attribute.type != expected: raise ValueError(f'Invalid {name} shape')
+                if name.startswith('JOINTS_') and attribute.componentType not in (5121,5123): raise ValueError('Invalid joint component type')
+            count = position.count
+            if primitive.indices is not None:
+                indices = index(primitive.indices,document.accessors,'primitive indices')
+                if indices.type != 'SCALAR' or indices.componentType not in (5121,5123,5125): raise ValueError('Invalid index accessor')
+                count = indices.count
+                if any(row[0] >= position.count for row in rows(primitive.indices)): raise ValueError('Primitive vertex index exceeds vertex count')
+            mode = primitive.mode if primitive.mode is not None else 4
+            if mode not in range(7) or (mode == 1 and count % 2) or (mode == 4 and count % 3): raise ValueError('Invalid primitive topology')
+            if (mode in (2,3) and count < 2) or (mode in (5,6) and count < 3): raise ValueError('Insufficient primitive vertices')
+            if primitive.material is not None: index(primitive.material,document.materials,'primitive material')
+            target_counts.add(len(primitive.targets or []))
+            for target in primitive.targets or []:
+                for semantic,value in target.items():
+                    accessor = index(value,document.accessors,'morph accessor')
+                    if semantic not in ('POSITION','NORMAL','TANGENT') or accessor.type != 'VEC3' or accessor.componentType != 5126 or accessor.count != position.count:
+                        raise ValueError('Invalid morph target')
+        if len(target_counts) > 1: raise ValueError('Morph count differs between primitives')
+        if mesh.weights and target_counts and len(mesh.weights) != next(iter(target_counts)): raise ValueError('Mesh morph weight count mismatch')
+    parents = {}
+    for i,node in enumerate(document.nodes):
+        if node.mesh is not None: index(node.mesh,document.meshes,'node mesh')
+        for child in node.children:
+            index(child,document.nodes,'child node')
+            if child in parents: raise ValueError('Node has multiple parents')
+            parents[child] = i
+        weights = raw_document['nodes'][i].get('weights',[])
+        node.weights = weights
+        if weights:
+            mesh = index(node.mesh,document.meshes,'morph node mesh')
+            if len(weights) != len(mesh.weights) or any(not math.isfinite(v) for v in weights): raise ValueError('Node morph weight count mismatch')
+        if node.skin is not None:
+            skin = index(node.skin,document.skins,'node skin')
+            if node.mesh is None: raise ValueError('Skinned node has no mesh')
+            for primitive in document.meshes[node.mesh].primitives:
+                joints = primitive.attributes.JOINTS_0
+                weights_attribute = primitive.attributes.WEIGHTS_0
+                if joints is None or weights_attribute is None: raise ValueError('Skinned primitive lacks joints or weights')
+                if any(j >= len(skin.joints) for row in rows(joints) for j in row): raise ValueError('Skin joint attribute exceeds joint count')
+    for i in range(len(document.nodes)):
+        seen = set()
+        parent = i
+        while parent in parents:
+            if parent in seen: raise ValueError('Node hierarchy cycle')
+            seen.add(parent)
+            parent = parents[parent]
+    for skin in document.skins:
+        if not skin.joints: raise ValueError('Skin has no authored joints')
+        for joint in skin.joints: index(joint,document.nodes,'skin joint')
+        if skin.skeleton is not None: index(skin.skeleton,document.nodes,'skin skeleton')
+        if skin.inverseBindMatrices is not None:
+            accessor = index(skin.inverseBindMatrices,document.accessors,'inverse bind accessor')
+            if accessor.type != 'MAT4' or accessor.componentType != 5126 or accessor.count != len(skin.joints): raise ValueError('Skin bind pose count mismatch')
+    for scene in document.scenes:
+        for root in scene.nodes:
+            index(root,document.nodes,'scene root')
+            if root in parents: raise ValueError('Scene root has a parent')
+    if document.scene is not None: index(document.scene,document.scenes,'default scene')
+    validate_animation_channels(document,rows)
     return document
 
 
-def export_gltf(roots, output: Path) -> dict:
+def export_gltf(roots, output: Path, library) -> dict:
     """Roots are (Source, selected Transform readers)."""
     source, readers = roots
-    return GltfExporter(source, output).export(readers)
+    return GltfExporter(source, output, library).export(readers)
+
+
+
+def validate_animation_channels(document, rows):
+    """Check animation accessors without reading shared geometry payloads."""
+    def item(index,items,label):
+        if not isinstance(index,int) or not 0<=index<len(items):raise ValueError(f'Invalid animation {label}')
+        return items[index]
+    for animation in document.animations:
+        targets=set()
+        for channel in animation.channels:
+            sampler=item(channel.sampler,animation.samplers,'sampler')
+            node=item(channel.target.node,document.nodes,'node')
+            path=channel.target.path
+            target=(channel.target.node,path)
+            if target in targets:raise ValueError('Duplicate animation target')
+            targets.add(target)
+            if path not in ('translation','rotation','scale','weights'):raise ValueError('Invalid animation target path')
+            incoming=item(sampler.input,document.accessors,'input')
+            outgoing=item(sampler.output,document.accessors,'output')
+            if incoming.type!='SCALAR' or incoming.componentType!=5126 or outgoing.componentType!=5126:
+                raise ValueError('Invalid animation accessor format')
+            for accessor in (incoming,outgoing):
+                view=item(accessor.bufferView,document.bufferViews,'buffer view')
+                if view.target is not None:raise ValueError('Animation buffer view has a vertex target')
+            times=[r[0] for r in rows(sampler.input)]
+            if not times or times[0]<0 or any(not math.isfinite(t) for t in times) or any(b<=a for a,b in zip(times,times[1:])):
+                raise ValueError('Invalid animation key times')
+            interpolation=sampler.interpolation or 'LINEAR'
+            if interpolation not in ('STEP','LINEAR','CUBICSPLINE'):raise ValueError('Invalid animation interpolation')
+            factor=3 if interpolation=='CUBICSPLINE' else 1
+            count=len(times)*factor
+            shape='VEC4' if path=='rotation' else 'VEC3'
+            if path=='weights':
+                mesh=item(node.mesh,document.meshes,'morph mesh')
+                widths={len(p.targets or []) for p in mesh.primitives}
+                if len(widths)!=1 or not next(iter(widths)):raise ValueError('Invalid animation morph targets')
+                count*=next(iter(widths));shape='SCALAR'
+            if outgoing.type!=shape or outgoing.count!=count:raise ValueError('Animation output dimensions differ')
+            values=list(rows(sampler.output))
+            if any(not math.isfinite(v) for row in values for v in row):raise ValueError('Non-finite animation output')
+            if path=='rotation':
+                quaternions=values[1::3] if factor==3 else values
+                if any(abs(sum(v*v for v in q)-1)>1e-4 for q in quaternions):
+                    raise ValueError('Invalid animation quaternion')

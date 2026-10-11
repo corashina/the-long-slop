@@ -3,10 +3,13 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 from pathlib import Path
+from .library.types import Snapshot, LibraryReceipt
 
 APP_ID = 1017180
 BUILD_ID = 11140890
+SOURCE_WORK_ROOT = Path('.cache/reference-library')
 
 
 def validate_build(steam_root: Path):
@@ -19,21 +22,120 @@ def validate_build(steam_root: Path):
     return values
 
 
-def export_reference(steam_root: Path, output: Path) -> None:
+def derive_reference(snapshot: Snapshot, library: LibraryReceipt, output: Path) -> None:
+    import tempfile
+    from .library.reader import LibraryReader
+    from .source import LibrarySource
+    if snapshot.manifest_sha256 != library.source_manifest_sha256:
+        raise ValueError('Runtime source provenance mismatch')
+    reader = LibraryReader(library)
+    if snapshot.files != reader.snapshot.files or snapshot.root.resolve() != reader.snapshot.root.resolve():
+        raise ValueError('Runtime source storage mismatch')
+    target = output.resolve()
+    for protected in (snapshot.manifest_path.parent.resolve(), reader.root):
+        if target.is_relative_to(protected) or protected.is_relative_to(target):
+            raise ValueError('Runtime output overlaps accepted library storage')
+    from .library.storage import RUNTIME_BYTES, check_space, tree_bytes
+    check_space('runtime: selected scene staging', reader.records_root.parent,
+                RUNTIME_BYTES, retained=tree_bytes(output))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    staged = Path(tempfile.mkdtemp(prefix='runtime-', dir=reader.records_root.parent / 'work'))
+    _export_selected(LibrarySource(reader), staged, reader, snapshot)
+    verify_reference(staged, library)
+    promote_reference(staged, output)
+
+
+def promote_reference(staged: Path, accepted: Path) -> None:
+    from .library.validation import _publish_directory
+    _publish_directory(staged, accepted)
+
+
+def provenance(library):
+    return {'schema_version':1, 'manifest_sha256':library.manifest_sha256,
+            'catalog_sha256':library.catalog_sha256, 'source_manifest_sha256':library.source_manifest_sha256}
+
+
+def validate_runtime_paths(manifest):
+    assets = manifest.get('assets', [])
+    if {a['path'] for a in assets} != {'reference/home.gltf','reference/lada.gltf','reference/items.gltf'} or len(assets) != 3:
+        raise ValueError('Runtime must contain only the selected scenes')
+    for asset in assets:
+        for item in [asset, *asset['dependencies']]:
+            name = item.get('file', item.get('path'))
+            if not name.startswith('reference/') or len(Path(name).parts) != 2 or Path(name).suffix not in ('.gltf','.bin','.png'):
+                raise ValueError('Invalid selected runtime dependency')
+    sprites = manifest.get('ui', {}).get('sprites', [])
+    paths = set()
+    for sprite in sprites:
+        source = sprite['source']
+        expected = f"reference/ui-{source['file']}-{source['path_id']}.png"
+        if sprite['path'] != expected or len(Path(expected).parts) != 2 or expected in paths:
+            raise ValueError('Invalid selected runtime UI sprite')
+        paths.add(expected)
+
+
+def validate_runtime_manifest(content: bytes) -> None:
+    """Use the game's contract before accepting runtime output."""
+    root = Path(__file__).resolve().parents[2]
+    command = ['docker', 'run', '--rm', '--pull=never', '-i',
+        '--mount', f'type=bind,source={root},target=/workspace,readonly',
+        '--mount', 'type=volume,source=tld-wasm-cargo,target=/cargo',
+        '--mount', 'type=volume,source=tld-wasm-target,target=/target',
+        'my-summer-slop-toolchain', 'cargo', 'run', '--quiet', '--locked',
+        '--bin', 'validate-reference']
+    try:
+        result = subprocess.run(command, input=content, capture_output=True, check=False)
+    except OSError as error:
+        raise ValueError('Runtime manifest contract validation needs Docker and the project toolchain image') from error
+    if result.returncode:
+        detail = result.stderr.decode('utf-8', errors='replace').strip()
+        raise ValueError(f'Runtime manifest contract validation failed: {detail}')
+
+
+def verify_reference(output: Path, library) -> None:
+    from .library.reader import checked
+    from .gltf import validate_gltf
+    content = (output / 'manifest.json').read_bytes()
+    manifest = json.loads(content)
+    if library is None or manifest.get('library') != provenance(library):
+        raise ValueError('Missing or mismatched runtime library provenance')
+    if manifest['library']['schema_version'] != 1 or any(not re.fullmatch('[0-9a-f]{64}', manifest['library'][k]) for k in ('manifest_sha256','catalog_sha256','source_manifest_sha256')):
+        raise ValueError('Unsupported runtime provenance')
+    validate_runtime_manifest(content)
+    validate_runtime_paths(manifest)
+    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json'}
+    for asset in manifest['assets']:
+        for record in [asset, *asset['dependencies']]:
+            name = record.get('file', record.get('path')).removeprefix('reference/')
+            path = output / name
+            checked(output, {'file':name,'bytes':path.stat().st_size,'sha256':record['sha256']})
+            names.add(name)
+        scene = output / asset['path'].removeprefix('reference/')
+        document = json.loads(scene.read_bytes())
+        uris = {entry['uri'] for entry in [*document.get('buffers', []), *document.get('images', [])]}
+        declared = {entry['file'].removeprefix('reference/') for entry in asset['dependencies']}
+        if uris != declared:
+            raise ValueError('Runtime scene dependencies differ from selected receipts')
+        validate_gltf(scene)
+    for sprite in manifest.get('ui', {}).get('sprites', []):
+        name = sprite['path'].removeprefix('reference/')
+        path = output / name
+        checked(output, {'file':name, 'bytes':path.stat().st_size, 'sha256':sprite['sha256']})
+        names.add(name)
+    if {p.relative_to(output).as_posix() for p in output.rglob('*') if p.is_file()} != names:
+        raise ValueError('Unselected files in runtime')
+
+
+def _export_selected(source, output: Path, library, snapshot) -> None:
     from .gltf import export_gltf
-    from .source import Source
     from .parameters import recover_parameters
     from .manifest import build_manifest
     from .conditions import prepare_conditions
     from .visibility import recover_camera_visibility
     from .ui import export_ui
     from .instruments import recover_instruments
-    if output.resolve().is_relative_to(steam_root.resolve()):
-        raise ValueError('Keep generated files outside the Steam installation')
-    output.mkdir(parents=True, exist_ok=True)
-    (output/'manifest.json').unlink(missing_ok=True)
-    validate_build(steam_root)
-    source = Source(steam_root)
+    if output.resolve().is_relative_to(source.root.resolve()):
+        raise ValueError('Keep generated files outside the source installation')
     def transform(go):return source.transform_for(source.get('level1',go))
     roots = {'home':[source.get('level1',21400)], 'lada':[transform(17687)],
         'items':[transform(go) for go in (13023,13027,18878,13019,15637)]}
@@ -51,7 +153,7 @@ def export_reference(steam_root: Path, output: Path) -> None:
     prepare_conditions(source,[root for readers in roots.values() for root in readers])
     report = {}
     for name, readers in roots.items():
-        report[name] = export_gltf((source,readers),output/f'{name}.gltf')
+        report[name] = export_gltf((source,readers),output/f'{name}.gltf',library)
         print(f'Exported {name}: {report[name]["node_count"]} nodes',flush=True)
     (output/'geometry-evidence.json').write_text(json.dumps(report,indent=2,allow_nan=False),encoding='utf-8')
     parameter_roots={f'{name}-{i}':root for name,readers in roots.items() for i,root in enumerate(readers)}
@@ -62,15 +164,11 @@ def export_reference(steam_root: Path, output: Path) -> None:
     (output/'parameter-evidence.json').write_text(json.dumps(parameters,indent=2,allow_nan=False),encoding='utf-8')
     if parameters['errors']:
         raise ValueError(f'Incomplete parameter recovery: {parameters["errors"]}')
-    data_root=steam_root/'TheLongDrive_Data'
-    inputs=[path for path in data_root.iterdir() if path.is_file() and (path.name in {'level0','level1','globalgamemanagers'} or path.suffix in {'.assets','.resS'})]
-    inputs.append(data_root/'Managed'/'Assembly-CSharp.dll')
-    hashes=[]
-    for path in sorted(inputs):
-        digest=hashlib.file_digest(path.open('rb'),'sha256').hexdigest()
-        hashes.append({'file':str(path.relative_to(data_root)).replace('\\','/'),'sha256':digest})
-    manifest=build_manifest(source,roots,report,hashes)
-    manifest['ui']=export_ui(source,output)
+    hashes=[{'file':record.file.removeprefix('TheLongDrive_Data/'),'sha256':record.sha256}
+            for record in snapshot.files if record.file.startswith('TheLongDrive_Data/')]
+    manifest=build_manifest(source,roots,report,hashes,library)
+    manifest['library']=provenance(library.receipt)
+    manifest['ui']=export_ui(source,output,library)
     manifest['instruments']=recover_instruments(source,manifest,report)
     parameters['controls']={
         'source':{'file':'level0','path_id':16865},
@@ -83,12 +181,236 @@ def export_reference(steam_root: Path, output: Path) -> None:
     parameters['player_markers']=[{'source':{'file':'level1','path_id':pid},'fields':source.read(source.get('level1',pid))} for pid in (39823,23339)]
     (output/'parameter-evidence.json').write_text(json.dumps(parameters,indent=2,allow_nan=False),encoding='utf-8')
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2,allow_nan=False),encoding='utf-8')
+    from dataclasses import asdict
+    selection = {name:[asdict(v) for v in sorted(values)] for name,values in (
+        ('records',library.selected_records),('meshes',library.selected_meshes),
+        ('textures',library.selected_textures),('sprites',library.selected_sprites))}
+    (output/'library-selection.json').write_text(json.dumps(selection,indent=2),encoding='utf-8')
     print(f'Exported manifest: {len(manifest["colliders"])} colliders, {len(manifest["items"])} items',flush=True)
 
 
-if __name__ == '__main__':
+def stage_source(steam_root: Path | None, verify: bool = False) -> Snapshot:
+    from .library.archive import load_snapshot, snapshot_source, verify_snapshot
+    from .library.inventory import inventory_source, catalog_data
+    from .source import Source
+    work_root = SOURCE_WORK_ROOT
+    if verify:
+        snapshot = load_snapshot(work_root)
+        verify_snapshot(snapshot)
+    else:
+        if steam_root is None:
+            raise ValueError('Source staging needs --steam-root')
+        snapshot = snapshot_source(steam_root, work_root)
+    source = Source(snapshot.root)
+    catalog = inventory_source(source, snapshot)
+    if len(source.serialized_files) != 9 or len(catalog.objects) != 262784:
+        raise ValueError(f'Installed inventory mismatch: {len(source.serialized_files)} serialized files, {len(catalog.objects)} objects')
+    data = catalog_data(catalog, source, snapshot)
+    catalog_path = work_root / 'catalog.json'
+    if verify or catalog_path.exists():
+        accepted = json.loads(catalog_path.read_text(encoding='utf-8'))
+        for item in accepted['objects']:
+            item['dependencies'] = []
+        if accepted != data:
+            raise ValueError('Archived catalog differs from the complete inventory')
+    else:
+        temporary = work_root / '.catalog.json'
+        temporary.write_text(json.dumps(data, indent=2, allow_nan=False) + '\n', encoding='utf-8')
+        temporary.replace(catalog_path)
+    action = 'Verified' if verify else 'Archived'
+    print(f'{action} source: {len(source.serialized_files)} serialized files, {len(source.resource_streams)} streams, {len(catalog.objects):,} objects', flush=True)
+    return snapshot
+
+
+def stage_catalog(steam_root: Path | None, verify: bool = False):
+    from .library.archive import load_snapshot, verify_snapshot
+    from .library.inventory import catalog_data
+    from .library.records import build_catalog, verify_catalog
+    from .source import Source
+    import shutil
+    work_root = SOURCE_WORK_ROOT
+    if not (work_root / 'source-manifest.json').exists():
+        if verify:
+            raise ValueError('No accepted source stage')
+        stage_source(steam_root)
+    snapshot = load_snapshot(work_root)
+    verify_snapshot(snapshot)
+    source = Source(snapshot.root)
+    catalog_path = work_root / 'catalog.json'
+    records_root = work_root / 'records'
+    if verify or (records_root / 'manifest.json').exists():
+        catalog = verify_catalog(source, snapshot, catalog_path, records_root)
+    else:
+        if records_root.exists():
+            raise ValueError('Unaccepted records tree; keep it for diagnosis')
+        from .library.storage import CATALOG_BYTES, check_space, tree_bytes
+        check_space('catalog: typed records and catalog staging', work_root,
+                    CATALOG_BYTES, retained=tree_bytes(work_root))
+        pending = work_root / 'work' / 'catalog-records'
+        if not pending.resolve().is_relative_to(work_root.resolve()):
+            raise ValueError('Catalog work path escapes work root')
+        if pending.exists():
+            shutil.rmtree(pending)
+        pending.mkdir(parents=True)
+        catalog = build_catalog(source, snapshot, pending)
+        data = catalog_data(catalog, source, snapshot)
+        content = (json.dumps(data, indent=2, allow_nan=False) + '\n').encode('utf-8')
+        receipt = json.loads((pending / 'manifest.json').read_bytes())
+        receipt['catalog_sha256'] = hashlib.sha256(content).hexdigest()
+        (pending / 'manifest.json').write_text(json.dumps(receipt, sort_keys=True, separators=(',', ':'), allow_nan=False) + '\n', encoding='utf-8')
+        temporary = work_root / 'work' / 'catalog.json'
+        temporary.write_bytes(content)
+        # Publish acceptance only after every required record and graph check passes.
+        if not records_root.resolve().is_relative_to(work_root.resolve()):
+            raise ValueError('Records path escapes work root')
+        from .library.validation import _publish_directory
+        _publish_directory(pending, records_root)
+        try:
+            temporary.replace(catalog_path)
+        except BaseException:
+            # No previous accepted record stage exists on this path.
+            records_root.replace(pending)
+            raise
+    action = 'Verified' if verify else 'Indexed'
+    edges = sum(len(value) for value in catalog.dependencies.values())
+    print(f'{action} catalog: {len(catalog.objects):,} records, {edges:,} dependency edges', flush=True)
+    return catalog
+
+
+def _category_stages(snapshot, catalog):
+    """Reuse source-bound stages, or build missing category prerequisites once."""
+    import tempfile
+    import shutil
+    from dataclasses import asdict
+    from .source import Source
+    from .library import (export_images, export_ui, export_audio, export_models,
+                          export_animations, export_native_assets, index_source_text,
+                          index_managed, write_analysis_report)
+    from .library.archive import sha256
+    from .library.records import _file, _json
+    from .library.validation import CATEGORIES, load_exports, _receipt, _check_files, _verify_managed, _publish_directory
+    root = snapshot.manifest_path.parent
+    path = root / 'category-stages.json'
+    bindings = {'schema_version': 1, 'source_manifest_sha256': snapshot.manifest_sha256,
+                'catalog_sha256': sha256(root / 'catalog.json'),
+                'records_manifest_sha256': sha256(root / 'records/manifest.json')}
+    if path.exists():
+        saved = json.loads(path.read_bytes())
+        if any(saved.get(k) != v for k, v in bindings.items()):
+            raise ValueError('Category stages differ from the accepted source or catalog')
+    else:
+        (root / 'work').mkdir(exist_ok=True)
+        pending = Path(tempfile.mkdtemp(prefix='category-assets-', dir=root / 'work'))
+        source = Source(snapshot.root)
+        prior = (*export_images(source, catalog, pending), *export_ui(source, catalog, pending),
+                 *export_audio(source, catalog, pending))
+        models = export_models(source, catalog, pending)
+        prior = (*prior, *models, *export_animations(source, catalog, models, pending))
+        records = root / 'records'
+        native_root = pending / 'record-inputs'
+        native_root.mkdir()
+        # This partial root supplies producers only. It is not an accepted record stage.
+        shutil.copyfile(records / 'manifest.json', native_root / 'manifest.json')
+        for identity, item in catalog.objects.items():
+            if item.type in ('MonoScript', 'ResourceManager'):
+                name = f'{identity.file}/{identity.path_id}.json'
+                (native_root / name).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(records / name, native_root / name)
+        export_native_assets(source, catalog, native_root, frozenset(e.source for e in prior))
+        index_source_text(snapshot, native_root)
+        if not (records / 'managed/manifest.json').exists():
+            managed = index_managed(snapshot, native_root)
+            analysis = write_analysis_report(catalog, managed, native_root)
+            _file(native_root, 'managed/manifest.json', _json({'schema_version': 1,
+                  'files': [asdict(f) for f in (*managed, analysis)]}))
+            _verify_managed(snapshot, native_root)
+            _publish_directory(native_root / 'managed', records / 'managed')
+        else:
+            _verify_managed(snapshot, records)
+        saved = {**bindings, 'categories': [{'category': category,
+                 'root': (native_root if category == 'native' else pending).relative_to(root).as_posix(),
+                 'index': asdict(_receipt(native_root if category == 'native' else pending, f'{category}/index.json'))}
+                 for category in CATEGORIES]}
+        _file(root, 'category-stages.json', _json(saved))
+    if [e['category'] for e in saved['categories']] != list(CATEGORIES):
+        raise ValueError('Missing or duplicate category stages')
+    stages = []
+    for entry in saved['categories']:
+        from .library.types import FileRecord
+        from .library.archive import validate_paths, _check_path
+        validate_paths([entry['root']])
+        directory = root / entry['root']
+        _check_path(directory, root.resolve())
+        record = FileRecord(**entry['index'])
+        if record.file != f"{entry['category']}/index.json":
+            raise ValueError('Category index identity mismatch')
+        _check_files(directory, {record.file: record})
+        stages.append((entry['category'], directory, load_exports(directory / record.file)))
+    return stages
+
+
+def stage_library(steam_root: Path | None, output: Path, verify: bool = False):
+    import tempfile
+    from .library.archive import load_snapshot
+    from .library.validation import (load_catalog, check_installed_counts, assemble_library,
+                                     publish_library, verify_library)
+    library = output.parent / 'library'
+    if verify:
+        receipt = verify_library(library, SOURCE_WORK_ROOT / 'source')
+        check_installed_counts(load_catalog(SOURCE_WORK_ROOT / 'catalog.json'))
+        print(f'Verified library: {len(receipt.exports):,} owners; {receipt.manifest_sha256}', flush=True)
+        return receipt
+    from .library.managed import preflight_managed
+    from .library.storage import (library_space, assembly_bytes, check_space, tree_bytes, with_headroom)
+    if not (SOURCE_WORK_ROOT / 'category-stages.json').exists() and not (SOURCE_WORK_ROOT / 'records/managed/manifest.json').exists():
+        preflight_managed()
+    library_space(SOURCE_WORK_ROOT, library)
+    if not (SOURCE_WORK_ROOT / 'source-manifest.json').exists():
+        stage_source(steam_root)
+    if not (SOURCE_WORK_ROOT / 'records/manifest.json').exists():
+        stage_catalog(steam_root)
+    snapshot = load_snapshot(SOURCE_WORK_ROOT)
+    catalog = load_catalog(SOURCE_WORK_ROOT / 'catalog.json')
+    check_installed_counts(catalog)
+    stages = _category_stages(snapshot, catalog)
+    check_space('library assembly: complete category receipts plus acceptance metadata', SOURCE_WORK_ROOT,
+                with_headroom(assembly_bytes(stages)), retained=tree_bytes(SOURCE_WORK_ROOT) + tree_bytes(library))
+    pending = Path(tempfile.mkdtemp(prefix='library-', dir=SOURCE_WORK_ROOT / 'work'))
+    exports = assemble_library(snapshot, stages, pending)
+    print(f'Assembled library: {len(exports):,} owners', flush=True)
+    receipt = publish_library(snapshot, catalog, exports, pending, library)
+    print(f'Published library: {len(exports):,} owners; {receipt.manifest_sha256}', flush=True)
+    return receipt
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--steam-root',type=Path,required=True)
-    parser.add_argument('--output',type=Path,default=Path('web/assets/reference'))
-    arguments = parser.parse_args()
-    export_reference(arguments.steam_root,arguments.output)
+    parser.add_argument('--steam-root', type=Path)
+    parser.add_argument('--output', type=Path, default=Path('web/assets/reference'))
+    parser.add_argument('--stage', choices=('runtime', 'source', 'catalog', 'library'), default='runtime')
+    parser.add_argument('--verify', action='store_true')
+    arguments = parser.parse_args(argv)
+    if arguments.stage in ('library', 'runtime') and arguments.steam_root:
+        steam = arguments.steam_root.resolve()
+        destinations = (arguments.output.resolve(), (arguments.output.parent / 'library').resolve())
+        if any(path.is_relative_to(steam) or steam.is_relative_to(path) for path in destinations):
+            parser.error('Keep runtime and library output separate from the Steam installation')
+    if arguments.stage == 'source':
+        stage_source(arguments.steam_root, verify=arguments.verify)
+    elif arguments.stage == 'catalog':
+        stage_catalog(arguments.steam_root, verify=arguments.verify)
+    elif arguments.stage == 'library':
+        stage_library(arguments.steam_root, arguments.output, verify=arguments.verify)
+    else:
+        library_path = arguments.output.parent / 'library/manifest.json'
+        receipt = stage_library(arguments.steam_root, arguments.output,
+                                verify=arguments.verify or library_path.is_file())
+        if arguments.verify:
+            verify_reference(arguments.output, receipt)
+        else:
+            from .library.archive import load_snapshot
+            derive_reference(load_snapshot(SOURCE_WORK_ROOT), receipt, arguments.output)
+
+
+if __name__ == '__main__':
+    main()

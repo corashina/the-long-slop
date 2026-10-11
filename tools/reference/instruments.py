@@ -6,7 +6,7 @@ def recover_instruments(source,manifest,reports):
     material_indices=reports['lada']['materials']
     root=source.transform_for(source.get('level1',17687))
     parts=[c for n in source.hierarchy(root) for c in n['components'] if c.type.name=='MonoBehaviour'
-           and c.parse_monobehaviour_head().m_Script.path_id]
+           and source.read(c)['m_Script']['m_PathID']]
     car=next(c for c in parts if source.class_name(c)=='carscript'); cd=source.read(car)
     meter=source.get('level1',78501);md=source.read(meter)
     def node(owner,ptr,renderer=False):

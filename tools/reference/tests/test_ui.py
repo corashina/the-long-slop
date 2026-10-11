@@ -13,24 +13,18 @@ class UiExportTests(unittest.TestCase):
     def test_installed_menu_slots_do_not_overlap(self):
         import json
         from pathlib import Path
-        from tools.reference.source import Source
         from tools.reference.ui import export_ui
-        steam=Path(r'C:\\Program Files (x86)\\Steam\\steamapps\\common\\The Long Drive')
-        if not steam.exists():self.skipTest('installed source required')
-        ui=export_ui(Source(steam),Path('.cache/ui-test'))
+        from tools.reference.source import LibrarySource
+        from tools.reference.library.reader import LibraryReader
+        from tools.reference.library.types import LibraryReceipt
+        import hashlib
+        library=Path('web/assets/library/manifest.json')
+        if not library.exists():self.skipTest('accepted library required')
+        data=json.loads(library.read_bytes())
+        reader=LibraryReader(LibraryReceipt(library,hashlib.sha256(library.read_bytes()).hexdigest(),
+            data['catalog_sha256'],data['source_manifest_sha256'],()))
+        ui=export_ui(LibrarySource(reader),Path('.cache/ui-test'),reader)
         positions=[ui['layouts'][role]['rect'][1] for role in ['continue','controls','restart','recover']]
         self.assertEqual(len(set(positions)),4)
-
-    def test_failed_export_removes_acceptance(self):
-        import tempfile
-        from pathlib import Path
-        from unittest.mock import patch
-        from tools.reference.export import export_reference
-        with tempfile.TemporaryDirectory(dir='.cache') as directory:
-            output=Path(directory);acceptance=output/'manifest.json';acceptance.write_text('{}')
-            with patch('tools.reference.export.validate_build'), patch('tools.reference.source.Source',side_effect=ValueError('broken source')):
-                with self.assertRaisesRegex(ValueError,'broken source'):
-                    export_reference(Path('C:/source-test/steam'),output)
-            self.assertFalse(acceptance.exists())
 
 if __name__=='__main__' : unittest.main()

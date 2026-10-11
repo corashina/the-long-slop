@@ -140,9 +140,24 @@ Change lamp handles only when their state changes.
 
 ## Do's and Don'ts
 
-- Do use exported source UI records for supported actions.
-- Do keep required assets and bindings checked before Start.
-- Do preserve the approved route-test waiver.
-- Don't add unsupported original menus or an RPM needle.
-- Don't enable the unsupported headlight indicator.
-- Don't claim live pixel parity or identical Unity physics.
+- Use exported source UI records for supported actions.
+- Check required assets and bindings before Start.
+- Preserve the approved route-test waiver.
+- Keep the live scene visible behind controls.
+- Keep keyboard focus visible.
+- Use tabular HUD numbers.
+- Keep menus within the approved product scope.
+- Keep the Lada dashboard free of an RPM needle.
+
+## Reference library availability
+
+The local library includes embedded Liberation Sans Regular at `sharedassets0.assets:769`.
+Its 350,200 bytes retain SHA-256 `e5b0af421ea2bfbc1ac8d251d647268087ae82786234c57f757d1f0b90fa8b49`.
+Chrome loaded this font in the isolated fixture.
+The current shell uses the self-hosted Liberation Sans version specified above.
+The TMP asset's null font pointer does not mean that the installed build lacks font bytes.
+
+The library preserves sprite borders, pivots, atlas links, UI layouts, and native material properties.
+The current UI uses selected source records. Complete library preservation does not establish Unity UI or shader parity.
+Six-face cubemap previews use clipped 8-bit PNGs. Native DDS faces retain BC6H HDR data and mip levels.
+Read [the asset audit](docs/research/2026-10-10-full-asset-audit.md) for measured coverage and support limits.

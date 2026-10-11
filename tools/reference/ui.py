@@ -15,21 +15,26 @@ def resolve_rect(rect, parent):
     size=[size[i]*abs(rect['scale'][i]) for i in range(2)]
     return point[0]-size[0]*pivot[0],point[1]-size[1]*pivot[1],size[0],size[1]
 
-def export_ui(source, output):
+def export_ui(source, output, library):
     output.mkdir(parents=True,exist_ok=True)
     sprites=[]; sprite_ids={}; layouts={}
     def sprite(reader,role):
         identity=key(reader)
         if identity not in sprite_ids:
-            data=source.read(reader); image=source.object(reader).image
+            from PIL import Image
+            from .library.types import ObjectId
+            data=source.read(reader)
+            payload=library.sprite(ObjectId(*identity))
+            with Image.open(payload) as image:
+                size=list(image.size)
             path=output/f'ui-{reader.assets_file.name}-{reader.path_id}.png'
-            image.save(path)
+            path.write_bytes(payload.read_bytes())
             border=data['m_Border']; rect=data['m_Rect']
             sprite_ids[identity]=len(sprites)
             sprites.append({'role':role,'source':source_id(reader),'path':f'reference/{path.name}',
                 'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),
                 'crop':[rect[n] for n in ('x','y','width','height')],
-                'border':[border[n] for n in ('x','y','z','w')],'size':list(image.size)})
+                'border':[border[n] for n in ('x','y','z','w')],'size':size})
         return sprite_ids[identity]
     def components(go):
         return [source.resolve(go,c['component']) for c in source.read(go)['m_Component']]
@@ -88,7 +93,7 @@ def export_ui(source, output):
         rt=rect_for(go)
         for record in source.hierarchy(rt):
             for c in record['components']:
-                if c.type.name!='MonoBehaviour' or not c.parse_monobehaviour_head().m_Script.path_id or source.class_name(c)!='Button':continue
+                if c.type.name!='MonoBehaviour' or not source.read(c)['m_Script']['m_PathID'] or source.class_name(c)!='Button':continue
                 for call in source.read(c)['m_OnClick']['m_PersistentCalls']['m_Calls']:
                     if call['m_MethodName']==method and (arg is None or call['m_Arguments']['m_StringArgument']==arg) and (target_id is None or call['m_Target']['m_PathID']==target_id):
                         return record['game_object']

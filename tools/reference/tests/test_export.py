@@ -38,7 +38,7 @@ class ReferenceExportTests(unittest.TestCase):
     def test_pickup_recenter_and_restrictions_keep_source_values(self):
         from types import SimpleNamespace
         from tools.reference.actions import recover_pickup
-        reader = SimpleNamespace(assets_file=SimpleNamespace(name='fixture'), path_id=19)
+        reader = SimpleNamespace(assets_file=SimpleNamespace(name='fixture',source_container_path='fixture'), path_id=19)
         fields = {'cantPickup': 1, 'cantPickupWhileMount': 1, 'cantPickupWhileSitting': 1,
             'noRot': 1, 'moveWithRot': 0, 'useRecenter': 1,
             'recenterPos': {'x': .2, 'y': .4, 'z': .6}, 'useRecenterRot': 1,
@@ -68,7 +68,7 @@ class ReferenceExportTests(unittest.TestCase):
         from types import SimpleNamespace
         from tools.reference.actions import recover_bindings
         def reader(identity, name):
-            return SimpleNamespace(assets_file=SimpleNamespace(name='fixture'), path_id=identity,
+            return SimpleNamespace(assets_file=SimpleNamespace(name='fixture',source_container_path='fixture'), path_id=identity,
                 type=SimpleNamespace(name=name))
         pick, cap, layer, collider = [reader(identity, name) for identity, name in
             [(1, 'MonoBehaviour'), (2, 'MonoBehaviour'), (3, 'MonoBehaviour'), (4, 'BoxCollider')]]

@@ -10,7 +10,7 @@
 
 **Spec:** [Complete asset library](../specs/2026-10-10-complete-asset-library-design.md).
 
-**Status:** The user requested the specification and plan together. Review and execution choice remain pending. No task has started.
+**Status:** The user requested the specification and plan together. The user approved execution and selected subagents on 2026-10-10. Track task progress in the plan ledger.
 
 ## Global Constraints
 

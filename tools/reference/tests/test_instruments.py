@@ -4,7 +4,7 @@ from tools.reference.source import Source
 from tools.reference.instruments import recover_instruments
 
 STEAM=Path(r'C:\\Program Files (x86)\\Steam\\steamapps\\common\\The Long Drive')
-@unittest.skipUnless(STEAM.exists(),'installed source required')
+@unittest.skipUnless(STEAM.exists() and Path('web/assets/reference/manifest.json').exists(),'installed source and export required')
 class InstrumentExportTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

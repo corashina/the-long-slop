@@ -7,7 +7,7 @@ from tools.reference.gltf import GltfExporter
 
 class MaterialEmissionTests(unittest.TestCase):
     def test_source_keyword_controls_emission_factor_and_map(self):
-        reader = SimpleNamespace(assets_file=SimpleNamespace(name="source.assets"), path_id=1)
+        reader = SimpleNamespace(assets_file=SimpleNamespace(name="source.assets",source_container_path="source.assets"), path_id=1)
         for enabled in (False, True):
             with self.subTest(enabled=enabled), tempfile.TemporaryDirectory(dir=".cache") as directory:
                 data = {
@@ -19,7 +19,7 @@ class MaterialEmissionTests(unittest.TestCase):
                     },
                 }
                 source = SimpleNamespace(read=lambda _: data, resolve=lambda *_: None)
-                exporter = GltfExporter(source, Path(directory) / "lamp.gltf")
+                exporter = GltfExporter(source, Path(directory) / "lamp.gltf", None)
                 texture_calls = []
                 def texture(*args):
                     texture_calls.append(args)
@@ -27,7 +27,9 @@ class MaterialEmissionTests(unittest.TestCase):
                 exporter.texture = texture
                 index = exporter.material(reader)
                 material = exporter.document.materials[index]
-                self.assertEqual(material.emissiveFactor, [2.67, 1.24, 0.0] if enabled else [0.0, 0.0, 0.0])
+                strength=material.extensions.get('KHR_materials_emissive_strength',{}).get('emissiveStrength',1.)
+                self.assertEqual([value*strength for value in material.emissiveFactor], [2.67, 1.24, 0.0] if enabled else [0.0, 0.0, 0.0])
+                self.assertTrue(all(0 <= value <= 1 for value in material.emissiveFactor))
                 self.assertEqual(material.emissiveTexture is not None, enabled)
                 self.assertEqual(len(texture_calls), int(enabled))
 
