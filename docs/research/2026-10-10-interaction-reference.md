@@ -116,3 +116,14 @@ Craft and UnCraft do not change those layers.
 The installed-source regression removes ten parts and tests real target resolution followed by F dispatch.
 It covers the engine, radiator, four doors, two round headlights, and both side mirrors.
 Native staging makes this a regression test, not continuous browser acceptance.
+
+## Final browser evidence, 2026-10-11
+
+The final product is d402a09. Its change from 53a9a4e only corrects mirror labels.
+Windows preparation and cabin captures, then isolated Linux input checks, cover the implemented interactions.
+Linux checks include latched grip, held-can pause, garage exit, off-road rebasing, recovery, and physical return home.
+The open garage leaves survived the return. A later held-can Restart cleared the shifted origin and restored startup state.
+A fixed 1280 by 720 headlight pair shows beam pools appearing with the engine running.
+No rendered Unity comparison was captured. Native source checks and port screenshots remain distinct evidence.
+Browser interruptions prevent a full preparation-to-road continuity claim.
+Read [verification](../verification.md) for exact versions, captures, measurements, and remaining limits.

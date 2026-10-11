@@ -1,100 +1,161 @@
-# Garage verification
+# Garage and interaction verification
 
 Reference: installed Steam build 11140890. Vehicle: fixed Lada 2101.
-Verification date: 2026-10-10, Europe/Warsaw.
-Verified implementation commit: `a8dd272`.
-The approved design is in `docs/superpowers/specs/2026-10-09-garage-start-design.md`.
+Verification date: 2026-10-11, Europe/Warsaw. Final product commit: `d402a09`.
+The full suite checked `53a9a4e`. The final label-only change passed its focused checks.
+Worktree: `C:/Users/Corashina/.codex/worktrees/interaction-parity/the-long-drive-wasm`.
+Read the [approved interaction scope](superpowers/specs/2026-10-10-interaction-parity-design.md), [garage scope](superpowers/specs/2026-10-09-garage-start-design.md), and [decision record](interaction-decisions.md).
 
-## Reference recovery
+## Source and build checks
 
-The exporter follows the selected scene links to the home and Car02Full hierarchy.
-It converts handedness once. It preserves nested scale and reflected wheel transforms.
-Source IDs and input hashes remain in the generated manifest.
-The generated export stays outside version control.
-
-The startup audit confirmed 0.5 L gasoline, 2.5 L oil, and 3.6 L water.
-The assembled car has 955 kg dry mass and 6.6 kg initial fluid mass.
-The selected home contains the preparation cans, barrel, faucet, and spare wheel.
-Installed wheel slots follow their individual part links.
-
-## Checks
+The exporter follows selected scene links to the home and Car02Full hierarchy.
+It converts handedness once and preserves nested scale and reflected wheel transforms.
+The manifest retains source IDs and input hashes. Generated assets stay outside version control.
+Startup contains 0.5 L gasoline, 2.5 L oil, and 3.6 L water.
+The car has 955 kg dry mass and 6.6 kg initial fluid mass.
 
 | Check | Result |
 | --- | --- |
-| Formatting and native suite | 91 passed; six source gates skipped by default |
-| Installed-source gates | Six passed in explicit runs |
-| Exporter suite | Four passed |
+| Native suite | 137 passed |
+| Installed-source gates | 31 passed |
+| Exporter suite | 12 passed |
+| HUD callback test | 1 passed |
+| Formatting | Passed |
 | Release WASM and browser package | Passed |
-| Independent review | Passed after the sleeping-ground removal fix |
+| Task, full-branch, and final code reviews | Passed |
 
-Native checks cover fluids, ignition, heat, collision, exit clearance, doors, wheels, pause, restart, recovery, and rebasing.
-Source checks use the actual export. Synthetic geometry stays in native fixtures.
-The source interaction tests stage clear player positions. They do not prove a continuous browser walking route.
+The final label-only change passed its installed label regression, formatting, and WASM/package build.
+Native checks cover fluids, ignition, heat, collisions, carry, mechanisms, lamps, parts, push, throw, pause, recovery, and rebasing.
+Source tests use the actual export. Some tests stage clear player positions.
+They do not prove a continuous browser route.
+The source route covers garage exit, nested parts, transferred hubcaps, engine and radiator operation, and lifecycle cancellation.
+Carry regressions cover floor separation, recovered collision groups, installed-can pickup, recenter, and walking.
 
-The actual source flow opens both garage leaves through aim and Use.
-It enters the recovered driver seat and closes the driver door from the seat.
-The car starts and reverses through the garage onto the road.
-It reaches the road lane after 6.65 seconds with all four wheel contacts.
-After braking, it continues beyond the lane. This check proves the join, not parking within the lane.
+Final logs are in `.superpowers/sdd/2026-10-10-interaction-parity/`:
+`final-fix-full.log`, `final-fix-python.log`, `final-fix-hud.log`, and `final-fix-report.md`.
+Earlier RED/GREEN logs and screenshots remain in the ignored `.cache` directory.
 
-The car remains still for 90 seconds with the source spare wheel present.
-Sleeping linear and angular velocity stay zero. All four wheels retain support.
-After a 95-second rest, door use, seating, steering, and reverse wake the car without a jump.
-Removing a supporting terrain collider also wakes a sleeping car.
-The original inspection pit and cellar remain clear.
+## Package and browser conditions
 
-Seat collider aliases follow the source `mainseat` links.
-The driver follows `driverSeat0`, source component 69296.
-Use rays apply mask 12747265. Exit overlap queries apply mask 10125313.
-Exit clearance uses capsule endpoints at plus or minus 0.568 meters and radius 0.25 meters.
-Each imported dynamic body uses its recovered linear and angular damping.
+The root-owned Windows server serves this worktree at `http://127.0.0.1:56191`.
+The earlier 53a9a4e Windows preparation package matched its checkout at that time.
+Its WASM was 50,916,156 bytes, SHA256 `b0f7325325a8ec276bdc07f91fc44de952b008d14d0b113a7a00ec5ef9035fd4`.
+Final d402a09 WASM is 50,916,241 bytes, SHA256 `99bd67a677d5afbfd20771a5f04a14d960e563783c6d7e0e686541add455c4d4`.
+The manifest is 3,849,428 bytes, SHA256 `ed43d7d49fcdb825c364b2a2ae4ac0b5043924dece3449bb1347ab863fa8c855`.
+Served final Windows and Linux package bytes matched the final checkout.
 
-Logs are in the ignored `.cache` directory:
-`garage-oct10-final-check.log`, `garage-oct10-final-source.log`,
-`garage-to-road-source.log`, and `garage-oct10-final-build.log`.
+Windows routes used Chrome 154.0.8037.95 with ANGLE SwiftShader.
+Flags: `--use-angle=swiftshader --enable-unsafe-swiftshader`.
+Playwright clicked Start and used normal pointer lock, keyboard, and mouse input.
+The helper read public `gameState` and `gameKeys`. It did not inject game state.
+Windows captures used 1280 by 720, with functional checks at 640 by 360 and 960 by 540.
 
-## Browser evidence and limits
+The 53a9a4e browser closed before a closer grip retry. No close command was sent; the cause is unknown.
+The helper read an already-closed page and exited. Evidence remains in `.cache/task8-53a9a4e-interrupted/`.
+The earlier abd2f5c helper had read a partial command file. Atomic command writes now prevent that harness failure.
+The d402a09 Windows session later lost its graphics context after a GPU process exit.
+Windows headless pointer lock also confined the desktop cursor. Testing stopped, and only the owned browser/helper were closed.
+Evidence remains in `.cache/task8-d402a09-context-lost/`. No Windows browser was launched afterward.
+Preparation-to-road continuity is unavailable. These split routes do not prove full continuous acceptance.
 
-Earlier browser checks showed the imported home and car, camera look, walking, doors, seats, ignition, pause, and restart.
-The embedded browser rejected pointer lock. A temporary input fixture supplied browser events during those checks.
-The fixture did not change native gameplay state. The product contains no capture fallback or test fixture.
-A blocked texture kept Start disabled and named the failed glTF dependency.
+The remaining route used Linux Chromium 151.0.7922.34, Playwright 1.62.1, and ANGLE SwiftShader.
+Image: `mcr.microsoft.com/playwright:v1.62.1-noble`.
+Digest: `sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e`.
+Docker used `--init`, `--network none`, and `--shm-size=2g`, with no host display mount.
+The checkout and existing dependencies were read-only. A separate evidence directory was writable.
+The server and browser ran inside the container. Root checked full desktop cursor bounds three times during Linux pointer lock.
+Evidence: `.cache/cursor-linux-isolation.jsonl`, `.cache/task8-linux-isolation.txt`, and `.cache/task8-run-linux.ps1`.
+Linux headless shell emitted opposing trusted mouse warps and failed calibration. It was closed.
+Full Chromium new-headless passed the normal mouse-delta check in the same container.
+A read-only native event observer recorded movement. It injected no events or game state.
 
-On 2026-10-10, Computer Use stopped before final UI input.
-It could not verify the current browser URL with enough confidence to enforce policy.
-The final continuous browser garage-to-road route remains unverified.
-The user requested that this test be skipped on 2026-10-10.
-Native source tests verify that route's vehicle and interaction steps.
+## Action evidence
 
-The earlier 1280 by 720 measurement used an RTX 4070 Ti with ANGLE Direct3D11.
-After warmup, 300 frame intervals averaged 7.82 milliseconds. Median was 8.0; 95th percentile was 8.2.
-These are earlier stationary garage measurements, not a benchmark of the final parking fix.
-The last measured reload reached scene readiness in about 3.0 seconds over localhost.
-The final WASM is 50,518,962 bytes. Reference export files total about 76.4 MB, including recovery evidence.
+| Action | Browser evidence | Limit |
+| --- | --- | --- |
+| Can-cap pickup, carry, recenter, fill, drop | 53a9a4e Windows route | Direct crouched path passed after a blocked bench approach |
+| Mounted hubcap, rim, engine removal and installation | 53a9a4e Windows route | Engine operation passed after installation |
+| Charged throw and meter | 53a9a4e Windows route | Charge reached 0.45; release cleared state |
+| Garage doors, window, mirrors, glovebox, visors | Paired Windows captures; Linux garage route | Window scroll was not proven |
+| Cabin lamp | Windows bright/dark pair | No rendered Unity comparison |
+| Vehicle headlights | Linux 1280 off/on pair with engine running | Two beam pools appeared on the brick wall after E and 60 steps |
+| Side mirror label | d402a09 Windows route | Label-only package change |
+| Ordinary push | d402a09 Windows route | F release stopped applied push |
+| Latched grip | d402a09 Linux route | Release and look-away retained grip; next F released |
+| Held-item pause | d402a09 Linux route | Fuel can remained held; charge and keys cleared |
+| Restart with removed part | Windows removed door; Linux removed hubcap | Separate from held-item Restart |
+| Restart with held item and shifted origin | Linux returned Fuel can | Cleared hands, origin, rebases, ignition, and keys; restored fuel 0.5 |
+| Seat entry, start, garage exit | Windows seat actions; Linux driving exit | Driver door required visible closure |
+| Recovery | d402a09 Linux route | Normal R preserved fuel and engine state |
+| Origin shift | d402a09 Linux normal drive | One rebase at absolute x2102.222 during off-road driving |
+| Return home | Physical Linux run after rebasing | Garage leaves remained open; loose-item persistence has native proof only |
+| Covered loose-wheel pickup | Native installed-source regression | No browser proof |
 
-## Material and physics limits
+Filling increased gasoline from 0.5 to 1.128319 L. Collision rules were unchanged after the first blocked approach.
+The final held-can pause recorded charge 0.55, active throw, and keys 256 before Escape.
+Pause cleared charge and keys. Resume retained the can without a delayed throw after 30 simulation steps.
+A removed-part Restart restored fuel 0.5, origin 0, handbrake, and empty hands.
+The first shifted-car reverse timed out. In the fresh route, the open driver door caught the garage frame.
+A negative seated drag left it open. The opposite positive drag visibly closed it, then reverse cleared the garage.
+The stage label `closed-door reverse` identifies a failed closure attempt, not proof of closure.
+The passing image is `task8-linux-driver-opposite-close.png`; `task8-linux-verified-exit.png` shows the car fully outside.
+
+Normal R aligned the car on the road at its current distance. R did not restore garage pose.
+Initial travel followed negative Z. The car later changed direction near z-974 with only W held.
+The cause was not isolated. The subsequent drive proves off-road travel and rebasing, not sustained road following.
+At absolute [2102.222, 2.208, -965.356], the origin became [2048, 0, -1024], with finite vehicle state.
+After another R, the engine was stopped and the car parked. Normal input returned the player home on foot.
+At [32.683, 2.465, -69.490], the garage leaves remained open and the car remained parked remotely.
+The passing capture is `task8-linux1280-returned-garage-leaves.png`.
+The earlier `task8-linux1280-home-persistence.png` was a missed approach and proves no leaf state.
+No Restart occurred during that return. No loose home item was moved after the preceding Restart.
+The home capture therefore proves mechanism persistence. Loose-item persistence remains native/source proof.
+
+The final headlight pair is `task8-linux1280-engine-headlight-off.png` and `task8-linux1280-engine-headlight-on.png`.
+Both use the same parked view with the engine at 800 rpm. The controller also confirmed the visible beam change.
+After capture, Escape paused the game with keys 0 and pointer lock released.
+Linux Chromium closed normally with exit code 0. Its container exited with code 0 and was removed.
+The root-owned Windows server remained available.
+
+## Measurements and limits
+
+Linux functional actions used 640 by 360, 480 by 270, and 320 by 180 for long travel.
+The same browser was resized for 960 by 540 and 1280 by 720 captures.
+At 1280 by 720, 30 RAF intervals had median 1833.3 ms and p95 2083.3 ms.
+The range was 1699.9-2099.9 ms. This software-rendering result does not establish hardware or Windows performance.
+Linux loading enabled Start in 5703 ms and acquired pointer lock in 11713 ms.
+Its captured page and HTTP error arrays were empty. The Windows GPU failure is recorded separately.
+Observed Windows request URLs map to 121,014,961 bytes of local files. This is not network transfer size.
+The inventory includes 60,230,351 bytes of PNG textures and 50,916,241 bytes of WASM.
+Route logs, screenshots, input history, and public-state snapshots remain in `.cache/task8-linux/` and `.cache/task8-linux-route.log`.
+
+All screenshots show the port. No rendered Unity comparison was captured.
+Recovered source records and native checks support source behavior; screenshots do not establish Unity visual parity.
+Hardware ANGLE Direct3D11 stalled before Start for 90 seconds in the Windows setup.
+The evidence does not identify the exact graphics operation. Software rendering does not establish hardware performance.
+
+## Source rules and limits
+
+Use, grab, fill, and push resolve recovered owners and masks.
+General parts scan near the held part with source mask 513 and a 0.2 m base radius.
+Source multipliers and nearest compatible slot selection follow recovered `partscript.Scan`.
+Wheels retain their separate aim query. No general-part layer mask was widened.
+The HUD names the resolved action owner. Remove the installed hubcap before its wheel.
+Carry supports distance, recenter, translation, rotation, roll, and charged throw.
+Source pickup rules can disable rotation; the garage fuel can has that rule.
+Ordinary push stops on F release. Grip stays latched until next F, excess distance, owner loss, or lifecycle cancellation.
+Changing aim does not release grip. Owner loss means an invalid physical owner or collider.
+Pause, capture loss, recovery, and restart clear sampled input before another simulation step.
 
 Rapier raycast suspension replaces Unity WheelCollider physics. Identical handling is not established.
-Recovered source parameters bind dimensions, spring values, damping, brakes, condition, and drivetrain ratios.
-The adapter uses Rapier solver and sleeping rules. It does not reproduce Unity's complete vehicle solver.
-The fixed garage spawn replaces the original bedroom spawn by user request.
-Seeded wheel condition gives repeatable startup within the recovered source ranges.
+Recovered dimensions, springs, damping, brakes, condition, and drivetrain ratios control the adapter.
+The fixed garage spawn follows the user's request. Seeded wheel condition makes startup repeatable.
+The exporter selects one high detail LOD and maps Unity materials to glTF.
+Unity shader effects, live mirror reflections, runtime plate text, and audio remain outside this stage.
+Selected Lada seats lack source pickup links. Plate slots start empty; no removable seats or plates were invented.
+Earlier allocation checks measured Rapier movement allocations. The player wrapper added none above that path.
+These results do not claim zero allocation for the game.
 
-The exporter maps Unity materials to glTF materials.
-It selects one high detail LOD layer. It does not reproduce all Unity shader effects.
-Mirror surface materials appear, but live RenderTexture reflections are omitted.
-Stale editor text meshes are omitted. Runtime plate text generation is not reproduced.
-Audio remains outside this stage.
-
-The player wrapper adds no allocation over the measured Rapier static movement path.
-Rapier allocated 720 blocks and 374400 bytes across 120 static movement steps.
-Its dynamic impulse path allocated five blocks and 1840 bytes in the measured case.
-These library allocations remain. Do not interpret them as zero allocation for the complete game.
-
-## Research sources
-
-The [Starting House](https://the-long-drive.fandom.com/wiki/Starting_House),
-[Getting Started](https://the-long-drive.fandom.com/wiki/Getting_Started), and
-[Lada 2101](https://the-long-drive.fandom.com/wiki/Lada_2101) wiki pages provided secondary context.
-The site is a community wiki. Installed-build evidence controls conflicting values.
-See `docs/research/2026-10-09-garage-reference.md` for the recovery record.
+Read the [garage recovery record](research/2026-10-09-garage-reference.md) and [interaction comparison](research/2026-10-10-interaction-reference.md).
+Installed-build evidence controls conflicting secondary descriptions.
+The [decision record](interaction-decisions.md) preserves all twelve ledger rulings and their rework costs.

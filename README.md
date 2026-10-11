@@ -75,7 +75,7 @@ Close the driver door before reversing through the garage exit.
 
 ## Scope and evidence
 
-Read [the approved scope](docs/superpowers/specs/2026-10-09-garage-start-design.md) and [verification](docs/verification.md).
+Read the [approved interaction scope](docs/superpowers/specs/2026-10-10-interaction-parity-design.md), [garage scope](docs/superpowers/specs/2026-10-09-garage-start-design.md), and [verification](docs/verification.md).
 Imported layout and recovered rules do not establish identical Unity physics or full-game parity.
 Unity shader effects, live mirror reflections, and audio are not reproduced.
 See the verification record for current browser coverage and renderer limits.
