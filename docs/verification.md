@@ -71,6 +71,8 @@ street lamps, the interior light, rear lamps, stars, clouds, and the radio, horn
 
 On 2026-10-10 at 1280 by 720 on an RTX 4070 Ti, garage frames averaged 7.82 ms. The 95th percentile was 8.2 ms.
 The release WASM was 50.5 MB. The scene was ready about 3 seconds after reload over localhost.
+On 2026-10-11, `strip = true` cut the release WASM from 51.4 MB to 33.8 MB, and 30.7 MB after `wasm-bindgen`.
+Fat LTO gave no further gain. Panic messages no longer show function names.
 
 ## Research sources
 
