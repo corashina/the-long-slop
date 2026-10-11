@@ -188,6 +188,119 @@ fn required_sky_dependency_is_validated() {
     );
 }
 
+fn assert_missing_field(
+    manifest: &ReferenceManifest,
+    source: &my_summer_slop::reference::SourceId,
+    field: &str,
+) {
+    let error = manifest
+        .validate()
+        .expect_err("missing setup binding must fail validation")
+        .to_string();
+    assert!(
+        error.contains(&format!("{}:{}", source.file, source.path_id)),
+        "{error}"
+    );
+    assert!(error.contains(field), "{error}");
+}
+
+#[test]
+fn rejects_missing_required_sky_float() {
+    let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    for property in ["_SunSize", "_SunSizeConvergence"] {
+        let mut manifest = original.clone();
+        manifest.lighting.skybox.floats.remove(property);
+        assert_missing_field(&manifest, &manifest.lighting.skybox.source, property);
+    }
+}
+
+#[test]
+fn rejects_missing_required_star_binding() {
+    let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    for renamed in [false, true] {
+        let mut manifest = original.clone();
+        let material = &mut manifest.lighting.cycle.star_material;
+        if renamed {
+            material.textures[0].property = "_UnusedTex".into();
+        } else {
+            material.textures.clear();
+        }
+        assert_missing_field(
+            &manifest,
+            &manifest.lighting.cycle.star_material.source,
+            "textures[0]._MainTex",
+        );
+    }
+}
+
+#[test]
+fn rejects_missing_required_cloud_binding() {
+    let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    for index in 0..original.lighting.cycle.clouds.len() {
+        for property in ["_ScatterMap0", "_ScatterMap1", "_DensityMap", "_TextureMap"] {
+            let mut manifest = original.clone();
+            manifest.lighting.cycle.clouds[index]
+                .material
+                .textures
+                .retain(|link| link.property != property);
+            assert_missing_field(
+                &manifest,
+                &manifest.lighting.cycle.clouds[index].material.source,
+                property,
+            );
+        }
+    }
+}
+
+#[test]
+fn rejects_missing_required_camera_role() {
+    let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    for role in ["Cam", "farCamera"] {
+        let mut manifest = original.clone();
+        manifest
+            .lighting
+            .cameras
+            .iter_mut()
+            .find(|camera| camera.role == role)
+            .unwrap()
+            .role = "unusedCamera".into();
+        assert_missing_field(
+            &manifest,
+            &manifest.lighting.source,
+            &format!("cameras.{role}"),
+        );
+    }
+}
+
+#[test]
+fn rejects_missing_required_controller_family() {
+    use my_summer_slop::reference::LightControllerKind;
+    let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    for (kind, field) in [
+        (LightControllerKind::Headlight, "controllers.headlight"),
+        (LightControllerKind::Rear, "controllers.rear"),
+    ] {
+        let mut manifest = original.clone();
+        manifest
+            .lighting
+            .controllers
+            .retain(|controller| controller.kind != kind);
+        assert_missing_field(&manifest, &manifest.lighting.source, field);
+    }
+}
+
+#[test]
+fn rejects_missing_required_road_light() {
+    let mut manifest =
+        ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    manifest.lighting.road_lamp.lights.clear();
+    assert_missing_field(
+        &manifest,
+        &manifest.lighting.road_lamp.source,
+        "road lights[0]",
+    );
+}
+
 #[test]
 fn rejects_missing_or_invalid_source_mips() {
     let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();

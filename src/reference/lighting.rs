@@ -444,6 +444,13 @@ impl LightingRecord {
             "startup overrides",
         )?;
         sky(&self.skybox)?;
+        for property in ["_SunSize", "_SunSizeConvergence"] {
+            check(
+                self.skybox.floats.contains_key(property),
+                &self.skybox.source,
+                &format!("floats.{property} missing"),
+            )?;
+        }
         for l in &self.lights {
             check(
                 l.id.0 > 0
@@ -626,6 +633,14 @@ impl LightingRecord {
         }
         sky(&c.star_material)?;
         check(
+            c.star_material
+                .textures
+                .first()
+                .is_some_and(|link| link.property == "_MainTex"),
+            &c.star_material.source,
+            "textures[0]._MainTex missing",
+        )?;
+        check(
             c.clouds.len() == 2
                 && texture_ids.contains(&c.cloud_shadow_cookie)
                 && !c.sky_resources.is_empty(),
@@ -641,6 +656,17 @@ impl LightingRecord {
         }
         for cloud in &c.clouds {
             sky(&cloud.material)?;
+            for property in ["_ScatterMap0", "_ScatterMap1", "_DensityMap", "_TextureMap"] {
+                check(
+                    cloud
+                        .material
+                        .textures
+                        .iter()
+                        .any(|link| link.property == property),
+                    &cloud.material.source,
+                    &format!("textures.{property} missing"),
+                )?;
+            }
             check(
                 node(cloud.node).is_some_and(|n| n.asset == cloud.asset)
                     && cloud.asset == c.sky_geometry.asset,
@@ -703,6 +729,19 @@ impl LightingRecord {
             &lamp.source,
             "high-beam instrument",
         )?;
+        for (kind, field) in [
+            (
+                LightControllerKind::Headlight,
+                "controllers.headlight missing",
+            ),
+            (LightControllerKind::Rear, "controllers.rear missing"),
+        ] {
+            check(
+                self.controllers.iter().any(|control| control.kind == kind),
+                &self.source,
+                field,
+            )?;
+        }
         for control in &self.controllers {
             let owner = node(control.node);
             check(
@@ -956,6 +995,13 @@ impl LightingRecord {
             &q.source,
             "quality shadows",
         )?;
+        for role in ["Cam", "farCamera"] {
+            check(
+                self.cameras.iter().any(|camera| camera.role == role),
+                &self.source,
+                &format!("cameras.{role} missing"),
+            )?;
+        }
         check(self.cameras.len() == 4, &self.source, "camera count")?;
         ids(
             self.cameras.iter().map(|v| &v.role),
@@ -1022,6 +1068,11 @@ impl LightingRecord {
             )?;
         }
         let road = &self.road_lamp;
+        check(
+            road.lights.len() == 1,
+            &road.source,
+            "road lights[0] required",
+        )?;
         check(
             manifest
                 .assets
