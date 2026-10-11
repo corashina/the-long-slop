@@ -67,6 +67,21 @@ class LightingTests(unittest.TestCase):
                 self.assertTrue(state['lights']);self.assertTrue(state['renderers'])
                 self.assertIsNotNone(state['on_material']);self.assertIsNotNone(state['off_material'])
 
+    def test_headlight_indicator_emission_follows_source_keyword(self):
+        from tools.reference.gltf import GltfExporter
+        exporter=GltfExporter(self.source,self.output/'indicator.gltf')
+        for pid,enabled in [(324,False),(325,True)]:
+            reader=self.source.get('sharedassets1.assets',pid);source=self.source.read(reader)
+            material=exporter.document.materials[exporter.material(reader)]
+            raw=dict(source['m_SavedProperties']['m_Colors'])['_EmissionColor']
+            self.assertEqual(material.extras['unity_properties']['m_Colors'],source['m_SavedProperties']['m_Colors'])
+            if enabled:
+                self.assertEqual(material.emissiveFactor,[raw[k] for k in ('r','g','b')])
+                self.assertIsNotNone(material.emissiveTexture)
+            else:
+                self.assertTrue(material.emissiveFactor is None or material.emissiveFactor==[0.,0.,0.])
+                self.assertIsNone(material.emissiveTexture)
+
     def test_high_beam_instrument_uses_checked_source_links(self):
         output=Path('web/assets/reference')
         original=json.loads((output/'manifest.json').read_text())

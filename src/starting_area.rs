@@ -770,7 +770,7 @@ impl GarageRuntime {
             .lighting
             .controllers
             .iter()
-            .find(|c| c.kind == crate::reference::LightControllerKind::Headlight)
+            .find(|c| c.kind == crate::reference::LightControllerKind::Rear)
             .unwrap();
         let electronics_fine = electronics.electronics_source.is_none()
             || electronics.electronics_output > electronics.electronics_threshold;

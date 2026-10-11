@@ -59,6 +59,12 @@ impl Plugin for SourceShadowPlugin {
                     .after(prepare_lights)
                     .in_set(RenderSystems::CreateViews),
             )
+            .add_systems(
+                Render,
+                invalidate_saved_views
+                    .after(bevy::pbr::queue_shadows)
+                    .in_set(RenderSystems::QueueMeshes),
+            )
             .add_systems(SourceShadowPass, draw_atlas);
     }
 }
@@ -282,6 +288,24 @@ fn prepare_views(
     for slot in &views.slots {
         if slot.previous_active && !slot.active {
             commands.entity(slot.entity).remove::<LightEntity>();
+        }
+    }
+}
+fn invalidate_saved_views(
+    mut views: ResMut<AtlasViews>,
+    dirty: Res<bevy::render::camera::DirtySpecializations>,
+) {
+    for slot in &mut views.slots {
+        if slot.active {
+            continue;
+        }
+        for &entity in dirty.iter_to_despecialize() {
+            super::shadow_cache::invalidate_saved(&mut slot.phase, |phase| {
+                phase.remove(entity);
+            });
+            super::shadow_cache::invalidate_saved(&mut slot.pipeline, |pipelines| {
+                pipelines.remove(&entity);
+            });
         }
     }
 }

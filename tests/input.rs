@@ -191,25 +191,22 @@ fn exported_driver_lights_use_real_edges() {
     let mut r =
         ReferenceManifest::from_json(&std::fs::read("web/assets/reference/manifest.json").unwrap())
             .unwrap();
-    r.area.player_spawn.translation = [37.8, 1.85, -69.3];
-    r.area.player_spawn.rotation = [0., 0., 0., 1.];
+    let tilt = (-85.0_f32).to_radians();
+    let head = r.player.standing_height * 0.5;
+    r.area.player_spawn.translation = [
+        37.8,
+        1.85 + head - head * tilt.cos(),
+        -69.3 - head * tilt.sin(),
+    ];
+    r.area.player_spawn.rotation = [(tilt / 2.).sin(), 0., 0., (tilt / 2.).cos()];
     let mut runtime = GarageRuntime::new(&r).unwrap();
     runtime.started = true;
-    for mut input in [
-        FrameInput {
-            mouse: [0., 85.],
-            ..Default::default()
-        },
-        FrameInput {
-            held: keys::USE,
-            pressed: keys::USE,
-            ..Default::default()
-        },
-        FrameInput {
-            released: keys::USE,
-            ..Default::default()
-        },
-    ] {
+    let mut input = FrameInput {
+        pressed: keys::USE,
+        released: keys::USE,
+        ..Default::default()
+    };
+    for _ in 0..6 {
         runtime.step(&r, input.take_step());
     }
     assert!(runtime.area.player.driving());
@@ -235,4 +232,308 @@ fn exported_driver_lights_use_real_edges() {
         .find(|o| o.id.0 == 14)
         .unwrap();
     assert!(rlight.enabled && rlight.intensity > 0.);
+}
+
+#[test]
+#[ignore = "Requires exported Steam assets"]
+fn exported_low_startup_keeps_source_outputs_through_pause() {
+    use my_summer_slop::{
+        reference::{LightControllerKind, ReferenceManifest},
+        starting_area::GarageRuntime,
+    };
+    let mut r =
+        ReferenceManifest::from_json(&std::fs::read("web/assets/reference/manifest.json").unwrap())
+            .unwrap();
+    r.lighting.cycle.startup_offset_seconds = 1348.;
+    for c in &mut r.lighting.controllers {
+        if c.kind == LightControllerKind::Headlight {
+            c.current_state = 1;
+            c.requested_state = 1;
+            c.energy = 1.;
+        }
+    }
+    let mut runtime = GarageRuntime::new(&r).unwrap();
+    runtime.started = true;
+    for _ in 0..132 {
+        runtime.step(&r, FrameInput::default());
+        runtime.advance_lighting(&r, 1. / 60.);
+        runtime.advance_light_fades(&r, 1. / 60.);
+    }
+    for c in r
+        .lighting
+        .controllers
+        .iter()
+        .filter(|c| c.kind == LightControllerKind::Headlight)
+    {
+        for id in &c.states[1].lights {
+            let output = runtime
+                .lighting
+                .light_outputs()
+                .iter()
+                .find(|o| o.id == *id)
+                .unwrap();
+            assert!(output.enabled);
+            assert_eq!(
+                output.intensity,
+                c.states[1].intensity * c.electronics_output
+            );
+        }
+        for id in &c.states[2].lights {
+            assert!(
+                !runtime
+                    .lighting
+                    .light_outputs()
+                    .iter()
+                    .find(|o| o.id == *id)
+                    .unwrap()
+                    .enabled
+            );
+        }
+        for renderer in &c.states[1].renderers {
+            let material = c.states[1].on_material.as_ref().unwrap();
+            let output = runtime
+                .lighting
+                .material_outputs()
+                .iter()
+                .find(|o| o.renderer == *renderer)
+                .unwrap();
+            assert_eq!(
+                (output.asset, output.material_index),
+                (material.asset, material.gltf_material)
+            );
+        }
+    }
+    assert!(!runtime.lighting.high_beam());
+    let lights = runtime
+        .lighting
+        .light_outputs()
+        .iter()
+        .map(|o| (o.id, o.enabled, o.intensity))
+        .collect::<Vec<_>>();
+    let materials = runtime
+        .lighting
+        .material_outputs()
+        .iter()
+        .map(|o| (o.renderer, o.asset, o.material_index))
+        .collect::<Vec<_>>();
+    runtime.paused = true;
+    runtime.step(
+        &r,
+        FrameInput {
+            pressed: keys::LIGHTS,
+            ..Default::default()
+        },
+    );
+    runtime.advance_light_fades(&r, 0.5);
+    assert_eq!(
+        lights,
+        runtime
+            .lighting
+            .light_outputs()
+            .iter()
+            .map(|o| (o.id, o.enabled, o.intensity))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        materials,
+        runtime
+            .lighting
+            .material_outputs()
+            .iter()
+            .map(|o| (o.renderer, o.asset, o.material_index))
+            .collect::<Vec<_>>()
+    );
+    assert!(!runtime.lighting.high_beam());
+}
+
+#[test]
+fn car_and_headlight_electronics_keep_their_source_owners() {
+    use my_summer_slop::{reference::LightControllerKind, starting_area::GarageRuntime};
+    let mut r = common::reference();
+    let mut part = 0;
+    for c in &mut r.lighting.controllers {
+        if c.kind == LightControllerKind::Rear {
+            c.electronics_output = 0.2;
+        } else if c.kind == LightControllerKind::Headlight {
+            c.current_state = 2;
+            c.requested_state = 2;
+            c.energy = 1.;
+            c.electronics_output = if part == 0 { 0.75 } else { 0.5 };
+            part += 1;
+        }
+    }
+    let mut runtime = GarageRuntime::new(&r).unwrap();
+    runtime.started = true;
+    runtime.engine.ignition = true;
+    runtime.step(&r, FrameInput::default());
+    runtime.advance_light_fades(&r, 0.1);
+    assert!(!runtime.lighting.high_beam());
+    for c in r
+        .lighting
+        .controllers
+        .iter()
+        .filter(|c| c.kind == LightControllerKind::Headlight)
+    {
+        for id in &c.states[2].lights {
+            let output = runtime
+                .lighting
+                .light_outputs()
+                .iter()
+                .find(|o| o.id == *id)
+                .unwrap();
+            assert_eq!(
+                output.intensity,
+                c.states[2].intensity * c.electronics_output
+            );
+        }
+    }
+    for id in 9..=12 {
+        assert!(
+            !runtime
+                .lighting
+                .light_outputs()
+                .iter()
+                .find(|o| o.id.0 == id)
+                .unwrap()
+                .enabled
+        );
+    }
+}
+
+#[test]
+#[ignore = "Requires exported Steam assets"]
+fn exported_brake_lights_sample_pedal_before_physics() {
+    use my_summer_slop::{reference::ReferenceManifest, starting_area::GarageRuntime};
+    let mut r =
+        ReferenceManifest::from_json(&std::fs::read("web/assets/reference/manifest.json").unwrap())
+            .unwrap();
+    let tilt = (-85.0_f32).to_radians();
+    let head = r.player.standing_height * 0.5;
+    r.area.player_spawn.translation = [
+        37.8,
+        1.85 + head - head * tilt.cos(),
+        -69.3 - head * tilt.sin(),
+    ];
+    r.area.player_spawn.rotation = [(tilt / 2.).sin(), 0., 0., (tilt / 2.).cos()];
+    let mut runtime = GarageRuntime::new(&r).unwrap();
+    runtime.started = true;
+    runtime.engine.ignition = true;
+    runtime.step(
+        &r,
+        FrameInput {
+            pressed: keys::USE,
+            released: keys::USE,
+            ..Default::default()
+        },
+    );
+    assert!(runtime.area.player.driving());
+    let chassis = runtime.physics.chassis_handle();
+    let velocity = runtime.physics.rapier().bodies[chassis].position().rotation
+        * -rapier3d::math::Vector::Z
+        * 2.;
+    runtime.physics.rapier_mut().bodies[chassis].set_linvel(velocity, true);
+    runtime.step(
+        &r,
+        FrameInput {
+            held: keys::BACK,
+            ..Default::default()
+        },
+    );
+    for id in 11..=12 {
+        assert!(
+            runtime
+                .lighting
+                .light_outputs()
+                .iter()
+                .find(|o| o.id.0 == id)
+                .unwrap()
+                .enabled
+        );
+    }
+    for id in 9..=10 {
+        assert!(
+            !runtime
+                .lighting
+                .light_outputs()
+                .iter()
+                .find(|o| o.id.0 == id)
+                .unwrap()
+                .enabled
+        );
+    }
+    runtime.physics.rapier_mut().bodies[chassis].set_linvel(velocity, true);
+    runtime.step(&r, FrameInput::default());
+    for id in 11..=12 {
+        assert!(
+            !runtime
+                .lighting
+                .light_outputs()
+                .iter()
+                .find(|o| o.id.0 == id)
+                .unwrap()
+                .enabled
+        );
+    }
+}
+
+#[test]
+#[ignore = "Requires exported Steam assets"]
+fn exported_reverse_lights_follow_selected_reverse_gear() {
+    use my_summer_slop::{reference::ReferenceManifest, starting_area::GarageRuntime};
+    let mut r =
+        ReferenceManifest::from_json(&std::fs::read("web/assets/reference/manifest.json").unwrap())
+            .unwrap();
+    let tilt = (-85.0_f32).to_radians();
+    let head = r.player.standing_height * 0.5;
+    r.area.player_spawn.translation = [
+        37.8,
+        1.85 + head - head * tilt.cos(),
+        -69.3 - head * tilt.sin(),
+    ];
+    r.area.player_spawn.rotation = [(tilt / 2.).sin(), 0., 0., (tilt / 2.).cos()];
+    let mut runtime = GarageRuntime::new(&r).unwrap();
+    runtime.started = true;
+    runtime.engine.ignition = true;
+    runtime.step(
+        &r,
+        FrameInput {
+            pressed: keys::USE,
+            released: keys::USE,
+            ..Default::default()
+        },
+    );
+    assert!(runtime.area.player.driving());
+    // Match the source automatic reverse request after its starter and wheel updates.
+    let mut selected = false;
+    for _ in 0..180 {
+        runtime.step(
+            &r,
+            FrameInput {
+                held: keys::BACK,
+                ..Default::default()
+            },
+        );
+        if runtime
+            .lighting
+            .light_outputs()
+            .iter()
+            .filter(|o| o.id.0 == 9 || o.id.0 == 10)
+            .all(|o| o.enabled)
+        {
+            selected = true;
+            break;
+        }
+    }
+    assert!(selected, "source automatic reverse was not selected");
+    for id in 11..=12 {
+        assert!(
+            !runtime
+                .lighting
+                .light_outputs()
+                .iter()
+                .find(|o| o.id.0 == id)
+                .unwrap()
+                .enabled
+        );
+    }
 }

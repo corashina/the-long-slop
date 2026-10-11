@@ -131,7 +131,7 @@ class GltfExporter:
             doubleSided=floats.get('_Cull',2) == 0,
             pbrMetallicRoughness=gl.PbrMetallicRoughness(baseColorFactor=[color[n] for n in ('r','g','b','a')],
                 metallicFactor=floats.get('_Metallic',0.), roughnessFactor=1.-floats.get('_Glossiness',0.5)),
-            extras={'source': source_id(reader), 'unity_shader': shader_name, 'unity_properties': properties})
+            extras={'source': source_id(reader), 'unity_shader': shader_name, 'unity_properties': properties, 'unity_keywords':data['m_ValidKeywords']})
         for name in ('_MainTex','_BaseMap'):
             if name in environments:
                 info = self.texture(reader, environments[name], 'srgb')
@@ -145,7 +145,7 @@ class GltfExporter:
             if info:
                 material.normalTexture = gl.NormalMaterialTexture(scale=floats.get('_BumpScale',1.), **info)
         emission = colors.get('_EmissionColor')
-        if emission:
+        if emission and (shader_name not in ('Standard','Standard (Specular setup)') or '_EMISSION' in data['m_ValidKeywords']):
             material.emissiveFactor = [emission[n] for n in ('r','g','b')]
             if '_EmissionMap' in environments:
                 info = self.texture(reader, environments['_EmissionMap'], 'srgb')

@@ -667,7 +667,7 @@ impl LightingState {
         let electronics_output = reference
             .controllers
             .iter()
-            .find(|c| c.kind == crate::reference::LightControllerKind::Headlight)
+            .find(|c| c.kind == crate::reference::LightControllerKind::Rear)
             .unwrap()
             .electronics_output;
         self.update_vehicle(
@@ -699,7 +699,7 @@ impl LightingState {
         let electronics = reference
             .controllers
             .iter()
-            .find(|c| c.kind == crate::reference::LightControllerKind::Headlight)
+            .find(|c| c.kind == crate::reference::LightControllerKind::Rear)
             .unwrap();
         self.high_beam = self.requested_headlights == 2
             && (electronics.electronics_source.is_none()
@@ -743,7 +743,7 @@ impl LightingState {
             state.update(dt);
             let energy = state.energy
                 * if control.electronics_source.is_some() {
-                    self.vehicle.electronics_output
+                    control.electronics_output
                 } else {
                     1.
                 };
