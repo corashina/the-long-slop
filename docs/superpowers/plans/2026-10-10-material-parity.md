@@ -1,5 +1,10 @@
 # Garage Material Parity Implementation Plan
 
+Status update, 2026-10-11: Tasks 1–3 are delivered at the stable material checkpoint.
+Task 4 progress is preserved separately. Tasks 4–5 are deferred.
+Checkpoint verification and documentation replace the remaining completion work for this delivery.
+Use [the roadmap](../../roadmap.md) and [remaining plan](2026-10-11-rendering-completion.md) for current status.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking. Wait for the user's plan review and execution choice.
 
 **Goal:** Restore source materials and lighting for the imported garage, fixed Lada, and preparation items.

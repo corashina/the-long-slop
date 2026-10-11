@@ -111,10 +111,12 @@ def validate_runtime_paths(manifest):
 def validate_runtime_manifest(content: bytes) -> None:
     """Use the game's contract before accepting runtime output."""
     root = Path(__file__).resolve().parents[2]
+    namespace = hashlib.sha256(str(root.resolve()).rstrip('\\/').lower().encode()).hexdigest()
     command = ['docker', 'run', '--rm', '--pull=never', '-i',
         '--mount', f'type=bind,source={root},target=/workspace,readonly',
         '--mount', 'type=volume,source=tld-wasm-cargo,target=/cargo',
         '--mount', 'type=volume,source=tld-wasm-target,target=/target',
+        '--env', f'CARGO_TARGET_DIR=/target/{namespace}',
         'my-summer-slop-toolchain', 'cargo', 'run', '--quiet', '--locked',
         '--bin', 'validate-reference']
     try:
@@ -137,7 +139,7 @@ def verify_reference(output: Path, library) -> None:
         raise ValueError('Unsupported runtime provenance')
     validate_runtime_manifest(content)
     validate_runtime_paths(manifest)
-    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json'}
+    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json'}
     for asset in manifest['assets']:
         for record in [asset, *asset['dependencies']]:
             name = record.get('file', record.get('path')).removeprefix('reference/')
@@ -149,7 +151,9 @@ def verify_reference(output: Path, library) -> None:
         uris = {entry['uri'] for entry in [*document.get('buffers', []), *document.get('images', [])]}
         resources = {item['path'] for item in lighting_resources(manifest)}
         declared = {entry['file'].removeprefix('reference/') for entry in asset['dependencies'] if entry['file'] not in resources}
-        if uris != declared:
+        material_mips = {Path(mip['file']).name for material in manifest['rendering']['materials']
+            if material['asset'] == asset['id'] for texture in material['properties']['textures'] for mip in texture['mips']}
+        if uris | material_mips != declared:
             raise ValueError('Runtime scene dependencies differ from selected receipts')
         validate_gltf(scene)
     for sprite in manifest.get('ui', {}).get('sprites', []):
@@ -190,6 +194,21 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
         raise ValueError('Selected home link differs from the required home')
     if source.read(source.get('level1',64898))['StartCar02']['m_PathID']!=206:
         raise ValueError('Selected Lada starter link differs from the required car')
+    source.live_mirror_sources = []
+    source.live_mirror_renderers = {}
+    main_reader = source.get('level1', 64919)
+    main = source.read(main_reader)
+    mirror_material = source.resolve(main_reader, main['defMirrorMaterial'])
+    mirror_texture = source.resolve(main_reader, main['defMirrorTexture'])
+    from .source import source_id, key
+    for node in source.hierarchy(roots['lada'][0], activate_root=True):
+        for reader in node['components']:
+            if reader.type.name == 'MonoBehaviour' and source.class_name(reader) == 'mirrorscript':
+                data = source.read(reader)['M']
+                if data['R']['m_PathID'] and data['C']['m_PathID']:
+                    source.live_mirror_sources.append(source_id(reader))
+                    source.live_mirror_renderers[key(source.resolve(reader, data['R']))] = mirror_material
+    source.live_mirror_sources.append(source_id(mirror_texture))
     prepare_conditions(source,[root for readers in roots.values() for root in readers])
     output.mkdir(parents=True, exist_ok=True)
     native_engine = native_engine_evidence(snapshot.root)
@@ -205,8 +224,9 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     roots['sky']=[clouds]
     report = {}
     for name, readers in roots.items():
-        report[name] = export_gltf((source,readers),output/f'{name}.gltf',library)
+        report[name] = export_gltf((source,readers),output/f'{name}.gltf',library,list(roots).index(name)+1)
         print(f'Exported {name}: {report[name]["node_count"]} nodes',flush=True)
+    (output/'material-evidence.json').write_text(json.dumps(list(source.material_evidence.values()), indent=2, allow_nan=False), encoding='utf-8')
     (output/'geometry-evidence.json').write_text(json.dumps(report,indent=2,allow_nan=False),encoding='utf-8')
     parameter_roots={f'{name}-{i}':root for name,readers in roots.items() for i,root in enumerate(readers)}
     parameter_roots['required-prefab']=prefab

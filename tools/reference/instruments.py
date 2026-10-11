@@ -3,7 +3,7 @@ from .source import key,source_id,vector
 
 def recover_instruments(source,manifest,reports):
     nodes={(n['source']['file'],n['source']['path_id']):n['id'] for n in manifest['nodes']}
-    material_indices=reports['lada']['materials']
+    material_indices=reports['lada']['material_indices']
     root=source.transform_for(source.get('level1',17687))
     parts=[c for n in source.hierarchy(root) for c in n['components'] if c.type.name=='MonoBehaviour'
            and source.read(c)['m_Script']['m_PathID']]

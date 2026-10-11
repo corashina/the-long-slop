@@ -24,7 +24,7 @@ def build_manifest(source, roots, reports, hashes, library):
             by_source[identity]=node_id;node_readers[node_id]=record['reader'];objects[node_id]=record
             nodes.append({'id':node_id,'source':entry['source'],'name':source.read(record['game_object'])['m_Name'],
                 'hierarchy_path':entry['hierarchy_path'],'asset':asset_id,'gltf_node':entry['gltf_node'],
-                'parent':by_source[key(record['parent'])] if record['parent'] else None,'active':record['active'],'transform':entry['transform']})
+                'parent':by_source[key(record['parent'])] if record['parent'] else None,'active':entry['active'],'transform':entry['transform']})
             group={}
             for reader in record['components']:
                 name=source.class_name(reader) if reader.type.name=='MonoBehaviour' else reader.type.name
@@ -360,6 +360,8 @@ def build_manifest(source, roots, reports, hashes, library):
         'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed']},'engine':engine_record,'player':player_record,'seats':seats,
         'vehicle':{'source':source_id(car_reader),'handbrake':bool(car['BhandBrake']),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':[w['id'] for w in wheel_slots],'colliders':[c['id'] for c in colliders if c['body']==car_body],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'keyboard_steering_rate':defaults[5],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')]},
         'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn,'car_pose':car_pose,'driveway_bounds':driveway_bounds,'driveway_height':driveway_height}}
+    result['rendering'] = {'materials': [dict(record, asset=asset_id)
+        for asset_id, name in enumerate(roots, 1) for record in reports[name]['materials']]}
     result['vehicle'].update(auto_shift_stop_speed=car['autoShiftStopSpeed'],auto_shift_min_rpm=car['autoShiftMinRpm'],auto_shift_max_rpm=car['autoShiftMaxRpm'])
     result['vehicle'].update(gear_free_run=[bool(gear['freeRun']) for gear in car['gears']],
         dont_ignite_with_throttle_in_automatic=bool(car['dontIgniteWithThorttleInAutomatic']),auto_move_min=0.3)

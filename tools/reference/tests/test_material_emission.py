@@ -1,40 +1,24 @@
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+from unittest.mock import patch
 from tools.reference.gltf import GltfExporter
+from tools.reference.tests import test_materials
 
 
 class MaterialEmissionTests(unittest.TestCase):
     def test_source_keyword_controls_emission_factor_and_map(self):
-        reader = SimpleNamespace(assets_file=SimpleNamespace(name="source.assets",source_container_path="source.assets"), path_id=1)
         for enabled in (False, True):
-            with self.subTest(enabled=enabled), tempfile.TemporaryDirectory(dir=".cache") as directory:
-                data = {
-                    "m_Name": "warning lamp", "m_Shader": {},
-                    "m_ValidKeywords": ["_EMISSION"] if enabled else [],
-                    "m_SavedProperties": {
-                        "m_Colors": [("_EmissionColor", {"r": 2.67, "g": 1.24, "b": 0.0, "a": 1.0})],
-                        "m_TexEnvs": [("_EmissionMap", {})],
-                    },
-                }
-                shader = SimpleNamespace(assets_file=reader.assets_file,path_id=2)
-                source = SimpleNamespace(read=lambda r: data if r is reader else {"m_Name":"Standard"},
-                    resolve=lambda *_: shader)
-                exporter = GltfExporter(source, Path(directory) / "lamp.gltf", None)
-                texture_calls = []
-                def texture(*args):
-                    texture_calls.append(args)
-                    return {"index": 0}
-                exporter.texture = texture
-                index = exporter.material(reader)
-                material = exporter.document.materials[index]
-                strength=material.extensions.get('KHR_materials_emissive_strength',{}).get('emissiveStrength',1.)
-                self.assertEqual([value*strength for value in material.emissiveFactor], [2.67, 1.24, 0.0] if enabled else [0.0, 0.0, 0.0])
-                self.assertTrue(all(0 <= value <= 1 for value in material.emissiveFactor))
-                self.assertEqual(material.emissiveTexture is not None, enabled)
-                self.assertEqual(len(texture_calls), int(enabled))
-
-
-if __name__ == "__main__":
-    unittest.main()
+            source, reader = test_materials.MaterialTests().material_source(texture_pointer=12)
+            data = source.read(reader)
+            data['m_ShaderKeywords'] = '_EMISSION' if enabled else ''
+            data['m_SavedProperties']['m_Colors'] = [('_EmissionColor', dict(r=2.67,g=1.24,b=0.,a=1.))]
+            data['m_SavedProperties']['m_TexEnvs'] = [('_EmissionMap', data['m_SavedProperties']['m_TexEnvs'][0][1])]
+            with self.subTest(enabled=enabled), tempfile.TemporaryDirectory(dir='.cache') as directory, patch('tools.reference.gltf.material_source_evidence'):
+                exporter = GltfExporter(source, Path(directory) / 'lamp.gltf', None)
+                material = exporter.document.materials[exporter.material(reader)]
+                record = exporter.material_records[0]
+                strength = material.extensions.get('KHR_materials_emissive_strength', {}).get('emissiveStrength',1.)
+                self.assertEqual([v*strength for v in material.emissiveFactor], [2.67,1.24,0.] if enabled else [0.,0.,0.])
+                self.assertTrue(all(0 <= v <= 1 for v in material.emissiveFactor))
+                self.assertEqual(any(t['slot'] == '_EmissionMap' for t in record['properties']['textures']), enabled)

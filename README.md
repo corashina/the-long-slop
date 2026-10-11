@@ -102,7 +102,9 @@ Lighting follows the approved [day cycle scope](docs/superpowers/specs/2026-10-1
 The source cycle controls sun, moon, clouds, stars, fog, headlights, cabin lights, house lamps, and roadside lamps.
 Pause freezes cycle time, lamp fades, and switch movement.
 Restart restores the source startup offset of 240 seconds.
+Selected source material behavior is reconstructed. Exact shadows, probe publication, postprocessing, and stained-glass capture remain deferred.
 Live mirror reflections and audio remain outside this stage.
+See [completed work and roadmap](docs/roadmap.md) and [the deferred rendering plan](docs/superpowers/plans/2026-10-11-rendering-completion.md).
 The final browser walking route was skipped at the user's request. It remains unverified.
 The build has no survival system, save system, multiplayer, or public deployment.
 

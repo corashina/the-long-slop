@@ -232,7 +232,7 @@ class LibrarySource(Source):
         from types import SimpleNamespace as NS
         self.library = library
         self.root = library.records_root.parent / 'source'
-        self.serialized_files = {c['file']:NS(source_container_path=c['file'],name=Path(c['file']).name,externals=c['externals']) for c in library.catalog['containers']}
+        self.serialized_files = {c['file']:NS(source_container_path=c['file'],name=Path(c['file']).name,externals=c['externals'],version=tuple(int(v) for v in c['unity_version'].replace('f','.').split('.')),platform=19) for c in library.catalog['containers']}
         self.objects = {}
         for item in library.catalog['objects']:
             identity = item['source']
@@ -281,6 +281,7 @@ class LibrarySource(Source):
             image = stored.copy()
         fields = {name:value for name,value in data.items() if name.startswith('m_')}
         fields['m_TextureSettings'] = NS(**data['m_TextureSettings'])
+        fields['object_reader'] = NS(assets_file=reader.assets_file,path_id=reader.path_id,version=reader.assets_file.version,platform=reader.assets_file.platform)
         return NS(**fields, image=image, get_image_data=lambda:self.library.texture_data(identity))
 
     def sprite_image(self, reader):

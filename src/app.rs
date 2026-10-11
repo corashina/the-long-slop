@@ -104,7 +104,10 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
                     ..default()
                 }),
         )
-        .add_plugins(presentation::lighting::SourceLightingPlugin)
+        .add_plugins((
+            presentation::lighting::SourceLightingPlugin,
+            presentation::materials::SourceMaterialPlugin,
+        ))
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -148,6 +151,7 @@ fn setup(
     visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
     commands.insert_resource(visuals);
     commands.insert_resource(InstrumentVisuals::default());
+    presentation::materials::load_materials(&mut commands, &server, &reference.0.rendering);
     presentation::lighting::load_lighting(&mut commands, &server, &reference.0.lighting);
     presentation::lighting::load_lamp_materials(&mut commands, &gltf_extensions, &reference.0);
     presentation::reference::load(&mut commands, &server, &reference.0);
@@ -196,11 +200,17 @@ fn check_ready(
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
     mut frames: Local<u8>,
     lighting: Res<presentation::lighting::SourceLighting>,
+    mut materials: ResMut<presentation::materials::SourceMaterials>,
 ) {
     if visuals.failed {
         return;
     }
     if let presentation::lighting::RenderingState::Failed(error) = &lighting.state {
+        game_failure(error);
+        visuals.failed = true;
+        return;
+    }
+    if let presentation::materials::RenderingState::Failed(error) = &materials.state {
         game_failure(error);
         visuals.failed = true;
         return;
@@ -254,6 +264,7 @@ fn check_ready(
                 &gltfs,
                 &gltf_materials,
                 &mut standard_materials,
+                &mut materials,
             ) {
                 Ok(true) => {}
                 Ok(false) => return,
@@ -271,6 +282,9 @@ fn check_ready(
                     return;
                 }
                 presentation::lighting::RenderingState::Ready => {}
+            }
+            if materials.state != presentation::materials::RenderingState::Ready {
+                return;
             }
             *frames += 1;
             if *frames >= 2 {

@@ -1,5 +1,8 @@
 //! Validated installed-build data. Geometry uses converted body-local meters.
 
+pub mod rendering;
+pub use rendering::*;
+
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -11,7 +14,6 @@ pub mod ui;
 pub use instruments::*;
 pub use ui::*;
 pub mod lighting;
-pub mod rendering;
 pub use lighting::*;
 
 pub const APP_ID: u32 = 1_017_180;
@@ -747,6 +749,7 @@ pub struct ReferenceManifest {
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
     pub assets: Vec<AssetRecord>,
+    pub rendering: RenderingRecord,
     pub nodes: Vec<NodeRecord>,
     pub bodies: Vec<BodyRecord>,
     pub colliders: Vec<ColliderRecord>,
@@ -850,6 +853,8 @@ impl ReferenceManifest {
             }),
             "prototype body",
         )?;
+        self.rendering
+            .validate(&self.assets, self.lighting.cycle.sky_geometry.asset)?;
         let asset_ids = ids(self.assets.iter().map(|r| r.id), "duplicate asset ID")?;
         let node_ids = ids(self.nodes.iter().map(|r| r.id), "duplicate node ID")?;
         self.ui.validate()?;

@@ -3,6 +3,9 @@
 Date: 2026-10-10, Europe/Warsaw.
 Status: The user approved this written specification in chat on 2026-10-10.
 
+Status update, 2026-10-11: The delivery now ends at the stable material checkpoint.
+Full rendering remains a future goal. See [the roadmap](../../roadmap.md).
+
 ## Intent and scope
 
 The user wants the current garage and car to match The Long Drive's original appearance, with a 1:1 target.
@@ -30,7 +33,8 @@ The investigation established these faults:
 
 | Fault | Source evidence | Current behavior |
 | --- | --- | --- |
-| White floor | `level1:35014`, `haz02/Luk`, has `digholescript2`, component `68463`. Its `Refresh` disables its renderer. `TerrainGenerationSettings.FStart` calls `Refresh`. | The exporter marks the helper renderer enabled. Its white plane covers the concrete. |
+| White floor | `level1:28128`, `haz02/HelpPos (3)`, belongs to component `79970` (`terrainHeightAlignToBuildingScript`). Its `FStart` deactivates each `helpPosCoords` GameObject. `TerrainGenerationSettings.FStart` calls it. | The exporter keeps the marker active. Its untextured white mesh covers the concrete. |
+| Terrain hole helper | `level1:35014`, `haz02/Luk`, has `digholescript2`, component `68463`. Its `Refresh` disables its renderer. `TerrainGenerationSettings.FStart` calls `Refresh`. | The exporter marks this separate helper renderer enabled. |
 | Strong bumps | Source normal textures store X in alpha and Y in green. | The exporter copies packed pixels into an RGB normal texture. |
 | Missing surface detail | `Lada1Used`, `Lada2Middle`, and `HouseConcrete` enable `_DETAIL_MULX2` and `_NORMALMAP`. | The exporter omits detail albedo, masks, and detail normals. |
 | Wrong material response | Source properties include metallic maps, smoothness channels, occlusion, and reflection switches. | The exporter copies scalar metallic and roughness values while omitting required maps and switches. |

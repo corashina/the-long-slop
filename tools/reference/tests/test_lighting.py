@@ -69,25 +69,20 @@ class LightingTests(unittest.TestCase):
 
     def test_headlight_indicator_emission_follows_source_keyword(self):
         from tools.reference.gltf import GltfExporter
-        from PIL import Image
-        from types import SimpleNamespace as NS
-        def texture(identity):
-            path=self.output/f'stored-{identity.path_id}.png'
-            self.source.object(self.source.get(identity.file,identity.path_id)).image.save(path)
-            return path
-        exporter=GltfExporter(self.source,self.output/'indicator.gltf',NS(texture=texture))
+        exporter=GltfExporter(self.source,self.output/'indicator.gltf',None)
         for pid,enabled in [(324,False),(325,True)]:
             reader=self.source.get('sharedassets1.assets',pid);source=self.source.read(reader)
             material=exporter.document.materials[exporter.material(reader)]
             raw=dict(source['m_SavedProperties']['m_Colors'])['_EmissionColor']
-            self.assertEqual(material.extras['unity_properties']['m_Colors'],source['m_SavedProperties']['m_Colors'])
+            record=exporter.material_records[material.extras['gltf_material']]
+            self.assertEqual(record['properties']['colors']['_EmissionColor'],[raw[k] for k in ('r','g','b','a')])
             if enabled:
                 strength=material.extensions.get('KHR_materials_emissive_strength',{}).get('emissiveStrength',1.)
                 self.assertEqual([v*strength for v in material.emissiveFactor],[raw[k] for k in ('r','g','b')])
-                self.assertIsNotNone(material.emissiveTexture)
+                self.assertTrue(any(t['slot']=='_EmissionMap' for t in record['properties']['textures']) or '_EmissionMap' in record['properties']['defaults'])
             else:
                 self.assertTrue(material.emissiveFactor is None or material.emissiveFactor==[0.,0.,0.])
-                self.assertIsNone(material.emissiveTexture)
+                self.assertFalse(any(t['slot']=='_EmissionMap' for t in record['properties']['textures']))
 
     def test_high_beam_instrument_uses_checked_source_links(self):
         output=Path('web/assets/reference')

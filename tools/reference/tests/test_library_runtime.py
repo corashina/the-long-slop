@@ -165,24 +165,62 @@ class LibraryInputTests(unittest.TestCase):
             path.write_bytes(b'changed')
             with self.assertRaisesRegex(ValueError,'hash mismatch'):reader.sprite(source)
 
+    def test_sky_geometry_has_no_surface_materials(self):
+        from types import SimpleNamespace as NS
+        from tools.reference.library.reader import LibraryReader
+        from tools.reference.gltf import GltfExporter
+        with tempfile.TemporaryDirectory() as tmp:
+            reader=LibraryReader(self.fixture(Path(tmp)))
+            mesh=NS(assets_file=NS(source_container_path='test'),path_id=1)
+            writer=GltfExporter(None,Path(tmp)/'sky.gltf',reader,5)
+            writer.material=lambda *_: self.fail('Sky geometry must use the existing sky renderer')
+            index=writer.mesh(mesh,[NS(assets_file=mesh.assets_file,path_id=99)])
+            self.assertIsNone(writer.document.meshes[index].primitives[0].material)
+            self.assertEqual(writer.material_records,[])
+            self.assertEqual(writer.material_dependencies,{})
+
+    def test_typed_library_decodes_authored_mip_bytes(self):
+        from types import SimpleNamespace as NS
+        from PIL import Image
+        from UnityPy.enums import TextureFormat
+        from tools.reference.source import LibrarySource
+        from tools.reference.materials import source_mip_images
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'stored.png';Image.new('RGBA',(2,2),(10,20,30,128)).save(path)
+            data=dict(m_TextureFormat=int(TextureFormat.RGBA32),m_Width=2,m_Height=2,m_MipCount=2,
+                m_TextureSettings=dict(m_FilterMode=1,m_WrapU=0,m_WrapV=0,m_Aniso=1,m_MipBias=0))
+            library=NS(records_root=Path(directory)/'records',catalog={
+                'containers':[{'file':'fixture','unity_version':'2021.3.18f1','externals':[]}],
+                'objects':[{'source':{'file':'fixture','path_id':1},'type':'Texture2D','bytes':20}]},
+                record=lambda _:data,texture=lambda _:path,
+                texture_data=lambda _:bytes([10,20,30,128]*4+[40,50,60,64]))
+            source=LibrarySource(library)
+            levels=list(source_mip_images(source.texture_object(source.get('fixture',1))))
+            self.assertEqual([level.size for level in levels],[(2,2),(1,1)])
+            self.assertEqual([level.getpixel((0,0)) for level in levels],[(10,20,30,128),(40,50,60,64)])
+
     def test_runtime_flips_stored_pixels_and_preserves_input(self):
         from types import SimpleNamespace as NS
         from PIL import Image
         from tools.reference.library.reader import LibraryReader
-        from tools.reference.gltf import GltfExporter
         from tools.reference.library.types import ObjectId
+        from tools.reference.materials import export_material_textures
         with tempfile.TemporaryDirectory() as tmp:
-            reader=LibraryReader(self.fixture(Path(tmp)))
+            root=Path(tmp)
+            reader=LibraryReader(self.fixture(root))
             texture=NS(assets_file=NS(source_container_path='test',name='test'),path_id=2,type=NS(name='Texture2D'))
-            data={'m_TextureSettings':{'m_FilterMode':1,'m_WrapU':0,'m_WrapV':0,'m_Aniso':0,'m_MipBias':0},'m_MipCount':1,'m_ColorSpace':1}
-            source=NS(resolve=lambda *args:texture,read=lambda _:data)
-            writer=GltfExporter(source,Path(tmp)/'selected.gltf',reader)
+            data={'m_SavedProperties':{'m_TexEnvs':[('_MainTex',{'m_Texture':{'m_PathID':2}})]}}
             original=reader.texture(ObjectId('test',2));before=original.read_bytes()
-            writer.texture(None,{'m_Texture':{},'m_Scale':{'x':1,'y':1},'m_Offset':{'x':0,'y':0}},'srgb')
-            with Image.open(Path(tmp)/writer.document.images[0].uri) as image:
-                self.assertEqual(image.getpixel((0,0)),(0,0,255))
+            def texture_object(value):
+                with Image.open(reader.texture(ObjectId('test',2))) as stored:
+                    return NS(image=stored.copy(),m_MipCount=1)
+            source=NS(resolve=lambda *args:texture,read=lambda _:data,texture_object=texture_object)
+            record={'source':{'file':'test','path_id':1},'properties':{'textures':[
+                {'slot':'_MainTex','file':'reference/main.png','source_encoding':'rgba','mips':[{'file':'reference/main.png'}]}]}}
+            dependencies=export_material_textures(source,None,record,root)
+            with Image.open(root/'main.png') as image:self.assertEqual(image.getpixel((0,0)),(0,0,255,255))
+            self.assertEqual(dependencies[0]['file'],'reference/main.png')
             self.assertEqual(original.read_bytes(),before)
-            self.assertTrue(writer.document.images[0].extras['conversion']['flip_y'])
             original.write_bytes(b'changed image')
             with self.assertRaisesRegex(ValueError,'hash mismatch'): reader.texture(ObjectId('test',2))
 
@@ -194,12 +232,25 @@ class RuntimeContractTests(unittest.TestCase):
         receipt=NS(manifest_sha256='a'*64,catalog_sha256='b'*64,source_manifest_sha256='c'*64)
         manifest=json.loads((Path(__file__).resolve().parents[3]/'tests/common/reference.json').read_bytes())
         manifest['library']=provenance(receipt)
-        manifest['assets'].append({'id':5,'usage':'unique_scene','material_count':0,'path':'reference/items.gltf','sha256':'a'*64,'root':{'file':'fixture','path_id':999},'dependencies':[]})
+        manifest['assets'].append({'id':5,'usage':'unique_scene','material_count':1,'path':'reference/items.gltf','sha256':'a'*64,'root':{'file':'fixture','path_id':999},'dependencies':[]})
+        manifest['rendering']['materials'].append({
+            'source':{'file':'fixture','path_id':999},'asset':5,'gltf_material':0,
+            'shader_family':'unlit_color','color':[1.,1.,1.,1.],'condition':None,'keywords':[],
+            'state':{'alpha_mode':'opaque','cull':2,'z_write':True,'z_test':4,'src_blend':1,'dst_blend':0,'render_queue':-1},
+            'properties':{'floats':{},'colors':{'_Color':[1.,1.,1.,1.]},'textures':[],'defaults':{},'exclusions':[]}})
         for asset in manifest['assets']:
             scene={'asset':{'version':'2.0'},'nodes':[],'scenes':[{'nodes':[]}],'scene':0}
             content=json.dumps(scene).encode()
             (root/Path(asset['path']).name).write_bytes(content)
-            asset['sha256']=hashlib.sha256(content).hexdigest();asset['dependencies']=[d for d in asset['dependencies'] if d['file'].startswith('reference/lighting-')]
+            asset['sha256']=hashlib.sha256(content).hexdigest()
+            material_mips={mip['file'] for material in manifest['rendering']['materials'] if material['asset']==asset['id']
+                for texture in material['properties']['textures'] for mip in texture['mips']}
+            asset['dependencies']=[d for d in asset['dependencies'] if d['file'].startswith('reference/lighting-') or d['file'] in material_mips]
+            for dependency in asset['dependencies']:
+                if dependency['file'] in material_mips:
+                    content=b'fixture source mip bytes'
+                    (root/Path(dependency['file']).name).write_bytes(content)
+                    dependency['sha256']=hashlib.sha256(content).hexdigest()
         for sprite in manifest.get('ui', {}).get('sprites', []):
             content=b'fixture sprite bytes'
             (root/Path(sprite['path']).name).write_bytes(content)
@@ -220,7 +271,7 @@ class RuntimeContractTests(unittest.TestCase):
             for asset in manifest['assets']:
                 for dependency in asset['dependencies']:
                     if dependency['file']==resource['path']:dependency['sha256']=resource['sha256']
-        for name in ('geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json'):
+        for name in ('geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json'):
             (root/name).write_text('{}')
         return manifest,receipt
 

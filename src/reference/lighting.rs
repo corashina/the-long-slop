@@ -182,8 +182,8 @@ pub struct LampStateReference {
     pub lights: Vec<LightId>,
     pub intensity: f32,
     pub renderers: Vec<NodeId>,
-    pub on_material: Option<MaterialLink>,
-    pub off_material: Option<MaterialLink>,
+    pub on_material: Option<LightingMaterialLink>,
+    pub off_material: Option<LightingMaterialLink>,
     pub broken: bool,
     pub working_nodes: Vec<NodeId>,
     pub broken_nodes: Vec<NodeId>,
@@ -262,8 +262,8 @@ pub struct HighBeamLampReference {
     pub source: SourceId,
     pub node: NodeId,
     pub signal: String,
-    pub on: MaterialLink,
-    pub off: MaterialLink,
+    pub on: LightingMaterialLink,
+    pub off: LightingMaterialLink,
     pub min_value: f32,
     pub max_value: f32,
     pub stay_on: bool,
@@ -305,7 +305,7 @@ pub struct LightingRecord {
     pub controllers: Vec<LightControllerReference>,
     pub high_beam: HighBeamLampReference,
     pub road_lamp: RoadLampReference,
-    pub textures: Vec<TextureRecord>,
+    pub textures: Vec<LightingTextureRecord>,
     pub materials: Vec<MaterialBindingReference>,
 }
 
@@ -684,7 +684,7 @@ impl LightingRecord {
                 "cloud",
             )?;
         }
-        let material = |m: &MaterialLink| {
+        let material = |m: &LightingMaterialLink| {
             self.materials.iter().any(|v| {
                 v.asset == m.asset && v.gltf_material == m.gltf_material && v.source == m.source
             }) && valid_source(&m.source)

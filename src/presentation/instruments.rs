@@ -1,6 +1,4 @@
-use super::materials::{
-    SourceCaster, SourceExtension, SourceMaterial, SourceMaterials, SourceShadowMode,
-};
+use super::materials::{MaterialCache, SourceCaster, SourceMaterial, SourceShadowMode};
 use crate::reference::{MaterialLink, NodeId, ReferenceError, ReferenceManifest};
 use crate::simulation::instruments::{InstrumentState, source_rotation};
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
@@ -71,6 +69,7 @@ impl InstrumentVisuals {
         gltf_assets: &Assets<Gltf>,
         raw_materials: &Assets<GltfMaterial>,
         standards: &mut Assets<StandardMaterial>,
+        authored: &mut super::materials::SourceMaterials,
     ) -> Result<bool, ReferenceError> {
         if self.bound {
             return Ok(true);
@@ -149,6 +148,7 @@ impl InstrumentVisuals {
             let handle = standards.add(source_material(
                 raw_materials.get(raw).expect("checked material"),
             ));
+            authored.standard_records.insert(handle.id(), key);
             handles.insert(key, handle.clone());
             handle
         };
@@ -277,7 +277,8 @@ pub(crate) fn prepare_instruments(
     mut source: ResMut<super::lighting::SourceLighting>,
     mut originals: ResMut<Assets<StandardMaterial>>,
     mut materials: ResMut<Assets<SourceMaterial>>,
-    mut cache: ResMut<SourceMaterials>,
+    mut cache: ResMut<MaterialCache>,
+    authored: Res<super::materials::SourceMaterials>,
     receivers: Query<
         (
             &Mesh3d,
@@ -290,7 +291,7 @@ pub(crate) fn prepare_instruments(
     >,
     casters: Query<(), With<SourceCaster>>,
 ) {
-    if !visuals.bound || visuals.prepared || !source.bound {
+    if !authored.textures_ready() || !visuals.bound || visuals.prepared || !source.bound {
         return;
     }
     if visuals
@@ -314,7 +315,11 @@ pub(crate) fn prepare_instruments(
             let mask = materials.get(&receiver.0).unwrap().extension.receiver_mask;
             let inverted = global.affine().matrix3.determinant() < 0.;
             let mut prepare = |handle: &Handle<StandardMaterial>| {
-                let mut base = originals.get(handle).unwrap().clone();
+                let key = authored.standard_records[&handle.id()];
+                let mut base = super::materials::authored_caster_material(key, &authored);
+                originals
+                    .insert(handle.id(), base.clone())
+                    .expect("loaded instrument caster material");
                 if inverted {
                     base.cull_mode = base.cull_mode.map(|face| match face {
                         Face::Front => Face::Back,
@@ -347,13 +352,10 @@ pub(crate) fn prepare_instruments(
                     .converted
                     .entry((surface.id(), mask))
                     .or_insert_with(|| {
-                        base.fog_enabled = false;
-                        materials.add(SourceMaterial {
-                            base,
-                            extension: SourceExtension {
-                                receiver_mask: mask,
-                            },
-                        })
+                        let key = authored.standard_records[&handle.id()];
+                        materials.add(super::materials::authored_material(
+                            key, inverted, mask, &authored,
+                        ))
                     })
                     .clone();
                 let warm = commands

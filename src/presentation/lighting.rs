@@ -1,6 +1,6 @@
 //! Persistent WebGL2 source lighting resources.
 use super::{
-    materials::{SourceMaterial, SourceMaterials, bind_materials},
+    materials::{MaterialCache, SourceMaterial, bind_materials},
     reference::ReferenceVisuals,
 };
 use crate::{
@@ -173,7 +173,7 @@ impl Plugin for SourceLightingPlugin {
                 super::shadows::SourceShadowPlugin,
                 super::sky::SourceSkyPlugin,
             ))
-            .init_resource::<SourceMaterials>()
+            .init_resource::<MaterialCache>()
             .add_systems(
                 Update,
                 (
@@ -250,7 +250,7 @@ pub fn load_lighting(commands: &mut Commands, server: &AssetServer, lighting: &L
         lights: Vec::with_capacity(MAX_LIGHTS),
         uniform: LightingUniform::default(),
         textures,
-        shader: server.load("shaders/source_lighting.wgsl"),
+        shader: server.load("shaders/source_surface.wgsl"),
         cookie_handles: None,
         status: Arc::new(Mutex::new(RenderingState::Loading)),
     });
@@ -769,7 +769,7 @@ pub fn lighting_readiness(
     }
     if let Some(LoadState::Failed(error)) = server.get_load_state(source.shader.id()) {
         source.state =
-            RenderingState::Failed(format!("Cannot load shaders/source_lighting.wgsl: {error}"));
+            RenderingState::Failed(format!("Cannot load shaders/source_surface.wgsl: {error}"));
         return;
     }
     if !source.materials_ready {

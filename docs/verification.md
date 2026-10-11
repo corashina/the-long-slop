@@ -1,5 +1,41 @@
 # Verification record
 
+The checkpoint results below precede this merge. They do not replace merged-tree verification.
+
+## Earlier material checkpoint, 2026-10-11
+
+Delivery branch: `codex/material-parity-checkpoint`.
+Material base: `7009f62b4a757069286115617bf38d538e3db5c0`.
+The only later runtime-source change removes the obsolete binary entrypoint.
+The browser still enters through the wasm-bindgen library.
+
+| Fresh check | Result |
+| --- | --- |
+| Exporter suite | 21 passed |
+| Native suite | 96 passed |
+| Installed-source gates | Seven passed |
+| Formatting | Passed |
+| WASM all-target check | Passed |
+| Release build and wasm-bindgen | Passed |
+| Matched web artifact audit | All 1,145 files matched |
+| Browser startup | Garage visible; garage-ready status; Start enabled |
+
+The fresh browser loaded the Node-served checkpoint on port 4213.
+This startup reached readiness without a recovery reload.
+A static screenshot is saved as `material-checkpoint-final.jpg` in the task visualization directory.
+This check does not establish continuous pointer-lock gameplay or matched native pixels.
+
+WASM size: 51,603,518 bytes.
+WASM SHA256: `4ecef4e02520bb660612ed05c3729b619fa65065fdf92144f1ff8a14adb88c2d`.
+Web audit SHA256: `7aefc0918a62daa32f98fc269964b342188765a1979484c7f08f3ac2b9fea2e6`.
+Build logs and the audit remain in `.superpowers/sdd/2026-10-10-material-parity/` and `.cache/`.
+
+The accepted material layer is not complete material or lighting parity.
+Source texture storage-color corrections remain on the recovery branch.
+Full shadows, probe publication, postprocessing, and stained-glass capture remain deferred.
+See [the roadmap](roadmap.md) and [remaining plan](superpowers/plans/2026-10-11-rendering-completion.md).
+
+
 These sections record separate asset library, interaction, and source UI checks.
 Each section names its tested branch or commit. Their results do not replace merged-tree checks.
 
@@ -424,21 +460,21 @@ No independent-review Minor findings remain deferred.
 
 Master `5d4cc16` integrates interaction worktree commit `c2d0fe6`.
 The merge keeps source menus, feedback, instruments, mechanisms, parts, carry, push, grip, and throw.
-Source `fpscontroller.MountFunc` lines 5544â€“5557 install on F release.
+Source `fpscontroller.MountFunc` lines 5544–5557 install on F release.
 Its callers at lines 3396 and 4325 require charge below the throw minimum.
 Charged release over a valid slot throws. Blocked installation keeps the held part and clears charge.
 Target names and source fluid labels use separate fields.
 Wheel compatibility and occupancy share one rule for selection, feedback, and execution.
 
 Headlight state now drives the high-beam indicator and odometer illumination.
-Source evidence: `carscript.cs` lines 1197â€“1208, 2437â€“2445, and 2559â€“2584, plus `forgoszamlap.TurnOn/TurnOff`.
+Source evidence: `carscript.cs` lines 1197–1208, 2437–2445, and 2559–2584, plus `forgoszamlap.TurnOn/TurnOff`.
 Digit material handles remain cached.
 
 Fresh checks passed: 157 native tests, 31 installed-source tests, 20 browser unit tests, and 19 exporter tests.
 Formatting, the release WASM build, and browser package generation passed.
 The combined export contains 417 colliders and 127 items.
 
-An isolated Linux Chromium 151.0.7922.34 check passed at 960 Ã— 540.
+An isolated Linux Chromium 151.0.7922.34 check passed at 960 × 540.
 Start enabled after 6 seconds. A trusted click captured the mouse. Physics advanced at least 12 steps.
 Escape paused play and released capture. The browser and internal server then closed.
 No page errors or gameplay asset HTTP errors occurred. The console recorded one 404 for the excluded favicon request.
@@ -663,3 +699,48 @@ Final package hashes:
 - `web/assets/reference/manifest.json`: `ac94af1b9f30ef97a5e1a88fef911ce96ab2a328a9b54213b8beddc1fbf9d7b1`; 4,085,882 bytes.
 
 Logs use `.cache/lighting-merge-*.log`. The browser capture is `lighting-merged-master-ready.png` in the local visualization folder.
+
+## Local material checkpoint merge: 2026-10-11
+
+Base master: `39d9e3fc04bef4e09d4066fd864e6adf88fed523`.
+Checkpoint: `e3625b8199b05c6aec7c70383c989ac09ef39541`.
+The merge retains master lighting, the accepted library, menus, instruments, mounting, and driving controls.
+The unfinished rendering branch remains separate.
+
+| Check | Result |
+| --- | --- |
+| Native suite | 233 passed |
+| Installed-source checks | 42 passed |
+| Exporter suite | 170 tests; one skipped |
+| Browser unit and server tests | 23 passed |
+| Formatting, WASM check, release and bindgen | Passed |
+| Accepted library | 262,784 owners verified; receipt unchanged |
+| Selected runtime export | Five scenes; native contract and dependency validation passed |
+| Production browser | Garage ready; Start enabled; no GPU errors |
+| Shader readiness | 11 source material pipelines ready; 13 receiver variants |
+
+Nine semantic texture slots share seven image banks.
+The complete WebGL2 layout uses 16 textures, 16 samplers, and 12 uniform buffers.
+The merge preserves source image bytes, mip levels, samplers, UV transforms, and channel rules.
+MainTex keeps bank zero for alpha shadow passes.
+Critical checks cover bank order, absent MainTex, overflow, and parallax binding.
+
+Road lamps retain the accepted AmplifyRope material behavior.
+Sky meshes use their existing sky material, outside surface material binding.
+The merge removes the obsolete source_lighting shader after combining its calculations with source_surface.
+The final shader removes an unused shadows import that caused ShaderImportNotYetAvailable.
+The production browser compiled the fixed shader and reached the existing readiness gate.
+
+The embedded browser rejects pointer lock. Startup and visible garage rendering passed.
+This check does not establish continuous mouse capture or matched native pixel parity.
+Source texture storage reconciliation and exact Task 4 rendering remain deferred in the roadmap.
+
+Logs and failed diagnostic evidence remain in the managed material-checkpoint-merge worktree under `.cache/merge-*`.
+The final browser logs are `merge-final-device-logs.json` in the local visualization folder.
+The garage image is `merged-master-garage.png` in that folder.
+
+Package and export hashes:
+
+- `web/pkg/my_summer_slop.js`: `23b8f17a3a62954cfe5a59a30450c060c899af451adc51ca815840db57c15abd`; 103747 bytes.
+- `web/pkg/my_summer_slop_bg.wasm`: `02c9c4a33f9f3e2b5c96b22155c4187fef9a3977f8e1f8a98b31408f0fc71451`; 53733353 bytes.
+- `web/assets/reference/manifest.json`: `d62630828b68c154c9351203b11f67427916390bd9a3eac1b911fda8efb5c74e`; 5712654 bytes.

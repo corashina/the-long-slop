@@ -338,6 +338,45 @@ fn production_export_matches_installed_contract() {
         .expect("source terrain hole node");
     assert_eq!(hole["extras"]["renderer_enabled"], false);
     assert!(hole.get("mesh").is_none());
+    for source in [38712, 23613, 28128] {
+        let marker = home["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| {
+                node["extras"]["reference_id"]["file"] == "level1"
+                    && node["extras"]["reference_id"]["path_id"] == source
+            })
+            .expect("source terrain alignment marker");
+        assert_eq!(marker["extras"]["active"], false);
+        assert_eq!(marker["extras"]["renderer_enabled"], false);
+        assert!(marker.get("mesh").is_none());
+        let node = manifest
+            .nodes
+            .iter()
+            .find(|node| node.source.file == "level1" && node.source.path_id == source)
+            .expect("retained terrain alignment node");
+        assert!(!node.active);
+        assert_eq!(
+            serde_json::to_value(node.transform.scale).unwrap(),
+            marker["scale"]
+        );
+    }
+    let cover = manifest
+        .nodes
+        .iter()
+        .find(|node| node.source.file == "level1" && node.source.path_id == 28128)
+        .unwrap();
+    assert_eq!(cover.transform.scale, [20.0, 0.1, 20.0]);
+    for (actual, expected) in cover
+        .transform
+        .translation
+        .into_iter()
+        .zip([9.3, -1.013, 2.34])
+    {
+        assert!((actual - expected).abs() < 0.000001);
+    }
+
     let faucet = manifest
         .openings
         .iter()

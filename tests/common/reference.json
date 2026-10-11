@@ -870,6 +870,14 @@
         {
           "file": "reference/lighting-switch-sharedassets1.assets-4594.png",
           "sha256": "ebd83e5df8964eb4e2ac173a92ea3509a10efcb221e795480f825ab79908ac2d"
+        },
+        {
+          "file": "reference/synthetic-color.png",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+          "file": "reference/synthetic-color-mip-1.png",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
         }
       ],
       "material_count": 37,
@@ -15862,5 +15870,2894 @@
     },
     "mask": 513,
     "radius": 0.2
+  },
+  "rendering": {
+    "materials": [
+      {
+        "asset": 1,
+        "gltf_material": 0,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 1
+        },
+        "shader_family": "stained_glass",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "refract",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {
+            "_BumpAmt": 10
+          },
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [
+            {
+              "slot": "_MainTex",
+              "source": {
+                "file": "synthetic.assets",
+                "path_id": 10
+              },
+              "file": "reference/synthetic-color.png",
+              "color_space": "srgb",
+              "encoding": "rgba",
+              "source_encoding": "rgba",
+              "uv_channel": 0,
+              "scale": [
+                1,
+                1
+              ],
+              "offset": [
+                0,
+                0
+              ],
+              "sampler": {
+                "filter": 1,
+                "wrap_u": 0,
+                "wrap_v": 0,
+                "aniso": 1,
+                "mip_bias": 0,
+                "mip_count": 2
+              },
+              "mips": [
+                {
+                  "file": "reference/synthetic-color.png",
+                  "width": 2,
+                  "height": 2
+                },
+                {
+                  "file": "reference/synthetic-color-mip-1.png",
+                  "width": 1,
+                  "height": 1
+                }
+              ]
+            }
+          ],
+          "defaults": {
+            "_BumpMap": "bump"
+          },
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 1,
+        "gltf_material": 1,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 11001
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 1,
+        "gltf_material": 2,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 11002
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 1,
+        "gltf_material": 3,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 11003
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 0,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 2
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 1,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12001
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 2,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12002
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 3,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12003
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 4,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12004
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 5,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12005
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 6,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12006
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 7,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12007
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 8,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12008
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 9,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12009
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 10,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12010
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 11,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12011
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 12,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12012
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 13,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12013
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 14,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12014
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 15,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12015
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 16,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12016
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 17,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12017
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 18,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12018
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 19,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12019
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 20,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12020
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 21,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12021
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 22,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12022
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 23,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12023
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 24,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12024
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 25,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12025
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 26,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12026
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 27,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12027
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 28,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12028
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 29,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12029
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 30,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12030
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 31,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12031
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 32,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12032
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 33,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12033
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 34,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12034
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 35,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12035
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 36,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12036
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 37,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12037
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 38,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12038
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 39,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12039
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 40,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12040
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 41,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12041
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 42,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12042
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 43,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12043
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 44,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12044
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 45,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12045
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 46,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12046
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 47,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12047
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 48,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12048
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 49,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12049
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 50,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12050
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 51,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12051
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 52,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12052
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 53,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12053
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 54,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12054
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 55,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12055
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 56,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12056
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 57,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12057
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 58,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12058
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 59,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12059
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 60,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12060
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 61,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12061
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 62,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12062
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 63,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12063
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 64,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 12064
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 3,
+        "gltf_material": 0,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 13000
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      },
+      {
+        "asset": 4,
+        "gltf_material": 0,
+        "source": {
+          "file": "synthetic.assets",
+          "path_id": 14000
+        },
+        "shader_family": "unlit_color",
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {},
+          "colors": {
+            "_Color": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "textures": [],
+          "defaults": {},
+          "exclusions": []
+        }
+      }
+    ]
   }
 }
