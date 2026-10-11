@@ -1,6 +1,9 @@
+mod carry;
+mod doors;
 pub mod feedback;
 pub mod items;
 pub mod parts;
+mod pour;
 pub mod wheels;
 use feedback::ActionMask;
 
@@ -400,39 +403,6 @@ impl InteractionState {
     pub fn tuning_opening(&self) -> Option<OpeningId> {
         self.tuning_opening
     }
-    pub fn hinge_angle(&self, id: ItemId) -> Option<f32> {
-        self.hinges
-            .iter()
-            .find(|hinge| hinge.reference.item == id)
-            .map(|hinge| hinge.angle)
-    }
-    /// A fitted part returns to its slot closed.
-    pub fn close_hinge(&mut self, item: ItemId) {
-        if let Some(hinge) = self
-            .hinges
-            .iter_mut()
-            .find(|hinge| hinge.reference.item == item)
-        {
-            hinge.angle = hinge.reference.closed_degrees;
-            hinge.target = hinge.reference.closed_degrees;
-        }
-    }
-    pub fn dragging_hinge(&self) -> Option<ItemId> {
-        self.latched_hinge
-            .map(|(index, _)| self.hinges[index].reference.item)
-    }
-    pub fn drop_held(
-        &mut self,
-        items: &mut ItemStore,
-        physics: &mut PhysicsWorld,
-    ) -> Option<ItemId> {
-        let held = self.held.take()?;
-        physics.rapier_mut().impulse_joints.remove(held.joint, true);
-        if let Some(item) = items.get_mut(held.item) {
-            item.location = ItemLocation::World;
-        }
-        Some(held.item)
-    }
     pub fn rebase(&mut self, shift: [f32; 3]) {
         for hinge in &mut self.hinges {
             if hinge.parent.is_none() {
@@ -706,142 +676,18 @@ impl InteractionState {
         }
         self.place_hinges(physics, false);
         items.sync_poses(physics);
-        let mut filling = None;
         if input.held & keys::FILL != 0
             && available.actions.0 & ActionMask::FILL != 0
-            && let Some(held) = self.held.as_ref()
-            && let Some(target) = target
-            && let Some(opening) = self
-                .openings
-                .iter()
-                .find(|opening| opening.reference.cap == target.item && opening.valve > 0.0)
+            && let Some(fill) = self.fill(target, items, dt)
         {
-            let (source_id, destination, flow) = if self.supplies.contains(&opening.reference.tank)
-            {
-                if !self.openings.iter().any(|destination| {
-                    destination.reference.tank == held.item && destination.valve > 0.0
-                }) {
-                    (held.item, held.item, 0.0)
-                } else {
-                    (
-                        opening.reference.tank,
-                        held.item,
-                        opening.reference.flow_liters_per_second * opening.valve,
-                    )
-                }
-            } else {
-                (
-                    held.item,
-                    opening.reference.tank,
-                    opening.reference.flow_liters_per_second * opening.valve,
-                )
-            };
-            let source_allowed = self
-                .tank_rules
-                .get(&source_id)
-                .is_some_and(|rules| !rules.no_fill_from);
-            let destination_rules = self.tank_rules.get(&destination);
-            if source_id != destination
-                && source_allowed
-                && destination_rules.is_some_and(|rules| !rules.no_fill_this)
-                && let Some((source, destination_state)) =
-                    items.get_pair_mut(source_id, destination)
-                && let (Some(source), Some(destination_state)) =
-                    (source.fluid.as_mut(), destination_state.fluid.as_mut())
-            {
-                let mut amount = flow * dt;
-                let source_total = source.mixture.total();
-                let destination_total = destination_state.mixture.total();
-                if destination_rules.is_some_and(|rules| rules.slow_oil)
-                    && source_total > 0.0
-                    && source.mixture.amount(1) / source_total > 0.25
-                    && destination_total > 0.05
-                    && destination_state.mixture.amount(1) / destination_total < 1.0
-                {
-                    amount = (amount * destination_total * self.slow_oil_modifier)
-                        .max(0.0001)
-                        .min(amount);
-                }
-                let liters = transfer(source, destination_state, amount);
-                if liters > 0.0 {
-                    filling = Some(source_id);
-                    action = Some(InteractionAction::Fill {
-                        source: source_id,
-                        destination,
-                        liters,
-                    });
-                }
-            }
+            action = Some(fill);
         }
-        for opening in &self.openings {
-            if opening.valve <= 0.0
-                || opening.reference.spill_disabled
-                || opening.reference.tube_connected
-                || filling == Some(opening.reference.tank)
-            {
-                continue;
-            }
-            let Some(item) = items.get_mut(opening.reference.tank) else {
-                continue;
-            };
-            let forward = (to_rapier(item.pose) * opening.local_pose).rotation * opening.tilt_axis;
-            let angle = forward.dot(Vector::Y).clamp(-1.0, 1.0).acos().to_degrees();
-            if let Some(fluid) = item.fluid.as_mut() {
-                let fill = (fluid.mixture.total() / fluid.capacity_liters).clamp(0.0, 1.0);
-                let threshold = 100.0 + (opening.reference.tilt_degrees - 100.0) * fill;
-                let factor = if opening.reference.angle_disabled {
-                    1.0
-                } else {
-                    inverse_lerp(threshold, opening.reference.tilt_degrees + 90.0, angle)
-                        .max(inverse_lerp(90.0, 180.0, angle))
-                };
-                if !opening.reference.angle_disabled && angle <= threshold {
-                    continue;
-                }
-                spill(
-                    fluid,
-                    factor * opening.valve * opening.reference.flow_liters_per_second * dt,
-                );
-            }
-        }
+        let filling = match action {
+            Some(InteractionAction::Fill { source, .. }) => Some(source),
+            _ => None,
+        };
+        self.spill(items, filling, dt);
         action
-    }
-
-    pub fn sync_hinges(&self, physics: &mut PhysicsWorld) {
-        self.place_hinges(physics, true);
-    }
-
-    pub fn hinge_local_pose(&self, body: BodyId) -> Option<Pose> {
-        self.hinges
-            .iter()
-            .find(|hinge| hinge.reference.body == body)
-            .map(local_hinge_pose)
-    }
-
-    fn place_hinges(&self, physics: &mut PhysicsWorld, commit: bool) {
-        for hinge in &self.hinges {
-            let Some(handle) = self.bodies.get(&hinge.reference.body).copied() else {
-                continue;
-            };
-            let parent = if let Some(parent) = hinge.parent {
-                let Some(body) = self
-                    .bodies
-                    .get(&parent)
-                    .and_then(|handle| physics.rapier().bodies.get(*handle))
-                else {
-                    continue;
-                };
-                *body.position()
-            } else {
-                Pose::IDENTITY
-            };
-            let pose = parent * local_hinge_pose(hinge);
-            let body = &mut physics.rapier_mut().bodies[handle];
-            if commit {
-                body.set_position(pose, false);
-            }
-            body.set_next_kinematic_position(pose);
-        }
     }
 
     pub(crate) fn pickup(
@@ -893,96 +739,6 @@ impl InteractionState {
         item.location = ItemLocation::Held;
         true
     }
-
-    fn update_carry(
-        &mut self,
-        input: FrameInput,
-        player: &PlayerState,
-        physics: &mut PhysicsWorld,
-        dt: f32,
-    ) -> bool {
-        let Some(held) = self.held.as_mut() else {
-            return false;
-        };
-        let Some(anchor) = self.carry_anchor else {
-            return false;
-        };
-        let view = to_rapier(player.view_pose(physics));
-        if input.wheel.is_finite() {
-            held.offset = (held.offset
-                - Vector::Z
-                    * input.wheel
-                    * self.carry.scroll_sensitivity
-                    * dt
-                    * self.carry.obj_move_sensitivity)
-                .clamp_length_max(self.carry.carry_offset_radius);
-        }
-        if input.held & keys::MOVE != 0 && input.mouse.iter().all(|n| n.is_finite()) {
-            held.offset += Vector::new(input.mouse[0], -input.mouse[1], 0.)
-                * dt
-                * self.carry.obj_move_sensitivity;
-            held.offset = held.offset.clamp_length_max(self.carry.carry_offset_radius);
-        }
-        if input.held & keys::ROTATE != 0 && input.mouse.iter().all(|delta| delta.is_finite()) {
-            let sensitivity = dt * 10.0 * self.carry.obj_rotation_sensitivity;
-            held.rotation = Rotation::from_rotation_y((-input.mouse[0] * sensitivity).to_radians())
-                * held.rotation
-                * Rotation::from_rotation_x((input.mouse[1] * sensitivity).to_radians());
-        }
-        let current = *physics.rapier().bodies[held.body].position();
-        let mut desired = Pose::from_parts(
-            view.translation
-                + view.rotation
-                    * (Vector::from_array(self.carry.carry_anchor_offset) + held.offset)
-                        .clamp_length(self.carry.carry_min_distance, self.carry.carry_max_distance),
-            view.rotation * held.rotation,
-        );
-        if (desired.translation - current.translation).length() >= self.carry.carry_drop_distance {
-            return true;
-        }
-        desired.translation = current.translation
-            + ((desired.translation - current.translation) * self.carry.carry_force_multiplier)
-                .clamp_length_max(self.carry.carry_max_force)
-                * physics.rapier().integration_parameters.dt;
-        let outside_player = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
-            collider.parent() != Some(player.body_handle())
-        };
-        let queries = physics.queries(
-            QueryFilter::default()
-                .exclude_sensors()
-                .exclude_rigid_body(held.body)
-                .predicate(&outside_player),
-        );
-        for collider_handle in physics.rapier().bodies[held.body].colliders() {
-            let collider = &physics.rapier().colliders[*collider_handle];
-            let local = collider
-                .position_wrt_parent()
-                .copied()
-                .unwrap_or(Pose::IDENTITY);
-            let velocity = desired.translation - current.translation;
-            if let Some((_, hit)) = queries.cast_shape(
-                &(current * local),
-                velocity,
-                collider.shape(),
-                ShapeCastOptions {
-                    max_time_of_impact: 1.0,
-                    ..Default::default()
-                },
-            ) {
-                desired.translation =
-                    current.translation + velocity * (hit.time_of_impact - 0.01).max(0.0);
-            }
-            if queries
-                .intersect_shape(desired * local, collider.shape())
-                .next()
-                .is_some()
-            {
-                desired.rotation = current.rotation;
-            }
-        }
-        physics.rapier_mut().bodies[anchor].set_next_kinematic_position(desired);
-        false
-    }
 }
 
 /// A part is fitted while it is attached. Hinged parts move only while fitted.
@@ -991,14 +747,6 @@ fn fitted(parts: &HashSet<ItemId>, items: &ItemStore, item: ItemId) -> bool {
         || items
             .get(item)
             .is_some_and(|item| matches!(item.location, ItemLocation::Attached(_)))
-}
-
-fn local_hinge_pose(hinge: &HingeState) -> Pose {
-    let rotation = Pose::from_rotation(Rotation::from_axis_angle(
-        hinge.axis,
-        (hinge.angle - hinge.reference.closed_degrees).to_radians(),
-    ));
-    hinge.closed_pose * hinge.anchor * rotation * hinge.anchor_inverse
 }
 
 fn transform_pose(transform: &crate::reference::Transform) -> Pose {
