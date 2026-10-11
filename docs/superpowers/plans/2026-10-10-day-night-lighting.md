@@ -310,23 +310,23 @@ Extend `tests/world.rs` and `tests/lighting.rs`.
 - Compare the cached keys and lateral band with current chunks before changing instances. Origin changes update existing local poses.
 - Produce `sync_road_lamps` using source assets, current cycle output, `WorldStream`, and origin.
 
-- [ ] Add `road_lamp_intervals_have_one_owner_at_seams` using a synthetic spacing of 64 metres.
+- [x] Add `road_lamp_intervals_have_one_owner_at_seams` using a synthetic spacing of 64 metres.
   Assert intervals `[0, 128)` and `[128, 256)` own IDs `[0, 1]` and `[2, 3]` without overlap.
   Assert `[-128, 0)` owns no IDs and `[-64, 64)` owns only ID 0.
-- [ ] Add `road_lamp_placement_is_absolute_after_rebase`.
+- [x] Add `road_lamp_placement_is_absolute_after_rebase`.
   Assert two origin offsets change local translation but preserve absolute position, rotation, and lamp ID.
   Include an absolute position beyond 100 million metres; assert rebase round-trip error remains below `1e-6`.
-- [ ] Add `night_late_loading_uses_current_enable_state`.
+- [x] Add `night_late_loading_uses_current_enable_state`.
   Assert a newly registered lamp inherits night on state, dawn threshold off state, and source electronics output above 0.2.
-- [ ] Run world and lighting tests. Expect new cases to fail.
-- [ ] Implement recovered spacing, road-relative transforms, horizontal light orientation, and seeded pole rotation.
+- [x] Run world and lighting tests. Expect new cases to fail.
+- [x] Implement recovered spacing, road-relative transforms, horizontal light orientation, and seeded pole rotation.
   Use the existing `road_sample` path. Do not change the procedural road generator or invent pole spacing.
-- [ ] Spawn source pole instances only when their ownership interval enters the active window.
+- [x] Spawn source pole instances only when their ownership interval enters the active window.
   Bind repeated scene nodes within their lamp instance. Do not insert repeated source IDs into the unique home/car node map.
-- [ ] Remove distant pole hierarchies and light registrations together. Respect source shadow flags and light masks.
-- [ ] Run world, lighting, and WASM checks. Drive across seams at night and through a floating origin shift.
-- [ ] Check warm spotlights, 20-metre range, 120-degree full cone, pole orientation, and bounded active light counts.
-- [ ] Commit as `Stream source roadside lamps with cycle control`.
+- [x] Remove distant pole hierarchies and light registrations together. Respect source shadow flags and light masks.
+- [x] Run world, lighting, and WASM checks. Drive across seams at night and through a floating origin shift.
+- [x] Check warm spotlights, 20-metre range, 120-degree full cone, pole orientation, and bounded active light counts.
+- [x] Commit as `Stream source roadside lamps with cycle control`.
 
 ## Task 7: Verify lifecycle and deliver the complete lighting change
 
