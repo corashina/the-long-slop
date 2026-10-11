@@ -1371,7 +1371,7 @@ fn production_parts_come_off_and_fit_again() {
     runtime.step(&reference, grab);
     assert_eq!(runtime.area.interaction.held(), Some(door));
 
-    // The carried part shows its empty slot. Grab on that slot fits it again.
+    // The carried part shows its empty slot. Releasing grab on that slot fits it again.
     let slot = runtime
         .physics
         .rapier()
@@ -1396,15 +1396,21 @@ fn production_parts_come_off_and_fit_again() {
         .aim(&runtime.physics, view, reference.player.aim_reach)
         .unwrap();
     assert!(target.part_slot && target.item == door);
-    let action = runtime.area.interaction.step(
-        grab,
-        Some(target),
-        &mut runtime.area.player,
-        &mut runtime.area.items,
-        &mut runtime.physics,
-        1.0 / 60.0,
-    );
-    assert_eq!(action, Some(InteractionAction::PartFit(door)));
+    let release = FrameInput {
+        released: keys::GRAB,
+        ..FrameInput::default()
+    };
+    let actions = [grab, release].map(|input| {
+        runtime.area.interaction.step(
+            input,
+            Some(target),
+            &mut runtime.area.player,
+            &mut runtime.area.items,
+            &mut runtime.physics,
+            1.0 / 60.0,
+        )
+    });
+    assert_eq!(actions, [None, Some(InteractionAction::PartFit(door))]);
     runtime
         .area
         .interaction
