@@ -8,7 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 
 from .inventory import inventory_source
-from .types import Catalog, DATA_DIRECTORY, FileRecord, ObjectId, SCHEMA_VERSION
+from .types import AssetExport, Catalog, DATA_DIRECTORY, FileRecord, ObjectId, SCHEMA_VERSION
+from ..source import Source
 
 
 def _json(data):
@@ -351,3 +352,88 @@ def verify_catalog(source, snapshot, catalog_path: Path, records_root: Path) -> 
         if byte_range['file'] not in source.resource_streams or byte_range['offset'] < 0 or byte_range['bytes'] < 0 or byte_range['offset'] + byte_range['bytes'] > file.stat().st_size:
             raise ValueError(f'Invalid stream range: {byte_range}')
     return catalog
+
+
+# UnityPy diagnostic text fails for these fixed-build programs. Native records remain complete.
+SHADER_TEXT_FAILURES = frozenset((ObjectId('globalgamemanagers.assets', 3),
+    ObjectId('globalgamemanagers.assets', 14), ObjectId('globalgamemanagers.assets', 16),
+    ObjectId('sharedassets0.assets', 714)))
+
+
+def _shader_text(source, identity):
+    diagnostic = {'status': 'not_requested', 'original_source_recovered': False,
+                  'reason': 'Shipped GPU programs retain native bytes and parsed metadata; diagnostic text is optional.'}
+    if identity in SHADER_TEXT_FAILURES:
+        try:
+            source.get(identity.file, identity.path_id).parse_as_object(check_read=True).export()
+        except Exception as error:
+            diagnostic = {'status': 'failed_optional', 'original_source_recovered': False,
+                          'reason': f'{type(error).__name__}: {error}'}
+        else:
+            diagnostic['reason'] = 'Previously failed diagnostic text export now succeeds; original source remains unavailable.'
+    return diagnostic
+
+
+def export_native_assets(source: Source, catalog: Catalog, records_root: Path,
+                         claimed: frozenset[ObjectId]) -> tuple[AssetExport, ...]:
+    """Index the exact remaining owners without changing accepted typed records."""
+    unknown = claimed - catalog.objects.keys()
+    if unknown:
+        raise ValueError(f'Unknown claimed identities: {sorted(unknown)}')
+    if catalog.objects.keys() != catalog.dependencies.keys():
+        raise ValueError('Missing dependency graph keys')
+    for identity, targets in catalog.dependencies.items():
+        for target in targets:
+            if target not in catalog.objects:
+                raise ValueError(f'Missing dependency target: {identity} -> {target}')
+    manifest = json.loads((records_root / 'manifest.json').read_bytes())
+    if manifest['schema_version'] != SCHEMA_VERSION:
+        raise ValueError('Obsolete typed record schema')
+    receipts = {item['file']: item for item in manifest['records']}
+    exports = []
+    for identity in sorted(catalog.objects.keys() - claimed):
+        entry = catalog.objects[identity]
+        name = f'{identity.file}/{identity.path_id}.json'
+        if name not in receipts:
+            raise ValueError(f'Missing accepted typed record: {identity}')
+        details = {'type': entry.type, 'typed_record': f'records/{name}',
+                   'record': receipts[name], 'native_range': {
+                       'file': f'{DATA_DIRECTORY}/{identity.file}', 'offset': entry.offset,
+                       'bytes': entry.bytes, 'container_sha256': entry.container_sha256}}
+        files = ()
+        if entry.type in ('Shader', 'ComputeShader'):
+            details['representation'] = 'shipped_programs_and_settings'
+            details['shader_text'] = _shader_text(source, identity) if entry.type == 'Shader' else {
+                'status': 'not_requested', 'original_source_recovered': False,
+                'reason': 'The typed record retains shipped compute programs and settings.'}
+        elif entry.type == 'RenderTexture':
+            details['representation'] = 'runtime_descriptor'
+            details['pixels'] = 'created_by_engine'
+        elif entry.type == 'TextAsset':
+            import struct
+            reader = source.get(identity.file, identity.path_id)
+            raw = reader.get_raw_data()
+            label_size = struct.unpack_from('<i', raw)[0]
+            offset = (4 + label_size + 3) & ~3
+            size = struct.unpack_from('<i', raw, offset)[0]
+            payload = raw[offset + 4:offset + 4 + size]
+            if label_size < 0 or size < 0 or len(payload) != size:
+                raise ValueError(f'Invalid TextAsset payload: {identity}')
+            receipt = _file(records_root, f'native/text/{identity.file}/{identity.path_id}.bin', payload)
+            files = (receipt,)
+            try:
+                payload.decode('utf-8')
+                encoding = 'utf-8'
+            except UnicodeDecodeError:
+                encoding = 'binary'
+            details['text'] = {'encoding': encoding, 'bytes': size,
+                               'source_payload_offset': entry.offset + offset + 4,
+                               'payload_sha256': receipt.sha256}
+        exports.append(AssetExport(identity, 'native', 'native_record', 'engine_dependent',
+                       'Complete typed metadata and original source bytes; engine execution requires an adapter.',
+                       files, catalog.dependencies[identity], details))
+    from .managed import native_managed_links
+    links = native_managed_links(source, catalog, records_root)
+    _file(records_root, 'native/index.json', _json({'schema_version': SCHEMA_VERSION,
+          'exports': [asdict(item) for item in exports], 'managed_links': asdict(links)}))
+    return tuple(exports)
