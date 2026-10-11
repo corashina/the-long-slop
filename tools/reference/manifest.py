@@ -288,10 +288,12 @@ def build_manifest(source, roots, reports, hashes):
     settings_reader=source.get('level0',16865);settings=source.read(settings_reader)
     if source.class_name(settings_reader)!='settingsscript':raise ValueError('Required default control settings differ')
     defaults=[]
-    for index in (0,1,2,4,5):
+    for index in (0,1,2,4,5,7):
         slider=source.resolve(settings_reader,settings['tabControls']['sliders'][index]);definition=source.read(slider)
         multiplier=definition['valueMultipler'] if definition['valueMultipler'] else 1.
         defaults.append(definition['defValue']*multiplier)
+    if car['speedBasedKeyboardSens'] or car['keySteerSensMultiplier'] != 0:
+        raise ValueError('Selected Lada requires unsupported speed-based keyboard steering')
     player_record.update(carry_min_distance=max(0.,math.sqrt(sum(value**2 for value in held_offset))-player['maxPickupDist']),
         carry_max_distance=math.sqrt(sum(value**2 for value in held_offset))+player['maxPickupDist'],obj_move_sensitivity=defaults[3],
         obj_rotation_sensitivity=defaults[4],look_sensitivity=[defaults[0]*defaults[1],defaults[0]*defaults[2]])
@@ -356,7 +358,7 @@ def build_manifest(source, roots, reports, hashes):
     driveway_bounds['min'][1]=driveway_height;driveway_bounds['max'][1]=driveway_height
     result={'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'lighting':recover_lighting(source,nodes,components,pointer_node,item_nodes,car,car_reader,reports),'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'parts':parts,'part_slots':part_slots,'part_scan':{'source':source_id(main_reader),'mask':main['scanLayer']['m_Bits'],'radius':main['defScanRadius']},'items':items,'openings':openings,'tanks':tanks,
         'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed']},'engine':engine_record,'player':player_record,'seats':seats,
-        'vehicle':{'source':source_id(car_reader),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':[w['id'] for w in wheel_slots],'colliders':[c['id'] for c in colliders if c['body']==car_body],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')]},
+        'vehicle':{'source':source_id(car_reader),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':[w['id'] for w in wheel_slots],'colliders':[c['id'] for c in colliders if c['body']==car_body],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'keyboard_steering_rate':defaults[5],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')]},
         'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn,'car_pose':car_pose,'driveway_bounds':driveway_bounds,'driveway_height':driveway_height}}
     result['vehicle'].update(auto_shift_stop_speed=car['autoShiftStopSpeed'],auto_shift_min_rpm=car['autoShiftMinRpm'],auto_shift_max_rpm=car['autoShiftMaxRpm'])
     result['vehicle'].update(gear_free_run=[bool(gear['freeRun']) for gear in car['gears']],

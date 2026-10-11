@@ -118,6 +118,22 @@ fn rejects_incomplete_transmission_before_startup() {
 }
 
 #[test]
+fn rejects_missing_nonpositive_and_nonfinite_keyboard_steering_rate() {
+    let mut input = fixture();
+    input["vehicle"]
+        .as_object_mut()
+        .unwrap()
+        .remove("keyboard_steering_rate");
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    for rate in [0.0, -1.25, f32::NAN, f32::INFINITY] {
+        let mut reference =
+            ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+        reference.vehicle.keyboard_steering_rate = rate;
+        assert!(reference.validate().is_err());
+    }
+}
+
+#[test]
 fn rejects_invalid_seat_hit_nodes_and_empty_use_mask() {
     for nodes in [
         serde_json::json!([]),
@@ -144,6 +160,7 @@ fn rejects_invalid_seat_hit_nodes_and_empty_use_mask() {
 fn production_export_matches_installed_contract() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let manifest = ReferenceManifest::from_json(&bytes).unwrap();
+    assert_eq!(manifest.vehicle.keyboard_steering_rate, 1.25);
     assert_eq!(
         manifest.nodes.iter().filter(|n| n.asset.0 == 1).count(),
         434

@@ -75,8 +75,9 @@ def export_reference(steam_root: Path, output: Path) -> None:
     parameters['controls']={
         'source':{'file':'level0','path_id':16865},
         'defaults':{'object_move':manifest['player']['obj_move_sensitivity'],'object_rotation':manifest['player']['obj_rotation_sensitivity'],
-            'look_xy':manifest['player']['look_sensitivity'],'foot_fov':manifest['player']['field_of_view_degrees']},
-        'slider_source_ids':[18564,18972,19178,17280,18711,17625,18360],
+            'look_xy':manifest['player']['look_sensitivity'],'foot_fov':manifest['player']['field_of_view_degrees'],
+            'keyboard_steering_rate':manifest['vehicle']['keyboard_steering_rate']},
+        'slider_source_ids':[18564,18972,19178,17280,18711,17625,18360,18191],
         'slider_multiplier_rule':'slidersettingscript.FStart changes zero valueMultipler to one; GetValue returns value * valueMultipler.',
         'carry_minimum_rule':'Distance range derives from the authored carry marker and maxPickupDist offset sphere.',
     }

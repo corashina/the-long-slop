@@ -2843,6 +2843,7 @@
     ],
     "final_drive_ratio": 4.300000190734863,
     "max_steer_degrees": 40,
+    "keyboard_steering_rate": 1.25,
     "brake_torque_nm": 600,
     "handbrake_torque_nm": 600,
     "wheel_slip": [

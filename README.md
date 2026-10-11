@@ -74,6 +74,7 @@ Recovery preserves fluids, parts, condition, and trip distance.
 An empty fuel tank moves recovery to a station.
 Restart restores the garage, supplies, car, origin, and trip distance.
 Close the driver door before reversing through the garage exit.
+Keyboard steering reaches full lock in 0.8 seconds. Release the key to return to center.
 
 ## Scope and evidence
 
