@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use my_summer_slop::fluids::{FluidContainer, VehicleFluids};
 use my_summer_slop::reference::EngineReference;

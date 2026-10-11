@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use my_summer_slop::player::{ExitReference, PlayerMode, PlayerState};
 use my_summer_slop::simulation::{FIXED_DT, FrameInput, keys};

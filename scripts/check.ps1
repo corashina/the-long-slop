@@ -11,8 +11,8 @@ try {
     }
     $checks = 'cargo fmt --all -- --check && cargo clippy --locked --all-targets -- -D warnings && cargo clippy --locked --release --target wasm32-unknown-unknown --lib -- -D warnings && cargo test --locked && cargo build --locked --release --target wasm32-unknown-unknown --lib'
     if ($Test) {
-        if ($Test -notmatch '^[a-z_]+$') { throw 'Use a test target name.' }
-        $checks = "cargo test --locked --test $Test"
+        if ($Test -notmatch '^[a-z_]+$') { throw 'Use a test module name.' }
+        $checks = "cargo test --locked --test game ${Test}::"
     }
     & docker run --rm --mount "type=bind,source=$root,target=/workspace" `
         --mount 'type=volume,source=tld-wasm-cargo,target=/cargo' `

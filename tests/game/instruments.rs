@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 use my_summer_slop::simulation::instruments::{
     InstrumentSample, InstrumentState, needle_angle, source_rotation,
 };

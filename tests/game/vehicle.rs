@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use my_summer_slop::simulation::{DriveInput, StepClock};
 use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose, VehicleSnapshot};

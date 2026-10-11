@@ -44,7 +44,7 @@
 | `src/presentation/glass.rs`, `web/assets/shaders/source_glass.wgsl` | Reusable scene-color target and glass composition |
 | `src/presentation/reference.rs`, `mod.rs`, `src/app.rs`, `Cargo.toml` | Runtime registration and readiness |
 | `tools/reference/tests/test_materials.py`, `test_lighting.py`, `test_export.py` | Critical export regressions |
-| `tests/rendering.rs`, `tests/reference.rs`, `tests/common/reference.json` | Native record validation and installed-source gates |
+| `tests/game/rendering.rs`, `tests/game/reference.rs`, `tests/game/common/reference.json` | Native record validation and installed-source gates |
 | `README.md`, `PRODUCT.md`, `DESIGN.md`, `docs/verification.md` | Verified behavior and measured limits |
 
 ## Verification commands
@@ -63,7 +63,7 @@ node scripts/serve.mjs
 The installed-export gate uses the current Docker image and cache volumes:
 
 ```powershell
-docker run --rm --mount "type=bind,source=$PWD,target=/workspace" --mount 'type=volume,source=tld-wasm-cargo,target=/cargo' --mount 'type=volume,source=tld-wasm-target,target=/target' my-summer-slop-toolchain cargo test --locked --test reference -- --ignored
+docker run --rm --mount "type=bind,source=$PWD,target=/workspace" --mount 'type=volume,source=tld-wasm-cargo,target=/cargo' --mount 'type=volume,source=tld-wasm-target,target=/target' my-summer-slop-toolchain cargo test --locked --test game reference:: -- --ignored
 ```
 
 Expected: exporter and native tests pass, installed gates pass, and the release browser package builds.
@@ -73,7 +73,7 @@ Do not add production debug controls or a second asset-loading path.
 
 ### Task 1: Restore concrete visibility and decode packed normals
 
-**Files:** Create `tools/reference/materials.py`, `tools/reference/tests/test_materials.py`. Modify `tools/reference/visibility.py`, `gltf.py`, `tests/test_export.py`, `tests/reference.rs`.
+**Files:** Create `tools/reference/materials.py`, `tools/reference/tests/test_materials.py`. Modify `tools/reference/visibility.py`, `gltf.py`, `tests/test_export.py`, `tests/game/reference.rs`.
 
 **Interfaces:**
 - Produce `renderer_visible(serialized_enabled: bool, component_classes: set[str]) -> bool` in `visibility.py`.
@@ -108,7 +108,7 @@ Do not add production debug controls or a second asset-loading path.
 
 ### Task 2: Export validated source material records and condition variants
 
-**Files:** Modify `materials.py`, `conditions.py`, `gltf.py`, `export.py`, `manifest.py`, `src/reference.rs`, `src/lib.rs`, `tests/common/reference.json`. Create `src/reference/rendering.rs`, `tests/rendering.rs`. Extend `test_materials.py`.
+**Files:** Modify `materials.py`, `conditions.py`, `gltf.py`, `export.py`, `manifest.py`, `src/reference.rs`, `src/lib.rs`, `tests/game/common/reference.json`. Create `src/reference/rendering.rs`, `tests/game/rendering.rs`. Extend `test_materials.py`.
 
 **Interfaces:**
 - Produce `recover_material(source: Source, reader: ObjectReader, color_override: dict | None, condition: dict | None) -> dict`.
@@ -129,7 +129,7 @@ Do not add production debug controls or a second asset-loading path.
   Assert errors contain the source ID and required property or shader name.
 - [ ] Add `test_condition_old_color_uses_rusty_color` and `test_condition_force_color_uses_part_color`.
   Assert source `defRusty.color` for states `3` and `4` unless `forceColor`; preserve `disableColor`.
-- [ ] Add `rejects_invalid_material_bindings` in `tests/rendering.rs`.
+- [ ] Add `rejects_invalid_material_bindings` in `tests/game/rendering.rs`.
   Assert rejection of duplicate asset/index pairs, absent asset IDs, unsafe paths, unknown slots, and nonfinite transforms.
   Define `fixture() -> serde_json::Value` by parsing `include_bytes!("common/reference.json")` in this test target.
   Use this missing-asset assertion:
@@ -151,7 +151,7 @@ Do not add production debug controls or a second asset-loading path.
 
 ### Task 3: Bind layered source shaders and gate scene readiness
 
-**Files:** Create `src/presentation/materials.rs`, `web/assets/shaders/source_surface.wgsl`. Modify `src/presentation/mod.rs`, `reference.rs`, `src/app.rs`, `Cargo.toml`, `tools/reference/gltf.py`. Extend `tests/rendering.rs` and `test_materials.py`.
+**Files:** Create `src/presentation/materials.rs`, `web/assets/shaders/source_surface.wgsl`. Modify `src/presentation/mod.rs`, `reference.rs`, `src/app.rs`, `Cargo.toml`, `tools/reference/gltf.py`. Extend `tests/game/rendering.rs` and `test_materials.py`.
 
 **Interfaces:**
 - Produce `SourceMaterialPlugin: Plugin`, `SourceSurface: MaterialExtension`, and `type SourceMaterial = ExtendedMaterial<StandardMaterial, SourceSurface>`.
@@ -200,7 +200,7 @@ Do not add production debug controls or a second asset-loading path.
 
 ### Task 4: Recover and render startup lighting and reflections
 
-**Files:** Create `tools/reference/lighting.py`, `tools/reference/tests/test_lighting.py`, `src/presentation/lighting.rs`, `web/assets/shaders/source_lighting.wgsl`. Modify `export.py`, `manifest.py`, `src/reference/rendering.rs`, `src/presentation/materials.rs`, `mod.rs`, `src/app.rs`, `tests/common/reference.json`, `tests/rendering.rs`.
+**Files:** Create `tools/reference/lighting.py`, `tools/reference/tests/test_lighting.py`, `src/presentation/lighting.rs`, `web/assets/shaders/source_lighting.wgsl`. Modify `export.py`, `manifest.py`, `src/reference/rendering.rs`, `src/presentation/materials.rs`, `mod.rs`, `src/app.rs`, `tests/game/common/reference.json`, `tests/game/rendering.rs`.
 
 **Interfaces:**
 - Produce `recover_lighting(source: Source, roots: list[ObjectReader], output: Path) -> dict`.
@@ -242,7 +242,7 @@ Do not add production debug controls or a second asset-loading path.
 
 ### Task 5: Reproduce stained-glass distortion
 
-**Files:** Create `src/presentation/glass.rs`, `web/assets/shaders/source_glass.wgsl`. Modify `src/presentation/mod.rs`, `materials.rs`, `src/app.rs`, `src/reference/rendering.rs`. Extend `tests/rendering.rs`, `test_materials.py`.
+**Files:** Create `src/presentation/glass.rs`, `web/assets/shaders/source_glass.wgsl`. Modify `src/presentation/mod.rs`, `materials.rs`, `src/app.rs`, `src/reference/rendering.rs`. Extend `tests/game/rendering.rs`, `test_materials.py`.
 
 **Interfaces:**
 - Produce `SourceGlassPlugin: Plugin` and `SourceGlass: MaterialExtension` with source glass uniforms and scene-color binding.
@@ -275,7 +275,7 @@ Do not add production debug controls or a second asset-loading path.
 
 ### Task 6: Verify matched views and document final behavior
 
-**Files:** Modify `README.md`, `PRODUCT.md`, `DESIGN.md`, `docs/verification.md`, `tools/reference/README.md`. Extend installed checks in `tests/reference.rs` only where a source contract still lacks coverage.
+**Files:** Modify `README.md`, `PRODUCT.md`, `DESIGN.md`, `docs/verification.md`, `tools/reference/README.md`. Extend installed checks in `tests/game/reference.rs` only where a source contract still lacks coverage.
 
 **Interfaces:** Consume the accepted export, all rendering readiness states, and existing gameplay controls. Produce verification evidence and accurate documentation.
 

@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 use my_summer_slop::simulation::{FrameInput, keys};
 use my_summer_slop::starting_area::GarageRuntime;
 

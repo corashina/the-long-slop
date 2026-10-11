@@ -55,7 +55,7 @@ Paths in this map refer to source files. Recovered outputs use the specification
 | `tools/reference/library/validation.py`, `__init__.py` | Coverage validation, stage orchestration, and publication |
 | `tools/reference/source.py`, `gltf.py` | Shared readers, canonical identities, type-tree repairs, and glTF helpers |
 | `tools/reference/export.py`, `manifest.py` | Single CLI and selected runtime derivation |
-| `src/reference.rs`, `tests/reference.rs`, `tests/common/reference.json` | Required library provenance and runtime validation |
+| `src/reference.rs`, `tests/game/reference.rs`, `tests/game/common/reference.json` | Required library provenance and runtime validation |
 | `scripts/serve.mjs`, `tests/web/server.test.mjs` | Development asset MIME types and server checks |
 | `tools/reference/tests/test_library_*.py` | Critical library integrity and conversion tests |
 | `.gitignore`, `README.md`, `DESIGN.md`, `PRODUCT.md`, `tools/reference/README.md`, `docs/verification.md` | Commands, availability, evidence, and scope |
@@ -417,8 +417,8 @@ for category, count in expected_counts.items():
 
 **Files:** Create `tools/reference/library/reader.py`.
 Modify `tools/reference/export.py`, `manifest.py`, `source.py`, `gltf.py`, and `src/reference.rs`.
-Update `tests/reference.rs`, `tests/common/reference.json`, `scripts/serve.mjs`, and the existing source UI specification and plan.
-Tests: `tools/reference/tests/test_library_runtime.py`, `tests/reference.rs`, and `tests/web/server.test.mjs`.
+Update `tests/game/reference.rs`, `tests/game/common/reference.json`, `scripts/serve.mjs`, and the existing source UI specification and plan.
+Tests: `tools/reference/tests/test_library_runtime.py`, `tests/game/reference.rs`, and `tests/web/server.test.mjs`.
 
 **Interfaces:**
 
@@ -457,7 +457,7 @@ Tests: `tools/reference/tests/test_library_runtime.py`, `tests/reference.rs`, an
   Run the installed-export gate below; expect valid provenance, reference data, and selected output hashes.
 
 ```powershell
-docker run --rm --mount "type=bind,source=$PWD,target=/workspace" --mount 'type=volume,source=tld-wasm-cargo,target=/cargo' --mount 'type=volume,source=tld-wasm-target,target=/target' my-summer-slop-toolchain cargo test --locked --test reference -- --ignored
+docker run --rm --mount "type=bind,source=$PWD,target=/workspace" --mount 'type=volume,source=tld-wasm-cargo,target=/cargo' --mount 'type=volume,source=tld-wasm-target,target=/target' my-summer-slop-toolchain cargo test --locked --test game reference:: -- --ignored
 ```
 
   Inspect startup network requests. Expect selected reference assets, with no full catalog or unused library preload.

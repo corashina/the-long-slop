@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 use my_summer_slop::simulation::day::{advance, sky};
 use rapier3d::math::{Rotation, Vector};
 
