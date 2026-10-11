@@ -2,7 +2,8 @@
 
 Reference: installed Steam build 11140890. Vehicle: fixed Lada 2101.
 Verification date: 2026-10-11, Europe/Warsaw. Final product commit: `d402a09`.
-The full suite checked `53a9a4e`. The final label-only change passed its focused checks.
+Final `d402a09` code passed fresh independent checks: 137 native tests, 31 installed-source tests, formatting, and release WASM.
+The earlier full checks and focused label regression remain recorded below.
 Worktree: `C:/Users/Corashina/.codex/worktrees/interaction-parity/the-long-drive-wasm`.
 Read the [approved interaction scope](superpowers/specs/2026-10-10-interaction-parity-design.md), [garage scope](superpowers/specs/2026-10-09-garage-start-design.md), and [decision record](interaction-decisions.md).
 
