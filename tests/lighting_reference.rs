@@ -169,3 +169,48 @@ fn rejects_missing_incomplete_and_nonfinite_visual_temperature_arrays() {
         assert!(m.validate().is_err());
     }
 }
+
+#[test]
+fn required_sky_dependency_is_validated() {
+    let mut manifest =
+        ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    let texture = manifest.lighting.cycle.clouds[0].material.textures[0].texture;
+    manifest
+        .lighting
+        .textures
+        .retain(|record| record.id != texture);
+    assert!(
+        manifest
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("sky properties")
+    );
+}
+
+#[test]
+fn rejects_missing_or_invalid_source_mips() {
+    let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    let mut manifest = original.clone();
+    manifest.lighting.textures[0].mip_count = 32;
+    assert!(manifest.validate().is_err());
+    let mut manifest = original;
+    manifest.lighting.textures[0].mip_data.sha256.clear();
+    assert!(manifest.validate().is_err());
+}
+
+#[test]
+fn rejects_incomplete_flare_geometry() {
+    let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    for mutation in 0..4 {
+        let mut manifest = original.clone();
+        let flare = &mut manifest.lighting.cycle.sun_flares[0];
+        match mutation {
+            0 => flare.elements.clear(),
+            1 => flare.elements[0].image = 11,
+            2 => flare.elements[0].size = f32::NAN,
+            _ => flare.fade_speed = -1.,
+        }
+        assert!(manifest.validate().is_err());
+    }
+}

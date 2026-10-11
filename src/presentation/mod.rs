@@ -1,5 +1,8 @@
 pub mod camera;
+pub mod lighting;
+pub mod materials;
 pub mod reference;
+pub mod shadows;
 pub mod world;
 
 use crate::vehicle::VehiclePose;
@@ -20,3 +23,6 @@ pub fn interpolate(a: VehiclePose, b: VehiclePose, alpha: f32) -> VehiclePose {
             .to_array(),
     }
 }
+pub mod textures;
+
+pub mod sky;

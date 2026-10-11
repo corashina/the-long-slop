@@ -14,6 +14,31 @@ class LightingTests(unittest.TestCase):
         cls.source=Source(Path(r'C:/Program Files (x86)/Steam/steamapps/common/The Long Drive'))
         cls.output=Path('.cache/lighting-test');cls.output.mkdir(parents=True,exist_ok=True)
 
+    def test_decoded_mips_preserve_source_levels_and_alpha(self):
+        from tools.reference.mips import decoded_mips,validate_mips
+        import texture2ddecoder
+        from PIL import Image
+        for file,pid in [('sharedassets1.assets',744),('sharedassets1.assets',1278)]:
+            obj=self.source.object(self.source.get(file,pid));data=decoded_mips(obj)
+            validate_mips(data,obj.m_Width,obj.m_Height,obj.m_MipCount)
+            base=obj.image.transpose(Image.Transpose.FLIP_TOP_BOTTOM).convert('RGBA').tobytes()
+            self.assertEqual(data[16:16+len(base)],base)
+            self.assertRaises(ValueError,validate_mips,data[:-1],obj.m_Width,obj.m_Height,obj.m_MipCount)
+            if pid==744:
+                self.assertEqual(obj.m_MipCount,11)
+                offset=16
+                for level in range(obj.m_MipCount):
+                    width,height=max(1,obj.m_Width>>level),max(1,obj.m_Height>>level)
+                    blocks=texture2ddecoder.unpack_unity_crunch(obj.get_image_data(),level)
+                    decoded=texture2ddecoder.decode_bc1(blocks,width,height)
+                    expected=Image.frombytes('RGBA',(width,height),decoded,'raw','BGRA').tobytes()
+                    self.assertEqual(data[offset:offset+len(expected)],expected,f'Source mip {level}')
+                    offset+=len(expected)
+            if pid==1278:
+                alpha=data[19::4]
+                self.assertEqual(alpha,obj.get_image_data())
+                self.assertLess(min(alpha),max(alpha))
+
     def test_cycle_uses_scene_values_and_nested_transition_durations(self):
         cycle=recover_cycle(self.source,self.source.get('level1',64920),self.output)
         self.assertEqual([cycle[k] for k in ('day_seconds','night_seconds','dawn_seconds','dusk_seconds')],[1200,300,240,180])
@@ -52,6 +77,11 @@ class LightingTests(unittest.TestCase):
             self.assertEqual(atlas['source'],{'file':'sharedassets1.assets','path_id':744})
             self.assertTrue((self.output/Path(flare['flare']['path']).name).is_file())
             self.assertTrue((self.output/Path(atlas['path']).name).is_file())
+            component=self.source.read(self.source.get(flare['source']['file'],flare['source']['path_id']))
+            self.assertEqual(flare['color'],[component['m_Color'][channel] for channel in ('r','g','b','a')])
+            self.assertEqual(flare['fade_speed'],component['m_FadeSpeed'])
+            self.assertEqual(flare['ignore_layers'],component['m_IgnoreLayers']['m_Bits'])
+            self.assertEqual(flare['directional'],bool(component['m_Directional']))
 
     def test_acceptance_rejects_missing_cabin_input_and_incomplete_door_links(self):
         output=Path('web/assets/reference')
@@ -81,6 +111,16 @@ class LightingTests(unittest.TestCase):
         for mutate in mutations:
             altered=copy.deepcopy(original);mutate(altered)
             with self.assertRaisesRegex(ValueError,'flare|resource hash'):
+                validate_lighting_export(altered,output)
+
+    def test_acceptance_rejects_changed_typed_flare_values(self):
+        output=Path('web/assets/reference');original=json.loads((output/'manifest.json').read_text())
+        mutations=[lambda f:f.update(elements=[]),lambda f:f['elements'][0].update(size=42),
+            lambda f:f.update(texture_layout=0),lambda f:f.update(fade_speed=-1),
+            lambda f:f.update(color=[float('nan'),0,0,1]),lambda f:f.update(directional=False)]
+        for mutate in mutations:
+            altered=copy.deepcopy(original);mutate(altered['lighting']['cycle']['sun_flares'][0])
+            with self.assertRaisesRegex(ValueError,'typed flare'):
                 validate_lighting_export(altered,output)
 
     def test_visual_temperature_arrays_match_checked_scene_values(self):

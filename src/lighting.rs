@@ -466,3 +466,213 @@ mod tests {
         }
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct LightOutput {
+    pub id: crate::reference::LightId,
+    pub enabled: bool,
+    pub intensity: f32,
+}
+#[derive(Clone, Copy, Debug)]
+pub struct LampMaterialOutput {
+    pub renderer: crate::reference::NodeId,
+    pub asset: crate::reference::AssetId,
+    pub material_index: u32,
+}
+#[derive(Clone, Debug)]
+pub struct ControlPoseOutput {
+    pub node: crate::reference::NodeId,
+    pub local_pose: crate::reference::Transform,
+}
+#[derive(Clone, Debug)]
+pub struct ControllerState {
+    pub current_state: usize,
+    pub requested_state: usize,
+    pub energy: f32,
+    pub enabled: bool,
+    pub on: bool,
+}
+pub struct LightingState {
+    pub cycle: CycleState,
+    pub(crate) controllers: Vec<ControllerState>,
+    pub(crate) lights: Vec<LightOutput>,
+    pub(crate) materials: Vec<LampMaterialOutput>,
+    pub(crate) poses: Vec<ControlPoseOutput>,
+}
+impl LightingState {
+    pub fn new(reference: &crate::reference::LightingRecord) -> Self {
+        let mut state = Self {
+            cycle: CycleState::new(&reference.cycle),
+            controllers: reference
+                .controllers
+                .iter()
+                .map(|c| ControllerState {
+                    current_state: c.current_state,
+                    requested_state: c.requested_state,
+                    energy: c.energy,
+                    enabled: c.enabled,
+                    on: c.startup_on,
+                })
+                .collect(),
+            lights: reference
+                .lights
+                .iter()
+                .map(|l| LightOutput {
+                    id: l.id,
+                    enabled: l.enabled,
+                    intensity: l.startup_intensity,
+                })
+                .collect(),
+            materials: Vec::with_capacity(
+                reference
+                    .controllers
+                    .iter()
+                    .flat_map(|c| &c.states)
+                    .map(|s| s.renderers.len())
+                    .sum(),
+            ),
+            poses: Vec::with_capacity(
+                reference
+                    .controllers
+                    .iter()
+                    .map(|c| c.animated_poses.len())
+                    .sum(),
+            ),
+        };
+        state.reset(reference);
+        state
+    }
+    pub fn reset(&mut self, reference: &crate::reference::LightingRecord) {
+        self.cycle.reset(&reference.cycle);
+        self.materials.clear();
+        self.poses.clear();
+        for (out, light) in self.lights.iter_mut().zip(&reference.lights) {
+            *out = LightOutput {
+                id: light.id,
+                enabled: light.enabled,
+                intensity: light.startup_intensity,
+            };
+        }
+        for (state, control) in self.controllers.iter_mut().zip(&reference.controllers) {
+            *state = ControllerState {
+                current_state: control.current_state,
+                requested_state: control.requested_state,
+                energy: control.energy,
+                enabled: control.enabled,
+                on: control.startup_on,
+            };
+            for lamp in &control.states {
+                if let Some(material) = if control.startup_on {
+                    &lamp.on_material
+                } else {
+                    &lamp.off_material
+                } {
+                    for &renderer in &lamp.renderers {
+                        if let Some(out) = self
+                            .materials
+                            .iter_mut()
+                            .find(|out| out.renderer == renderer)
+                        {
+                            *out = LampMaterialOutput {
+                                renderer,
+                                asset: material.asset,
+                                material_index: material.gltf_material,
+                            };
+                        } else {
+                            self.materials.push(LampMaterialOutput {
+                                renderer,
+                                asset: material.asset,
+                                material_index: material.gltf_material,
+                            });
+                        }
+                    }
+                }
+            }
+            for pose in &control.animated_poses {
+                if let Some(local_pose) = pose.states.get(control.current_state) {
+                    self.poses.push(ControlPoseOutput {
+                        node: pose.node,
+                        local_pose: local_pose.clone(),
+                    });
+                }
+            }
+        }
+    }
+    pub fn light_outputs(&self) -> &[LightOutput] {
+        &self.lights
+    }
+    pub fn material_outputs(&self) -> &[LampMaterialOutput] {
+        &self.materials
+    }
+    pub fn control_poses(&self) -> &[ControlPoseOutput] {
+        &self.poses
+    }
+}
+/// Unity 2021.3 gamma conversion. HDR channels use the native 2.2 exponent.
+pub fn source_linear(value: f32) -> f32 {
+    if value <= 0.04045 {
+        value / 12.92
+    } else if value < 1. {
+        ((value + 0.055) / 1.055).powf(2.4)
+    } else {
+        value.powf(2.2)
+    }
+}
+/// Checked native byte attenuation table. The final texel is zero.
+pub fn attenuation_table() -> [u8; 1024] {
+    std::array::from_fn(|i| {
+        if i == 1023 {
+            return 0;
+        }
+        let s = i as f32 / 1024.;
+        let mut value = 1. / (s * 25. + 1.);
+        let start = f32::from_bits(0x3f23d70b);
+        if s >= start {
+            value *= 1. - (s - start) / f32::from_bits(0x3eb851ea);
+        }
+        (value * 255. + 0.5) as u8
+    })
+}
+
+/// Keep the source repeat cookie phase bounded after a floating-origin shift.
+pub fn directional_cookie_phase(
+    basis: [[f32; 3]; 2],
+    origin: [f64; 3],
+    anchor: [f32; 3],
+    size: f32,
+) -> [f32; 2] {
+    basis.map(|row| {
+        let projected = (0..3)
+            .map(|axis| f64::from(row[axis]) * (origin[axis] - f64::from(anchor[axis])))
+            .sum::<f64>();
+        (projected / f64::from(size)).rem_euclid(1.) as f32
+    })
+}
+
+/// Native spotlight projection from the exported right-handed pose, without transform scale.
+pub fn spot_cookie_matrix(
+    pose: &crate::reference::Transform,
+    range: f32,
+    cot_half_angle: f32,
+) -> [[f32; 4]; 4] {
+    use rapier3d::math::{Rotation, Vector};
+    let inverse = Rotation::from_array(pose.rotation).inverse();
+    let scale = 1. / range;
+    let projected_scale = (2. / cot_half_angle) * scale;
+    [
+        Vector::X,
+        Vector::Y,
+        Vector::Z,
+        -Vector::from_array(pose.translation),
+    ]
+    .map(|column| {
+        let local = inverse * column;
+        // Export reflects Unity Z. X and Y keep their native cookie signs.
+        [
+            local.x * scale,
+            local.y * scale,
+            -local.z * scale,
+            -local.z * projected_scale,
+        ]
+    })
+}

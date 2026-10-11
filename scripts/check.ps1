@@ -2,6 +2,12 @@ param([string]$Test)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $image = 'my-summer-slop-toolchain'
+$sha = [Security.Cryptography.SHA256]::Create()
+try {
+    $pathBytes = [Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($root).ToLowerInvariant())
+    $checkout = [BitConverter]::ToString($sha.ComputeHash($pathBytes)).Replace('-', '').Substring(0, 16).ToLowerInvariant()
+} finally { $sha.Dispose() }
+$target = "/target/$checkout"
 try {
     & docker build --tag $image --file "$root/tools/Dockerfile" $root
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -12,7 +18,8 @@ try {
     }
     & docker run --rm --mount "type=bind,source=$root,target=/workspace" `
         --mount 'type=volume,source=tld-wasm-cargo,target=/cargo' `
-        --mount 'type=volume,source=tld-wasm-target,target=/target' $image `
+        --mount 'type=volume,source=tld-wasm-target,target=/target' `
+        --env "CARGO_TARGET_DIR=$target" $image `
         sh -c $checks
     exit $LASTEXITCODE
 } catch {

@@ -424,6 +424,50 @@
         {
           "file": "reference/lighting-unity default resources-10001.texture.bin",
           "sha256": "d770ef4af2f0ac92a4dede3f353a578edfac0d29187eb1beec2ab5c69c517300"
+        },
+        {
+          "file": "reference/lighting-sharedassets1.assets-735.texture.bin.smip",
+          "sha256": "b956b430041ba91f4dbb61c04496b31265f621b93f88b1e9c5900e93e49fb7b0"
+        },
+        {
+          "file": "reference/lighting-sharedassets1.assets-1278.texture.bin.smip",
+          "sha256": "ac9b0b47c809ae6d7268410a1242e6fb14f8657129214463c285daf7c5a7f8c7"
+        },
+        {
+          "file": "reference/lighting-sharedassets0.assets-257.texture.bin.smip",
+          "sha256": "cf76ca46c7b402c40536cc6a682004b7af894716f6d4e7dc0d0fa20a4d63f4a2"
+        },
+        {
+          "file": "reference/lighting-sharedassets0.assets-319.texture.bin.smip",
+          "sha256": "baf7dc856a61fd1a118cfc63902687c25dda041a08c02e9e94e9d239227e7e39"
+        },
+        {
+          "file": "reference/lighting-sharedassets0.assets-278.texture.bin.smip",
+          "sha256": "f7c034ef8cf4fc7a66719206cc0be0d8fcaef2b40d07350503bab069df35f379"
+        },
+        {
+          "file": "reference/lighting-sharedassets0.assets-291.texture.bin.smip",
+          "sha256": "a666cb9e9b59e28e6a10e414429f542648278ed2f470e33aedb43b35f56d0714"
+        },
+        {
+          "file": "reference/lighting-sharedassets0.assets-141.texture.bin.smip",
+          "sha256": "61e7741811fef79e1da596734dc926843797becf8327426d36495d5f9ce07b28"
+        },
+        {
+          "file": "reference/lighting-sharedassets0.assets-194.texture.bin.smip",
+          "sha256": "90f01d6c02b36e0082e3a14c60fd828d9208329ab7d14a9e9fd0704f46ca06a9"
+        },
+        {
+          "file": "reference/lighting-sharedassets1.assets-701.texture.bin.smip",
+          "sha256": "7120d29a22dd998b8d69f3bb0ca561ab7b595aacede42949bea06b5c0e523106"
+        },
+        {
+          "file": "reference/lighting-sharedassets1.assets-744.texture.bin.smip",
+          "sha256": "92dbb846ed81e4cb08851582cf49d1296452035e32be9b7c1ce8058ecd7bfc29"
+        },
+        {
+          "file": "reference/lighting-unity default resources-10001.texture.bin.smip",
+          "sha256": "d770ef4af2f0ac92a4dede3f353a578edfac0d29187eb1beec2ab5c69c517300"
         }
       ],
       "usage": "unique_scene"
@@ -7921,7 +7965,323 @@
             "path": "reference/lighting-sharedassets1.assets-4516.flare.json",
             "sha256": "7765d15991e95c28d25dd8e185c0b1003002c9654c481548c4736b2886875a84"
           },
-          "atlas": 10
+          "atlas": 10,
+          "color": [
+            0.6499999761581421,
+            0.6499999761581421,
+            0.6499999761581421,
+            1.0
+          ],
+          "fade_speed": 5.0,
+          "ignore_layers": 75855142,
+          "directional": true,
+          "pose": {
+            "translation": [
+              -3.4332275390625e-05,
+              0.0,
+              -0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              4.214685134229512e-08,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "use_fog": true,
+          "texture_layout": 1,
+          "elements": [
+            {
+              "image": 9,
+              "position": 0.0,
+              "size": 40.0,
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": true,
+              "fade": true
+            },
+            {
+              "image": 0,
+              "position": 0.0,
+              "size": 50.0,
+              "color": [
+                0.0941176488995552,
+                0.0941176488995552,
+                0.0941176488995552,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": true,
+              "zoom": true,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 0.0,
+              "size": 20.0,
+              "color": [
+                0.0313725508749485,
+                0.019607843831181526,
+                0.019607843831181526,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": -0.26999998092651367,
+              "size": 36.38999938964844,
+              "color": [
+                0.0313725508749485,
+                0.0235294122248888,
+                0.019607843831181526,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": -0.7499999403953552,
+              "size": 28.689998626708984,
+              "color": [
+                0.019607843831181526,
+                0.01568627543747425,
+                0.0117647061124444,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 3,
+              "position": 0.0,
+              "size": 10.250001907348633,
+              "color": [
+                0.4470588266849518,
+                0.0,
+                0.007843137718737125,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 0.4359998106956482,
+              "size": 4.013999938964844,
+              "color": [
+                0.0117647061124444,
+                0.0235294122248888,
+                0.03921568766236305,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 0.33599987626075745,
+              "size": 2.5899999141693115,
+              "color": [
+                0.03529411926865578,
+                0.0235294122248888,
+                0.0784313753247261,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 0.3909999132156372,
+              "size": 7.470000743865967,
+              "color": [
+                0.01568627543747425,
+                0.0235294122248888,
+                0.03921568766236305,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 7,
+              "position": 1.5,
+              "size": 7.470000743865967,
+              "color": [
+                0.0941176488995552,
+                0.05882352963089943,
+                0.0,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 1.4530003070831299,
+              "size": 4.44999361038208,
+              "color": [
+                0.07058823853731155,
+                0.04313725605607033,
+                0.0,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 4,
+              "position": 1.2820016145706177,
+              "size": 1.5,
+              "color": [
+                0.2705882489681244,
+                0.8196078538894653,
+                0.572549045085907,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 6,
+              "position": 1.7420015335083008,
+              "size": 2.7699930667877197,
+              "color": [
+                0.1568627506494522,
+                0.0784313753247261,
+                0.2705882489681244,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 1.7230000495910645,
+              "size": 2.7699928283691406,
+              "color": [
+                0.027450980618596077,
+                0.0941176488995552,
+                0.05882352963089943,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 1.5230002403259277,
+              "size": 2.1299936771392822,
+              "color": [
+                0.05098039284348488,
+                0.0313725508749485,
+                0.0,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 8,
+              "position": -0.23900000751018524,
+              "size": 4.589999198913574,
+              "color": [
+                0.1882352977991104,
+                0.14901961386203766,
+                0.05882352963089943,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 2,
+              "position": 2.4609997272491455,
+              "size": 25.96999740600586,
+              "color": [
+                0.16470588743686676,
+                0.16470588743686676,
+                0.16470588743686676,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 1,
+              "position": 2.130999803543091,
+              "size": 17.20999526977539,
+              "color": [
+                0.16470588743686676,
+                0.16470588743686676,
+                0.16470588743686676,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 0.8199999928474426,
+              "size": 2.6599960327148438,
+              "color": [
+                0.05098039284348488,
+                0.0235294122248888,
+                0.0,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            }
+          ]
         },
         {
           "source": {
@@ -7944,7 +8304,323 @@
             "path": "reference/lighting-sharedassets1.assets-4516.flare.json",
             "sha256": "7765d15991e95c28d25dd8e185c0b1003002c9654c481548c4736b2886875a84"
           },
-          "atlas": 10
+          "atlas": 10,
+          "color": [
+            0.6499999761581421,
+            0.6499999761581421,
+            0.6499999761581421,
+            1.0
+          ],
+          "fade_speed": 5.0,
+          "ignore_layers": 75855142,
+          "directional": true,
+          "pose": {
+            "translation": [
+              0.0,
+              0.0,
+              -0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              -0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "use_fog": true,
+          "texture_layout": 1,
+          "elements": [
+            {
+              "image": 9,
+              "position": 0.0,
+              "size": 40.0,
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": true,
+              "fade": true
+            },
+            {
+              "image": 0,
+              "position": 0.0,
+              "size": 50.0,
+              "color": [
+                0.0941176488995552,
+                0.0941176488995552,
+                0.0941176488995552,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": true,
+              "zoom": true,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 0.0,
+              "size": 20.0,
+              "color": [
+                0.0313725508749485,
+                0.019607843831181526,
+                0.019607843831181526,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": -0.26999998092651367,
+              "size": 36.38999938964844,
+              "color": [
+                0.0313725508749485,
+                0.0235294122248888,
+                0.019607843831181526,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": -0.7499999403953552,
+              "size": 28.689998626708984,
+              "color": [
+                0.019607843831181526,
+                0.01568627543747425,
+                0.0117647061124444,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 3,
+              "position": 0.0,
+              "size": 10.250001907348633,
+              "color": [
+                0.4470588266849518,
+                0.0,
+                0.007843137718737125,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 0.4359998106956482,
+              "size": 4.013999938964844,
+              "color": [
+                0.0117647061124444,
+                0.0235294122248888,
+                0.03921568766236305,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 0.33599987626075745,
+              "size": 2.5899999141693115,
+              "color": [
+                0.03529411926865578,
+                0.0235294122248888,
+                0.0784313753247261,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 0.3909999132156372,
+              "size": 7.470000743865967,
+              "color": [
+                0.01568627543747425,
+                0.0235294122248888,
+                0.03921568766236305,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 7,
+              "position": 1.5,
+              "size": 7.470000743865967,
+              "color": [
+                0.0941176488995552,
+                0.05882352963089943,
+                0.0,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 1.4530003070831299,
+              "size": 4.44999361038208,
+              "color": [
+                0.07058823853731155,
+                0.04313725605607033,
+                0.0,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 4,
+              "position": 1.2820016145706177,
+              "size": 1.5,
+              "color": [
+                0.2705882489681244,
+                0.8196078538894653,
+                0.572549045085907,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 6,
+              "position": 1.7420015335083008,
+              "size": 2.7699930667877197,
+              "color": [
+                0.1568627506494522,
+                0.0784313753247261,
+                0.2705882489681244,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 1.7230000495910645,
+              "size": 2.7699928283691406,
+              "color": [
+                0.027450980618596077,
+                0.0941176488995552,
+                0.05882352963089943,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 1.5230002403259277,
+              "size": 2.1299936771392822,
+              "color": [
+                0.05098039284348488,
+                0.0313725508749485,
+                0.0,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 8,
+              "position": -0.23900000751018524,
+              "size": 4.589999198913574,
+              "color": [
+                0.1882352977991104,
+                0.14901961386203766,
+                0.05882352963089943,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 2,
+              "position": 2.4609997272491455,
+              "size": 25.96999740600586,
+              "color": [
+                0.16470588743686676,
+                0.16470588743686676,
+                0.16470588743686676,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 1,
+              "position": 2.130999803543091,
+              "size": 17.20999526977539,
+              "color": [
+                0.16470588743686676,
+                0.16470588743686676,
+                0.16470588743686676,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 0.8199999928474426,
+              "size": 2.6599960327148438,
+              "color": [
+                0.05098039284348488,
+                0.0235294122248888,
+                0.0,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            }
+          ]
         },
         {
           "source": {
@@ -7967,7 +8643,323 @@
             "path": "reference/lighting-sharedassets1.assets-4516.flare.json",
             "sha256": "7765d15991e95c28d25dd8e185c0b1003002c9654c481548c4736b2886875a84"
           },
-          "atlas": 10
+          "atlas": 10,
+          "color": [
+            0.6499999761581421,
+            0.6499999761581421,
+            0.6499999761581421,
+            1.0
+          ],
+          "fade_speed": 5.0,
+          "ignore_layers": 75855142,
+          "directional": true,
+          "pose": {
+            "translation": [
+              0.0,
+              0.0,
+              -0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              -0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "use_fog": true,
+          "texture_layout": 1,
+          "elements": [
+            {
+              "image": 9,
+              "position": 0.0,
+              "size": 40.0,
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": true,
+              "fade": true
+            },
+            {
+              "image": 0,
+              "position": 0.0,
+              "size": 50.0,
+              "color": [
+                0.0941176488995552,
+                0.0941176488995552,
+                0.0941176488995552,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": true,
+              "zoom": true,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 0.0,
+              "size": 20.0,
+              "color": [
+                0.0313725508749485,
+                0.019607843831181526,
+                0.019607843831181526,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": -0.26999998092651367,
+              "size": 36.38999938964844,
+              "color": [
+                0.0313725508749485,
+                0.0235294122248888,
+                0.019607843831181526,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": -0.7499999403953552,
+              "size": 28.689998626708984,
+              "color": [
+                0.019607843831181526,
+                0.01568627543747425,
+                0.0117647061124444,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 3,
+              "position": 0.0,
+              "size": 10.250001907348633,
+              "color": [
+                0.4470588266849518,
+                0.0,
+                0.007843137718737125,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 0.4359998106956482,
+              "size": 4.013999938964844,
+              "color": [
+                0.0117647061124444,
+                0.0235294122248888,
+                0.03921568766236305,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 0.33599987626075745,
+              "size": 2.5899999141693115,
+              "color": [
+                0.03529411926865578,
+                0.0235294122248888,
+                0.0784313753247261,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 0.3909999132156372,
+              "size": 7.470000743865967,
+              "color": [
+                0.01568627543747425,
+                0.0235294122248888,
+                0.03921568766236305,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 7,
+              "position": 1.5,
+              "size": 7.470000743865967,
+              "color": [
+                0.0941176488995552,
+                0.05882352963089943,
+                0.0,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 1.4530003070831299,
+              "size": 4.44999361038208,
+              "color": [
+                0.07058823853731155,
+                0.04313725605607033,
+                0.0,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 4,
+              "position": 1.2820016145706177,
+              "size": 1.5,
+              "color": [
+                0.2705882489681244,
+                0.8196078538894653,
+                0.572549045085907,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 6,
+              "position": 1.7420015335083008,
+              "size": 2.7699930667877197,
+              "color": [
+                0.1568627506494522,
+                0.0784313753247261,
+                0.2705882489681244,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 1.7230000495910645,
+              "size": 2.7699928283691406,
+              "color": [
+                0.027450980618596077,
+                0.0941176488995552,
+                0.05882352963089943,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 1.5230002403259277,
+              "size": 2.1299936771392822,
+              "color": [
+                0.05098039284348488,
+                0.0313725508749485,
+                0.0,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 8,
+              "position": -0.23900000751018524,
+              "size": 4.589999198913574,
+              "color": [
+                0.1882352977991104,
+                0.14901961386203766,
+                0.05882352963089943,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 2,
+              "position": 2.4609997272491455,
+              "size": 25.96999740600586,
+              "color": [
+                0.16470588743686676,
+                0.16470588743686676,
+                0.16470588743686676,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 1,
+              "position": 2.130999803543091,
+              "size": 17.20999526977539,
+              "color": [
+                0.16470588743686676,
+                0.16470588743686676,
+                0.16470588743686676,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            },
+            {
+              "image": 5,
+              "position": 0.8199999928474426,
+              "size": 2.6599960327148438,
+              "color": [
+                0.05098039284348488,
+                0.0235294122248888,
+                0.0,
+                1.0
+              ],
+              "use_light_color": true,
+              "rotate": false,
+              "zoom": false,
+              "fade": true
+            }
+          ]
         }
       ],
       "sky_geometry": {
@@ -9347,7 +10339,15 @@
         },
         "mip_count": 10,
         "aniso": 0,
-        "mip_bias": 0.0
+        "mip_bias": 0.0,
+        "mip_data": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 735
+          },
+          "path": "reference/lighting-sharedassets1.assets-735.texture.bin.smip",
+          "sha256": "b956b430041ba91f4dbb61c04496b31265f621b93f88b1e9c5900e93e49fb7b0"
+        }
       },
       {
         "id": 2,
@@ -9375,7 +10375,15 @@
         },
         "mip_count": 10,
         "aniso": 0,
-        "mip_bias": 0.0
+        "mip_bias": 0.0,
+        "mip_data": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 1278
+          },
+          "path": "reference/lighting-sharedassets1.assets-1278.texture.bin.smip",
+          "sha256": "ac9b0b47c809ae6d7268410a1242e6fb14f8657129214463c285daf7c5a7f8c7"
+        }
       },
       {
         "id": 3,
@@ -9403,7 +10411,15 @@
         },
         "mip_count": 10,
         "aniso": 1,
-        "mip_bias": 0.0
+        "mip_bias": 0.0,
+        "mip_data": {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 257
+          },
+          "path": "reference/lighting-sharedassets0.assets-257.texture.bin.smip",
+          "sha256": "cf76ca46c7b402c40536cc6a682004b7af894716f6d4e7dc0d0fa20a4d63f4a2"
+        }
       },
       {
         "id": 4,
@@ -9431,7 +10447,15 @@
         },
         "mip_count": 9,
         "aniso": 1,
-        "mip_bias": 0.0
+        "mip_bias": 0.0,
+        "mip_data": {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 319
+          },
+          "path": "reference/lighting-sharedassets0.assets-319.texture.bin.smip",
+          "sha256": "baf7dc856a61fd1a118cfc63902687c25dda041a08c02e9e94e9d239227e7e39"
+        }
       },
       {
         "id": 5,
@@ -9459,7 +10483,15 @@
         },
         "mip_count": 9,
         "aniso": 1,
-        "mip_bias": 0.0
+        "mip_bias": 0.0,
+        "mip_data": {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 278
+          },
+          "path": "reference/lighting-sharedassets0.assets-278.texture.bin.smip",
+          "sha256": "f7c034ef8cf4fc7a66719206cc0be0d8fcaef2b40d07350503bab069df35f379"
+        }
       },
       {
         "id": 6,
@@ -9487,7 +10519,15 @@
         },
         "mip_count": 11,
         "aniso": 1,
-        "mip_bias": 0.0
+        "mip_bias": 0.0,
+        "mip_data": {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 291
+          },
+          "path": "reference/lighting-sharedassets0.assets-291.texture.bin.smip",
+          "sha256": "a666cb9e9b59e28e6a10e414429f542648278ed2f470e33aedb43b35f56d0714"
+        }
       },
       {
         "id": 7,
@@ -9515,7 +10555,15 @@
         },
         "mip_count": 9,
         "aniso": 1,
-        "mip_bias": 0.0
+        "mip_bias": 0.0,
+        "mip_data": {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 141
+          },
+          "path": "reference/lighting-sharedassets0.assets-141.texture.bin.smip",
+          "sha256": "61e7741811fef79e1da596734dc926843797becf8327426d36495d5f9ce07b28"
+        }
       },
       {
         "id": 8,
@@ -9543,7 +10591,15 @@
         },
         "mip_count": 9,
         "aniso": 1,
-        "mip_bias": 0.0
+        "mip_bias": 0.0,
+        "mip_data": {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 194
+          },
+          "path": "reference/lighting-sharedassets0.assets-194.texture.bin.smip",
+          "sha256": "90f01d6c02b36e0082e3a14c60fd828d9208329ab7d14a9e9fd0704f46ca06a9"
+        }
       },
       {
         "id": 9,
@@ -9571,7 +10627,15 @@
         },
         "mip_count": 7,
         "aniso": 1,
-        "mip_bias": 0.0
+        "mip_bias": 0.0,
+        "mip_data": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 701
+          },
+          "path": "reference/lighting-sharedassets1.assets-701.texture.bin.smip",
+          "sha256": "7120d29a22dd998b8d69f3bb0ca561ab7b595aacede42949bea06b5c0e523106"
+        }
       },
       {
         "id": 10,
@@ -9599,7 +10663,15 @@
         },
         "mip_count": 11,
         "aniso": 1,
-        "mip_bias": 0.0
+        "mip_bias": 0.0,
+        "mip_data": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 744
+          },
+          "path": "reference/lighting-sharedassets1.assets-744.texture.bin.smip",
+          "sha256": "92dbb846ed81e4cb08851582cf49d1296452035e32be9b7c1ce8058ecd7bfc29"
+        }
       },
       {
         "id": 11,
@@ -9627,7 +10699,15 @@
         },
         "mip_count": 8,
         "aniso": 0,
-        "mip_bias": 0.0
+        "mip_bias": 0.0,
+        "mip_data": {
+          "source": {
+            "file": "unity default resources",
+            "path_id": 10001
+          },
+          "path": "reference/lighting-unity default resources-10001.texture.bin.smip",
+          "sha256": "d770ef4af2f0ac92a4dede3f353a578edfac0d29187eb1beec2ab5c69c517300"
+        }
       }
     ],
     "materials": [

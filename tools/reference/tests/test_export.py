@@ -18,6 +18,14 @@ class ReferenceExportTests(unittest.TestCase):
         self.assertFalse(visible_to_camera(18,normal_view_mask(masks)))
         self.assertTrue(visible_to_camera(0,normal_view_mask(masks)))
 
+    def test_terrain_hole_renderer_is_hidden(self):
+        from tools.reference.visibility import renderer_visible
+        self.assertFalse(renderer_visible(True, {'digholescript2'}))
+        self.assertTrue(renderer_visible(True, set()))
+        self.assertFalse(renderer_visible(False, set()))
+        self.assertFalse(renderer_visible(True, {'TextMeshPro'}))
+        self.assertFalse(renderer_visible(True, {'TMP_SubMesh'}))
+
     def test_build_and_conversion(self):
         cache = Path('.cache/reference-test')
         cache.mkdir(parents=True, exist_ok=True)

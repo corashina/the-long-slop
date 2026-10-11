@@ -25,11 +25,13 @@ def texture(source, reader, output):
         from PIL import Image
         obj=source.object(reader);name=f'lighting-{reader.assets_file.name}-{reader.path_id}.png'
         path=output/name;obj.image.transpose(Image.Transpose.FLIP_TOP_BOTTOM).save(path)
+        from .mips import decoded_mips
+        mip_data=resource(reader,output,"smip",decoded_mips(obj))
         s=obj.m_TextureSettings
         source.lighting_textures[identity]={'id':len(source.lighting_textures)+1,'source':source_id(reader),'path':f'reference/{name}',
             'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'width':obj.m_Width,'height':obj.m_Height,
             'source_format':obj.m_TextureFormat,'sample_channel':'alpha' if obj.m_TextureFormat==1 else 'rgba','color_space':obj.m_ColorSpace,'filter_mode':s.m_FilterMode,'wrap_u':s.m_WrapU,'wrap_v':s.m_WrapV,
-            'source_data':resource(reader,output,'texture.bin',obj.get_image_data()),'mip_count':obj.m_MipCount,'aniso':s.m_Aniso,'mip_bias':s.m_MipBias}
+            'mip_data':mip_data,'source_data':resource(reader,output,'texture.bin',obj.get_image_data()),'mip_count':obj.m_MipCount,'aniso':s.m_Aniso,'mip_bias':s.m_MipBias}
     return source.lighting_textures[identity]['id']
 
 def sky_material(source, reader, output):
@@ -118,7 +120,12 @@ def recover_cycle(source: Source, reader, output: Path) -> dict:
                 atlas=source.resolve(flare,flare_data['m_FlareTexture'])
                 result['sun_flares'].append({'source':source_id(linked),'component':result['sky_resources'][-1],
                     'flare':resource(flare,output,'flare.json',json.dumps(flare_data,allow_nan=False).encode()),
-                    'atlas':texture(source,atlas,output)})
+                    'atlas':texture(source,atlas,output),
+                    'color':rgba(data['m_Color']),'fade_speed':data['m_FadeSpeed'],'ignore_layers':data['m_IgnoreLayers']['m_Bits'],
+                    'directional':bool(data['m_Directional']),'pose':converted_transform(source.read(source.transform_for(source.resolve(linked,data['m_GameObject'])))),
+                    'use_fog':bool(flare_data['m_UseFog']),'texture_layout':flare_data['m_TextureLayout'],
+                    'elements':[{'image':e['m_ImageIndex'],'position':e['m_Position'],'size':e['m_Size'],'color':rgba(e['m_Color']),
+                        'use_light_color':bool(e['m_UseLightColor']),'rotate':bool(e['m_Rotate']),'zoom':bool(e['m_Zoom']),'fade':bool(e['m_Fade'])} for e in flare_data['m_Elements']]})
             # Particle and flare renderer resources remain explicit, never inferred.
             if linked.type.name in ('ParticleSystem','GameObject'):
                 transform=source.transform_for(linked if linked.type.name=='GameObject' else source.resolve(linked,data['m_GameObject']))
@@ -370,6 +377,12 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
         elif isinstance(value,list):
             for child in value:walk(child)
     walk(lighting)
+    from .mips import validate_mips
+    for t in lighting["textures"]:
+        mip=t.get("mip_data")
+        if not mip:fail(t["source"],"mip_data missing")
+        try:validate_mips((output/Path(mip["path"]).name).read_bytes(),t["width"],t["height"],t["mip_count"])
+        except ValueError as error:fail(t["source"],str(error))
     for a in manifest['assets']:
         for d in a['dependencies']:
             path=output/Path(d['file']).name
@@ -426,6 +439,18 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
         payload=json.loads((output/Path(flare['flare']['path']).name).read_text())
         if payload['m_FlareTexture']!={'m_FileID':0,'m_PathID':atlas['source']['path_id']}:
             fail(flare['source'],'sun flare atlas link')
+        expected_elements=[{'image':e['m_ImageIndex'],'position':e['m_Position'],'size':e['m_Size'],'color':rgba(e['m_Color']),
+            'use_light_color':bool(e['m_UseLightColor']),'rotate':bool(e['m_Rotate']),'zoom':bool(e['m_Zoom']),'fade':bool(e['m_Fade'])} for e in payload['m_Elements']]
+        def finite_values(value,count):
+            return isinstance(value,list) and len(value)==count and all(isinstance(v,(int,float)) and math.isfinite(v) for v in value)
+        fade=flare.get('fade_speed');pose=flare.get('pose',{})
+        if not (flare.get('elements')==expected_elements and expected_elements
+                and flare.get('texture_layout')==payload['m_TextureLayout']==1
+                and flare.get('use_fog')==bool(payload['m_UseFog'])
+                and finite_values(flare.get('color'),4) and isinstance(fade,(int,float)) and math.isfinite(fade) and fade>=0
+                and flare.get('directional') is True and isinstance(flare.get('ignore_layers'),int) and 0<=flare['ignore_layers']<=0xffffffff
+                and all(finite_values(pose.get(field),count) for field,count in [('translation',3),('rotation',4),('scale',3)])):
+            fail(flare['source'],'typed flare values')
     road=lighting['road_lamp']
     if assets[road['asset']]['usage']!='road_lamp_prototype' or controls[road['controller']]['kind']!='road':fail(road['source'],'prototype')
     if documents[road['asset']]['nodes'][0]['translation']!=IDENTITY['translation']:fail(road['source'],'prototype placement')

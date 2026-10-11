@@ -18,10 +18,10 @@ use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
 #[derive(Resource)]
-struct RuntimeReference(Arc<ReferenceManifest>);
+pub(crate) struct RuntimeReference(pub Arc<ReferenceManifest>);
 #[derive(Resource)]
-struct Drive {
-    runtime: GarageRuntime,
+pub(crate) struct Drive {
+    pub runtime: GarageRuntime,
     input: FrameInput,
     clock: StepClock,
     previous: VehiclePose,
@@ -56,7 +56,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
             skip_elapsed: false,
             ready: false,
         })
-        .insert_resource(ClearColor(Color::srgb(0.64, 0.72, 0.73)))
+        .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(
             DefaultPlugins
                 .set(AssetPlugin {
@@ -75,11 +75,14 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
                     ..default()
                 }),
         )
+        .add_plugins(presentation::lighting::SourceLightingPlugin)
         .add_systems(Startup, setup)
         .add_systems(
             Update,
             (
                 check_ready,
+                presentation::lighting::bind_lighting,
+                presentation::lighting::lighting_readiness,
                 read_input,
                 advance_physics,
                 sync_world,
@@ -88,6 +91,14 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
                 update_hud,
             )
                 .chain(),
+        )
+        .add_systems(
+            PostUpdate,
+            presentation::lighting::sync_lighting
+                .after(bevy::transform::TransformSystems::Propagate)
+                .before(bevy::light::SimulationLightSystems::AssignLightsToClusters)
+                .before(bevy::light::SimulationLightSystems::UpdateDirectionalLightCascades)
+                .before(bevy::light::SimulationLightSystems::UpdateLightFrusta),
         )
         .run();
     Ok(())
@@ -98,57 +109,68 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     server: Res<AssetServer>,
+    gltf_extensions: Res<bevy::gltf::extensions::GltfExtensionHandlers>,
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
 ) {
     let mut visuals = WorldVisuals::new(&mut meshes, &mut materials);
     visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
     commands.insert_resource(visuals);
-    presentation::reference::spawn(&mut commands, &server, &reference.0);
-    commands.spawn((
-        DirectionalLight {
-            color: Color::srgb(1.0, 0.91, 0.77),
-            illuminance: 9000.0,
-            ..default()
-        },
-        Transform::from_xyz(6.0, 9.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
-        (0..32).collect::<RenderLayers>(),
-    ));
+    presentation::lighting::load_lighting(&mut commands, &server, &reference.0.lighting);
+    presentation::lighting::load_lamp_materials(&mut commands, &gltf_extensions, &reference.0);
+    presentation::reference::load(&mut commands, &server, &reference.0);
     commands.spawn((
         DriveCamera,
         Camera3d::default(),
+        bevy::camera::Hdr,
         (0..32)
             .filter(|layer| reference.0.player.camera_culling_mask & (1u32 << layer) != 0)
             .collect::<RenderLayers>(),
         Projection::Perspective(PerspectiveProjection {
             fov: reference.0.player.field_of_view_degrees.to_radians(),
+            near: reference
+                .0
+                .lighting
+                .cameras
+                .iter()
+                .map(|c| c.startup_near_plane)
+                .fold(f32::INFINITY, f32::min),
+            far: reference
+                .0
+                .lighting
+                .cameras
+                .iter()
+                .map(|c| c.startup_far_plane)
+                .fold(0., f32::max),
             ..default()
         }),
         presentation::transform(drive.current),
         Msaa::Off,
-        bevy::core_pipeline::tonemapping::Tonemapping::Reinhard,
-        DistanceFog {
-            color: Color::srgb(0.64, 0.72, 0.73),
-            falloff: FogFalloff::Linear {
-                start: 110.0,
-                end: 430.0,
-            },
-            ..default()
-        },
+        bevy::core_pipeline::tonemapping::Tonemapping::None,
     ));
 }
 
 fn check_ready(
     mut commands: Commands,
     server: Res<AssetServer>,
+    gltfs: Res<Assets<bevy::gltf::Gltf>>,
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
     mut visuals: ResMut<ReferenceVisuals>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
     mut frames: Local<u8>,
+    lighting: Res<presentation::lighting::SourceLighting>,
 ) {
-    if drive.ready || visuals.failed {
+    if visuals.failed {
+        return;
+    }
+    if let presentation::lighting::RenderingState::Failed(error) = &lighting.state {
+        game_failure(error);
+        visuals.failed = true;
+        return;
+    }
+    if drive.ready {
         return;
     }
     for (path, handle) in &visuals.handles {
@@ -165,9 +187,21 @@ fn check_ready(
             visuals.failed = true;
             return;
         }
-        if !server.is_loaded_with_dependencies(handle.id()) {
+        if !server.is_loaded_with_dependencies(handle.id()) || !gltfs.contains(handle.id()) {
             return;
         }
+        if gltfs.get(handle).unwrap().scenes.is_empty() {
+            game_failure(&format!("Required source scene 0 is missing from {path}"));
+            visuals.failed = true;
+            return;
+        }
+    }
+    if !lighting.materials_ready {
+        return;
+    }
+    if !visuals.spawned {
+        presentation::reference::spawn_scenes(&mut commands, &reference.0, &mut visuals, &gltfs);
+        return;
     }
     match presentation::reference::bind(
         &mut commands,
@@ -177,6 +211,15 @@ fn check_ready(
         &primitives,
     ) {
         Ok(true) => {
+            match &lighting.state {
+                presentation::lighting::RenderingState::Loading => return,
+                presentation::lighting::RenderingState::Failed(error) => {
+                    game_failure(error);
+                    visuals.failed = true;
+                    return;
+                }
+                presentation::lighting::RenderingState::Ready => {}
+            }
             *frames += 1;
             if *frames >= 2 {
                 drive.ready = true;
@@ -259,6 +302,9 @@ fn advance_physics(
         drive.skip_elapsed = false;
         return;
     }
+    drive
+        .runtime
+        .advance_lighting(&reference.0, time.delta_secs_f64());
     let steps = drive.clock.advance(time.delta_secs_f64());
     drive.frame_steps = steps as u32;
     for _ in 0..steps {

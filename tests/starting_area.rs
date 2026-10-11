@@ -1275,3 +1275,31 @@ fn aim_from_seat(
         "seated door control must use real aim"
     );
 }
+
+#[test]
+fn active_cycle_is_independent_of_physics_cap() {
+    let (reference, mut runtime) = initial();
+    runtime.started = true;
+    let mut clock = my_summer_slop::simulation::StepClock::default();
+    runtime.advance_lighting(&reference, 1.0);
+    let steps = clock.advance(1.0);
+    for _ in 0..steps {
+        runtime.step(&reference, FrameInput::default());
+    }
+    assert_eq!(runtime.lighting.cycle.elapsed_seconds(), 1.0);
+    assert!(steps <= 6);
+}
+#[test]
+fn pause_focus_and_restart_preserve_clock_rules() {
+    let (reference, mut runtime) = initial();
+    runtime.advance_lighting(&reference, 1.0);
+    assert_eq!(runtime.lighting.cycle.elapsed_seconds(), 0.0);
+    runtime.started = true;
+    runtime.advance_lighting(&reference, 1.0);
+    runtime.paused = true;
+    runtime.advance_lighting(&reference, 10.0);
+    assert_eq!(runtime.lighting.cycle.elapsed_seconds(), 1.0);
+    runtime.restart(&reference).unwrap();
+    assert_eq!(runtime.lighting.cycle.elapsed_seconds(), 0.0);
+    assert_eq!(runtime.lighting.cycle.output().cycle_seconds, 240.0);
+}

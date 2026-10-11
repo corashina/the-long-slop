@@ -22,6 +22,7 @@ pub struct ShaderReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TextureRecord {
+    pub mip_data: ResourceReference,
     pub source_data: ResourceReference,
     pub id: u32,
     pub source: SourceId,

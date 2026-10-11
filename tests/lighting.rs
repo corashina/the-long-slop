@@ -217,3 +217,142 @@ fn cycle_reference_rejects_missing_or_invalid_fog_modifier() {
         assert!(manifest.validate().is_err());
     }
 }
+
+#[test]
+fn source_upload_preserves_native_light_conversion_and_attenuation() {
+    use my_summer_slop::lighting::{attenuation_table, source_linear};
+    // Checksum of all 1024 byte texels from the checked native callback.
+    let checksum = attenuation_table()
+        .iter()
+        .fold(0xcbf29ce484222325_u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+        });
+    assert_eq!(checksum, 0x43d0ffb8c640e4e7);
+    close(source_linear(0.04045), 0.003130805);
+    close(source_linear(0.5), 0.21404114);
+    close(source_linear(1.25), 1.6338118);
+    assert!((source_linear(0.5 * 1.25) - source_linear(0.5) * 1.25).abs() > 0.08);
+}
+
+#[test]
+fn directional_cookie_phase_survives_large_origin_shifts() {
+    use my_summer_slop::lighting::directional_cookie_phase;
+    let basis = [[0.8_f32, 0., 0.6], [-0.3, 0.8660254, 0.4]];
+    let anchor = [-17.45_f32, 95.48, -280.1];
+    let size = 10000_f32;
+    for origin_z in [0., -512., -100_000_000.] {
+        let origin = [1024., 0., origin_z];
+        let local = [237_f32, 4., -600.];
+        let absolute: [f64; 3] = std::array::from_fn(|i| origin[i] + f64::from(local[i]));
+        for shift in [[0., 0., 0.], [512., 0., -512.], [-1024., 0., 1024.]] {
+            let rebased = std::array::from_fn(|i| origin[i] + shift[i]);
+            let position: [f32; 3] = std::array::from_fn(|i| (absolute[i] - rebased[i]) as f32);
+            let phase = directional_cookie_phase(basis, rebased, anchor, size);
+            for axis in 0..2 {
+                assert!((0. ..1.).contains(&phase[axis]));
+                let gpu = (basis[axis][0] * position[0]
+                    + basis[axis][1] * position[1]
+                    + basis[axis][2] * position[2])
+                    / size
+                    + phase[axis]
+                    + 0.5;
+                let expected = ((0..3)
+                    .map(|i| f64::from(basis[axis][i]) * (absolute[i] - f64::from(anchor[i])))
+                    .sum::<f64>()
+                    / f64::from(size)
+                    + 0.5)
+                    .rem_euclid(1.);
+                let difference = (f64::from(gpu.rem_euclid(1.)) - expected).abs();
+                assert!(
+                    difference.min(1. - difference) < 0.000001,
+                    "origin {rebased:?}, axis {axis}, difference {difference}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn spot_cookie_matches_native_projection_fixtures() {
+    use my_summer_slop::lighting::spot_cookie_matrix;
+    // Isolated UnityPlayer CalculateLightMatrix, RVA 0x312ff0, cached cotangent 1.
+    // DLL SHA-256: 553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86.
+    let half = std::f32::consts::FRAC_1_SQRT_2;
+    let fixtures = [
+        (
+            8.,
+            [0., 0., 0., 1.],
+            [
+                [0.125, 0., 0., 0.],
+                [0., 0.125, 0., 0.],
+                [0., 0., 0.125, 0.25],
+                [0.; 4],
+            ],
+            [[1., 0.5], [0.5, 1.]],
+        ),
+        (
+            32.,
+            [0., 0., 0., 1.],
+            [
+                [0.03125, 0., 0., 0.],
+                [0., 0.03125, 0., 0.],
+                [0., 0., 0.03125, 0.0625],
+                [0.; 4],
+            ],
+            [[1., 0.5], [0.5, 1.]],
+        ),
+        (
+            8.,
+            [0., 0., half, half],
+            [
+                [0., -0.125, 0., 0.],
+                [0.125, 0., 0., 0.],
+                [0., 0., 0.125, 0.25],
+                [0.; 4],
+            ],
+            [[0.5, 0.], [1., 0.5]],
+        ),
+    ];
+    for (range, rotation, native, expected_uv) in fixtures {
+        let pose = my_summer_slop::reference::Transform {
+            rotation,
+            translation: [0.; 3],
+            scale: [1.; 3],
+        };
+        let matrix = spot_cookie_matrix(&pose, range, 1.);
+        let mut scaled = pose.clone();
+        scaled.scale = [100., 0.25, 3.];
+        assert_eq!(spot_cookie_matrix(&scaled, range, 1.), matrix);
+        for column in 0..4 {
+            for row in 0..4 {
+                close(
+                    matrix[column][row],
+                    native[column][row] * if column == 2 { -1. } else { 1. },
+                );
+            }
+        }
+        let project = |point: [f32; 3]| {
+            let input = [point[0], point[1], -point[2], 1.];
+            let coord: [f32; 4] = std::array::from_fn(|row| {
+                (0..4)
+                    .map(|column| matrix[column][row] * input[column])
+                    .sum()
+            });
+            (
+                [coord[0] / coord[3] + 0.5, coord[1] / coord[3] + 0.5],
+                coord[2] > 0.,
+            )
+        };
+        for (point, uv) in [
+            ([1., 0., 1.], expected_uv[0]),
+            ([0., 1., 1.], expected_uv[1]),
+            ([0., 0., 1.], [0.5, 0.5]),
+        ] {
+            let (actual, front) = project(point);
+            close(actual[0], uv[0]);
+            close(actual[1], uv[1]);
+            assert!(front);
+        }
+        assert!(!project([0., 0., -1.]).1);
+    }
+}

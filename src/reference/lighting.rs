@@ -355,6 +355,10 @@ impl LightingRecord {
                         &t.source_data.path,
                         &t.source_data.sha256,
                     )
+                    && valid_resource(&t.mip_data.source, &t.mip_data.path, &t.mip_data.sha256)
+                    && t.mip_data.source == t.source
+                    && t.mip_data.path.ends_with(".smip")
+                    && t.mip_count <= 32 - t.width.max(t.height).leading_zeros()
                     && t.width > 0
                     && t.height > 0
                     && t.color_space <= 1
@@ -938,6 +942,26 @@ impl LightingRecord {
                 )?;
             }
         }
+        for flare in &self.cycle.sun_flares {
+            check(
+                finite(&flare.color)
+                    && flare.fade_speed.is_finite()
+                    && flare.fade_speed >= 0.
+                    && transform(&flare.pose)
+                    && flare.directional
+                    && flare.texture_layout == 1
+                    && !flare.elements.is_empty()
+                    && flare.elements.iter().all(|e| {
+                        e.image <= 10
+                            && e.position.is_finite()
+                            && e.size.is_finite()
+                            && e.size >= 0.
+                            && finite(&e.color)
+                    }),
+                &flare.source,
+                "flare parameters",
+            )?;
+        }
         let road = &self.road_lamp;
         check(
             manifest
@@ -1046,8 +1070,29 @@ pub struct SkyGeometryReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SunFlareReference {
+    pub color: [f32; 4],
+    pub fade_speed: f32,
+    pub ignore_layers: u32,
+    pub directional: bool,
+    pub pose: Transform,
+    pub use_fog: bool,
+    pub texture_layout: u8,
+    pub elements: Vec<FlareElementReference>,
     pub source: SourceId,
     pub component: ResourceReference,
     pub flare: ResourceReference,
     pub atlas: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FlareElementReference {
+    pub image: u8,
+    pub position: f32,
+    pub size: f32,
+    pub color: [f32; 4],
+    pub use_light_color: bool,
+    pub rotate: bool,
+    pub zoom: bool,
+    pub fade: bool,
 }

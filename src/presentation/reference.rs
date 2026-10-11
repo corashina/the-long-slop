@@ -5,9 +5,7 @@ use crate::starting_area::StartingArea;
 use crate::vehicle::PhysicsWorld;
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs as bevy_ecs;
-use bevy::gltf::{
-    GltfAssetLabel, GltfExtras, GltfLoaderSettings, convert_coordinates::GltfConvertCoordinates,
-};
+use bevy::gltf::{GltfExtras, GltfLoaderSettings, convert_coordinates::GltfConvertCoordinates};
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 use std::collections::HashMap;
@@ -43,15 +41,26 @@ pub struct CapVisual {
 
 #[derive(Resource, Default)]
 pub struct ReferenceVisuals {
-    pub handles: Vec<(String, Handle<bevy::world_serialization::WorldAsset>)>,
+    pub handles: Vec<(String, Handle<bevy::gltf::Gltf>)>,
     pub nodes: HashMap<NodeId, Entity>,
+    pub spawned: bool,
     pub instances: usize,
     pub expected_instances: usize,
     pub bound: bool,
     pub failed: bool,
 }
 
-pub fn spawn(commands: &mut Commands, server: &AssetServer, reference: &ReferenceManifest) {
+pub(crate) fn source_gltf_settings(settings: &mut GltfLoaderSettings) {
+    settings.load_cameras = false;
+    settings.load_lights = false;
+    settings.load_animations = false;
+    settings.convert_coordinates = Some(GltfConvertCoordinates {
+        rotate_scene_entity: false,
+        rotate_meshes: false,
+    });
+}
+
+pub fn load(commands: &mut Commands, server: &AssetServer, reference: &ReferenceManifest) {
     let mut visuals = ReferenceVisuals {
         expected_instances: reference.expected_instances(),
         ..Default::default()
@@ -59,30 +68,33 @@ pub fn spawn(commands: &mut Commands, server: &AssetServer, reference: &Referenc
     for asset in &reference.assets {
         let handle = server
             .load_builder()
-            .with_settings(|settings: &mut GltfLoaderSettings| {
-                settings.load_cameras = false;
-                settings.load_lights = false;
-                settings.load_animations = false;
-                settings.convert_coordinates = Some(GltfConvertCoordinates {
-                    rotate_scene_entity: false,
-                    rotate_meshes: false,
-                });
-            })
-            .load(GltfAssetLabel::Scene(0).from_asset(asset.path.clone()));
+            .with_settings(source_gltf_settings)
+            .load(asset.path.clone());
         visuals.handles.push((asset.path.clone(), handle.clone()));
+    }
+    commands.insert_resource(visuals);
+}
+
+pub fn spawn_scenes(
+    commands: &mut Commands,
+    reference: &ReferenceManifest,
+    visuals: &mut ReferenceVisuals,
+    gltfs: &Assets<bevy::gltf::Gltf>,
+) {
+    for (asset, (_, handle)) in reference.assets.iter().zip(&visuals.handles) {
         if asset.usage != AssetUsage::UniqueScene {
             continue;
         }
         commands
             .spawn((
                 ImportedRoot,
-                WorldAssetRoot(handle),
+                WorldAssetRoot(gltfs.get(handle).unwrap().scenes[0].clone()),
                 Transform::default(),
                 Visibility::Hidden,
             ))
             .observe(instance_ready);
     }
-    commands.insert_resource(visuals);
+    visuals.spawned = true;
 }
 
 fn instance_ready(_: On<WorldInstanceReady>, mut visuals: ResMut<ReferenceVisuals>) {
@@ -94,6 +106,8 @@ struct NodeExtras {
     active: bool,
     renderer_enabled: Option<bool>,
     layer: Option<u8>,
+    cast_shadows: Option<u8>,
+    receive_shadows: Option<bool>,
 }
 #[derive(serde::Deserialize)]
 struct NodeReference {
@@ -108,6 +122,14 @@ pub fn bind(
     primitives: &Query<(Entity, &ChildOf), With<Mesh3d>>,
 ) -> Result<bool, String> {
     if visuals.bound {
+        for (node, entity) in &visuals.nodes {
+            if !extras.contains(*entity) {
+                return Err(format!(
+                    "Required source node {} lost its imported entity",
+                    node.0
+                ));
+            }
+        }
         return Ok(true);
     }
     if visuals.instances != visuals.expected_instances {
@@ -156,6 +178,18 @@ pub fn bind(
             commands
                 .entity(primitive)
                 .insert(RenderLayers::layer(layer as usize));
+            let cast = data
+                .cast_shadows
+                .filter(|mode| *mode <= 3)
+                .ok_or_else(|| format!("Missing shadow mode for glTF node {}", node.id.0))?;
+            commands
+                .entity(primitive)
+                .insert(super::materials::SourceShadowMode(cast));
+            if data.receive_shadows == Some(false) {
+                commands
+                    .entity(primitive)
+                    .insert(bevy::light::NotShadowReceiver);
+            }
             if !enabled {
                 commands.entity(primitive).insert(Visibility::Hidden);
             }

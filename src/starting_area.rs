@@ -431,6 +431,7 @@ pub fn initial_vehicle_pose(reference: &ReferenceManifest) -> Result<VehiclePose
 }
 
 pub struct GarageRuntime {
+    pub lighting: crate::lighting::LightingState,
     pub physics: PhysicsWorld,
     pub area: StartingArea,
     pub stream: WorldStream,
@@ -495,6 +496,7 @@ impl GarageRuntime {
             physics,
             area,
             stream,
+            lighting: crate::lighting::LightingState::new(&reference.lighting),
             engine: EngineState::new(&reference.engine),
             engine_output: EngineOutput::default(),
             trip_m: 0.0,
@@ -516,6 +518,14 @@ impl GarageRuntime {
             recovery_bounds,
             recovery_bodies: Vec::with_capacity(reference.items.len()),
         })
+    }
+
+    pub fn advance_lighting(&mut self, reference: &ReferenceManifest, elapsed_seconds: f64) {
+        if self.started && !self.paused {
+            self.lighting
+                .cycle
+                .advance(&reference.lighting.cycle, elapsed_seconds);
+        }
     }
 
     pub fn step(&mut self, reference: &ReferenceManifest, input: FrameInput) {
