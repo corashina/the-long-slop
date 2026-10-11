@@ -176,4 +176,4 @@ Keep unresolved shader behavior visible until its browser implementation passes 
 Do not equate preserved Unity assets with identical rendering, physics, or a completed game port.
 
 The user requested the specification and plan together after approving the library design.
-Review the [specification](../superpowers/specs/2026-10-10-complete-asset-library-design.md) and [plan](../superpowers/plans/2026-10-10-complete-asset-library.md) before implementation.
+Review the [specification](../specs/2026-10-10-complete-asset-library-design.md) and [plan](../plans/2026-10-10-complete-asset-library.md) before implementation.

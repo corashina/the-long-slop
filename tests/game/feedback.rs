@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 use my_summer_slop::interaction::AimTarget;
 use my_summer_slop::interaction::feedback::ActionMask;
 use my_summer_slop::starting_area::GarageRuntime;

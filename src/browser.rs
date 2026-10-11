@@ -20,28 +20,7 @@ extern "C" {
     #[wasm_bindgen(js_namespace = window, js_name = gameActions)]
     pub fn game_actions() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameUpdate)]
-    pub fn game_update(
-        speed: f32,
-        camera: u32,
-        x: f32,
-        y: f32,
-        z: f32,
-        contacts: u32,
-        steps: u32,
-        tiles: u32,
-        colliders: u32,
-        absolute_x: f64,
-        absolute_y: f64,
-        absolute_z: f64,
-        origin_x: f64,
-        origin_y: f64,
-        origin_z: f64,
-        rebases: u32,
-        travel: f64,
-        fuel: f32,
-        paused: bool,
-        started: bool,
-    );
+    pub fn game_update(first_person: bool, travel: f64, paused: bool, started: bool);
     #[wasm_bindgen(js_namespace = window, js_name = gameFeedback)]
     pub fn game_feedback(
         actions: u32,

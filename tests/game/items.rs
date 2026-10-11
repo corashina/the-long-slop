@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use my_summer_slop::interaction::items::ItemStore;
 

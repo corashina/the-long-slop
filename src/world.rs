@@ -103,13 +103,13 @@ impl Generator {
         // Segments run toward +Z. Yaw stays within 90 degrees.
         let first =
             segments.partition_point(|s| self.path.origin[2] + s.position[2] < point[1] - range);
-        for index in first..segments.len() {
+        for (index, segment) in segments.iter().enumerate().skip(first) {
             let start = self.path.start(index);
             if start[2] > point[1] + range {
                 break;
             }
             if (start[0] - point[0]).powi(2) + (start[2] - point[1]).powi(2) < range * range {
-                points.extend((0..segments[index].points.len()).map(|b| self.path.point(index, b)));
+                points.extend((0..segment.points.len()).map(|b| self.path.point(index, b)));
             }
         }
     }
@@ -288,9 +288,9 @@ impl WorldStream {
             };
             for point in points {
                 let point = (pose * Vector::from_array(*point)).to_array();
-                for axis in 0..3 {
-                    bounds.min[axis] = bounds.min[axis].min(point[axis]);
-                    bounds.max[axis] = bounds.max[axis].max(point[axis]);
+                for (axis, value) in point.into_iter().enumerate() {
+                    bounds.min[axis] = bounds.min[axis].min(value);
+                    bounds.max[axis] = bounds.max[axis].max(value);
                 }
             }
             interiors.push(bounds);
@@ -459,7 +459,7 @@ impl WorldStream {
         }
         let mut station = None;
         let mut pump = None;
-        if index > 0 && index % STATION_SEGMENTS == 0 {
+        if index > 0 && index.is_multiple_of(STATION_SEGMENTS) {
             let stop = self.generator.station(index);
             colliders.push(
                 physics.insert_static(

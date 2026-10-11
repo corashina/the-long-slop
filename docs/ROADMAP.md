@@ -6,7 +6,7 @@ Rows marked out of scope need a `PRODUCT.md` change before work starts.
 
 | # | Feature | Original classes | State |
 | --- | --- | --- | --- |
-| 1 | Source UI: menus, crosshair icons, prompts, Lada gauges | `mainscript`, `menuhandler`, `meterscript` | Planned |
+| 1 | Source UI: menus, crosshair icons, prompts, Lada gauges | `mainscript`, `menuhandler`, `meterscript` | Done |
 | 2 | Material parity in the garage | `conditionmaterial`, `materialChangeScript` | Planned |
 | 3 | Original road, terrain, and biome generation | `roadGenScript`, `TerrainGenerator`, `TerrainGenerationJob` | Done for near terrain |
 | 4 | Roadside buildings, villages, and loot | `buildingscript`, `falugenscript`, `roadBuildingScript`, `newRandomStuffSpawnScript` | Next after 3 |
@@ -21,7 +21,9 @@ Rows marked out of scope need a `PRODUCT.md` change before work starts.
 | 13 | Other vehicles, bus, and trailers | `CarType`, `busdoorscripts`, `utanfutoscript` | Out of scope |
 | 14 | Tools and wearables | `flashlightscript`, `compassscript`, `metalDetectorScript`, `digholescript` | Open |
 | 15 | Settings, key rebinding, and game modes | `settingsscript`, `inputSettingScript`, `gamemodesettings` | Out of scope |
+| 16 | Complete asset library: models, textures, audio, UI, and scenes | — | Spec and plan written; not started |
 
+Feature 1 does not show part condition or the headlight key in its prompts.
 Feature 3 leaves distant terrain layers and the `TerrainBiome` blend shader open.
 Feature 6 knocks wheels and car parts off in crashes. Each part fits again only into its own slot.
 The source also lets some parts fit other slots, such as hood and trunk. Hubcaps stay on.

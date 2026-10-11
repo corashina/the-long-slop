@@ -165,6 +165,29 @@ pub struct TerrainNoise {
     edge_gradient: f32,
 }
 
+/// Octave count, persistence, and lacunarity of a source fractal noise.
+#[derive(Clone, Copy)]
+struct Octaves {
+    count: usize,
+    persistence: f32,
+    lacunarity: f32,
+}
+
+impl Octaves {
+    const COLOR: Self = Self {
+        count: 2,
+        persistence: 0.3,
+        lacunarity: 0.25,
+    };
+    const fn height(count: usize) -> Self {
+        Self {
+            count,
+            persistence: 0.05,
+            lacunarity: 0.1,
+        }
+    }
+}
+
 impl TerrainNoise {
     pub fn new(seed: i32, edge: f32, edge_gradient: f32) -> Self {
         let mut random = DotNetRandom::new(seed);
@@ -182,12 +205,15 @@ impl TerrainNoise {
         position: [f32; 2],
         frequency: f32,
         amplitude: f32,
-        octaves: usize,
-        persistence: f32,
-        lacunarity: f32,
+        octaves: Octaves,
     ) -> f32 {
+        let Octaves {
+            count,
+            persistence,
+            lacunarity,
+        } = octaves;
         let (mut value, mut f, mut a) = (0.0, 1.0, 1.0);
-        for offset in &self.vectors[..octaves] {
+        for offset in &self.vectors[..count] {
             let frequency = frequency * f;
             value += perlin(
                 offset[0] + position[0] + c[0] / frequency,
@@ -214,13 +240,13 @@ impl TerrainNoise {
     /// Source `randomize` without alignment. `c` is absolute Unity X and Z.
     pub fn base_height(&self, c: [f32; 2], edge: bool) -> f32 {
         let v = &self.vectors;
-        let mut height = self.noise(c, v[1], 1000.0, 100.0, 2, 0.05, 0.1)
+        let mut height = self.noise(c, v[1], 1000.0, 100.0, Octaves::height(2))
             * self.landscape(c, v[0], 0.85, 0.9)
-            + self.noise(c, v[3], 10_000.0, 875.0, 3, 0.05, 0.1)
+            + self.noise(c, v[3], 10_000.0, 875.0, Octaves::height(3))
                 * self.landscape(c, v[2], 0.3, 0.5)
-            + self.noise(c, v[5], 3000.0, 250.0, 3, 0.05, 0.1)
+            + self.noise(c, v[5], 3000.0, 250.0, Octaves::height(3))
                 * self.landscape(c, v[4], 0.45, 0.55)
-            + self.noise(c, v[7], 10_000.0, 2500.0, 4, 0.05, 0.1)
+            + self.noise(c, v[7], 10_000.0, 2500.0, Octaves::height(4))
                 * self.landscape(c, v[6], 0.5, 0.7);
         if edge {
             let start = self.edge - self.edge_gradient;
@@ -259,10 +285,14 @@ impl TerrainNoise {
     pub fn vertex_color(&self, c: [f32; 2], height: f32) -> [f32; 4] {
         let v = &self.vectors;
         [
-            inverse_lerp(0.55, 0.65, self.noise(c, v[0], 50_000.0, 1.0, 2, 0.3, 0.25)),
-            inverse_lerp(0.3, 0.4, self.noise(c, v[1], 50_000.0, 1.0, 2, 0.3, 0.25)),
+            inverse_lerp(
+                0.55,
+                0.65,
+                self.noise(c, v[0], 50_000.0, 1.0, Octaves::COLOR),
+            ),
+            inverse_lerp(0.3, 0.4, self.noise(c, v[1], 50_000.0, 1.0, Octaves::COLOR)),
             inverse_lerp(1600.0, 2500.0, height),
-            inverse_lerp(0.6, 0.8, self.noise(c, v[2], 20_000.0, 1.0, 2, 0.3, 0.25)),
+            inverse_lerp(0.6, 0.8, self.noise(c, v[2], 20_000.0, 1.0, Octaves::COLOR)),
         ]
     }
 
@@ -420,8 +450,8 @@ impl RoadPath {
         let mut points = Vec::with_capacity(road.bone_count);
         rotations.push(self.rotation);
         let mut last = heading(self.rotation, bone);
-        for i in 0..3 {
-            self.position[i] += last[i] as f64;
+        for (position, last) in self.position.iter_mut().zip(last) {
+            *position += last as f64;
         }
         points.push([last[0], last[1] - road.above_terrain, last[2]]);
         let ground = |x: f32, z: f32| road.above_terrain + noise.base_height([x, z], true);
@@ -443,13 +473,13 @@ impl RoadPath {
                 turn[1] *= road.straight_modifier;
             }
             rotations.push(turn);
-            for i in 0..2 {
-                self.rotation[i] = (self.rotation[i] + turn[i]).clamp(-90.0, 90.0);
+            for (rotation, turn) in self.rotation.iter_mut().zip(turn) {
+                *rotation = (*rotation + turn).clamp(-90.0, 90.0);
             }
             let step = heading(self.rotation, bone);
-            for i in 0..3 {
-                last[i] += step[i];
-                self.position[i] += step[i] as f64;
+            for ((last, position), step) in last.iter_mut().zip(&mut self.position).zip(step) {
+                *last += step;
+                *position += step as f64;
             }
             points.push([last[0], last[1] - road.above_terrain, last[2]]);
         }

@@ -306,9 +306,7 @@ impl PlayerState {
     }
 
     fn exit_pose(&self, physics: &PhysicsWorld, limits: &ExitReference) -> Option<Pose> {
-        if self.occupancy.is_none() {
-            return None;
-        }
+        self.occupancy.as_ref()?;
         let view = to_rapier(self.view_pose(physics));
         let body = to_rapier(self.body_pose(physics));
         let forward = view.rotation * -Vector::Z;

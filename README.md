@@ -47,7 +47,6 @@ The build script writes the browser package to `web/pkg`.
 | Hold LMB | Fill an open container | — |
 | I | — | Tap ignition; hold starter |
 | L | — | Switch headlights: off, low beam, high beam |
-| Hold H | — | Sound the horn |
 | C | — | Switch first person / chase view |
 | Backspace | Hide or show feedback | Hide or show feedback |
 | Esc | Pause menu | Pause menu |
@@ -69,15 +68,9 @@ An empty fuel tank moves recovery to a station. Other recovery moves the car to 
 Restart restores the garage, supplies, car, origin, and trip distance.
 Close the driver door before reversing through the garage exit.
 
-## Scope and evidence
+## Scope
 
-Read [the approved scope](docs/superpowers/specs/2026-10-09-garage-start-design.md) and [verification](docs/verification.md).
-Imported layout and recovered rules do not establish identical Unity physics or full-game parity.
-Unity shader effects and live mirror reflections are not reproduced.
-The car radio and the sandstorm sound are not reproduced.
-Terrain uses the source sand texture only. Biome blending and distant terrain are not reproduced.
-The final browser walking route was skipped at the user's request. It remains unverified.
-The build has no survival system, save system, multiplayer, or public deployment.
+[PRODUCT.md](PRODUCT.md) defines the scope. [Verification](docs/verification.md) records checks and limits.
 
 ## Toolchain
 

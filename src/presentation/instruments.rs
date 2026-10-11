@@ -1,3 +1,4 @@
+use super::reference::ReferenceVisuals;
 use crate::reference::{MaterialLink, NodeId, ReferenceError, ReferenceManifest};
 use crate::simulation::instruments::{InstrumentState, source_rotation};
 use bevy::ecs as bevy_ecs;
@@ -25,7 +26,7 @@ fn source_material(m: &GltfMaterial) -> StandardMaterial {
         occlusion_texture: m.occlusion_texture.clone(),
         double_sided: m.double_sided,
         cull_mode: m.cull_mode,
-        alpha_mode: m.alpha_mode.clone(),
+        alpha_mode: m.alpha_mode,
         unlit: m.unlit,
         uv_transform: m.uv_transform,
         ..Default::default()
@@ -49,13 +50,13 @@ impl InstrumentVisuals {
     pub fn bind(
         &mut self,
         reference: &ReferenceManifest,
-        nodes: &HashMap<NodeId, Entity>,
+        visuals: &ReferenceVisuals,
         primitives: &Query<(Entity, &ChildOf), With<Mesh3d>>,
-        gltfs: &[(crate::reference::AssetId, Handle<Gltf>)],
         gltf_assets: &Assets<Gltf>,
         raw_materials: &Assets<GltfMaterial>,
         standards: &mut Assets<StandardMaterial>,
     ) -> Result<bool, ReferenceError> {
+        let (nodes, gltfs) = (&visuals.nodes, &visuals.gltfs);
         if self.bound {
             return Ok(true);
         }

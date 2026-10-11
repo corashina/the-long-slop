@@ -23,7 +23,7 @@ Home decoration can appear as geometry. Only preparation objects receive new gam
 
 ## Reference and asset contract
 
-The [research record](../../research/2026-10-09-garage-reference.md) records sources, recovered code, and unresolved component reads.
+The [research record](../research/2026-10-09-garage-reference.md) records sources, recovered code, and unresolved component reads.
 The inspected home hierarchy is `level1` GameObject `32`, Transform `21400`, named `haz02`.
 Use `sharedassets1.assets` GameObject `40132`, Transform `82556`, named `Car02Full`, for the assembled Lada.
 It contains 697 transforms, the engine, radiator, and four wheel assemblies.

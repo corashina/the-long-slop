@@ -48,13 +48,13 @@ Mirror materials retain their authored factors. Live mirror camera output is omi
 Plate text is omitted because serialized glyphs contain obsolete editor text.
 Unity shaders map to glTF PBR. Verify their appearance during browser integration.
 
-`tests/common/reference.json` contains recovered scalar values and synthetic geometry.
+`tests/game/common/reference.json` contains recovered scalar values and synthetic geometry.
 It supports native tests. It does not replace the installed export.
 
 Run the installed export check after extraction:
 
 ```powershell
-docker run --rm --mount "type=bind,source=$PWD,target=/workspace" --mount "type=volume,source=tld-wasm-cargo,target=/cargo" --mount "type=volume,source=tld-wasm-target,target=/target" my-summer-slop-toolchain cargo test --locked --test reference -- --ignored
+docker run --rm --mount "type=bind,source=$PWD,target=/workspace" --mount "type=volume,source=tld-wasm-cargo,target=/cargo" --mount "type=volume,source=tld-wasm-target,target=/target" my-summer-slop-toolchain cargo test --locked --test game reference:: -- --ignored
 ```
 
 Pinned package metadata: [pygltflib](https://pypi.org/pypi/pygltflib/json).

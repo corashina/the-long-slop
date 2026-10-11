@@ -20,7 +20,7 @@ Do not add a debug HUD, graphics settings, control rebinding, localization syste
 
 ## Reference authority
 
-The [comparison](../../research/2026-10-10-ui-reference.md) records the inspected source and current UI.
+The [comparison](../research/2026-10-10-ui-reference.md) records the inspected source and current UI.
 Required source links include `mainmenuscript`, `menuhandler`, `mainscript`, `settingsscript`, and `tankcapscript`.
 Use `fpscontroller` for interaction precedence and `carscript` for instrument signals.
 Use `meterscript`, `mutatoscript`, `forgoszamlap`, and `ledkijelzoscript` for instrument presentation.
