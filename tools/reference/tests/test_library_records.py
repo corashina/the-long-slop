@@ -74,6 +74,15 @@ class RecordsTests(unittest.TestCase):
             self.assertEqual(saved['data']['numbers'], [{'$float': 'nan'}, {'$float': '+inf'}, {'$float': '-inf'}])
             self.assertEqual(write_record(src, reader, root), receipt)
 
+    def test_schema_cache_writes_each_record_root(self):
+        src, reader = source(node('Material'), {})
+        with tempfile.TemporaryDirectory() as directory:
+            roots = [Path(directory) / 'first', Path(directory) / 'second']
+            for root in roots:
+                receipt = write_record(src, reader, root)
+                payload = json.loads((root / receipt.file).read_bytes())
+                self.assertTrue((root / payload['type_tree']['file']).is_file())
+
     def test_custom_header_and_complete_read(self):
         src = Source.__new__(Source)
         src.evidence = {}
@@ -122,7 +131,7 @@ class RecordsTests(unittest.TestCase):
             catalog_path = root / 'catalog.json'
             catalog_path.write_bytes(raw)
             receipt = {'schema_version': 1, 'source_manifest_sha256': 'source', 'catalog_sha256': hashlib.sha256(raw).hexdigest(),
-                       'record_count': 65, 'records': [asdict(item) for item in saved], 'type_trees': [asdict(item) for item in src.record_schema_cache.values()], 'stream_ranges': [],
+                       'record_count': 65, 'records': [asdict(item) for item in saved], 'type_trees': [asdict(item) for item in src.record_schema_cache[str(root.resolve())].values()], 'stream_ranges': [],
                        'checks': {'complete_byte_consumption': True, 'graph_closed': True, 'transform_parent_cycles': 0, 'reciprocal_hierarchy': True, 'reciprocal_component_ownership': True}}
             (root / 'manifest.json').write_text(json.dumps(receipt))
             before = {p: (p.stat().st_mtime_ns, p.read_bytes()) for p in root.rglob('*') if p.is_file()}
@@ -132,6 +141,16 @@ class RecordsTests(unittest.TestCase):
                 self.assertEqual(before, after)
                 (root / 'owner/65.0.bin').write_bytes(b'changed')
                 with self.assertRaisesRegex(ValueError, 'hash mismatch'):
+                    verify_catalog(src, N(manifest_sha256='source'), catalog_path, root)
+                (root / 'owner/65.0.bin').write_bytes(before[root / 'owner/65.0.bin'][1])
+                receipt['records'][0]['file'] = '../escape.json'
+                (root / 'manifest.json').write_text(json.dumps(receipt))
+                with self.assertRaisesRegex(ValueError, 'Unsafe Windows path'):
+                    verify_catalog(src, N(manifest_sha256='source'), catalog_path, root)
+                receipt['records'][0]['file'] = saved[0].file
+                (root / 'manifest.json').write_text(json.dumps(receipt))
+                (root / saved[0].file).unlink()
+                with self.assertRaises(FileNotFoundError):
                     verify_catalog(src, N(manifest_sha256='source'), catalog_path, root)
 
     def test_generated_pair_type_collision(self):

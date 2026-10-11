@@ -63,6 +63,7 @@ def _write_decoded(source, reader, records_root, data):
     schemas = getattr(source, 'record_schema_cache', None)
     if schemas is None:
         schemas = source.record_schema_cache = {}
+    schemas = schemas.setdefault(str(records_root.resolve()), {})
     tree_key = id(tree)
     if tree_key not in schemas:
         content = _json(_tree_data(tree))
@@ -255,7 +256,7 @@ def build_catalog(source, snapshot, records_root: Path) -> Catalog:
     for component, owner in owners.items():
         if owner is not None and component not in components.get(owner, ()):
             raise ValueError(f'Component owner omits component: {component}: {owner}')
-    schemas = tuple(sorted(set(source.record_schema_cache.values()), key=lambda item: item.file))
+    schemas = tuple(sorted(set(source.record_schema_cache[str(records_root.resolve())].values()), key=lambda item: item.file))
     manifest = {'schema_version': SCHEMA_VERSION, 'source_manifest_sha256': snapshot.manifest_sha256,
                 'record_count': len(receipts), 'records': [asdict(item) for item in receipts],
                 'type_trees': [asdict(item) for item in schemas], 'stream_ranges': stream_ranges,
@@ -327,9 +328,9 @@ def verify_catalog(source, snapshot, catalog_path: Path, records_root: Path) -> 
     with ThreadPoolExecutor(max_workers=8) as pool:
         for start in range(0, len(receipt['records']), 64):
             batch = receipt['records'][start:start + 64]
-            paths = [checked_path(item) for item in batch]
-            # Only independent accepted-file reads and hashes run in workers.
-            for item, content in zip(batch, pool.map(read_file, batch, paths)):
+            # Independent file path checks, reads, and hashes run in bounded workers.
+            # Typed decoding and graph checks remain on this thread.
+            for item, content in zip(batch, pool.map(check_file, batch)):
                 payload = json.loads(content)
                 identity = ObjectId(**payload['source'])
                 if identity in seen or identity not in catalog.objects:

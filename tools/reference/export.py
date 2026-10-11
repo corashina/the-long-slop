@@ -168,17 +168,118 @@ def stage_catalog(steam_root: Path | None, verify: bool = False):
     return catalog
 
 
+def _category_stages(snapshot, catalog):
+    """Reuse source-bound stages, or build missing category prerequisites once."""
+    import tempfile
+    import shutil
+    from dataclasses import asdict
+    from .source import Source
+    from .library import (export_images, export_ui, export_audio, export_models,
+                          export_animations, export_native_assets, index_source_text,
+                          index_managed, write_analysis_report)
+    from .library.archive import sha256
+    from .library.records import _file, _json
+    from .library.validation import CATEGORIES, load_exports, _receipt, _check_files, _verify_managed, _publish_directory
+    root = snapshot.manifest_path.parent
+    path = root / 'category-stages.json'
+    bindings = {'schema_version': 1, 'source_manifest_sha256': snapshot.manifest_sha256,
+                'catalog_sha256': sha256(root / 'catalog.json'),
+                'records_manifest_sha256': sha256(root / 'records/manifest.json')}
+    if path.exists():
+        saved = json.loads(path.read_bytes())
+        if any(saved.get(k) != v for k, v in bindings.items()):
+            raise ValueError('Category stages differ from the accepted source or catalog')
+    else:
+        (root / 'work').mkdir(exist_ok=True)
+        pending = Path(tempfile.mkdtemp(prefix='category-assets-', dir=root / 'work'))
+        source = Source(snapshot.root)
+        prior = (*export_images(source, catalog, pending), *export_ui(source, catalog, pending),
+                 *export_audio(source, catalog, pending))
+        models = export_models(source, catalog, pending)
+        prior = (*prior, *models, *export_animations(source, catalog, models, pending))
+        records = root / 'records'
+        native_root = pending / 'record-inputs'
+        native_root.mkdir()
+        # This partial root supplies producers only. It is not an accepted record stage.
+        shutil.copyfile(records / 'manifest.json', native_root / 'manifest.json')
+        for identity, item in catalog.objects.items():
+            if item.type in ('MonoScript', 'ResourceManager'):
+                name = f'{identity.file}/{identity.path_id}.json'
+                (native_root / name).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(records / name, native_root / name)
+        export_native_assets(source, catalog, native_root, frozenset(e.source for e in prior))
+        index_source_text(snapshot, native_root)
+        if not (records / 'managed/manifest.json').exists():
+            managed = index_managed(snapshot, native_root)
+            analysis = write_analysis_report(catalog, managed, native_root)
+            _file(native_root, 'managed/manifest.json', _json({'schema_version': 1,
+                  'files': [asdict(f) for f in (*managed, analysis)]}))
+            _verify_managed(snapshot, native_root)
+            _publish_directory(native_root / 'managed', records / 'managed')
+        else:
+            _verify_managed(snapshot, records)
+        saved = {**bindings, 'categories': [{'category': category,
+                 'root': (native_root if category == 'native' else pending).relative_to(root).as_posix(),
+                 'index': asdict(_receipt(native_root if category == 'native' else pending, f'{category}/index.json'))}
+                 for category in CATEGORIES]}
+        _file(root, 'category-stages.json', _json(saved))
+    if [e['category'] for e in saved['categories']] != list(CATEGORIES):
+        raise ValueError('Missing or duplicate category stages')
+    stages = []
+    for entry in saved['categories']:
+        from .library.types import FileRecord
+        from .library.archive import validate_paths, _check_path
+        validate_paths([entry['root']])
+        directory = root / entry['root']
+        _check_path(directory, root.resolve())
+        record = FileRecord(**entry['index'])
+        if record.file != f"{entry['category']}/index.json":
+            raise ValueError('Category index identity mismatch')
+        _check_files(directory, {record.file: record})
+        stages.append((entry['category'], directory, load_exports(directory / record.file)))
+    return stages
+
+
+def stage_library(steam_root: Path | None, output: Path, verify: bool = False):
+    import tempfile
+    from .library.archive import load_snapshot
+    from .library.validation import (load_catalog, check_installed_counts, assemble_library,
+                                     publish_library, verify_library)
+    library = output.parent / 'library'
+    if verify:
+        receipt = verify_library(library, SOURCE_WORK_ROOT / 'source')
+        check_installed_counts(load_catalog(SOURCE_WORK_ROOT / 'catalog.json'))
+        print(f'Verified library: {len(receipt.exports):,} owners; {receipt.manifest_sha256}', flush=True)
+        return receipt
+    if not (SOURCE_WORK_ROOT / 'source-manifest.json').exists():
+        stage_source(steam_root)
+    if not (SOURCE_WORK_ROOT / 'records/manifest.json').exists():
+        stage_catalog(steam_root)
+    snapshot = load_snapshot(SOURCE_WORK_ROOT)
+    catalog = load_catalog(SOURCE_WORK_ROOT / 'catalog.json')
+    check_installed_counts(catalog)
+    stages = _category_stages(snapshot, catalog)
+    pending = Path(tempfile.mkdtemp(prefix='library-', dir=SOURCE_WORK_ROOT / 'work'))
+    exports = assemble_library(snapshot, stages, pending)
+    print(f'Assembled library: {len(exports):,} owners', flush=True)
+    receipt = publish_library(snapshot, catalog, exports, pending, library)
+    print(f'Published library: {len(exports):,} owners; {receipt.manifest_sha256}', flush=True)
+    return receipt
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--steam-root', type=Path)
     parser.add_argument('--output', type=Path, default=Path('web/assets/reference'))
-    parser.add_argument('--stage', choices=('runtime', 'source', 'catalog'), default='runtime')
+    parser.add_argument('--stage', choices=('runtime', 'source', 'catalog', 'library'), default='runtime')
     parser.add_argument('--verify', action='store_true')
     arguments = parser.parse_args(argv)
     if arguments.stage == 'source':
         stage_source(arguments.steam_root, verify=arguments.verify)
     elif arguments.stage == 'catalog':
         stage_catalog(arguments.steam_root, verify=arguments.verify)
+    elif arguments.stage == 'library':
+        stage_library(arguments.steam_root, arguments.output, verify=arguments.verify)
     else:
         if arguments.steam_root is None:
             parser.error('Runtime export needs --steam-root')
@@ -186,8 +287,9 @@ def main(argv=None):
             parser.error('Keep runtime output outside the Steam installation')
         if arguments.verify:
             parser.error('Runtime verification belongs to the runtime stage task')
-        snapshot = stage_source(arguments.steam_root)
-        export_reference(snapshot, arguments.output)
+        stage_library(arguments.steam_root, arguments.output)
+        from .library.archive import load_snapshot
+        export_reference(load_snapshot(SOURCE_WORK_ROOT), arguments.output)
 
 
 if __name__ == '__main__':

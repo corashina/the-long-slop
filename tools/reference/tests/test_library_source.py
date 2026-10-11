@@ -75,16 +75,16 @@ class LibrarySourceTests(unittest.TestCase):
         container = next(file for file in snapshot.files if file.file == 'TheLongDrive_Data/level0')
         self.assertEqual(record.container_sha256, container.sha256)
 
-    def test_cli_runtime_uses_source_prerequisite(self):
+    def test_cli_runtime_uses_library_prerequisite(self):
         from tools.reference.export import main
         accepted = Mock(spec=Snapshot)
         calls = Mock()
-        calls.attach_mock(Mock(return_value=accepted), 'source')
+        calls.attach_mock(Mock(), 'library')
         calls.attach_mock(Mock(), 'runtime')
-        with patch('tools.reference.export.stage_source', calls.source), patch('tools.reference.export.export_reference', calls.runtime):
+        with patch('tools.reference.export.stage_library', calls.library), patch('tools.reference.export.export_reference', calls.runtime), patch('tools.reference.library.archive.load_snapshot', return_value=accepted):
             main(['--steam-root', str(self.root), '--output', str(self.base / 'runtime')])
-        self.assertEqual([call[0] for call in calls.mock_calls], ['source', 'runtime'])
-        calls.source.assert_called_once_with(self.root)
+        self.assertEqual([call[0] for call in calls.mock_calls], ['library', 'runtime'])
+        calls.library.assert_called_once_with(self.root, self.base / 'runtime')
         calls.runtime.assert_called_once_with(accepted, self.base / 'runtime')
         from tools.reference.export import export_reference
         snapshot = snapshot_source(self.root, self.work)
