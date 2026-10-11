@@ -230,8 +230,7 @@ impl PhysicsWorld {
             0.0
         };
         let direction = speed * chassis.linvel().length();
-        let braking = (input.brake_reverse && direction > self.auto_move_min)
-            || (input.accelerate && direction < -self.auto_move_min);
+        let braking = crate::simulation::braking(input, direction, self.auto_move_min);
         let drive_force = if drive_force.is_finite() {
             drive_force.max(0.0)
         } else {

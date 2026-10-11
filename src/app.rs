@@ -318,6 +318,9 @@ fn advance_physics(
         }
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
     }
+    drive
+        .runtime
+        .advance_light_fades(&reference.0, time.delta_secs_f64());
     drive.rendered = presentation::interpolate(drive.previous, drive.current, drive.clock.alpha());
 }
 fn sync_world(

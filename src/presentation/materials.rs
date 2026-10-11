@@ -350,6 +350,15 @@ pub(crate) fn prepare_lamp_materials(
                 }
             }
         }
+        let dashboard = &reference.0.lighting.high_beam;
+        if dashboard.node == output.renderer {
+            for material in [&dashboard.on, &dashboard.off] {
+                let key = (material.asset, material.gltf_material);
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            }
+        }
         for key in keys {
             let authored = source
                 .materials

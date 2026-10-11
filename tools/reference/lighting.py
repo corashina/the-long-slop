@@ -270,6 +270,30 @@ def recover_controllers(source: Source, roots: list, node_ids: dict, material_id
             controls.append(c)
     return controls
 
+def recover_high_beam(source: Source, material_ids: dict) -> dict:
+    meter=source.get('level1',78501)
+    lamps=[]
+    for pointer in source.read(meter)['leds']:
+        reader=source.resolve(meter,pointer);fields=source.read(reader)
+        if fields['vname']=='headlight2':lamps.append((reader,fields))
+    if len(lamps)!=1 or len(lamps[0][1]['leds'])!=1:raise ValueError('Selected headlight2 lamp')
+    reader,fields=lamps[0];lamp=fields['leds'][0]
+    renderer=source.resolve(reader,lamp['r'])
+    transform=source.transform_for(source.resolve(renderer,source.read(renderer)['m_GameObject']))
+    node=source.lighting_nodes[key(transform)];asset=source.lighting_assets_for_node[node]
+    def material(pointer):
+        linked=source.resolve(reader,pointer);group=source.lighting_extra_materials.setdefault(asset,[])
+        if key(linked) not in [key(m) for m in group]:group.append(linked)
+        result={'asset':asset,'gltf_material':next(i for i,m in enumerate(group) if key(m)==key(linked)),
+                'source':source_id(linked),'condition_key':None}
+        material_ids[asset,key(linked)]=result
+        return result
+    result={'source':source_id(reader),'node':node,'signal':fields['vname'],'on':material(lamp['on']),
+            'off':material(lamp['off']),'min_value':lamp['minValue'],'max_value':lamp['maxValue'],
+            'stay_on':bool(lamp['stayOnAfterMaximum'])}
+    source.lighting_startup_materials[key(renderer)]=source.resolve(reader,lamp['off'])
+    return result
+
 def recover_lighting(source: Source, roots: list, output: Path) -> dict:
     output.mkdir(parents=True,exist_ok=True)
     source.lighting_textures={};source.lighting_nodes={};source.lighting_assets={};source.lighting_assets_for_node={};source.lighting_collider_ids={}
@@ -301,6 +325,7 @@ def recover_lighting(source: Source, roots: list, output: Path) -> dict:
             elif isinstance(value,list):
                 for child in value:walk(child)
         walk(source.read(r))
+    high_beam=recover_high_beam(source,material_ids)
     lights=[source.get('level1',56812),*[c for r in records for c in r['components'] if c.type.name=='Light']]
     source.lighting_light_ids={key(r):i for i,r in enumerate(lights,1)};source.lighting_lights=[]
     for r in lights:
@@ -333,7 +358,7 @@ def recover_lighting(source: Source, roots: list, output: Path) -> dict:
         'fog':{'enabled':bool(f['m_Fog']),'mode':f['m_FogMode'],'density':f['m_FogDensity'],'color':rgba(f['m_FogColor']),'start':f['m_LinearFogStart'],'end':f['m_LinearFogEnd']},
         'startup_ambient':cycle['day_ambient'],'startup_reflection':cycle['max_reflection'],'startup_fog_density':cycle['day_fog_densities'][0],
         'default_spot_cookie':texture(source,source.resolve(render,f['m_SpotCookie']),output),
-        'skybox':sky_material(source,source.resolve(render,f['m_SkyboxMaterial']),output),'sun':1,'lights':source.lighting_lights,'cycle':cycle,'controllers':controls,
+        'skybox':sky_material(source,source.resolve(render,f['m_SkyboxMaterial']),output),'sun':1,'lights':source.lighting_lights,'cycle':cycle,'controllers':controls,'high_beam':high_beam,
         'road_lamp':recover_road_lamp(source,output),'textures':list(source.lighting_textures.values()),'materials':[{'asset':m['asset'],'gltf_material':m['gltf_material'],'source':m['source']} for m in material_ids.values()]}
     graphics=source.get('globalgamemanagers',7);gf=source.read(graphics)
     quality=source.get('globalgamemanagers',12);qf=source.read(quality);q=qf['m_QualitySettings'][qf['m_CurrentQuality']]
@@ -387,6 +412,20 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
         for d in a['dependencies']:
             path=output/Path(d['file']).name
             if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=d['sha256']:raise ValueError(f"{d['file']} dependency hash")
+    lamp=lighting.get('high_beam')
+    if not lamp:raise ValueError('Required headlight2 instrument')
+    if not (lamp['source']=={'file':'level1','path_id':66369} and lamp['signal']=='headlight2'
+            and lamp['node'] in nodes and nodes[lamp['node']]['source']=={'file':'level1','path_id':22197} and lamp['min_value']==1 and lamp['max_value']==0 and lamp['stay_on']):
+        fail(lamp['source'],'headlight2 instrument')
+    for field in ('on','off'):
+        material=lamp[field];document=documents.get(material['asset']);index=material['gltf_material']
+        expected={'file':'sharedassets1.assets','path_id':325 if field=='on' else 324}
+        if material['source']!=expected:fail(lamp['source'],f'headlight2 {field} source')
+        if (nodes[lamp['node']]['asset']!=material['asset'] or not document
+                or not 0<=index<len(document['materials'])
+                or document['materials'][index]['extras']['source']!=material['source']
+                or not any(m['asset']==material['asset'] and m['gltf_material']==index and m['source']==material['source'] for m in lighting['materials'])):
+            fail(lamp['source'],f'headlight2 {field}')
     for c in lighting['controllers']:
         if c['node'] not in nodes:fail(c['source'],'node')
         owner=nodes[c['node']]['asset']

@@ -1,5 +1,6 @@
 pub const FIXED_DT: f32 = 1.0 / 60.0;
 pub mod engine;
+pub mod instruments;
 const MAX_FRAME_SECONDS: f64 = 0.1;
 const STEP_SECONDS: f64 = 1.0 / 60.0;
 
@@ -18,6 +19,7 @@ pub mod keys {
     pub const CAMERA: u32 = 2048;
     pub const ROTATE: u32 = 4096;
     pub const ASSEMBLE: u32 = 8192;
+    pub const LIGHTS: u32 = 1 << 14;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -64,6 +66,11 @@ pub struct DriveInput {
     pub brake_reverse: bool,
     pub steer: f32,
     pub handbrake: bool,
+}
+
+pub fn braking(input: DriveInput, direction: f32, auto_move_min: f32) -> bool {
+    (input.brake_reverse && direction > auto_move_min)
+        || (input.accelerate && direction < -auto_move_min)
 }
 
 /// Retains only the fraction after at most six fixed steps per frame.

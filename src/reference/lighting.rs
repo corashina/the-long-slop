@@ -258,6 +258,18 @@ pub struct RoadLampReference {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct HighBeamLampReference {
+    pub source: SourceId,
+    pub node: NodeId,
+    pub signal: String,
+    pub on: MaterialLink,
+    pub off: MaterialLink,
+    pub min_value: f32,
+    pub max_value: f32,
+    pub stay_on: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LightingRecord {
     pub source: SourceId,
     pub lights_use_linear_intensity: bool,
@@ -281,6 +293,7 @@ pub struct LightingRecord {
     pub lights: Vec<LightReference>,
     pub cycle: CycleReference,
     pub controllers: Vec<LightControllerReference>,
+    pub high_beam: HighBeamLampReference,
     pub road_lamp: RoadLampReference,
     pub textures: Vec<TextureRecord>,
     pub materials: Vec<MaterialBindingReference>,
@@ -644,6 +657,31 @@ impl LightingRecord {
                 "material asset",
             )?;
         }
+        let lamp = &self.high_beam;
+        check(
+            valid_source(&lamp.source)
+                && lamp.source.file == "level1"
+                && lamp.source.path_id == 66369
+                && lamp.signal == "headlight2"
+                && node(lamp.node).is_some_and(|n| {
+                    n.asset == lamp.on.asset
+                        && n.asset == lamp.off.asset
+                        && n.source.file == "level1"
+                        && n.source.path_id == 22197
+                })
+                && finite(&[lamp.min_value, lamp.max_value])
+                && lamp.min_value == 1.
+                && lamp.max_value == 0.
+                && lamp.stay_on
+                && material(&lamp.on)
+                && material(&lamp.off)
+                && lamp.on.source.file == "sharedassets1.assets"
+                && lamp.on.source.path_id == 325
+                && lamp.off.source.file == "sharedassets1.assets"
+                && lamp.off.source.path_id == 324,
+            &lamp.source,
+            "high-beam instrument",
+        )?;
         for control in &self.controllers {
             let owner = node(control.node);
             check(

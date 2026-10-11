@@ -67,6 +67,20 @@ class LightingTests(unittest.TestCase):
                 self.assertTrue(state['lights']);self.assertTrue(state['renderers'])
                 self.assertIsNotNone(state['on_material']);self.assertIsNotNone(state['off_material'])
 
+    def test_high_beam_instrument_uses_checked_source_links(self):
+        output=Path('web/assets/reference')
+        original=json.loads((output/'manifest.json').read_text())
+        lamp=original['lighting']['high_beam']
+        self.assertEqual(lamp['source'],{'file':'level1','path_id':66369})
+        self.assertEqual(lamp['on']['source'],{'file':'sharedassets1.assets','path_id':325})
+        self.assertEqual(lamp['off']['source'],{'file':'sharedassets1.assets','path_id':324})
+        self.assertEqual(lamp['signal'],'headlight2')
+        mutations=[lambda l:l.pop('high_beam'),lambda l:l['high_beam'].update(node=original['vehicle']['root']),
+                   lambda l:l['high_beam'].update(on=l['high_beam']['off'])]
+        for mutate in mutations:
+            altered=copy.deepcopy(original);mutate(altered['lighting'])
+            with self.assertRaises(ValueError):validate_lighting_export(altered,output)
+
     def test_sun_flare_chain_is_exported(self):
         lighting=self.recover()
         flares=lighting['cycle']['sun_flares']

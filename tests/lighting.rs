@@ -356,3 +356,225 @@ fn spot_cookie_matches_native_projection_fixtures() {
         assert!(!project([0., 0., -1.]).1);
     }
 }
+
+use my_summer_slop::lighting::{HeadlightState, LightingState, VehicleLightSample};
+use my_summer_slop::reference::{LightControllerKind, LightId, LightingRecord};
+fn lamps() -> LightingRecord {
+    ReferenceManifest::from_json(include_bytes!("common/reference.json"))
+        .unwrap()
+        .lighting
+}
+#[test]
+fn headlight_fade_uses_source_branch_order() {
+    let r = lamps();
+    let mut c = r
+        .controllers
+        .iter()
+        .find(|c| c.kind == LightControllerKind::Headlight)
+        .unwrap()
+        .clone();
+    c.current_state = 1;
+    c.requested_state = 1;
+    c.energy = 1.;
+    let mut h = HeadlightState::new(&c);
+    h.request(2);
+    h.update(0.1);
+    assert_eq!((h.current_state(), h.energy()), (1, 0.));
+    h.update(0.1);
+    assert_eq!((h.current_state(), h.energy()), (2, 0.));
+    h.update(0.1);
+    assert_eq!((h.current_state(), h.energy()), (2, 1.));
+    let mut state = LightingState::new(&r);
+    state.cycle_headlights(&r);
+    state.advance_fades(&r, 0.1);
+    state.advance_fades(&r, 0.1);
+    state.advance_fades(&r, 0.1);
+    assert!(
+        state
+            .light_outputs()
+            .iter()
+            .find(|l| l.id == LightId(13))
+            .unwrap()
+            .enabled
+    );
+    state.cycle_headlights(&r);
+    state.advance_fades(&r, 0.1);
+    state.advance_fades(&r, 0.1);
+    assert!(
+        state
+            .light_outputs()
+            .iter()
+            .find(|l| l.id == LightId(13))
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        !state
+            .light_outputs()
+            .iter()
+            .find(|l| l.id == LightId(14))
+            .unwrap()
+            .enabled
+    );
+    state.advance_fades(&r, 0.1);
+    assert!(
+        !state
+            .light_outputs()
+            .iter()
+            .find(|l| l.id == LightId(13))
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        state
+            .light_outputs()
+            .iter()
+            .find(|l| l.id == LightId(14))
+            .unwrap()
+            .enabled
+    );
+}
+#[test]
+fn rapid_headlight_requests_keep_source_guard() {
+    let r = lamps();
+    let c = r
+        .controllers
+        .iter()
+        .find(|c| c.kind == LightControllerKind::Headlight)
+        .unwrap();
+    let mut h = HeadlightState::new(c);
+    h.request(1);
+    h.update(0.1);
+    h.update(0.1);
+    h.update(0.1);
+    assert_eq!(h.current_state(), 1);
+    h.request(2);
+    h.update(0.01);
+    h.request(1);
+    for _ in 0..30 {
+        h.update(0.01);
+    }
+    assert_eq!(h.current_state(), 2);
+}
+#[test]
+fn headlights_do_not_need_ignition_and_rear_lights_do() {
+    let r = lamps();
+    let mut state = LightingState::new(&r);
+    state.cycle_headlights(&r);
+    state.update_vehicle(
+        &r,
+        VehicleLightSample {
+            local_ignition: false,
+            brake: 1.,
+            gear_ratio: -1.,
+            electronics_output: 1.,
+        },
+    );
+    for _ in 0..3 {
+        state.advance_fades(&r, 0.1);
+    }
+    assert_eq!(
+        state
+            .light_outputs()
+            .iter()
+            .find(|l| l.id == LightId(13))
+            .unwrap()
+            .intensity,
+        r.controllers
+            .iter()
+            .find(|c| c.kind == LightControllerKind::Headlight)
+            .unwrap()
+            .states[1]
+            .intensity
+    );
+    for id in 9..=12 {
+        assert!(
+            !state
+                .light_outputs()
+                .iter()
+                .find(|l| l.id == LightId(id))
+                .unwrap()
+                .enabled
+        );
+    }
+    let rear = r
+        .controllers
+        .iter()
+        .find(|c| c.kind == LightControllerKind::Rear)
+        .unwrap();
+    for lamp in &rear.states {
+        for renderer in &lamp.renderers {
+            let output = state
+                .material_outputs()
+                .iter()
+                .find(|o| o.renderer == *renderer)
+                .unwrap();
+            assert_eq!(
+                output.material_index,
+                rear.states
+                    .iter()
+                    .rev()
+                    .find(|last| last.renderers.contains(renderer))
+                    .unwrap()
+                    .off_material
+                    .as_ref()
+                    .unwrap()
+                    .gltf_material
+            );
+        }
+    }
+}
+#[test]
+fn brake_reverse_and_high_beam_signals_match_source() {
+    let r = lamps();
+    let mut state = LightingState::new(&r);
+    state.cycle_headlights(&r);
+    state.cycle_headlights(&r);
+    let mut sample = VehicleLightSample {
+        local_ignition: true,
+        brake: 0.01,
+        gear_ratio: 0.,
+        electronics_output: 1.,
+    };
+    state.update_vehicle(&r, sample);
+    assert!(state.high_beam());
+    assert!(
+        !state
+            .light_outputs()
+            .iter()
+            .find(|l| l.id == LightId(11))
+            .unwrap()
+            .enabled
+    );
+    sample.brake = 0.011;
+    sample.gear_ratio = -1.;
+    state.update_vehicle(&r, sample);
+    for id in 9..=12 {
+        assert!(
+            state
+                .light_outputs()
+                .iter()
+                .find(|l| l.id == LightId(id))
+                .unwrap()
+                .enabled
+        );
+    }
+    sample.electronics_output = 0.2;
+    state.update_vehicle(&r, sample);
+    assert!(!state.high_beam());
+}
+
+#[test]
+fn source_low_and_high_keep_separate_nodes_and_ranges() {
+    let r = lamps();
+    for (low, high) in [(13, 14), (15, 16)] {
+        let low = r.lights.iter().find(|l| l.id.0 == low).unwrap();
+        let high = r.lights.iter().find(|l| l.id.0 == high).unwrap();
+        assert_eq!(low.range_meters, 50.);
+        assert_eq!(high.range_meters, 250.);
+        assert_ne!(low.node, high.node);
+        assert!(low.cookie.is_some() && high.cookie.is_some());
+        assert_ne!(low.shadows.kind, 0);
+        assert_ne!(high.shadows.kind, 0);
+    }
+}

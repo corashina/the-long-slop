@@ -528,6 +528,13 @@ impl GarageRuntime {
         }
     }
 
+    pub fn advance_light_fades(&mut self, reference: &ReferenceManifest, elapsed_seconds: f64) {
+        if self.started && !self.paused {
+            self.lighting
+                .advance_fades(&reference.lighting, elapsed_seconds as f32);
+        }
+    }
+
     pub fn step(&mut self, reference: &ReferenceManifest, input: FrameInput) {
         if !self.started || self.paused {
             return;
@@ -637,6 +644,9 @@ impl GarageRuntime {
         self.area.sync_attachments(&mut self.physics, true);
         self.area.sync_compound(&mut self.physics);
         let driving = self.area.player.driving();
+        if driving && input.pressed & keys::LIGHTS != 0 {
+            self.lighting.cycle_headlights(&reference.lighting);
+        }
         if driving && input.pressed & keys::SPACE != 0 {
             self.handbrake = !self.handbrake;
         }
@@ -756,6 +766,24 @@ impl GarageRuntime {
                 - ((driving && input.held & keys::RIGHT != 0) as u8 as f32),
             handbrake: self.handbrake,
         };
+        let electronics = reference
+            .lighting
+            .controllers
+            .iter()
+            .find(|c| c.kind == crate::reference::LightControllerKind::Headlight)
+            .unwrap();
+        let electronics_fine = electronics.electronics_source.is_none()
+            || electronics.electronics_output > electronics.electronics_threshold;
+        self.lighting.update_vehicle(
+            &reference.lighting,
+            crate::lighting::VehicleLightSample {
+                local_ignition: self.engine_output.ignition && electronics_fine,
+                brake: crate::simulation::braking(drive, direction, reference.vehicle.auto_move_min)
+                    as u8 as f32,
+                gear_ratio: reference.vehicle.gear_ratios[gear],
+                electronics_output: electronics.electronics_output,
+            },
+        );
         let drive_count = self.physics.driven_wheel_count();
         self.physics.set_engine_brake(
             self.engine_output.brake_torque_nm * ratio / (drive_count.max(1) as f32 * radius),

@@ -3938,6 +3938,37 @@
           5.0
         ]
       }
+    },
+    {
+      "id": 111,
+      "source": {
+        "file": "level1",
+        "path_id": 22197
+      },
+      "name": "fenyszoro",
+      "hierarchy_path": "Car02Full/Slots/KMHSlot/LadaKmh/car02kmh/fenyszoro",
+      "asset": 2,
+      "gltf_node": 47,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0.0,
+          -0.0,
+          0.7071067094802856
+        ],
+        "scale": [
+          100.0,
+          99.99996948242188,
+          99.99996948242188
+        ]
+      }
     }
   ],
   "bodies": [
@@ -10814,6 +10845,22 @@
           "file": "sharedassets1.assets",
           "path_id": 410
         }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 9,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 325
+        }
+      },
+      {
+        "asset": 2,
+        "gltf_material": 10,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 324
+        }
       }
     ],
     "lights_use_linear_intensity": false,
@@ -10892,6 +10939,35 @@
         "hdr": true,
         "culling_mask": 65536
       }
-    ]
+    ],
+    "high_beam": {
+      "source": {
+        "file": "level1",
+        "path_id": 66369
+      },
+      "node": 111,
+      "signal": "headlight2",
+      "on": {
+        "asset": 2,
+        "gltf_material": 9,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 325
+        },
+        "condition_key": null
+      },
+      "off": {
+        "asset": 2,
+        "gltf_material": 10,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 324
+        },
+        "condition_key": null
+      },
+      "min_value": 1.0,
+      "max_value": 0.0,
+      "stay_on": true
+    }
   }
 }

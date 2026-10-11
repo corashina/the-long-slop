@@ -214,3 +214,24 @@ fn rejects_incomplete_flare_geometry() {
         assert!(manifest.validate().is_err());
     }
 }
+
+#[test]
+fn dashboard_contract_rejects_missing_and_wrong_source_links() {
+    let mut value: serde_json::Value =
+        serde_json::from_slice(include_bytes!("common/reference.json")).unwrap();
+    value["lighting"]
+        .as_object_mut()
+        .unwrap()
+        .remove("high_beam");
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&value).unwrap()).is_err());
+    let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    let mut bad = original.clone();
+    bad.lighting.high_beam.node = bad.vehicle.root;
+    assert!(bad.validate().is_err());
+    let mut bad = original.clone();
+    bad.lighting.high_beam.on = bad.lighting.high_beam.off.clone();
+    assert!(bad.validate().is_err());
+    let mut bad = original;
+    bad.lighting.high_beam.max_value = f32::NAN;
+    assert!(bad.validate().is_err());
+}

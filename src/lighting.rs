@@ -485,16 +485,78 @@ pub struct ControlPoseOutput {
     pub local_pose: crate::reference::Transform,
 }
 #[derive(Clone, Debug)]
-pub struct ControllerState {
+pub struct HeadlightState {
     pub current_state: usize,
     pub requested_state: usize,
     pub energy: f32,
     pub enabled: bool,
     pub on: bool,
+    refreshed_state: usize,
+    energy_move: f32,
+    state_count: usize,
+}
+impl HeadlightState {
+    pub fn new(reference: &crate::reference::LightControllerReference) -> Self {
+        Self {
+            current_state: reference.current_state,
+            requested_state: reference.requested_state,
+            energy: reference.energy,
+            enabled: reference.enabled,
+            on: reference.startup_on,
+            refreshed_state: reference.current_state,
+            energy_move: reference.energy_move,
+            state_count: reference.states.len(),
+        }
+    }
+    pub fn request(&mut self, state: u8) {
+        let state = usize::from(state);
+        if state < self.state_count && state != self.requested_state && state != self.current_state
+        {
+            self.requested_state = state;
+            self.enabled = true;
+        }
+    }
+    pub fn update(&mut self, dt: f32) {
+        if !self.enabled || !dt.is_finite() || dt < 0. {
+            return;
+        }
+        if self.requested_state == self.current_state {
+            if self.energy < 1. {
+                self.energy = (self.energy + dt * self.energy_move).clamp(0., 1.);
+            } else {
+                self.enabled = false;
+            }
+            self.refreshed_state = self.current_state;
+        } else if self.energy > 0. {
+            self.energy = (self.energy - dt * self.energy_move).clamp(0., 1.);
+            self.refreshed_state = self.current_state;
+        } else {
+            // Source RefreshLights runs before the current-state assignment.
+            self.refreshed_state = self.current_state;
+            self.current_state = self.requested_state;
+        }
+    }
+    pub fn current_state(&self) -> u8 {
+        self.current_state as u8
+    }
+    pub fn energy(&self) -> f32 {
+        self.energy
+    }
+}
+#[derive(Clone, Copy, Debug, Default)]
+pub struct VehicleLightSample {
+    pub local_ignition: bool,
+    pub brake: f32,
+    pub gear_ratio: f32,
+    pub electronics_output: f32,
 }
 pub struct LightingState {
     pub cycle: CycleState,
-    pub(crate) controllers: Vec<ControllerState>,
+    requested_headlights: u8,
+    vehicle: VehicleLightSample,
+    high_beam: bool,
+    dashboard_index: usize,
+    pub(crate) controllers: Vec<HeadlightState>,
     pub(crate) lights: Vec<LightOutput>,
     pub(crate) materials: Vec<LampMaterialOutput>,
     pub(crate) poses: Vec<ControlPoseOutput>,
@@ -503,16 +565,14 @@ impl LightingState {
     pub fn new(reference: &crate::reference::LightingRecord) -> Self {
         let mut state = Self {
             cycle: CycleState::new(&reference.cycle),
+            requested_headlights: 0,
+            vehicle: VehicleLightSample::default(),
+            high_beam: false,
+            dashboard_index: 0,
             controllers: reference
                 .controllers
                 .iter()
-                .map(|c| ControllerState {
-                    current_state: c.current_state,
-                    requested_state: c.requested_state,
-                    energy: c.energy,
-                    enabled: c.enabled,
-                    on: c.startup_on,
-                })
+                .map(HeadlightState::new)
                 .collect(),
             lights: reference
                 .lights
@@ -529,7 +589,8 @@ impl LightingState {
                     .iter()
                     .flat_map(|c| &c.states)
                     .map(|s| s.renderers.len())
-                    .sum(),
+                    .sum::<usize>()
+                    + 1,
             ),
             poses: Vec::with_capacity(
                 reference
@@ -554,13 +615,7 @@ impl LightingState {
             };
         }
         for (state, control) in self.controllers.iter_mut().zip(&reference.controllers) {
-            *state = ControllerState {
-                current_state: control.current_state,
-                requested_state: control.requested_state,
-                energy: control.energy,
-                enabled: control.enabled,
-                on: control.startup_on,
-            };
+            *state = HeadlightState::new(control);
             for lamp in &control.states {
                 if let Some(material) = if control.startup_on {
                     &lamp.on_material
@@ -597,6 +652,123 @@ impl LightingState {
                 }
             }
         }
+        self.requested_headlights = reference
+            .controllers
+            .iter()
+            .find(|c| c.kind == crate::reference::LightControllerKind::Headlight)
+            .unwrap()
+            .requested_state as u8;
+        self.dashboard_index = self.materials.len();
+        self.materials
+            .push(crate::simulation::instruments::update_high_beam(
+                &reference.high_beam,
+                crate::simulation::instruments::InstrumentSample::default(),
+            ));
+        let electronics_output = reference
+            .controllers
+            .iter()
+            .find(|c| c.kind == crate::reference::LightControllerKind::Headlight)
+            .unwrap()
+            .electronics_output;
+        self.update_vehicle(
+            reference,
+            VehicleLightSample {
+                electronics_output,
+                ..Default::default()
+            },
+        );
+    }
+    pub fn cycle_headlights(&mut self, reference: &crate::reference::LightingRecord) {
+        self.requested_headlights = (self.requested_headlights + 1) % 3;
+        for (state, control) in self.controllers.iter_mut().zip(&reference.controllers) {
+            if control.kind == crate::reference::LightControllerKind::Headlight {
+                state.request(self.requested_headlights);
+            }
+        }
+        self.update_vehicle(reference, self.vehicle);
+    }
+    pub fn high_beam(&self) -> bool {
+        self.high_beam
+    }
+    pub fn update_vehicle(
+        &mut self,
+        reference: &crate::reference::LightingRecord,
+        sample: VehicleLightSample,
+    ) {
+        self.vehicle = sample;
+        let electronics = reference
+            .controllers
+            .iter()
+            .find(|c| c.kind == crate::reference::LightControllerKind::Headlight)
+            .unwrap();
+        self.high_beam = self.requested_headlights == 2
+            && (electronics.electronics_source.is_none()
+                || sample.electronics_output > electronics.electronics_threshold);
+        let output = crate::simulation::instruments::update_high_beam(
+            &reference.high_beam,
+            crate::simulation::instruments::InstrumentSample {
+                high_beam: self.high_beam,
+            },
+        );
+        self.materials[self.dashboard_index] = output;
+        for control in &reference.controllers {
+            if control.kind != crate::reference::LightControllerKind::Rear {
+                continue;
+            }
+            for lamp in &control.states {
+                let on = sample.local_ignition
+                    && match lamp.signal {
+                        crate::reference::LampSignal::Tail => self.requested_headlights != 0,
+                        crate::reference::LampSignal::Brake => sample.brake > 0.01,
+                        crate::reference::LampSignal::Reverse => sample.gear_ratio < 0.,
+                        _ => false,
+                    };
+                for id in &lamp.lights {
+                    let output = self.lights.iter_mut().find(|o| o.id == *id).unwrap();
+                    output.enabled = on;
+                    output.intensity = lamp.intensity;
+                }
+                if on || !sample.local_ignition || !lamp.dont_overwrite {
+                    select_material(&mut self.materials, lamp, on);
+                }
+            }
+        }
+    }
+    pub fn advance_fades(&mut self, reference: &crate::reference::LightingRecord, dt: f32) {
+        for (state, control) in self.controllers.iter_mut().zip(&reference.controllers) {
+            if control.kind != crate::reference::LightControllerKind::Headlight {
+                continue;
+            }
+            state.request(self.requested_headlights);
+            state.update(dt);
+            let energy = state.energy
+                * if control.electronics_source.is_some() {
+                    self.vehicle.electronics_output
+                } else {
+                    1.
+                };
+            // Clear other states first. Shared source renderers then select the current state.
+            for (index, lamp) in control.states.iter().enumerate() {
+                if index == state.refreshed_state {
+                    continue;
+                }
+                for id in &lamp.lights {
+                    self.lights
+                        .iter_mut()
+                        .find(|o| o.id == *id)
+                        .unwrap()
+                        .enabled = false;
+                }
+                select_material(&mut self.materials, lamp, false);
+            }
+            let lamp = &control.states[state.refreshed_state];
+            for id in &lamp.lights {
+                let output = self.lights.iter_mut().find(|o| o.id == *id).unwrap();
+                output.enabled = true;
+                output.intensity = lamp.intensity * energy;
+            }
+            select_material(&mut self.materials, lamp, energy > 0.);
+        }
     }
     pub fn light_outputs(&self) -> &[LightOutput] {
         &self.lights
@@ -606,6 +778,27 @@ impl LightingState {
     }
     pub fn control_poses(&self) -> &[ControlPoseOutput] {
         &self.poses
+    }
+}
+fn select_material(
+    outputs: &mut [LampMaterialOutput],
+    lamp: &crate::reference::LampStateReference,
+    on: bool,
+) {
+    let material = if on {
+        lamp.on_material.as_ref().or(lamp.off_material.as_ref())
+    } else {
+        lamp.off_material.as_ref()
+    };
+    if let Some(material) = material {
+        for renderer in &lamp.renderers {
+            let output = outputs
+                .iter_mut()
+                .find(|o| o.renderer == *renderer)
+                .expect("prepared lamp slot");
+            output.asset = material.asset;
+            output.material_index = material.gltf_material;
+        }
     }
 }
 /// Unity 2021.3 gamma conversion. HDR channels use the native 2.2 exponent.
