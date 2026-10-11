@@ -70,7 +70,10 @@ impl InteractionState {
             a.item = Some(t.item);
             a.part = Some(t.item);
             a.slot = t.slot;
-            if self.hinges.iter().any(|h| h.reference.item == t.item) {
+            if !t.part_slot
+                && fitted(&self.parts, items, t.item)
+                && self.hinges.iter().any(|h| h.reference.item == t.item)
+            {
                 a.actions.0 |= ActionMask::DOOR;
                 a.context = FeedbackContext::Door;
             }
@@ -127,7 +130,30 @@ impl InteractionState {
                 a.actions.0 |= ActionMask::ENTER;
                 a.context = FeedbackContext::Seat;
             }
-            if let Some(item) = items.get(t.item) {
+            // A part's child, such as a door mirror, acts for its part.
+            let part = match items.get(t.item).map(|i| i.location) {
+                Some(ItemLocation::Attached(parent))
+                    if !self.parts.contains(&t.item) && self.parts.contains(&parent) =>
+                {
+                    Some(parent)
+                }
+                _ => self.parts.contains(&t.item).then_some(t.item),
+            };
+            if let Some(part) = part {
+                a.part = Some(part);
+                match self.held.as_ref() {
+                    Some(held) if t.part_slot && held.item == part => {
+                        a.actions.0 |= ActionMask::MOUNT;
+                    }
+                    None if !t.part_slot && fitted(&self.parts, items, part) => {
+                        a.actions.0 |= ActionMask::DISMOUNT;
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(item) = items.get(t.item)
+                && !t.part_slot
+            {
                 if matches!(
                     self.kinds.get(&t.item),
                     Some(ItemKind::Rim | ItemKind::Wheel | ItemKind::Tire)
@@ -153,15 +179,6 @@ impl InteractionState {
                         }
                         ItemLocation::World
                             if t.slot.is_none()
-                                && matches!(
-                                    self.kinds.get(&t.item),
-                                    Some(
-                                        ItemKind::Container
-                                            | ItemKind::Rim
-                                            | ItemKind::Wheel
-                                            | ItemKind::Tire
-                                    )
-                                )
                                 && item.body.is_some_and(|b| {
                                     b != physics.chassis_handle()
                                         && physics

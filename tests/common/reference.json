@@ -1628,7 +1628,8 @@
       "body": 2,
       "name": "Fixture 1",
       "kind": "container",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1642,7 +1643,8 @@
       "body": 2,
       "name": "Fixture 2",
       "kind": "container",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1656,7 +1658,8 @@
       "body": 2,
       "name": "Fixture 3",
       "kind": "container",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1670,7 +1673,8 @@
       "body": 2,
       "name": "Fixture 4",
       "kind": "engine",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": 0.7,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1684,7 +1688,8 @@
       "body": 2,
       "name": "Fixture 5",
       "kind": "decoration",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1698,7 +1703,8 @@
       "body": 2,
       "name": "Fixture 6",
       "kind": "decoration",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1712,7 +1718,8 @@
       "body": 2,
       "name": "Fixture 7",
       "kind": "decoration",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1726,7 +1733,8 @@
       "body": 2,
       "name": "Fixture 8",
       "kind": "decoration",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1740,7 +1748,8 @@
       "body": 2,
       "name": "Fixture 9",
       "kind": "tire",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1754,7 +1763,8 @@
       "body": 2,
       "name": "Fixture 10",
       "kind": "tire",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1768,7 +1778,8 @@
       "body": 2,
       "name": "Fixture 11",
       "kind": "tire",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1782,7 +1793,8 @@
       "body": 2,
       "name": "Fixture 12",
       "kind": "tire",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1796,7 +1808,8 @@
       "body": 2,
       "name": "Fixture 13",
       "kind": "rim",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": 0.6,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1810,7 +1823,8 @@
       "body": 2,
       "name": "Fixture 14",
       "kind": "rim",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": 0.6,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1824,7 +1838,8 @@
       "body": 2,
       "name": "Fixture 15",
       "kind": "rim",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": 0.6,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1838,7 +1853,8 @@
       "body": 2,
       "name": "Fixture 16",
       "kind": "rim",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": 0.6,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1852,7 +1868,8 @@
       "body": 2,
       "name": "Fixture 17",
       "kind": "seat",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 1,
       "attached_to": null
     },
@@ -1866,7 +1883,8 @@
       "body": 1,
       "name": "Synthetic faucet",
       "kind": "container",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 0,
       "attached_to": null
     },
@@ -1880,7 +1898,8 @@
       "body": 1,
       "name": "Synthetic faucet",
       "kind": "cap",
-      "condition": 1,
+      "condition": 0,
+      "fall_off_power": null,
       "mass_kg": 0,
       "attached_to": null
     }
@@ -2361,6 +2380,15 @@
       1.25,
       0.75
     ],
+    "rim_slip": [0.4, 0.3],
+    "item": 1,
+    "crash": {
+      "fall_off_speed": [15, 40],
+      "max_fall_off_speed": 120,
+      "fall_off_counts": [[1, 5], [2, 6]],
+      "multiplier": 1,
+      "fall_off_multiplier": 1
+    },
     "auto_shift_stop_speed": 1,
     "auto_shift_min_rpm": 2700,
     "auto_shift_max_rpm": 3700,
@@ -2460,6 +2488,96 @@
       ]
     },
     "driveway_height": 0
+  },
+  "parts": [],
+  "headlights": [],
+  "day_cycle": {
+    "source": {
+      "file": "level1",
+      "path_id": 64920
+    },
+    "day_seconds": 1200.0,
+    "night_seconds": 300.0,
+    "dawn_seconds": 240.0,
+    "dusk_seconds": 180.0,
+    "start_seconds": 240.0,
+    "day_intensity": 1.125,
+    "noon_intensity": 1.600000023841858,
+    "night_intensity": 0.30000001192092896,
+    "day_ambient": 0.20000000298023224,
+    "night_ambient": 0.019999999552965164,
+    "day_angles": [
+      40.0,
+      140.0
+    ],
+    "midnight_angles": [
+      -30.0,
+      210.0
+    ],
+    "moon_angles": [
+      -50.0,
+      250.0
+    ],
+    "sun_colors": [
+      {
+        "time": 0.0,
+        "color": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      {
+        "time": 0.5000076295109483,
+        "color": [
+          1.0,
+          0.3137255012989044,
+          0.1568627506494522
+        ]
+      },
+      {
+        "time": 1.0,
+        "color": [
+          0.11764706671237946,
+          0.1568627506494522,
+          0.2549019753932953
+        ]
+      }
+    ],
+    "day_fog_colors": [
+      [
+        0.7877358198165894,
+        0.949346125125885,
+        1.0
+      ],
+      [
+        1.0,
+        1.0,
+        1.0
+      ],
+      [
+        0.7877358198165894,
+        0.949346125125885,
+        1.0
+      ]
+    ],
+    "night_fog_colors": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0
+      ]
+    ]
   },
   "wheel_parts": [
     {
@@ -6224,5 +6342,319 @@
     "battery_test_rpm": 800.0,
     "electronics_output": 1.0,
     "electronics_off_threshold": 0.2
+  },
+  "world": {
+    "source": {
+      "file": "level1",
+      "path_id": 64898
+    },
+    "graphics_source": {
+      "file": "level0",
+      "path_id": 16865
+    },
+    "asset": {
+      "path": "reference/world.gltf",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "dependencies": []
+    },
+    "seed": 7,
+    "edge_of_world": 10000000.0,
+    "edge_gradient": 10000.0,
+    "terrain": {
+      "resolution": 20,
+      "tile_size": 100.0,
+      "generate_distance": 245.0,
+      "remove_distance": 370.0
+    },
+    "terrain_material": 3,
+    "flat_zones": [
+      {
+        "center": [40.0, 1.0, 65.0],
+        "inner_sqr": 100.0,
+        "outer_sqr": 1600.0
+      }
+    ],
+    "height_anchor": [40.0, 1.0, 65.0],
+    "road": {
+      "source": {
+        "file": "level1",
+        "path_id": 64771
+      },
+      "length": 5000000.0,
+      "width": 1000.0,
+      "scale": 0.0001,
+      "noises": [
+        {
+          "amplitude": 1.0,
+          "frequency": 10.0,
+          "octaves": 3,
+          "persistence": 0.5,
+          "lacunarity": 2.0
+        }
+      ],
+      "segment_length": 100.0,
+      "bone_length": 10.0,
+      "bone_count": 10,
+      "max_pitch_degrees": 6.0,
+      "max_yaw_degrees": 10.0,
+      "above_terrain": -0.02,
+      "start_straight": 1,
+      "straight_modifier": 0.2,
+      "point_range": 20.0,
+      "generate_distance": 1000.0,
+      "segment": {
+        "positions": [
+          [-4, 0, 0],
+          [4, 0, 0],
+          [-4, 10, 0],
+          [4, 10, 0],
+          [-4, 20, 0],
+          [4, 20, 0],
+          [-4, 30, 0],
+          [4, 30, 0],
+          [-4, 40, 0],
+          [4, 40, 0],
+          [-4, 50, 0],
+          [4, 50, 0],
+          [-4, 60, 0],
+          [4, 60, 0],
+          [-4, 70, 0],
+          [4, 70, 0],
+          [-4, 80, 0],
+          [4, 80, 0],
+          [-4, 90, 0],
+          [4, 90, 0],
+          [-4, 100, 0],
+          [4, 100, 0]
+        ],
+        "normals": [
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1],
+          [0, 0, -1]
+        ],
+        "uvs": [
+          [0, 0.0],
+          [1, 0.0],
+          [0, 0.1],
+          [1, 0.1],
+          [0, 0.2],
+          [1, 0.2],
+          [0, 0.3],
+          [1, 0.3],
+          [0, 0.4],
+          [1, 0.4],
+          [0, 0.5],
+          [1, 0.5],
+          [0, 0.6],
+          [1, 0.6],
+          [0, 0.7],
+          [1, 0.7],
+          [0, 0.8],
+          [1, 0.8],
+          [0, 0.9],
+          [1, 0.9],
+          [0, 1.0],
+          [1, 1.0]
+        ],
+        "triangles": [
+          [0, 2, 1],
+          [1, 2, 3],
+          [2, 4, 3],
+          [3, 4, 5],
+          [4, 6, 5],
+          [5, 6, 7],
+          [6, 8, 7],
+          [7, 8, 9],
+          [8, 10, 9],
+          [9, 10, 11],
+          [10, 12, 11],
+          [11, 12, 13],
+          [12, 14, 13],
+          [13, 14, 15],
+          [14, 16, 15],
+          [15, 16, 17],
+          [16, 18, 17],
+          [17, 18, 19],
+          [18, 20, 19],
+          [19, 20, 21]
+        ],
+        "joints": [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 9, 9],
+        "bind_poses": [
+          [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+          [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -10, 0, 1],
+          [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -20, 0, 1],
+          [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -30, 0, 1],
+          [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -40, 0, 1],
+          [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -50, 0, 1],
+          [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -60, 0, 1],
+          [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -70, 0, 1],
+          [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -80, 0, 1],
+          [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -90, 0, 1],
+          [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+        ]
+      },
+      "biomes": [
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 900
+          },
+          "material": 0,
+          "mesh": {
+            "file": "sharedassets1.assets",
+            "path_id": 1601
+          },
+          "armature": [1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1],
+          "static_bones": [
+            {
+              "joint": 10,
+              "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+            }
+          ],
+          "pole": {
+            "matrix": [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 5, 0, 0, 1],
+            "chances": [0.5, 0.25],
+            "angles": [
+              [5, 5, 10],
+              [30, 20, 40]
+            ],
+            "renderers": [],
+            "colliders": [
+              {
+                "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                "shape": {
+                  "kind": "capsule",
+                  "center": [0, 5, 0],
+                  "radius": 0.15,
+                  "height": 10,
+                  "direction": 1
+                }
+              },
+              {
+                "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                "shape": {
+                  "kind": "box",
+                  "center": [0, 9, 0],
+                  "size": [3, 0.2, 0.2]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 901
+          },
+          "material": 1,
+          "mesh": {
+            "file": "sharedassets1.assets",
+            "path_id": 1601
+          },
+          "armature": [1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1],
+          "static_bones": [
+            {
+              "joint": 10,
+              "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+            }
+          ],
+          "pole": {
+            "matrix": [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 5, 0, 0, 1],
+            "chances": [0.5, 0.25],
+            "angles": [
+              [5, 5, 10],
+              [30, 20, 40]
+            ],
+            "renderers": [],
+            "colliders": [
+              {
+                "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                "shape": {
+                  "kind": "capsule",
+                  "center": [0, 5, 0],
+                  "radius": 0.15,
+                  "height": 10,
+                  "direction": 1
+                }
+              },
+              {
+                "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                "shape": {
+                  "kind": "box",
+                  "center": [0, 9, 0],
+                  "size": [3, 0.2, 0.2]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 902
+          },
+          "material": 2,
+          "mesh": {
+            "file": "sharedassets1.assets",
+            "path_id": 1601
+          },
+          "armature": [1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1],
+          "static_bones": [
+            {
+              "joint": 10,
+              "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+            }
+          ],
+          "pole": {
+            "matrix": [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 5, 0, 0, 1],
+            "chances": [0.5, 0.25],
+            "angles": [
+              [5, 5, 10],
+              [30, 20, 40]
+            ],
+            "renderers": [],
+            "colliders": [
+              {
+                "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                "shape": {
+                  "kind": "capsule",
+                  "center": [0, 5, 0],
+                  "radius": 0.15,
+                  "height": 10,
+                  "direction": 1
+                }
+              },
+              {
+                "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+                "shape": {
+                  "kind": "box",
+                  "center": [0, 9, 0],
+                  "size": [3, 0.2, 0.2]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
   }
 }

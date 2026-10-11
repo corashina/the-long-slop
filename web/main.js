@@ -11,18 +11,18 @@ window.gamePressed=()=>frame.pressed;window.gameReleased=()=>frame.released;
 window.gameMouseX=()=>frame.mouseX;window.gameMouseY=()=>frame.mouseY;window.gameWheel=()=>frame.wheel;
 window.gameActions=()=>{const a=actions;actions=0;return a;};
 window.gameState = { speedKmh: 0, camera: 'First person', x: 0, y: 0, z: 0, contacts: 0,
-  frameSteps: 0, totalSteps: 0, activeChunks: 0, colliderCount: 0, absoluteX: 0, absoluteY: 0, absoluteZ: 0,
-  originX: 0, originY: 0, originZ: 0, rebases: 0, travelM: 0, lateralBand: 0, fuelLiters: 0,
+  frameSteps: 0, totalSteps: 0, activeTiles: 0, colliderCount: 0, absoluteX: 0, absoluteY: 0, absoluteZ: 0,
+  originX: 0, originY: 0, originZ: 0, rebases: 0, travelM: 0, fuelLiters: 0,
   paused: false, started: false, target: '', targetAction: 0, carrying:false, fluidVolumes:record.quantities };
-window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, chunks, colliders, absoluteX, absoluteY, absoluteZ,
-  originX, originY, originZ, rebases, travelM, lateralBand, fuelLiters, paused, started) => {
+window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, tiles, colliders, absoluteX, absoluteY, absoluteZ,
+  originX, originY, originZ, rebases, travelM, fuelLiters, paused, started) => {
   const state = window.gameState;
   state.speedKmh = kmh; state.camera = mode ? 'First person' : 'Chase';
   state.x = x; state.y = y; state.z = z; state.contacts = contacts;
-  state.frameSteps = steps; state.totalSteps += steps; state.activeChunks = chunks; state.colliderCount = colliders;
+  state.frameSteps = steps; state.totalSteps += steps; state.activeTiles = tiles; state.colliderCount = colliders;
   state.absoluteX = absoluteX; state.absoluteY = absoluteY; state.absoluteZ = absoluteZ;
   state.originX = originX; state.originY = originY; state.originZ = originZ;
-  state.rebases = rebases; state.travelM = travelM; state.lateralBand = lateralBand;
+  state.rebases = rebases; state.travelM = travelM;
   state.fuelLiters = fuelLiters; state.paused = paused; state.started = started;
   menu?.sync(started,paused,travelM);
   feedback?.setVisible(started&&!paused&&Boolean(mode)&&menu?.model.state==='playing');

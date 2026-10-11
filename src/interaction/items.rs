@@ -22,8 +22,9 @@ pub struct ItemState {
     pub location: ItemLocation,
     pub pose: VehiclePose,
     pub local_pose: VehiclePose,
-    /// One is new; zero is the most worn source state.
-    pub condition: f32,
+    /// Source condition state: zero is new, four is rusty.
+    pub condition: u8,
+    pub mass_kg: f32,
     pub fluid: Option<FluidContainer>,
 }
 
@@ -70,6 +71,7 @@ impl ItemStore {
                 pose,
                 local_pose,
                 condition: item.condition,
+                mass_kg: item.mass_kg,
                 fluid,
             });
         }
@@ -153,7 +155,8 @@ impl ItemStore {
                 position: [0.0; 3],
                 rotation: [0.0, 0.0, 0.0, 1.0],
             },
-            condition: 1.0,
+            condition: 0,
+            mass_kg: 0.0,
             fluid: Some(FluidContainer {
                 capacity_liters: 1000.0,
                 mixture: crate::fluids::FluidMixture {
@@ -210,6 +213,38 @@ impl ItemStore {
                 .as_mut()
                 .ok_or_else(|| ReferenceError("Missing coolant state".into()))?,
         })
+    }
+
+    /// The item is the car or is mounted on it through wheel slots or part links.
+    pub fn mounted(&self, car: ItemId, mut id: ItemId) -> bool {
+        loop {
+            if id == car {
+                return true;
+            }
+            match self.get(id).map(|item| item.location) {
+                Some(ItemLocation::WheelSlot(_)) => return true,
+                Some(ItemLocation::Attached(parent)) => id = parent,
+                _ => return false,
+            }
+        }
+    }
+
+    /// Dry and fluid mass of the car and every mounted item.
+    pub fn mounted_mass(&self, car: ItemId) -> f32 {
+        self.states
+            .iter()
+            .filter(|item| self.mounted(car, item.id))
+            .map(|item| item.mass_kg + item.fluid.as_ref().map_or(0.0, |f| f.mixture.total()))
+            .sum()
+    }
+
+    /// Dry and fluid mass of the items on one body.
+    pub fn body_mass(&self, body: RigidBodyHandle) -> f32 {
+        self.states
+            .iter()
+            .filter(|item| item.body == Some(body))
+            .map(|item| item.mass_kg + item.fluid.as_ref().map_or(0.0, |f| f.mixture.total()))
+            .sum()
     }
 
     pub fn bind_body(&mut self, id: BodyId, handle: RigidBodyHandle) {

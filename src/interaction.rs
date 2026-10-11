@@ -1,7 +1,8 @@
 pub mod feedback;
 pub mod items;
-use feedback::ActionMask;
+pub mod parts;
 pub mod wheels;
+use feedback::ActionMask;
 
 use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
@@ -28,6 +29,8 @@ pub struct AimTarget {
     pub distance: f32,
     pub point: [f32; 3],
     pub slot: Option<WheelSlotId>,
+    /// The ray hit the empty slot of `item`.
+    pub part_slot: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -52,6 +55,8 @@ pub enum InteractionAction {
         rim: ItemId,
         tire: ItemId,
     },
+    PartRemove(ItemId),
+    PartFit(ItemId),
 }
 
 struct HingeState {
@@ -122,6 +127,7 @@ pub struct InteractionState {
     slot_fits: HashMap<WheelSlotId, HashSet<ItemId>>,
     tire_fits: HashSet<(ItemId, ItemId)>,
     f_gesture_consumed: bool,
+    parts: HashSet<ItemId>,
     bodies: HashMap<BodyId, RigidBodyHandle>,
     hinges: Vec<HingeState>,
     openings: Vec<OpeningState>,
@@ -288,6 +294,7 @@ impl InteractionState {
                 .iter()
                 .map(|item| (item.id, item.kind.clone()))
                 .collect(),
+            parts: reference.parts.iter().map(|part| part.item).collect(),
             bodies: HashMap::with_capacity(reference.bodies.len()),
             hinges,
             openings,
@@ -399,6 +406,17 @@ impl InteractionState {
             .find(|hinge| hinge.reference.item == id)
             .map(|hinge| hinge.angle)
     }
+    /// A fitted part returns to its slot closed.
+    pub fn close_hinge(&mut self, item: ItemId) {
+        if let Some(hinge) = self
+            .hinges
+            .iter_mut()
+            .find(|hinge| hinge.reference.item == item)
+        {
+            hinge.angle = hinge.reference.closed_degrees;
+            hinge.target = hinge.reference.closed_degrees;
+        }
+    }
     pub fn dragging_hinge(&self) -> Option<ItemId> {
         self.latched_hinge
             .map(|(index, _)| self.hinges[index].reference.item)
@@ -446,16 +464,15 @@ impl InteractionState {
         let (handle, hit) = physics
             .queries(QueryFilter::default().predicate(&surfaces))
             .cast_ray_and_get_normal(&ray, reach, true)?;
-        let encoded = physics.rapier().colliders[handle].user_data as u32;
-        let item = ItemId(encoded.checked_sub(1)?);
+        let data = physics.rapier().colliders[handle].user_data;
+        let item = ItemId((data as u32).checked_sub(1)?);
         self.kinds.get(&item)?;
         Some(AimTarget {
             item,
             distance: hit.time_of_impact,
             point: ray.point_at(hit.time_of_impact).to_array(),
-            slot: (physics.rapier().colliders[handle].user_data & SLOT_SENSOR_FLAG != 0).then_some(
-                WheelSlotId((physics.rapier().colliders[handle].user_data >> 96) as u8),
-            ),
+            slot: (data & SLOT_SENSOR_FLAG != 0).then_some(WheelSlotId((data >> 96) as u8)),
+            part_slot: data & parts::PART_SLOT_FLAG != 0,
         })
     }
 
@@ -483,6 +500,7 @@ impl InteractionState {
                 .hinges
                 .iter()
                 .position(|hinge| hinge.reference.item == target.item)
+            && fitted(&self.parts, items, target.item)
             && let Some(body) = self
                 .bodies
                 .get(&self.hinges[index].reference.body)
@@ -509,6 +527,7 @@ impl InteractionState {
                         distance: distance.sqrt(),
                         point: point.to_array(),
                         slot: None,
+                        part_slot: false,
                     })
                 } else {
                     self.latched_hinge = None;
@@ -525,9 +544,11 @@ impl InteractionState {
         let mut carry_input = input;
         self.tuning_opening = None;
         let can_use_target = use_target.is_some_and(|target| {
-            self.hinges
+            (self
+                .hinges
                 .iter()
                 .any(|hinge| hinge.reference.item == target.item)
+                && fitted(&self.parts, items, target.item))
                 || self.openings.iter().any(|opening| {
                     opening.reference.cap == target.item
                         && (opening.reference.can_toggle || opening.reference.can_tune)
@@ -586,6 +607,7 @@ impl InteractionState {
                 action = Some(InteractionAction::Seat(seat.id));
             }
             if input.held & keys::USE != 0
+                && fitted(&self.parts, items, target.item)
                 && let Some(hinge) = self
                     .hinges
                     .iter_mut()
@@ -632,10 +654,13 @@ impl InteractionState {
         if input.pressed & keys::GRAB != 0 {
             self.f_gesture_consumed = false;
             if available.actions.0 & ActionMask::DISMOUNT != 0 && self.held.is_none() {
+                let part = available.part.expect("dismount part");
                 action = Some(if let Some(rim) = available.rim {
                     InteractionAction::WheelSplit(rim)
+                } else if self.parts.contains(&part) {
+                    InteractionAction::PartRemove(part)
                 } else {
-                    InteractionAction::WheelRemove(available.part.expect("dismount part"))
+                    InteractionAction::WheelRemove(part)
                 });
                 self.f_gesture_consumed = true;
             } else if available.actions.0 & ActionMask::MOUNT == 0 {
@@ -660,6 +685,8 @@ impl InteractionState {
                     });
                 } else if let (Some(rim), Some(tire)) = (available.rim, available.tire) {
                     action = Some(InteractionAction::WheelJoin { rim, tire });
+                } else if let Some(part) = available.part {
+                    action = Some(InteractionAction::PartFit(part));
                 }
             }
             self.f_gesture_consumed = false;
@@ -826,10 +853,7 @@ impl InteractionState {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> bool {
-        if !matches!(
-            self.kinds.get(&target.item),
-            Some(ItemKind::Container | ItemKind::Wheel | ItemKind::Rim | ItemKind::Tire)
-        ) {
+        if !self.kinds.contains_key(&target.item) {
             return false;
         }
         let Some(item) = items.get_mut(target.item) else {
@@ -961,6 +985,14 @@ impl InteractionState {
         physics.rapier_mut().bodies[anchor].set_next_kinematic_position(desired);
         false
     }
+}
+
+/// A part is fitted while it is attached. Hinged parts move only while fitted.
+fn fitted(parts: &HashSet<ItemId>, items: &ItemStore, item: ItemId) -> bool {
+    !parts.contains(&item)
+        || items
+            .get(item)
+            .is_some_and(|item| matches!(item.location, ItemLocation::Attached(_)))
 }
 
 fn local_hinge_pose(hinge: &HingeState) -> Pose {

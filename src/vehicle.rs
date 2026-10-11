@@ -15,7 +15,8 @@ use crate::simulation::{DriveInput, FIXED_DT};
 #[derive(Clone, Copy)]
 pub struct InstalledWheel {
     pub radius: f32,
-    pub condition: f32,
+    /// Source forward stiffness from `wheelscript`.
+    pub friction_slip: f32,
 }
 pub const VEHICLE_COLLIDER_FLAG: u128 = 1 << 127;
 pub const SLOT_SENSOR_FLAG: u128 = 1 << 126;
@@ -196,7 +197,7 @@ impl PhysicsWorld {
                         .find(|wheel| wheel.id == vehicle.wheel_slots[index])
                         .unwrap()
                         .radius,
-                    condition: 1.0,
+                    friction_slip: vehicle.wheel_slip[0],
                 })
             }),
             wheel_rotations: [0.0; 4],
@@ -264,8 +265,7 @@ impl PhysicsWorld {
             } else {
                 0.0
             };
-            wheel.friction_slip =
-                0.75 + 0.5 * self.installed[slot].unwrap().condition.clamp(0.0, 1.0);
+            wheel.friction_slip = self.installed[slot].unwrap().friction_slip;
         }
         let not_vehicle = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
             collider.user_data & VEHICLE_COLLIDER_FLAG == 0
@@ -384,7 +384,7 @@ impl PhysicsWorld {
             );
             *added = *wheel;
             added.radius = installed.radius;
-            added.friction_slip = 0.75 + 0.5 * installed.condition.clamp(0.0, 1.0);
+            added.friction_slip = installed.friction_slip;
             self.active_slots.push(slot);
         }
         self.controller = controller;
@@ -493,28 +493,23 @@ impl PhysicsWorld {
     }
 
     pub fn insert_mesh(&mut self, vertices: &[[f32; 3]], indices: &[[u32; 3]]) -> ColliderHandle {
-        self.insert_mesh_at(vertices, indices, [0.0; 3])
-    }
-
-    pub fn insert_mesh_at(
-        &mut self,
-        vertices: &[[f32; 3]],
-        indices: &[[u32; 3]],
-        position: [f32; 3],
-    ) -> ColliderHandle {
         let mesh = ColliderBuilder::trimesh(
             vertices.iter().copied().map(Vector::from_array).collect(),
             indices.to_vec(),
         )
-        .expect("Static mesh must contain valid triangles")
-        .friction(0.8)
-        .translation(Vector::from_array(position));
-        let handle = self.physics.colliders.insert(mesh);
+        .expect("Static mesh must contain valid triangles");
+        let handle = self.insert_static(mesh);
         self.refresh_queries();
         handle
     }
 
-    pub fn remove_collider(&mut self, handle: ColliderHandle) {
+    /// Adds fixed world geometry. Call `refresh_queries` after a batch.
+    pub fn insert_static(&mut self, collider: ColliderBuilder) -> ColliderHandle {
+        self.physics.colliders.insert(collider.friction(0.8))
+    }
+
+    /// Removes fixed world geometry. Call `refresh_queries` after a batch.
+    pub fn remove_static(&mut self, handle: ColliderHandle) {
         if self
             .controller
             .wheels()
@@ -524,6 +519,10 @@ impl PhysicsWorld {
             self.physics.bodies[self.chassis].wake_up(true);
         }
         self.physics.remove_collider(handle);
+    }
+
+    pub fn remove_collider(&mut self, handle: ColliderHandle) {
+        self.remove_static(handle);
         self.refresh_queries();
     }
 
@@ -543,10 +542,9 @@ impl PhysicsWorld {
     }
 
     pub fn insert_box(&mut self, center: [f32; 3], half_size: [f32; 3]) -> ColliderHandle {
-        let handle = self.physics.colliders.insert(
+        let handle = self.insert_static(
             ColliderBuilder::cuboid(half_size[0], half_size[1], half_size[2])
-                .translation(Vector::from_array(center))
-                .friction(0.8),
+                .translation(Vector::from_array(center)),
         );
         self.refresh_queries();
         handle

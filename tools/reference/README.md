@@ -11,7 +11,7 @@ tools/reference/.venv/Scripts/python.exe -m unittest discover -s tools/reference
 ```
 
 The exporter reads Steam app `1017180`, build `11140890`.
-It writes `home.gltf`, `lada.gltf`, `items.gltf`, buffers, textures, and `manifest.json` into `web/assets/reference/`.
+It writes `home.gltf`, `lada.gltf`, `items.gltf`, `world.gltf`, buffers, textures, and `manifest.json` into `web/assets/reference/`.
 Git ignores these files. Steam files remain unchanged.
 
 The home link comes from `homesickscript.FirstHome`.
@@ -31,6 +31,14 @@ Node extras contain the resolved source ID in `reference_id`.
 Bind this ID to the manifest's numeric node ID once during loading.
 Asset records include hashes for each referenced buffer and texture.
 `parameter-evidence.json` records source fields, byte checks, startup rules, and material differences.
+
+The `world` record comes from `roadGenScript` and `TerrainGenerationSettings` in `level1`.
+It keeps generator values in Unity space. The runtime converts generated geometry once.
+Draw distances use the default graphics slider in `settingsscript`.
+The road record holds the shared skinned segment mesh, its bind poses, and three biome prefabs.
+Each prefab names its road material, static bones, and power pole. Rope and lamp parts are omitted.
+`world.gltf` holds the road, pole, and terrain materials and the pole meshes. It has no scene.
+Home flat zones come from `terrainHeightAlignToBuildingScript`.
 
 Startup conditions use a fixed build-based seed and original source ranges.
 Rims and tires use the matching source material variants.

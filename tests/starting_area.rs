@@ -101,6 +101,7 @@ fn restart_after_carry_detach_rebase() {
                 distance: 1.0,
                 point: [10.0, 2.0, -1.0],
                 slot: None,
+                part_slot: false,
             }),
             &mut runtime.area.player,
             &mut runtime.area.items,
@@ -162,7 +163,7 @@ fn recovery_preserves_state() {
     let (reference, mut runtime) = initial();
     runtime.trip_m = 256.0;
     for item in runtime.area.items.iter_mut() {
-        item.condition *= 0.5;
+        item.condition = 4 - item.condition;
     }
     runtime
         .area
@@ -175,24 +176,21 @@ fn recovery_preserves_state() {
         .mixture
         .quantities_liters = [0.0; 6];
     let quantities = fluids(&runtime);
-    let parts: Vec<_> = runtime
-        .area
-        .items
-        .iter()
-        .map(|item| (item.id, item.location, item.condition))
-        .collect();
-    let body_count = runtime.physics.rapier().bodies.len();
-    runtime.recover(&reference);
-    assert_eq!(fluids(&runtime), quantities);
-    assert_eq!(
+    // Station supplies stream with the road. Recovery may load another one.
+    let parts = |runtime: &GarageRuntime| {
         runtime
             .area
             .items
             .iter()
+            .filter(|item| item.id.0 < 0x8000_0000)
             .map(|item| (item.id, item.location, item.condition))
-            .collect::<Vec<_>>(),
-        parts
-    );
+            .collect::<Vec<_>>()
+    };
+    let before = parts(&runtime);
+    let body_count = runtime.physics.rapier().bodies.len();
+    runtime.recover(&reference);
+    assert_eq!(fluids(&runtime), quantities);
+    assert_eq!(parts(&runtime), before);
     assert_eq!(runtime.trip_m, 256.0);
     assert_eq!(runtime.physics.rapier().bodies.len(), body_count);
 }
@@ -405,7 +403,10 @@ fn aim_at(
         .rapier()
         .colliders
         .iter()
-        .find(|(_, collider)| collider.user_data as u32 == item.0 + 1)
+        .find(|(_, collider)| {
+            collider.user_data as u32 == item.0 + 1
+                && collider.user_data & my_summer_slop::interaction::parts::PART_SLOT_FLAG == 0
+        })
         .map(|(_, collider)| collider.compute_aabb().center().to_array())
         .expect("item collider");
     let standing = rapier3d::prelude::SharedShape::capsule_y(
@@ -580,6 +581,7 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
             distance: 1.0,
             point: [0.8, 0.7, 0.0],
             slot: None,
+            part_slot: false,
         }),
         &mut runtime.area.player,
         &mut runtime.area.items,
@@ -622,6 +624,7 @@ fn dry_recovery_keeps_a_carried_can_reachable() {
             distance: 1.0,
             point: [10.0, 2.0, -1.0],
             slot: None,
+            part_slot: false,
         }),
         &mut runtime.area.player,
         &mut runtime.area.items,
@@ -715,22 +718,13 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
             .sqrt()
             < reference.player.aim_reach
     );
-    let station = my_summer_slop::world::nearest_station(
-        runtime.stream.seed,
-        -runtime
-            .stream
-            .origin
-            .absolute(runtime.physics.snapshot().pose.position)[2],
-    );
     let car = runtime
         .stream
         .origin
         .absolute(runtime.physics.snapshot().pose.position);
+    let station = runtime.stream.nearest_station(car);
     assert!(
-        ((car[0] - station.absolute_point[0]).powi(2)
-            + (car[2] - station.absolute_point[2]).powi(2))
-        .sqrt()
-            < 0.01
+        ((car[0] - station.point[0]).powi(2) + (car[2] - station.point[2]).powi(2)).sqrt() < 0.01
     );
     // Stage the same source can as trunk cargo. Recovery must preserve its car-relative pose.
     let body = runtime.area.items.get(can).unwrap().body.unwrap();
@@ -773,32 +767,26 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
 #[test]
 fn walking_far_keeps_a_parked_road_car_supported() {
     let mut physics = common::world();
-    let mut stream = my_summer_slop::world::WorldStream::new(my_summer_slop::world::DEFAULT_SEED);
-    let pose = stream.reset_pose(640.0, false, &mut physics);
+    let mut stream = my_summer_slop::world::WorldStream::new(&common::reference());
+    let pose = stream.reset_pose(false, &mut physics);
     physics.reset(pose);
-    for _ in 0..180 {
-        physics.apply_vehicle_forces(
-            my_summer_slop::simulation::DriveInput {
-                handbrake: true,
-                ..Default::default()
-            },
-            0.0,
-        );
-        physics.step_physics();
-    }
+    let parked = |physics: &mut my_summer_slop::vehicle::PhysicsWorld, steps: usize| {
+        for _ in 0..steps {
+            physics.apply_vehicle_forces(
+                my_summer_slop::simulation::DriveInput {
+                    handbrake: true,
+                    ..Default::default()
+                },
+                0.0,
+            );
+            physics.step_physics();
+        }
+    };
+    parked(&mut physics, 180);
     let before = physics.snapshot().pose.position;
-    let distant = my_summer_slop::world::road_sample(stream.seed, 3000.0).center;
-    stream.sync_at(distant, &mut physics);
-    for _ in 0..120 {
-        physics.apply_vehicle_forces(
-            my_summer_slop::simulation::DriveInput {
-                handbrake: true,
-                ..Default::default()
-            },
-            0.0,
-        );
-        physics.step_physics();
-    }
+    let car = stream.origin.absolute(before);
+    stream.sync_at([car[0] + 400.0, car[1], car[2] - 3000.0], &mut physics);
+    parked(&mut physics, 120);
     let after = physics.snapshot().pose.position;
     assert!(
         after[1] > before[1] - 0.1,
@@ -812,38 +800,11 @@ fn walking_far_keeps_a_parked_road_car_supported() {
             .wheels_contact
             .iter()
             .all(|contact| *contact),
-        "support halo must retain all four wheel contacts"
-    );
-    assert_eq!(stream.chunks().count(), 11);
-    assert!(
-        physics.collider_count() <= 66,
-        "support halo exceeded collider bound"
-    );
-    assert_eq!(
-        physics
-            .rapier()
-            .colliders
-            .iter()
-            .filter(|(_, collider)| collider.shape().as_trimesh().is_some())
-            .count(),
-        14
+        "the car keeps its own terrain tiles"
     );
     stream.sync_at(stream.origin.absolute(after), &mut physics);
     let count = physics.collider_count();
-    assert!(
-        count <= 63,
-        "returning focus must remove the terrain-only support halo"
-    );
-    assert_eq!(
-        physics
-            .rapier()
-            .colliders
-            .iter()
-            .filter(|(_, collider)| collider.shape().as_trimesh().is_some())
-            .count(),
-        11
-    );
-    stream.sync_at(stream.origin.absolute(after), &mut physics);
+    stream.sync_at([car[0] + 1.0, car[1], car[2]], &mut physics);
     assert_eq!(
         physics.collider_count(),
         count,
@@ -996,29 +957,56 @@ fn production_garage_exits_and_reverse_to_road() {
             crossed = true;
         }
         let absolute = runtime.stream.origin.absolute(state.pose.position);
-        let road = my_summer_slop::world::road_sample(runtime.stream.seed, -absolute[2]);
-        if (absolute[0] - road.center[0]).abs() <= 4.0 {
-            assert!(
-                state.wheels_contact.iter().all(|contact| *contact),
-                "car lost wheel support at the road join: {:?}, contacts {:?}",
-                state.pose.position,
-                state.wheels_contact
-            );
-            assert!(
-                state.pose.position.iter().all(|value| value.is_finite())
-                    && state.pose.position[1] > 0.0,
-                "car left the terrain at the road join"
-            );
-            println!(
-                "source road joined after {} reverse steps at {:?}; road centre {:?}; contacts {:?}",
-                step + 1,
-                absolute,
-                road.center,
-                state.wheels_contact
-            );
-            joined = true;
-            break;
+        let (road, yaw) = runtime.stream.nearest_road(absolute);
+        let lateral = ((absolute[0] - road[0]) * yaw.cos() as f64
+            - (absolute[2] - road[2]) * yaw.sin() as f64)
+            .abs();
+        if lateral > 4.0 {
+            continue;
         }
+        assert!(
+            state.pose.position.iter().all(|value| value.is_finite())
+                && state.pose.position[1] > 0.0,
+            "car left the terrain at the road join"
+        );
+        // The source terrain sits 0.1 meters below the road within 4.5 meters of it.
+        // A wheel can leave that lip for a moment. All four must land within one second.
+        let mut settled = None;
+        for extra in 0..60 {
+            if runtime
+                .physics
+                .snapshot()
+                .wheels_contact
+                .iter()
+                .all(|contact| *contact)
+            {
+                settled = Some(extra);
+                break;
+            }
+            runtime.step(
+                &reference,
+                FrameInput {
+                    held: keys::BACK,
+                    ..FrameInput::default()
+                },
+            );
+        }
+        let landed = runtime.physics.snapshot();
+        assert!(
+            settled.is_some(),
+            "car lost wheel support at the road join: {:?}, contacts {:?}",
+            landed.pose.position,
+            landed.wheels_contact
+        );
+        println!(
+            "source road joined after {} reverse steps at {:?}; road bone {:?}; all wheels down after {} more steps",
+            step + 1,
+            absolute,
+            road,
+            settled.unwrap()
+        );
+        joined = true;
+        break;
     }
     let exit = runtime.physics.snapshot();
     assert!(
@@ -1274,4 +1262,206 @@ fn aim_from_seat(
         Some(item),
         "seated door control must use real aim"
     );
+}
+#[test]
+fn hard_crash_knocks_wheels_off() {
+    use my_summer_slop::interaction::items::ItemLocation;
+    let (reference, mut runtime) = initial();
+    runtime.started = true;
+    let rims: Vec<_> = reference.wheel_slots.iter().map(|slot| slot.rim).collect();
+    let mounted = |runtime: &GarageRuntime| {
+        rims.iter()
+            .filter(|id| {
+                matches!(
+                    runtime.area.items.get(**id).unwrap().location,
+                    ItemLocation::WheelSlot(_)
+                )
+            })
+            .count()
+    };
+    let chassis = runtime.physics.chassis_handle();
+    let forward = |runtime: &mut GarageRuntime, kmh: f32| {
+        let rotation = *runtime.physics.rapier().bodies[chassis].rotation();
+        runtime.physics.rapier_mut().bodies[chassis]
+            .set_linvel(rotation * -rapier3d::math::Vector::Z * (kmh / 3.6), true);
+    };
+    for _ in 0..60 {
+        forward(&mut runtime, 5.0);
+        runtime.step(&reference, FrameInput::default());
+    }
+    assert_eq!(mounted(&runtime), 4, "gentle driving keeps every wheel");
+    forward(&mut runtime, 100.0);
+    runtime.step(&reference, FrameInput::default());
+    assert!(mounted(&runtime) < 4, "a 95 km/h jump knocks wheels off");
+    let loose = rims
+        .iter()
+        .find(|id| runtime.area.items.get(**id).unwrap().location == ItemLocation::World)
+        .unwrap();
+    let body = runtime.area.items.get(*loose).unwrap().body.unwrap();
+    assert!(runtime.physics.rapier().bodies[body].is_dynamic());
+}
+
+#[test]
+#[ignore = "Requires exported Steam assets"]
+fn production_parts_come_off_and_fit_again() {
+    use my_summer_slop::interaction::{
+        InteractionAction, items::ItemLocation, parts::PART_SLOT_FLAG,
+    };
+    use rapier3d::math::{Rotation, Vector};
+    let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+    let reference = my_summer_slop::reference::ReferenceManifest::from_json(&bytes).unwrap();
+    let part = |name: &str| {
+        reference
+            .parts
+            .iter()
+            .map(|part| part.item)
+            .find(|id| {
+                reference
+                    .items
+                    .iter()
+                    .any(|item| item.id == *id && item.name == name)
+            })
+            .unwrap()
+    };
+    let (door, mirror) = (part("FRDoor"), part("RightMirror"));
+    let car = reference.vehicle.item;
+    let grab = FrameInput {
+        pressed: keys::GRAB,
+        ..FrameInput::default()
+    };
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    runtime.started = true;
+    runtime.step(&reference, FrameInput::default());
+    let chassis = runtime.physics.chassis_handle();
+    let mass = runtime.physics.rapier().bodies[chassis].mass();
+    let shapes = |runtime: &GarageRuntime| {
+        runtime
+            .physics
+            .rapier()
+            .colliders
+            .iter()
+            .filter(|(_, collider)| {
+                collider.user_data & PART_SLOT_FLAG == 0 && collider.user_data as u32 == door.0 + 1
+            })
+            .map(|(_, collider)| (collider.parent(), *collider.position_wrt_parent().unwrap()))
+            .collect::<Vec<_>>()
+    };
+    let fitted = shapes(&runtime);
+
+    // Grab removes an aimed door with its mirror. The door can then be carried.
+    aim_at(&mut runtime, &reference, door);
+    runtime.step(&reference, grab);
+    let body = runtime.area.items.get(door).unwrap().body.unwrap();
+    assert_eq!(
+        runtime.area.items.get(door).unwrap().location,
+        ItemLocation::World
+    );
+    assert_eq!(runtime.area.items.get(mirror).unwrap().body, Some(body));
+    assert!(!runtime.area.items.mounted(car, mirror));
+    assert!(
+        shapes(&runtime)
+            .iter()
+            .all(|(parent, _)| *parent == Some(body))
+    );
+    assert!(runtime.physics.rapier().bodies[chassis].mass() < mass - 10.0);
+    for _ in 0..30 {
+        runtime.step(&reference, FrameInput::default());
+    }
+    aim_at(&mut runtime, &reference, door);
+    runtime.step(&reference, grab);
+    assert_eq!(runtime.area.interaction.held(), Some(door));
+
+    // The carried part shows its empty slot. Grab on that slot fits it again.
+    let slot = runtime
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, collider)| {
+            collider.user_data & PART_SLOT_FLAG != 0 && collider.user_data as u32 == door.0 + 1
+        })
+        .map(|(_, collider)| *collider.position())
+        .unwrap();
+    let car_pose = *runtime.physics.rapier().bodies[chassis].position();
+    let mut outward = slot.translation - car_pose.translation;
+    outward.y = 0.0;
+    let outward = outward.normalize();
+    let view = my_summer_slop::vehicle::from_rapier(&rapier3d::math::Pose::from_parts(
+        slot.translation + outward * 1.2,
+        Rotation::from_rotation_arc(-Vector::Z, -outward),
+    ));
+    let target = runtime
+        .area
+        .interaction
+        .aim(&runtime.physics, view, reference.player.aim_reach)
+        .unwrap();
+    assert!(target.part_slot && target.item == door);
+    let action = runtime.area.interaction.step(
+        grab,
+        Some(target),
+        &mut runtime.area.player,
+        &mut runtime.area.items,
+        &mut runtime.physics,
+        1.0 / 60.0,
+    );
+    assert_eq!(action, Some(InteractionAction::PartFit(door)));
+    runtime
+        .area
+        .interaction
+        .drop_held(&mut runtime.area.items, &mut runtime.physics);
+    runtime
+        .parts
+        .fit(door, &mut runtime.area.items, &mut runtime.physics)
+        .unwrap();
+    runtime.step(&reference, FrameInput::default());
+    assert_eq!(
+        runtime.area.items.get(door).unwrap().location,
+        ItemLocation::Attached(car)
+    );
+    assert!(runtime.area.items.mounted(car, mirror));
+    for ((parent, pose), (old_parent, old_pose)) in shapes(&runtime).iter().zip(&fitted) {
+        assert_eq!(parent, old_parent);
+        assert!((pose.translation - old_pose.translation).length() < 0.001);
+    }
+    assert!((runtime.physics.rapier().bodies[chassis].mass() - mass).abs() < 0.01);
+
+    // A hard crash knocks parts other than wheels off.
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    runtime.started = true;
+    let rotation = *runtime.physics.rapier().bodies[chassis].rotation();
+    runtime.physics.rapier_mut().bodies[chassis]
+        .set_linvel(rotation * -Vector::Z * (150.0 / 3.6), true);
+    runtime.step(&reference, FrameInput::default());
+    assert!(reference.parts.iter().any(|part| {
+        runtime.area.items.get(part.item).unwrap().location == ItemLocation::World
+    }));
+}
+
+#[test]
+#[ignore = "Requires exported Steam assets"]
+fn production_lights_key_cycles_headlights() {
+    let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+    let reference = my_summer_slop::reference::ReferenceManifest::from_json(&bytes).unwrap();
+    assert_eq!(reference.headlights.len(), 2);
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    let lights = FrameInput {
+        pressed: keys::LIGHTS,
+        ..FrameInput::default()
+    };
+    // Outside the car the key does nothing.
+    runtime.started = true;
+    runtime.step(&reference, lights);
+    assert_eq!(runtime.lamps, 0);
+    enter_source_driver(&mut runtime, &reference);
+    for lamps in [1, 2, 0] {
+        runtime.step(&reference, lights);
+        assert_eq!(runtime.lamps, lamps);
+        for _ in 0..60 {
+            runtime.step(&reference, FrameInput::default());
+        }
+        for headlight in &runtime.headlights {
+            assert_eq!(headlight.current, lamps);
+            assert_eq!(headlight.energy, 1.0);
+        }
+    }
 }

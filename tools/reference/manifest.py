@@ -6,6 +6,9 @@ from .collision import world_pose, quaternion_product, bake_points, geometry
 from .caps import opening_metadata
 from .visibility import recover_camera_visibility
 
+# mainscript.fallOffPowerNeeded is a static initializer, indexed by partscript.fallOffCategory.
+FALL_OFF_POWER=(-1.,.2,.2,.2,.2,.2,0.,.6,-1.,.3,.6,.7,.6,.5,.3,.3,.7,.01)
+
 
 def build_manifest(source, roots, reports, hashes):
     nodes=[]; by_source={}; objects={}; components={}; node_readers={}
@@ -109,10 +112,11 @@ def build_manifest(source, roots, reports, hashes):
             if class_name in group:kind=kind_name
         if node in hinge_nodes:kind='hood' if 'Hood' in nodes[node-1]['hierarchy_path'] else 'trunk' if 'Trunk' in nodes[node-1]['hierarchy_path'] else 'door'
         condition=data(node,'partconditionscript')
-        raw=source.conditions[key(group['partconditionscript'][0])]['state'] if condition else 0
-        mass=data(node,'massScript')
+        state=source.conditions[key(group['partconditionscript'][0])]['state'] if condition else 0
+        mass=data(node,'massScript');part=data(node,'partscript')
+        power=FALL_OFF_POWER[part['fallOffCategory']] if part else -1.
         value={'id':len(items)+1,'source':source_id(node_readers[node]),'node':node,'body':body_for(node),'name':name,'kind':kind,
-            'condition':1.-raw*0.25,'mass_kg':mass['mass'] if mass else 0.,'attached_to':None}
+            'condition':state,'fall_off_power':power if power>=0 else None,'mass_kg':mass['mass'] if mass else 0.,'attached_to':None}
         items.append(value);item_nodes[node]=value['id']
         for readers in group.values():
             for reader in readers:item_components[key(reader)]=value['id']
@@ -265,6 +269,54 @@ def build_manifest(source, roots, reports, hashes):
         wheel_parts.append({'item':item_nodes[node],'source':source_id(part),'radius':radius,'main_types':value['maintipus'],'part_types':value['tipus'],
             'colliders':[collider_ids[identity] for identity in identities],'tire_slot_anchor':tire_anchor,'tire_mount':tire_mount,
             'tire_main_types':tire_main,'tire_types':tire_types,'local_rotation_after_mount':euler_quaternion(vector(value['localRotationAfterMount']))})
+    # General car part slots. Wheel parts and the slots on rims use the wheel records.
+    parts=[];items_by_id={item['id']:item for item in items}
+    for node,group in components.items():
+        for slot in group.get('partslotscript',[]):
+            value=source.read(slot)
+            if not value['part']['m_PathID']:continue
+            part=source.resolve(slot,value['part']);part_data=source.read(part);item=items_by_id[item_nodes[node_of(part)]]
+            parent=items_by_id[item['attached_to']]
+            if item['kind'] in ('rim','tire') or parent['kind'] in ('rim','tire'):continue
+            if part_data['T']['m_PathID'] and pointer_node(part,part_data['T'])!=item['node']:raise ValueError('Part transform must be the part node')
+            parts.append({'item':item['id'],'source':source_id(slot),'detach_node':pointer_node(slot,value['DT']) if value['DT']['m_PathID'] else None,
+                'local_rotation_after_mount':euler_quaternion(vector(part_data['localRotationAfterMount']))})
+    parts.sort(key=lambda part:part['item'])
+    # Car headlights: headlightscript states switched by carscript.lampak.
+    rgb=lambda color:[color['r'],color['g'],color['b']]
+    headlights=[]
+    for node,group in components.items():
+        for reader in group.get('headlightscript',[]):
+            if node not in item_nodes:continue
+            value=source.read(reader);states=[];lens=None
+            for state in value['states']:
+                light=None
+                if state['L']['m_PathID']:
+                    light_reader=source.resolve(reader,state['L']);light_data=source.read(light_reader)
+                    if light_data['m_Type']!=0:raise ValueError('Headlight must be a spot light')
+                    light={'node':node_of(light_reader),'color':rgb(light_data['m_Color']),'range':light_data['m_Range'],'spot_degrees':light_data['m_SpotAngle']}
+                if state['L']['m_PathID'] and state['Ls']:raise ValueError('Headlight state uses one light')
+                renderer=node_of(source.resolve(reader,state['R']))
+                if lens not in (None,renderer):raise ValueError('Headlight states share one lens')
+                lens=renderer
+                emission=None
+                if state['M']['m_PathID']:
+                    emission=rgb(dict(source.read(source.resolve(reader,state['M']))['m_SavedProperties']['m_Colors'])['_EmissionColor'])
+                states.append({'intensity':state['intensity'],'light':light,'lens_emission':emission})
+            headlights.append({'item':item_nodes[node],'source':source_id(reader),'energy_rate':value['energyMove'],'lens_node':lens,'states':states})
+    headlights.sort(key=lambda headlight:headlight['item'])
+    # napszakvaltakozas: the day cycle. Its times are in minutes.
+    day_reader=source.resolve(main_reader,main['napszak']);day=source.read(day_reader)
+    if not day['minute']:raise ValueError('Day cycle times must be minutes')
+    gradient=day['color']
+    day_cycle={'source':source_id(day_reader),'day_seconds':day['daytime']*60.,'night_seconds':day['nighttime']*60.,
+        'dawn_seconds':day['reggelTime']*60.,'dusk_seconds':day['esteTime']*60.,'start_seconds':day['daytime']*60.*0.2,
+        'day_intensity':day['dayIntensity'],'noon_intensity':day['noonIntensity'],'night_intensity':day['nightIntensity'],
+        'day_ambient':day['dayAmbient'],'night_ambient':day['nightAmbient'],'day_angles':[day['dayAngleMin'],day['dayAngleMax']],
+        'midnight_angles':[day['midnightAngleR'],day['midnightAngleE']],'moon_angles':[day['minMoonAngle'],day['maxMoonAngle']],
+        'sun_colors':[{'time':gradient[f'ctime{i}']/65535.,'color':rgb(gradient[f'key{i}'])} for i in range(gradient['m_NumColorKeys'])],
+        'day_fog_colors':[rgb(color) for color in day['dayFogColors']],'night_fog_colors':[rgb(color) for color in day['nightFogColors']]}
+    if gradient['m_Mode']!=0:raise ValueError('Sun gradient must blend')
     for slot in wheel_slots:
         owner=source.get(slot['source']['file'],slot['source']['path_id'])
         if source.read(owner)['disableCollidersOnCraft']:
@@ -366,9 +418,13 @@ def build_manifest(source, roots, reports, hashes):
     driveway_points=[point for height,points in wheel_floors if abs(height-driveway_height)<0.001 for point in points]
     driveway_bounds={'min':[min(p[i] for p in driveway_points) for i in range(3)],'max':[max(p[i] for p in driveway_points) for i in range(3)]}
     driveway_bounds['min'][1]=driveway_height;driveway_bounds['max'][1]=driveway_height
-    result={'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'hinges':hinges,'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'items':items,'openings':openings,'tanks':tanks,
+    result={'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'hinges':hinges,'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'parts':parts,'headlights':headlights,'day_cycle':day_cycle,'items':items,'openings':openings,'tanks':tanks,
         'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed']},'engine':engine_record,'player':player_record,'seats':seats,
-        'vehicle':{'source':source_id(car_reader),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':[w['id'] for w in wheel_slots],'colliders':[c['id'] for c in colliders if c['body']==car_body],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')]},
+        'vehicle':{'source':source_id(car_reader),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':[w['id'] for w in wheel_slots],'colliders':[c['id'] for c in colliders if c['body']==car_body],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')],
+            'rim_slip':[main['WheelSlip1'],main['WheelSlip2']],'item':item_nodes[node_of(source.resolve(car_reader,car['condition']))],
+            'crash':{'fall_off_speed':[main['crashSpeedMinFallOff'],main['crashSpeedMaxFallOff']],'max_fall_off_speed':main['crashSpeedMaxFallOffMax'],
+                'fall_off_counts':[[main['minNumFallOff'],main['maxNumFallOff']],[main['minNumFallOff2'],main['maxNumFallOff2']]],
+                'multiplier':car['crashMultiplier'],'fall_off_multiplier':car['crashFallOffMultiplier']}},
         'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn,'car_pose':car_pose,'driveway_bounds':driveway_bounds,'driveway_height':driveway_height}}
     result['vehicle'].update(auto_shift_stop_speed=car['autoShiftStopSpeed'],auto_shift_min_rpm=car['autoShiftMinRpm'],auto_shift_max_rpm=car['autoShiftMaxRpm'])
     result['vehicle'].update(gear_free_run=[bool(gear['freeRun']) for gear in car['gears']],

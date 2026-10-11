@@ -1,6 +1,9 @@
 pub const FIXED_DT: f32 = 1.0 / 60.0;
+pub mod crash;
+pub mod day;
 pub mod engine;
 pub mod instruments;
+pub mod lights;
 const MAX_FRAME_SECONDS: f64 = 0.1;
 const STEP_SECONDS: f64 = 1.0 / 60.0;
 
@@ -19,6 +22,7 @@ pub mod keys {
     pub const CAMERA: u32 = 2048;
     pub const ROTATE: u32 = 4096;
     pub const MOVE: u32 = 8192;
+    pub const LIGHTS: u32 = 16384;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

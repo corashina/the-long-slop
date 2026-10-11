@@ -258,9 +258,17 @@ fn missing_coolant_changes_cooling_without_a_start_lock() {
     wet_state.rpm = r.idle_rpm;
     wet_state.ignition = true;
     let mut dry_state = wet_state.clone();
-    let wet_output = step(&mut wet_state, EngineInput::default(), &mut wet, &r);
-    let dry_output = step(&mut dry_state, EngineInput::default(), &mut dry, &r);
-    assert!(wet_output.running && dry_output.running);
+    let mut removed_state = wet_state.clone();
+    let mut removed = wet.clone();
+    let radiator = EngineInput {
+        radiator_condition: Some(0),
+        ..Default::default()
+    };
+    let wet_output = step(&mut wet_state, radiator, &mut wet, &r);
+    let dry_output = step(&mut dry_state, radiator, &mut dry, &r);
+    let removed_output = step(&mut removed_state, EngineInput::default(), &mut removed, &r);
+    assert!(wet_output.running && dry_output.running && removed_output.running);
     assert!(dry_output.temperature > wet_output.temperature);
+    assert!(removed_output.temperature > wet_output.temperature);
     assert!(wet_output.consumed_fuel_liters > 0.0);
 }

@@ -3,8 +3,9 @@ use crate::presentation::instruments::InstrumentVisuals;
 use crate::presentation::{
     self,
     camera::{CameraMode, DriveCamera},
+    lighting::{HeadlightBeam, HeadlightLens, Sun},
     reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
-    world::{ChunkVisual, WorldVisuals},
+    world::{WorldVisual, WorldVisuals},
 };
 use crate::reference::{ItemId, OpeningId, ReferenceManifest};
 use crate::simulation::instruments::{InstrumentSample, InstrumentState};
@@ -104,6 +105,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
                 sync_world,
                 sync_imported,
                 sync_instruments,
+                update_lighting,
                 update_camera,
                 update_hud,
             )
@@ -121,18 +123,15 @@ fn setup(
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
 ) {
-    let mut visuals = WorldVisuals::new(&mut meshes, &mut materials);
+    let mut visuals = WorldVisuals::new(&server, &reference.0.world, &mut meshes, &mut materials);
     visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
     commands.insert_resource(visuals);
     commands.insert_resource(InstrumentVisuals::default());
     presentation::reference::spawn(&mut commands, &server, &reference.0);
     commands.spawn((
-        DirectionalLight {
-            color: Color::srgb(1.0, 0.91, 0.77),
-            illuminance: 9000.0,
-            ..default()
-        },
-        Transform::from_xyz(6.0, 9.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+        DirectionalLight::default(),
+        Sun,
+        Transform::IDENTITY,
         (0..32).collect::<RenderLayers>(),
     ));
     commands.spawn((
@@ -169,6 +168,7 @@ fn check_ready(
     gltfs: Res<Assets<bevy::gltf::Gltf>>,
     gltf_materials: Res<Assets<bevy::gltf::GltfMaterial>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
+    world: Res<WorldVisuals>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
     mut frames: Local<u8>,
@@ -176,23 +176,31 @@ fn check_ready(
     if drive.ready || visuals.failed {
         return;
     }
-    for (path, handle) in &visuals.handles {
-        let Some((load, _, recursive)) = server.get_load_states(handle.id()) else {
+    let assets = visuals
+        .handles
+        .iter()
+        .map(|(path, handle)| (path, handle.id().untyped()))
+        .chain([(&reference.0.world.asset.path, world.asset.id().untyped())]);
+    let mut failure = None;
+    for (path, id) in assets {
+        let Some((load, _, recursive)) = server.get_load_states(id) else {
             return;
         };
         if let LoadState::Failed(error) = load {
-            game_failure(&format!("Cannot load {path}: {error}"));
-            visuals.failed = true;
+            failure = Some(format!("Cannot load {path}: {error}"));
+        } else if let RecursiveDependencyLoadState::Failed(error) = recursive {
+            failure = Some(format!("Cannot load dependencies for {path}: {error}"));
+        } else if !server.is_loaded_with_dependencies(id) {
             return;
         }
-        if let RecursiveDependencyLoadState::Failed(error) = recursive {
-            game_failure(&format!("Cannot load dependencies for {path}: {error}"));
-            visuals.failed = true;
-            return;
+        if failure.is_some() {
+            break;
         }
-        if !server.is_loaded_with_dependencies(handle.id()) {
-            return;
-        }
+    }
+    if let Some(failure) = failure {
+        game_failure(&failure);
+        visuals.failed = true;
+        return;
     }
     match presentation::reference::bind(
         &mut commands,
@@ -220,6 +228,9 @@ fn check_ready(
                 }
             }
             *frames += 1;
+            if *frames == 1 {
+                presentation::lighting::bind(&mut commands, &reference.0, &visuals.nodes);
+            }
             if *frames >= 2 {
                 drive.ready = true;
                 game_ready();
@@ -322,11 +333,11 @@ fn sync_world(
     mut visuals: ResMut<WorldVisuals>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut chunks: Query<(&ChunkVisual, &mut Transform)>,
+    mut visible: Query<(&WorldVisual, &mut Transform)>,
 ) {
     visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
-    for (chunk, mut transform) in &mut chunks {
-        let translation = Vec3::from_array(drive.runtime.stream.origin.local(chunk.0));
+    for (anchor, mut transform) in &mut visible {
+        let translation = Vec3::from_array(drive.runtime.stream.origin.local(anchor.0));
         if transform.translation != translation {
             transform.translation = translation;
         }
@@ -385,6 +396,37 @@ fn sync_instruments(
         &mut materials,
     );
 }
+fn update_lighting(
+    reference: Res<RuntimeReference>,
+    drive: Res<Drive>,
+    mut sun: Query<(&mut DirectionalLight, &mut Transform), With<Sun>>,
+    mut ambient: ResMut<GlobalAmbientLight>,
+    mut clear: ResMut<ClearColor>,
+    mut fog: Query<&mut DistanceFog>,
+    mut beams: Query<(&HeadlightBeam, &mut SpotLight, &mut Visibility)>,
+    mut lenses: Query<(&mut HeadlightLens, &Children)>,
+    primitives: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    presentation::lighting::sync_sky(
+        &reference.0,
+        &drive.runtime,
+        &mut sun,
+        &mut ambient,
+        &mut clear,
+        &mut fog,
+    );
+    presentation::lighting::sync_headlights(
+        &reference.0,
+        &drive.runtime,
+        &mut beams,
+        &mut lenses,
+        &primitives,
+        &mut commands,
+        &mut materials,
+    );
+}
 fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveCamera>>) {
     for mut transform in &mut query {
         *transform =
@@ -420,7 +462,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         position[2],
         contacts,
         drive.frame_steps,
-        runtime.stream.chunks().count() as u32,
+        runtime.stream.tiles().count() as u32,
         runtime.physics.collider_count() as u32,
         absolute[0],
         absolute[1],
@@ -430,7 +472,6 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         origin[2],
         runtime.rebases,
         runtime.trip_m,
-        runtime.stream.lateral_band() as f64,
         fuel,
         runtime.paused,
         runtime.started,

@@ -1,5 +1,6 @@
 pub mod camera;
 pub mod instruments;
+pub mod lighting;
 pub mod reference;
 pub mod world;
 

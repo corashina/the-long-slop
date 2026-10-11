@@ -39,7 +39,7 @@ The source interaction tests stage clear player positions. They do not prove a c
 The actual source flow opens both garage leaves through aim and Use.
 It enters the recovered driver seat and closes the driver door from the seat.
 The car starts and reverses through the garage onto the road.
-It reaches the road lane after 6.65 seconds with all four wheel contacts.
+It reaches the generated road lane after 5.65 seconds. All four wheels land within four more steps.
 After braking, it continues beyond the lane. This check proves the join, not parking within the lane.
 
 The car remains still for 90 seconds with the source spare wheel present.
@@ -227,3 +227,96 @@ The design record uses the actual source palette, menu and gameplay fonts, canva
 Its sidecar records color metadata, motion, breakpoints, and standalone text components.
 Original sprite previews require the ignored local export and remain outside the sidecar.
 No independent-review Minor findings remain deferred.
+
+## World generation
+
+Verification date: 2026-10-10, Europe/Warsaw.
+Sources: `roadGenScript` 64771, `TerrainGenerationSettings` 64898, and `terrainHeightAlignToBuildingScript` 79970 in `level1`.
+Draw distances come from `settingsscript` 16865 in `level0` at the default slider.
+
+The `System.Random` port returns the published .NET values for seeds 0 and 42.
+The Perlin port returns the engine lattice value 0.4652731.
+The serialized seed is -1705217151. The source picks a new seed for each new game. This build keeps the serialized one.
+The source lifts the home onto the terrain. This build keeps the home fixed and lowers the world by 578.897 meters.
+
+| Check | Result |
+| --- | --- |
+| Formatting and native suite | 90 passed; six source gates skipped by default |
+| Installed-source gates | Six passed in explicit runs |
+| Exporter suite | Four passed |
+| Release WASM | Passed |
+
+Native checks cover tile seams, skinned road bone ends, streaming bounds, recovery, rebasing, and home flat zones.
+The source terrain sits 0.1 meters below the road within 4.5 meters of it. A wheel can leave that lip for a moment.
+
+A headless Chromium run with SwiftShader showed the road, poles, sand terrain, and home.
+That run used a temporary roadside spawn in a copied manifest. It is not a performance measurement.
+
+Distant terrain layers, the `TerrainBiome` blend shader, building holes, power lines, lamps, and grass are not reproduced.
+
+## Part condition and crashes
+
+Verification date: 2026-10-10, Europe/Warsaw.
+Sources: `partconditionscript`, `partscript.WouldFallOff`, `carscript.DamageStuff`, and `gumiscript` in `Assembly-CSharp.dll`.
+Crash values come from `mainscript` 64919 and the Lada `carscript` in `level1`.
+
+Each part keeps the source condition state from 0, new, to 4, rusty.
+The radiator and tire effects read that state. A rim without a tire uses the source rim stiffness.
+A crash is a change of forward speed of 15 to 40 km/h in one step. A rusty car body scales both speeds by 0.2.
+Each part needs its source fall-off power. A rusty part scales that power by 0.2.
+The exporter copies the static `fallOffPowerNeeded` table. It is code, not serialized data.
+The source checks once per rendered frame. This build checks once per 60 Hz step.
+
+The exporter copies 20 `partslotscript` slots: doors, mirrors, hood, trunk, bumpers, lights, cabin parts, radiator, and engine.
+A removed part takes the source `DT` pose when the slot has one. It keeps its pose when the slot has none.
+Items attached to the part, such as a mirror or plate, go with it.
+A part fits only into its own slot. The source also accepts other matching slots. Hubcaps stay on.
+The car does not run without the engine. Without the radiator it has no radiator cooling or leak.
+
+| Check | Result |
+| --- | --- |
+| Formatting and native suite | 92 passed; seven source gates skipped by default |
+| Installed-source gates | Seven passed in explicit runs |
+| Exporter suite | Four passed |
+| Release WASM | Passed |
+
+A headless Chromium run loaded the garage with the part export. The car parts render in place.
+That run did not drive a crash or fit a part. Native and source checks cover those steps.
+
+## Day cycle and headlights
+
+Verification date: 2026-10-11, Europe/Warsaw.
+Sources: `napszakvaltakozas`, `carscript.InteractSwitchLights`, and `headlightscript` in `Assembly-CSharp.dll`.
+Cycle values come from the `napszakvaltakozas` component in `level1`.
+
+A cycle is 20 minutes of day and 5 minutes of night. Dawn takes 4 minutes. Dusk takes 3 minutes.
+The game starts 4 minutes into the cycle, as the source does.
+The sun angle, color gradient, intensity, and flat ambient follow the four source phases.
+At night the light follows the source moon angles.
+The fog color mixes the source desert, grass, and winter colors by the terrain color at the player.
+The terrain color is sampled once per second.
+
+L cycles the source lamp states while the player drives: off, low beam, high beam.
+Each fitted headlight fades out, changes state, and fades in at the source rate.
+A removed headlight keeps its last state, as in the source.
+The lens glows with the source emission color of each state.
+
+Unity light units have no exact Bevy match. This build uses these approximations:
+
+- One Unity intensity unit is 8000 lux of sun light.
+- One Unity ambient unit is 400 nits. The source day ambient then equals the Bevy default.
+- A spot light matches the Unity falloff at one fifth of its range. Bevy uses inverse square falloff, so near surfaces are brighter than in the source.
+- The lens emission is the source emission color times 8000 / π nits.
+
+WebGL2 has no Bevy atmosphere. The sky color is the source fog color. The fog keeps the linear 110 to 430 meter range.
+Not ported: street lamps, the interior light, rear lamps, stars, clouds, the sun flare, heat haze, sandstorm changes, light cookies, shadows, and the debug time keys.
+
+| Check | Result |
+| --- | --- |
+| Formatting and native suite | 93 passed; eight source gates skipped by default |
+| Installed-source gates | Eight passed in explicit runs |
+| Exporter suite | Four passed |
+| Release WASM | Passed |
+
+A headless Chromium run showed the garage in day light and at the end of dusk.
+A test build with the high beam on lit the garage wall in front of the car.

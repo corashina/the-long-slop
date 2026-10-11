@@ -268,7 +268,7 @@ fn mounted_tire_dismount_preserves_rim_and_vehicle_mass() {
     wheels.sync(&mut area.items, &mut physics).unwrap();
     let slot = &r.wheel_slots[0];
     let count = area.items.len();
-    let before = physics.rapier().bodies[physics.chassis_handle()].mass();
+    let before = area.items.mounted_mass(r.vehicle.item);
     let tire_mass = r.items.iter().find(|i| i.id == slot.tire).unwrap().mass_kg;
     let (rim, tire) = wheels
         .split(slot.rim, &mut area.items, &mut physics)
@@ -279,12 +279,9 @@ fn mounted_tire_dismount_preserves_rim_and_vehicle_mass() {
     );
     assert_eq!(area.items.get(tire).unwrap().location, ItemLocation::World);
     assert_eq!(area.items.len(), count);
-    assert!(
-        (physics.rapier().bodies[physics.chassis_handle()].mass() - (before - tire_mass)).abs()
-            < 0.01
-    );
+    assert!((area.items.mounted_mass(r.vehicle.item) - (before - tire_mass)).abs() < 0.01);
     wheels
         .assemble(rim, tire, &mut area.items, &mut physics)
         .unwrap();
-    assert!((physics.rapier().bodies[physics.chassis_handle()].mass() - before).abs() < 0.01);
+    assert!((area.items.mounted_mass(r.vehicle.item) - before).abs() < 0.01);
 }

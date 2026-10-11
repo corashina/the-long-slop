@@ -10,6 +10,7 @@ pub mod instruments;
 pub mod ui;
 pub use instruments::*;
 pub use ui::*;
+pub mod world;
 
 pub const APP_ID: u32 = 1_017_180;
 pub const BUILD_ID: u32 = 11_140_890;
@@ -191,7 +192,10 @@ pub struct ItemRecord {
     pub body: BodyId,
     pub name: String,
     pub kind: ItemKind,
-    pub condition: f32,
+    /// Source condition state: zero is new, four is rusty.
+    pub condition: u8,
+    /// Crash lerp a new part needs to fall off. `None` keeps the part on.
+    pub fall_off_power: Option<f32>,
     pub mass_kg: f32,
     pub attached_to: Option<ItemId>,
 }
@@ -464,6 +468,89 @@ pub struct WheelPartReference {
     pub local_rotation_after_mount: [f32; 4],
 }
 
+/// A general car part slot. The part fits only into its own slot.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PartReference {
+    pub item: ItemId,
+    pub source: SourceId,
+    /// `partslotscript.DT`: the part pose after removal.
+    pub detach_node: Option<NodeId>,
+    pub local_rotation_after_mount: [f32; 4],
+}
+
+/// One `headlightscript` state. `carscript.lampak` picks the state.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeadlightStateReference {
+    pub intensity: f32,
+    pub light: Option<SpotLightReference>,
+    /// Lens `_EmissionColor` in this state. `None` is the dark lens.
+    pub lens_emission: Option<[f32; 3]>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpotLightReference {
+    pub node: NodeId,
+    pub color: [f32; 3],
+    pub range: f32,
+    /// Unity full cone angle.
+    pub spot_degrees: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeadlightReference {
+    pub item: ItemId,
+    pub source: SourceId,
+    /// `energyMove`: light energy change per second.
+    pub energy_rate: f32,
+    pub lens_node: NodeId,
+    pub states: Vec<HeadlightStateReference>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SunColorKey {
+    pub time: f32,
+    pub color: [f32; 3],
+}
+
+/// `napszakvaltakozas` values. Biome arrays are desert, winter, and grass.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DayCycleReference {
+    pub source: SourceId,
+    pub day_seconds: f32,
+    pub night_seconds: f32,
+    pub dawn_seconds: f32,
+    pub dusk_seconds: f32,
+    pub start_seconds: f32,
+    pub day_intensity: f32,
+    pub noon_intensity: f32,
+    pub night_intensity: f32,
+    pub day_ambient: f32,
+    pub night_ambient: f32,
+    pub day_angles: [f32; 2],
+    pub midnight_angles: [f32; 2],
+    pub moon_angles: [f32; 2],
+    pub sun_colors: Vec<SunColorKey>,
+    pub day_fog_colors: [[f32; 3]; 3],
+    pub night_fog_colors: [[f32; 3]; 3],
+}
+
+/// `carscript.DamageStuff` values. Speeds are in km/h per frame.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrashReference {
+    pub fall_off_speed: [f32; 2],
+    pub max_fall_off_speed: f32,
+    pub fall_off_counts: [[u8; 2]; 2],
+    pub multiplier: f32,
+    pub fall_off_multiplier: f32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VehicleReference {
@@ -480,6 +567,11 @@ pub struct VehicleReference {
     pub brake_torque_nm: f32,
     pub handbrake_torque_nm: f32,
     pub wheel_slip: [f32; 4],
+    /// Forward and side stiffness for a rim without a tire.
+    pub rim_slip: [f32; 2],
+    /// Car item. Its condition scales the crash speeds.
+    pub item: ItemId,
+    pub crash: CrashReference,
     pub auto_shift_stop_speed: f32,
     pub auto_shift_min_rpm: f32,
     pub auto_shift_max_rpm: f32,
@@ -524,6 +616,9 @@ pub struct ReferenceManifest {
     pub hinges: Vec<HingeRecord>,
     pub wheel_slots: Vec<WheelSlotReference>,
     pub wheel_parts: Vec<WheelPartReference>,
+    pub parts: Vec<PartReference>,
+    pub headlights: Vec<HeadlightReference>,
+    pub day_cycle: DayCycleReference,
     pub items: Vec<ItemRecord>,
     pub openings: Vec<OpeningRecord>,
     pub tanks: Vec<TankReference>,
@@ -533,6 +628,7 @@ pub struct ReferenceManifest {
     pub seats: Vec<SeatReference>,
     pub vehicle: VehicleReference,
     pub area: StartingAreaReference,
+    pub world: world::WorldReference,
 }
 
 #[derive(Debug)]
@@ -544,7 +640,7 @@ impl fmt::Display for ReferenceError {
 }
 impl std::error::Error for ReferenceError {}
 
-fn require(ok: bool, field: &str) -> Result<(), ReferenceError> {
+pub(crate) fn require(ok: bool, field: &str) -> Result<(), ReferenceError> {
     if ok {
         Ok(())
     } else {
@@ -571,7 +667,7 @@ fn ids<T: Eq + std::hash::Hash>(
     }
     Ok(result)
 }
-fn hash(value: &str) -> bool {
+pub(crate) fn hash(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
@@ -817,8 +913,9 @@ impl ReferenceManifest {
                 "item binding",
             )?;
             require(
-                r.condition.is_finite()
-                    && (0.0..=1.0).contains(&r.condition)
+                r.condition <= 4
+                    && r.fall_off_power
+                        .is_none_or(|power| power.is_finite() && power >= 0.0)
                     && r.mass_kg.is_finite()
                     && r.mass_kg >= 0.0,
                 "item condition/mass",
@@ -1181,6 +1278,78 @@ impl ReferenceManifest {
                 "wheel part geometry/fit",
             )?;
         }
+        ids(self.parts.iter().map(|part| part.item), "duplicate part")?;
+        ids(
+            self.headlights.iter().map(|light| light.item),
+            "duplicate headlight",
+        )?;
+        for light in &self.headlights {
+            require(
+                item_ids.contains(&light.item)
+                    && node_ids.contains(&light.lens_node)
+                    && !light.states.is_empty()
+                    && light.energy_rate.is_finite()
+                    && light.energy_rate > 0.0
+                    && light.states.iter().all(|state| {
+                        state.intensity.is_finite()
+                            && state.intensity >= 0.0
+                            && state.lens_emission.as_ref().is_none_or(|c| finite(c))
+                            && state.light.as_ref().is_none_or(|spot| {
+                                node_ids.contains(&spot.node)
+                                    && finite(&spot.color)
+                                    && spot.range > 0.0
+                                    && spot.spot_degrees > 0.0
+                                    && spot.spot_degrees < 180.0
+                            })
+                    }),
+                "headlight bindings",
+            )?;
+        }
+        let d = &self.day_cycle;
+        require(
+            [
+                d.day_seconds,
+                d.night_seconds,
+                d.dawn_seconds,
+                d.dusk_seconds,
+            ]
+            .iter()
+            .all(|v| v.is_finite() && *v > 0.0)
+                && d.dawn_seconds + d.dusk_seconds < d.day_seconds
+                && (0.0..d.day_seconds).contains(&d.start_seconds)
+                && finite(&[
+                    d.day_intensity,
+                    d.noon_intensity,
+                    d.night_intensity,
+                    d.day_ambient,
+                    d.night_ambient,
+                ])
+                && finite(&d.day_angles)
+                && finite(&d.midnight_angles)
+                && finite(&d.moon_angles)
+                && !d.sun_colors.is_empty()
+                && d.sun_colors
+                    .windows(2)
+                    .all(|keys| keys[0].time <= keys[1].time)
+                && d.sun_colors
+                    .iter()
+                    .all(|key| key.time.is_finite() && finite(&key.color))
+                && d.day_fog_colors
+                    .iter()
+                    .chain(&d.night_fog_colors)
+                    .all(|c| finite(c)),
+            "day cycle",
+        )?;
+        for part in &self.parts {
+            require(
+                self.items
+                    .iter()
+                    .any(|item| item.id == part.item && item.attached_to.is_some())
+                    && part.detach_node.is_none_or(|id| node_ids.contains(&id))
+                    && finite(&part.local_rotation_after_mount),
+                "part slot bindings",
+            )?;
+        }
         require(
             self.wheel_slots.iter().all(|slot| {
                 self.wheel_parts.iter().any(|part| part.item == slot.rim)
@@ -1194,8 +1363,20 @@ impl ReferenceManifest {
             body_ids.contains(&v.body)
                 && node_ids.contains(&v.root)
                 && v.wheel_slots.iter().all(|id| wheel_ids.contains(id))
-                && v.colliders.iter().all(|id| collider_ids.contains(id)),
+                && v.colliders.iter().all(|id| collider_ids.contains(id))
+                && item_ids.contains(&v.item),
             "vehicle bindings",
+        )?;
+        let c = &v.crash;
+        require(
+            finite(&v.wheel_slip)
+                && finite(&v.rim_slip)
+                && finite(&[c.max_fall_off_speed, c.multiplier, c.fall_off_multiplier])
+                && finite(&c.fall_off_speed)
+                && c.fall_off_speed[0] <= c.fall_off_speed[1]
+                && c.fall_off_speed[0] < c.max_fall_off_speed
+                && c.fall_off_counts.iter().all(|[low, high]| low <= high),
+            "crash and slip parameters",
         )?;
         require(
             wheel_ids.len() == 4
@@ -1232,6 +1413,7 @@ impl ReferenceManifest {
             )?;
         }
         require(a.driveway_height.is_finite(), "driveway height")?;
+        self.world.validate()?;
         Ok(())
     }
 }

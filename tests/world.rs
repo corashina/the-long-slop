@@ -1,246 +1,186 @@
 mod common;
 
+use my_summer_slop::reference::ReferenceManifest;
 use my_summer_slop::simulation::DriveInput;
 use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose};
-use my_summer_slop::world::{
-    ChunkData, ChunkKey, WorldOrigin, WorldStream, active_chunks, generate_chunk,
-    generate_chunk_in_band, nearest_station, road_sample,
-};
+use my_summer_slop::world::generation::{DotNetRandom, perlin};
+use my_summer_slop::world::{Generator, WorldOrigin, WorldStream};
 
-// Chunk origin is [band * 128, 0, -key * 128]. Road distance is -absolute Z.
-fn seam_vertices(chunk: &ChunkData, end: bool) -> Vec<[f64; 3]> {
-    let z = if end { -128.0 } else { 0.0 };
-    let mut seam: Vec<_> = chunk
-        .vertices
-        .iter()
-        .filter(|v| (v[2] - z).abs() < 0.001)
-        .map(|v| {
-            [
-                v[0] as f64 + chunk.origin()[0],
-                v[1] as f64,
-                v[2] as f64 - chunk.key.0 as f64 * 128.0,
-            ]
-        })
-        .collect();
-    seam.sort_by(|a, b| {
-        a[0].total_cmp(&b[0])
-            .then(a[1].total_cmp(&b[1]))
-            .then(a[2].total_cmp(&b[2]))
+fn physics(reference: &ReferenceManifest) -> PhysicsWorld {
+    PhysicsWorld::new(
+        reference,
+        VehiclePose {
+            position: [0.0, 1.1, 0.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+        },
+    )
+    .expect("fixture physics")
+}
+
+fn close(a: [f32; 3], b: [f32; 3], tolerance: f32) -> bool {
+    (0..3).all(|i| (a[i] - b[i]).abs() < tolerance)
+}
+
+#[test]
+fn source_random_and_noise_match_engine_values() {
+    // Published .NET Framework values for `new Random(0)` and `new Random(42).Next(100)`.
+    let mut random = DotNetRandom::new(0);
+    assert_eq!(random.next_double(), 0.7262432699679598);
+    assert_eq!(random.next_double(), 0.8173253595909687);
+    assert_eq!(DotNetRandom::new(42).range(0, 100), 66);
+    // `Mathf.PerlinNoise` returns this value at every lattice point.
+    for point in [[0.0, 0.0], [3.0, -7.0], [1000.0, 25.0]] {
+        assert!((perlin(point[0], point[1]) - 0.4652731).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn adjacent_tiles_share_edge_heights_and_normals() {
+    let reference = common::reference();
+    let mut generator = Generator::new(&reference.world);
+    let edge = |tile: &my_summer_slop::world::Tile, axis: usize, value: f32| {
+        let mut points: Vec<_> = tile
+            .positions
+            .iter()
+            .zip(&tile.normals)
+            .filter(|(p, _)| (p[axis] - value).abs() < 1e-3)
+            .map(|(p, n)| {
+                let absolute = [
+                    p[0] + tile.center[0] as f32,
+                    p[1],
+                    p[2] + tile.center[2] as f32,
+                ];
+                (absolute, *n)
+            })
+            .collect();
+        points.sort_by(|a, b| a.0[0].total_cmp(&b.0[0]).then(a.0[2].total_cmp(&b.0[2])));
+        points
+    };
+    for (key, next, axis, value) in [
+        ([0, 0], [1, 0], 0, 50.0),
+        ([3, 7], [3, 8], 2, -50.0),
+        ([-4, -2], [-3, -2], 0, 50.0),
+    ] {
+        let a = generator.tile(key, &[]);
+        let b = generator.tile(next, &[]);
+        let left = edge(&a, axis, value);
+        let right = edge(&b, axis, -value);
+        assert_eq!(left.len(), 20);
+        assert_eq!(left.len(), right.len());
+        for ((p, n), (q, m)) in left.iter().zip(&right) {
+            assert!(close(*p, *q, 1e-3), "{p:?} {q:?}");
+            assert!(close(*n, *m, 1e-4), "{n:?} {m:?}");
+        }
+    }
+}
+
+#[test]
+fn skinned_road_follows_the_generated_path() {
+    let reference = common::reference();
+    let mut generator = Generator::new(&reference.world);
+    generator.extend_to(1000.0);
+    let road = &reference.world.road;
+    for index in 0..8 {
+        let start = generator.start(index);
+        let mesh = generator.segment(index);
+        for bone in 0..road.bone_count {
+            let point = generator.game(generator.path.point(index, bone).map(|v| v as f64));
+            let expected = [
+                (point[0] - start[0]) as f32,
+                (point[1] - start[1]) as f32 + road.above_terrain,
+                (point[2] - start[2]) as f32,
+            ];
+            // Fixture vertex pairs sit at each bone end, four meters to each side.
+            let left = mesh.positions[2 * bone + 2];
+            let right = mesh.positions[2 * bone + 3];
+            let middle = std::array::from_fn(|i| (left[i] + right[i]) * 0.5);
+            assert!(close(middle, expected, 2e-3), "{middle:?} {expected:?}");
+            assert!(mesh.normals[2 * bone + 2][1] > 0.9);
+        }
+        let next = generator.start(index + 1);
+        let end = generator.game(generator.path.point(index, 9).map(|v| v as f64));
+        assert!((next[1] - end[1] - road.above_terrain as f64).abs() < 1e-3);
+        assert!((next[0] - end[0]).abs() < 1e-3 && (next[2] - end[2]).abs() < 1e-3);
+    }
+}
+
+#[test]
+fn streaming_loads_tiles_roads_and_bounds_colliders() {
+    let reference = common::reference();
+    let mut physics = physics(&reference);
+    let base = physics.collider_count();
+    let mut stream = WorldStream::new(&reference);
+    for z in [0.0, -150.0, -2000.0, -2050.0, 300.0, 0.0] {
+        stream.sync_at([5.0, 0.0, z], &mut physics);
+        let tiles = stream.tiles().count();
+        assert!((19..=90).contains(&tiles), "{tiles}");
+        let roads: usize = stream
+            .roads()
+            .map(|r| 1 + r.mesh.colliders.len() + 2 * r.station.is_some() as usize)
+            .sum();
+        assert_eq!(physics.collider_count(), base + tiles + roads);
+        let size = reference.world.terrain.tile_size;
+        let range = reference.world.terrain.remove_distance + size;
+        for loaded in stream.tiles() {
+            let center = loaded.tile.center;
+            let near = |x: f64, z: f64| ((center[0] - x).powi(2) + (center[2] - z).powi(2)).sqrt();
+            assert!(near(5.0, z) < range as f64 || near(0.0, 0.0) < range as f64);
+        }
+        let generate = reference.world.road.generate_distance as f64;
+        for road in stream.roads() {
+            let near =
+                |x: f64, z: f64| ((road.start[0] - x).powi(2) + (road.start[2] - z).powi(2)).sqrt();
+            assert!(near(5.0, z) <= generate || near(0.0, 0.0) <= generate);
+        }
+        assert!(stream.roads().count() >= 5);
+    }
+}
+
+#[test]
+fn recovery_places_the_car_on_the_road_and_at_stations() {
+    let reference = common::reference();
+    let mut physics = physics(&reference);
+    let mut stream = WorldStream::new(&reference);
+    stream.sync_at([0.0, 0.0, 0.0], &mut physics);
+    physics.reset(VehiclePose {
+        position: [40.0, 30.0, -1200.0],
+        rotation: [0.0, 0.0, 0.0, 1.0],
     });
-    seam
-}
-
-#[test]
-fn overlapping_lateral_bands_share_ground_triangles() {
-    fn overlap(chunk: &ChunkData) -> Vec<[[f64; 3]; 3]> {
-        let origin = chunk.origin();
-        let columns = chunk.lateral_samples.len();
-        chunk
-            .indices
-            .iter()
-            .filter(|triangle| {
-                triangle.iter().all(|i| {
-                    (-32.0..=160.0).contains(&chunk.lateral_samples[*i as usize % columns])
-                })
-            })
-            .map(|triangle| {
-                triangle.map(|i| {
-                    std::array::from_fn(|axis| {
-                        chunk.vertices[i as usize][axis] as f64 + origin[axis]
-                    })
-                })
-            })
-            .collect()
-    }
-    for key in [-1, 0, 15, 100_000] {
-        let left = overlap(&generate_chunk_in_band(42, ChunkKey(key), 0));
-        let right = overlap(&generate_chunk_in_band(42, ChunkKey(key), 1));
-        assert!(!left.is_empty());
-        assert_eq!(left.len(), right.len());
-        for (p, q) in left
-            .iter()
-            .flatten()
-            .flatten()
-            .zip(right.iter().flatten().flatten())
-        {
-            assert!((p - q).abs() < 0.001);
+    for at_station in [false, true] {
+        let pose = stream.reset_pose(at_station, &mut physics);
+        physics.reset(pose);
+        for _ in 0..120 {
+            physics.apply_vehicle_forces(DriveInput::default(), 0.0);
+            physics.step_physics();
         }
-    }
-}
-
-#[test]
-fn adjacent_chunks_share_the_seam() {
-    for key in [-13, -1, 0, 15, 32, 100_000] {
-        let a = generate_chunk(42, ChunkKey(key));
-        let b = generate_chunk(42, ChunkKey(key + 1));
-        assert_eq!(a, generate_chunk(42, ChunkKey(key)));
-        let left = seam_vertices(&a, true);
-        let right = seam_vertices(&b, false);
-        assert!(!left.is_empty());
-        assert_eq!(left.len(), right.len());
-        for (p, q) in left.iter().zip(&right) {
-            for axis in 0..3 {
-                assert!((p[axis] - q[axis]).abs() < 0.001);
-            }
-        }
-    }
-    assert_ne!(
-        generate_chunk(42, ChunkKey(0)),
-        generate_chunk(43, ChunkKey(0))
-    );
-}
-
-#[test]
-fn stations_and_active_window_follow_absolute_distance() {
-    assert_eq!(
-        active_chunks(128.0),
-        std::array::from_fn(|i| ChunkKey(i as i64 - 2))
-    );
-    assert_eq!(active_chunks(-0.01)[3], ChunkKey(-1));
-    for id in [-100, -1, 0, 1, 3000] {
-        let station = nearest_station(42, id as f64 * 640.0 + 100.0);
-        assert_eq!(station.id, id);
-        assert_eq!(station.absolute_point[2], -(id as f64 * 640.0));
-        let chunk = generate_chunk(42, ChunkKey(id * 5));
-        assert_eq!(chunk.stations, vec![station]);
-        let road = road_sample(42, id as f64 * 640.0);
-        assert!((station.absolute_point[0] - road.center[0] - 10.0).abs() < 0.001);
-    }
-}
-
-#[test]
-fn rebase_preserves_wheels_velocities_and_absolute_position() {
-    let mut physics = PhysicsWorld::new(
-        &common::reference(),
-        VehiclePose {
-            position: [0.0, 1.1, 0.0],
-            rotation: [0.0, 0.0, 0.0, 1.0],
-        },
-    )
-    .expect("fixture physics");
-    physics.insert_mesh(
-        &[
-            [-500.0, 0.0, -500.0],
-            [500.0, 0.0, -500.0],
-            [500.0, 0.0, 500.0],
-            [-500.0, 0.0, 500.0],
-        ],
-        &[[0, 2, 1], [0, 3, 2]],
-    );
-    for _ in 0..180 {
-        physics.apply_vehicle_forces(
-            DriveInput {
-                accelerate: true,
-                steer: 0.05,
-                ..Default::default()
-            },
-            2600.0,
+        let snapshot = physics.snapshot();
+        assert!(snapshot.wheels_contact.into_iter().all(|c| c));
+        assert!(snapshot.speed_mps < 0.5);
+        let absolute = stream.origin.absolute(snapshot.pose.position);
+        let station = stream.nearest_station(absolute);
+        let distance = ((absolute[0] - station.point[0]).powi(2)
+            + (absolute[2] - station.point[2]).powi(2))
+        .sqrt();
+        assert_eq!(distance < 2.0, at_station, "{distance}");
+        assert!(
+            stream
+                .roads()
+                .any(|r| r.station.is_some_and(|s| s.id == station.id))
+                || !at_station
         );
-        physics.step_physics();
     }
-    let before = physics.snapshot();
-    let mut origin = WorldOrigin::default();
-    let absolute = origin.absolute(before.pose.position);
-    let shift = [0.0, 0.0, -4096.0];
-    physics.rebase(shift);
-    origin.shift(shift);
-    let after = physics.snapshot();
-    assert!((after.pose.position[2] - before.pose.position[2] - 4096.0).abs() < 0.001);
-    assert_eq!(before.linear_velocity, after.linear_velocity);
-    assert_eq!(before.angular_velocity, after.angular_velocity);
-    assert_eq!(before.pose.rotation, after.pose.rotation);
-    for (p, q) in origin
-        .absolute(after.pose.position)
-        .into_iter()
-        .zip(absolute)
-    {
-        assert!((p - q).abs() < 0.001);
-    }
-    for i in 0..4 {
-        assert_eq!(before.wheels[i].rotation, after.wheels[i].rotation);
-        for axis in 0..3 {
-            let relative_before = before.wheels[i].position[axis] - before.pose.position[axis];
-            let relative_after = after.wheels[i].position[axis] - after.pose.position[axis];
-            assert!((relative_before - relative_after).abs() < 0.001);
-        }
-    }
-    physics.apply_vehicle_forces(DriveInput::default(), 2600.0);
-    physics.step_physics();
-    assert!(physics.snapshot().wheels_contact.into_iter().all(|c| c));
-    assert!(physics.snapshot().speed_mps > 1.0);
 }
 
 #[test]
-fn streaming_bounds_colliders_and_loads_teleport_destination() {
-    let mut physics = PhysicsWorld::new(
-        &common::reference(),
-        VehiclePose {
-            position: [0.0, 1.1, 0.0],
-            rotation: [0.0, 0.0, 0.0, 1.0],
-        },
-    )
-    .expect("fixture physics");
-    let mut stream = WorldStream::new(42);
-    for distance in (0..40)
-        .map(|i| i as f64 * 256.0)
-        .chain([1_000_000.0, -1024.0, 0.0])
-    {
-        stream.sync_at(road_sample(42, distance).center, &mut physics);
-        assert_eq!(stream.chunks().count(), 11);
-        let expected_colliders = 2 + stream
-            .chunks()
-            .map(|c| {
-                1 + c
-                    .data
-                    .props
-                    .iter()
-                    .filter(|p| p.kind != my_summer_slop::world::PropKind::Cactus)
-                    .count()
-                    + c.data.stations.len() * 2
-            })
-            .sum::<usize>();
-        let terrain_count = physics
-            .rapier()
-            .colliders
-            .iter()
-            .filter(|(_, collider)| collider.shape().as_trimesh().is_some())
-            .count();
-        assert!((11..=14).contains(&terrain_count));
-        assert_eq!(
-            physics.collider_count(),
-            expected_colliders + terrain_count - stream.chunks().count()
-        );
-        assert!(physics.collider_count() <= 66);
-        for key in active_chunks(distance) {
-            assert!(stream.chunks().any(|c| c.data.key == key));
-        }
-    }
-    let pose = stream.reset_pose(3200.0, true, &mut physics);
-    assert!(
-        stream
-            .chunks()
-            .any(|c| c.data.stations.iter().any(|s| s.id == 5))
-    );
-    physics.reset(pose);
-    for _ in 0..120 {
-        physics.apply_vehicle_forces(DriveInput::default(), 0.0);
-        physics.step_physics();
-    }
-    assert!(physics.snapshot().wheels_contact.into_iter().all(|c| c));
-}
-
-#[test]
-fn driving_crosses_chunk_seams_and_rebase_without_trip_jump() {
-    let mut physics = PhysicsWorld::new(
-        &common::reference(),
-        VehiclePose {
-            position: [0.0, 1.1, 0.0],
-            rotation: [0.0, 0.0, 0.0, 1.0],
-        },
-    )
-    .expect("fixture physics");
-    let mut stream = WorldStream::new(42);
-    let pose = stream.reset_pose(2000.0, false, &mut physics);
+fn driving_crosses_tiles_and_rebase_without_trip_jump() {
+    let reference = common::reference();
+    let mut physics = physics(&reference);
+    let mut stream = WorldStream::new(&reference);
+    physics.reset(VehiclePose {
+        position: [0.0, 30.0, -2000.0],
+        rotation: [0.0, 0.0, 0.0, 1.0],
+    });
+    let pose = stream.reset_pose(false, &mut physics);
     physics.reset(pose);
     for _ in 0..120 {
         physics.apply_vehicle_forces(DriveInput::default(), 2600.0);
@@ -249,7 +189,7 @@ fn driving_crosses_chunk_seams_and_rebase_without_trip_jump() {
     let mut previous = stream.origin.absolute(physics.snapshot().pose.position);
     let mut trip = 0.0;
     let mut rebases = 0;
-    for _ in 0..600 {
+    for _ in 0..900 {
         let accelerate = physics.snapshot().speed_mps < 16.0;
         physics.apply_vehicle_forces(
             DriveInput {
@@ -273,90 +213,17 @@ fn driving_crosses_chunk_seams_and_rebase_without_trip_jump() {
         trip += travel;
         previous = absolute;
         stream.sync_at(absolute, &mut physics);
-        assert_eq!(stream.chunks().count(), 11);
-        assert!(snapshot.pose.position.iter().all(|v| v.is_finite()));
+        assert!(snapshot.wheels_contact.iter().any(|c| *c));
     }
-    assert!(trip > 100.0, "Trip: {trip}");
+    assert!(trip > 150.0, "Trip: {trip}");
     assert!(rebases > 0);
-    assert!(physics.snapshot().wheels_contact.into_iter().all(|c| c));
-}
-
-#[test]
-fn lateral_streaming_supports_travel_beyond_the_old_edge() {
-    let mut physics = PhysicsWorld::new(
-        &common::reference(),
-        VehiclePose {
-            position: [55.0, 8.0, -64.0],
-            rotation: [
-                0.0,
-                -std::f32::consts::FRAC_1_SQRT_2,
-                0.0,
-                std::f32::consts::FRAC_1_SQRT_2,
-            ],
-        },
-    )
-    .expect("fixture physics");
-    let mut stream = WorldStream::new(42);
-    stream.sync_at([55.0, 8.0, -64.0], &mut physics);
-    for _ in 0..180 {
-        physics.apply_vehicle_forces(DriveInput::default(), 2600.0);
-        physics.step_physics();
-    }
-    let mut band_changes = 0;
-    let mut old_band = stream.lateral_band();
-    for _ in 0..3600 {
-        let absolute = stream.origin.absolute(physics.snapshot().pose.position);
-        stream.sync_at(absolute, &mut physics);
-        if stream.lateral_band() != old_band {
-            band_changes += 1;
-            old_band = stream.lateral_band();
-        }
-        let accelerate = physics.snapshot().speed_mps < 8.0;
-        physics.apply_vehicle_forces(
-            DriveInput {
-                accelerate,
-                ..Default::default()
-            },
-            2600.0,
-        );
-        physics.step_physics();
-        let snapshot = physics.snapshot();
-        assert!(
-            snapshot.wheels_contact.iter().any(|c| *c),
-            "Lost contact at {:?}, band {}",
-            snapshot.pose.position,
-            old_band
-        );
-        assert_eq!(stream.chunks().count(), 11);
-        let expected = 2 + stream
-            .chunks()
-            .map(|c| {
-                1 + c
-                    .data
-                    .props
-                    .iter()
-                    .filter(|p| p.kind != my_summer_slop::world::PropKind::Cactus)
-                    .count()
-                    + c.data.stations.len() * 2
-            })
-            .sum::<usize>();
-        assert_eq!(physics.collider_count(), expected);
-    }
-    assert!(stream.origin.absolute(physics.snapshot().pose.position)[0] > 362.0);
-    assert!(band_changes >= 3);
 }
 
 #[test]
 fn walking_focus_rebases_a_parked_vehicle_without_travel() {
-    let mut physics = PhysicsWorld::new(
-        &common::reference(),
-        VehiclePose {
-            position: [0.0, 1.1, 0.0],
-            rotation: [0.0, 0.0, 0.0, 1.0],
-        },
-    )
-    .expect("fixture physics");
-    let mut stream = WorldStream::new(42);
+    let reference = common::reference();
+    let mut physics = physics(&reference);
+    let mut stream = WorldStream::new(&reference);
     let before = physics.snapshot();
     let shift = stream.rebase([2300.0, 0.0, 0.0], &mut physics);
     assert_eq!(shift, Some([2304.0, 0.0, 0.0]));
@@ -365,21 +232,18 @@ fn walking_focus_rebases_a_parked_vehicle_without_travel() {
     assert_eq!(absolute, [0.0, 1.1_f32 as f64, 0.0]);
     assert_eq!(before.linear_velocity, after.linear_velocity);
     assert_eq!(before.angular_velocity, after.angular_velocity);
+    let mut origin = WorldOrigin::default();
+    origin.shift([128.0, 0.0, -256.0]);
+    assert_eq!(
+        origin.local(origin.absolute([1.0, 2.0, 3.0])),
+        [1.0, 2.0, 3.0]
+    );
 }
 
 #[test]
-fn garage_terrain_keeps_interiors_clear_and_connects_driveway() {
-    use my_summer_slop::reference::{Bounds, ColliderGeometry};
+fn home_terrain_keeps_interiors_clear_and_holds_flat_zones() {
+    use my_summer_slop::reference::ColliderGeometry;
     let mut reference = common::reference();
-    reference.area.home_bounds = Bounds {
-        min: [30.0, -2.0, -75.0],
-        max: [50.0, 7.0, -45.0],
-    };
-    reference.area.driveway_bounds = Bounds {
-        min: [30.0, 1.0, -70.0],
-        max: [40.0, 1.0, -60.0],
-    };
-    reference.area.driveway_height = 1.0;
     let mut interior = reference.nodes[0].clone();
     interior.id = my_summer_slop::reference::NodeId(999);
     interior.name = "interiorCellar".into();
@@ -398,61 +262,56 @@ fn garage_terrain_keeps_interiors_clear_and_connects_driveway() {
     reference.bodies[0].pose.translation = [0.0; 3];
     reference.bodies[0].pose.rotation = [0.0, 0.0, 0.0, 1.0];
     reference.colliders.push(collider);
-    let mut physics = PhysicsWorld::new(
-        &common::reference(),
-        VehiclePose {
-            position: [0.0, 1.1, 0.0],
-            rotation: [0.0, 0.0, 0.0, 1.0],
-        },
-    )
-    .unwrap();
-    let mut world = WorldStream::new(42);
-    world.configure_starting_area(&reference);
+    let mut physics = physics(&common::reference());
+    let mut world = WorldStream::new(&reference);
     world.sync_at([40.0, 0.0, -64.0], &mut physics);
-    let data = &world
-        .chunks()
-        .find(|chunk| chunk.data.key == ChunkKey(0))
-        .unwrap()
-        .data;
-    assert!(data.vertices.iter().any(|p| p[0] > 30.0
-        && p[0] < 40.0
-        && p[2] < -60.0
-        && p[2] > -70.0
-        && (p[1] - 1.0).abs() < 0.001));
-    for triangle in &data.indices {
-        let x = triangle
-            .iter()
-            .map(|i| data.vertices[*i as usize][0])
-            .sum::<f32>()
-            / 3.0;
-        let z = triangle
-            .iter()
-            .map(|i| data.vertices[*i as usize][2])
-            .sum::<f32>()
-            / 3.0;
-        assert!(!(35.0..=38.0).contains(&x) || !(-67.0..=-64.0).contains(&z));
+    // The fixture flat zone holds Unity height 1 within 10 meters of X 40, Z 65.
+    let flat = rapier3d::prelude::Ray::new(
+        rapier3d::math::Vector::new(40.0, 20.0, -64.0),
+        -rapier3d::math::Vector::Y,
+    );
+    let hit = physics
+        .queries(rapier3d::prelude::QueryFilter::default())
+        .cast_ray(&flat, 40.0, true)
+        .unwrap();
+    assert!((20.0 - hit.1 - 1.0).abs() < 1e-3, "{}", 20.0 - hit.1);
+    for loaded in world.tiles() {
+        let tile = &loaded.tile;
+        for triangle in &tile.indices {
+            let centroid = |axis: usize| {
+                triangle
+                    .iter()
+                    .map(|i| tile.positions[*i as usize][axis])
+                    .sum::<f32>()
+                    / 3.0
+                    + tile.center[axis] as f32
+            };
+            assert!(
+                !(35.0..=38.0).contains(&centroid(0)) || !(-67.0..=-64.0).contains(&centroid(2))
+            );
+        }
     }
     for x in [34.9, 38.1] {
         let ray = rapier3d::prelude::Ray::new(
-            rapier3d::math::Vector::new(x, 2.0, -65.0),
+            rapier3d::math::Vector::new(x, 20.0, -65.0),
             -rapier3d::math::Vector::Y,
         );
         assert!(
             physics
                 .queries(rapier3d::prelude::QueryFilter::default())
-                .cast_ray(&ray, 3.0, true)
+                .cast_ray(&ray, 40.0, true)
                 .is_some(),
             "terrain must reach the exact room boundary at x{x}",
         );
     }
     let ray = rapier3d::prelude::Ray::new(
-        rapier3d::math::Vector::new(35.1, 2.0, -65.0),
+        rapier3d::math::Vector::new(35.1, 20.0, -65.0),
         -rapier3d::math::Vector::Y,
     );
     assert!(
         physics
             .queries(rapier3d::prelude::QueryFilter::default())
-            .cast_ray(&ray, 3.0, true)
+            .cast_ray(&ray, 40.0, true)
             .is_none(),
         "room must stay clear"
     );
