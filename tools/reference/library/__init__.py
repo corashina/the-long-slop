@@ -4,3 +4,4 @@ from .images import export_images
 from .ui import convert_layout, export_ui
 from .audio import export_audio, validate_wav
 from .models import collect_model_hierarchy, export_models, write_library_model
+from .animations import decode_clip, export_animations, sample_track

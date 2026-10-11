@@ -544,3 +544,23 @@ def export_models(source: Source, catalog: Catalog, output: Path) -> tuple[Asset
     exports = tuple(sorted(exports,key=lambda e:e.source))
     _file(output,'models/index.json',_json({'schema_version':SCHEMA_VERSION,'exports':[asdict(e) for e in exports]}))
     return exports
+
+
+def animation_model_document(model: AssetExport, output: Path, destination: Path):
+    """Load separate animation nodes with canonical shared geometry and image URIs."""
+    import pygltflib as gl
+    from urllib.parse import unquote, quote
+    import os
+    path = output / next(f.file for f in model.files if f.file.endswith('/model.gltf'))
+    document = gl.GLTF2.load(str(path))
+    # pygltflib's Node omits morph weights; preserve the existing extended node.
+    import json
+    document.nodes = [ModelNode.from_dict(node) for node in json.loads(path.read_text())['nodes']]
+    root = output.resolve()
+    for item in (*document.buffers, *document.images):
+        if not item.uri: raise ValueError('Expected external model resource')
+        resource = (path.parent / unquote(item.uri)).resolve()
+        if not resource.is_relative_to(root) or not resource.is_file():
+            raise ValueError(f'Invalid animation model resource: {item.uri}')
+        item.uri = quote(Path(os.path.relpath(resource,destination)).as_posix(),safe='/')
+    return document

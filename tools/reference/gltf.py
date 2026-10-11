@@ -56,7 +56,7 @@ class GltfExporter:
         self.material_report = []
         self.samplers = {}
 
-    def accessor(self, values, shape, component=5126, target=34962):
+    def accessor(self, values, shape, component=5126, target=34962, buffer_index=0):
         gl = self.gl
         width = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4, 'MAT4':16}[shape]
         rows = [tuple(value) if width > 1 else (value,) for value in values]
@@ -68,7 +68,7 @@ class GltfExporter:
         code = {5126:'f',5125:'I',5123:'H'}[component]
         self.binary.extend(struct.pack(f'<{len(flat)}{code}', *flat))
         view = len(self.document.bufferViews)
-        self.document.bufferViews.append(gl.BufferView(buffer=0, byteOffset=offset, byteLength=len(self.binary)-offset, target=target))
+        self.document.bufferViews.append(gl.BufferView(buffer=buffer_index, byteOffset=offset, byteLength=len(self.binary)-offset, target=target))
         accessor = len(self.document.accessors)
         self.document.accessors.append(gl.Accessor(bufferView=view, componentType=component, count=len(rows), type=shape,
             min=[min(row[i] for row in rows) for i in range(width)], max=[max(row[i] for row in rows) for i in range(width)]))
@@ -447,6 +447,7 @@ def validate_gltf(path):
             index(root,document.nodes,'scene root')
             if root in parents: raise ValueError('Scene root has a parent')
     if document.scene is not None: index(document.scene,document.scenes,'default scene')
+    validate_animation_channels(document,rows)
     return document
 
 
@@ -454,3 +455,48 @@ def export_gltf(roots, output: Path) -> dict:
     """Roots are (Source, selected Transform readers)."""
     source, readers = roots
     return GltfExporter(source, output).export(readers)
+
+
+
+def validate_animation_channels(document, rows):
+    """Check animation accessors without reading shared geometry payloads."""
+    def item(index,items,label):
+        if not isinstance(index,int) or not 0<=index<len(items):raise ValueError(f'Invalid animation {label}')
+        return items[index]
+    for animation in document.animations:
+        targets=set()
+        for channel in animation.channels:
+            sampler=item(channel.sampler,animation.samplers,'sampler')
+            node=item(channel.target.node,document.nodes,'node')
+            path=channel.target.path
+            target=(channel.target.node,path)
+            if target in targets:raise ValueError('Duplicate animation target')
+            targets.add(target)
+            if path not in ('translation','rotation','scale','weights'):raise ValueError('Invalid animation target path')
+            incoming=item(sampler.input,document.accessors,'input')
+            outgoing=item(sampler.output,document.accessors,'output')
+            if incoming.type!='SCALAR' or incoming.componentType!=5126 or outgoing.componentType!=5126:
+                raise ValueError('Invalid animation accessor format')
+            for accessor in (incoming,outgoing):
+                view=item(accessor.bufferView,document.bufferViews,'buffer view')
+                if view.target is not None:raise ValueError('Animation buffer view has a vertex target')
+            times=[r[0] for r in rows(sampler.input)]
+            if not times or times[0]<0 or any(not math.isfinite(t) for t in times) or any(b<=a for a,b in zip(times,times[1:])):
+                raise ValueError('Invalid animation key times')
+            interpolation=sampler.interpolation or 'LINEAR'
+            if interpolation not in ('STEP','LINEAR','CUBICSPLINE'):raise ValueError('Invalid animation interpolation')
+            factor=3 if interpolation=='CUBICSPLINE' else 1
+            count=len(times)*factor
+            shape='VEC4' if path=='rotation' else 'VEC3'
+            if path=='weights':
+                mesh=item(node.mesh,document.meshes,'morph mesh')
+                widths={len(p.targets or []) for p in mesh.primitives}
+                if len(widths)!=1 or not next(iter(widths)):raise ValueError('Invalid animation morph targets')
+                count*=next(iter(widths));shape='SCALAR'
+            if outgoing.type!=shape or outgoing.count!=count:raise ValueError('Animation output dimensions differ')
+            values=list(rows(sampler.output))
+            if any(not math.isfinite(v) for row in values for v in row):raise ValueError('Non-finite animation output')
+            if path=='rotation':
+                quaternions=values[1::3] if factor==3 else values
+                if any(abs(sum(v*v for v in q)-1)>1e-4 for q in quaternions):
+                    raise ValueError('Invalid animation quaternion')

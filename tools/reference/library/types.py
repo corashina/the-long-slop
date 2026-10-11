@@ -78,3 +78,24 @@ class LibraryReceipt:
     catalog_sha256: str
     source_manifest_sha256: str
     exports: tuple[AssetExport, ...]
+
+
+@dataclass(frozen=True)
+class AnimationTrack:
+    binding: dict
+    times: tuple[float, ...]
+    values: tuple[tuple[float, ...], ...]
+    interpolation: str
+    in_tangents: tuple[tuple[float, ...], ...] = ()
+    out_tangents: tuple[tuple[float, ...], ...] = ()
+    # Stored [key][component] triples (a, b, c) evaluate at time from the key.
+    # Value = ((a * dt + b) * dt + c) * dt + values[key][component].
+    coefficients: tuple[tuple[tuple[float, ...], ...], ...] = ()
+
+
+@dataclass(frozen=True)
+class AnimationRecord:
+    source: ObjectId
+    tracks: tuple[AnimationTrack, ...]
+    events: tuple[dict, ...]
+    settings: dict
