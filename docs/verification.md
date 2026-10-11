@@ -1,4 +1,43 @@
-# Garage verification
+# Verification
+
+## Material checkpoint, 2026-10-11
+
+Delivery branch: `codex/material-parity-checkpoint`.
+Material base: `7009f62b4a757069286115617bf38d538e3db5c0`.
+The only later runtime-source change removes the obsolete binary entrypoint.
+The browser still enters through the wasm-bindgen library.
+
+| Fresh check | Result |
+| --- | --- |
+| Exporter suite | 21 passed |
+| Native suite | 96 passed |
+| Installed-source gates | Seven passed |
+| Formatting | Passed |
+| WASM all-target check | Passed |
+| Release build and wasm-bindgen | Passed |
+| Matched web artifact audit | All 1,145 files matched |
+| Browser startup | Garage visible; garage-ready status; Start enabled |
+
+The fresh browser loaded the Node-served checkpoint on port 4213.
+This startup reached readiness without a recovery reload.
+A static screenshot is saved as `material-checkpoint-final.jpg` in the task visualization directory.
+This check does not establish continuous pointer-lock gameplay or matched native pixels.
+
+WASM size: 51,603,518 bytes.
+WASM SHA256: `4ecef4e02520bb660612ed05c3729b619fa65065fdf92144f1ff8a14adb88c2d`.
+Web audit SHA256: `7aefc0918a62daa32f98fc269964b342188765a1979484c7f08f3ac2b9fea2e6`.
+Build logs and the audit remain in `.superpowers/sdd/2026-10-10-material-parity/` and `.cache/`.
+
+The accepted material layer is not complete material or lighting parity.
+Source texture storage-color corrections remain on the recovery branch.
+Full shadows, probe publication, postprocessing, and stained-glass capture remain deferred.
+See [the roadmap](roadmap.md) and [remaining plan](superpowers/plans/2026-10-11-rendering-completion.md).
+
+## Earlier garage verification
+
+The following record describes the earlier garage checks. Its dates, commits, and measurements remain historical.
+
+
 
 Reference: installed Steam build 11140890. Vehicle: fixed Lada 2101.
 Verification date: 2026-10-10, Europe/Warsaw.

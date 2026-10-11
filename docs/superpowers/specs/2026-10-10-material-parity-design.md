@@ -3,6 +3,9 @@
 Date: 2026-10-10, Europe/Warsaw.
 Status: The user approved this written specification in chat on 2026-10-10.
 
+Status update, 2026-10-11: The delivery now ends at the stable material checkpoint.
+Full rendering remains a future goal. See [the roadmap](../../roadmap.md).
+
 ## Intent and scope
 
 The user wants the current garage and car to match The Long Drive's original appearance, with a 1:1 target.
