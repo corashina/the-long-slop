@@ -1,6 +1,7 @@
 import hashlib
 import json
 import tempfile
+import subprocess
 import unittest
 from dataclasses import asdict
 from pathlib import Path
@@ -93,6 +94,75 @@ class MetadataTests(unittest.TestCase):
                     index_managed(snapshot, output)
             self.assertEqual(original.read_bytes(), b'original')
             self.assertFalse(json.loads((output / 'managed/diagnostics.json').read_text())['complete'])
+
+    def stub_decompiler(self, root):
+        package = root / 'package'
+        assembly = package / 'lib/netstandard2.0/ICSharpCode.Decompiler.dll'
+        assembly.parent.mkdir(parents=True)
+        code = """using System.Reflection;
+[assembly: AssemblyVersion("11.1.0.9782")]
+namespace ICSharpCode.Decompiler { public class DecompilerSettings {} }
+namespace ICSharpCode.Decompiler.CSharp {
+    public class CSharpDecompiler {
+        public CSharpDecompiler(string path, ICSharpCode.Decompiler.DecompilerSettings settings) {}
+        public string DecompileWholeModuleAsString() { return "// Error decompiling fixture method"; }
+    }
+}"""
+        source = root / 'stub.cs'
+        source.write_text(code)
+        command = f"Add-Type -TypeDefinition ([IO.File]::ReadAllText('{source.as_posix()}')) -OutputAssembly '{assembly.as_posix()}'"
+        build = subprocess.run(['pwsh', '-NoProfile', '-Command', command], capture_output=True, text=True)
+        self.assertEqual(build.returncode, 0, build.stderr)
+        nuspec = package / 'ICSharpCode.Decompiler.nuspec'
+        nuspec.write_text("""<package><metadata><version>11.1.0.9782</version><dependencies>
+<group><dependency id="System.Collections.Immutable" version="9.0.0"/>
+<dependency id="System.Reflection.Metadata" version="9.0.0"/></group>
+</dependencies></metadata></package>""")
+        return assembly, nuspec
+
+    def run_failure_decompiler(self, root, assembly):
+        from tools.reference.library.managed import SCRIPT
+        output = root / 'output'
+        result = subprocess.run(['pwsh', '-NoProfile', '-File', str(SCRIPT),
+            '-AssemblyPath', str(assembly), '-DecompilerPath', str(assembly), '-OutputPath', str(output)],
+            capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        receipt = json.loads((output / 'decompilation.json').read_bytes())
+        self.assertFalse(receipt['complete'])
+        return output, receipt
+
+    def test_actual_failed_decompile_keeps_diagnostics_and_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            assembly, nuspec = self.stub_decompiler(root)
+            original = assembly.read_bytes()
+            output, receipt = self.run_failure_decompiler(root, assembly)
+            self.assertTrue(any('Error decompiling fixture method' in value for value in receipt['diagnostics']))
+            self.assertTrue(any('reported incomplete code' in value for value in receipt['diagnostics']))
+            raw = (output / 'Assembly-CSharp.cs').read_bytes()
+            self.assertEqual(receipt['output']['sha256'], hashlib.sha256(raw).hexdigest())
+            self.assertEqual(receipt['output']['bytes'], len(raw))
+            self.assertEqual(receipt['decompiler']['version'], '11.1.0.9782')
+            self.assertEqual(receipt['decompiler']['sha256'], hashlib.sha256(original).hexdigest())
+            self.assertEqual(receipt['decompiler']['package_sha256'], hashlib.sha256(nuspec.read_bytes()).hexdigest())
+            self.assertEqual(len(receipt['decompiler']['dependencies']), 2)
+            self.assertTrue(receipt['host']['powershell'])
+            self.assertGreater(receipt['type_count'], 0)
+            self.assertGreater(receipt['method_count'], 0)
+            self.assertEqual(assembly.read_bytes(), original)
+
+    def test_actual_early_decompile_failure_keeps_available_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            assembly, nuspec = self.stub_decompiler(root)
+            nuspec.write_text(nuspec.read_text().replace('11.1.0.9782', '11.0.0.0'))
+            _, receipt = self.run_failure_decompiler(root, assembly)
+            self.assertEqual(receipt['input']['sha256'], hashlib.sha256(assembly.read_bytes()).hexdigest())
+            self.assertEqual(receipt['decompiler']['package_sha256'], hashlib.sha256(nuspec.read_bytes()).hexdigest())
+            self.assertEqual(receipt['decompiler']['sha256'], hashlib.sha256(assembly.read_bytes()).hexdigest())
+            self.assertEqual(receipt['decompiler']['package_version'], '11.0.0.0')
+            self.assertTrue(receipt['host']['dotnet'])
+            self.assertTrue(any('package version mismatch' in value for value in receipt['diagnostics']))
 
     def test_text_asset_payload_preserves_invalid_utf8(self):
         import struct

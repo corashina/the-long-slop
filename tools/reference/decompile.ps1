@@ -185,42 +185,54 @@ if ($Mode -eq 'Index') {
     if ($diagnostics.Count) { throw 'Managed IL indexing contains errors. See index.json.' }
     exit 0
 }
-$inputHash = Hash-File $AssemblyPath
+$receipt = [ordered]@{schema_version=1;complete=$false;mode='whole_module';
+    input=[ordered]@{file='TheLongDrive_Data/Managed/Assembly-CSharp.dll';sha256=$null};
+    host=[ordered]@{powershell=$PSVersionTable.PSVersion.ToString();dotnet=[Environment]::Version.ToString()};
+    diagnostics=@()}
 try {
+    $inputHash = Hash-File $AssemblyPath
+    $receipt['input']['sha256'] = $inputHash
     $DecompilerPath = [IO.Path]::GetFullPath($DecompilerPath)
+    $receipt['decompiler'] = [ordered]@{name='ICSharpCode.Decompiler';sha256=(Hash-File $DecompilerPath)}
     $packageRoot = [IO.Directory]::GetParent([IO.Directory]::GetParent([IO.Path]::GetDirectoryName($DecompilerPath)).FullName).FullName
     $nuspec = Join-Path $packageRoot 'ICSharpCode.Decompiler.nuspec'
+    $receipt['decompiler']['package_sha256'] = Hash-File $nuspec
     [xml]$package = [IO.File]::ReadAllText($nuspec)
+    $receipt['decompiler']['package_version'] = [string]$package.package.metadata.version
     if ($package.package.metadata.version -ne '11.1.0.9782') { throw 'Decompiler package version mismatch.' }
     $decompilerAssembly = [Reflection.Assembly]::LoadFrom($DecompilerPath)
+    $receipt['decompiler']['version'] = $decompilerAssembly.GetName().Version.ToString()
     if ($decompilerAssembly.GetName().Version.ToString() -ne '11.1.0.9782') { throw 'Decompiler assembly version mismatch.' }
     $dependencies = [Collections.Generic.List[object]]::new()
+    $receipt['decompiler']['dependencies'] = $dependencies
     foreach ($dependency in $package.package.metadata.dependencies.group.dependency) {
         $loaded = [Reflection.Assembly]::Load([string]$dependency.id)
         $required = [Version]([string]$dependency.version)
-        if ($loaded.GetName().Version -lt $required) { throw ('Decompiler dependency version mismatch: ' + $dependency.id) }
         $dependencies.Add([ordered]@{name=[string]$dependency.id;required=[string]$dependency.version;
             version=$loaded.GetName().Version.ToString();sha256=(Hash-File $loaded.Location)})
+        if ($loaded.GetName().Version -lt $required) { throw ('Decompiler dependency version mismatch: ' + $dependency.id) }
     }
     $settings = [ICSharpCode.Decompiler.DecompilerSettings]::new()
     $decompiler = [ICSharpCode.Decompiler.CSharp.CSharpDecompiler]::new($AssemblyPath, $settings)
     $text = $decompiler.DecompileWholeModuleAsString()
     $codePath = Join-Path $OutputPath 'Assembly-CSharp.cs'
     [IO.File]::WriteAllText($codePath, $text, [Text.UTF8Encoding]::new($false))
+    $receipt['output'] = [ordered]@{file='managed/Assembly-CSharp.cs';
+        bytes=(Get-Item -LiteralPath $codePath).Length;sha256=(Hash-File $codePath)}
     $diagnostics = @([regex]::Matches($text, '(?m)^\s*//.*(?:Error decompiling|Unknown result type|Expected[ :]|Invalid comparison|ILSpy generated).*') | ForEach-Object { $_.Value.Trim() })
+    $receipt['diagnostics'] = $diagnostics
     $errors = @($diagnostics | Where-Object { $_ -match 'Error decompiling' })
     $metadata = [ManagedAssetIndex]::Read($AssemblyPath, 'TheLongDrive_Data/Managed/Assembly-CSharp.dll')
+    $receipt['type_count'] = $metadata['types'].Count
+    $receipt['method_count'] = $metadata['methods'].Count
     $complete = ($errors.Count -eq 0 -and $metadata['diagnostics'].Count -eq 0)
-    Write-Json 'decompilation.json' ([ordered]@{schema_version=1;complete=$complete;mode='whole_module';
-        input=[ordered]@{file='TheLongDrive_Data/Managed/Assembly-CSharp.dll';sha256=$inputHash};
-        output=[ordered]@{file='managed/Assembly-CSharp.cs';bytes=(Get-Item -LiteralPath $codePath).Length;sha256=(Hash-File $codePath)};
-        decompiler=[ordered]@{name='ICSharpCode.Decompiler';version=$decompilerAssembly.GetName().Version.ToString();
-            sha256=(Hash-File $DecompilerPath);package_sha256=(Hash-File $nuspec);dependencies=$dependencies};
-        host=[ordered]@{powershell=$PSVersionTable.PSVersion.ToString();dotnet=[Environment]::Version.ToString()};
-        type_count=$metadata['types'].Count;method_count=$metadata['methods'].Count;diagnostics=$diagnostics})
+    $receipt['complete'] = $complete
+    Write-Json 'decompilation.json' $receipt
     if ((Hash-File $AssemblyPath) -ne $inputHash) { throw 'Decompilation input changed.' }
     if (-not $complete) { throw 'Decompiler reported incomplete code. See decompilation.json.' }
 } catch {
-    Write-Json 'decompilation.json' ([ordered]@{schema_version=1;complete=$false;input_sha256=$inputHash;diagnostics=@($_.Exception.ToString())})
+    $receipt['complete'] = $false
+    $receipt['diagnostics'] = @($receipt['diagnostics']) + @($_.Exception.ToString())
+    Write-Json 'decompilation.json' $receipt
     throw
 }
