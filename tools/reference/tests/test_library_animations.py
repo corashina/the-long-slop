@@ -194,13 +194,13 @@ class AnimationTests(unittest.TestCase):
         self.assertEqual(bake_track(track)[2],'STEP')
 
     def test_gltf_animation_validation_rejects_bad_times_and_quaternions(self):
-        from tools.reference.gltf import GltfExporter,validate_gltf
+        from tools.reference.gltf import GltfBuilder,validate_gltf
         import pygltflib as gl
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
             for times,values,expected in [([1.,0.],[(0.,0.,0.,1.)]*2,'time'),
                                           ([0.,1.],[(0.,0.,0.,0.)]*2,'quaternion')]:
-                writer=GltfExporter(None,root)
+                writer=GltfBuilder(None,root)
                 writer.document.nodes=[gl.Node()]
                 a=writer.accessor(times,'SCALAR',target=None)
                 b=writer.accessor(values,'VEC4',target=None)

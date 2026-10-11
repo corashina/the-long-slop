@@ -1,4 +1,4 @@
-{
+{"library":{"schema_version":1,"manifest_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","catalog_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","source_manifest_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"},
   "app_id": 1017180,
   "build_id": 11140890,
   "source_hashes": [

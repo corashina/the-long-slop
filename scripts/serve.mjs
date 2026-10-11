@@ -14,7 +14,13 @@ const types = new Map([
   ['.gltf', 'model/gltf+json'],
   ['.bin', 'application/octet-stream'],
   ['.png', 'image/png'],
+  ['.wav', 'audio/wav'],
+  ['.ttf', 'font/ttf'],
+  ['.otf', 'font/otf'],
+  ['.glb', 'model/gltf-binary'],
 ]);
+
+const port = Number(process.env.PORT ?? 4173);
 
 createServer(async (request, response) => {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -47,6 +53,6 @@ createServer(async (request, response) => {
     const code = error.code === 'ENOENT' || error.code === 'ENOTDIR' ? 404 : 400;
     response.writeHead(code).end(code === 404 ? 'Not found' : 'Invalid request');
   }
-}).listen(4173, '127.0.0.1', () => {
-  console.log('My Summer Slop: http://127.0.0.1:4173');
+}).listen(port, '127.0.0.1', function () {
+  console.log(`My Summer Slop: http://127.0.0.1:${this.address().port}`);
 });

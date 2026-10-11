@@ -364,12 +364,12 @@ def _model_for_context(context, model_nodes):
 
 def _write_animation_package(source, output, record, context, model, bound):
     from .models import animation_model_document
-    from ..gltf import GltfExporter
+    from ..gltf import GltfBuilder
     identity=record.source
     owner=ObjectId(**context['owner'])
     name=f'animations/clips/{identity.file}/{identity.path_id}/rigs/{owner.file}/{owner.path_id}/animation.gltf'
     path=output/name
-    writer=GltfExporter(source,path.parent)
+    writer=GltfBuilder(source,path.parent)
     writer.document=animation_model_document(model,output,path.parent)
     gl=writer.gl
     mapping={ObjectId(**node.extras['source']):index for index,node in enumerate(writer.document.nodes)}

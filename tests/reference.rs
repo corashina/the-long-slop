@@ -144,6 +144,41 @@ fn rejects_invalid_seat_hit_nodes_and_empty_use_mask() {
 fn production_export_matches_installed_contract() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let manifest = ReferenceManifest::from_json(&bytes).unwrap();
+    fn digest(path: &str) -> String {
+        let output = std::process::Command::new("sha256sum")
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .to_owned()
+    }
+    assert_eq!(
+        manifest.library.manifest_sha256,
+        digest("web/assets/library/manifest.json")
+    );
+    assert_eq!(
+        manifest.library.catalog_sha256,
+        digest(".cache/reference-library/catalog.json")
+    );
+    assert_eq!(
+        manifest.library.source_manifest_sha256,
+        digest(".cache/reference-library/source-manifest.json")
+    );
+    for asset in &manifest.assets {
+        assert_eq!(asset.sha256, digest(&format!("web/assets/{}", asset.path)));
+        for dependency in &asset.dependencies {
+            assert_eq!(
+                dependency.sha256,
+                digest(&format!("web/assets/{}", dependency.file))
+            );
+        }
+    }
+
     assert_eq!(
         manifest.nodes.iter().filter(|n| n.asset.0 == 1).count(),
         434
@@ -284,5 +319,19 @@ fn production_export_matches_installed_contract() {
                 collider.source
             );
         }
+    }
+}
+
+#[test]
+fn requires_current_library_provenance() {
+    let mut input = fixture();
+    input.as_object_mut().unwrap().remove("library");
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    for value in [
+        serde_json::json!({"schema_version": 0, "manifest_sha256": "a".repeat(64), "catalog_sha256": "a".repeat(64), "source_manifest_sha256": "a".repeat(64)}),
+        serde_json::json!({"schema_version": 1, "manifest_sha256": "z".repeat(64), "catalog_sha256": "a".repeat(64), "source_manifest_sha256": "a".repeat(64)}),
+    ] {
+        input["library"] = value;
+        assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
     }
 }

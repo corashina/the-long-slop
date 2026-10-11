@@ -81,23 +81,11 @@ class LibrarySourceTests(unittest.TestCase):
         calls = Mock()
         calls.attach_mock(Mock(), 'library')
         calls.attach_mock(Mock(), 'runtime')
-        with patch('tools.reference.export.stage_library', calls.library), patch('tools.reference.export.export_reference', calls.runtime), patch('tools.reference.library.archive.load_snapshot', return_value=accepted):
+        with patch('tools.reference.export.stage_library', calls.library), patch('tools.reference.export.derive_reference', calls.runtime), patch('tools.reference.library.archive.load_snapshot', return_value=accepted):
             main(['--steam-root', str(self.root), '--output', str(self.base / 'runtime')])
         self.assertEqual([call[0] for call in calls.mock_calls], ['library', 'runtime'])
-        calls.library.assert_called_once_with(self.root, self.base / 'runtime')
-        calls.runtime.assert_called_once_with(accepted, self.base / 'runtime')
-        from tools.reference.export import export_reference
-        snapshot = snapshot_source(self.root, self.work)
-        parsed = Mock()
-        with patch('tools.reference.library.archive.verify_snapshot') as verify, patch('tools.reference.source.Source', return_value=parsed) as load, patch('tools.reference.export._export_selected') as selected:
-            export_reference(snapshot, self.base / 'runtime')
-        verify.assert_called_once_with(snapshot)
-        load.assert_called_once_with(snapshot.root)
-        selected.assert_called_once_with(parsed, self.base / 'runtime')
-        with patch('tools.reference.library.archive.verify_snapshot', side_effect=ValueError('invalid source')), patch('tools.reference.source.Source') as load:
-            with self.assertRaisesRegex(ValueError, 'invalid source'):
-                export_reference(snapshot, self.base / 'runtime')
-        load.assert_not_called()
+        calls.library.assert_called_once_with(self.root, self.base / 'runtime', verify=False)
+        calls.runtime.assert_called_once_with(accepted, calls.library.return_value, self.base / 'runtime')
 
         with patch('sys.stderr'):
             with self.assertRaises(SystemExit):
@@ -155,7 +143,7 @@ class LibrarySourceTests(unittest.TestCase):
                   for path in self.root.rglob('*') if path.is_file()}
         for output in (self.root, self.root / 'generated', self.data / '..' / 'generated'):
             with self.subTest(output=output):
-                with patch('tools.reference.export.stage_source') as source, patch('tools.reference.export.export_reference') as runtime, patch('sys.stderr'):
+                with patch('tools.reference.export.stage_source') as source, patch('tools.reference.export.derive_reference') as runtime, patch('sys.stderr'):
                     with self.assertRaises(SystemExit) as rejected:
                         main(['--steam-root', str(self.root), '--output', str(output)])
                 self.assertEqual(rejected.exception.code, 2)
@@ -167,7 +155,7 @@ class LibrarySourceTests(unittest.TestCase):
         self.assertFalse((self.root / 'generated').exists())
         archive_root = self.work / 'source'
         with self.assertRaisesRegex(ValueError, 'outside the source installation'):
-            _export_selected(SimpleNamespace(root=archive_root), archive_root / 'generated')
+            _export_selected(SimpleNamespace(root=archive_root), archive_root / 'generated', None, None)
         self.assertFalse((archive_root / 'generated').exists())
 
     def test_changed_source_rejects_snapshot(self):

@@ -503,7 +503,17 @@ pub struct StartingAreaReference {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct LibraryProvenance {
+    pub schema_version: u32,
+    pub manifest_sha256: String,
+    pub catalog_sha256: String,
+    pub source_manifest_sha256: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
+    pub library: LibraryProvenance,
     pub app_id: u32,
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
@@ -576,6 +586,13 @@ impl ReferenceManifest {
     }
 
     pub fn validate(&self) -> Result<(), ReferenceError> {
+        require(
+            self.library.schema_version == 1
+                && hash(&self.library.manifest_sha256)
+                && hash(&self.library.catalog_sha256)
+                && hash(&self.library.source_manifest_sha256),
+            "library provenance",
+        )?;
         require(
             self.app_id == APP_ID && self.build_id == BUILD_ID,
             "app/build",

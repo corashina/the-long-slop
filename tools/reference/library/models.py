@@ -12,7 +12,7 @@ from UnityPy.helpers.MeshHelper import MeshHandler
 from .images import typed_record
 from .records import _file, _json
 from .types import AssetExport, Catalog, FileRecord, ObjectId, SCHEMA_VERSION
-from ..gltf import GltfExporter, convert_point, convert_triangles, converted_transform, convert_bind_poses, validate_gltf
+from ..gltf import GltfBuilder, convert_point, convert_triangles, converted_transform, convert_bind_poses, validate_gltf
 from ..source import Source, key, source_id, vector
 
 
@@ -131,7 +131,7 @@ def _write_mesh(source, identity, catalog, output):
         return AssetExport(identity,'models','source_empty','unverified','Source mesh contains zero vertices.',(),
                            catalog.dependencies[identity], details)
     path = output / f'{_prefix("meshes",identity)}/geometry.gltf'
-    writer = GltfExporter(source,path)
+    writer = GltfBuilder(source,path)
     details['skin_attribute_widths'] = {'indices':sorted({len(v) for v in (handler.m_BoneIndices or [])}),
                                        'weights':sorted({len(v) for v in (handler.m_BoneWeights or [])})}
     def influences(values):
@@ -420,7 +420,7 @@ def write_library_model(source: Source, nodes: tuple[ObjectId, ...], output: Pat
     root = _reader(source,nodes[0])
     owner = _identity(source.components(root)[0])
     path = output / f'{_prefix("hierarchies",owner)}/model.gltf'
-    writer = GltfExporter(source,path)
+    writer = GltfBuilder(source,path)
     writer.library_output = output
     writer.library_files = set()
     writer.texture_limits = []

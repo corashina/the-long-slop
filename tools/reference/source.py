@@ -212,3 +212,45 @@ class Source:
                 visit(self.resolve(reader, child), reader, path, active)
         visit(root, None, '', True)
         return result
+
+
+class LibrarySource(Source):
+    """Resolve the selected scene from accepted typed records only."""
+    def __init__(self, library):
+        from types import SimpleNamespace as NS
+        self.library = library
+        self.root = library.records_root.parent / 'source'
+        self.serialized_files = {c['file']:NS(source_container_path=c['file'],name=c['file'],externals=c['externals']) for c in library.catalog['containers']}
+        self.objects = {}
+        for item in library.catalog['objects']:
+            identity = item['source']
+            self.objects[identity['file'],identity['path_id']] = NS(assets_file=self.serialized_files[identity['file']],path_id=identity['path_id'],type=NS(name=item['type']),byte_size=item['bytes'])
+        self.data_cache = {}
+        self.class_cache = {}
+        self.evidence = {}
+
+    def resolve(self, owner, pointer):
+        if not pointer['m_PathID']: return None
+        file = owner.assets_file.source_container_path
+        if pointer['m_FileID']:
+            external = owner.assets_file.externals[pointer['m_FileID']-1]
+            if external['file_id'] != pointer['m_FileID']: raise ValueError('External file identity mismatch')
+            file = external['path'].replace('\\','/')
+            if file == 'Library/unity default resources': file = 'Resources/unity default resources'
+        return self.get(file,pointer['m_PathID'])
+
+    def read(self, reader):
+        from .library.types import ObjectId
+        identity = key(reader)
+        if identity not in self.data_cache:
+            self.data_cache[identity] = self.library.record(ObjectId(*identity))
+            if reader.type.name == 'MonoBehaviour':
+                self.evidence[f'{identity[0]}:{identity[1]}'] = {'class':self.class_name(reader),'bytes':reader.byte_size,'complete_byte_consumption':True}
+        return self.data_cache[identity]
+
+    def class_name(self, reader):
+        script = self.resolve(reader,self.read(reader)['m_Script'])
+        return self.read(script)['m_ClassName'] if script else None
+
+    def object(self, reader):
+        raise TypeError('Runtime derivation requires typed library records')

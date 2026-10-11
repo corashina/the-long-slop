@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from .library.types import Snapshot
+from .library.types import Snapshot, LibraryReceipt
 
 APP_ID = 1017180
 BUILD_ID = 11140890
@@ -21,14 +21,75 @@ def validate_build(steam_root: Path):
     return values
 
 
-def export_reference(snapshot: Snapshot, output: Path) -> None:
-    from .library.archive import verify_snapshot
-    from .source import Source
-    verify_snapshot(snapshot)
-    _export_selected(Source(snapshot.root), output)
+def derive_reference(snapshot: Snapshot, library: LibraryReceipt, output: Path) -> None:
+    import tempfile
+    from .library.reader import LibraryReader
+    from .source import LibrarySource
+    if snapshot.manifest_sha256 != library.source_manifest_sha256:
+        raise ValueError('Runtime source provenance mismatch')
+    reader = LibraryReader(library)
+    if snapshot.files != reader.snapshot.files or snapshot.root.resolve() != reader.snapshot.root.resolve():
+        raise ValueError('Runtime source storage mismatch')
+    target = output.resolve()
+    for protected in (snapshot.manifest_path.parent.resolve(), reader.root):
+        if target.is_relative_to(protected) or protected.is_relative_to(target):
+            raise ValueError('Runtime output overlaps accepted library storage')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    staged = Path(tempfile.mkdtemp(prefix='runtime-', dir=reader.records_root.parent / 'work'))
+    _export_selected(LibrarySource(reader), staged, reader, snapshot)
+    verify_reference(staged, library)
+    promote_reference(staged, output)
 
 
-def _export_selected(source, output: Path) -> None:
+def promote_reference(staged: Path, accepted: Path) -> None:
+    from .library.validation import _publish_directory
+    _publish_directory(staged, accepted)
+
+
+def provenance(library):
+    return {'schema_version':1, 'manifest_sha256':library.manifest_sha256,
+            'catalog_sha256':library.catalog_sha256, 'source_manifest_sha256':library.source_manifest_sha256}
+
+
+def validate_runtime_paths(manifest):
+    assets = manifest.get('assets', [])
+    if {a['path'] for a in assets} != {'reference/home.gltf','reference/lada.gltf','reference/items.gltf'} or len(assets) != 3:
+        raise ValueError('Runtime must contain only the selected scenes')
+    for asset in assets:
+        for item in [asset, *asset['dependencies']]:
+            name = item.get('file', item.get('path'))
+            if not name.startswith('reference/') or len(Path(name).parts) != 2 or Path(name).suffix not in ('.gltf','.bin','.png'):
+                raise ValueError('Invalid selected runtime dependency')
+
+
+def verify_reference(output: Path, library) -> None:
+    from .library.reader import checked
+    from .gltf import validate_gltf
+    manifest = json.loads((output / 'manifest.json').read_bytes())
+    if library is None or manifest.get('library') != provenance(library):
+        raise ValueError('Missing or mismatched runtime library provenance')
+    if manifest['library']['schema_version'] != 1 or any(not re.fullmatch('[0-9a-f]{64}', manifest['library'][k]) for k in ('manifest_sha256','catalog_sha256','source_manifest_sha256')):
+        raise ValueError('Unsupported runtime provenance')
+    validate_runtime_paths(manifest)
+    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json'}
+    for asset in manifest['assets']:
+        for record in [asset, *asset['dependencies']]:
+            name = record.get('file', record.get('path')).removeprefix('reference/')
+            path = output / name
+            checked(output, {'file':name,'bytes':path.stat().st_size,'sha256':record['sha256']})
+            names.add(name)
+        scene = output / asset['path'].removeprefix('reference/')
+        document = json.loads(scene.read_bytes())
+        uris = {entry['uri'] for entry in [*document.get('buffers', []), *document.get('images', [])]}
+        declared = {entry['file'].removeprefix('reference/') for entry in asset['dependencies']}
+        if uris != declared:
+            raise ValueError('Runtime scene dependencies differ from selected receipts')
+        validate_gltf(scene)
+    if {p.relative_to(output).as_posix() for p in output.rglob('*') if p.is_file()} != names:
+        raise ValueError('Unselected files in runtime')
+
+
+def _export_selected(source, output: Path, library, snapshot) -> None:
     from .gltf import export_gltf
     from .parameters import recover_parameters
     from .manifest import build_manifest
@@ -56,7 +117,7 @@ def _export_selected(source, output: Path) -> None:
     (output/'manifest.json').unlink(missing_ok=True)
     report = {}
     for name, readers in roots.items():
-        report[name] = export_gltf((source,readers),output/f'{name}.gltf')
+        report[name] = export_gltf((source,readers),output/f'{name}.gltf',library)
         print(f'Exported {name}: {report[name]["node_count"]} nodes',flush=True)
     (output/'geometry-evidence.json').write_text(json.dumps(report,indent=2,allow_nan=False),encoding='utf-8')
     parameter_roots={f'{name}-{i}':root for name,readers in roots.items() for i,root in enumerate(readers)}
@@ -67,14 +128,10 @@ def _export_selected(source, output: Path) -> None:
     (output/'parameter-evidence.json').write_text(json.dumps(parameters,indent=2,allow_nan=False),encoding='utf-8')
     if parameters['errors']:
         raise ValueError(f'Incomplete parameter recovery: {parameters["errors"]}')
-    data_root=source.root/'TheLongDrive_Data'
-    inputs=[path for path in data_root.iterdir() if path.is_file() and (path.name in {'level0','level1','globalgamemanagers'} or path.suffix in {'.assets','.resS'})]
-    inputs.append(data_root/'Managed'/'Assembly-CSharp.dll')
-    hashes=[]
-    for path in sorted(inputs):
-        digest=hashlib.file_digest(path.open('rb'),'sha256').hexdigest()
-        hashes.append({'file':str(path.relative_to(data_root)).replace('\\','/'),'sha256':digest})
-    manifest=build_manifest(source,roots,report,hashes)
+    hashes=[{'file':record.file.removeprefix('TheLongDrive_Data/'),'sha256':record.sha256}
+            for record in snapshot.files if record.file.startswith('TheLongDrive_Data/')]
+    manifest=build_manifest(source,roots,report,hashes,library)
+    manifest['library']=provenance(library.receipt)
     parameters['controls']={
         'source':{'file':'level0','path_id':16865},
         'defaults':{'object_move':manifest['player']['obj_move_sensitivity'],'object_rotation':manifest['player']['obj_rotation_sensitivity'],
@@ -86,6 +143,10 @@ def _export_selected(source, output: Path) -> None:
     parameters['player_markers']=[{'source':{'file':'level1','path_id':pid},'fields':source.read(source.get('level1',pid))} for pid in (39823,23339)]
     (output/'parameter-evidence.json').write_text(json.dumps(parameters,indent=2,allow_nan=False),encoding='utf-8')
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2,allow_nan=False),encoding='utf-8')
+    from dataclasses import asdict
+    selection = {name:[asdict(v) for v in sorted(values)] for name,values in (
+        ('records',library.selected_records),('meshes',library.selected_meshes),('textures',library.selected_textures))}
+    (output/'library-selection.json').write_text(json.dumps(selection,indent=2),encoding='utf-8')
     print(f'Exported manifest: {len(manifest["colliders"])} colliders, {len(manifest["items"])} items',flush=True)
 
 
@@ -281,15 +342,16 @@ def main(argv=None):
     elif arguments.stage == 'library':
         stage_library(arguments.steam_root, arguments.output, verify=arguments.verify)
     else:
-        if arguments.steam_root is None:
-            parser.error('Runtime export needs --steam-root')
-        if arguments.output.resolve().is_relative_to(arguments.steam_root.resolve()):
+        if arguments.steam_root and arguments.output.resolve().is_relative_to(arguments.steam_root.resolve()):
             parser.error('Keep runtime output outside the Steam installation')
+        library_path = arguments.output.parent / 'library/manifest.json'
+        receipt = stage_library(arguments.steam_root, arguments.output,
+                                verify=arguments.verify or library_path.is_file())
         if arguments.verify:
-            parser.error('Runtime verification belongs to the runtime stage task')
-        stage_library(arguments.steam_root, arguments.output)
-        from .library.archive import load_snapshot
-        export_reference(load_snapshot(SOURCE_WORK_ROOT), arguments.output)
+            verify_reference(arguments.output, receipt)
+        else:
+            from .library.archive import load_snapshot
+            derive_reference(load_snapshot(SOURCE_WORK_ROOT), receipt, arguments.output)
 
 
 if __name__ == '__main__':
