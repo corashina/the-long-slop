@@ -60,4 +60,7 @@ extern "C" {
         blood: f32,
         diesel: f32,
     );
+    /// One sound frame. The view is valid only during the call.
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudio)]
+    pub fn game_audio(frame: &[f32]);
 }

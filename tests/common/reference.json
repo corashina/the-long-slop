@@ -6656,5 +6656,561 @@
         }
       ]
     }
+  },
+  "audio": {
+    "clips": [
+      {
+        "id": 0,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 9000
+        },
+        "name": "clip0",
+        "path": "reference/audio/0-clip0.wav",
+        "seconds": 1.0,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "id": 1,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 9001
+        },
+        "name": "clip1",
+        "path": "reference/audio/1-clip1.wav",
+        "seconds": 2.0,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000001"
+      },
+      {
+        "id": 2,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 9002
+        },
+        "name": "clip2",
+        "path": "reference/audio/2-clip2.wav",
+        "seconds": 3.0,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000002"
+      },
+      {
+        "id": 3,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 9003
+        },
+        "name": "clip3",
+        "path": "reference/audio/3-clip3.wav",
+        "seconds": 4.0,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000003"
+      }
+    ],
+    "one_shot": {
+      "min_distance": 0.5,
+      "max_distance": 200.0,
+      "spatial": 1.0,
+      "random_pitch": [
+        0.85,
+        1.15
+      ]
+    },
+    "buses": {
+      "default_interior": 0.5,
+      "interior_lerp": 2.0,
+      "car_multiplier": 1.4
+    },
+    "engine": {
+      "idle": {
+        "source": {
+          "file": "level1",
+          "path_id": 8000
+        },
+        "clip": 0,
+        "volume": 1.0,
+        "min_distance": 1.0,
+        "max_distance": 500.0,
+        "spatial": 1.0,
+        "item": 4,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "motor": {
+        "source": {
+          "file": "level1",
+          "path_id": 8001
+        },
+        "clip": 1,
+        "volume": 1.0,
+        "min_distance": 1.0,
+        "max_distance": 500.0,
+        "spatial": 1.0,
+        "item": 4,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "start": 2,
+      "start_volume": 0.6,
+      "stop": 3,
+      "stop_volume": 0.6,
+      "idle_rpm": [
+        600.0,
+        1400.0
+      ],
+      "idle_pitch": [
+        0.9,
+        1.2
+      ],
+      "idle_volume": 0.7,
+      "motor_rpm": [
+        500.0,
+        1300.0
+      ],
+      "motor_pitch": [
+        0.8,
+        1.5
+      ],
+      "motor_volume": 0.7,
+      "reverse_volume": 0.4
+    },
+    "cooling": {
+      "clips": [
+        3
+      ],
+      "temperature": [
+        60.0,
+        100.0
+      ],
+      "time": [
+        [
+          2.0,
+          0.5
+        ],
+        [
+          0.05,
+          0.25
+        ]
+      ],
+      "volume": [
+        [
+          0.05,
+          0.175
+        ],
+        [
+          0.175,
+          0.35
+        ]
+      ],
+      "pitch": [
+        [
+          1.2,
+          1.4
+        ],
+        [
+          1.3,
+          1.5
+        ]
+      ]
+    },
+    "car": {
+      "collide": [
+        [
+          0
+        ],
+        [
+          1
+        ],
+        [
+          2
+        ],
+        [
+          3
+        ]
+      ],
+      "collision_modifier": 0.1,
+      "brake": {
+        "source": {
+          "file": "level1",
+          "path_id": 8000
+        },
+        "clip": 0,
+        "volume": 1.0,
+        "min_distance": 1.0,
+        "max_distance": 500.0,
+        "spatial": 1.0,
+        "item": 1,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "brake_modifier": 0.1,
+      "reverse": {
+        "source": {
+          "file": "level1",
+          "path_id": 8001
+        },
+        "clip": 1,
+        "volume": 1.0,
+        "min_distance": 1.0,
+        "max_distance": 500.0,
+        "spatial": 1.0,
+        "item": 1,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "handbrake": 2,
+      "handbrake_voice": {
+        "source": {
+          "file": "level1",
+          "path_id": 8000
+        },
+        "clip": null,
+        "volume": 1.0,
+        "min_distance": 1.0,
+        "max_distance": 500.0,
+        "spatial": 1.0,
+        "item": 1,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "boil": {
+        "source": {
+          "file": "level1",
+          "path_id": 8003
+        },
+        "clip": 3,
+        "volume": 1.0,
+        "min_distance": 1.0,
+        "max_distance": 500.0,
+        "spatial": 1.0,
+        "item": 1,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "boil_volume": 1.0,
+      "wheel": {
+        "ground": {
+          "source": {
+            "file": "level1",
+            "path_id": 8000
+          },
+          "clip": 0,
+          "volume": 1.0,
+          "min_distance": 1.0,
+          "max_distance": 500.0,
+          "spatial": 1.0,
+          "item": 1,
+          "offset": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "spring": {
+          "source": {
+            "file": "level1",
+            "path_id": 8001
+          },
+          "clip": 1,
+          "volume": 1.0,
+          "min_distance": 1.0,
+          "max_distance": 500.0,
+          "spatial": 1.0,
+          "item": 1,
+          "offset": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "slide": {
+          "source": {
+            "file": "level1",
+            "path_id": 8002
+          },
+          "clip": 2,
+          "volume": 1.0,
+          "min_distance": 1.0,
+          "max_distance": 500.0,
+          "spatial": 1.0,
+          "item": 1,
+          "offset": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      "ground_modifier": 0.3,
+      "spring_modifier": 750.0,
+      "spring_pitch_modifier": 1000.0,
+      "slide_angle": 3.0,
+      "max_slide_volume_speed": 30.0,
+      "skid_road": {
+        "clip": 2,
+        "volume": 1.0,
+        "pitch": [
+          0.6,
+          1.2
+        ]
+      },
+      "skid_dirt": {
+        "clip": 3,
+        "volume": 0.6,
+        "pitch": [
+          0.9,
+          1.5
+        ]
+      },
+      "speed_difference": [
+        5.0,
+        30.0
+      ]
+    },
+    "steps": {
+      "surfaces": [
+        {
+          "clips": [
+            0
+          ],
+          "volume": 0.2
+        },
+        {
+          "clips": [
+            0
+          ],
+          "volume": 0.2
+        },
+        {
+          "clips": [
+            0
+          ],
+          "volume": 0.2
+        },
+        {
+          "clips": [
+            0
+          ],
+          "volume": 0.2
+        },
+        {
+          "clips": [
+            1
+          ],
+          "volume": 2.0
+        }
+      ],
+      "modifier": 1.0,
+      "ray_distance": 0.25,
+      "bob_speed": 8.0,
+      "bob_speed_velocity": 2.0,
+      "bob_height": 0.05,
+      "bob_threshold": 0.03,
+      "run_bonus": 0.15,
+      "colliders": []
+    },
+    "wind": {
+      "voice": {
+        "source": {
+          "file": "level1",
+          "path_id": 8000
+        },
+        "clip": 0,
+        "volume": 1.0,
+        "min_distance": 1.0,
+        "max_distance": 500.0,
+        "spatial": 0.0,
+        "item": null,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "max_speed_kmh": 120.0,
+      "lerp": 5.0,
+      "view_modifier": 0.2
+    },
+    "ambient": {
+      "day": [
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 8000
+          },
+          "clip": 0,
+          "volume": 1.0,
+          "min_distance": 1.0,
+          "max_distance": 500.0,
+          "spatial": 0.0,
+          "item": null,
+          "offset": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 8001
+          },
+          "clip": 1,
+          "volume": 1.0,
+          "min_distance": 1.0,
+          "max_distance": 500.0,
+          "spatial": 0.0,
+          "item": null,
+          "offset": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 8002
+          },
+          "clip": 2,
+          "volume": 1.0,
+          "min_distance": 1.0,
+          "max_distance": 500.0,
+          "spatial": 0.0,
+          "item": null,
+          "offset": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "night": [
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 8000
+          },
+          "clip": 0,
+          "volume": 1.0,
+          "min_distance": 1.0,
+          "max_distance": 500.0,
+          "spatial": 0.0,
+          "item": null,
+          "offset": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 8001
+          },
+          "clip": 1,
+          "volume": 1.0,
+          "min_distance": 1.0,
+          "max_distance": 500.0,
+          "spatial": 0.0,
+          "item": null,
+          "offset": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 8002
+          },
+          "clip": 2,
+          "volume": 1.0,
+          "min_distance": 1.0,
+          "max_distance": 500.0,
+          "spatial": 0.0,
+          "item": null,
+          "offset": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "day_volume": [
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.25,
+          0.25,
+          0.25
+        ]
+      ],
+      "night_volume": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.75,
+          0.75,
+          0.75
+        ]
+      ],
+      "fade_rate": 0.1
+    },
+    "interiors": [],
+    "hinges": [],
+    "openings": [
+      {
+        "opening": 1,
+        "item": 19,
+        "open": 0,
+        "open_volume": 0.5,
+        "close": 1,
+        "close_volume": 0.5
+      }
+    ],
+    "items": [],
+    "menu": {
+      "pitch": [
+        0.9,
+        1.1
+      ],
+      "volume": 0.6,
+      "touch_volume": 0.5,
+      "down": [
+        0
+      ],
+      "up": [
+        1
+      ],
+      "touch_down": [
+        2
+      ],
+      "touch_up": [
+        3
+      ]
+    }
   }
 }

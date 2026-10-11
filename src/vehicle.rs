@@ -2,8 +2,9 @@ use rapier3d::control::{DynamicRayCastVehicleController, Wheel, WheelTuning};
 use rapier3d::math::{Pose, Rotation, Vector};
 pub use rapier3d::prelude::ColliderHandle;
 use rapier3d::prelude::{
-    ColliderBuilder, Group, InteractionGroups, InteractionTestMode, QueryFilter, QueryPipeline,
-    QueryPipelineMut, RigidBodyBuilder, RigidBodyHandle,
+    ActiveEvents, ColliderBuilder, CollisionEvent, CollisionEventFlags, Group, InteractionGroups,
+    InteractionTestMode, QueryFilter, QueryPipeline, QueryPipelineMut, RigidBodyBuilder,
+    RigidBodyHandle,
 };
 
 use crate::reference::{
@@ -20,6 +21,86 @@ pub struct InstalledWheel {
 }
 pub const VEHICLE_COLLIDER_FLAG: u128 = 1 << 127;
 pub const SLOT_SENSOR_FLAG: u128 = 1 << 126;
+/// Streamed terrain. The source puts it on the sand layer.
+pub const TERRAIN_COLLIDER_FLAG: u128 = 1 << 124;
+
+/// The start of a contact. `speed` is the relative velocity at the point before the solver.
+#[derive(Clone, Copy, Debug)]
+pub struct Impact {
+    pub point: [f32; 3],
+    pub speed: f32,
+    pub user_data: [u128; 2],
+}
+
+/// Wheel state for the source ground, spring, and skid sounds.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WheelContact {
+    pub contact: bool,
+    pub suspension_length: f32,
+    /// User data of the ground collider.
+    pub ground: u128,
+    pub rpm: f32,
+    pub radius: f32,
+    /// Wheel forward direction in game space.
+    pub forward: [f32; 3],
+}
+
+struct ImpactCollector(std::sync::Mutex<Vec<Impact>>);
+
+impl rapier3d::prelude::EventHandler for ImpactCollector {
+    fn handle_collision_event(
+        &self,
+        bodies: &rapier3d::prelude::RigidBodySet,
+        colliders: &rapier3d::prelude::ColliderSet,
+        event: CollisionEvent,
+        pair: Option<&rapier3d::prelude::ContactPair>,
+    ) {
+        let CollisionEvent::Started(a, b, flags) = event else {
+            return;
+        };
+        if flags.contains(CollisionEventFlags::SENSOR) {
+            return;
+        }
+        let (Some(pair), Some(first), Some(second)) = (pair, colliders.get(a), colliders.get(b))
+        else {
+            return;
+        };
+        let Some((_, contact)) = pair.find_deepest_contact() else {
+            return;
+        };
+        let owner = colliders.get(pair.collider1).expect("contact collider");
+        let point = owner.position() * contact.local_p1;
+        let velocity = |collider: &rapier3d::prelude::Collider| {
+            collider
+                .parent()
+                .and_then(|body| bodies.get(body))
+                .map_or(Vector::ZERO, |body| body.velocity_at_point(point))
+        };
+        let speed = (velocity(first) - velocity(second)).length();
+        self.0.lock().expect("impact lock").push(Impact {
+            point: point.to_array(),
+            speed,
+            user_data: [first.user_data, second.user_data],
+        });
+    }
+
+    fn handle_contact_force_event(
+        &self,
+        _: f32,
+        _: &rapier3d::prelude::RigidBodySet,
+        _: &rapier3d::prelude::ColliderSet,
+        _: &rapier3d::prelude::ContactPair,
+        _: f32,
+    ) {
+    }
+
+    fn handle_soft_body_tear_event(
+        &self,
+        _: &rapier3d::prelude::SoftBodySet,
+        _: &rapier3d::prelude::SoftBodyTearEvent,
+    ) {
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VehiclePose {
@@ -65,6 +146,8 @@ pub struct PhysicsWorld {
     auto_move_min: f32,
     engine_brake_force: f32,
     last_handbrake: bool,
+    braking: bool,
+    impacts: ImpactCollector,
 }
 
 impl PhysicsWorld {
@@ -101,6 +184,7 @@ impl PhysicsWorld {
                     InteractionTestMode::And,
                 ))
                 .density(if collider.sensor { 0.0 } else { 1.0 })
+                .active_events(ActiveEvents::COLLISION_EVENTS)
                 .user_data(VEHICLE_COLLIDER_FLAG | ((id.0 as u128) << 64));
             physics
                 .colliders
@@ -205,6 +289,8 @@ impl PhysicsWorld {
             auto_move_min: vehicle.auto_move_min,
             engine_brake_force: 0.0,
             last_handbrake: true,
+            braking: false,
+            impacts: ImpactCollector(std::sync::Mutex::new(Vec::with_capacity(64))),
         })
     }
 
@@ -233,6 +319,7 @@ impl PhysicsWorld {
         let direction = speed * chassis.linvel().length();
         let braking = (input.brake_reverse && direction > self.auto_move_min)
             || (input.accelerate && direction < -self.auto_move_min);
+        self.braking = braking;
         let drive_force = if drive_force.is_finite() {
             drive_force.max(0.0)
         } else {
@@ -290,7 +377,39 @@ impl PhysicsWorld {
     }
 
     pub fn step_physics(&mut self) {
-        self.physics.step();
+        self.impacts.0.lock().expect("impact lock").clear();
+        self.physics.step_with_events(&(), &self.impacts);
+    }
+
+    /// Contacts that started in the last step.
+    pub fn impacts(&self) -> std::sync::MutexGuard<'_, Vec<Impact>> {
+        self.impacts.0.lock().expect("impact lock")
+    }
+
+    /// Whether the last drive input used the service brake.
+    pub fn braking(&self) -> bool {
+        self.braking
+    }
+
+    pub fn wheel_contacts(&self) -> [WheelContact; 4] {
+        let pose = self.physics.bodies[self.chassis].position();
+        let mut result = [WheelContact::default(); 4];
+        for (wheel, &slot) in self.controller.wheels().iter().zip(&self.active_slots) {
+            let info = wheel.raycast_info();
+            result[slot] = WheelContact {
+                contact: info.is_in_contact,
+                suspension_length: info.suspension_length,
+                ground: info
+                    .ground_object
+                    .and_then(|handle| self.physics.colliders.get(handle))
+                    .map_or(0, |collider| collider.user_data),
+                rpm: self.wheel_rpm[slot],
+                radius: wheel.radius,
+                forward: (pose.rotation * Rotation::from_rotation_y(wheel.steering) * -Vector::Z)
+                    .to_array(),
+            };
+        }
+        result
     }
 
     pub fn wheel_support_count(&self) -> usize {

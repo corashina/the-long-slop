@@ -31,6 +31,7 @@ class Source:
         from UnityPy.helpers import TypeTreeHelper
         from UnityPy.helpers.TypeTreeGenerator import TypeTreeGenerator
         directory = steam_root / 'TheLongDrive_Data'
+        self.directory = directory
         self.env = UnityPy.load(*(str(directory / name) for name in (
             'level0', 'level1', 'sharedassets1.assets', 'sharedassets0.assets',
             'globalgamemanagers', 'globalgamemanagers.assets', 'resources.assets')))

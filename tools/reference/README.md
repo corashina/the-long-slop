@@ -11,7 +11,7 @@ tools/reference/.venv/Scripts/python.exe -m unittest discover -s tools/reference
 ```
 
 The exporter reads Steam app `1017180`, build `11140890`.
-It writes `home.gltf`, `lada.gltf`, `items.gltf`, `world.gltf`, buffers, textures, and `manifest.json` into `web/assets/reference/`.
+It writes `home.gltf`, `lada.gltf`, `items.gltf`, `world.gltf`, buffers, textures, `audio/*.wav`, and `manifest.json` into `web/assets/reference/`.
 Git ignores these files. Steam files remain unchanged.
 
 The home link comes from `homesickscript.FirstHome`.

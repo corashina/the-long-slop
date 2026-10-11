@@ -6,6 +6,7 @@ pub mod app;
 #[cfg(target_arch = "wasm32")]
 pub mod browser;
 
+pub mod audio;
 pub mod fluids;
 pub mod interaction;
 pub mod player;

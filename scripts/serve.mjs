@@ -14,6 +14,7 @@ const types = new Map([
   ['.gltf', 'model/gltf+json'],
   ['.bin', 'application/octet-stream'],
   ['.png', 'image/png'],
+  ['.wav', 'audio/wav'],
 ]);
 
 createServer(async (request, response) => {
@@ -33,16 +34,26 @@ createServer(async (request, response) => {
       response.writeHead(404).end('Not found');
       return;
     }
-    response.writeHead(200, {
+    // Media elements seek with byte ranges.
+    const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.range ?? '');
+    const start = range && range[1] ? Number(range[1]) : range && range[2] ? Math.max(0, file.size - Number(range[2])) : 0;
+    const end = range && range[1] && range[2] ? Math.min(Number(range[2]), file.size - 1) : file.size - 1;
+    if (range && (start > end || start >= file.size)) {
+      response.writeHead(416, { 'Content-Range': `bytes */${file.size}` }).end();
+      return;
+    }
+    response.writeHead(range ? 206 : 200, {
       'Content-Type': types.get(extname(path)) ?? 'application/octet-stream',
-      'Content-Length': file.size,
+      'Content-Length': end - start + 1,
+      'Accept-Ranges': 'bytes',
+      ...(range ? { 'Content-Range': `bytes ${start}-${end}/${file.size}` } : {}),
       'Cache-Control': 'no-store',
     });
     if (request.method === 'HEAD') {
       response.end();
       return;
     }
-    createReadStream(path).on('error', () => response.destroy()).pipe(response);
+    createReadStream(path, { start, end }).on('error', () => response.destroy()).pipe(response);
   } catch (error) {
     const code = error.code === 'ENOENT' || error.code === 'ENOTDIR' ? 404 : 400;
     response.writeHead(code).end(code === 404 ? 'Not found' : 'Invalid request');
