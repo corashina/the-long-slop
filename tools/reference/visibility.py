@@ -2,6 +2,10 @@
 from .source import source_id
 
 
+def renderer_visible(serialized_enabled: bool, component_classes: set[str]) -> bool:
+    return serialized_enabled and not component_classes.intersection({'digholescript2', 'TextMeshPro', 'TMP_SubMesh'})
+
+
 def normal_view_mask(masks):
     result=0
     for mask in masks:

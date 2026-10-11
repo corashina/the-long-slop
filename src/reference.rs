@@ -10,6 +10,9 @@ pub mod instruments;
 pub mod ui;
 pub use instruments::*;
 pub use ui::*;
+pub mod lighting;
+pub mod rendering;
+pub use lighting::*;
 
 pub const APP_ID: u32 = 1_017_180;
 pub const BUILD_ID: u32 = 11_140_890;
@@ -32,6 +35,8 @@ id!(SeatId, u32);
 id!(OpeningId, u32);
 id!(WheelSlotId, u8);
 id!(PartSlotId, u32);
+id!(LightId, u32);
+id!(LightControlId, u32);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -55,10 +60,19 @@ pub struct Transform {
     pub scale: [f32; 3],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetUsage {
+    UniqueScene,
+    RoadLampPrototype,
+    SkyPrototype,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssetRecord {
     pub material_count: u32,
+    pub usage: AssetUsage,
     pub id: AssetId,
     pub path: String,
     pub sha256: String,
@@ -198,80 +212,6 @@ pub enum TurnAction {
     CycleHeadlights,
     InteriorLight,
     ToggleHomeLight { source: SourceId },
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LightingReference {
-    pub headlights: u8,
-    pub handbrake: bool,
-    pub interior_light_mode: u8,
-    pub door_items: Vec<ItemId>,
-    pub door_limit: f32,
-    pub home_electronics_threshold: f32,
-    pub groups: Vec<LampGroupReference>,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LampControl {
-    Headlights,
-    Interior,
-    Home,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LampGroupReference {
-    pub source: SourceId,
-    pub owner: Option<ItemId>,
-    pub control: LampControl,
-    pub electronics_source: Option<SourceId>,
-    pub electronics_output: f32,
-    pub initial_on: bool,
-    pub initial_state: u8,
-    pub initial_target: u8,
-    pub initial_energy: f32,
-    pub energy_move: f32,
-    pub button: Option<LampButtonReference>,
-    pub states: Vec<LampStateReference>,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LampButtonReference {
-    pub node: NodeId,
-    pub on: NodeId,
-    pub off: NodeId,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LampStateReference {
-    pub intensity: f32,
-    pub lamps: Vec<LampReference>,
-    pub renderers: Vec<NodeId>,
-    pub material: Option<LampMaterialReference>,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LampMaterialReference {
-    pub source: SourceId,
-    pub asset: AssetId,
-    pub index: u32,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LampType {
-    Spot,
-    Point,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LampReference {
-    pub source: SourceId,
-    pub node: NodeId,
-    pub lamp_type: LampType,
-    pub color: [f32; 3],
-    pub intensity: f32,
-    pub range: f32,
-    pub outer_degrees: f32,
-    pub inner_degrees: f32,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -433,6 +373,7 @@ pub struct TankReference {
     /// Gasoline, oil, alcohol, water, blood, diesel.
     pub quantities_liters: [f32; 6],
     pub openings: Vec<OpeningId>,
+    pub no_drink: bool,
     pub no_fill_this: bool,
     pub no_fill_from: bool,
     pub slow_oil: bool,
@@ -743,6 +684,7 @@ pub struct WheelPartReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VehicleReference {
+    pub handbrake: bool,
     pub source: SourceId,
     pub body: BodyId,
     pub root: NodeId,
@@ -800,6 +742,7 @@ pub struct ReferenceManifest {
     pub ui: UiReference,
     pub instruments: InstrumentReference,
     pub library: LibraryProvenance,
+    pub lighting: LightingRecord,
     pub app_id: u32,
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
@@ -811,7 +754,6 @@ pub struct ReferenceManifest {
     pub pushables: Vec<PushReference>,
     pub anchors: Vec<AnchorRecord>,
     pub mechanisms: Vec<MechanismReference>,
-    pub lighting: LightingReference,
     pub wheel_slots: Vec<WheelSlotReference>,
     pub wheel_parts: Vec<WheelPartReference>,
     pub part_scan: PartScanReference,
@@ -869,6 +811,12 @@ fn hash(value: &str) -> bool {
 }
 
 impl ReferenceManifest {
+    pub fn expected_instances(&self) -> usize {
+        self.assets
+            .iter()
+            .filter(|a| a.usage == AssetUsage::UniqueScene)
+            .count()
+    }
     pub fn from_json(bytes: &[u8]) -> Result<Self, ReferenceError> {
         require(bytes.len() <= 64 * 1024 * 1024, "manifest size")?;
         let manifest: Self =
@@ -888,6 +836,19 @@ impl ReferenceManifest {
         require(
             self.app_id == APP_ID && self.build_id == BUILD_ID,
             "app/build",
+        )?;
+        self.lighting.validate(self)?;
+        require(
+            self.bodies.iter().all(|b| {
+                self.nodes.iter().any(|n| {
+                    n.id == b.node
+                        && self
+                            .assets
+                            .iter()
+                            .any(|a| a.id == n.asset && a.usage == AssetUsage::UniqueScene)
+                })
+            }),
+            "prototype body",
         )?;
         let asset_ids = ids(self.assets.iter().map(|r| r.id), "duplicate asset ID")?;
         let node_ids = ids(self.nodes.iter().map(|r| r.id), "duplicate node ID")?;
@@ -1299,9 +1260,9 @@ impl ReferenceManifest {
                 match &turn.action {
                     TurnAction::ToggleHomeLight { source } => require(
                         self.lighting
-                            .groups
+                            .controllers
                             .iter()
-                            .any(|g| g.source == *source && g.control == LampControl::Home),
+                            .any(|g| g.source == *source && g.kind == LightControllerKind::House),
                         "switch lamp link",
                     )?,
                     TurnAction::InteriorLight => {
@@ -1375,82 +1336,6 @@ impl ReferenceManifest {
                     .iter()
                     .find(|m| m.item == id)
                     .and_then(|m| m.child);
-            }
-        }
-        let lighting = &self.lighting;
-        require(
-            lighting.home_electronics_threshold.is_finite()
-                && lighting.home_electronics_threshold >= 0.0
-                && lighting.headlights <= 2
-                && lighting.interior_light_mode <= 2
-                && lighting.door_limit.is_finite()
-                && lighting.door_limit >= 0.0
-                && lighting
-                    .door_items
-                    .iter()
-                    .all(|id| mechanism_items.contains(id)),
-            "lighting controls",
-        )?;
-        ids(
-            lighting
-                .groups
-                .iter()
-                .map(|g| (&g.source.file, g.source.path_id)),
-            "lamp group source",
-        )?;
-        for g in &lighting.groups {
-            let state_count = match g.control {
-                LampControl::Headlights => 3,
-                LampControl::Interior | LampControl::Home => 2,
-            };
-            require(g.states.len() == state_count, "lamp state count")?;
-            require(
-                g.owner.is_none_or(|id| item_ids.contains(&id))
-                    && usize::from(g.initial_state) < g.states.len()
-                    && usize::from(g.initial_target) < g.states.len()
-                    && g.initial_energy.is_finite()
-                    && (0.0..=1.0).contains(&g.initial_energy)
-                    && g.electronics_output.is_finite()
-                    && g.electronics_output >= 0.0
-                    && g.energy_move.is_finite()
-                    && g.energy_move >= 0.0,
-                "lamp group",
-            )?;
-            if let Some(b) = &g.button {
-                require(
-                    [b.node, b.on, b.off].iter().all(|id| node_ids.contains(id)),
-                    "lamp button nodes",
-                )?;
-            }
-            for state in &g.states {
-                require(
-                    state.intensity.is_finite()
-                        && state.intensity >= 0.0
-                        && state.renderers.iter().all(|id| node_ids.contains(id))
-                        && state
-                            .material
-                            .as_ref()
-                            .is_none_or(|m| asset_ids.contains(&m.asset)),
-                    "lamp state",
-                )?;
-                for l in &state.lamps {
-                    require(
-                        node_ids.contains(&l.node)
-                            && finite(&l.color)
-                            && l.color.iter().all(|v| *v >= 0.0)
-                            && l.intensity.is_finite()
-                            && l.intensity >= 0.0
-                            && l.range.is_finite()
-                            && l.range > 0.0
-                            && l.outer_degrees.is_finite()
-                            && l.inner_degrees.is_finite()
-                            && l.inner_degrees >= 0.0
-                            && l.outer_degrees > 0.0
-                            && l.outer_degrees < 180.0
-                            && l.inner_degrees <= l.outer_degrees,
-                        "lamp parameters",
-                    )?;
-                }
             }
         }
         for r in &self.openings {

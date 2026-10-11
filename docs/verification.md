@@ -484,3 +484,182 @@ Verified package SHA-256:
 
 - WASM: `0aa817ef29683d1c0c9ce3e54f34a841629825445dc9f8c454b2ded5034440ea`.
 - Manifest: `0bd31e0f609768345f8a336a7bea2b305424264eec8684d95c66096cc5f8f33a`.
+
+## Day cycle and lamps: 2026-10-11
+
+The user approved [the lighting specification](superpowers/specs/2026-10-10-day-night-lighting-design.md) on 2026-10-10.
+Installed Steam build 11140890 remains the source authority.
+The selected cycle component is `level1:64920`.
+Assembly-CSharp SHA-256 is `9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e`.
+The manifest retains fifteen source hashes, ten controllers, seventeen light records, and eleven lighting textures.
+The checked source metadata run matches all fifteen installed input hashes.
+
+Final command checks use the isolated lighting checkout and Cargo target `/target/0aeee55818e76061`.
+Python passes 26 tests. Native Rust passes 147 tests; all 15 installed-export cases pass in the explicit ignored run.
+Formatting, release WASM, and matching wasm-bindgen pass after observation removal.
+The final browser package timestamp is 2026-10-11T13:08:25UTC. Its WASM size is 53065640 bytes.
+The final production source contains no temporary Task 7 observation system.
+The final production browser reaches Ready, enables Start, shows L, and reports no current GPU error.
+Its final seated night-low case renders wall beams and horizontal occlusion at 55 steps, with ignition on and engine off.
+Root captured `lighting-task7-final-night-low.jpg` and accepted the recorded limits.
+
+
+Source durations are day 1200, night 300, dawn 240, and dusk 180 seconds.
+Dawn and dusk lie within the day interval. Production startup begins at 240 seconds.
+The native lifecycle test freezes cycle time, fades, and switch movement during pause.
+It preserves those states through recovery and restores startup state through restart.
+The installed acceptance test checks source IDs, ranges, cones, shadow flags, material links, and exported file hashes.
+Native source tests cover both physical headlight aliases, cabin modes, five house switches, brake input, and reverse input.
+
+One `SourceLighting` owner retains imported scene nodes, textures, meshes, prepared material choices, and GPU buffers.
+Restart removes fixed light proxies and owned pole hierarchies before rebinding.
+Road pole identities use absolute source segment indices. Each active interval owns each pole once.
+Eleven 128-metre intervals permit at most fifteen poles with source 100-metre spacing.
+Road geometry and road lamps share the existing lateral admission rule: bands minus 1 through 1.
+Movement and rebasing update existing poses. Stream changes replace instances with shared handles.
+The steady lighting and sky paths update persistent uniform buffers and prepared material selections.
+The source audit found no resource creation in those covered steady paths. It does not measure complete-game heap allocation.
+
+### Browser evidence
+
+Root records the browser checks in ignored Task 3 through Task 7 reports and captures.
+The baseline Task 7 restart retains 38 of 38 old light and pole entities. This proves the renderer reset defect.
+The production-offset scenario preserves startup 240 and advances the existing elapsed cycle after Ready.
+The GREEN reset removes all 38 original entity IDs and restores cycle 240 with elapsed 0.
+Eighteen rebound snapshots retain 16 unique fixed IDs and 11 unique poles, with no original IDs.
+Imported node links and eleven source texture handles retain their exact identities.
+The existing restart input owns this transition.
+This elapsed advance tests renderer lifecycle. Native cycle tests provide timing rule evidence.
+Synthetic phase captures change the served startup offset. They provide image evidence, separate from production reset proof.
+
+Root captured walking and cockpit images at dawn, noon, dusk, and night from the same browser package.
+The walking poses match. The night cockpit differs by 2.85 mm after one extra physics step.
+Local driver pose, camera settings, source materials, and low-beam selection match across cockpit views.
+The four images show the parked car, closed garage, and source sky changes.
+Cockpit wall patches show low beams and interruption by horizontal geometry.
+The dark night image does not prove distinct parked-car or closed-door moon shadow edges.
+The noon procedural apron still clips.
+
+Earlier accepted views show wall beams, tail emission, white reverse lamps, house 1 through 4 output, cabin modes, and roadside patches.
+House 5 accepts aimed input, but its upward view lacks clear lamp pixels. Installed tests prove its output state.
+The two physical headlight records share one usable source action; the browser uses its canonical alias.
+Source ranges 50 and 250 metres remain numerical source checks. Close wall images do not measure those distances.
+The matched night road run crosses seams and rebases once. It retains 14 poles, 30 light registrations, and 68 shadow views.
+The run beyond 100 million metres retains those counts and shows distant warm patches.
+The synthetic dawn threshold view shows poles without warm lamp patches.
+
+The actual upload payload has one active radiance slot in daytime and twelve at night with eleven road lamps.
+The source enabled-proxy count matches those values. The parked fixture has 27 registrations.
+Reset clears registrations and radiance; rebound restores one active daytime slot out of 27 registrations.
+The loading marker count stays zero after Ready and after restart.
+These counts read source payload RGB and SourceLight.enabled. They exclude Bevy's zero-intensity native light fields.
+The temporary observer performs no driver GPU-buffer readback.
+
+Resource observations count asset storage and current instance registrations.
+Image mip payload bytes count retained CPU image data, including decoded mip chains.
+They exclude GPU alignment, render targets, framebuffer storage, and driver overhead.
+The custom 4000-square Depth32Float atlas holds 64000000 bytes; hard and soft bindings share that allocation.
+The source uniform holds 14800 bytes. GPU limits report 16384-pixel textures and 65536-byte uniform bindings.
+The garage observations retain 126 source materials, 126 standard materials, 97 images, 244 meshes, 11 targets, and 27 prepared choices.
+Their image mip payload totals 309788668 bytes through recovery and restart.
+
+| Settled phase at 1280 by 720 | Mean ms | Median ms | p95 ms |
+| --- | --- | --- | --- |
+| Night before recovery |31.5683|27.9|41.7|
+| Night after recovery |19.6475|20.8|27.8|
+| Day after restart |18.1421|20.8|27.7|
+
+Frame measurements use 240 consecutive requestAnimationFrame intervals in each settled phase.
+They measure browser frame pacing, including scheduling and application work. They do not isolate GPU time.
+The night movement run completes 190 metres with one rebase and 14 poles, 30 light registrations, and 68 shadow views.
+Its 240-frame rebase window spans originZ 0 to -2048, at steps 719 through 895.
+That window has mean 12.2396 ms, median 13.9 ms, p95 14 ms, and maximum 21 ms.
+Twelve movement batch means range 10.6196 through 16.8983 ms.
+Batch 9 retains a single 1118.1 ms interval of unproved cause. These measurements do not isolate GPU work.
+
+
+### Startup gates and expected warnings
+
+Required cookie failures and shader failures keep Start disabled and name the failed resource.
+Healthy production loads reach Ready.
+The final cookie gate names its missing SMIP. The final shader gate reports a Composer error.
+Both keep Start disabled. Root captured both failures, then accepted the healthy phase views.
+I stopped both dedicated fault servers after their checks. Production files retain their healthy resources.
+Temporary fault routes and observations stay outside production files.
+The exporter filters only the exact pinned pygltflib provisional-validator notice.
+It still runs the same schema validation and shows other warnings and validation errors.
+
+Bevy warns that its native WebGL shadow path supports one directional cascade.
+The custom source atlas consumes the four checked cascade transforms. Keep those four source bounds.
+The imported geometry also produces an unused TEXCOORD_2 warning.
+Covered source lighting and cloud shaders use UV0; the exporter retains extra source UV channels.
+These two named warnings remain expected. GPU validation errors, panics, and other warnings require inspection.
+
+### Source rendering limits
+
+No matched running original-game screenshot set exists. Source pixel parity remains unverified.
+The source uses a camera stack; this renderer uses one combined camera with source near and far bounds.
+Its 398-square shadow cells differ from source resolution. Native bias units and cascade edge blending remain unverified.
+The sky sphere uses 64 by 32 segments. Native sky geometry and star RNG remain unverified.
+Flare UV inset, exact physics queries, flare fog, and final color quantization remain unverified.
+The renderer uses zero extra flare inset and no extra flare fog term.
+Source mip bytes retain their original rows; native GPU cookie upload orientation remains unverified.
+The synthetic noon view clips the bright procedural apron. Full procedural surface parity remains outside this task.
+
+Dashboard node 861 selects source on material 325, with checked emission, a loaded texture, and visible entity flags.
+Nine checked seated-eye rays cross opaque Doboz before the back-facing icon. Its source texture crop contains the correct symbol.
+Part 74816 on root 34046 retains localRotationAfterMount [0, 180, 0] and a null saved slot.
+The checked Craft rule applies that angle, but the selected slot and executed mount path remain unresolved.
+No guessed panel rotation, opacity, culling, winding, or color change repairs that gap.
+The dashboard icon has no proved visible pixels in the current cockpit view.
+
+Close beam images do not establish far cutoff or all terrain, wall, and closed-door occlusion cases.
+Four-phase parked-car and closed-door shadow acceptance requires observable edges in each captured phase.
+Keep any dark or hidden edges as an acceptance limit.
+The embedded browser rejects ordinary pointer lock. Deterministic ignored input scenarios do not prove real mouse capture.
+Engine heat, fluids, portable flashlights, survival, sleep, weather events, audio, saves, multiplayer, and deployment retain the approved scope.
+
+## Local lighting merge: 2026-10-11
+
+Base: `af7d3af`. Lighting branch: `8af831f`. Target: local `master`.
+The merge retains the asset library, source menus, instruments, part mounting, and keyboard steering.
+Source lighting owns the cycle and lamp state. Removed headlights and doors retain their mounting guards.
+L uses bit 65536. Source light feedback uses context 10.
+Recovery runs from the pause menu. Lifecycle actions discard the sampled input frame.
+The exporter retains the source/catalog/library/runtime stages and exact archive paths.
+
+| Check | Result |
+| --- | --- |
+| Native suite | 225 passed; 41 installed-source cases skipped by default |
+| Installed-source cases | All 41 passed |
+| Exporter suite | 155 passed |
+| Browser unit and server tests | 23 passed |
+| Formatting and release WASM | Passed |
+| Matched wasm-bindgen package | Passed; version 0.2.129 |
+| Complete accepted library | 262,784 owners verified; accepted receipt unchanged |
+| Regenerated selected runtime | Five scenes; native contract, dependency hashes, lighting files, and exact file set passed |
+| Production browser | Ready; Start enabled; headlights control row present; no graphics errors or sampler conflict |
+| Integration review | No unresolved Critical or Important findings |
+
+The complete library receipt is `92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99`.
+Runtime promotion followed verification against that unchanged receipt.
+The first export stopped on an archive path mismatch. The strict consumer now uses the complete archive path.
+The final native fixture uses the complete source receipt list and unique synthetic node bindings.
+Installed dashboard checks resolve material source identity through the generated glTF index.
+
+The server test now requests a free port. The existing material research server on port 4199 remains running.
+The production preview uses loopback port 4181.
+The in-app browser still rejects mouse capture. This check establishes startup and rendering readiness.
+The earlier source pixel parity, dashboard visibility, and continuous browser route limits remain open.
+The managed lighting worktree remains available with ignored source exports and research files.
+Remote master has separate commits. The local merge does not integrate those commits or push changes.
+
+Final package hashes:
+
+- `web/pkg/my_summer_slop.js`: `aada77f02f281bcae1381481cd525e5e03fe785534a4ad00b2ddee6a3f938447`; 103,747 bytes.
+
+- `web/pkg/my_summer_slop_bg.wasm`: `7e1f3e2cf21060da504cf6399072f70b8b21e1142fc221c25b159dbf579045e7`; 53,552,956 bytes.
+
+- `web/assets/reference/manifest.json`: `ac94af1b9f30ef97a5e1a88fef911ce96ab2a328a9b54213b8beddc1fbf9d7b1`; 4,085,882 bytes.
+
+Logs use `.cache/lighting-merge-*.log`. The browser capture is `lighting-merged-master-ready.png` in the local visualization folder.

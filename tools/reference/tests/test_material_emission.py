@@ -18,7 +18,9 @@ class MaterialEmissionTests(unittest.TestCase):
                         "m_TexEnvs": [("_EmissionMap", {})],
                     },
                 }
-                source = SimpleNamespace(read=lambda _: data, resolve=lambda *_: None)
+                shader = SimpleNamespace(assets_file=reader.assets_file,path_id=2)
+                source = SimpleNamespace(read=lambda r: data if r is reader else {"m_Name":"Standard"},
+                    resolve=lambda *_: shader)
                 exporter = GltfExporter(source, Path(directory) / "lamp.gltf", None)
                 texture_calls = []
                 def texture(*args):

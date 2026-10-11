@@ -44,3 +44,9 @@ test('fluid_label_and_action_owner_have_independent_caches',()=>{
  assert.equal(m.update({...r,name:'Oil cap',fluidName:'Oil Tank'}),true);
  assert.match(m.fluidText,/Oil Tank:/);
 });
+
+test('light_switch_uses_source_icon_without_changing_mechanism_feedback',()=>{
+ assert.equal(selectIcon(1,10,false),'light_switch');
+ assert.equal(selectIcon(2,7,false),'door');
+ assert.equal(selectIcon(64|1,2,false),'fill');
+});

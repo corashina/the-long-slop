@@ -21,12 +21,10 @@ use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
 #[derive(Resource)]
-struct RuntimeReference(Arc<ReferenceManifest>);
+pub(crate) struct RuntimeReference(pub Arc<ReferenceManifest>);
 #[derive(Resource)]
-struct LampMaterials(Vec<Vec<Option<Handle<StandardMaterial>>>>);
-#[derive(Resource)]
-struct Drive {
-    runtime: GarageRuntime,
+pub(crate) struct Drive {
+    pub runtime: GarageRuntime,
     instruments: InstrumentState,
     input: FrameInput,
     clock: StepClock,
@@ -39,10 +37,13 @@ struct Drive {
     ready: bool,
     last_feedback: Option<FeedbackStamp>,
 }
+
 #[derive(Clone, Copy, PartialEq)]
 struct FeedbackStamp {
     actions: u32,
     context: u32,
+    light_control: u32,
+    lmb_use: bool,
     item: Option<ItemId>,
     opening: Option<OpeningId>,
     carrying: bool,
@@ -84,7 +85,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
             ready: false,
             last_feedback: None,
         })
-        .insert_resource(ClearColor(Color::srgb(0.64, 0.72, 0.73)))
+        .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(
             DefaultPlugins
                 .set(AssetPlugin {
@@ -103,20 +104,32 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
                     ..default()
                 }),
         )
+        .add_plugins(presentation::lighting::SourceLightingPlugin)
         .add_systems(Startup, setup)
         .add_systems(
             Update,
             (
                 check_ready,
+                presentation::lighting::bind_lighting,
+                presentation::lighting::lighting_readiness,
                 read_input,
                 advance_physics,
                 sync_world,
                 sync_imported,
                 sync_instruments,
+                presentation::lighting::sync_control_visuals,
                 update_camera,
                 update_hud,
             )
                 .chain(),
+        )
+        .add_systems(
+            PostUpdate,
+            presentation::lighting::sync_lighting
+                .after(bevy::transform::TransformSystems::Propagate)
+                .before(bevy::light::SimulationLightSystems::AssignLightsToClusters)
+                .before(bevy::light::SimulationLightSystems::UpdateDirectionalLightCascades)
+                .before(bevy::light::SimulationLightSystems::UpdateLightFrusta),
         )
         .run();
     Ok(())
@@ -127,6 +140,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     server: Res<AssetServer>,
+    gltf_extensions: Res<bevy::gltf::extensions::GltfExtensionHandlers>,
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
 ) {
@@ -134,60 +148,64 @@ fn setup(
     visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
     commands.insert_resource(visuals);
     commands.insert_resource(InstrumentVisuals::default());
-    presentation::reference::spawn(&mut commands, &server, &reference.0);
-    commands.insert_resource(LampMaterials(presentation::lighting::load_materials(
-        &server,
-        &reference.0,
-    )));
-    commands.spawn((
-        DirectionalLight {
-            color: Color::srgb(1.0, 0.91, 0.77),
-            illuminance: 9000.0,
-            ..default()
-        },
-        Transform::from_xyz(6.0, 9.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
-        (0..32).collect::<RenderLayers>(),
-    ));
+    presentation::lighting::load_lighting(&mut commands, &server, &reference.0.lighting);
+    presentation::lighting::load_lamp_materials(&mut commands, &gltf_extensions, &reference.0);
+    presentation::reference::load(&mut commands, &server, &reference.0);
     commands.spawn((
         DriveCamera,
         Camera3d::default(),
+        bevy::camera::Hdr,
         (0..32)
             .filter(|layer| reference.0.player.camera_culling_mask & (1u32 << layer) != 0)
             .collect::<RenderLayers>(),
         Projection::Perspective(PerspectiveProjection {
             fov: reference.0.player.field_of_view_degrees.to_radians(),
+            near: reference
+                .0
+                .lighting
+                .cameras
+                .iter()
+                .map(|c| c.startup_near_plane)
+                .fold(f32::INFINITY, f32::min),
+            far: reference
+                .0
+                .lighting
+                .cameras
+                .iter()
+                .map(|c| c.startup_far_plane)
+                .fold(0., f32::max),
             ..default()
         }),
         presentation::transform(drive.current),
         Msaa::Off,
-        bevy::core_pipeline::tonemapping::Tonemapping::Reinhard,
-        DistanceFog {
-            color: Color::srgb(0.64, 0.72, 0.73),
-            falloff: FogFalloff::Linear {
-                start: 110.0,
-                end: 430.0,
-            },
-            ..default()
-        },
+        bevy::core_pipeline::tonemapping::Tonemapping::None,
     ));
 }
 
 fn check_ready(
     mut commands: Commands,
     server: Res<AssetServer>,
+    gltfs: Res<Assets<bevy::gltf::Gltf>>,
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
     mut visuals: ResMut<ReferenceVisuals>,
     mut instruments: ResMut<InstrumentVisuals>,
-    gltfs: Res<Assets<bevy::gltf::Gltf>>,
     gltf_materials: Res<Assets<bevy::gltf::GltfMaterial>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
     mut frames: Local<u8>,
-    lamp_materials: Res<LampMaterials>,
+    lighting: Res<presentation::lighting::SourceLighting>,
 ) {
-    if drive.ready || visuals.failed {
+    if visuals.failed {
+        return;
+    }
+    if let presentation::lighting::RenderingState::Failed(error) = &lighting.state {
+        game_failure(error);
+        visuals.failed = true;
+        return;
+    }
+    if drive.ready {
         return;
     }
     for (path, handle) in &visuals.handles {
@@ -204,24 +222,22 @@ fn check_ready(
             visuals.failed = true;
             return;
         }
-        if !server.is_loaded_with_dependencies(handle.id()) {
+        if !server.is_loaded_with_dependencies(handle.id()) || !gltfs.contains(handle.id()) {
             return;
         }
-    }
-    for handle in lamp_materials.0.iter().flatten().flatten() {
-        if matches!(
-            server.get_load_state(handle.id()),
-            Some(LoadState::Failed(_))
-        ) {
-            game_failure("Cannot load lamp material.");
+        if gltfs.get(handle).unwrap().scenes.is_empty() {
+            game_failure(&format!("Required source scene 0 is missing from {path}"));
             visuals.failed = true;
             return;
         }
-        if !server.is_loaded_with_dependencies(handle.id()) {
-            return;
-        }
     }
-    let bind_lights = !visuals.bound;
+    if !lighting.materials_ready {
+        return;
+    }
+    if !visuals.spawned {
+        presentation::reference::spawn_scenes(&mut commands, &reference.0, &mut visuals, &gltfs);
+        return;
+    }
     match presentation::reference::bind(
         &mut commands,
         &reference.0,
@@ -230,15 +246,6 @@ fn check_ready(
         &primitives,
     ) {
         Ok(true) => {
-            if bind_lights {
-                presentation::lighting::bind(
-                    &mut commands,
-                    &reference.0,
-                    &visuals,
-                    &primitives,
-                    &lamp_materials.0,
-                );
-            }
             match instruments.bind(
                 &reference.0,
                 &visuals.nodes,
@@ -255,6 +262,15 @@ fn check_ready(
                     visuals.failed = true;
                     return;
                 }
+            }
+            match &lighting.state {
+                presentation::lighting::RenderingState::Loading => return,
+                presentation::lighting::RenderingState::Failed(error) => {
+                    game_failure(error);
+                    visuals.failed = true;
+                    return;
+                }
+                presentation::lighting::RenderingState::Ready => {}
             }
             *frames += 1;
             if *frames >= 2 {
@@ -279,7 +295,12 @@ fn clear_input(drive: &mut Drive) {
     drive.runtime.area.begin_step();
     drive.skip_elapsed = true;
 }
-fn read_input(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
+fn read_input(
+    mut commands: Commands,
+    reference: Res<RuntimeReference>,
+    mut drive: ResMut<Drive>,
+    mut source: ResMut<presentation::lighting::SourceLighting>,
+) {
     let actions = game_actions();
     let frame = FrameInput {
         held: game_keys(),
@@ -305,6 +326,7 @@ fn read_input(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             game_failure(&error.to_string());
             return;
         }
+        source.reset_instances(&mut commands);
         drive.instruments.reset(&reference.0.instruments);
         drive.camera = CameraMode::default();
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
@@ -319,7 +341,6 @@ fn read_input(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         drive.input.clear();
         return;
     }
-    // Discard the frame sampled before the lifecycle input clear.
     if actions & 31 != 0 {
         return;
     }
@@ -344,6 +365,9 @@ fn advance_physics(
         drive.skip_elapsed = false;
         return;
     }
+    drive
+        .runtime
+        .advance_lighting(&reference.0, time.delta_secs_f64());
     let steps = drive.clock.advance(time.delta_secs_f64());
     drive.frame_steps = steps as u32;
     for _ in 0..steps {
@@ -357,6 +381,9 @@ fn advance_physics(
         }
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
     }
+    drive
+        .runtime
+        .advance_light_fades(&reference.0, time.delta_secs_f64());
     drive.rendered = presentation::interpolate(drive.previous, drive.current, drive.clock.alpha());
 }
 fn sync_world(
@@ -378,35 +405,8 @@ fn sync_imported(
     drive: Res<Drive>,
     mut query: Query<(&BodyVisual, &mut Transform)>,
     mut items: Query<(&ItemVisual, &mut Transform), Without<BodyVisual>>,
-    mut caps: Query<
-        (&CapVisual, &mut Transform),
-        (
-            Without<BodyVisual>,
-            Without<ItemVisual>,
-            Without<presentation::lighting::LampButtonVisual>,
-        ),
-    >,
-    mut visibility: Query<
-        (&ValveVisibility, &mut Visibility),
-        Without<presentation::lighting::LampVisual>,
-    >,
-    mut lamps: Query<
-        (
-            &presentation::lighting::LampVisual,
-            &mut Visibility,
-            Option<&mut PointLight>,
-            Option<&mut SpotLight>,
-        ),
-        Without<ValveVisibility>,
-    >,
-    mut lamp_materials: Query<(
-        &presentation::lighting::LampMaterialVisual,
-        &mut MeshMaterial3d<StandardMaterial>,
-    )>,
-    mut lamp_buttons: Query<
-        (&presentation::lighting::LampButtonVisual, &mut Transform),
-        (Without<BodyVisual>, Without<ItemVisual>, Without<CapVisual>),
-    >,
+    mut caps: Query<(&CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
+    mut visibility: Query<(&ValveVisibility, &mut Visibility)>,
 ) {
     presentation::reference::sync(
         &drive.runtime.area,
@@ -416,12 +416,6 @@ fn sync_imported(
     );
     presentation::reference::sync_items(&drive.runtime.area, drive.clock.alpha(), &mut items);
     presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
-    presentation::lighting::sync(
-        &drive.runtime.lighting,
-        &mut lamps,
-        &mut lamp_materials,
-        &mut lamp_buttons,
-    );
 }
 fn sync_instruments(
     time: Res<Time<Real>>,
@@ -429,7 +423,8 @@ fn sync_instruments(
     mut drive: ResMut<Drive>,
     mut visuals: ResMut<InstrumentVisuals>,
     mut transforms: Query<&mut Transform, Without<DriveCamera>>,
-    mut materials: Query<&mut MeshMaterial3d<StandardMaterial>>,
+    mut materials: Query<&mut MeshMaterial3d<presentation::materials::SourceMaterial>>,
+    mut casters: Query<&mut MeshMaterial3d<StandardMaterial>>,
 ) {
     let run = &drive.runtime;
     let amount = |id: ItemId| {
@@ -446,7 +441,7 @@ fn sync_instruments(
         oil_liters: amount(reference.0.engine.oil_tank),
         temperature: run.engine_output.temperature,
         rpm: run.engine_output.rpm,
-        headlights: run.lighting.controls.headlights,
+        headlights: run.lighting.headlights(),
         local_ignition: run.engine_output.ignition
             && r.electronics_output > r.electronics_off_threshold,
         distance_m: run.trip_m,
@@ -459,6 +454,7 @@ fn sync_instruments(
         &drive.instruments,
         &mut transforms,
         &mut materials,
+        &mut casters,
     );
 }
 fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveCamera>>) {
@@ -561,6 +557,8 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         ],
         actions: info.actions.0,
         context: info.context as u32,
+        light_control: available.light_control.map_or(0, |id| id.0),
+        lmb_use: available.lmb_use,
         item: available.item,
         opening: available.opening,
         carrying: info.carrying,
@@ -606,6 +604,8 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             quantities[3],
             quantities[4],
             quantities[5],
+            stamp.light_control,
+            stamp.lmb_use,
         );
         drive.last_feedback = Some(stamp);
     }

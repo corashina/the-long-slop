@@ -54,7 +54,7 @@ Library-only verification does not use Docker.
 
 The exporter accepts Steam app `1017180`, build `11140890`, with Unity `2021.3.18f1`.
 It preserves the installed tree and complete object graph before converting development assets.
-It derives the selected garage, Lada, and supplies from the accepted library.
+It derives the garage, Lada, supplies, road pole, and sky from the accepted library.
 Git ignores recovered files and decompiled code. The exporter leaves Steam files unchanged.
 
 ## Stages and storage
@@ -69,7 +69,7 @@ The default stage is `runtime`. It runs missing prerequisites and verifies an ex
 | Source | `--stage source` | `.cache/reference-library/source/`, source hashes, and copied Steam manifest |
 | Catalog | `--stage catalog` | `catalog.json`, complete typed records, schemas, and binary sidecars |
 | Library | `--stage library` | `web/assets/library/`, category indexes, coverage, and acceptance manifest |
-| Runtime | `--stage runtime` | `web/assets/reference/`, three selected scenes and gameplay records |
+| Runtime | `--stage runtime` | `web/assets/reference/`, five selected scenes and gameplay records |
 
 ```powershell
 python -m tools.reference.export --stage library --verify
@@ -79,7 +79,8 @@ python -m tools.reference.export --stage runtime --verify
 Use the configured reference Python environment for these commands.
 Library verification checks source hashes, typed records, dependencies, required media conversions, and installed counts.
 Runtime verification also checks the native gameplay contract, selected file hashes, and exact scene dependencies.
-Runtime derivation reads accepted typed records, glTF buffers, and PNG files. It does not decode Unity meshes again.
+Runtime derivation reads accepted records, glTF buffers, PNG files, and hash-checked archived lighting byte ranges.
+It decodes each authored lighting mip without changing its size. It does not decode Unity meshes again.
 Prerequisite library verification still reads archived source data for semantic checks.
 
 Before writes, the exporter prints additional bytes, retained bytes, estimated peak bytes, and available disk bytes.
@@ -95,7 +96,7 @@ Repeated catalog commands verify accepted records and keep managed analysis. Inv
 The accepted source archive contains 183 files and 529,237,089 bytes.
 Shared records and managed analysis contain 268,954 files and 698,121,145 bytes.
 The published library contains 8,570 files and 3,105,818,196 bytes.
-The selected runtime contains 89 files and 73,261,688 bytes.
+Run runtime derivation to add lighting files to the accepted library export.
 
 Category indexes: [images](../../web/assets/library/images/index.json), [models](../../web/assets/library/models/index.json),
 [audio](../../web/assets/library/audio/index.json), [animations](../../web/assets/library/animations/index.json),
@@ -123,6 +124,10 @@ Body poses contain translation and rotation. `parent_body` identifies moving par
 Node extras contain the resolved source ID in `reference_id`.
 Bind this ID to the manifest's numeric node ID once during loading.
 Asset records include hashes for each referenced buffer and texture.
+Lighting records include separate hashes for shader records, native bytes, sprites, textures, and SMIP chains.
+The runtime verifier checks these files before promotion.
+Runtime lighting shader evidence retains accepted typed JSON and native program bytes.
+`lighting-evidence.json` binds its records to the accepted library receipt and checked UnityPlayer.dll.
 `parameter-evidence.json` records source fields, byte checks, startup rules, and material differences.
 
 Startup conditions use a fixed build-based seed and original source ranges.
@@ -131,7 +136,9 @@ The exporter selects the highest source LOD and retains all transform IDs.
 
 Mirror materials retain their authored factors. Live mirror camera output is omitted.
 Plate text is omitted because serialized glyphs contain obsolete editor text.
-Unity shaders map to glTF PBR. Verify their appearance during browser integration.
+The exporter maps supported Unity materials to glTF PBR and retains source properties and keywords.
+The source renderer ports the approved lighting, cookie, shadow, sky, cloud, and flare paths.
+Verify rendered appearance against a matched live source view before claiming pixel parity.
 
 `tests/common/reference.json` contains recovered scalar values and synthetic geometry.
 It supports native tests. It does not replace the installed export.
@@ -158,3 +165,23 @@ The remaining 26 clips retain native records and normalized tracks with binding 
 The source contains no morph channels. Synthetic morph fixtures cover geometry and channel validation.
 Animation playback, humanoid retargeting, Unity shaders, particles, live reflections, and native UI adapters remain unverified.
 See [final browser and command evidence](../../docs/verification.md).
+## Lighting authority and checks
+
+Use selected scene component links from build 11140890.
+The manifest retains cycle source `level1:64920`, ten controllers, seventeen light records, and eleven lighting textures.
+The cycle has day 1200 seconds, night 300 seconds, dawn 240 seconds, and dusk 180 seconds.
+Dawn and dusk lie within the day interval. Startup begins at 240 seconds.
+The headlight controllers retain 50-metre low beams and 250-metre high beams.
+Road poles retain 100-metre source spacing, 20-metre lamp range, and a 120-degree full cone.
+Road pole and light transforms stay local to the prototype during loading.
+
+Run installed lighting and lifecycle checks in the Docker toolchain:
+
+```sh
+cargo test --locked --test lighting_reference --test lighting_interaction --test starting_area -- --include-ignored
+```
+
+`production_lighting_records_match_selected_scene` checks source values, material links, and exported file hashes.
+It uses the toolchain's `sha256sum` utility. It adds no runtime dependency.
+The validator filters one exact pinned pygltflib provisional notice. Other warnings and validation errors remain visible.
+Keep source recovery, analysis, scenario patches, and captures outside Git.

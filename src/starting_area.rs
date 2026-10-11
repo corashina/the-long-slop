@@ -462,6 +462,7 @@ pub fn initial_vehicle_pose(reference: &ReferenceManifest) -> Result<VehiclePose
 }
 
 pub struct GarageRuntime {
+    pub lighting: crate::lighting::LightingState,
     pub physics: PhysicsWorld,
     pub area: StartingArea,
     pub stream: WorldStream,
@@ -469,7 +470,6 @@ pub struct GarageRuntime {
     pub engine_output: EngineOutput,
     pub trip_m: f64,
     pub handbrake: bool,
-    pub lighting: crate::interaction::lighting::LightingState,
     pub paused: bool,
     pub started: bool,
     pub attempts: u64,
@@ -482,6 +482,7 @@ pub struct GarageRuntime {
     auto_gear: usize,
     recovery_bounds: crate::reference::Bounds,
     recovery_bodies: Vec<RigidBodyHandle>,
+    light_owners: Vec<Option<ItemId>>,
 }
 
 impl GarageRuntime {
@@ -528,11 +529,11 @@ impl GarageRuntime {
             physics,
             area,
             stream,
+            lighting: crate::lighting::LightingState::new(&reference.lighting),
             engine: EngineState::new(&reference.engine),
             engine_output: EngineOutput::default(),
             trip_m: 0.0,
-            handbrake: reference.lighting.handbrake,
-            lighting: crate::interaction::lighting::LightingState::new(&reference.lighting),
+            handbrake: reference.vehicle.handbrake,
             paused: false,
             started: false,
             attempts: 0,
@@ -552,7 +553,48 @@ impl GarageRuntime {
                 .expect("validated neutral"),
             recovery_bounds,
             recovery_bodies: Vec::with_capacity(reference.items.len()),
+            light_owners: reference
+                .lighting
+                .controllers
+                .iter()
+                .map(|control| {
+                    let mut node = Some(control.node);
+                    while let Some(id) = node {
+                        if let Some(part) = reference.parts.iter().find(|part| part.node == id) {
+                            return Some(part.item);
+                        }
+                        node = reference
+                            .nodes
+                            .iter()
+                            .find(|node| node.id == id)
+                            .unwrap()
+                            .parent;
+                    }
+                    None
+                })
+                .collect(),
         })
+    }
+
+    pub fn advance_lighting(&mut self, reference: &ReferenceManifest, elapsed_seconds: f64) {
+        if self.started && !self.paused {
+            self.lighting
+                .cycle
+                .advance(&reference.lighting.cycle, elapsed_seconds);
+        }
+    }
+
+    pub fn advance_light_fades(&mut self, reference: &ReferenceManifest, elapsed_seconds: f64) {
+        if self.started && !self.paused {
+            for (index, owner) in self.light_owners.iter().enumerate() {
+                self.lighting.set_controller_mounted(
+                    index,
+                    owner.is_none_or(|item| self.area.items.mounted(item)),
+                );
+            }
+            self.lighting
+                .advance_fades(&reference.lighting, elapsed_seconds as f32);
+        }
     }
 
     pub fn step(&mut self, reference: &ReferenceManifest, input: FrameInput) {
@@ -595,6 +637,10 @@ impl GarageRuntime {
             self.notice = block.notice();
         }
         match action {
+            Some(InteractionAction::LightControl(control)) => {
+                self.lighting.use_control(&reference.lighting, control);
+                self.notice = "";
+            }
             Some(InteractionAction::WheelRemove(item)) => {
                 if let Some(slot) = self.wheels.slot_for_item(item) {
                     self.notice =
@@ -708,12 +754,10 @@ impl GarageRuntime {
             ) {
                 self.handbrake = !self.handbrake;
             }
-            self.lighting.apply(&action);
         }
-        self.lighting.step(
-            &self.area.interaction.mechanisms,
-            &self.area.items,
-            FIXED_DT,
+        self.lighting.update_cabin(
+            &reference.lighting,
+            self.area.interaction.cabin_door_values(&self.area.items),
         );
         self.area.sync_portable_mass(&mut self.physics);
         if seated
@@ -756,6 +800,9 @@ impl GarageRuntime {
             },
             input.held,
         );
+        if driving && input.pressed & keys::LIGHTS != 0 {
+            self.lighting.cycle_headlights(&reference.lighting);
+        }
         if driving && input.pressed & keys::SPACE != 0 {
             self.handbrake = !self.handbrake;
         }
@@ -881,6 +928,24 @@ impl GarageRuntime {
             steer: self.area.interaction.push_steering().unwrap_or(steering),
             handbrake: self.handbrake,
         };
+        let electronics = reference
+            .lighting
+            .controllers
+            .iter()
+            .find(|c| c.kind == crate::reference::LightControllerKind::Rear)
+            .unwrap();
+        let electronics_fine = electronics.electronics_source.is_none()
+            || electronics.electronics_output > electronics.electronics_threshold;
+        self.lighting.update_vehicle(
+            &reference.lighting,
+            crate::lighting::VehicleLightSample {
+                local_ignition: self.engine_output.ignition && electronics_fine,
+                brake: crate::simulation::braking(drive, direction, reference.vehicle.auto_move_min)
+                    as u8 as f32,
+                gear_ratio: reference.vehicle.gear_ratios[gear],
+                electronics_output: electronics.electronics_output,
+            },
+        );
         let drive_count = self.physics.driven_wheel_count();
         self.physics.set_engine_brake(
             self.engine_output.brake_torque_nm * ratio / (drive_count.max(1) as f32 * radius),

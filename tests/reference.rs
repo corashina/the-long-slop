@@ -325,6 +325,19 @@ fn production_export_matches_installed_contract() {
     assert_eq!(helper["extras"]["layer"], 18);
     assert_eq!(helper["extras"]["renderer_enabled"], true);
     assert!(helper.get("mesh").is_some());
+    let home: serde_json::Value =
+        serde_json::from_slice(&std::fs::read("web/assets/reference/home.gltf").unwrap()).unwrap();
+    let hole = home["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| {
+            node["extras"]["reference_id"]["file"] == "level1"
+                && node["extras"]["reference_id"]["path_id"] == 35014
+        })
+        .expect("source terrain hole node");
+    assert_eq!(hole["extras"]["renderer_enabled"], false);
+    assert!(hole.get("mesh").is_none());
     let faucet = manifest
         .openings
         .iter()
@@ -453,55 +466,6 @@ fn installed_mechanisms_keep_source_controls_and_window_tracks() {
         assert_eq!(window["slide"]["paths"].as_array().unwrap().len(), 1);
         assert_eq!(window["slide"]["rotations"][0]["angle_degrees"], -810.0);
         assert!(window["parent_item"].is_number());
-    }
-}
-
-#[test]
-fn lighting_state_counts_match_reachable_control_states() {
-    use my_summer_slop::reference::{LampControl, LampGroupReference, LampStateReference};
-    for (control, expected) in [
-        (LampControl::Headlights, 3),
-        (LampControl::Interior, 2),
-        (LampControl::Home, 2),
-    ] {
-        let mut manifest =
-            ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
-        manifest.lighting.groups.push(LampGroupReference {
-            source: manifest.player.source.clone(),
-            owner: None,
-            control,
-            electronics_source: None,
-            electronics_output: 1.0,
-            initial_on: false,
-            initial_state: 0,
-            initial_target: 0,
-            initial_energy: 0.0,
-            energy_move: 10.0,
-            button: None,
-            states: vec![
-                LampStateReference {
-                    intensity: 1.0,
-                    lamps: vec![],
-                    renderers: vec![],
-                    material: None
-                };
-                expected
-            ],
-        });
-        assert!(manifest.validate().is_ok());
-        for count in [1, expected - 1, expected + 1] {
-            let mut invalid = manifest.clone();
-            let state = invalid.lighting.groups[0].states[0].clone();
-            invalid.lighting.groups[0].states.resize(count, state);
-            let bytes = serde_json::to_vec(&invalid).unwrap();
-            let error = ReferenceManifest::from_json(&bytes)
-                .err()
-                .expect("Malformed state count must fail before Start");
-            assert!(
-                error.to_string().contains("lamp state count"),
-                "{control:?}: {error}"
-            );
-        }
     }
 }
 

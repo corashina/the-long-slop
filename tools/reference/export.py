@@ -10,6 +10,15 @@ from .library.types import Snapshot, LibraryReceipt
 APP_ID = 1017180
 BUILD_ID = 11140890
 SOURCE_WORK_ROOT = Path('.cache/reference-library')
+NATIVE_ENGINE_SHA256 = '553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86'
+
+
+def native_engine_evidence(steam_root: Path):
+    with (steam_root / 'UnityPlayer.dll').open('rb') as stream:
+        digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+    if digest != NATIVE_ENGINE_SHA256:
+        raise ValueError('UnityPlayer.dll differs from the checked native cloud noise source')
+    return {'file': 'UnityPlayer.dll', 'version': '2021.3.18f1 (3129e69bc0c7)', 'sha256': digest}
 
 
 def validate_build(steam_root: Path):
@@ -55,15 +64,40 @@ def provenance(library):
             'catalog_sha256':library.catalog_sha256, 'source_manifest_sha256':library.source_manifest_sha256}
 
 
+def lighting_resources(manifest):
+    resources = {}
+    def collect(value):
+        if isinstance(value, dict):
+            if 'path' in value and 'sha256' in value:
+                path = value['path']
+                if path in resources and resources[path]['sha256'] != value['sha256']:
+                    raise ValueError('Conflicting lighting resource hashes')
+                resources[path] = value
+            for child in value.values(): collect(child)
+        elif isinstance(value, list):
+            for child in value: collect(child)
+    collect(manifest.get('lighting', {}))
+    return list(resources.values())
+
+
 def validate_runtime_paths(manifest):
     assets = manifest.get('assets', [])
-    if {a['path'] for a in assets} != {'reference/home.gltf','reference/lada.gltf','reference/items.gltf'} or len(assets) != 3:
+    if {a['path'] for a in assets} != {'reference/home.gltf','reference/lada.gltf','reference/items.gltf','reference/road_lamp.gltf','reference/sky.gltf'} or len(assets) != 5:
         raise ValueError('Runtime must contain only the selected scenes')
+    resources = {item['path']:item['sha256'] for item in lighting_resources(manifest)}
     for asset in assets:
         for item in [asset, *asset['dependencies']]:
             name = item.get('file', item.get('path'))
+            if name in resources:
+                if item['sha256'] != resources[name]:
+                    raise ValueError('Lighting dependency hash differs from typed resource')
+                continue
             if not name.startswith('reference/') or len(Path(name).parts) != 2 or Path(name).suffix not in ('.gltf','.bin','.png'):
                 raise ValueError('Invalid selected runtime dependency')
+    for item in lighting_resources(manifest):
+        name = item['path']
+        if not name.startswith('reference/lighting-') or len(Path(name).parts) != 2 or Path(name).suffix not in ('.bin','.png','.smip','.txt','.json'):
+            raise ValueError('Invalid selected runtime lighting resource')
     sprites = manifest.get('ui', {}).get('sprites', [])
     paths = set()
     for sprite in sprites:
@@ -103,7 +137,7 @@ def verify_reference(output: Path, library) -> None:
         raise ValueError('Unsupported runtime provenance')
     validate_runtime_manifest(content)
     validate_runtime_paths(manifest)
-    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json'}
+    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json'}
     for asset in manifest['assets']:
         for record in [asset, *asset['dependencies']]:
             name = record.get('file', record.get('path')).removeprefix('reference/')
@@ -113,7 +147,8 @@ def verify_reference(output: Path, library) -> None:
         scene = output / asset['path'].removeprefix('reference/')
         document = json.loads(scene.read_bytes())
         uris = {entry['uri'] for entry in [*document.get('buffers', []), *document.get('images', [])]}
-        declared = {entry['file'].removeprefix('reference/') for entry in asset['dependencies']}
+        resources = {item['path'] for item in lighting_resources(manifest)}
+        declared = {entry['file'].removeprefix('reference/') for entry in asset['dependencies'] if entry['file'] not in resources}
         if uris != declared:
             raise ValueError('Runtime scene dependencies differ from selected receipts')
         validate_gltf(scene)
@@ -122,12 +157,17 @@ def verify_reference(output: Path, library) -> None:
         path = output / name
         checked(output, {'file':name, 'bytes':path.stat().st_size, 'sha256':sprite['sha256']})
         names.add(name)
+    from .lighting import validate_lighting_export
+    validate_lighting_export(manifest, output)
+    names.update(Path(item['path']).name for item in lighting_resources(manifest))
     if {p.relative_to(output).as_posix() for p in output.rglob('*') if p.is_file()} != names:
         raise ValueError('Unselected files in runtime')
 
 
 def _export_selected(source, output: Path, library, snapshot) -> None:
     from .gltf import export_gltf
+    from .lighting import recover_lighting, road_source, validate_lighting_export
+    from .source import key
     from .parameters import recover_parameters
     from .manifest import build_manifest
     from .conditions import prepare_conditions
@@ -151,6 +191,18 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     if source.read(source.get('level1',64898))['StartCar02']['m_PathID']!=206:
         raise ValueError('Selected Lada starter link differs from the required car')
     prepare_conditions(source,[root for readers in roots.values() for root in readers])
+    output.mkdir(parents=True, exist_ok=True)
+    native_engine = native_engine_evidence(snapshot.root)
+    source.lighting_root_assets={key(root):i for i,readers in enumerate(roots.values(),1) for root in readers}
+    _,pole=road_source(source)
+    clouds=source.get('level1',27217)
+    source.lighting_prototype_roots={key(pole),key(clouds)}
+    source.lighting_pole_root=key(pole)
+    source.lighting_root_assets[key(clouds)]=5
+    source.lighting_root_assets[key(pole)]=4
+    recover_lighting(source,[root for readers in roots.values() for root in readers],output)
+    roots['road_lamp']=[pole]
+    roots['sky']=[clouds]
     report = {}
     for name, readers in roots.items():
         report[name] = export_gltf((source,readers),output/f'{name}.gltf',library)
@@ -170,6 +222,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     manifest['library']=provenance(library.receipt)
     manifest['ui']=export_ui(source,output,library)
     manifest['instruments']=recover_instruments(source,manifest,report)
+    validate_lighting_export(manifest,output)
+    (output/'lighting-evidence.json').write_text(json.dumps({'lighting':manifest['lighting'],'byte_checks':source.evidence,'native_engine':native_engine,'fog_setting':source.lighting_fog_evidence,'library':manifest['library']},indent=2,allow_nan=False),encoding='utf-8')
     parameters['controls']={
         'source':{'file':'level0','path_id':16865},
         'defaults':{'object_move':manifest['player']['obj_move_sensitivity'],'object_rotation':manifest['player']['obj_rotation_sensitivity'],

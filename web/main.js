@@ -27,11 +27,12 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, chunks, colliders, abs
   menu?.sync(started,paused,travelM);
   feedback?.setVisible(started&&!paused&&Boolean(mode)&&menu?.model.state==='playing');
 };
-window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,noText,fluidName,condition,held,charge,throwing,rpm,ignition,running,starter,seated,handbrake,gas,oil,alcohol,water,blood,diesel)=>{
- record.actions=mask;record.context=context;record.name=name;record.notice=notice;record.carrying=carrying;record.amount=amount;record.capacity=capacity;record.hasName=hasName;record.noText=noText;record.fluidName=fluidName;
+window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,noText,fluidName,condition,held,charge,throwing,rpm,ignition,running,starter,seated,handbrake,gas,oil,alcohol,water,blood,diesel,control,lmbUse)=>{
+ record.actions=mask;record.context=context;record.lmbUse=lmbUse;record.name=name;record.notice=notice;record.carrying=carrying;record.amount=amount;record.capacity=capacity;record.hasName=hasName;record.noText=noText;record.fluidName=fluidName;
  record.condition=condition;record.held=held;record.throwCharge=charge;record.throwActive=throwing;
  const q=record.quantities;q[0]=gas;q[1]=oil;q[2]=alcohol;q[3]=water;q[4]=blood;q[5]=diesel;
  const state=window.gameState;
+ state.feedbackContext=context;state.availableActions=mask;state.lightControl=control;state.lmbUse=lmbUse;
  state.target=name;state.targetAction=mask;state.carrying=carrying;state.heldItem=held;state.throwCharge=charge;state.throwActive=throwing;
  state.rpm=rpm;state.ignition=ignition;state.running=running;state.starter=starter;state.seated=seated;state.handbrake=handbrake;
  feedback?.update(record);
@@ -52,7 +53,9 @@ async function load(){
  status.textContent='Loading interface assets...';
  await loadUiAssets(manifest.ui);
  menu=createMenu({canvas,ui:manifest.ui,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
- feedback=createFeedback(manifest.ui);
+ const switchIconUrl='./assets/'+manifest.lighting.switch_icon.path;
+ const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
+ feedback=createFeedback(manifest.ui,switchIconUrl);
  status.textContent='Loading game code...';
  const {default:init,run}=await import('./pkg/my_summer_slop.js');
  const wasm=await fetch('./pkg/my_summer_slop_bg.wasm');if(!wasm.ok)throw Error('Cannot load game code (HTTP '+wasm.status+').');

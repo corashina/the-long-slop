@@ -38,6 +38,7 @@ pub enum FeedbackContext {
     Mechanism = 7,
     Part = 8,
     Push = 9,
+    LightSwitch = 10,
 }
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ActionAvailability {
@@ -50,6 +51,9 @@ pub struct ActionAvailability {
     pub opening: Option<OpeningId>,
     pub slot: Option<SlotTarget>,
     pub consumes_mouse: bool,
+    pub light_control: Option<LightControlId>,
+    pub lmb_use: bool,
+    pub fill_reservation: Option<OpeningId>,
 }
 pub struct FluidFeedback<'a> {
     pub amount: f32,
@@ -65,6 +69,38 @@ pub struct InteractionFeedback<'a> {
     pub fluid: Option<FluidFeedback<'a>>,
 }
 impl InteractionState {
+    fn can_reserve_fill(&self, opening: &OpeningState, items: &ItemStore) -> bool {
+        let Some(held) = self.held() else {
+            return false;
+        };
+        if opening.valve <= 0. {
+            return false;
+        }
+        let (source, destination) = if self.supplies.contains(&opening.reference.tank) {
+            (opening.reference.tank, held)
+        } else {
+            (held, opening.reference.tank)
+        };
+        let destination_open = !self.supplies.contains(&opening.reference.tank)
+            || self
+                .openings
+                .iter()
+                .any(|o| o.reference.tank == destination && o.valve > 0.);
+        source != destination
+            && destination_open
+            && self
+                .tank_rules
+                .get(&source)
+                .is_some_and(|r| !r.no_fill_from)
+            && self
+                .tank_rules
+                .get(&destination)
+                .is_some_and(|r| !r.no_fill_this)
+            && items
+                .get(source)
+                .and_then(|i| i.fluid.as_ref())
+                .is_some_and(|f| f.mixture.total() > 0.)
+    }
     pub fn available_actions(
         &self,
         aim: &ResolvedAim,
@@ -152,6 +188,9 @@ impl InteractionState {
             && let Some(held) = self.held()
         {
             a.opening = Some(o.reference.id);
+            if self.can_reserve_fill(o, items) {
+                a.fill_reservation = Some(o.reference.id);
+            }
             let (source, dest) = if self.supplies.contains(&o.reference.tank) {
                 (o.reference.tank, held)
             } else {
@@ -301,6 +340,33 @@ impl InteractionState {
                 ActionMask::PUSH
             };
             a.context = FeedbackContext::Push;
+        }
+        let drink_guard = self.held().is_some_and(|held| {
+            self.tank_rules
+                .get(&held)
+                .is_some_and(|tank| !tank.no_drink)
+        });
+        let latched_fill = self
+            .fill_opening
+            .and_then(|id| self.openings.iter().find(|o| o.reference.id == id))
+            .is_some_and(|opening| self.can_reserve_fill(opening, items));
+        a.lmb_use = a.fill_reservation.is_none() && !latched_fill && !drink_guard;
+        if self.latched_mechanism.is_none()
+            && let Some(t) = aim.light_target
+            && t.distance.is_finite()
+            && t.distance >= 0.
+            && t.distance <= self.reach
+            && self.light_controls.get(&t.collider) == Some(&t.control)
+            && self.light_nodes.get(&t.collider) == Some(&t.node)
+            && !(self.seat_action_latched && self.usable_light_controls.contains(&t.control))
+        {
+            a.light_control = Some(t.control);
+            a.actions.0 |= ActionMask::USE;
+            a.actions.0 &= !(ActionMask::DOOR
+                | ActionMask::SWITCH
+                | ActionMask::PRIMARY_SWITCH
+                | ActionMask::SCROLL);
+            a.context = FeedbackContext::LightSwitch;
         }
         if player.seat().is_some()
             && a.actions.0

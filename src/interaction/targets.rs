@@ -1,7 +1,9 @@
 //! Collider identity and source action owners.
 use super::items::{ItemLocation, ItemStore};
 use super::{AimTarget, InteractionState, SLOT_SENSOR_FLAG, SlotTarget};
-use crate::reference::{ActionBinding, ColliderId, ItemId, ItemKind, WheelSlotId};
+use crate::reference::{
+    ActionBinding, ColliderId, ItemId, ItemKind, LightControlId, NodeId, WheelSlotId,
+};
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
 use rapier3d::math::Vector;
 use rapier3d::prelude::{ColliderHandle, QueryFilter, Ray};
@@ -25,8 +27,17 @@ impl InteractionBlock {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LightAim {
+    pub node: NodeId,
+    pub collider: ColliderId,
+    pub distance: f32,
+    pub point: [f32; 3],
+    pub control: LightControlId,
+}
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ResolvedAim {
+    pub light_target: Option<LightAim>,
     pub use_target: Option<AimTarget>,
     pub grab_target: Option<AimTarget>,
     pub installation_target: Option<AimTarget>,
@@ -42,7 +53,9 @@ impl ResolvedAim {
         let identity = |target: Option<AimTarget>| {
             target.map(|target| (target.collider, target.item, target.slot))
         };
-        identity(self.use_target) == identity(other.use_target)
+        self.light_target.map(|t| (t.collider, t.control))
+            == other.light_target.map(|t| (t.collider, t.control))
+            && identity(self.use_target) == identity(other.use_target)
             && identity(self.grab_target) == identity(other.grab_target)
             && identity(self.installation_target) == identity(other.installation_target)
             && identity(self.filling_target) == identity(other.filling_target)
@@ -52,6 +65,11 @@ impl ResolvedAim {
             && self.installation_block == other.installation_block
     }
     pub fn rebase(&mut self, shift: [f32; 3]) {
+        if let Some(target) = &mut self.light_target {
+            for (point, shift) in target.point.iter_mut().zip(shift) {
+                *point -= shift;
+            }
+        }
         for target in [
             &mut self.use_target,
             &mut self.grab_target,
@@ -142,6 +160,7 @@ impl InteractionState {
         let view = to_rapier(view);
         let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
         let mut aim = ResolvedAim {
+            light_target: self.query_light(physics, &ray),
             use_target: self.query_action(physics, &ray, items, QueryAction::Use),
             grab_target: self.query_action(physics, &ray, items, QueryAction::Grab),
             installation_target: self.query_action(physics, &ray, items, QueryAction::Install),
@@ -208,6 +227,7 @@ impl InteractionState {
             aim.installation_target = None;
         }
         if self.held().is_some()
+            || aim.light_target.is_some()
             || aim.use_target.is_some()
             || aim.grab_target.is_some()
             || aim.installation_target.is_some()
@@ -248,6 +268,33 @@ impl InteractionState {
 
     pub(super) fn is_wheel(&self, item: ItemId) -> bool {
         matches!(self.kinds.get(&item), Some(ItemKind::Wheel | ItemKind::Rim))
+    }
+
+    fn query_light(&self, physics: &PhysicsWorld, ray: &Ray) -> Option<LightAim> {
+        let mask = self.action_masks.use_mask;
+        let held_body = self.carry.body();
+        let surfaces = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
+            let id = ColliderId((collider.user_data >> 64) as u32);
+            collider.is_enabled()
+                && collider.collision_groups().memberships.bits() & mask != 0
+                && (held_body.is_none() || collider.parent() != held_body)
+                && (self.player_body.is_none() || collider.parent() != self.player_body)
+                && (!collider.is_sensor() || self.light_controls.contains_key(&id))
+                && !collider
+                    .shape()
+                    .contains_point(collider.position(), ray.origin)
+        };
+        let (handle, hit) = physics
+            .queries(QueryFilter::default().predicate(&surfaces))
+            .cast_ray_and_get_normal(ray, self.reach, true)?;
+        let collider = ColliderId((physics.rapier().colliders[handle].user_data >> 64) as u32);
+        Some(LightAim {
+            node: *self.light_nodes.get(&collider)?,
+            collider,
+            control: *self.light_controls.get(&collider)?,
+            distance: hit.time_of_impact,
+            point: ray.point_at(hit.time_of_impact).to_array(),
+        })
     }
 
     fn supports_use(&self, item: ItemId) -> bool {

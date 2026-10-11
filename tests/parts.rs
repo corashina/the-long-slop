@@ -37,6 +37,49 @@ fn detach(g: &mut GarageRuntime, item: ItemId) {
         .sync_parts(&mut g.area.items, &mut g.physics)
         .unwrap();
 }
+fn settle_lamps(g: &mut GarageRuntime, reference: &ReferenceManifest) {
+    g.started = true;
+    for _ in 0..20 {
+        g.step(reference, FrameInput::default());
+        g.advance_light_fades(reference, 0.02);
+    }
+}
+fn node_belongs_to(
+    reference: &ReferenceManifest,
+    mut node: my_summer_slop::reference::NodeId,
+    owner: ItemId,
+) -> bool {
+    let owner_node = reference
+        .items
+        .iter()
+        .find(|item| item.id == owner)
+        .unwrap()
+        .node;
+    loop {
+        if node == owner_node {
+            return true;
+        }
+        let Some(parent) = reference
+            .nodes
+            .iter()
+            .find(|record| record.id == node)
+            .unwrap()
+            .parent
+        else {
+            return false;
+        };
+        node = parent;
+    }
+}
+fn lamp_output(g: &GarageRuntime, id: my_summer_slop::reference::LightId) -> f32 {
+    let output = g
+        .lighting
+        .light_outputs()
+        .iter()
+        .find(|output| output.id == id)
+        .unwrap();
+    if output.enabled { output.intensity } else { 0. }
+}
 #[test]
 #[ignore = "requires installed source export"]
 fn hubcap_cover_blocks_wheel_removal_until_removed() {
@@ -444,22 +487,27 @@ fn detached_lamps_turn_off_and_compatible_remount_restores_pose() {
         .filter(|p| p.part_types.iter().any(|t| t == "roundheadlight"))
         .map(|p| p.item)
         .collect();
-    g.lighting.controls.headlights = 1;
-    for _ in 0..20 {
-        g.lighting
-            .step(&g.area.interaction.mechanisms, &g.area.items, 0.02);
-    }
-    let group = r
+    g.lighting.cycle_headlights(&r.lighting);
+    settle_lamps(&mut g, &r);
+    let controller = r
         .lighting
-        .groups
+        .controllers
         .iter()
-        .position(|lamp| lamp.owner == Some(lamps[0]))
+        .find(|controller| {
+            controller.kind == my_summer_slop::reference::LightControllerKind::Headlight
+                && node_belongs_to(&r, controller.node, lamps[0])
+        })
         .unwrap();
-    assert!(g.lighting.output(group, 1) > 0.);
+    let light = controller
+        .states
+        .iter()
+        .find(|state| state.signal == my_summer_slop::reference::LampSignal::Low)
+        .unwrap()
+        .lights[0];
+    assert!(lamp_output(&g, light) > 0.);
     detach(&mut g, lamps[0]);
-    g.lighting
-        .step(&g.area.interaction.mechanisms, &g.area.items, 0.02);
-    assert_eq!(g.lighting.output(group, 1), 0.);
+    settle_lamps(&mut g, &r);
+    assert_eq!(lamp_output(&g, light), 0.);
     let slot = r
         .part_slots
         .iter()
@@ -495,11 +543,8 @@ fn detached_lamps_turn_off_and_compatible_remount_restores_pose() {
         (Vector::from_array(actual.position) - Vector::from_array(expected.position)).length()
             < 1e-4
     );
-    for _ in 0..20 {
-        g.lighting
-            .step(&g.area.interaction.mechanisms, &g.area.items, 0.02);
-    }
-    assert!(g.lighting.output(group, 1) > 0.);
+    settle_lamps(&mut g, &r);
+    assert!(lamp_output(&g, light) > 0.);
 }
 #[test]
 #[ignore = "requires installed source export"]
@@ -537,17 +582,23 @@ fn missing_door_does_not_power_the_cabin_lamp() {
             0.02,
         );
     }
-    for _ in 0..20 {
-        g.lighting
-            .step(&g.area.interaction.mechanisms, &g.area.items, 0.02);
-    }
-    assert!(g.lighting.controls.interior_light);
+    let cabin = r
+        .lighting
+        .controllers
+        .iter()
+        .find(|controller| controller.kind == my_summer_slop::reference::LightControllerKind::Cabin)
+        .unwrap();
+    let light = cabin
+        .states
+        .iter()
+        .find(|state| state.signal == my_summer_slop::reference::LampSignal::Cabin)
+        .unwrap()
+        .lights[0];
+    settle_lamps(&mut g, &r);
+    assert!(lamp_output(&g, light) > 0.);
     detach(&mut g, door);
-    for _ in 0..20 {
-        g.lighting
-            .step(&g.area.interaction.mechanisms, &g.area.items, 0.02);
-    }
-    assert!(!g.lighting.controls.interior_light);
+    settle_lamps(&mut g, &r);
+    assert_eq!(lamp_output(&g, light), 0.);
 }
 #[test]
 #[ignore = "requires installed source export"]

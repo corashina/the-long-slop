@@ -69,6 +69,22 @@ Use bright green for fluid text and source action labels.
 Use black text shadows for contrast.
 The error panel uses the recorded dark red.
 
+### Scene lighting
+
+Use the installed build's material and lighting records for imported objects.
+Keep the existing procedural terrain and road materials.
+Source sky, clouds, stars, ambient light, and fog follow the active cycle.
+Source lamp choices retain authored material links, emission, cookies, and shadow flags.
+Use one `SourceLighting` owner and one shared material cache.
+Keep cycle values in persistent uniform buffers. Select prepared lamp handles during updates.
+Retain imported scene nodes and shared assets through recovery and restart.
+Replace light proxies and road pole instances on restart.
+Keep loading markers on warmup instances only.
+
+The renderer uses WebGL2 and a shared 4000-square shadow atlas.
+Each shadow cell has a 398-square usable viewport.
+Read `docs/verification.md` before claiming source pixel parity.
+
 ## Typography
 
 Use self-hosted Liberation Sans 2.1.5 for menus. Keep its license and provenance.
@@ -99,6 +115,7 @@ Tint them once during loading. Preserve alpha and source color.
 Use a black text shadow of 2px 2px 2px.
 Use 3px 3px 2px for fluid text.
 Keep keyboard focus visible with a two-pixel white outline.
+Use source directional illumination and cycle fog for scene depth.
 
 ## Shapes
 

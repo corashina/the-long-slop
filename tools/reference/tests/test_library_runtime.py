@@ -18,7 +18,7 @@ class RuntimeTests(unittest.TestCase):
         from tools.reference.export import validate_runtime_paths
         with self.assertRaises(ValueError): validate_runtime_paths({'assets':[{'path':'library/models/unused.gltf','dependencies':[]}]})
         manifest = {'assets': [{'path': f'reference/{name}.gltf', 'dependencies': []}
-                               for name in ('home', 'lada', 'items')]}
+                               for name in ('home', 'lada', 'items', 'road_lamp', 'sky')]}
         validate_runtime_paths(manifest)
         manifest['ui']={'sprites':[{'path':'reference/ui-test-3.png','source':{'file':'test','path_id':3}}]}
         validate_runtime_paths(manifest)
@@ -28,6 +28,33 @@ class RuntimeTests(unittest.TestCase):
         manifest['assets'][0]['dependencies'].append({'file': 'reference/unused.wav'})
         with self.assertRaisesRegex(ValueError, 'Invalid selected runtime dependency'):
             validate_runtime_paths(manifest)
+
+    def test_lighting_dependency_receipts_require_matching_typed_hashes(self):
+        from tools.reference.export import validate_runtime_paths
+        manifest={'assets':[{'path':f'reference/{name}.gltf','dependencies':[]} for name in ('home','lada','items','road_lamp','sky')]}
+        resource={'path':'reference/lighting-test-1.smip','sha256':'a'*64}
+        manifest['lighting']={'textures':[resource]}
+        manifest['assets'][0]['dependencies']=[{'file':resource['path'],'sha256':resource['sha256']}]
+        validate_runtime_paths(manifest)
+        manifest['assets'][0]['dependencies'][0]['sha256']='b'*64
+        with self.assertRaisesRegex(ValueError,'Lighting dependency hash'):validate_runtime_paths(manifest)
+        manifest['assets'][0]['dependencies']=[{'file':'reference/unused.smip','sha256':'a'*64}]
+        with self.assertRaisesRegex(ValueError,'Invalid selected runtime dependency'):validate_runtime_paths(manifest)
+
+    def test_archived_lighting_ranges_reject_changes_and_out_of_bounds_reads(self):
+        import hashlib
+        from types import SimpleNamespace as NS
+        from tools.reference.library.reader import LibraryReader
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);path=root/'source.bin';path.write_bytes(b'accepted source')
+            reader=LibraryReader.__new__(LibraryReader)
+            reader.snapshot=NS(root=root)
+            reader.source_files={'source.bin':NS(bytes=15,sha256=hashlib.sha256(path.read_bytes()).hexdigest())}
+            reader.verified_source_files={}
+            self.assertEqual(reader.source_range('source.bin',9,6),b'source')
+            with self.assertRaisesRegex(ValueError,'exceeds file'):reader.source_range('source.bin',10,6)
+            path.write_bytes(b'changed source!')
+            with self.assertRaisesRegex(ValueError,'hash mismatch'):reader.source_range('source.bin',0,1)
 
     def test_failed_runtime_promotion_restores_previous_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -167,17 +194,33 @@ class RuntimeContractTests(unittest.TestCase):
         receipt=NS(manifest_sha256='a'*64,catalog_sha256='b'*64,source_manifest_sha256='c'*64)
         manifest=json.loads((Path(__file__).resolve().parents[3]/'tests/common/reference.json').read_bytes())
         manifest['library']=provenance(receipt)
-        manifest['assets'].append({'id':3,'material_count':0,'path':'reference/items.gltf','sha256':'a'*64,'root':{'file':'fixture','path_id':999},'dependencies':[]})
+        manifest['assets'].append({'id':5,'usage':'unique_scene','material_count':0,'path':'reference/items.gltf','sha256':'a'*64,'root':{'file':'fixture','path_id':999},'dependencies':[]})
         for asset in manifest['assets']:
             scene={'asset':{'version':'2.0'},'nodes':[],'scenes':[{'nodes':[]}],'scene':0}
             content=json.dumps(scene).encode()
             (root/Path(asset['path']).name).write_bytes(content)
-            asset['sha256']=hashlib.sha256(content).hexdigest();asset['dependencies']=[]
+            asset['sha256']=hashlib.sha256(content).hexdigest();asset['dependencies']=[d for d in asset['dependencies'] if d['file'].startswith('reference/lighting-')]
         for sprite in manifest.get('ui', {}).get('sprites', []):
             content=b'fixture sprite bytes'
             (root/Path(sprite['path']).name).write_bytes(content)
             sprite['sha256']=hashlib.sha256(content).hexdigest()
-        for name in ('geometry-evidence.json','parameter-evidence.json','library-selection.json'):
+        from tools.reference.export import lighting_resources
+        def update_resource_hashes(value):
+            if isinstance(value,dict):
+                if 'path' in value and 'sha256' in value:
+                    value['sha256']=hashlib.sha256(b'fixture lighting bytes').hexdigest()
+                for child in value.values():update_resource_hashes(child)
+            elif isinstance(value,list):
+                for child in value:update_resource_hashes(child)
+        update_resource_hashes(manifest['lighting'])
+        for resource in lighting_resources(manifest):
+            content=b'fixture lighting bytes'
+            (root/Path(resource['path']).name).write_bytes(content)
+            resource['sha256']=hashlib.sha256(content).hexdigest()
+            for asset in manifest['assets']:
+                for dependency in asset['dependencies']:
+                    if dependency['file']==resource['path']:dependency['sha256']=resource['sha256']
+        for name in ('geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json'):
             (root/name).write_text('{}')
         return manifest,receipt
 
@@ -185,12 +228,12 @@ class RuntimeContractTests(unittest.TestCase):
         (root/'manifest.json').write_text(json.dumps(manifest))
 
     def test_runtime_contract_accepts_current_fixture(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'):
             root=Path(tmp);manifest,receipt=self.runtime(root);self.save(root,manifest)
             verify_reference(root,receipt)
 
     def test_runtime_contract_rejects_missing_records(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'):
             root=Path(tmp);manifest,receipt=self.runtime(root)
             for field in ('app_id','build_id','nodes','player','vehicle','colliders'):
                 incomplete=dict(manifest);del incomplete[field];self.save(root,incomplete)
@@ -200,7 +243,7 @@ class RuntimeContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'Runtime manifest contract'):verify_reference(root,receipt)
 
     def test_runtime_contract_rejects_wrong_build_and_broken_relationships(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'):
             root=Path(tmp);manifest,receipt=self.runtime(root)
             manifest['build_id']=0;self.save(root,manifest)
             with self.assertRaisesRegex(ValueError,'Runtime manifest contract'):verify_reference(root,receipt)
@@ -209,7 +252,7 @@ class RuntimeContractTests(unittest.TestCase):
 
     def test_runtime_cli_verify_rejects_missing_gameplay_records(self):
         from tools.reference.export import main
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'):
             root=Path(tmp);manifest,receipt=self.runtime(root);del manifest['player'];self.save(root,manifest)
             before={p.name:(p.read_bytes(),p.stat().st_mtime_ns) for p in root.iterdir()}
             with patch('tools.reference.export.stage_library',return_value=receipt),self.assertRaisesRegex(ValueError,'Runtime manifest contract'):
@@ -233,7 +276,7 @@ class RuntimeContractTests(unittest.TestCase):
     def test_unavailable_validator_preserves_accepted_runtime_before_promotion(self):
         from types import SimpleNamespace as NS
         from tools.reference.export import derive_reference
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'):
             root=Path(tmp);accepted=root/'reference';accepted.mkdir()
             (accepted/'manifest.json').write_text('accepted runtime')
             before=(accepted/'manifest.json').read_bytes(),(accepted/'manifest.json').stat().st_mtime_ns

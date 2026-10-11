@@ -56,6 +56,9 @@ class LibraryReader:
                 identity = ObjectId(**value['source'])
                 if identity in self.exports: raise ValueError('Duplicate library owner')
                 self.exports[identity] = value
+        self.source_files = {r.file:r for r in snapshot.files}
+        self.source_objects = {ObjectId(**v['source']):v for v in self.catalog['objects']}
+        self.verified_source_files = {}
         self.selected_records = set()
         self.selected_meshes = set()
         self.selected_textures = set()
@@ -111,3 +114,46 @@ class LibraryReader:
         checked(self.root, record)
         self.selected_sprites.add(source)
         return self.root / record['file']
+
+    def source_range(self, name, offset, size):
+        from .archive import sha256
+        record = self.source_files[name]
+        path = self.snapshot.root / name
+        _check_path(path, self.snapshot.root.resolve())
+        before = path.stat()
+        signature = (before.st_size, before.st_mtime_ns)
+        if self.verified_source_files.get(name) != signature:
+            if before.st_size != record.bytes or sha256(path) != record.sha256:
+                raise ValueError(f'Archived source hash mismatch: {name}')
+            self.verified_source_files[name] = signature
+        if offset < 0 or size < 0 or offset + size > record.bytes:
+            raise ValueError(f'Archived source range exceeds file: {name}')
+        with path.open('rb') as stream:
+            stream.seek(offset)
+            content = stream.read(size)
+        after = path.stat()
+        if (after.st_size, after.st_mtime_ns) != signature:
+            raise ValueError('Archived source changed during read')
+        if len(content) != size: raise ValueError('Incomplete archived source range')
+        return content
+
+    def raw_object(self, source: ObjectId):
+        self.record(source)
+        record = self.source_objects[source]
+        name = f'TheLongDrive_Data/{source.file}'
+        if self.source_files[name].sha256 != record['container_sha256']:
+            raise ValueError('Archived object container mismatch')
+        return self.source_range(name, record['offset'], record['bytes'])
+
+    def texture_data(self, source: ObjectId):
+        data = self.record(source)
+        stream = data['m_StreamData']
+        if stream['size']:
+            return self.source_range(f"TheLongDrive_Data/{stream['path']}", stream['offset'], stream['size'])
+        payload = data['image data']
+        return checked(self.records_root, payload['$binary'])
+
+    def typed_payload(self, source: ObjectId):
+        self.record(source)
+        name = f'{source.file}/{source.path_id}.json'
+        return checked(self.records_root, self.record_files[name])

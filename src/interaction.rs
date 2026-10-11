@@ -2,20 +2,20 @@ pub mod carry;
 pub mod feedback;
 pub mod items;
 pub mod labels;
-pub mod lighting;
 pub mod mechanisms;
 pub mod parts;
 pub mod push;
 pub mod targets;
 pub mod wheels;
 use feedback::ActionMask;
-pub use targets::{InteractionBlock, ResolvedAim};
+pub use targets::{InteractionBlock, LightAim, ResolvedAim};
 
 use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
 use crate::reference::{
-    ActionBinding, ActionMasks, BodyId, ColliderId, ItemId, ItemKind, OpeningId, OpeningRecord,
-    PartSlotId, ReferenceError, ReferenceManifest, SeatId, TankRole, WheelSlotId,
+    ActionBinding, ActionMasks, BodyId, ColliderId, ItemId, ItemKind, LightControlId,
+    LightControllerKind, NodeId, OpeningId, OpeningRecord, PartSlotId, ReferenceError,
+    ReferenceManifest, SeatId, TankRole, WheelSlotId,
 };
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
@@ -43,6 +43,7 @@ pub enum SlotTarget {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum InteractionAction {
+    LightControl(LightControlId),
     Pickup(ItemId),
     Drop(ItemId),
     Throw(ItemId),
@@ -113,6 +114,12 @@ struct SeatState {
 }
 
 pub struct InteractionState {
+    light_controls: HashMap<ColliderId, LightControlId>,
+    light_nodes: HashMap<ColliderId, NodeId>,
+    cabin_doors: [Option<(ItemId, ItemId)>; 4],
+    seat_action_latched: bool,
+    usable_light_controls: HashSet<LightControlId>,
+    fill_opening: Option<OpeningId>,
     kinds: HashMap<ItemId, ItemKind>,
     slot_fits: HashMap<WheelSlotId, HashSet<ItemId>>,
     tire_fits: HashSet<(ItemId, ItemId)>,
@@ -146,6 +153,7 @@ pub struct InteractionState {
 
 #[derive(Clone, Copy)]
 struct TankRules {
+    no_drink: bool,
     no_fill_this: bool,
     no_fill_from: bool,
     slow_oil: bool,
@@ -283,7 +291,62 @@ impl InteractionState {
                 }
             }
         }
+        let mut light_controls = HashMap::new();
+        for control in &reference.lighting.controllers {
+            for &collider in &control.aim_colliders {
+                if let Some(previous) = light_controls.get(&collider) {
+                    let previous = reference
+                        .lighting
+                        .controllers
+                        .iter()
+                        .find(|c| c.id == *previous)
+                        .unwrap();
+                    if control.kind != LightControllerKind::Headlight
+                        || previous.kind != control.kind
+                        || previous.usable_source != control.usable_source
+                        || previous.usable_event != control.usable_event
+                    {
+                        return Err(ReferenceError("Conflicting light control collider".into()));
+                    }
+                    if previous.id.0 < control.id.0 {
+                        continue;
+                    }
+                }
+                light_controls.insert(collider, control.id);
+            }
+        }
+        let cabin_doors = reference
+            .lighting
+            .controllers
+            .iter()
+            .find_map(|c| c.cabin_input.as_ref())
+            .map_or([None; 4], |input| {
+                std::array::from_fn(|i| {
+                    reference
+                        .mechanisms
+                        .iter()
+                        .find(|m| m.source == input.door_usable_sources[i])
+                        .map(|m| (m.item, m.parent_item.unwrap_or(m.item)))
+                })
+            });
         Ok(Self {
+            light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
+            light_controls,
+            cabin_doors,
+            seat_action_latched: false,
+            fill_opening: None,
+            usable_light_controls: reference
+                .lighting
+                .controllers
+                .iter()
+                .filter(|c| {
+                    matches!(
+                        c.kind,
+                        LightControllerKind::Cabin | LightControllerKind::Headlight
+                    )
+                })
+                .map(|c| c.id)
+                .collect(),
             slot_fits,
             tire_fits,
             f_gesture_consumed: false,
@@ -327,6 +390,7 @@ impl InteractionState {
                     (
                         tank.item,
                         TankRules {
+                            no_drink: tank.no_drink,
                             no_fill_this: tank.no_fill_this,
                             no_fill_from: tank.no_fill_from,
                             slow_oil: tank.slow_oil,
@@ -375,6 +439,7 @@ impl InteractionState {
         self.tank_rules.insert(
             item,
             TankRules {
+                no_drink: true,
                 no_fill_this: true,
                 no_fill_from: false,
                 slow_oil: false,
@@ -428,7 +493,16 @@ impl InteractionState {
     pub fn push_gripping(&self) -> bool {
         self.push.gripping()
     }
+    pub fn cabin_door_values(&self, items: &ItemStore) -> [f32; 4] {
+        self.cabin_doors.map(|link| {
+            link.filter(|(_, owner)| items.mounted(*owner))
+                .and_then(|(usable, _)| self.mechanisms.value(usable, false))
+                .unwrap_or(0.)
+        })
+    }
     pub fn cancel_input(&mut self) {
+        self.seat_action_latched = false;
+        self.fill_opening = None;
         self.f_gesture_consumed = false;
         self.carry.cancel_input();
         self.push.cancel_input();
@@ -482,7 +556,17 @@ impl InteractionState {
         let valid = |target: AimTarget| {
             target.distance.is_finite() && target.distance >= 0.0 && target.distance <= reach
         };
-        let target = aim.use_target.filter(|target| valid(*target));
+        if input.held & keys::USE == 0 {
+            self.seat_action_latched = false;
+        }
+        let availability = self.available_actions(&aim, player, items, physics);
+        let light_action = availability.light_control.filter(|_| {
+            input.pressed & keys::USE != 0
+                || (input.pressed & keys::FILL != 0 && availability.lmb_use)
+        });
+        let target = aim
+            .use_target
+            .filter(|target| valid(*target) && availability.light_control.is_none());
         let grab_target = aim.grab_target.filter(|target| valid(*target));
         let installation_target = aim.installation_target.filter(|target| valid(*target));
         let filling_target = aim.filling_target.filter(|target| valid(*target));
@@ -537,16 +621,17 @@ impl InteractionState {
         } else {
             target
         };
-        let mut action = None;
+        let mut action = light_action.map(InteractionAction::LightControl);
         let mut carry_input = input;
         self.tuning_opening = None;
-        let can_use_target = use_target.is_some_and(|target| {
-            self.mechanisms.contains(target.item)
-                || self.openings.iter().any(|opening| {
-                    opening.reference.cap == target.item
-                        && (opening.reference.can_toggle || opening.reference.can_tune)
-                })
-        });
+        let can_use_target = availability.light_control.is_some()
+            || use_target.is_some_and(|target| {
+                self.mechanisms.contains(target.item)
+                    || self.openings.iter().any(|opening| {
+                        opening.reference.cap == target.item
+                            && (opening.reference.can_toggle || opening.reference.can_tune)
+                    })
+            });
         if input.pressed & keys::USE != 0 && player.seat().is_some() && !can_use_target {
             if let Some(seat) = self
                 .seats
@@ -554,10 +639,13 @@ impl InteractionState {
                 .find(|seat| Some(seat.id) == player.seat())
                 && player.try_exit(physics, &seat.exit)
             {
+                self.seat_action_latched = true;
                 action = Some(InteractionAction::Seat(seat.id));
             }
         } else if let Some(target) = use_target {
-            if input.pressed & keys::USE != 0 {
+            if input.pressed & keys::USE != 0
+                || (input.pressed & keys::FILL != 0 && availability.lmb_use)
+            {
                 for opening in &mut self.openings {
                     if opening.reference.cap == target.item && opening.reference.can_toggle {
                         opening.valve = if opening.valve > 0.0 { 0.0 } else { 1.0 };
@@ -597,6 +685,7 @@ impl InteractionState {
                 && let Some(seat) = self.seats.iter().find(|seat| seat.item == target.item)
                 && player.enter(seat.id, seat.pose, physics)
             {
+                self.seat_action_latched = true;
                 action = Some(InteractionAction::Seat(seat.id));
             }
             if self.mechanisms.contains(target.item)
@@ -861,6 +950,7 @@ impl InteractionState {
         if input.released & keys::GRAB != 0 {
             self.f_gesture_consumed = false;
         }
+        self.fill_opening = availability.fill_reservation;
         action
     }
 

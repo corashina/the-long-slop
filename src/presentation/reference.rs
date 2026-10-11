@@ -1,13 +1,11 @@
 use crate::reference::{
-    AssetId, BodyId, ItemId, ItemKind, NodeId, OpeningId, ReferenceManifest, SourceId,
+    AssetId, AssetUsage, BodyId, ItemId, ItemKind, NodeId, OpeningId, ReferenceManifest, SourceId,
 };
 use crate::starting_area::StartingArea;
 use crate::vehicle::PhysicsWorld;
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs as bevy_ecs;
-use bevy::gltf::{
-    GltfAssetLabel, GltfExtras, GltfLoaderSettings, convert_coordinates::GltfConvertCoordinates,
-};
+use bevy::gltf::{GltfExtras, GltfLoaderSettings, convert_coordinates::GltfConvertCoordinates};
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 use std::collections::HashMap;
@@ -43,15 +41,17 @@ pub struct CapVisual {
 
 #[derive(Resource, Default)]
 pub struct ReferenceVisuals {
-    pub handles: Vec<(String, Handle<bevy::world_serialization::WorldAsset>)>,
+    pub handles: Vec<(String, Handle<bevy::gltf::Gltf>)>,
     pub gltfs: Vec<(AssetId, Handle<bevy::gltf::Gltf>)>,
     pub nodes: HashMap<NodeId, Entity>,
+    pub spawned: bool,
     pub instances: usize,
+    pub expected_instances: usize,
     pub bound: bool,
     pub failed: bool,
 }
 
-pub fn configure_import(settings: &mut GltfLoaderSettings) {
+pub(crate) fn source_gltf_settings(settings: &mut GltfLoaderSettings) {
     settings.load_cameras = false;
     settings.load_lights = false;
     settings.load_animations = false;
@@ -61,29 +61,42 @@ pub fn configure_import(settings: &mut GltfLoaderSettings) {
     });
 }
 
-pub fn spawn(commands: &mut Commands, server: &AssetServer, reference: &ReferenceManifest) {
-    let mut visuals = ReferenceVisuals::default();
+pub fn load(commands: &mut Commands, server: &AssetServer, reference: &ReferenceManifest) {
+    let mut visuals = ReferenceVisuals {
+        expected_instances: reference.expected_instances(),
+        ..Default::default()
+    };
     for asset in &reference.assets {
         let handle = server
             .load_builder()
-            .with_settings(configure_import)
-            .load(GltfAssetLabel::Scene(0).from_asset(asset.path.clone()));
-        let gltf = server
-            .load_builder()
-            .with_settings(configure_import)
-            .load::<bevy::gltf::Gltf>(asset.path.clone());
-        visuals.gltfs.push((asset.id, gltf));
+            .with_settings(source_gltf_settings)
+            .load(asset.path.clone());
         visuals.handles.push((asset.path.clone(), handle.clone()));
+        visuals.gltfs.push((asset.id, handle));
+    }
+    commands.insert_resource(visuals);
+}
+
+pub fn spawn_scenes(
+    commands: &mut Commands,
+    reference: &ReferenceManifest,
+    visuals: &mut ReferenceVisuals,
+    gltfs: &Assets<bevy::gltf::Gltf>,
+) {
+    for (asset, (_, handle)) in reference.assets.iter().zip(&visuals.handles) {
+        if asset.usage != AssetUsage::UniqueScene {
+            continue;
+        }
         commands
             .spawn((
                 ImportedRoot,
-                WorldAssetRoot(handle),
+                WorldAssetRoot(gltfs.get(handle).unwrap().scenes[0].clone()),
                 Transform::default(),
                 Visibility::Hidden,
             ))
             .observe(instance_ready);
     }
-    commands.insert_resource(visuals);
+    visuals.spawned = true;
 }
 
 fn instance_ready(_: On<WorldInstanceReady>, mut visuals: ResMut<ReferenceVisuals>) {
@@ -95,10 +108,56 @@ struct NodeExtras {
     active: bool,
     renderer_enabled: Option<bool>,
     layer: Option<u8>,
+    cast_shadows: Option<u8>,
+    receive_shadows: Option<bool>,
 }
 #[derive(serde::Deserialize)]
 struct NodeReference {
     reference_id: Option<SourceId>,
+}
+
+/// Apply checked source renderer flags without global node ownership.
+pub(crate) fn bind_node(
+    commands: &mut Commands,
+    node: &crate::reference::NodeRecord,
+    entity: Entity,
+    extra: &GltfExtras,
+    primitives: &Query<(Entity, &ChildOf), With<Mesh3d>>,
+) -> Result<(), String> {
+    let data: NodeExtras = serde_json::from_str(&extra.value)
+        .map_err(|error| format!("Invalid glTF node {} extras: {error}", node.id.0))?;
+    if !data.active {
+        commands.entity(entity).insert(Visibility::Hidden);
+    }
+    for (primitive, parent) in primitives {
+        if parent.parent() != entity {
+            continue;
+        }
+        let enabled = data
+            .renderer_enabled
+            .ok_or_else(|| format!("Missing renderer_enabled for glTF node {}", node.id.0))?;
+        let layer = data
+            .layer
+            .filter(|layer| *layer < 32)
+            .ok_or_else(|| format!("Missing source layer for glTF node {}", node.id.0))?;
+        let cast = data
+            .cast_shadows
+            .filter(|mode| *mode <= 3)
+            .ok_or_else(|| format!("Missing shadow mode for glTF node {}", node.id.0))?;
+        commands.entity(primitive).insert((
+            RenderLayers::layer(layer as usize),
+            super::materials::SourceShadowMode(cast),
+        ));
+        if data.receive_shadows == Some(false) {
+            commands
+                .entity(primitive)
+                .insert(bevy::light::NotShadowReceiver);
+        }
+        if !enabled {
+            commands.entity(primitive).insert(Visibility::Hidden);
+        }
+    }
+    Ok(())
 }
 
 pub fn bind(
@@ -109,9 +168,17 @@ pub fn bind(
     primitives: &Query<(Entity, &ChildOf), With<Mesh3d>>,
 ) -> Result<bool, String> {
     if visuals.bound {
+        for (node, entity) in &visuals.nodes {
+            if !extras.contains(*entity) {
+                return Err(format!(
+                    "Required source node {} lost its imported entity",
+                    node.0
+                ));
+            }
+        }
         return Ok(true);
     }
-    if visuals.instances != visuals.handles.len() {
+    if visuals.instances != visuals.expected_instances {
         return Ok(false);
     }
     for (entity, extra) in extras {
@@ -120,49 +187,30 @@ pub fn bind(
         let Some(source) = identity.reference_id else {
             continue;
         };
-        let data: NodeExtras = serde_json::from_str(&extra.value).map_err(|error| {
-            format!(
-                "Invalid glTF node {}:{} extras: {error}",
-                source.file, source.path_id
-            )
-        })?;
         let Some(node) = reference.nodes.iter().find(|node| node.source == source) else {
             return Err(format!(
                 "Unknown glTF node {}:{}",
                 source.file, source.path_id
             ));
         };
+        if !reference
+            .assets
+            .iter()
+            .any(|a| a.id == node.asset && a.usage == AssetUsage::UniqueScene)
+        {
+            continue;
+        }
+        bind_node(commands, node, entity, extra, primitives)?;
         if visuals.nodes.insert(node.id, entity).is_some() {
             return Err(format!("Duplicate glTF node {}", node.id.0));
         }
-        if !data.active {
-            commands.entity(entity).insert(Visibility::Hidden);
-        }
-        for (primitive, parent) in primitives {
-            if parent.parent() != entity {
-                continue;
-            }
-            let enabled = data.renderer_enabled.ok_or_else(|| {
-                format!(
-                    "Missing renderer_enabled for glTF node {} ({})",
-                    node.id.0, node.hierarchy_path
-                )
-            })?;
-            let layer = data.layer.filter(|layer| *layer < 32).ok_or_else(|| {
-                format!(
-                    "Invalid or missing layer for glTF node {} ({})",
-                    node.id.0, node.hierarchy_path
-                )
-            })?;
-            commands
-                .entity(primitive)
-                .insert(RenderLayers::layer(layer as usize));
-            if !enabled {
-                commands.entity(primitive).insert(Visibility::Hidden);
-            }
-        }
     }
-    for node in &reference.nodes {
+    for node in reference.nodes.iter().filter(|n| {
+        reference
+            .assets
+            .iter()
+            .any(|a| a.id == n.asset && a.usage == AssetUsage::UniqueScene)
+    }) {
         if !visuals.nodes.contains_key(&node.id) {
             return Err(format!(
                 "Missing glTF node {} ({})",
@@ -176,7 +224,7 @@ pub fn bind(
     }
     for item in &reference.items {
         if !matches!(item.kind, ItemKind::Wheel | ItemKind::Rim | ItemKind::Tire)
-            && !reference.parts.iter().any(|p| p.item == item.id)
+            && !reference.parts.iter().any(|part| part.item == item.id)
         {
             continue;
         }
@@ -267,18 +315,8 @@ pub fn bind(
 
 pub fn sync_caps(
     area: &StartingArea,
-    caps: &mut Query<
-        (&CapVisual, &mut Transform),
-        (
-            Without<BodyVisual>,
-            Without<ItemVisual>,
-            Without<super::lighting::LampButtonVisual>,
-        ),
-    >,
-    visibility: &mut Query<
-        (&ValveVisibility, &mut Visibility),
-        Without<super::lighting::LampVisual>,
-    >,
+    caps: &mut Query<(&CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
+    visibility: &mut Query<(&ValveVisibility, &mut Visibility)>,
 ) {
     for (cap, mut transform) in caps {
         let valve = area.interaction.opening_valve(cap.opening);

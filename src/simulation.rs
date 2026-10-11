@@ -22,6 +22,7 @@ pub mod keys {
     pub const ASSEMBLE: u32 = 8192;
     pub const TRANSLATE: u32 = 16384;
     pub const RECENTER: u32 = 32768;
+    pub const LIGHTS: u32 = 65536;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -68,6 +69,11 @@ pub struct DriveInput {
     pub brake_reverse: bool,
     pub steer: f32,
     pub handbrake: bool,
+}
+
+pub fn braking(input: DriveInput, direction: f32, auto_move_min: f32) -> bool {
+    (input.brake_reverse && direction > auto_move_min)
+        || (input.accelerate && direction < -auto_move_min)
 }
 
 /// Retains only the fraction after at most six fixed steps per frame.

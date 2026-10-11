@@ -12,6 +12,7 @@ export function formatTank(r) {
  return result;
 }
 export function selectIcon(mask,context,carrying) {
+ if(context===10&&(mask&ACTION.USE))return 'light_switch';
  if(mask&ACTION.MOUNT)return 'mount';
  if(mask&ACTION.DISMOUNT)return 'dismount';
  if(mask&ACTION.FILL)return 'fill';
@@ -25,7 +26,7 @@ export function selectIcon(mask,context,carrying) {
  return carrying?'carrying':'default';
 }
 export class FeedbackState {
- constructor(){this.visible=false;this.enabled=true;this.active=false;this.fluidText='';this.fluidName=undefined;this.capacity=undefined;this.amountKey=undefined;this.percentKeys=[-1,-1,-1,-1,-1,-1];this.hasName=undefined;this.noText=undefined;this.empty=undefined;this.actions=-1;this.context=-1;this.carrying=false;this.notice='';this.targetName='';this.condition=-1;this.throwCharge=0;this.throwActive=false;}
+ constructor(){this.visible=false;this.enabled=true;this.active=false;this.fluidText='';this.fluidName=undefined;this.capacity=undefined;this.amountKey=undefined;this.percentKeys=[-1,-1,-1,-1,-1,-1];this.hasName=undefined;this.noText=undefined;this.empty=undefined;this.lmbUse=false;this.actions=-1;this.context=-1;this.carrying=false;this.notice='';this.targetName='';this.condition=-1;this.throwCharge=0;this.throwActive=false;}
  setVisible(active){this.active=active;this.visible=active&&this.enabled;}
  toggle(){this.enabled=!this.enabled;this.visible=this.active&&this.enabled;}
  update(r){
@@ -35,12 +36,12 @@ export class FeedbackState {
   if(changed){this.fluidText=formatTank(r);this.amountKey=amountKey;this.empty=empty;this.capacity=r.capacity;this.fluidName=r.fluidName;this.hasName=r.hasName;this.noText=r.noText;}
   const detailChanged=r.name!==this.targetName||r.condition!==this.condition||r.throwCharge!==this.throwCharge||r.throwActive!==this.throwActive;
   this.targetName=r.name;this.condition=r.condition;this.throwCharge=r.throwCharge;this.throwActive=r.throwActive;
-  const actionsChanged=r.actions!==this.actions||r.context!==this.context||r.carrying!==this.carrying||r.notice!==this.notice;
-  this.actions=r.actions;this.context=r.context;this.carrying=r.carrying;this.notice=r.notice;
+  const actionsChanged=r.actions!==this.actions||r.context!==this.context||r.carrying!==this.carrying||r.notice!==this.notice||r.lmbUse!==this.lmbUse;
+  this.lmbUse=r.lmbUse;this.actions=r.actions;this.context=r.context;this.carrying=r.carrying;this.notice=r.notice;
   return changed||actionsChanged||detailChanged;
  }
 }
-export function createFeedback(ui) {
+export function createFeedback(ui,switchIconUrl) {
  const state=new FeedbackState(),root=document.querySelector('#hud'),icon=document.querySelector('#crosshair'),fluid=document.querySelector('#fluid-text'),carry=document.querySelector('#carry-help'),notice=document.querySelector('#action-notice'),target=document.querySelector('#target-name'),condition=document.querySelector('#target-condition'),charge=document.querySelector('#throw-charge'),level=document.querySelector('#throw-level');
  const rows=[
   [ACTION.USE,'use','[E]: Open/Close'],
@@ -62,7 +63,7 @@ export function createFeedback(ui) {
   [ACTION.SPLIT,'split','[X]: Split / assemble'],
   [ACTION.SCROLL,'scroll','[Scroll]: Open/Close']
  ].map(([bit,role,text])=>{const n=document.createElement('p');n.textContent=text;n.className='action-row';n.hidden=true;root.append(n);return {bit,role,n,family:0,top:0,line:0,offset:-1};});
- let lastIcon='',lastFluid='',lastNotice='',lastName='',lastCondition='',lastCharge=-1,lastCarry='',lastDoor='';
+ let lastIcon='',lastFluid='',lastNotice='',lastName='',lastCondition='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='';
  const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance / [Tab]: Center';
  const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance / [Tab]: Center';
  const counts=new Uint8Array(4);
@@ -90,6 +91,8 @@ export function createFeedback(ui) {
   for(const r of rows)r.n.hidden=!(state.actions&r.bit)||(r.bit===ACTION.DROP&&Boolean(state.actions&ACTION.THROW))||(r.bit===ACTION.SWITCH&&Boolean(state.actions&ACTION.PRIMARY_SWITCH));
   const doorText=state.context===7?'[E]+[Mouse]: Move':'[E]+[Mouse]: Open/Close';
   if(doorText!==lastDoor){rows[1].n.textContent=doorText;lastDoor=doorText;}
+  const useText=state.context===10?(state.lmbUse?'[E] / [LMB]: Switch':'[E]: Switch'):'[E]: Open/Close';
+  if(useText!==lastUse){rows[0].n.textContent=useText;lastUse=useText;}
   placeRows();
   if(state.targetName!==lastName){target.textContent=state.targetName;lastName=state.targetName;}target.hidden=!state.targetName;
   const detail=state.condition>=0?'Condition '+Math.round(state.condition*100)+'%':'';
@@ -99,7 +102,7 @@ export function createFeedback(ui) {
   carry.hidden=!state.carrying;const help=state.actions&ACTION.ROTATE?rotationHelp:translationHelp;
   if(help!==lastCarry){carry.textContent=help;lastCarry=help;}
   const selected=selectIcon(state.actions,state.context,state.carrying);
-  if(selected!==lastIcon){icon.src=ui.urls[ui.icons[selected]];lastIcon=selected;resize();}
+  if(selected!==lastIcon){icon.src=selected==='light_switch'?switchIconUrl:ui.urls[ui.icons[selected]];lastIcon=selected;resize();}
   if(state.fluidText!==lastFluid){fluid.textContent=state.fluidText;lastFluid=state.fluidText;}fluid.hidden=!state.fluidText;
   const message=state.context===6?'Unlimited Gas':state.notice;
   if(message!==lastNotice){notice.textContent=message;lastNotice=message;}notice.hidden=!message;

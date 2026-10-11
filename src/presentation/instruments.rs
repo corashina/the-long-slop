@@ -1,8 +1,13 @@
+use super::materials::{
+    SourceCaster, SourceExtension, SourceMaterial, SourceMaterials, SourceShadowMode,
+};
 use crate::reference::{MaterialLink, NodeId, ReferenceError, ReferenceManifest};
 use crate::simulation::instruments::{InstrumentState, source_rotation};
+use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::ecs as bevy_ecs;
 use bevy::gltf::{Gltf, GltfMaterial};
 use bevy::prelude::*;
+use bevy::render::render_resource::Face;
 use std::collections::HashMap;
 // Bevy's glTF -> StandardMaterial converter is private. This startup-only adapter
 // maps the PBR fields emitted by our exporter; it does not load or clone frame assets.
@@ -32,13 +37,22 @@ fn source_material(m: &GltfMaterial) -> StandardMaterial {
     }
 }
 struct MaterialVisual {
+    index: usize,
     entities: Vec<Entity>,
     on: Handle<StandardMaterial>,
     off: Handle<StandardMaterial>,
+    choices: Vec<InstrumentReceiver>,
+}
+struct InstrumentReceiver {
+    entity: Entity,
+    on: Handle<SourceMaterial>,
+    off: Handle<SourceMaterial>,
+    casters: Vec<(Entity, Handle<StandardMaterial>, Handle<StandardMaterial>)>,
 }
 #[derive(Resource, Default)]
 pub struct InstrumentVisuals {
     pub bound: bool,
+    pub prepared: bool,
     needles: Vec<Entity>,
     digits: Vec<Entity>,
     lamps: Vec<MaterialVisual>,
@@ -138,7 +152,10 @@ impl InstrumentVisuals {
             handles.insert(key, handle.clone());
             handle
         };
-        for lamp in &reference.instruments.lamps {
+        for (index, lamp) in reference.instruments.lamps.iter().enumerate() {
+            if lamp.signal == "headlight2" {
+                continue;
+            }
             let parent = node(lamp.node)?;
             let entities: Vec<_> = primitives
                 .iter()
@@ -151,9 +168,11 @@ impl InstrumentVisuals {
                 )));
             }
             self.lamps.push(MaterialVisual {
+                index,
                 entities,
                 on: material(&lamp.on),
                 off: material(&lamp.off),
+                choices: Vec::new(),
             });
         }
         for digit in &reference.instruments.odometer.digits {
@@ -169,9 +188,11 @@ impl InstrumentVisuals {
                 )));
             }
             self.digit_materials.push(MaterialVisual {
+                index: 0,
                 entities,
                 on: material(&digit.on),
                 off: material(&digit.off),
+                choices: Vec::new(),
             });
         }
         self.bound = true;
@@ -182,9 +203,10 @@ impl InstrumentVisuals {
         reference: &ReferenceManifest,
         state: &InstrumentState,
         transforms: &mut Query<&mut Transform, Without<super::camera::DriveCamera>>,
-        materials: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
+        materials: &mut Query<&mut MeshMaterial3d<SourceMaterial>>,
+        casters: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
     ) {
-        if !self.bound {
+        if !self.prepared {
             return;
         }
         for (i, entity) in self.needles.iter().enumerate() {
@@ -211,33 +233,171 @@ impl InstrumentVisuals {
         }
         if self.last_digits_lit != Some(state.digits_lit) {
             for digit in &self.digit_materials {
-                let handle = if state.digits_lit {
-                    &digit.on
-                } else {
-                    &digit.off
-                };
-                for entity in &digit.entities {
-                    if let Ok(mut m) = materials.get_mut(*entity) {
-                        m.0 = handle.clone();
-                    }
-                }
+                select_material(digit, state.digits_lit, materials, casters);
             }
             self.last_digits_lit = Some(state.digits_lit);
         }
         if self.last_lamps != Some(state.lamp_bits) {
-            for (i, lamp) in self.lamps.iter().enumerate() {
-                let handle = if state.lamp_bits & (1 << i) != 0 {
-                    &lamp.on
-                } else {
-                    &lamp.off
-                };
-                for entity in &lamp.entities {
-                    if let Ok(mut m) = materials.get_mut(*entity) {
-                        m.0 = handle.clone();
-                    }
-                }
+            for lamp in &self.lamps {
+                select_material(
+                    lamp,
+                    state.lamp_bits & (1 << lamp.index) != 0,
+                    materials,
+                    casters,
+                );
             }
             self.last_lamps = Some(state.lamp_bits);
         }
     }
+}
+
+fn select_material(
+    visual: &MaterialVisual,
+    on: bool,
+    materials: &mut Query<&mut MeshMaterial3d<SourceMaterial>>,
+    casters: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
+) {
+    for choice in &visual.choices {
+        if let Ok(mut material) = materials.get_mut(choice.entity) {
+            material.set_if_neq(MeshMaterial3d(
+                if on { &choice.on } else { &choice.off }.clone(),
+            ));
+        }
+        for (entity, lit, dark) in &choice.casters {
+            if let Ok(mut material) = casters.get_mut(*entity) {
+                material.set_if_neq(MeshMaterial3d(if on { lit } else { dark }.clone()));
+            }
+        }
+    }
+}
+
+pub(crate) fn prepare_instruments(
+    mut commands: Commands,
+    mut visuals: ResMut<InstrumentVisuals>,
+    mut source: ResMut<super::lighting::SourceLighting>,
+    mut originals: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<SourceMaterial>>,
+    mut cache: ResMut<SourceMaterials>,
+    receivers: Query<
+        (
+            &Mesh3d,
+            &MeshMaterial3d<SourceMaterial>,
+            &GlobalTransform,
+            Option<&SourceShadowMode>,
+            Option<&Children>,
+        ),
+        Without<SourceCaster>,
+    >,
+    casters: Query<(), With<SourceCaster>>,
+) {
+    if !visuals.bound || visuals.prepared || !source.bound {
+        return;
+    }
+    if visuals
+        .lamps
+        .iter()
+        .chain(&visuals.digit_materials)
+        .any(|visual| {
+            visual
+                .entities
+                .iter()
+                .any(|entity| !receivers.contains(*entity))
+        })
+    {
+        return;
+    }
+    let far = Transform::from_translation(Vec3::splat(1_000_000.));
+    let visuals = &mut *visuals;
+    for visual in visuals.lamps.iter_mut().chain(&mut visuals.digit_materials) {
+        for &entity in &visual.entities {
+            let (mesh, receiver, global, mode, children) = receivers.get(entity).unwrap();
+            let mask = materials.get(&receiver.0).unwrap().extension.receiver_mask;
+            let inverted = global.affine().matrix3.determinant() < 0.;
+            let mut prepare = |handle: &Handle<StandardMaterial>| {
+                let mut base = originals.get(handle).unwrap().clone();
+                if inverted {
+                    base.cull_mode = base.cull_mode.map(|face| match face {
+                        Face::Front => Face::Back,
+                        Face::Back => Face::Front,
+                    });
+                }
+                let surface = if inverted {
+                    cache
+                        .variants
+                        .entry((handle.id(), true, false))
+                        .or_insert_with(|| originals.add(base.clone()))
+                        .clone()
+                } else {
+                    handle.clone()
+                };
+                let caster = if mode.is_some_and(|mode| mode.0 == 2) {
+                    cache
+                        .variants
+                        .entry((handle.id(), inverted, true))
+                        .or_insert_with(|| {
+                            let mut material = base.clone();
+                            material.cull_mode = None;
+                            originals.add(material)
+                        })
+                        .clone()
+                } else {
+                    surface.clone()
+                };
+                let material = cache
+                    .converted
+                    .entry((surface.id(), mask))
+                    .or_insert_with(|| {
+                        base.fog_enabled = false;
+                        materials.add(SourceMaterial {
+                            base,
+                            extension: SourceExtension {
+                                receiver_mask: mask,
+                            },
+                        })
+                    })
+                    .clone();
+                let warm = commands
+                    .spawn((
+                        mesh.clone(),
+                        MeshMaterial3d(material.clone()),
+                        far,
+                        Visibility::Visible,
+                        bevy::light::NotShadowCaster,
+                        NoFrustumCulling,
+                    ))
+                    .id();
+                source.warmups.push((warm, false));
+                if mode.is_some_and(|mode| mode.0 != 0) {
+                    let warm = commands
+                        .spawn((
+                            SourceCaster,
+                            mesh.clone(),
+                            MeshMaterial3d(caster.clone()),
+                            far,
+                            Visibility::Visible,
+                            (32..64).collect::<RenderLayers>(),
+                            NoFrustumCulling,
+                        ))
+                        .id();
+                    source.warmups.push((warm, true));
+                }
+                (material, caster)
+            };
+            let (on, lit_caster) = prepare(&visual.on);
+            let (off, dark_caster) = prepare(&visual.off);
+            let casters = children
+                .into_iter()
+                .flat_map(|children| children.iter())
+                .filter(|child| casters.contains(*child))
+                .map(|child| (child, lit_caster.clone(), dark_caster.clone()))
+                .collect();
+            visual.choices.push(InstrumentReceiver {
+                entity,
+                on,
+                off,
+                casters,
+            });
+        }
+    }
+    visuals.prepared = true;
 }

@@ -132,6 +132,18 @@ class Source:
             return None
         return PPtr(m_FileID=pointer['m_FileID'], m_PathID=pointer['m_PathID'], assetsfile=owner.assets_file).deref()
 
+    def raw_data(self, reader):
+        return reader.get_raw_data()
+
+    def texture_object(self, reader):
+        return self.object(reader)
+
+    def sprite_image(self, reader):
+        return self.object(reader).image
+
+    def shader_resource(self, reader):
+        return 'shader.txt', self.object(reader).export().encode('utf-8')
+
     def object(self, reader):
         identity = key(reader)
         if identity not in self.object_cache:
@@ -220,7 +232,7 @@ class LibrarySource(Source):
         from types import SimpleNamespace as NS
         self.library = library
         self.root = library.records_root.parent / 'source'
-        self.serialized_files = {c['file']:NS(source_container_path=c['file'],name=c['file'],externals=c['externals']) for c in library.catalog['containers']}
+        self.serialized_files = {c['file']:NS(source_container_path=c['file'],name=Path(c['file']).name,externals=c['externals']) for c in library.catalog['containers']}
         self.objects = {}
         for item in library.catalog['objects']:
             identity = item['source']
@@ -254,3 +266,29 @@ class LibrarySource(Source):
 
     def object(self, reader):
         raise TypeError('Runtime derivation requires typed library records')
+
+    def raw_data(self, reader):
+        from .library.types import ObjectId
+        return self.library.raw_object(ObjectId(*key(reader)))
+
+    def texture_object(self, reader):
+        from types import SimpleNamespace as NS
+        from PIL import Image
+        from .library.types import ObjectId
+        identity = ObjectId(*key(reader))
+        data = self.read(reader)
+        with Image.open(self.library.texture(identity)) as stored:
+            image = stored.copy()
+        fields = {name:value for name,value in data.items() if name.startswith('m_')}
+        fields['m_TextureSettings'] = NS(**data['m_TextureSettings'])
+        return NS(**fields, image=image, get_image_data=lambda:self.library.texture_data(identity))
+
+    def sprite_image(self, reader):
+        from PIL import Image
+        from .library.types import ObjectId
+        with Image.open(self.library.sprite(ObjectId(*key(reader)))) as stored:
+            return stored.copy()
+
+    def shader_resource(self, reader):
+        from .library.types import ObjectId
+        return 'shader.json', self.library.typed_payload(ObjectId(*key(reader)))

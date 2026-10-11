@@ -150,3 +150,17 @@ impl InstrumentState {
         }
     }
 }
+
+pub fn update_high_beam(
+    lamp: &crate::reference::HighBeamLampReference,
+    high_beam: bool,
+) -> crate::lighting::LampMaterialOutput {
+    let value = high_beam as u8 as f32;
+    let on = value >= lamp.min_value && (value <= lamp.max_value || lamp.stay_on);
+    let material = if on { &lamp.on } else { &lamp.off };
+    crate::lighting::LampMaterialOutput {
+        renderer: lamp.node,
+        asset: material.asset,
+        material_index: material.gltf_material,
+    }
+}

@@ -5,7 +5,11 @@ import struct
 from pathlib import Path
 
 from .source import key, source_id, vector
-from .library.reader import LibraryReader
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .library.reader import LibraryReader
+from .materials import decode_normal_image, normal_encoding
+from .visibility import renderer_visible
 
 
 def convert_point(value: tuple[float, float, float]) -> tuple[float, float, float]:
@@ -76,11 +80,11 @@ class GltfBuilder:
         return accessor
 
 class GltfExporter(GltfBuilder):
-    def __init__(self, source, output, library: LibraryReader):
+    def __init__(self, source, output, library: "LibraryReader"):
         super().__init__(source, output)
         self.library = library
 
-    def texture(self, owner, environment, color_space):
+    def texture(self, owner, environment, color_space, normal_encoding=None):
         from PIL import Image
         gl = self.gl
         reader = self.source.resolve(owner, environment['m_Texture'])
@@ -89,7 +93,7 @@ class GltfExporter(GltfBuilder):
         if reader.type.name == 'RenderTexture':
             self.material_report.append({'source':source_id(reader),'adaptation':'Runtime render texture omitted; authored material factors retained.'})
             return None
-        identity = key(reader), color_space
+        identity = key(reader), color_space, normal_encoding
         if identity not in self.textures:
             texture = self.source.read(reader)
             settings=texture['m_TextureSettings']
@@ -104,16 +108,16 @@ class GltfExporter(GltfBuilder):
                 self.samplers[sampler_key]=len(self.document.samplers)
                 self.document.samplers.append(gl.Sampler(wrapS=wrapping[settings['m_WrapU']],wrapT=wrapping[settings['m_WrapV']],
                     magFilter=mag,minFilter=minimum,extras={'unity_aniso':settings['m_Aniso'],'unity_mip_bias':settings['m_MipBias']}))
-            name = f'texture-{reader.assets_file.name}-{reader.path_id}-{color_space}.png'
+            suffix = f'-normal-{normal_encoding}' if normal_encoding is not None else ''
+            name = f'texture-{reader.assets_file.name}-{reader.path_id}-{color_space}{suffix}.png'
             from .library.types import ObjectId
             with Image.open(self.library.texture(ObjectId(*key(reader)))) as stored:
                 image = stored.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
-                if color_space == 'normal':
-                    from .library.models import _normal_rgb
-                    image = _normal_rgb(image)
+                if normal_encoding is not None:
+                    image = decode_normal_image(image, normal_encoding)
                 image.save(self.output.parent / name)
             image = len(self.document.images)
-            self.document.images.append(gl.Image(uri=name, extras={'source': source_id(reader), 'color_space': color_space,'unity_color_space':texture['m_ColorSpace'], 'conversion':{'input':'stored_source_png','flip_y':True,'channels':'unity_normal_to_rgb' if color_space == 'normal' else 'unchanged'}}))
+            self.document.images.append(gl.Image(uri=name, extras={'source': source_id(reader), 'color_space': color_space,'unity_color_space':texture['m_ColorSpace'], 'conversion':{'input':'stored_source_png','flip_y':True,'channels':normal_encoding if normal_encoding is not None else 'unchanged'}}))
             self.textures[identity] = len(self.document.textures)
             self.document.textures.append(gl.Texture(source=image, sampler=self.samplers[sampler_key]))
         scale, offset = environment['m_Scale'], environment['m_Offset']
@@ -146,7 +150,7 @@ class GltfExporter(GltfBuilder):
             doubleSided=floats.get('_Cull',2) == 0,
             pbrMetallicRoughness=gl.PbrMetallicRoughness(baseColorFactor=[color[n] for n in ('r','g','b','a')],
                 metallicFactor=floats.get('_Metallic',0.), roughnessFactor=1.-floats.get('_Glossiness',0.5)),
-            extras={'source': source_id(reader), 'unity_shader': shader_name, 'unity_properties': properties})
+            extras={'source': source_id(reader), 'unity_shader': shader_name, 'unity_properties': properties, 'unity_keywords':data['m_ValidKeywords']})
         for name in ('_MainTex','_BaseMap'):
             if name in environments:
                 info = self.texture(reader, environments[name], 'srgb')
@@ -154,11 +158,13 @@ class GltfExporter(GltfBuilder):
                     material.pbrMetallicRoughness.baseColorTexture = gl.TextureInfo(**info)
                 break
         if '_BumpMap' in environments:
-            info = self.texture(reader, environments['_BumpMap'], 'normal')
+            normal_reader = self.source.resolve(reader, environments['_BumpMap']['m_Texture'])
+            encoding = normal_encoding(self.source.read(normal_reader), self.source.read(shader) if shader else None, shader_name, source_id(normal_reader)) if normal_reader else None
+            info = self.texture(reader, environments['_BumpMap'], 'linear', normal_encoding=encoding)
             if info:
                 material.normalTexture = gl.NormalMaterialTexture(scale=floats.get('_BumpScale',1.), **info)
         emission = colors.get('_EmissionColor')
-        if emission and '_EMISSION' in data['m_ValidKeywords']:
+        if emission and (shader_name not in ('Standard','Standard (Specular setup)') or '_EMISSION' in data['m_ValidKeywords']):
             factors = [emission[n] for n in ('r','g','b')]
             strength = max(1., *factors)
             material.emissiveFactor = [value / strength for value in factors]
@@ -254,6 +260,8 @@ class GltfExporter(GltfBuilder):
         self.output.parent.mkdir(parents=True, exist_ok=True)
         records = []
         mapping = {}
+        asset = getattr(self.source,'lighting_assets',{}).get(key(roots[0]))
+        for material in getattr(self.source,'lighting_extra_materials',{}).get(asset,[]):self.material(material)
         for root in roots:
             records.extend(self.source.hierarchy(root, activate_root=True))
         hidden_lods=set()
@@ -277,7 +285,11 @@ class GltfExporter(GltfBuilder):
             transform = converted_transform(data)
             if record['parent'] is None:
                 from .collision import world_pose
-                transform=world_pose(self.source,reader)
+                from .lighting import IDENTITY
+                if key(reader)==getattr(self.source,'lighting_pole_root',None):
+                    transform=IDENTITY.copy()
+                elif key(reader) not in getattr(self.source,'lighting_prototype_roots',set()):
+                    transform=world_pose(self.source,reader)
             node = gl.Node(name=self.source.read(record['game_object'])['m_Name'],
                 extras={'reference_id': source_id(reader), 'active':record['active'], 'hierarchy_path':record['path'],
                     'layer':self.source.read(record['game_object'])['m_Layer']}, **transform)
@@ -286,18 +298,19 @@ class GltfExporter(GltfBuilder):
             mesh_filter = components.get('MeshFilter')
             if renderer and (mesh_filter or renderer.type.name == 'SkinnedMeshRenderer'):
                 renderer_data = self.source.read(renderer)
-                render_enabled=bool(renderer_data['m_Enabled']) and key(renderer) not in hidden_lods
-                text_component=next((r for r in record['components'] if r.type.name=='MonoBehaviour' and self.source.read(r)['m_Script']['m_PathID'] and self.source.class_name(r) in {'TextMeshPro','TMP_SubMesh'}),None)
-                if text_component:
-                    render_enabled=False
+                component_classes={self.source.class_name(r) for r in record['components'] if r.type.name=='MonoBehaviour' and self.source.read(r)['m_Script']['m_PathID']}
+                render_enabled=renderer_visible(bool(renderer_data['m_Enabled']), component_classes) and key(renderer) not in hidden_lods
+                if component_classes.intersection({'TextMeshPro','TMP_SubMesh'}):
                     self.material_report.append({'source':source_id(renderer),
                         'adaptation':'Omitted obsolete editor TMP glyphs. Seeded plate text requires glyph regeneration.'})
                 node.extras['renderer_enabled'] = render_enabled
+                node.extras['cast_shadows'] = renderer_data['m_CastShadows']
+                node.extras['receive_shadows'] = bool(renderer_data['m_ReceiveShadows'])
                 owner = mesh_filter or renderer
                 mesh_reader = self.source.resolve(owner, self.source.read(owner)['m_Mesh'])
                 if mesh_reader and record['active'] and render_enabled:
                     materials=[self.source.resolve(renderer,p) for p in renderer_data['m_Materials']]
-                    selected=getattr(self.source,'condition_materials',{}).get(key(renderer))
+                    selected=getattr(self.source,'lighting_startup_materials',{}).get(key(renderer)) or getattr(self.source,'condition_materials',{}).get(key(renderer))
                     if selected:materials=[selected for _ in materials]
                     color=getattr(self.source,'condition_colors',{}).get(key(renderer))
                     condition=getattr(self.source,'condition_renderers',{}).get(key(renderer))
@@ -341,17 +354,6 @@ class GltfExporter(GltfBuilder):
                 else:pointers=[v[k] for v in data['szamok'] for k in ('MOn','MOff')]
                 for ptr in pointers:
                     if ptr['m_PathID']:self.material(self.source.resolve(component,ptr))
-        switch_materials={}
-        for record in records:
-            for reader in record['components']:
-                if reader.type.name!='MonoBehaviour':continue
-                cls=self.source.class_name(reader)
-                if cls not in {'headlightscript','flashlightscript'}:continue
-                fields=self.source.read(reader)
-                pointers=[fields['MOFF']]+[state['M'] for state in fields['states']] if cls=='headlightscript' else [fields['mON'],fields['mOFF']]
-                for pointer in pointers:
-                    material=self.source.resolve(reader,pointer)
-                    if material:switch_materials[key(material)]={'source':source_id(material),'index':self.material(material)}
         self.document.scenes.append(gl.Scene(nodes=root_nodes))
         self.document.scene = 0
         self.document.buffers.append(gl.Buffer(uri=self.output.with_suffix('.bin').name,byteLength=len(self.binary)))
@@ -363,7 +365,6 @@ class GltfExporter(GltfBuilder):
         return {'path': self.output.name, 'sha256': hashlib.sha256(self.output.read_bytes()).hexdigest(),
                 'dependencies':dependencies,
                 'material_count':len(self.document.materials), 'materials':{f'{identity[0][0]}:{identity[0][1]}':index for identity,index in self.materials.items() if identity[1] is None}, 'node_count':len(records), 'mesh_count':len(self.meshes), 'material_adaptations':self.material_report,
-                'switch_materials':list(switch_materials.values()),
                 'nodes':[{'source':source_id(r['reader']),'gltf_node':mapping[key(r['reader'])],
                     'parent':source_id(r['parent']) if r['parent'] else None,'hierarchy_path':r['path'],
                     'active':r['active'],'transform':{'translation':self.document.nodes[mapping[key(r['reader'])]].translation,

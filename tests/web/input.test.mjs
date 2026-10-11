@@ -22,3 +22,9 @@ test('wheel_assembly_and_carry_recenter_use_distinct_bits',()=>{
  const i=new InputState();i.code('KeyX',true);i.code('Tab',true);
  assert.equal(i.takeFrame().held,8192|32768);
 });
+
+test('headlights_do_not_overlap_carry_controls',()=>{
+ const i=new InputState();i.code('KeyL',true);i.code('Mouse2',true);i.code('Tab',true);
+ assert.equal(i.takeFrame().held,65536|16384|32768);
+ i.code('KeyL',false);assert.equal(i.takeFrame().released,65536);
+});

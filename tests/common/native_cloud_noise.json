@@ -1,0 +1,69 @@
+{
+  "method": "Unicorn isolated x86-64 emulation plus float32 algebra comparison",
+  "engine_version": "2021.3.18f1 (3129e69bc0c7)",
+  "dll_sha256": "553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86",
+  "wrapper_rva": "0x66480",
+  "noise_rva": "0x483eb0",
+  "permutation_sha256": "0e2324949e99f3333c190a2d72dc1c4d3d195a1d6f548fa73962188ff3868b07",
+  "checked_inputs": 2049,
+  "mismatch_count": 0,
+  "domain": "x in [-1, 0], y = 0; isolated source instruction emulation, not a live Unity process",
+  "samples": [
+    {
+      "x_bits": "0xbf800000",
+      "native_bits": "0x3eee3846"
+    },
+    {
+      "x_bits": "0xbf7fffff",
+      "native_bits": "0x3eee3834"
+    },
+    {
+      "x_bits": "0xbf600000",
+      "native_bits": "0x3ec89b25"
+    },
+    {
+      "x_bits": "0xbf400000",
+      "native_bits": "0x3ebba58b"
+    },
+    {
+      "x_bits": "0xbf200000",
+      "native_bits": "0x3ecbc450"
+    },
+    {
+      "x_bits": "0xbf000000",
+      "native_bits": "0x3eee3846"
+    },
+    {
+      "x_bits": "0xbec00000",
+      "native_bits": "0x3f08561e"
+    },
+    {
+      "x_bits": "0xbe800000",
+      "native_bits": "0x3f106580"
+    },
+    {
+      "x_bits": "0xbe000000",
+      "native_bits": "0x3f09eab4"
+    },
+    {
+      "x_bits": "0x80800000",
+      "native_bits": "0x3eee3846"
+    },
+    {
+      "x_bits": "0x807fffff",
+      "native_bits": "0x3eee3846"
+    },
+    {
+      "x_bits": "0x80000001",
+      "native_bits": "0x3eee3846"
+    },
+    {
+      "x_bits": "0x80000000",
+      "native_bits": "0x3eee3846"
+    },
+    {
+      "x_bits": "0x0",
+      "native_bits": "0x3eee3846"
+    }
+  ]
+}

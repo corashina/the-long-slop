@@ -69,6 +69,7 @@ Development availability does not add vehicles, audio, animation playback, or ot
 | X | Split a wheel | - |
 | Hold LMB | Fill an open container | Use an aimed switch |
 | I | — | Tap ignition; hold starter |
+| L | — | Cycle headlights: off, low beam, high beam |
 | C | — | Switch first person / chase view |
 | Backspace | Hide or show feedback | Hide or show feedback |
 | Esc | Pause menu | Pause menu |
@@ -87,9 +88,9 @@ Its capacities are 39 L fuel, 5 L oil, and 5 L coolant.
 Use Recover in the pause menu. Use Controls for bindings and Fullscreen.
 Aim at a tire and press F to dismount it. Release F to mount a held tire or rim.
 Focus loss pauses play and clears input. Continue captures the mouse again.
-Recovery preserves fluids, parts, condition, and trip distance.
+Recovery preserves fluids, parts, condition, trip distance, cycle time, and lamp state.
 An empty fuel tank moves recovery to a station.
-Restart restores the garage, supplies, car, origin, and trip distance.
+Restart restores the garage, supplies, car, origin, trip distance, source cycle time, and lamp state.
 Close the driver door before reversing through the garage exit.
 Keyboard steering reaches full lock in 0.8 seconds. Release the key to return to center.
 
@@ -97,10 +98,12 @@ Keyboard steering reaches full lock in 0.8 seconds. Release the key to return to
 
 Read the [approved interaction scope](docs/superpowers/specs/2026-10-10-interaction-parity-design.md), [garage scope](docs/superpowers/specs/2026-10-09-garage-start-design.md), and [verification](docs/verification.md).
 Imported layout and recovered rules do not establish identical Unity physics or full-game parity.
-Unity shader effects, live mirror reflections, and audio are not reproduced.
-See the verification record for branch-specific browser checks and renderer limits.
-The asset branch's isolated Chrome check stalled during synchronous GPU shader linking. Readiness on that path remains unverified.
-The final continuous browser route remains unverified under the user's waiver.
+Lighting follows the approved [day cycle scope](docs/superpowers/specs/2026-10-10-day-night-lighting-design.md).
+The source cycle controls sun, moon, clouds, stars, fog, headlights, cabin lights, house lamps, and roadside lamps.
+Pause freezes cycle time, lamp fades, and switch movement.
+Restart restores the source startup offset of 240 seconds.
+Live mirror reflections and audio remain outside this stage.
+The final browser walking route was skipped at the user's request. It remains unverified.
 The build has no survival system, save system, multiplayer, or public deployment.
 
 ## Toolchain

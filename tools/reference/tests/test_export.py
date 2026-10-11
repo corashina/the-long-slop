@@ -91,6 +91,31 @@ class ReferenceExportTests(unittest.TestCase):
         fields[1]['cols'] = [{'m_PathID': 2}]
         with self.assertRaisesRegex(ValueError, 'pickupable.cols'):
             recover_bindings(source, nodes, components, {1: 10, 2: 11}, [], [], [], [])
+    def test_validator_filters_only_its_provisional_notice(self):
+        import warnings
+        from unittest.mock import patch
+        import pygltflib
+        from pygltflib.validator import InvalidMeshPrimitiveMode
+        from tools.reference.gltf import validate_gltf
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'scene.gltf'
+            pygltflib.GLTF2().save_json(str(path))
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter('always')
+                validate_gltf(path)
+                self.assertEqual(caught, [])
+            document = pygltflib.GLTF2(meshes=[pygltflib.Mesh(primitives=[pygltflib.Primitive(mode=99)])])
+            document.save_json(str(path))
+            with self.assertRaises(InvalidMeshPrimitiveMode):
+                validate_gltf(path)
+            pygltflib.GLTF2().save_json(str(path))
+            def warning(document):
+                warnings.warn('Unrelated validation warning')
+            with patch('pygltflib.validator.validate', side_effect=warning):
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter('always')
+                    validate_gltf(path)
+                    self.assertEqual(str(caught[0].message), 'Unrelated validation warning')
 
     def test_camera_layers_exclude_source_helper(self):
         from tools.reference.visibility import normal_view_mask, visible_to_camera
@@ -98,6 +123,14 @@ class ReferenceExportTests(unittest.TestCase):
         self.assertEqual(normal_view_mask(masks),0x14db8f33)
         self.assertFalse(visible_to_camera(18,normal_view_mask(masks)))
         self.assertTrue(visible_to_camera(0,normal_view_mask(masks)))
+
+    def test_terrain_hole_renderer_is_hidden(self):
+        from tools.reference.visibility import renderer_visible
+        self.assertFalse(renderer_visible(True, {'digholescript2'}))
+        self.assertTrue(renderer_visible(True, set()))
+        self.assertFalse(renderer_visible(False, set()))
+        self.assertFalse(renderer_visible(True, {'TextMeshPro'}))
+        self.assertFalse(renderer_visible(True, {'TMP_SubMesh'}))
 
     def test_build_and_conversion(self):
         cache = Path('.cache/reference-test')
