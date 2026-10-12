@@ -7,8 +7,13 @@ use crate::vehicle::{ColliderHandle, PhysicsWorld, VehiclePose};
 mod lamps;
 mod noise;
 mod random;
+mod road;
 pub use noise::{TerrainEvaluator, source_perlin};
 pub use random::{RandomState, SourceRandom};
+pub use road::{
+    ROAD_CHECKPOINT_INTERVAL, ROAD_CONTROLS, ROAD_SEGMENTS, RoadCheckpoint, RoadCurve, RoadIndex,
+    RoadSegment, RoadSequence, RoadState,
+};
 mod terrain;
 pub use lamps::{RoadLampId, RoadLampPlacement, road_lamp_placement, road_lamp_range};
 
