@@ -280,7 +280,7 @@ Modify presentation registration, texture helpers, mirror warmup collection, and
 - Produce: `plate_warmup_pairs(world: &World, pairs: &mut Vec<(AssetId<Mesh>, UntypedAssetId)>)`.
 Use Bevy asset IDs in this signature, not reference asset IDs.
 
-- [ ] **Step 1: Add critical material and mesh integration assertions.**
+- [x] **Step 1: Add critical material and mesh integration assertions.**
 
 Extend `plate_text.rs` with `plate_text_uniforms_keep_source_surface_values`.
 Extract pure uniform preparation into `src/plates/layout.rs` as `sdf_parameters(material: &PlateMaterialReference, layout: &PlateLayoutReference) -> SdfParameters`.
@@ -297,11 +297,11 @@ Assert face RGB `16/255`, dilation `0.1`, outline width `0.1`, softness `0.2`, g
 Define an ignored browser probe for actual material sharing, pipeline readiness, and rendered text.
 Keep this probe outside product code and Git.
 
-- [ ] **Step 2: Run native parameter checks and the browser probe before rendering integration.**
+- [x] **Step 2: Run native parameter checks and the browser probe before rendering integration.**
 
 Expected: missing parameter function; browser probe reports absent labels.
 
-- [ ] **Step 3: Implement the lit SDF material and imported-node binding.**
+- [x] **Step 3: Implement the lit SDF material and imported-node binding.**
 
 Use the existing Bevy material API and current lighting uniforms.
 Translate active source TMP shader behavior, including SDF sampling, bold scale, perspective, alpha, depth, and lit face/outline treatment.
@@ -322,14 +322,14 @@ Use existing erased material capture dispatch; do not add a second capture rende
 Gate game readiness on `PlateTextStatus`, source textures, and compiled main/capture variants.
 Surface failures through the existing loading diagnostic.
 
-- [ ] **Step 4: Verify a working mounted-text product.**
+- [x] **Step 4: Verify a working mounted-text product.**
 
 Run native plate checks, `./scripts/build.ps1`, and the visible browser probe.
 Expected: two matching labels; correct front and rear reading direction; lit text; shared atlas and material.
 Expected: no sampler error, capture feedback, unknown pipeline, or new render target.
 Record a screenshot and code/build hashes before continuing.
 
-- [ ] **Step 5: Commit the complete mounted-text rendering layer.**
+- [x] **Step 5: Commit the complete mounted-text rendering layer.**
 
 Commit message: `feat: render source SDF license plate text`.
 
