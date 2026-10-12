@@ -18,7 +18,8 @@ struct Grip {
 pub struct PushState {
     rules: HashMap<ItemId, PushReference>,
     player: PlayerReference,
-    steering_angle: f32,
+    /// Maximum steering angle per vehicle, in radians.
+    steering_angles: Vec<f32>,
     grip: Option<Grip>,
     cancelled: bool,
     steer: Option<f32>,
@@ -33,7 +34,11 @@ impl PushState {
                 .map(|r| (r.owner, r.clone()))
                 .collect(),
             player: reference.player.clone(),
-            steering_angle: reference.vehicle.max_steer_degrees.to_radians(),
+            steering_angles: reference
+                .vehicles
+                .iter()
+                .map(|vehicle| vehicle.max_steer_degrees.to_radians())
+                .collect(),
             grip: None,
             cancelled: false,
             steer: None,
@@ -54,8 +59,8 @@ impl PushState {
         self.cancelled = true;
         self.steer = None;
     }
-    pub fn steering(&self) -> Option<f32> {
-        self.steer
+    pub fn steering(&self) -> Option<(RigidBodyHandle, f32)> {
+        Some((self.grip.as_ref()?.body, self.steer?))
     }
     pub fn gripping(&self) -> bool {
         self.grip.is_some() && !self.cancelled
@@ -226,7 +231,10 @@ impl PushState {
             );
             let forward = ((input.held & keys::FORWARD != 0) as u8 as f32)
                 - ((input.held & keys::BACK != 0) as u8 as f32);
-            let direction = Rotation::from_rotation_y(self.steer.unwrap() * self.steering_angle)
+            let angle = physics
+                .vehicle_of(body_handle)
+                .map_or(0.0, |vehicle| self.steering_angles[vehicle]);
+            let direction = Rotation::from_rotation_y(self.steer.unwrap() * angle)
                 * (car_pose.rotation * -Vector::Z)
                 * forward;
             let up = car_pose.rotation * Vector::Y;

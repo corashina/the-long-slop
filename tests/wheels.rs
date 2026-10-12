@@ -35,7 +35,7 @@ fn assert_slot_aim(
     let collider = &physics.rapier().colliders[slot_sensor(physics, slot)];
     assert!(collider.parent().is_none());
     let center = collider.translation();
-    let chassis = physics.rapier().bodies[physics.chassis_handle()].translation();
+    let chassis = physics.rapier().bodies[physics.chassis_handle(0)].translation();
     let mut outward = center - chassis;
     outward.y = 0.0;
     outward = outward.normalize();
@@ -64,7 +64,7 @@ fn wheel_sensors_are_unparented_and_keep_aim_after_rebase() {
     let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
     let mut wheels = WheelAssemblies::new(&reference).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
-    let slot = reference.vehicle.wheel_slots[0];
+    let slot = reference.vehicles[0].wheel_slots[0];
     let rim = reference.wheel_slots[0].rim;
     assert_slot_aim(&area, &mut physics, slot, rim, false);
     wheels.remove(slot, &mut area.items, &mut physics).unwrap();
@@ -91,25 +91,25 @@ fn removed_wheel_has_no_support() {
     let mut wheels = WheelAssemblies::new(&reference).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
     for _ in 0..120 {
-        physics.apply_vehicle_forces(DriveInput::default(), 0.0);
+        physics.apply_vehicle_forces(0, DriveInput::default(), 0.0);
         physics.step_physics();
         wheels.sync(&mut area.items, &mut physics).unwrap();
     }
-    let slot = reference.vehicle.wheel_slots[0];
+    let slot = reference.vehicles[0].wheel_slots[0];
     let mounted = reference
         .wheel_slots
         .iter()
         .find(|wheel| wheel.id == slot)
         .unwrap();
-    assert!(physics.snapshot().wheels_contact[0]);
+    assert!(physics.snapshot(0).wheels_contact[0]);
     let condition = area.items.get(mounted.rim).unwrap().condition;
     let count = area.items.len();
     let id = wheels.remove(slot, &mut area.items, &mut physics).unwrap();
     assert_eq!(id, mounted.rim);
-    assert_eq!(physics.wheel_support_count(), 3);
-    physics.apply_vehicle_forces(DriveInput::default(), 0.0);
+    assert_eq!(physics.wheel_support_count(0), 3);
+    physics.apply_vehicle_forces(0, DriveInput::default(), 0.0);
     physics.step_physics();
-    assert!(!physics.snapshot().wheels_contact[0]);
+    assert!(!physics.snapshot(0).wheels_contact[0]);
     let part = area.items.get(id).unwrap();
     assert_eq!(part.location, ItemLocation::World);
     assert_eq!(part.condition, condition);
@@ -122,7 +122,7 @@ fn removed_wheel_has_no_support() {
     wheels
         .install(id, slot, &mut area.items, &mut physics)
         .unwrap();
-    assert_eq!(physics.wheel_support_count(), 4);
+    assert_eq!(physics.wheel_support_count(0), 4);
     assert_eq!(area.items.len(), count);
     assert_eq!(area.items.get(id).unwrap().condition, condition);
     assert!(
@@ -141,7 +141,7 @@ fn split_and_assembly_conserve_parts_and_mass() {
     wheels.sync(&mut area.items, &mut physics).unwrap();
     let mounted = &reference.wheel_slots[0];
     let count = area.items.len();
-    let initial_mass = physics.rapier().bodies[physics.chassis_handle()].mass();
+    let initial_mass = physics.rapier().bodies[physics.chassis_handle(0)].mass();
     let id = wheels
         .remove(mounted.id, &mut area.items, &mut physics)
         .unwrap();
@@ -173,7 +173,7 @@ fn split_and_assembly_conserve_parts_and_mass() {
         .unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
     assert!(
-        (physics.rapier().bodies[physics.chassis_handle()].mass() - initial_mass).abs() < 0.001
+        (physics.rapier().bodies[physics.chassis_handle(0)].mass() - initial_mass).abs() < 0.001
     );
     assert_eq!(area.items.len(), count);
 }
@@ -186,7 +186,7 @@ fn rebase_and_reattachment_keep_contact_and_identity() {
     let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
     let mut wheels = WheelAssemblies::new(&reference).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
-    let slot = reference.vehicle.wheel_slots[0];
+    let slot = reference.vehicles[0].wheel_slots[0];
     let id = wheels.remove(slot, &mut area.items, &mut physics).unwrap();
     let shape_handles = physics.rapier().bodies[area.items.get(id).unwrap().body.unwrap()]
         .colliders()
@@ -197,11 +197,11 @@ fn rebase_and_reattachment_keep_contact_and_identity() {
         .install(id, slot, &mut area.items, &mut physics)
         .unwrap();
     for _ in 0..120 {
-        physics.apply_vehicle_forces(DriveInput::default(), 0.0);
+        physics.apply_vehicle_forces(0, DriveInput::default(), 0.0);
         physics.step_physics();
         wheels.sync(&mut area.items, &mut physics).unwrap();
     }
-    assert!(physics.snapshot().wheels_contact[0]);
+    assert!(physics.snapshot(0).wheels_contact[0]);
     assert_eq!(wheels.slot_for_item(id), Some(slot));
     for handle in shape_handles {
         assert!(physics.rapier().colliders.contains(handle));
@@ -215,19 +215,15 @@ fn production_wheel_bindings_detach_and_restore() {
         &std::fs::read("web/assets/reference/manifest.json").unwrap(),
     )
     .unwrap();
-    let transform = reference.area.car_pose;
     let mut physics = my_summer_slop::vehicle::PhysicsWorld::new(
         &reference,
-        my_summer_slop::vehicle::VehiclePose {
-            position: transform.translation,
-            rotation: transform.rotation,
-        },
+        &my_summer_slop::starting_area::initial_vehicle_poses(&reference).unwrap(),
     )
     .unwrap();
     let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
     let mut wheels = WheelAssemblies::new(&reference).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
-    let slot = reference.vehicle.wheel_slots[0];
+    let slot = reference.vehicles[0].wheel_slots[0];
     let count = area.items.len();
     let mounted = reference
         .wheel_slots
@@ -267,7 +263,7 @@ fn production_wheel_bindings_detach_and_restore() {
     area.items.rebase([1024.0, 0.0, 0.0]);
     wheels.sync(&mut area.items, &mut physics).unwrap();
     assert_slot_aim(&area, &mut physics, slot, mounted.rim, false);
-    assert_eq!(physics.wheel_support_count(), 4);
+    assert_eq!(physics.wheel_support_count(0), 4);
     assert_eq!(area.items.len(), count);
 }
 
@@ -280,7 +276,7 @@ fn mounted_tire_dismount_preserves_rim_and_vehicle_mass() {
     wheels.sync(&mut area.items, &mut physics).unwrap();
     let slot = &r.wheel_slots[0];
     let count = area.items.len();
-    let before = physics.rapier().bodies[physics.chassis_handle()].mass();
+    let before = physics.rapier().bodies[physics.chassis_handle(0)].mass();
     let tire_mass = r.items.iter().find(|i| i.id == slot.tire).unwrap().mass_kg;
     let (rim, tire) = wheels
         .split(slot.rim, &mut area.items, &mut physics)
@@ -292,13 +288,13 @@ fn mounted_tire_dismount_preserves_rim_and_vehicle_mass() {
     assert_eq!(area.items.get(tire).unwrap().location, ItemLocation::World);
     assert_eq!(area.items.len(), count);
     assert!(
-        (physics.rapier().bodies[physics.chassis_handle()].mass() - (before - tire_mass)).abs()
+        (physics.rapier().bodies[physics.chassis_handle(0)].mass() - (before - tire_mass)).abs()
             < 0.01
     );
     wheels
         .assemble(rim, tire, &mut area.items, &mut physics)
         .unwrap();
-    assert!((physics.rapier().bodies[physics.chassis_handle()].mass() - before).abs() < 0.01);
+    assert!((physics.rapier().bodies[physics.chassis_handle(0)].mass() - before).abs() < 0.01);
 }
 
 fn runtime_aiming_at_wheel(
@@ -316,7 +312,7 @@ fn runtime_aiming_at_wheel(
         .rim;
     let center =
         runtime.physics.rapier().colliders[slot_sensor(&runtime.physics, slot)].translation();
-    let chassis = runtime.physics.rapier().bodies[runtime.physics.chassis_handle()].translation();
+    let chassis = runtime.physics.rapier().bodies[runtime.physics.chassis_handle(0)].translation();
     let outward = Vector::new((center - chassis).x, 0.0, (center - chassis).z).normalize();
     let old = runtime.area.player.body_handle();
     runtime.physics.rapier_mut().bodies[old].set_enabled(false);
@@ -363,11 +359,11 @@ fn removed_wheel_is_held_with_the_same_identity() {
     reference
         .nodes
         .iter_mut()
-        .find(|node| node.id == reference.vehicle.root)
+        .find(|node| node.id == reference.vehicles[0].root)
         .unwrap()
         .transform
         .translation[1] = 1.1;
-    let slot = reference.vehicle.wheel_slots[0];
+    let slot = reference.vehicles[0].wheel_slots[0];
     let mut runtime = runtime_aiming_at_wheel(&reference, slot);
     let rim = reference.wheel_slots[0].rim;
     let tire = reference.wheel_slots[0].tire;
@@ -383,7 +379,7 @@ fn removed_wheel_is_held_with_the_same_identity() {
     );
     assert_eq!(runtime.area.interaction.held(), Some(rim));
     assert!(!runtime.wheels.installed(slot));
-    assert_eq!(runtime.physics.wheel_support_count(), 3);
+    assert_eq!(runtime.physics.wheel_support_count(0), 3);
     assert_eq!(
         runtime.area.items.get(tire).unwrap().location,
         ItemLocation::Attached(rim)
@@ -420,12 +416,12 @@ fn rejected_wheel_installation_keeps_the_carry_constraint() {
     reference
         .nodes
         .iter_mut()
-        .find(|node| node.id == reference.vehicle.root)
+        .find(|node| node.id == reference.vehicles[0].root)
         .unwrap()
         .transform
         .translation[1] = 1.1;
     reference.wheel_slots[0].rim_types = vec!["incompatible".into()];
-    let slot = reference.vehicle.wheel_slots[0];
+    let slot = reference.vehicles[0].wheel_slots[0];
     let rim = reference.wheel_slots[0].rim;
     let mut runtime = runtime_aiming_at_wheel(&reference, slot);
     runtime.step(
@@ -497,7 +493,7 @@ fn production_wheel_removal_acquires_the_source_rim() {
         &std::fs::read("web/assets/reference/manifest.json").unwrap(),
     )
     .unwrap();
-    let slot = reference.vehicle.wheel_slots[0];
+    let slot = reference.vehicles[0].wheel_slots[0];
     let mut runtime = runtime_aiming_at_wheel(&reference, slot);
     let rim = reference.wheel_slots[0].rim;
     let tire = reference.wheel_slots[0].tire;
@@ -536,5 +532,5 @@ fn production_wheel_removal_acquires_the_source_rim() {
         ItemLocation::Attached(rim)
     );
     assert_eq!(runtime.area.items.get(rim).unwrap().condition, condition);
-    assert_eq!(runtime.physics.wheel_support_count(), 3);
+    assert_eq!(runtime.physics.wheel_support_count(0), 3);
 }

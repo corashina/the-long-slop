@@ -47,17 +47,22 @@ struct InstrumentReceiver {
     off: Handle<SourceMaterial>,
     casters: Vec<(Entity, Handle<StandardMaterial>, Handle<StandardMaterial>)>,
 }
-#[derive(Resource, Default)]
-pub struct InstrumentVisuals {
-    pub bound: bool,
-    pub prepared: bool,
+/// The gauges of one vehicle.
+#[derive(Default)]
+struct Dashboard {
     needles: Vec<Entity>,
     digits: Vec<Entity>,
     lamps: Vec<MaterialVisual>,
     digit_materials: Vec<MaterialVisual>,
-
     last_lamps: Option<u32>,
     last_digits_lit: Option<bool>,
+}
+/// Dashboards follow the order of the manifest vehicles.
+#[derive(Resource, Default)]
+pub struct InstrumentVisuals {
+    pub bound: bool,
+    pub prepared: bool,
+    dashboards: Vec<Dashboard>,
 }
 impl InstrumentVisuals {
     pub fn bind(
@@ -77,20 +82,19 @@ impl InstrumentVisuals {
         if gltfs.iter().any(|(_, h)| gltf_assets.get(h).is_none()) {
             return Ok(false);
         }
-        for link in reference
-            .instruments
-            .lamps
-            .iter()
-            .flat_map(|l| [&l.on, &l.off])
-            .chain(
-                reference
-                    .instruments
-                    .odometer
-                    .digits
-                    .iter()
-                    .flat_map(|d| [&d.on, &d.off]),
-            )
-        {
+        for link in reference.vehicles.iter().flat_map(|v| {
+            v.instruments
+                .lamps
+                .iter()
+                .flat_map(|l| [&l.on, &l.off])
+                .chain(
+                    v.instruments
+                        .odometer
+                        .digits
+                        .iter()
+                        .flat_map(|d| [&d.on, &d.off]),
+                )
+        }) {
             let (_, handle) = gltfs
                 .iter()
                 .find(|(id, _)| *id == link.asset)
@@ -120,19 +124,6 @@ impl InstrumentVisuals {
                 .copied()
                 .ok_or_else(|| ReferenceError(format!("Missing instrument node {}", id.0)))
         };
-        self.needles = reference
-            .instruments
-            .needles
-            .iter()
-            .map(|r| node(r.node))
-            .collect::<Result<_, _>>()?;
-        self.digits = reference
-            .instruments
-            .odometer
-            .digits
-            .iter()
-            .map(|r| node(r.node))
-            .collect::<Result<_, _>>()?;
         let mut handles = HashMap::new();
         let mut material = |r: &MaterialLink| -> Handle<StandardMaterial> {
             let key = (r.asset, r.gltf_material);
@@ -152,56 +143,75 @@ impl InstrumentVisuals {
             handles.insert(key, handle.clone());
             handle
         };
-        for (index, lamp) in reference.instruments.lamps.iter().enumerate() {
-            if lamp.signal == "headlight2" {
-                continue;
+        for vehicle in &reference.vehicles {
+            let instruments = &vehicle.instruments;
+            let mut dashboard = Dashboard {
+                needles: instruments
+                    .needles
+                    .iter()
+                    .map(|r| node(r.node))
+                    .collect::<Result<_, _>>()?,
+                digits: instruments
+                    .odometer
+                    .digits
+                    .iter()
+                    .map(|r| node(r.node))
+                    .collect::<Result<_, _>>()?,
+                ..Default::default()
+            };
+            for (index, lamp) in instruments.lamps.iter().enumerate() {
+                if lamp.signal == "headlight2" {
+                    continue;
+                }
+                let parent = node(lamp.node)?;
+                let entities: Vec<_> = primitives
+                    .iter()
+                    .filter_map(|(e, p)| (p.parent() == parent).then_some(e))
+                    .collect();
+                if entities.is_empty() {
+                    return Err(ReferenceError(format!(
+                        "Missing instrument renderer {}",
+                        lamp.node.0
+                    )));
+                }
+                dashboard.lamps.push(MaterialVisual {
+                    index,
+                    entities,
+                    on: material(&lamp.on),
+                    off: material(&lamp.off),
+                    choices: Vec::new(),
+                });
             }
-            let parent = node(lamp.node)?;
-            let entities: Vec<_> = primitives
-                .iter()
-                .filter_map(|(e, p)| (p.parent() == parent).then_some(e))
-                .collect();
-            if entities.is_empty() {
-                return Err(ReferenceError(format!(
-                    "Missing instrument renderer {}",
-                    lamp.node.0
-                )));
+            for digit in &instruments.odometer.digits {
+                let parent = node(digit.node)?;
+                let entities: Vec<_> = primitives
+                    .iter()
+                    .filter_map(|(e, p)| (p.parent() == parent).then_some(e))
+                    .collect();
+                if entities.is_empty() {
+                    return Err(ReferenceError(format!(
+                        "Missing instrument renderer {}",
+                        digit.node.0
+                    )));
+                }
+                dashboard.digit_materials.push(MaterialVisual {
+                    index: 0,
+                    entities,
+                    on: material(&digit.on),
+                    off: material(&digit.off),
+                    choices: Vec::new(),
+                });
             }
-            self.lamps.push(MaterialVisual {
-                index,
-                entities,
-                on: material(&lamp.on),
-                off: material(&lamp.off),
-                choices: Vec::new(),
-            });
-        }
-        for digit in &reference.instruments.odometer.digits {
-            let parent = node(digit.node)?;
-            let entities: Vec<_> = primitives
-                .iter()
-                .filter_map(|(e, p)| (p.parent() == parent).then_some(e))
-                .collect();
-            if entities.is_empty() {
-                return Err(ReferenceError(format!(
-                    "Missing instrument renderer {}",
-                    digit.node.0
-                )));
-            }
-            self.digit_materials.push(MaterialVisual {
-                index: 0,
-                entities,
-                on: material(&digit.on),
-                off: material(&digit.off),
-                choices: Vec::new(),
-            });
+            self.dashboards.push(dashboard);
         }
         self.bound = true;
         Ok(true)
     }
+    /// `states` follow the order of the manifest vehicles.
     pub fn update(
         &mut self,
         reference: &ReferenceManifest,
-        state: &InstrumentState,
+        states: &[InstrumentState],
         transforms: &mut Query<&mut Transform, Without<super::camera::DriveCamera>>,
         materials: &mut Query<&mut MeshMaterial3d<SourceMaterial>>,
         casters: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
@@ -209,9 +219,29 @@ impl InstrumentVisuals {
         if !self.prepared {
             return;
         }
+        for ((dashboard, vehicle), state) in self
+            .dashboards
+            .iter_mut()
+            .zip(&reference.vehicles)
+            .zip(states)
+        {
+            dashboard.update(&vehicle.instruments, state, transforms, materials, casters);
+        }
+    }
+}
+
+impl Dashboard {
+    fn update(
+        &mut self,
+        reference: &crate::reference::InstrumentReference,
+        state: &InstrumentState,
+        transforms: &mut Query<&mut Transform, Without<super::camera::DriveCamera>>,
+        materials: &mut Query<&mut MeshMaterial3d<SourceMaterial>>,
+        casters: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
+    ) {
         for (i, entity) in self.needles.iter().enumerate() {
             if let Ok(mut t) = transforms.get_mut(*entity) {
-                let r = &reference.instruments.needles[i];
+                let r = &reference.needles[i];
                 let mut e = r.rest;
                 e[r.axis as usize] = state.needle_angles[i];
                 let rotation = Quat::from_array(source_rotation(e));
@@ -222,7 +252,7 @@ impl InstrumentVisuals {
         }
         for (i, entity) in self.digits.iter().enumerate() {
             if let Ok(mut t) = transforms.get_mut(*entity) {
-                let r = &reference.instruments.odometer.digits[i];
+                let r = &reference.odometer.digits[i];
                 let mut e = [0.; 3];
                 e[r.axis as usize] = state.digit_angles[i] * if r.inv { -1. } else { 1. };
                 let rotation = Quat::from_array(source_rotation(e));
@@ -295,9 +325,9 @@ pub(crate) fn prepare_instruments(
         return;
     }
     if visuals
-        .lamps
+        .dashboards
         .iter()
-        .chain(&visuals.digit_materials)
+        .flat_map(|d| d.lamps.iter().chain(&d.digit_materials))
         .any(|visual| {
             visual
                 .entities
@@ -309,7 +339,11 @@ pub(crate) fn prepare_instruments(
     }
     let far = Transform::from_translation(Vec3::splat(1_000_000.));
     let visuals = &mut *visuals;
-    for visual in visuals.lamps.iter_mut().chain(&mut visuals.digit_materials) {
+    for visual in visuals
+        .dashboards
+        .iter_mut()
+        .flat_map(|d| d.lamps.iter_mut().chain(&mut d.digit_materials))
+    {
         for &entity in &visual.entities {
             let (mesh, receiver, global, mode, children) = receivers.get(entity).unwrap();
             let mask = materials.get(&receiver.0).unwrap().extension.receiver_mask;

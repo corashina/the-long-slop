@@ -44,9 +44,7 @@ pub fn display_name<'a>(
                 crate::reference::TurnAction::ToggleHomeLight { .. } => "Light switch",
             }),
         ItemKind::Door => {
-            if item.body == reference.vehicle.body
-                || crate::starting_area::belongs_to_vehicle(reference, item.body)
-            {
+            if crate::starting_area::body_vehicle(reference, item.body).is_some() {
                 "Car door"
             } else {
                 item.name.as_str()
@@ -83,18 +81,23 @@ pub fn display_name<'a>(
                 .iter()
                 .find(|opening| opening.cap == id)
                 .map(|opening| opening.tank);
-            if tank == Some(reference.engine.fuel_tank) {
+            let engines = || reference.vehicles.iter().map(|vehicle| &vehicle.engine);
+            if engines().any(|engine| tank == Some(engine.fuel_tank)) {
                 "Fuel cap"
-            } else if tank == Some(reference.engine.oil_tank) {
+            } else if engines().any(|engine| tank == Some(engine.oil_tank)) {
                 "Oil cap"
-            } else if tank == Some(reference.engine.coolant_tank) {
+            } else if engines().any(|engine| tank == Some(engine.coolant_tank)) {
                 "Coolant cap"
             } else {
                 "Container cap"
             }
         }
         ItemKind::Container => {
-            if item.body == reference.vehicle.body {
+            if reference
+                .vehicles
+                .iter()
+                .any(|vehicle| vehicle.body == item.body)
+            {
                 return "Fuel tank";
             }
             if let Some(tank) = reference.tanks.iter().find(|tank| tank.item == id) {

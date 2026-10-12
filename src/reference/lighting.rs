@@ -219,6 +219,7 @@ pub struct LightControllerReference {
     pub id: LightControlId,
     pub source: SourceId,
     pub kind: LightControllerKind,
+    pub vehicle: Option<usize>,
     pub node: NodeId,
     pub aim_colliders: Vec<ColliderId>,
     pub animated_poses: Vec<AnimatedLightPose>,
@@ -303,7 +304,7 @@ pub struct LightingRecord {
     pub lights: Vec<LightReference>,
     pub cycle: CycleReference,
     pub controllers: Vec<LightControllerReference>,
-    pub high_beam: HighBeamLampReference,
+    pub high_beams: Vec<HighBeamLampReference>,
     pub road_lamp: RoadLampReference,
     pub textures: Vec<LightingTextureRecord>,
     pub materials: Vec<MaterialBindingReference>,
@@ -700,43 +701,35 @@ impl LightingRecord {
                 "material asset",
             )?;
         }
-        let lamp = &self.high_beam;
         check(
-            valid_source(&lamp.source)
-                && lamp.source.file == "level1"
-                && lamp.source.path_id == 66369
-                && lamp.signal == "headlight2"
-                && node(lamp.node).is_some_and(|n| {
-                    n.asset == lamp.on.asset
-                        && n.asset == lamp.off.asset
-                        && n.source.file == "level1"
-                        && n.source.path_id == 22197
-                })
-                && finite(&[lamp.min_value, lamp.max_value])
-                && lamp.min_value == 1.
-                && lamp.max_value == 0.
-                && lamp.stay_on
-                && material(&lamp.on)
-                && material(&lamp.off)
-                && lamp.on.source.file == "sharedassets1.assets"
-                && lamp.on.source.path_id == 325
-                && lamp.off.source.file == "sharedassets1.assets"
-                && lamp.off.source.path_id == 324,
-            &lamp.source,
-            "high-beam instrument",
+            self.high_beams.len() == manifest.vehicles.len(),
+            &self.source,
+            "high-beam instruments",
         )?;
-        for (kind, field) in [
-            (
-                LightControllerKind::Headlight,
-                "controllers.headlight missing",
-            ),
-            (LightControllerKind::Rear, "controllers.rear missing"),
-        ] {
+        for lamp in &self.high_beams {
             check(
-                self.controllers.iter().any(|control| control.kind == kind),
-                &self.source,
-                field,
+                valid_source(&lamp.source)
+                    && lamp.signal == "headlight2"
+                    && node(lamp.node)
+                        .is_some_and(|n| n.asset == lamp.on.asset && n.asset == lamp.off.asset)
+                    && finite(&[lamp.min_value, lamp.max_value])
+                    && material(&lamp.on)
+                    && material(&lamp.off)
+                    && lamp.on.source != lamp.off.source,
+                &lamp.source,
+                "high-beam instrument",
             )?;
+        }
+        for vehicle in 0..manifest.vehicles.len() {
+            for kind in [LightControllerKind::Headlight, LightControllerKind::Rear] {
+                check(
+                    self.controllers
+                        .iter()
+                        .any(|control| control.kind == kind && control.vehicle == Some(vehicle)),
+                    &self.source,
+                    "vehicle controllers missing",
+                )?;
+            }
         }
         for control in &self.controllers {
             let owner = node(control.node);
@@ -756,7 +749,15 @@ impl LightingRecord {
                     && (0.0..=1.0).contains(&control.energy)
                     && control.energy_move >= 0.
                     && control.electronics_output >= 0.
-                    && control.electronics_source.as_ref().is_none_or(valid_source),
+                    && control.electronics_source.as_ref().is_none_or(valid_source)
+                    && control.vehicle.is_none_or(|v| v < manifest.vehicles.len())
+                    && control.vehicle.is_some()
+                        == matches!(
+                            control.kind,
+                            LightControllerKind::Headlight
+                                | LightControllerKind::Rear
+                                | LightControllerKind::Cabin
+                        ),
                 &control.source,
                 "controller state/node",
             )?;
@@ -870,34 +871,13 @@ impl LightingRecord {
                     &control.source,
                     "cabin input",
                 )?;
-                let level1 =
-                    |source: &SourceId, pid| source.file == "level1" && source.path_id == pid;
                 check(
-                    level1(&input.source, 73157)
-                        && level1(&input.switch_source, 69669)
-                        && input.door_slots.len() == 4
+                    input.door_slots.len() == 4
                         && input.door_usable_sources.len() == 4
                         && input.door_nodes.len() == 4,
                     &control.source,
                     "cabin door links",
                 )?;
-                let expected = [
-                    (77869, 76010, 38014),
-                    (77868, 70795, 24532),
-                    (77864, 66662, 33544),
-                    (77865, 69957, 24439),
-                ];
-                for (i, (slot, usable, transform_source)) in expected.into_iter().enumerate() {
-                    check(
-                        level1(&input.door_slots[i], slot)
-                            && level1(&input.door_usable_sources[i], usable)
-                            && node(input.door_nodes[i]).is_some_and(|n| {
-                                n.asset == asset && level1(&n.source, transform_source)
-                            }),
-                        &control.source,
-                        "cabin door links correspondence",
-                    )?;
-                }
             }
         }
         let expected_flares = [57088, 57090, 57089];

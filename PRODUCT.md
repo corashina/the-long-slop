@@ -10,6 +10,7 @@ Keyboard and mouse controls. WebGL2 rendering.
 ## Purpose
 
 Prepare a fixed Lada 2101 in the imported starting garage. Drive onto the endless desert road.
+A source Skoda waits in the yard as a second car.
 Installed Steam build 11140890 owns the reference values.
 The approved garage spawn takes precedence over the original bedroom spawn.
 
@@ -18,17 +19,17 @@ The approved garage spawn takes precedence over the original bedroom spawn.
 The build includes walking, first person look, crouching, jumping, seating, carrying, and aimed use.
 Preparation includes doors, fluid caps, filling, spilling, ignition, and wheel assembly.
 It retains the road, stations, chase camera, pause, recovery, and restart.
-The interface uses source menus, action icons, fluid percentages, and animated Lada instruments.
+The interface uses source menus, action icons, fluid percentages, and animated car instruments.
 Recovery preserves state. Restart restores the garage.
 
 The source cycle changes sky, illumination, ambient light, and fog during active play.
 Lights include headlights, cabin lights, rear lamps, five house switches, and automatic roadside lamps.
-L and the two physical headlight controls share one car request.
+L and the physical headlight controls share one request per car.
 House switches use E or eligible LMB. Cabin controls follow source modes and door links.
 Pause freezes cycle time, fades, and switch movement. Recovery preserves these states.
 Restart restores the garage and source startup state at 240 seconds.
 
-Portable flashlights, survival, sleep, weather events, weapons, other vehicles, multiplayer, saves, audio, and deployment remain outside this stage.
+Portable flashlights, survival, sleep, weather events, weapons, further vehicles, multiplayer, saves, audio, and deployment remain outside this stage.
 Engine heat and fluid rules retain their current behavior.
 The build does not claim identical Unity physics or full-game parity.
 
@@ -36,7 +37,7 @@ The build does not claim identical Unity physics or full-game parity.
 
 The complete local library covers installed build 11140890.
 It preserves source files and typed records, and supplies converted media and model files for development.
-The game uses the selected garage, fixed Lada, and preparation items.
+The game uses the selected garage, the Lada, the Skoda, and preparation items.
 Library availability does not expand gameplay scope.
 Engine-dependent records require separate browser adapters before use.
 

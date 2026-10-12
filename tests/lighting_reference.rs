@@ -101,14 +101,6 @@ fn rejects_missing_cabin_input_and_incomplete_door_links() {
             }
             assert!(m.validate().is_err());
         }
-        let mut m = original.clone();
-        let input = m.lighting.controllers[index].cabin_input.as_mut().unwrap();
-        match field {
-            0 => input.door_slots.reverse(),
-            1 => input.door_usable_sources.reverse(),
-            _ => input.door_nodes.reverse(),
-        }
-        assert!(m.validate().is_err());
     }
     let mut m = original;
     m.lighting.controllers[index]
@@ -277,8 +269,11 @@ fn rejects_missing_required_controller_family() {
     use my_summer_slop::reference::LightControllerKind;
     let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
     for (kind, field) in [
-        (LightControllerKind::Headlight, "controllers.headlight"),
-        (LightControllerKind::Rear, "controllers.rear"),
+        (
+            LightControllerKind::Headlight,
+            "vehicle controllers missing",
+        ),
+        (LightControllerKind::Rear, "vehicle controllers missing"),
     ] {
         let mut manifest = original.clone();
         manifest
@@ -335,17 +330,17 @@ fn dashboard_contract_rejects_missing_and_wrong_source_links() {
     value["lighting"]
         .as_object_mut()
         .unwrap()
-        .remove("high_beam");
+        .remove("high_beams");
     assert!(ReferenceManifest::from_json(&serde_json::to_vec(&value).unwrap()).is_err());
     let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
     let mut bad = original.clone();
-    bad.lighting.high_beam.node = bad.vehicle.root;
+    bad.lighting.high_beams[0].node = my_summer_slop::reference::NodeId(u32::MAX);
     assert!(bad.validate().is_err());
     let mut bad = original.clone();
-    bad.lighting.high_beam.on = bad.lighting.high_beam.off.clone();
+    bad.lighting.high_beams[0].on = bad.lighting.high_beams[0].off.clone();
     assert!(bad.validate().is_err());
     let mut bad = original;
-    bad.lighting.high_beam.max_value = f32::NAN;
+    bad.lighting.high_beams[0].max_value = f32::NAN;
     assert!(bad.validate().is_err());
 }
 
@@ -452,13 +447,13 @@ fn production_lighting_records_match_selected_scene() {
     }
     for field in ["source", "signal", "min_value", "max_value", "stay_on"] {
         assert_eq!(
-            a["high_beam"][field], b["high_beam"][field],
+            a["high_beams"][0][field], b["high_beams"][0][field],
             "dashboard {field}"
         );
     }
     for field in ["on", "off"] {
-        let choice = &a["high_beam"][field];
-        assert_eq!(choice["source"], b["high_beam"][field]["source"]);
+        let choice = &a["high_beams"][0][field];
+        assert_eq!(choice["source"], b["high_beams"][0][field]["source"]);
         let asset = manifest
             .assets
             .iter()

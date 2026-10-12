@@ -35,9 +35,10 @@ pub struct ItemStore {
     states: Vec<ItemState>,
     indices: HashMap<ItemId, usize>,
     body_ids: Vec<BodyId>,
-    vehicle_tanks: [usize; 3],
+    /// Fuel, sump, and coolant state indices per vehicle.
+    vehicle_tanks: Vec<[usize; 3]>,
     names: Vec<String>,
-    vehicle_item: ItemId,
+    vehicle_items: Vec<ItemId>,
     slot_owners: HashMap<PartSlotId, Option<ItemId>>,
 }
 
@@ -76,35 +77,39 @@ impl ItemStore {
                 pose,
                 local_pose,
                 condition: item.condition,
-                temperature: (item.id == reference.engine.item)
-                    .then_some(reference.engine.initial_temperature),
+                temperature: reference
+                    .vehicles
+                    .iter()
+                    .find(|vehicle| vehicle.engine.item == item.id)
+                    .map(|vehicle| vehicle.engine.initial_temperature),
                 fluid,
             });
         }
-        let ids = [
-            reference.engine.fuel_tank,
-            reference.engine.oil_tank,
-            reference.engine.coolant_tank,
-        ];
-        let mut vehicle_tanks = [0; 3];
-        for (index, id) in ids.iter().enumerate() {
-            vehicle_tanks[index] = *indices
-                .get(id)
-                .ok_or_else(|| ReferenceError(format!("Missing engine tank {}", id.0)))?;
-            if states[vehicle_tanks[index]].fluid.is_none() {
-                return Err(ReferenceError(format!(
-                    "Missing engine fluid container {}",
-                    id.0
-                )));
+        let mut vehicle_tanks = Vec::with_capacity(reference.vehicles.len());
+        for vehicle in &reference.vehicles {
+            let ids = [
+                vehicle.engine.fuel_tank,
+                vehicle.engine.oil_tank,
+                vehicle.engine.coolant_tank,
+            ];
+            let mut tanks = [0; 3];
+            for (index, id) in ids.iter().enumerate() {
+                tanks[index] = *indices
+                    .get(id)
+                    .ok_or_else(|| ReferenceError(format!("Missing engine tank {}", id.0)))?;
+                if states[tanks[index]].fluid.is_none() {
+                    return Err(ReferenceError(format!(
+                        "Missing engine fluid container {}",
+                        id.0
+                    )));
+                }
             }
-        }
-        if vehicle_tanks[0] == vehicle_tanks[1]
-            || vehicle_tanks[0] == vehicle_tanks[2]
-            || vehicle_tanks[1] == vehicle_tanks[2]
-        {
-            return Err(ReferenceError(
-                "Engine tanks must have distinct item IDs".into(),
-            ));
+            if tanks[0] == tanks[1] || tanks[0] == tanks[2] || tanks[1] == tanks[2] {
+                return Err(ReferenceError(
+                    "Engine tanks must have distinct item IDs".into(),
+                ));
+            }
+            vehicle_tanks.push(tanks);
         }
         for slot in &reference.wheel_slots {
             for id in [slot.wheel, slot.rim] {
@@ -125,12 +130,18 @@ impl ItemStore {
             }
         }
         Ok(Self {
-            vehicle_item: reference
-                .items
+            vehicle_items: reference
+                .vehicles
                 .iter()
-                .find(|i| i.node == reference.vehicle.root)
-                .expect("vehicle item")
-                .id,
+                .map(|vehicle| {
+                    reference
+                        .items
+                        .iter()
+                        .find(|i| i.node == vehicle.root)
+                        .expect("vehicle item")
+                        .id
+                })
+                .collect(),
             slot_owners: reference
                 .part_slots
                 .iter()
@@ -158,7 +169,7 @@ impl ItemStore {
 
     pub fn mounted(&self, mut id: ItemId) -> bool {
         for _ in 0..self.states.len() {
-            if id == self.vehicle_item {
+            if self.vehicle_items.contains(&id) {
                 return true;
             }
             match self.get(id).map(|i| i.location) {
@@ -239,10 +250,10 @@ impl ItemStore {
         Some((first, second))
     }
 
-    pub fn vehicle_fluids(&mut self) -> Result<VehicleFluids<'_>, ReferenceError> {
+    pub fn vehicle_fluids(&mut self, vehicle: usize) -> Result<VehicleFluids<'_>, ReferenceError> {
         let [fuel, sump, coolant] = self
             .states
-            .get_disjoint_mut(self.vehicle_tanks)
+            .get_disjoint_mut(self.vehicle_tanks[vehicle])
             .map_err(|_| ReferenceError("Engine tank bindings overlap".into()))?;
         Ok(VehicleFluids {
             fuel: fuel

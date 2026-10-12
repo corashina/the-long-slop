@@ -260,13 +260,13 @@ fn engine_and_radiator_removal_preserve_contents_and_change_operation() {
     let radiator = part(&r, "coolanttank");
     g.area
         .items
-        .get_mut(r.engine.oil_tank)
+        .get_mut(r.vehicles[0].engine.oil_tank)
         .unwrap()
         .fluid
         .as_mut()
         .unwrap()
         .mixture
-        .quantities_liters[r.engine.oil_fluid as usize] = 1.7;
+        .quantities_liters[r.vehicles[0].engine.oil_fluid as usize] = 1.7;
     g.area
         .items
         .get_mut(radiator)
@@ -277,9 +277,15 @@ fn engine_and_radiator_removal_preserve_contents_and_change_operation() {
         .mixture
         .quantities_liters[3] = 2.1;
     g.wheels.sync(&mut g.area.items, &mut g.physics).unwrap();
-    let chassis = g.physics.chassis_handle();
+    let chassis = g.physics.chassis_handle(0);
     let before_mass = g.physics.rapier().bodies[chassis].mass();
-    let oil = g.area.items.get(r.engine.oil_tank).unwrap().fluid.clone();
+    let oil = g
+        .area
+        .items
+        .get(r.vehicles[0].engine.oil_tank)
+        .unwrap()
+        .fluid
+        .clone();
     let coolant = g.area.items.get(radiator).unwrap().fluid.clone();
     detach(&mut g, engine);
     detach(&mut g, radiator);
@@ -287,7 +293,7 @@ fn engine_and_radiator_removal_preserve_contents_and_change_operation() {
     assert!(g.physics.rapier().bodies[chassis].mass() < before_mass - 3.8);
     assert!(!g.area.items.mounted(engine));
     assert!(!g.area.items.mounted(radiator));
-    let output = g.engine.step(
+    let output = g.vehicles[0].engine.step(
         my_summer_slop::simulation::engine::EngineInput {
             engine_present: false,
             radiator_present: false,
@@ -295,14 +301,21 @@ fn engine_and_radiator_removal_preserve_contents_and_change_operation() {
             throttle: 1.,
             ..Default::default()
         },
-        g.area.items.vehicle_fluids().unwrap(),
-        &r.engine,
+        g.area.items.vehicle_fluids(0).unwrap(),
+        &r.vehicles[0].engine,
         0.,
         0.02,
     );
     assert!(!output.running);
     assert_eq!(output.torque_nm, 0.);
-    assert_eq!(g.area.items.get(r.engine.oil_tank).unwrap().fluid, oil);
+    assert_eq!(
+        g.area
+            .items
+            .get(r.vehicles[0].engine.oil_tank)
+            .unwrap()
+            .fluid,
+        oil
+    );
     assert_eq!(g.area.items.get(radiator).unwrap().fluid, coolant);
     for (item, slot) in [(engine, PartSlotId(71602)), (radiator, PartSlotId(77055))] {
         g.area
@@ -487,7 +500,7 @@ fn detached_lamps_turn_off_and_compatible_remount_restores_pose() {
         .filter(|p| p.part_types.iter().any(|t| t == "roundheadlight"))
         .map(|p| p.item)
         .collect();
-    g.lighting.cycle_headlights(&r.lighting);
+    g.lighting.cycle_headlights(&r.lighting, 0);
     settle_lamps(&mut g, &r);
     let controller = r
         .lighting

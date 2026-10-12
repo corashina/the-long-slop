@@ -300,7 +300,7 @@ fn seated_view_follows_chassis_and_rebase() {
         ..START
     };
     assert!(player.enter(driver.id, local, &mut world));
-    let chassis = world.chassis_handle();
+    let chassis = world.chassis_handle(0);
     world.rapier_mut().bodies[chassis].set_position(
         Pose::from_parts(Vector::new(5.0, 1.0, 5.0), Rotation::from_rotation_y(0.5)),
         false,

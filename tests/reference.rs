@@ -8,13 +8,13 @@ fn fixture() -> serde_json::Value {
 fn accepts_recovered_scalars_with_synthetic_geometry() {
     let manifest = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
     assert_eq!(manifest.build_id, BUILD_ID);
-    assert_eq!(manifest.vehicle.serialized_mass_kg, 717.0);
-    assert_eq!(manifest.engine.max_torque_nm, 87.0);
+    assert_eq!(manifest.vehicles[0].serialized_mass_kg, 717.0);
+    assert_eq!(manifest.vehicles[0].engine.max_torque_nm, 87.0);
     assert_eq!(manifest.tanks[0].capacity_liters, 39.0);
     assert_eq!(manifest.tanks[0].quantities_liters[0], 0.5);
     assert_eq!(manifest.player.mass_kg, 72.0);
     assert_eq!(manifest.player.camera_culling_mask, 0x14db8f33);
-    let car = &manifest.bodies[manifest.vehicle.body.0 as usize - 1];
+    let car = &manifest.bodies[manifest.vehicles[0].body.0 as usize - 1];
     assert_eq!(car.linear_damping, 0.005);
     assert_eq!(car.angular_damping, 0.05);
 }
@@ -110,17 +110,17 @@ fn rejects_invalid_geometry_quantities_and_hierarchy_cycles() {
 #[test]
 fn rejects_incomplete_transmission_before_startup() {
     let mut input = fixture();
-    input["vehicle"]["gear_ratios"] = serde_json::json!([-3.87, 3.75, 2.3, 1.49, 1.0]);
+    input["vehicles"][0]["gear_ratios"] = serde_json::json!([-3.87, 3.75, 2.3, 1.49, 1.0]);
     assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
     let mut input = fixture();
-    input["vehicle"]["gear_free_run"] = serde_json::json!([]);
+    input["vehicles"][0]["gear_free_run"] = serde_json::json!([]);
     assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
 }
 
 #[test]
 fn rejects_missing_nonpositive_and_nonfinite_keyboard_steering_rate() {
     let mut input = fixture();
-    input["vehicle"]
+    input["vehicles"][0]
         .as_object_mut()
         .unwrap()
         .remove("keyboard_steering_rate");
@@ -128,7 +128,7 @@ fn rejects_missing_nonpositive_and_nonfinite_keyboard_steering_rate() {
     for rate in [0.0, -1.25, f32::NAN, f32::INFINITY] {
         let mut reference =
             ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
-        reference.vehicle.keyboard_steering_rate = rate;
+        reference.vehicles[0].keyboard_steering_rate = rate;
         assert!(reference.validate().is_err());
     }
 }
@@ -195,7 +195,7 @@ fn production_export_matches_installed_contract() {
         }
     }
 
-    assert_eq!(manifest.vehicle.keyboard_steering_rate, 1.25);
+    assert_eq!(manifest.vehicles[0].keyboard_steering_rate, 1.25);
     assert_eq!(
         manifest.nodes.iter().filter(|n| n.asset.0 == 1).count(),
         434
@@ -204,7 +204,7 @@ fn production_export_matches_installed_contract() {
         manifest.nodes.iter().filter(|n| n.asset.0 == 2).count(),
         697
     );
-    assert!((manifest.vehicle.mass_kg - 961.6).abs() < 0.01);
+    assert!((manifest.vehicles[0].mass_kg - 961.6).abs() < 0.01);
     for (source, mass, linear, angular) in [
         (50613, 961.6, 0.005, 0.05),
         (50394, 7.0, 0.0, 0.05),
@@ -289,7 +289,7 @@ fn production_export_matches_installed_contract() {
             .iter()
             .find(|body| body.id == tank.body)
             .unwrap();
-        if !body.dynamic || body.id == manifest.vehicle.body {
+        if !body.dynamic || body.id == manifest.vehicles[0].body {
             continue;
         }
         let bindings: Vec<_> = manifest
@@ -425,14 +425,15 @@ fn production_export_matches_installed_contract() {
 
 #[test]
 fn rejects_missing_ui_and_instrument_contract() {
-    for field in ["ui", "instruments"] {
-        let mut input = fixture();
-        input.as_object_mut().unwrap().remove(field);
-        assert!(
-            ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err(),
-            "missing {field}"
-        );
-    }
+    let mut input = fixture();
+    input.as_object_mut().unwrap().remove("ui");
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    let mut input = fixture();
+    input["vehicles"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("instruments");
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
 }
 
 #[test]
@@ -441,10 +442,10 @@ fn rejects_invalid_ui_and_instrument_links() {
     m.ui.sprites[0].sha256 = "broken".into();
     assert!(m.validate().is_err());
     let mut m = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
-    m.instruments.needles[0].node = my_summer_slop::reference::NodeId(999999);
+    m.vehicles[0].instruments.needles[0].node = my_summer_slop::reference::NodeId(999999);
     assert!(m.validate().is_err());
     let mut m = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
-    m.instruments.lamps[0].on.asset = my_summer_slop::reference::AssetId(999999);
+    m.vehicles[0].instruments.lamps[0].on.asset = my_summer_slop::reference::AssetId(999999);
     assert!(m.validate().is_err());
 }
 
@@ -452,7 +453,7 @@ fn rejects_invalid_ui_and_instrument_links() {
 fn rejects_lamp_material_outside_exported_count() {
     let mut input = fixture();
     input["assets"][1]["material_count"] = serde_json::json!(1);
-    input["instruments"]["lamps"][0]["on"]["gltf_material"] = serde_json::json!(1);
+    input["vehicles"][0]["instruments"]["lamps"][0]["on"]["gltf_material"] = serde_json::json!(1);
     assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
 }
 

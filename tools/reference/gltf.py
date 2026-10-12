@@ -82,10 +82,11 @@ class GltfBuilder:
         return accessor
 
 class GltfExporter(GltfBuilder):
-    def __init__(self, source, output, library: "LibraryReader", asset_id=0):
+    def __init__(self, source, output, library: "LibraryReader", asset_id=0, with_materials=True):
         super().__init__(source, output)
         self.library = library
         self.asset_id = asset_id
+        self.with_materials = with_materials
         self.material_indices = {}
 
     def material(self, reader, color_override=None, condition=None):
@@ -193,7 +194,7 @@ class GltfExporter(GltfBuilder):
             submesh = primitive.extras['submesh']
             if submesh >= len(material_readers): raise ValueError('Missing submesh material')
             material = material_readers[submesh]
-            primitive.material = self.material(material,color_override,condition) if material and self.asset_id != 5 else None
+            primitive.material = self.material(material,color_override,condition) if material and self.with_materials else None
             if primitive.indices is not None: primitive.indices = accessor(primitive.indices)
             for name,value in vars(primitive.attributes).items():
                 if isinstance(value,int): setattr(primitive.attributes,name,accessor(value))
@@ -499,10 +500,10 @@ def validate_gltf(path):
     return document
 
 
-def export_gltf(roots, output: Path, library, asset_id: int) -> dict:
-    """Roots are (Source, selected Transform readers)."""
+def export_gltf(roots, output: Path, library, asset_id: int, materials=True) -> dict:
+    """Roots are (Source, selected Transform readers). The sky prototype has no materials."""
     source, readers = roots
-    return GltfExporter(source, output, library, asset_id).export(readers)
+    return GltfExporter(source, output, library, asset_id, materials).export(readers)
 
 
 

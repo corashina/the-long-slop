@@ -1,6 +1,7 @@
 # My Summer Slop
 
 Prepare a fixed Lada 2101 in the starting garage. Drive onto the desert road.
+A source Skoda waits in the yard north of the garage. Read [vehicles](docs/vehicles.md).
 The home, car, and supplies come from installed Steam build 11140890.
 Rust, Bevy, and Rapier run the browser game through WebAssembly.
 
@@ -47,7 +48,7 @@ Startup requests contain only selected runtime assets.
 Use [export stages and verification commands](tools/reference/README.md) to access the library.
 Read [coverage and support limits](docs/research/2026-10-10-full-asset-audit.md) before using an asset.
 The library includes embedded Liberation Sans. The current shell uses self-hosted Liberation Sans and Arial.
-Development availability does not add vehicles, audio, animation playback, or other gameplay.
+Development availability does not add further vehicles, audio, animation playback, or other gameplay.
 
 ## Controls
 
