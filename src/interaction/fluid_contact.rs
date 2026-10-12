@@ -64,9 +64,7 @@ impl FluidContact {
         speed: f32,
         poured: Option<f32>,
     ) -> bool {
-        if let Some(poured) = poured {
-            self.last_poured = poured;
-        }
+        self.last_poured = poured.unwrap_or(0.);
         let emitter = cap_pose
             * Pose::from_parts(
                 Vector::from_array(reference.local_pose.translation),
@@ -159,7 +157,7 @@ impl FluidContact {
                     self.particles.swap_remove(index);
                     continue;
                 }
-                let normal = hit.normal2.normalize_or_zero();
+                let normal = hit.normal1.normalize_or_zero();
                 let inward = particle.velocity.dot(normal).min(0.);
                 particle.position += travel * hit.time_of_impact + normal * 0.0001;
                 particle.velocity = (particle.velocity - normal * inward) * (1. - reference.dampen)
