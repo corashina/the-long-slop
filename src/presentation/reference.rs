@@ -66,7 +66,11 @@ pub fn load(commands: &mut Commands, server: &AssetServer, reference: &Reference
         expected_instances: reference.expected_instances(),
         ..Default::default()
     };
-    for asset in &reference.assets {
+    for asset in reference
+        .assets
+        .iter()
+        .filter(|asset| asset.usage != AssetUsage::WorldPrototype)
+    {
         let handle = server
             .load_builder()
             .with_settings(source_gltf_settings)
@@ -83,7 +87,12 @@ pub fn spawn_scenes(
     visuals: &mut ReferenceVisuals,
     gltfs: &Assets<bevy::gltf::Gltf>,
 ) {
-    for (asset, (_, handle)) in reference.assets.iter().zip(&visuals.handles) {
+    for (asset, (_, handle)) in reference
+        .assets
+        .iter()
+        .filter(|asset| asset.usage != AssetUsage::WorldPrototype)
+        .zip(&visuals.handles)
+    {
         if asset.usage != AssetUsage::UniqueScene {
             continue;
         }

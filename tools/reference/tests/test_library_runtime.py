@@ -4,6 +4,11 @@ from unittest.mock import patch
 from tools.reference.export import verify_reference, promote_reference
 
 class RuntimeTests(unittest.TestCase):
+    def add_world(self, manifest):
+        for i,a in enumerate(manifest['assets'],1):a.update(id=i,usage='unique_scene')
+        manifest['assets'].append({'id':6,'usage':'world_prototype','path':'reference/world-synthetic.gltf','dependencies':[]})
+        manifest['world']={'prototypes':[{'asset':6}]}
+
     def test_runtime_requires_accepted_library(self):
         from types import SimpleNamespace as NS
         receipt=NS(manifest_sha256='a'*64,catalog_sha256='b'*64,source_manifest_sha256='c'*64)
@@ -19,6 +24,7 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError): validate_runtime_paths({'assets':[{'path':'library/models/unused.gltf','dependencies':[]}]})
         manifest = {'assets': [{'path': f'reference/{name}.gltf', 'dependencies': []}
                                for name in ('home', 'lada', 'items', 'road_lamp', 'sky')]}
+        self.add_world(manifest)
         validate_runtime_paths(manifest)
         manifest['ui']={'sprites':[{'path':'reference/ui-test-3.png','source':{'file':'test','path_id':3}}]}
         validate_runtime_paths(manifest)
@@ -32,6 +38,7 @@ class RuntimeTests(unittest.TestCase):
     def test_lighting_dependency_receipts_require_matching_typed_hashes(self):
         from tools.reference.export import validate_runtime_paths
         manifest={'assets':[{'path':f'reference/{name}.gltf','dependencies':[]} for name in ('home','lada','items','road_lamp','sky')]}
+        self.add_world(manifest)
         resource={'path':'reference/lighting-test-1.smip','sha256':'a'*64}
         manifest['lighting']={'textures':[resource]}
         manifest['assets'][0]['dependencies']=[{'file':resource['path'],'sha256':resource['sha256']}]
@@ -232,9 +239,11 @@ class RuntimeContractTests(unittest.TestCase):
         receipt=NS(manifest_sha256='a'*64,catalog_sha256='b'*64,source_manifest_sha256='c'*64)
         manifest=json.loads((Path(__file__).resolve().parents[3]/'tests/common/reference.json').read_bytes())
         manifest['library']=provenance(receipt)
-        manifest['assets'].append({'id':5,'usage':'unique_scene','material_count':1,'path':'reference/items.gltf','sha256':'a'*64,'root':{'file':'fixture','path_id':999},'dependencies':[]})
+        manifest['world']['library']=provenance(receipt)
+        extra_id=len(manifest['assets'])+1
+        manifest['assets'].append({'id':extra_id,'usage':'unique_scene','material_count':1,'path':'reference/items.gltf','sha256':'a'*64,'root':{'file':'fixture','path_id':999},'dependencies':[]})
         manifest['rendering']['materials'].append({
-            'source':{'file':'fixture','path_id':999},'asset':5,'gltf_material':0,
+            'source':{'file':'fixture','path_id':999},'asset':extra_id,'gltf_material':0,
             'shader_family':'unlit_color','color':[1.,1.,1.,1.],'condition':None,'keywords':[],
             'state':{'alpha_mode':'opaque','cull':2,'z_write':True,'z_test':4,'src_blend':1,'dst_blend':0,'render_queue':-1},
             'properties':{'floats':{},'colors':{'_Color':[1.,1.,1.,1.]},'textures':[],'defaults':{},'exclusions':[]}})
@@ -255,7 +264,7 @@ class RuntimeContractTests(unittest.TestCase):
             content=b'fixture sprite bytes'
             (root/Path(sprite['path']).name).write_bytes(content)
             sprite['sha256']=hashlib.sha256(content).hexdigest()
-        from tools.reference.export import lighting_resources
+        from tools.reference.export import runtime_resources
         def update_resource_hashes(value):
             if isinstance(value,dict):
                 if 'path' in value and 'sha256' in value:
@@ -264,7 +273,8 @@ class RuntimeContractTests(unittest.TestCase):
             elif isinstance(value,list):
                 for child in value:update_resource_hashes(child)
         update_resource_hashes(manifest['lighting'])
-        for resource in lighting_resources(manifest):
+        update_resource_hashes(manifest['world']['terrain'])
+        for resource in runtime_resources(manifest):
             content=b'fixture lighting bytes'
             (root/Path(resource['path']).name).write_bytes(content)
             resource['sha256']=hashlib.sha256(content).hexdigest()

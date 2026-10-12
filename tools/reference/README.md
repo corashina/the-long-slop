@@ -54,7 +54,7 @@ Library-only verification does not use Docker.
 
 The exporter accepts Steam app `1017180`, build `11140890`, with Unity `2021.3.18f1`.
 It preserves the installed tree and complete object graph before converting development assets.
-It derives the garage, Lada, supplies, road pole, and sky from the accepted library.
+It derives the garage, Lada, supplies, road pole, sky, and selected world prototypes from the accepted library.
 Git ignores recovered files and decompiled code. The exporter leaves Steam files unchanged.
 
 ## Stages and storage
@@ -69,7 +69,7 @@ The default stage is `runtime`. It runs missing prerequisites and verifies an ex
 | Source | `--stage source` | `.cache/reference-library/source/`, source hashes, and copied Steam manifest |
 | Catalog | `--stage catalog` | `catalog.json`, complete typed records, schemas, and binary sidecars |
 | Library | `--stage library` | `web/assets/library/`, category indexes, coverage, and acceptance manifest |
-| Runtime | `--stage runtime` | `web/assets/reference/`, five selected scenes and gameplay records |
+| Runtime | `--stage runtime` | `web/assets/reference/`, selected scenes, world prototypes, and gameplay records |
 
 ```powershell
 python -m tools.reference.export --stage library --verify
@@ -185,3 +185,43 @@ cargo test --locked --test lighting_reference --test lighting_interaction --test
 It uses the toolchain's `sha256sum` utility. It adds no runtime dependency.
 The validator filters one exact pinned pygltflib provisional notice. Other warnings and validation errors remain visible.
 Keep source recovery, analysis, scenario patches, and captures outside Git.
+
+## Checked world export
+
+Use an accepted library from another checkout without changing its files:
+
+```powershell
+$referencePython = 'C:/Users/Corashina/Documents/Projects/the-long-drive-wasm/tools/reference/.venv/Scripts/python.exe'
+$libraryRoot = 'C:/Users/Corashina/Documents/Projects/the-long-drive-wasm/web/assets/library'
+& $referencePython -B -m tools.reference.export --library-root $libraryRoot
+& $referencePython -B -m tools.reference.export --library-root $libraryRoot --verify
+```
+
+The runtime stage checks the external library before reading selected records.
+It stages files under the current checkout's `.cache/reference-library/work` and promotes only its runtime directory.
+`--library-root` is valid only for the runtime stage.
+The required `world` contract rejects old manifests and unresolved source links.
+Native and browser loaders share a 128 MiB manifest limit.
+All prototype node indices belong to one prototype instance.
+Road control counts and skin bone counts are separate.
+
+The world contract uses the saved 5,000-metre source settings profile.
+It requires Task 1's checked local samples and retained source runs.
+Source captures, managed methods, and exported assets remain outside Git.
+Synthetic fixtures test contract rejection; they do not prove world generation parity.
+
+World selection includes the active object pools, active building types, and supported recursive physical props.
+The catalog retains source weights, recursive category indices, null categories, and invalid source category outcomes.
+Unsupported vehicles, actors, and part behavior have explicit exclusions.
+Physical props retain their source identity when an action, such as eating or firing, is excluded.
+The three terrain prefabs have null source mesh links.
+Their TerrainBiome shader, textures, mip levels, and parameters remain available for generated terrain.
+Dormant LOD bindings retain their original shaders, parameters, textures, mip levels, and render target descriptors.
+Explicit null material slots and zero-vertex meshes remain distinct from unresolved links.
+Later rendering work must admit each visible source binding before its LOD appears.
+This export adds data. Later tasks connect the world generator and runtime instances.
+
+Startup checks every world prototype file and dependency before Start becomes available.
+Two workers check bounded file buffers and release them after SHA-256 validation.
+Only the five existing scene, lamp, and sky assets load into Bevy at startup.
+World prototype records remain available for later bounded loading.

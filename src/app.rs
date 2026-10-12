@@ -151,7 +151,7 @@ fn setup(
     visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
     commands.insert_resource(visuals);
     commands.insert_resource(InstrumentVisuals::default());
-    presentation::materials::load_materials(&mut commands, &server, &reference.0.rendering);
+    presentation::materials::load_materials(&mut commands, &server, &reference.0);
     presentation::lighting::load_lighting(&mut commands, &server, &reference.0.lighting);
     presentation::lighting::load_lamp_materials(&mut commands, &gltf_extensions, &reference.0);
     presentation::reference::load(&mut commands, &server, &reference.0);

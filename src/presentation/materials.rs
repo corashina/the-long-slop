@@ -1,5 +1,6 @@
 use crate::reference::{
-    self as source, MaterialRecord, RenderingRecord, ShaderFamily, TextureColorSpace, TextureRecord,
+    self as source, AssetUsage, MaterialRecord, ReferenceManifest, ShaderFamily, TextureColorSpace,
+    TextureRecord,
 };
 use bevy::asset::{AssetId, LoadState, RenderAssetUsages};
 use bevy::gltf::GltfMaterialExtras;
@@ -160,10 +161,27 @@ impl Plugin for SourceMaterialPlugin {
     }
 }
 
-pub fn load_materials(commands: &mut Commands, server: &AssetServer, rendering: &RenderingRecord) {
+pub fn load_materials(
+    commands: &mut Commands,
+    server: &AssetServer,
+    reference: &ReferenceManifest,
+) {
+    let eager_assets: HashSet<_> = reference
+        .assets
+        .iter()
+        .filter(|asset| asset.usage != AssetUsage::WorldPrototype)
+        .map(|asset| asset.id)
+        .collect();
+    let records: Vec<_> = reference
+        .rendering
+        .materials
+        .iter()
+        .filter(|record| eager_assets.contains(&record.asset))
+        .cloned()
+        .collect();
     let mut textures = Vec::new();
     let mut texture_indices = HashMap::new();
-    for record in &rendering.materials {
+    for record in &records {
         for texture in &record.properties.textures {
             if texture_indices.contains_key(&texture.file) {
                 continue;
@@ -196,7 +214,7 @@ pub fn load_materials(commands: &mut Commands, server: &AssetServer, rendering: 
     }
     commands.insert_resource(SourceMaterials {
         standard_records: HashMap::new(),
-        records: rendering.materials.clone(),
+        records,
         textures,
         texture_indices,
         handles: HashMap::new(),

@@ -24,3 +24,11 @@ test('recover_does_not_resume',()=>{
  const m=new MenuState();m.ready();m.started=true;m.pause();m.recover();
  assert.equal(m.state,'pause-menu');assert.equal(m.takeActions(),16);
 });
+
+test('world_dependency_failure_keeps_start_disabled',()=>{
+ const model=new MenuState();
+ model.fail('Missing required source world dependency');
+ model.ready();
+ assert.equal(model.readyFlag,false);
+ assert.equal(model.state,'error');
+});

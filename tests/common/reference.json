@@ -940,6 +940,61 @@
         }
       ],
       "material_count": 0
+    },
+    {
+      "id": 5,
+      "material_count": 0,
+      "usage": "world_prototype",
+      "path": "reference/world-synthetic-0.gltf",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "root": {
+        "file": "level1",
+        "path_id": 900000
+      },
+      "dependencies": [
+        {
+          "file": "reference/world-synthetic-0.bin",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        {
+          "file": "reference/lighting-terrain-synthetic.bin",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "material_count": 0,
+      "usage": "world_prototype",
+      "path": "reference/world-synthetic-1.gltf",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "root": {
+        "file": "level1",
+        "path_id": 900010
+      },
+      "dependencies": [
+        {
+          "file": "reference/world-synthetic-1.bin",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "material_count": 0,
+      "usage": "world_prototype",
+      "path": "reference/world-synthetic-2.gltf",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "root": {
+        "file": "level1",
+        "path_id": 900020
+      },
+      "dependencies": [
+        {
+          "file": "reference/world-synthetic-2.bin",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ]
     }
   ],
   "nodes": [
@@ -18759,5 +18814,1562 @@
         }
       }
     ]
+  },
+  "world": {
+    "sample_payload_sha256": "243f2862c6fa3d38b4c7d8df56332a2016c09d412b11030564f7f21665ad8ad9",
+    "managed_sha256": "9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e",
+    "library": {
+      "schema_version": 1,
+      "manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "catalog_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source_manifest_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "settings_context": "saved_default_5000_frozen_generation_frame",
+    "generation_frame": {
+      "translation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "distances": {
+      "TerrainGenDist": 100.0,
+      "TerrainRemoveDist": 100.0,
+      "DistantTerrainGenDist": 100.0,
+      "DistantTerrainRemoveDist": 100.0,
+      "DistantTerrain2GenDist": 100.0,
+      "DistantTerrain2RemoveDist": 100.0,
+      "RoadGenDist": 100.0,
+      "BuildingGenDist": 100.0,
+      "BuildingRemoveDist": 100.0,
+      "ObjGenDist": 100.0,
+      "ObjRemoveDist": 100.0,
+      "MountainGenDist": 100.0,
+      "MountainRemoveDist": 100.0,
+      "ItemSpawnDist": 100.0,
+      "ItemRemoveDist": 100.0,
+      "ItemFreezeDist": 100.0,
+      "ItemUnFreezeDist": 100.0,
+      "drawDistance": 5000.0
+    },
+    "source_hashes": [
+      {
+        "file": "level1",
+        "sha256": "94ecc4165c165a1b42b3c4d42ad70441fd52696f9fd2b9a5f00398079d345839"
+      }
+    ],
+    "road": {
+      "source": {
+        "file": "level1",
+        "path_id": 900900
+      },
+      "prototypes": [
+        {
+          "file": "level1",
+          "path_id": 900000
+        },
+        {
+          "file": "level1",
+          "path_id": 900010
+        },
+        {
+          "file": "level1",
+          "path_id": 900020
+        }
+      ],
+      "length": 1000.0,
+      "roadBoneNum": 2,
+      "roadBoneLength": 10.0,
+      "roadSegmentLength": 20.0,
+      "roadAboveTerrain": 0.0,
+      "width": 10.0,
+      "scale": 0.001,
+      "XmaxAngle": 5.0,
+      "YmaxAngle": 10.0,
+      "startStraight": 1,
+      "straightModifier": 0.5,
+      "alignEdgeOfTheWorld": 1,
+      "aliignRoad": 0,
+      "alignBuildings": 0,
+      "forceHomesick": 0,
+      "defPointRange": 20.0,
+      "defPointStep": 10.0,
+      "addPoint": 2,
+      "buildingBoneNum": 2,
+      "noises": [
+        {
+          "amplitude": 1.0,
+          "frequency": 2.0,
+          "lacunarity": 2.0,
+          "octaves": 2,
+          "persistence": 0.5
+        },
+        {
+          "amplitude": 1.0,
+          "frequency": 2.0,
+          "lacunarity": 2.0,
+          "octaves": 2,
+          "persistence": 0.5
+        }
+      ]
+    },
+    "terrain": {
+      "source": {
+        "file": "level1",
+        "path_id": 900901
+      },
+      "tiles": [
+        {
+          "tileSize": 100,
+          "resolution": 4,
+          "drawDistance": 3,
+          "YCoord": 0.0
+        },
+        {
+          "tileSize": 100,
+          "resolution": 4,
+          "drawDistance": 3,
+          "YCoord": 0.0
+        },
+        {
+          "tileSize": 100,
+          "resolution": 4,
+          "drawDistance": 3,
+          "YCoord": 0.0
+        }
+      ],
+      "edgeOfWorld": 20000.0,
+      "edgeOfWorldGradient": 100.0,
+      "edgeOfWorldGenerationDist": 20000.0,
+      "edgeOfWorldWarpDist": 21000.0,
+      "edgeOfWorldWarpOffset": 100.0,
+      "randomSeed": 1,
+      "seed": 42,
+      "prefabs": [
+        {
+          "file": "level1",
+          "path_id": 900030
+        },
+        {
+          "file": "level1",
+          "path_id": 900040
+        },
+        {
+          "file": "level1",
+          "path_id": 900050
+        }
+      ],
+      "materials": [
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 900901
+          },
+          "shader": {
+            "source": {
+              "file": "level1",
+              "path_id": 900901
+            },
+            "path": "reference/lighting-terrain-synthetic.bin",
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "name": "TerrainBiome",
+            "compiled_data": {
+              "source": {
+                "file": "level1",
+                "path_id": 900901
+              },
+              "path": "reference/lighting-terrain-synthetic.bin",
+              "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+            }
+          },
+          "source_data": {
+            "source": {
+              "file": "level1",
+              "path_id": 900901
+            },
+            "path": "reference/lighting-terrain-synthetic.bin",
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "floats": {},
+          "colors": {},
+          "textures": [],
+          "render_targets": []
+        },
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 900901
+          },
+          "shader": {
+            "source": {
+              "file": "level1",
+              "path_id": 900901
+            },
+            "path": "reference/lighting-terrain-synthetic.bin",
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "name": "TerrainBiome",
+            "compiled_data": {
+              "source": {
+                "file": "level1",
+                "path_id": 900901
+              },
+              "path": "reference/lighting-terrain-synthetic.bin",
+              "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+            }
+          },
+          "source_data": {
+            "source": {
+              "file": "level1",
+              "path_id": 900901
+            },
+            "path": "reference/lighting-terrain-synthetic.bin",
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "floats": {},
+          "colors": {},
+          "textures": [],
+          "render_targets": []
+        },
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 900901
+          },
+          "shader": {
+            "source": {
+              "file": "level1",
+              "path_id": 900901
+            },
+            "path": "reference/lighting-terrain-synthetic.bin",
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "name": "TerrainBiome",
+            "compiled_data": {
+              "source": {
+                "file": "level1",
+                "path_id": 900901
+              },
+              "path": "reference/lighting-terrain-synthetic.bin",
+              "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+            }
+          },
+          "source_data": {
+            "source": {
+              "file": "level1",
+              "path_id": 900901
+            },
+            "path": "reference/lighting-terrain-synthetic.bin",
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "floats": {},
+          "colors": {},
+          "textures": [],
+          "render_targets": []
+        }
+      ],
+      "game_settings": {
+        "source": {
+          "file": "level1",
+          "path_id": 900901
+        },
+        "biome": 0,
+        "homesickMode": 0
+      },
+      "textures": []
+    },
+    "buildings": {
+      "source": {
+        "file": "level1",
+        "path_id": 900902
+      },
+      "types": [
+        {
+          "type_id": 1,
+          "prototype": {
+            "file": "level1",
+            "path_id": 900000
+          }
+        }
+      ],
+      "groups": [
+        {
+          "available": [],
+          "currentAvailable": [],
+          "currentCount": 0,
+          "currentMaxCount": 0,
+          "maxCount": 2,
+          "minCount": 1,
+          "types": [
+            {
+              "type": 1,
+              "dontUseDefault": 0,
+              "useModifier": 1,
+              "sides": [],
+              "maxDist": 200.0,
+              "minDist": 100.0,
+              "xDistModifier": 1.0
+            }
+          ]
+        }
+      ],
+      "defaultSides": [
+        {
+          "maxXpos": 2.0,
+          "maxYAngle": 10.0,
+          "minXpos": 1.0,
+          "minYAngle": -10.0
+        }
+      ],
+      "minStartDist": 50.0,
+      "maxStartDist": 100.0,
+      "distModifier": 1.0
+    },
+    "generators": [
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900903
+        },
+        "types": [
+          {
+            "prototype": {
+              "file": "level1",
+              "path_id": 900000
+            },
+            "InDesert": 1,
+            "InGrass": 1,
+            "InWinter": 1,
+            "affectedByRoad": 1,
+            "chance": 1.0,
+            "maxDistFromRoad": 0.0,
+            "minDistFromBuilding": 0.0,
+            "minDistFromRoad": 5.0
+          }
+        ],
+        "seedplus": 0,
+        "noSpawnChance": 2.0,
+        "pointDist": 5.0,
+        "chunkDist": 100.0,
+        "heightAdd": 0.0,
+        "affectedByRoad": 1,
+        "affectsTerrain": 0,
+        "alignToBuilding": 0,
+        "alignToRoad": 1,
+        "buildingspawn": 0,
+        "waitForTerrain": 1
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900904
+        },
+        "types": [
+          {
+            "prototype": {
+              "file": "level1",
+              "path_id": 900000
+            },
+            "InDesert": 1,
+            "InGrass": 1,
+            "InWinter": 1,
+            "affectedByRoad": 1,
+            "chance": 1.0,
+            "maxDistFromRoad": 0.0,
+            "minDistFromBuilding": 0.0,
+            "minDistFromRoad": 5.0
+          }
+        ],
+        "seedplus": 10,
+        "noSpawnChance": 2.0,
+        "pointDist": 5.0,
+        "chunkDist": 100.0,
+        "heightAdd": 0.0,
+        "affectedByRoad": 1,
+        "affectsTerrain": 0,
+        "alignToBuilding": 0,
+        "alignToRoad": 1,
+        "buildingspawn": 0,
+        "waitForTerrain": 1
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900905
+        },
+        "types": [
+          {
+            "prototype": {
+              "file": "level1",
+              "path_id": 900000
+            },
+            "InDesert": 1,
+            "InGrass": 1,
+            "InWinter": 1,
+            "affectedByRoad": 1,
+            "chance": 1.0,
+            "maxDistFromRoad": 0.0,
+            "minDistFromBuilding": 0.0,
+            "minDistFromRoad": 5.0
+          }
+        ],
+        "seedplus": 20,
+        "noSpawnChance": 2.0,
+        "pointDist": 5.0,
+        "chunkDist": 100.0,
+        "heightAdd": 0.0,
+        "affectedByRoad": 1,
+        "affectsTerrain": 0,
+        "alignToBuilding": 0,
+        "alignToRoad": 1,
+        "buildingspawn": 0,
+        "waitForTerrain": 1
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900906
+        },
+        "types": [
+          {
+            "prototype": {
+              "file": "level1",
+              "path_id": 900000
+            },
+            "InDesert": 1,
+            "InGrass": 1,
+            "InWinter": 1,
+            "affectedByRoad": 1,
+            "chance": 1.0,
+            "maxDistFromRoad": 0.0,
+            "minDistFromBuilding": 0.0,
+            "minDistFromRoad": 5.0
+          }
+        ],
+        "seedplus": 30,
+        "noSpawnChance": 2.0,
+        "pointDist": 5.0,
+        "chunkDist": 100.0,
+        "heightAdd": 0.0,
+        "affectedByRoad": 1,
+        "affectsTerrain": 0,
+        "alignToBuilding": 0,
+        "alignToRoad": 1,
+        "buildingspawn": 0,
+        "waitForTerrain": 1
+      }
+    ],
+    "startup": [
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900901
+        },
+        "group": "StartObjs",
+        "pose": {
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      }
+    ],
+    "prototypes": [
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900000
+        },
+        "role": "road",
+        "asset": 5,
+        "nodes": [
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 900000
+            },
+            "name": "synthetic-0",
+            "parent": null,
+            "active": true,
+            "transform": {
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            "gltf_node": 0,
+            "layer": 0,
+            "renderer_enabled": true
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 900001
+            },
+            "name": "synthetic-1",
+            "parent": 0,
+            "active": true,
+            "transform": {
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            "gltf_node": 1,
+            "layer": 0,
+            "renderer_enabled": true
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 900002
+            },
+            "name": "synthetic-2",
+            "parent": 0,
+            "active": true,
+            "transform": {
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            "gltf_node": 2,
+            "layer": 0,
+            "renderer_enabled": true
+          }
+        ],
+        "controls": [
+          1,
+          2
+        ],
+        "skins": [
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 900004
+            },
+            "mesh": {
+              "file": "level1",
+              "path_id": 900800
+            },
+            "node": 0,
+            "bones": [
+              0,
+              1,
+              2
+            ],
+            "bind_poses": [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ],
+            "positions": [
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                -1.0
+              ]
+            ],
+            "normals": [
+              [
+                0.0,
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0,
+                0.0
+              ]
+            ],
+            "uv": [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0
+              ]
+            ],
+            "joints": [
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                1,
+                0,
+                0,
+                0
+              ],
+              [
+                2,
+                0,
+                0,
+                0
+              ]
+            ],
+            "weights": [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            ],
+            "triangles": [
+              [
+                [
+                  0,
+                  2,
+                  1
+                ]
+              ]
+            ]
+          }
+        ],
+        "colliders": [],
+        "prefab_pose": {
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "bodies": [],
+        "excluded_actions": [],
+        "deferred_materials": []
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900010
+        },
+        "role": "road",
+        "asset": 6,
+        "nodes": [
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 900010
+            },
+            "name": "synthetic-0",
+            "parent": null,
+            "active": true,
+            "transform": {
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            "gltf_node": 0,
+            "layer": 0,
+            "renderer_enabled": true
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 900011
+            },
+            "name": "synthetic-1",
+            "parent": 0,
+            "active": true,
+            "transform": {
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            "gltf_node": 1,
+            "layer": 0,
+            "renderer_enabled": true
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 900012
+            },
+            "name": "synthetic-2",
+            "parent": 0,
+            "active": true,
+            "transform": {
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            "gltf_node": 2,
+            "layer": 0,
+            "renderer_enabled": true
+          }
+        ],
+        "controls": [
+          1,
+          2
+        ],
+        "skins": [
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 900014
+            },
+            "mesh": {
+              "file": "level1",
+              "path_id": 900800
+            },
+            "node": 0,
+            "bones": [
+              0,
+              1,
+              2
+            ],
+            "bind_poses": [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ],
+            "positions": [
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                -1.0
+              ]
+            ],
+            "normals": [
+              [
+                0.0,
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0,
+                0.0
+              ]
+            ],
+            "uv": [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0
+              ]
+            ],
+            "joints": [
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                1,
+                0,
+                0,
+                0
+              ],
+              [
+                2,
+                0,
+                0,
+                0
+              ]
+            ],
+            "weights": [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            ],
+            "triangles": [
+              [
+                [
+                  0,
+                  2,
+                  1
+                ]
+              ]
+            ]
+          }
+        ],
+        "colliders": [],
+        "prefab_pose": {
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "bodies": [],
+        "excluded_actions": [],
+        "deferred_materials": []
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900020
+        },
+        "role": "road",
+        "asset": 7,
+        "nodes": [
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 900020
+            },
+            "name": "synthetic-0",
+            "parent": null,
+            "active": true,
+            "transform": {
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            "gltf_node": 0,
+            "layer": 0,
+            "renderer_enabled": true
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 900021
+            },
+            "name": "synthetic-1",
+            "parent": 0,
+            "active": true,
+            "transform": {
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            "gltf_node": 1,
+            "layer": 0,
+            "renderer_enabled": true
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 900022
+            },
+            "name": "synthetic-2",
+            "parent": 0,
+            "active": true,
+            "transform": {
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            "gltf_node": 2,
+            "layer": 0,
+            "renderer_enabled": true
+          }
+        ],
+        "controls": [
+          1,
+          2
+        ],
+        "skins": [
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 900024
+            },
+            "mesh": {
+              "file": "level1",
+              "path_id": 900800
+            },
+            "node": 0,
+            "bones": [
+              0,
+              1,
+              2
+            ],
+            "bind_poses": [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ],
+            "positions": [
+              [
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                -1.0
+              ]
+            ],
+            "normals": [
+              [
+                0.0,
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0,
+                0.0
+              ]
+            ],
+            "uv": [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0
+              ]
+            ],
+            "joints": [
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                1,
+                0,
+                0,
+                0
+              ],
+              [
+                2,
+                0,
+                0,
+                0
+              ]
+            ],
+            "weights": [
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            ],
+            "triangles": [
+              [
+                [
+                  0,
+                  2,
+                  1
+                ]
+              ]
+            ]
+          }
+        ],
+        "colliders": [],
+        "prefab_pose": {
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "bodies": [],
+        "excluded_actions": [],
+        "deferred_materials": []
+      }
+    ],
+    "records": [
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900900
+        },
+        "class_name": "synthetic",
+        "fields": {
+          "value": {
+            "kind": "integer",
+            "value": 1
+          }
+        },
+        "links": []
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900901
+        },
+        "class_name": "synthetic",
+        "fields": {
+          "value": {
+            "kind": "integer",
+            "value": 1
+          }
+        },
+        "links": []
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900902
+        },
+        "class_name": "synthetic",
+        "fields": {
+          "value": {
+            "kind": "integer",
+            "value": 1
+          }
+        },
+        "links": []
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900903
+        },
+        "class_name": "synthetic",
+        "fields": {
+          "value": {
+            "kind": "integer",
+            "value": 1
+          }
+        },
+        "links": []
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900904
+        },
+        "class_name": "synthetic",
+        "fields": {
+          "value": {
+            "kind": "integer",
+            "value": 1
+          }
+        },
+        "links": []
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900905
+        },
+        "class_name": "synthetic",
+        "fields": {
+          "value": {
+            "kind": "integer",
+            "value": 1
+          }
+        },
+        "links": []
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900906
+        },
+        "class_name": "synthetic",
+        "fields": {
+          "value": {
+            "kind": "integer",
+            "value": 1
+          }
+        },
+        "links": []
+      }
+    ],
+    "receipts": [
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900900
+        },
+        "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900901
+        },
+        "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900902
+        },
+        "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900903
+        },
+        "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900904
+        },
+        "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900905
+        },
+        "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900906
+        },
+        "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900030
+        },
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900040
+        },
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900050
+        },
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    ],
+    "exclusions": [],
+    "catalog": {
+      "source": {
+        "file": "level1",
+        "path_id": 900902
+      },
+      "items": [],
+      "categories": []
+    },
+    "material_textures": [],
+    "part_scope_slots": []
   }
 }

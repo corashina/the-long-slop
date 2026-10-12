@@ -507,7 +507,10 @@ impl RenderingRecord {
                 .filter(|record| record.asset == asset.id)
                 .count();
             require(
-                count > 0 && (0..count as u32).all(|index| bindings.contains(&(asset.id, index))),
+                (count > 0 || asset.usage == super::AssetUsage::WorldPrototype)
+                    && (asset.usage != super::AssetUsage::WorldPrototype
+                        || count == asset.material_count as usize)
+                    && (0..count as u32).all(|index| bindings.contains(&(asset.id, index))),
                 "missing glTF material binding",
             )?;
         }

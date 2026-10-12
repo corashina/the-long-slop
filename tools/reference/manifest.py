@@ -375,6 +375,20 @@ def build_manifest(source, roots, reports, hashes, library):
         missing=[old_colliders[i] for i in controller['aim_colliders'] if old_colliders[i] not in collider_ids]
         if missing and controller['kind']!='road':raise ValueError(f"{controller['source']} required aim collider outside export: {missing}")
         controller['aim_colliders']=[collider_ids[old_colliders[i]] for i in controller['aim_colliders'] if old_colliders[i] in collider_ids]
-    from .export import lighting_resources
-    assets[0]['dependencies'].extend({'file':item['path'],'sha256':item['sha256']} for item in lighting_resources(result))
+    from .export import runtime_resources
+    assets[0]['dependencies'].extend({'file':item['path'],'sha256':item['sha256']} for item in runtime_resources(result))
     return result
+
+
+def attach_world(manifest, world):
+    """Move selected prototype resources into the shared asset and material tables."""
+    for prototype in world['prototypes']:
+        asset=prototype.pop('asset_record')
+        if asset['id']!=len(manifest['assets'])+1 or asset['id']!=prototype['asset']:
+            raise ValueError(f"{prototype['source']} world asset index")
+        manifest['assets'].append(asset)
+        manifest['rendering']['materials'].extend(prototype.pop('materials'))
+    manifest['world']=world
+    from .export import runtime_resources
+    world_resources=runtime_resources({'world':world})
+    manifest['assets'][world['prototypes'][0]['asset']-1]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in world_resources)

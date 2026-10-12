@@ -1,3 +1,6 @@
+pub mod types;
+pub use types::*;
+
 use crate::reference::{Bounds, ColliderGeometry, ReferenceManifest, StartingAreaReference};
 use crate::vehicle::{ColliderHandle, PhysicsWorld, VehiclePose};
 

@@ -1,5 +1,7 @@
 //! Validated installed-build data. Geometry uses converted body-local meters.
 
+pub mod world;
+pub use world::*;
 pub mod rendering;
 pub use rendering::*;
 
@@ -68,6 +70,7 @@ pub enum AssetUsage {
     UniqueScene,
     RoadLampPrototype,
     SkyPrototype,
+    WorldPrototype,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -738,9 +741,12 @@ pub struct LibraryProvenance {
     pub source_manifest_sha256: String,
 }
 
+pub const MAX_MANIFEST_BYTES: usize = 128 * 1024 * 1024;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
+    pub world: WorldReference,
     pub ui: UiReference,
     pub instruments: InstrumentReference,
     pub library: LibraryProvenance,
@@ -821,7 +827,7 @@ impl ReferenceManifest {
             .count()
     }
     pub fn from_json(bytes: &[u8]) -> Result<Self, ReferenceError> {
-        require(bytes.len() <= 64 * 1024 * 1024, "manifest size")?;
+        require(bytes.len() <= MAX_MANIFEST_BYTES, "manifest size")?;
         let manifest: Self =
             serde_json::from_slice(bytes).map_err(|e| ReferenceError(e.to_string()))?;
         manifest.validate()?;
@@ -840,6 +846,7 @@ impl ReferenceManifest {
             self.app_id == APP_ID && self.build_id == BUILD_ID,
             "app/build",
         )?;
+        self.world.validate(self)?;
         self.lighting.validate(self)?;
         require(
             self.bodies.iter().all(|b| {

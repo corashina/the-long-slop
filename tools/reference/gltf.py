@@ -62,6 +62,7 @@ class GltfBuilder:
         self.material_report = []
         self.material_records = []
         self.material_dependencies = {}
+        self.deferred_materials = {}
 
     def accessor(self, values, shape, component=5126, target=34962, buffer_index=0):
         gl = self.gl
@@ -144,7 +145,7 @@ class GltfExporter(GltfBuilder):
         view = document.bufferViews[accessor.bufferView]
         content = (directory / unquote(document.buffers[view.buffer].uri)).read_bytes()
         code,size = {5126:('f',4),5125:('I',4),5123:('H',2),5121:('B',1)}[accessor.componentType]
-        width = {'SCALAR':1,'VEC3':3}[accessor.type]
+        width = {'SCALAR':1,'VEC2':2,'VEC3':3,'VEC4':4,'MAT4':16}[accessor.type]
         start = (view.byteOffset or 0)+(accessor.byteOffset or 0)
         stride = view.byteStride or size*width
         return [struct.unpack_from('<'+str(width)+code,content,start+i*stride) for i in range(accessor.count)]
@@ -193,7 +194,19 @@ class GltfExporter(GltfBuilder):
             submesh = primitive.extras['submesh']
             if submesh >= len(material_readers): raise ValueError('Missing submesh material')
             material = material_readers[submesh]
-            primitive.material = self.material(material,color_override,condition) if material and self.asset_id != 5 else None
+            deferred=False
+            if getattr(self,'world_prototype',False) and material is None:primitive.extras['world_source_material']=None
+            if material and getattr(self,'world_prototype',False):
+                from .materials import FAMILIES
+                data=self.source.read(material);shader=self.source.resolve(material,data['m_Shader'])
+                shader_name=self.source.read(shader)['m_ParsedForm']['m_Name']
+                if shader_name not in FAMILIES:
+                    identity_material=key(material)
+                    if identity_material not in self.deferred_materials:
+                        self.deferred_materials[identity_material]=self.source.world_material_export(material)
+                    primitive.extras['world_source_material']=source_id(material)
+                    deferred=True
+            primitive.material = self.material(material,color_override,condition) if material and self.asset_id != 5 and not deferred else None
             if primitive.indices is not None: primitive.indices = accessor(primitive.indices)
             for name,value in vars(primitive.attributes).items():
                 if isinstance(value,int): setattr(primitive.attributes,name,accessor(value))
@@ -214,6 +227,7 @@ class GltfExporter(GltfBuilder):
         for material in getattr(self.source,'lighting_extra_materials',{}).get(asset,[]):self.material(material)
         for root in roots:
             records.extend(self.source.hierarchy(root, activate_root=True))
+        world_prototype=self.world_prototype=all(key(root) in getattr(self.source,'world_prototype_roots',set()) for root in roots)
         condition_active = getattr(self.source, 'condition_active', {})
         effective_active = {}
         for record in records:
@@ -234,9 +248,9 @@ class GltfExporter(GltfBuilder):
                 if component.type.name != 'LODGroup':continue
                 lods=self.source.read(component)['m_LODs']
                 if not lods:continue
-                highest={key(self.source.resolve(component,p['renderer'])) for p in lods[0]['renderers']}
+                highest={key(self.source.resolve(component,p['renderer'])) for p in lods[0]['renderers'] if p['renderer']['m_PathID']}
                 for lod in lods[1:]:
-                    hidden_lods.update(key(self.source.resolve(component,p['renderer'])) for p in lod['renderers'])
+                    hidden_lods.update(key(self.source.resolve(component,p['renderer'])) for p in lod['renderers'] if p['renderer']['m_PathID'])
                 hidden_lods.difference_update(highest)
         for index, record in enumerate(records):
             identity = key(record['reader'])
@@ -250,18 +264,20 @@ class GltfExporter(GltfBuilder):
             if record['parent'] is None:
                 from .collision import world_pose
                 from .lighting import IDENTITY
-                if key(reader)==getattr(self.source,'lighting_pole_root',None):
+                if key(reader)==getattr(self.source,'lighting_pole_root',None) or key(reader) in getattr(self.source,'world_prototype_roots',set()):
                     transform=IDENTITY.copy()
                 elif key(reader) not in getattr(self.source,'lighting_prototype_roots',set()):
                     transform=world_pose(self.source,reader)
             node = gl.Node(name=self.source.read(record['game_object'])['m_Name'],
                 extras={'reference_id': source_id(reader), 'active':record['active'], 'hierarchy_path':record['path'],
                     'layer':self.source.read(record['game_object'])['m_Layer']}, **transform)
+            if world_prototype:node.extras['source_active']=bool(self.source.read(record['game_object'])['m_IsActive'])
             components = {r.type.name:r for r in record['components']}
             renderer = components.get('MeshRenderer') or components.get('SkinnedMeshRenderer')
             mesh_filter = components.get('MeshFilter')
             if renderer and (mesh_filter or renderer.type.name == 'SkinnedMeshRenderer'):
                 renderer_data = self.source.read(renderer)
+                if world_prototype:node.extras['source_renderer_enabled']=bool(renderer_data['m_Enabled'])
                 component_classes={self.source.class_name(r) for r in record['components'] if r.type.name=='MonoBehaviour' and self.source.read(r)['m_Script']['m_PathID']}
                 render_enabled=renderer_visible(bool(renderer_data['m_Enabled']), component_classes) and key(renderer) not in hidden_lods and key(reader) not in inactive_nodes
                 if component_classes.intersection({'TextMeshPro','TMP_SubMesh'}):
@@ -272,7 +288,13 @@ class GltfExporter(GltfBuilder):
                 node.extras['receive_shadows'] = bool(renderer_data['m_ReceiveShadows'])
                 owner = mesh_filter or renderer
                 mesh_reader = getattr(self.source, 'condition_meshes', {}).get(key(renderer)) or self.source.resolve(owner, self.source.read(owner)['m_Mesh'])
-                if mesh_reader and record['active'] and render_enabled:
+                retain_world_geometry=world_prototype and renderer_visible(True,component_classes) and key(reader) not in inactive_nodes
+                if world_prototype and mesh_reader and self.source.read(mesh_reader)['m_VertexData']['m_VertexCount']==0:
+                    if self.source.read(mesh_reader)['m_IndexBuffer']:
+                        raise ValueError(f'{source_id(mesh_reader)} empty mesh has indices')
+                    node.extras['source_empty_mesh']=source_id(mesh_reader)
+                    mesh_reader=None
+                if mesh_reader and ((record['active'] and render_enabled) or retain_world_geometry):
                     materials=[self.source.resolve(renderer,p) for p in renderer_data['m_Materials']]
                     selected=getattr(self.source,'lighting_startup_materials',{}).get(key(renderer)) or getattr(self.source,'condition_materials',{}).get(key(renderer))
                     if selected:materials=[selected for _ in materials]
@@ -282,7 +304,7 @@ class GltfExporter(GltfBuilder):
                     mirror = getattr(self.source, 'live_mirror_renderers', {}).get(key(renderer))
                     if mirror:
                         materials = [mirror]
-                    if not materials or any(r is None for r in materials):
+                    if not materials or (not world_prototype and any(r is None for r in materials)):
                         raise ValueError(f'{source_id(renderer)} m_Materials: unresolved startup material')
                     if len(materials) < len(self.geometry(mesh_reader)[2]):
                         # Unity reuses the last renderer material for remaining submeshes.
@@ -333,7 +355,7 @@ class GltfExporter(GltfBuilder):
         dependencies=[{'file':f'reference/{path}','sha256':hashlib.sha256((self.output.parent/path).read_bytes()).hexdigest()} for path in sorted(paths)]
         dependencies = list({entry['file']: entry for entry in [*dependencies, *self.material_dependencies.values()]}.values())
         return {'path': self.output.name, 'sha256': hashlib.sha256(self.output.read_bytes()).hexdigest(),
-                'dependencies':dependencies, 'materials': self.material_records,
+                'dependencies':dependencies, 'materials': self.material_records, 'deferred_materials':list(self.deferred_materials.values()),
                 'material_count':len(self.document.materials), 'material_indices':self.material_indices,
                 'node_count':len(records), 'mesh_count':len(self.meshes), 'material_adaptations':self.material_report,
                 'nodes':[{'source':source_id(r['reader']),'gltf_node':mapping[key(r['reader'])],
