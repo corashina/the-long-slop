@@ -1175,3 +1175,39 @@ A manual save survived a full page reload. Continue resumed that restored sessio
 The snapshot comparison measured maximum position error of `3.33786e-6` metres and quaternion component error of `3e-7`.
 The visible Load action returned to pause with `Game loaded`. Save returned `Save complete`, with actions enabled.
 No GPU error appeared during these checks. The default package had no fixture hooks.
+
+The controlled fleet checks used fixture WASM SHA-256 `7a784ad083d8e965ebc67775a301b11d18a656120b8d0fb4c87042369033af6b`.
+They used the same accepted source manifest listed above.
+Both distinct vehicle records survived a manual save and full page reload.
+The Skoda remained selected by stable source identity `level1:69517` while the player stayed on foot.
+Both engines resumed from elapsed time 10 to 10.216663 seconds.
+The two trip values remained 1234.5 and 1634.5000001192093 metres.
+The restored runtime had 114 bodies, 701 colliders, four wheel supports, no owner errors, and no duplicate supports.
+Maximum position error was `3.33786e-6` metres; quaternion component error was `3e-7`.
+
+The controlled driving check covered a rebase, manual save, full page reload, and resumed road contact.
+Travel reached 46.78494750846679 metres. Total fuel changed from 23 to 22.98723856 litres.
+The selected trip reached 46.86606230050236 metres.
+Maximum position error was `2.49744e-5` metres; quaternion component error was `3e-7`.
+The runtime retained 114 bodies and four wheel supports, with no owner errors or duplicate supports.
+Its 704 colliders became 701 after the streamed window updated on resume.
+All four wheels reported contact before resume. Resumed motion preserved stable chassis height.
+
+The parts check covered removal, held parts, fluids, cycle state, full page reload, resume, and the normal F drop action.
+It restored 116 bodies, 701 colliders, three wheel supports, and one carry joint.
+Eleven part colliders had the correct source owner. No owner errors or duplicate supports appeared.
+Maximum position error was `3.33786e-6` metres; quaternion component error was `2.9e-7`.
+Fluid transfer moved 0.25 litres from volumes [2, 0.5] to [1.75, 0.75].
+A second transfer after load reached [1.5, 1].
+Cycle time crossed from 1499.95 to 0.1886 seconds with its fade state preserved.
+The F action removed carry state and left zero throw charge. The dropped body remained active.
+
+Active-session storage fault checks also passed on the fixture package.
+An aborted write preserved the previous slot and active session.
+Corrupt data, source mismatch, unavailable storage, and missing metadata each preserved the active session.
+The checks compared the complete normalized snapshot, camera, origin, and required source record.
+These controlled inputs do not prove uninterrupted trusted pointer lock or matched source appearance.
+
+The scoped integration review found no issues in code commit `6935e23f751222296085c228d99f7768f6c3b44a`.
+The review covered merge resolutions, fleet save ownership, dormant recovery, mirror integration, and the light-capacity fix.
+Later commits record verification only.
