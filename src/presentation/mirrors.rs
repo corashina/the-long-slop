@@ -8,7 +8,7 @@ use crate::{
     app::{Drive, RuntimeReference},
     mirrors::{MirrorFrame, MirrorInput, MirrorState},
 };
-use bevy::asset::{AssetId, RenderAssetUsages};
+use bevy::asset::{AssetId, RenderAssetUsages, UntypedAssetId};
 use bevy::camera::{CameraProjection, RenderTarget, visibility::RenderLayers};
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Vec3A;
@@ -103,6 +103,24 @@ pub struct SourceMirrors {
 #[derive(Resource, Clone, Default, ExtractResource)]
 struct MirrorSurfaces {
     entries: Arc<Vec<(Entity, AssetId<SourceMaterial>, AssetId<SourceMaterial>)>>,
+}
+
+fn resolve_mirror_material(
+    role: MirrorViewRole,
+    entity: MainEntity,
+    current: UntypedAssetId,
+    surfaces: &MirrorSurfaces,
+) -> UntypedAssetId {
+    for (owner, entry) in surfaces.entries.iter().enumerate() {
+        if MainEntity::from(entry.0) == entity {
+            return if current == entry.2.untyped() {
+                current
+            } else {
+                mirror_material_for_view(role, owner, entry.1, entry.2).untyped()
+            };
+        }
+    }
+    current
 }
 
 pub struct SourceMirrorPlugin;
@@ -634,13 +652,12 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMirrorMaterial<I> {
         let Some(instance) = instances.into_inner().instances.get(&item.main_entity()) else {
             return RenderCommandResult::Skip;
         };
-        let mut selected = instance.asset_id;
-        for (owner, entry) in surfaces.into_inner().entries.iter().enumerate() {
-            if MainEntity::from(entry.0) == item.main_entity() && selected != entry.2.untyped() {
-                selected = mirror_material_for_view(*role, owner, entry.1, entry.2).untyped();
-                break;
-            }
-        }
+        let selected = resolve_mirror_material(
+            *role,
+            item.main_entity(),
+            instance.asset_id,
+            surfaces.into_inner(),
+        );
         let Some(material) = materials.into_inner().get(selected) else {
             return RenderCommandResult::Skip;
         };
@@ -757,13 +774,12 @@ fn queue_capture_meshes(
             else {
                 continue;
             };
-            let mut selected = material_instance.asset_id;
-            for (owner, entry) in surfaces.entries.iter().enumerate() {
-                if MainEntity::from(entry.0) == *visible_entity && selected != entry.2.untyped() {
-                    selected = mirror_material_for_view(*role, owner, entry.1, entry.2).untyped();
-                    break;
-                }
-            }
+            let selected = resolve_mirror_material(
+                *role,
+                *visible_entity,
+                material_instance.asset_id,
+                &surfaces,
+            );
             let Some(material) = render_materials.get(selected) else {
                 continue;
             };
