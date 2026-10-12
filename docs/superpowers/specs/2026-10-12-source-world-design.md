@@ -1,7 +1,7 @@
 # Source road and world generation
 
 Date: 2026-10-12, Europe/Warsaw.
-Status: The user approved the design in chat. Written specification review remains pending.
+Status: The user approved this written specification in chat on 2026-10-12.
 Branch: `codex/source-world`.
 Base commit: `dccd516387dff48bf9388ad96ecd52eab3f29c00`.
 
