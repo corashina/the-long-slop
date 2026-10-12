@@ -1,23 +1,24 @@
 import {applyLayout,layoutBox,rgba} from './ui-layout.js';
 export const ACTIONS={START:1,PAUSE:2,CONTINUE:4,RESTART:8,RECOVER:16};
 export class MenuState {
- constructor(){this.state='loading';this.readyFlag=false;this.started=false;this.actions=0;this.error='';this.generation=0;this.pending=false;this.origin='start-menu';}
+ constructor(){this.state='loading';this.readyFlag=false;this.started=false;this.actions=0;this.error='';this.generation=0;this.pending=false;this.origin='start-menu';this.dead=false;this.deathComplete=false;}
  ready(){if(this.state==='error')return;this.readyFlag=true;this.state='start-menu';}
  fail(message){this.generation++;this.pending=false;this.readyFlag=false;this.state='error';this.error=message;this.actions=this.started?ACTIONS.PAUSE:0;}
  pause(){this.generation++;this.pending=false;this.actions=this.started?ACTIONS.PAUSE:0;if(this.state==='error')return;if(this.state==='controls'){this.origin=this.started?'pause-menu':'start-menu';return;}this.state=this.readyFlag?(this.started?'pause-menu':'start-menu'):'loading';}
  controls(){if(this.pending)return;if(this.state!=='start-menu' && this.state!=='pause-menu')return;this.origin=this.state;this.state='controls';}
  back(){if(this.state==='controls')this.state=this.origin;}
- recover(){if(this.state==='pause-menu')this.actions=ACTIONS.RECOVER;}
+ recover(){if(this.state==='pause-menu'&&!this.dead)this.actions=ACTIONS.RECOVER;}
  takeActions(){const a=this.actions;this.actions=0;return a;}
  async capture(action,request){
+  if(this.deathComplete && action!==ACTIONS.RESTART)return false;
   if(!this.readyFlag || this.pending || !['start-menu','pause-menu'].includes(this.state))return false;
   const token=++this.generation;this.pending=true;this.error='';
-  try {await request();if(token!==this.generation)return false;this.started=true;this.actions=action;this.state='playing';return true;}
+  try {await request();if(token!==this.generation)return false;this.started=true;if(action===ACTIONS.RESTART){this.dead=false;this.deathComplete=false;}this.actions=action;this.state='playing';return true;}
   catch(error){if(token===this.generation){this.error='Mouse capture failed. '+error.message+' Select '+(this.started?'Continue':'Start')+' to try again.';this.state=this.started?'pause-menu':'start-menu';}return false;}
   finally {if(token===this.generation)this.pending=false;}
  }
 }
-export function createMenu({canvas,ui,clearInput,queueAction}) {
+export function createMenu({canvas,ui,clearInput,queueAction,audio}) {
  const model=new MenuState(),menu=document.querySelector('#menu'),controls=document.querySelector('#controls-screen');
  const initial=document.querySelector('#start-actions'),paused=document.querySelector('#pause-actions'),error=document.querySelector('#capture-error'),status=document.querySelector('#status');
  const art=document.querySelector('#menu-art'),frame=document.querySelector('#menu-frame'),hud=document.querySelector('#hud');
@@ -39,7 +40,7 @@ export function createMenu({canvas,ui,clearInput,queueAction}) {
   const state=model.state;menu.hidden=state==='playing';controls.hidden=state!=='controls';initial.hidden=!['loading','start-menu','error'].includes(state);paused.hidden=state!=='pause-menu';
   if(hud&&state!=='playing')hud.hidden=true;
   for(const id of ['#start','#resume','#restart'])document.querySelector(id).disabled=!model.readyFlag||model.pending;
-  document.querySelector('#start-controls').disabled=!model.readyFlag||model.pending;document.querySelector('#recover').disabled=!model.readyFlag;
+  document.querySelector('#start-controls').disabled=!model.readyFlag||model.pending;document.querySelector('#recover').disabled=!model.readyFlag||model.dead;document.querySelector('#resume').disabled=!model.readyFlag||model.pending||model.deathComplete;
   error.hidden=!model.error;if(lastError!==model.error){error.textContent=model.error;lastError=model.error;}
   if(state!==lastState){
    if(state==='start-menu'||state==='pause-menu'){
@@ -50,8 +51,8 @@ export function createMenu({canvas,ui,clearInput,queueAction}) {
   }
  }
  function flush(){const a=model.takeActions();if(a)queueAction(a);}
- function pause(){clearInput();model.pause();if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();}
- async function capture(action){clearInput();const pending=model.capture(action,async()=>{canvas.focus();await canvas.requestPointerLock();if(document.pointerLockElement!==canvas)throw Error('The browser did not capture the mouse.');});paint();const success=await pending;if(!success && document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();}
+ function pause(){audio?.pause();clearInput();model.pause();if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();}
+ async function capture(action){clearInput();const pending=model.capture(action,async()=>{audio?.resumeFromGesture();canvas.focus();await canvas.requestPointerLock();if(document.pointerLockElement!==canvas)throw Error('The browser did not capture the mouse.');});paint();const success=await pending;if(!success){audio?.pause();if(document.pointerLockElement===canvas)document.exitPointerLock();}flush();paint();}
  document.querySelector('#start').addEventListener('click',()=>capture(ACTIONS.START));
  document.querySelector('#resume').addEventListener('click',()=>capture(ACTIONS.CONTINUE));
  document.querySelector('#restart').addEventListener('click',()=>capture(ACTIONS.RESTART));
@@ -65,5 +66,5 @@ export function createMenu({canvas,ui,clearInput,queueAction}) {
  document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==canvas && model.state==='playing')pause();});
  window.addEventListener('blur',pause);document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});
  window.addEventListener('resize',resize);resize();paint();
- return {model,ready(){model.ready();status.textContent='The garage is ready.';paint();},sync(started,stopped,travelM){model.started=started;if(stopped && started && model.state==='playing'){model.pause();paint();}const km=Math.round(travelM/10)/100;if(lastTravel!==km){document.querySelector('#session-distance').textContent='Session distance: '+km.toFixed(2)+' km';lastTravel=km;}},fail(message){clearInput();model.fail(message);if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();},dispose(){window.removeEventListener('resize',resize);}};
+ return {model,survival(dead,menuDue){if(dead===model.dead&&menuDue===model.deathComplete)return;const becameDue=menuDue&&!model.deathComplete,wasDead=model.dead;model.dead=dead;model.deathComplete=menuDue;if(becameDue){pause();status.textContent='You died. Select Restart.';queueMicrotask(()=>document.querySelector('#restart').focus({preventScroll:true}));}else if(wasDead&&!dead)status.textContent='The garage is ready.';paint();},ready(){model.ready();status.textContent='The garage is ready.';paint();},sync(started,stopped,travelM){model.started=started;if(stopped && started && model.state==='playing'){model.pause();paint();}const km=Math.round(travelM/10)/100;if(lastTravel!==km){document.querySelector('#session-distance').textContent='Session distance: '+km.toFixed(2)+' km';lastTravel=km;}},fail(message){audio?.pause();clearInput();model.fail(message);if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();},dispose(){window.removeEventListener('resize',resize);}};
 }

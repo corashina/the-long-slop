@@ -171,7 +171,7 @@ impl GarageRuntime {
         reference: &ReferenceManifest,
         item: ItemId,
     ) -> Result<bool, ReferenceError> {
-        if !self.survival.output().can_eat {
+        if self.needs_output().dead || !self.survival.output().can_eat {
             return Ok(false);
         }
         let Some(state) = self.area.items.get(item) else {
@@ -195,6 +195,7 @@ impl GarageRuntime {
             hp: prototype.effect.hp / divisor,
         });
         self.survival.show_stats();
+        self.emit_survival_audio(reference, crate::audio::AudioKind::Eat);
         let bite = {
             let state = self.area.items.get_mut(item).unwrap();
             state.food.as_mut().unwrap().bite += 1;
@@ -213,6 +214,9 @@ impl GarageRuntime {
         source: ItemId,
         requested_liters: f32,
     ) -> Result<DrinkResult, ReferenceError> {
+        if self.needs_output().dead {
+            return Err(ReferenceError("Player is dead".into()));
+        }
         if !requested_liters.is_finite() || requested_liters < 0. {
             return Err(ReferenceError("Invalid drink volume".into()));
         }
@@ -233,6 +237,9 @@ impl GarageRuntime {
         poured_liters: f32,
         fractions: [f32; 6],
     ) -> Result<DrinkResult, ReferenceError> {
+        if self.needs_output().dead {
+            return Err(ReferenceError("Player is dead".into()));
+        }
         if !poured_liters.is_finite()
             || poured_liters < 0.
             || !fractions
@@ -290,6 +297,9 @@ impl GarageRuntime {
         source: ItemId,
         requested_liters: f32,
     ) -> Result<DrinkResult, ReferenceError> {
+        if self.needs_output().dead {
+            return Err(ReferenceError("Player is dead".into()));
+        }
         if !requested_liters.is_finite() || requested_liters < 0. {
             return Err(ReferenceError("Invalid drink volume".into()));
         }
@@ -386,5 +396,167 @@ impl GarageRuntime {
         state.location = ItemLocation::World;
         state.removed = true;
         Ok(())
+    }
+}
+
+impl GarageRuntime {
+    pub fn needs_output(&self) -> crate::survival::NeedsOutput {
+        self.survival.output()
+    }
+    pub fn advance_needs(&mut self, reference: &ReferenceManifest, dt: f32, need_scale: f32) {
+        if !self.started || self.paused {
+            return;
+        }
+        self.simulation_seconds += f64::from(dt);
+        self.survival.advance(
+            &reference.survival,
+            dt,
+            self.lighting.cycle.output().visual_temperature,
+            need_scale,
+        );
+        self.announce_death(reference);
+        if self.needs_output().menu_due {
+            self.paused = true;
+        }
+    }
+    fn draw_survival(&mut self) -> f32 {
+        self.survival_draw = self.survival_draw.wrapping_add(1);
+        super::start_sample(super::DEFAULT_SEED, self.survival_draw)
+    }
+    fn select_survival_audio(
+        &mut self,
+        reference: &ReferenceManifest,
+        kind: crate::audio::AudioKind,
+    ) -> (u32, f32, f32, f32) {
+        let b = reference.audio.binding(kind as u32);
+        let clip = b.clips
+            [((self.draw_survival() * b.clips.len() as f32) as usize).min(b.clips.len() - 1)];
+        let gain = b.gain[0] + (b.gain[1] - b.gain[0]) * self.draw_survival();
+        let pitch = b.pitch[0] + (b.pitch[1] - b.pitch[0]) * self.draw_survival();
+        (
+            clip,
+            gain,
+            pitch,
+            reference.audio.clips[clip as usize].duration_seconds as f32 / pitch,
+        )
+    }
+    fn emit_selected_audio(
+        &mut self,
+        reference: &ReferenceManifest,
+        kind: crate::audio::AudioKind,
+        selection: (u32, f32, f32, f32),
+    ) {
+        let b = reference.audio.binding(kind as u32);
+        let pose = if kind == crate::audio::AudioKind::Eat {
+            self.area.player.view_pose(&self.physics)
+        } else {
+            self.area.player.body_pose(&self.physics)
+        };
+        let local = to_rapier(pose) * rapier3d::math::Vector::from_array(b.offset);
+        let position = self.stream.origin.absolute(local.to_array());
+        self.audio.emit(crate::audio::AudioEvent {
+            session: self.audio_session,
+            emitter: 0,
+            kind,
+            action: crate::audio::AudioAction::Start,
+            clip: selection.0,
+            gain: selection.1,
+            pitch: selection.2,
+            position,
+        });
+    }
+    fn emit_survival_audio(
+        &mut self,
+        reference: &ReferenceManifest,
+        kind: crate::audio::AudioKind,
+    ) {
+        let selection = self.select_survival_audio(reference, kind);
+        self.emit_selected_audio(reference, kind, selection);
+    }
+    fn announce_death(&mut self, reference: &ReferenceManifest) {
+        if self.needs_output().dead && !self.death_announced {
+            self.death_announced = true;
+            self.clear_input();
+            self.area
+                .interaction
+                .drop_held(&mut self.area.items, &mut self.physics);
+            self.emit_survival_audio(reference, crate::audio::AudioKind::Death);
+        }
+    }
+    pub(super) fn sample_survival_speed(&mut self, reference: &ReferenceManifest) {
+        // Kinematic controller velocity comes from Rapier's completed fixed step.
+        // Seat entry and exit are placement operations, not source acceleration.
+        if self.area.player.seat().is_some() {
+            self.previous_speed = None;
+            return;
+        }
+        let speed = self.physics.rapier().bodies[self.area.player.body_handle()]
+            .linvel()
+            .length();
+        if !self.death_protected
+            && self
+                .previous_speed
+                .is_some_and(|last| (speed - last).abs() > reference.survival.death_velocity_change)
+        {
+            self.survival
+                .damage_instant(&reference.survival, reference.survival.maximum.hp);
+        }
+        self.previous_speed = Some(speed);
+        if self.area.player.grounded() {
+            self.death_protected = false;
+        }
+        self.announce_death(reference);
+    }
+    pub(super) fn process_toilet(
+        &mut self,
+        reference: &ReferenceManifest,
+        input: crate::simulation::FrameInput,
+        dt: f32,
+    ) {
+        if self.needs_output().dead {
+            return;
+        }
+        use crate::audio::AudioKind;
+        use crate::simulation::keys;
+        let pressed = input.pressed & keys::BURP != 0;
+        let draws = if pressed {
+            [self.draw_survival(), self.draw_survival()]
+        } else {
+            [0., 0.]
+        };
+        let kind = if draws[0] < reference.survival.toilet.fart_burp_ratio {
+            if self.needs_output().needs.bowel
+                >= reference.survival.maximum.bowel * reference.survival.toilet.bowel_fraction
+                && draws[1] > reference.survival.toilet.fart_shit_ratio
+            {
+                AudioKind::Shit
+            } else {
+                AudioKind::Fart
+            }
+        } else {
+            AudioKind::Burp
+        };
+        let selection = if pressed {
+            self.select_survival_audio(reference, kind)
+        } else {
+            (0, 0., 1., 0.)
+        };
+        let output = self.survival.toilet_step(
+            &reference.survival,
+            crate::survival::ToiletInput {
+                urinate: input.held & keys::URINATE != 0,
+                burp_held: input.held & keys::BURP != 0,
+                burp_pressed: pressed,
+            },
+            dt,
+            draws,
+            selection.3,
+        );
+        if output.burp || output.fart || output.defecated {
+            self.emit_selected_audio(reference, kind, selection);
+        }
+        if self.apply_toilet_output(reference, output).is_err() {
+            self.notice = "Cannot create toilet item.";
+        }
     }
 }

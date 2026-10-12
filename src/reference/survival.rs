@@ -101,7 +101,6 @@ pub struct SurvivalReference {
     pub mode: u8,
     pub death_seconds: f32,
     pub drinking: DrinkingReference,
-    pub audio: Vec<SurvivalAudio>,
     pub source: SourceId,
     pub player: SourceId,
     pub blood: SourceId,
@@ -331,31 +330,6 @@ impl SurvivalReference {
                 && d.tank == self.toilet.bladder,
             "drinking contacts",
         )?;
-        require(self.audio.len() == 7, "survival audio")?;
-        ids(
-            self.audio.iter().map(|a| a.role.as_str()),
-            "duplicate audio role",
-        )?;
-        for a in &self.audio {
-            require(!a.clips.is_empty(), "audio clips")?;
-            for c in &a.clips {
-                require(
-                    hash(&c.sha256)
-                        && c.path
-                            == format!(
-                                "reference/survival-audio-{}-{}.wav",
-                                c.source.file, c.source.path_id
-                            )
-                        && c.duration_seconds.is_finite()
-                        && c.duration_seconds > 0.
-                        && c.frequency > 0
-                        && c.frames > 0
-                        && c.channels > 0
-                        && (c.duration_seconds - c.frames as f64 / c.frequency as f64).abs() < 1e-6,
-                    "audio receipt",
-                )?;
-            }
-        }
         let t = &self.toilet;
         require(
             finite(&[
@@ -447,22 +421,4 @@ pub struct DrinkingReference {
     pub is_drink_cap: bool,
     pub particle_contact_radius_multiplier: f32,
     pub evidence: ManagedEvidence,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SurvivalClip {
-    pub source: SourceId,
-    pub path: String,
-    pub sha256: String,
-    pub duration_seconds: f64,
-    pub frames: u64,
-    pub frequency: u32,
-    pub channels: u8,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SurvivalAudio {
-    pub role: String,
-    pub source: SourceId,
-    pub clips: Vec<SurvivalClip>,
 }

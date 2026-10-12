@@ -9899,11 +9899,27 @@
       "tube_connected": false,
       "flow_radius": 3.0,
       "particles": {
-        "source": { "file": "level1", "path_id": 64724 },
+        "source": {
+          "file": "level1",
+          "path_id": 64724
+        },
         "local_pose": {
-          "translation": [0.0, 0.0, 0.025],
-          "rotation": [0.0, 0.0, 0.0, 1.0],
-          "scale": [1.0, 1.0, 1.0]
+          "translation": [
+            0.0,
+            0.0,
+            0.025
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
         },
         "capacity": 10000,
         "cone_degrees": 6.0,
@@ -11598,10 +11614,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
           0.7843137383460999,
           0.7843137383460999,
-          0.7843137383460999
+          0.7843137383460999,
+          1.0
         ],
         "font_size": 65.0,
         "font": "Liberation Sans",
@@ -11609,10 +11625,10 @@
         "text": "START",
         "sprite": 0,
         "image_color": [
-          1.0,
-          0.6792452931404114,
+          0.9056603908538818,
           0.8620288968086243,
-          0.9056603908538818
+          0.6792452931404114,
+          1.0
         ]
       },
       "start-controls": {
@@ -11728,10 +11744,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
           0.5094339847564697,
           0.5094339847564697,
-          0.5094339847564697
+          0.5094339847564697,
+          1.0
         ],
         "font_size": 55.099998474121094,
         "font": "Liberation Sans",
@@ -11739,10 +11755,10 @@
         "text": "Settings",
         "sprite": 0,
         "image_color": [
-          1.0,
-          0.6792452931404114,
+          0.9056603908538818,
           0.8620288968086243,
-          0.9056603908538818
+          0.6792452931404114,
+          1.0
         ]
       },
       "continue": {
@@ -11918,10 +11934,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
-          0.0,
+          0.38027140498161316,
           0.9528301954269409,
-          0.38027140498161316
+          0.0,
+          1.0
         ],
         "font_size": 56.349998474121094,
         "font": "Liberation Sans",
@@ -11929,10 +11945,10 @@
         "text": "Continue",
         "sprite": 0,
         "image_color": [
-          1.0,
-          0.6792452931404114,
+          0.9056603908538818,
           0.8620288968086243,
-          0.9056603908538818
+          0.6792452931404114,
+          1.0
         ]
       },
       "controls": {
@@ -12108,10 +12124,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
           0.5094339847564697,
           0.5094339847564697,
-          0.5094339847564697
+          0.5094339847564697,
+          1.0
         ],
         "font_size": 56.349998474121094,
         "font": "Liberation Sans",
@@ -12119,10 +12135,10 @@
         "text": "Settings",
         "sprite": 0,
         "image_color": [
-          1.0,
-          0.6792452931404114,
+          0.9056603908538818,
           0.8620288968086243,
-          0.9056603908538818
+          0.6792452931404114,
+          1.0
         ]
       },
       "restart": {
@@ -12298,10 +12314,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
           0.5094339847564697,
           0.5094339847564697,
-          0.5094339847564697
+          0.5094339847564697,
+          1.0
         ],
         "font_size": 56.349998474121094,
         "font": "Liberation Sans",
@@ -12309,10 +12325,10 @@
         "text": "Save/Load",
         "sprite": 0,
         "image_color": [
-          1.0,
-          0.6792452931404114,
+          0.9056603908538818,
           0.8620288968086243,
-          0.9056603908538818
+          0.6792452931404114,
+          1.0
         ]
       },
       "recover": {
@@ -12488,10 +12504,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
+          0.7843137383460999,
           0.31287822127342224,
           0.31287822127342224,
-          0.7843137383460999
+          1.0
         ],
         "font_size": 56.349998474121094,
         "font": "Liberation Sans",
@@ -12499,10 +12515,10 @@
         "text": "Exit",
         "sprite": 0,
         "image_color": [
-          1.0,
-          0.6792452931404114,
+          0.9056603908538818,
           0.8620288968086243,
-          0.9056603908538818
+          0.6792452931404114,
+          1.0
         ]
       },
       "back": {
@@ -12678,10 +12694,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
-          0.3137255012989044,
+          0.3921568691730499,
           0.8627451062202454,
-          0.3921568691730499
+          0.3137255012989044,
+          1.0
         ],
         "font_size": 65,
         "font": "Arial",
@@ -12938,10 +12954,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
           0.8235294222831726,
           0.8235294222831726,
-          0.8235294222831726
+          0.8235294222831726,
+          1.0
         ],
         "font_size": 40,
         "font": "Arial",
@@ -13068,10 +13084,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
           0.8235294222831726,
           0.8235294222831726,
-          0.8235294222831726
+          0.8235294222831726,
+          1.0
         ],
         "font_size": 40,
         "font": "Arial",
@@ -13198,10 +13214,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
-          0.7882353067398071,
           0.8235294222831726,
-          0.8235294222831726
+          0.8235294222831726,
+          0.7882353067398071,
+          1.0
         ],
         "font_size": 40,
         "font": "Arial",
@@ -13328,10 +13344,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
           0.8235294222831726,
           0.8235294222831726,
-          0.8235294222831726
+          0.8235294222831726,
+          1.0
         ],
         "font_size": 40,
         "font": "Arial",
@@ -13458,10 +13474,10 @@
           "screen_match": 1
         },
         "color": [
+          0.6549632549285889,
           1.0,
           0.0,
-          1.0,
-          0.6549632549285889
+          1.0
         ],
         "font_size": 55,
         "font": "Arial",
@@ -13648,10 +13664,10 @@
           "screen_match": 1
         },
         "color": [
-          0.6274510025978088,
           1.0,
           1.0,
-          1.0
+          1.0,
+          0.6274510025978088
         ],
         "font_size": 40,
         "font": "Arial",
@@ -13659,10 +13675,10 @@
         "text": "",
         "sprite": 2,
         "image_color": [
-          0.6274510025978088,
           1.0,
           1.0,
-          1.0
+          1.0,
+          0.6274510025978088
         ]
       },
       "foot": {
@@ -13868,10 +13884,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
           0.7843137383460999,
           0.7843137383460999,
-          0.7843137383460999
+          0.7843137383460999,
+          1.0
         ],
         "font_size": 45,
         "font": "Arial",
@@ -14088,10 +14104,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
           0.7843137383460999,
           0.7843137383460999,
-          0.7843137383460999
+          0.7843137383460999,
+          1.0
         ],
         "font_size": 45,
         "font": "Arial",
@@ -15058,10 +15074,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
-          0.0,
+          0.75,
           0.5,
-          0.75
+          0.0,
+          1.0
         ],
         "font_size": 40,
         "font": "Arial",
@@ -15069,10 +15085,10 @@
         "text": "",
         "sprite": null,
         "image_color": [
-          1.0,
-          0.0,
+          0.75,
           0.5,
-          0.75
+          0.0,
+          1.0
         ]
       },
       "need-food-background": {
@@ -15218,10 +15234,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
           0.0,
           0.0,
-          0.0
+          0.0,
+          1.0
         ],
         "font_size": 40,
         "font": "Arial",
@@ -15229,10 +15245,10 @@
         "text": "",
         "sprite": null,
         "image_color": [
-          1.0,
           0.0,
           0.0,
-          0.0
+          0.0,
+          1.0
         ]
       },
       "need-food-icon": {
@@ -15378,10 +15394,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
-          0.0,
+          0.7490196228027344,
           0.49803924560546875,
-          0.7490196228027344
+          0.0,
+          1.0
         ],
         "font_size": 40,
         "font": "Arial",
@@ -15389,10 +15405,10 @@
         "text": "",
         "sprite": 11,
         "image_color": [
-          1.0,
-          0.0,
+          0.7490196228027344,
           0.49803924560546875,
-          0.7490196228027344
+          0.0,
+          1.0
         ]
       },
       "need-water-fill": {
@@ -15568,10 +15584,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
-          1.0,
+          0.0,
           0.6666665077209473,
-          0.0
+          1.0,
+          1.0
         ],
         "font_size": 40,
         "font": "Arial",
@@ -15579,10 +15595,10 @@
         "text": "",
         "sprite": null,
         "image_color": [
-          1.0,
-          1.0,
+          0.0,
           0.6666665077209473,
-          0.0
+          1.0,
+          1.0
         ]
       },
       "need-water-background": {
@@ -15728,10 +15744,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
           0.0,
           0.0,
-          0.0
+          0.0,
+          1.0
         ],
         "font_size": 40,
         "font": "Arial",
@@ -15739,10 +15755,10 @@
         "text": "",
         "sprite": null,
         "image_color": [
-          1.0,
           0.0,
           0.0,
-          0.0
+          0.0,
+          1.0
         ]
       },
       "need-water-icon": {
@@ -15888,10 +15904,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
-          1.0,
+          0.0,
           0.6627451181411743,
-          0.0
+          1.0,
+          1.0
         ],
         "font_size": 40,
         "font": "Arial",
@@ -15899,10 +15915,10 @@
         "text": "",
         "sprite": 12,
         "image_color": [
-          1.0,
-          1.0,
+          0.0,
           0.6627451181411743,
-          0.0
+          1.0,
+          1.0
         ]
       },
       "need-hp-fill": {
@@ -16238,10 +16254,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
           0.0,
           0.0,
-          0.0
+          0.0,
+          1.0
         ],
         "font_size": 40,
         "font": "Arial",
@@ -16249,10 +16265,10 @@
         "text": "",
         "sprite": null,
         "image_color": [
-          1.0,
           0.0,
           0.0,
-          0.0
+          0.0,
+          1.0
         ]
       },
       "need-hp-icon": {
@@ -16589,8 +16605,8 @@
         },
         "color": [
           1.0,
-          0.0,
           0.8470588326454163,
+          0.0,
           1.0
         ],
         "font_size": 40,
@@ -16600,8 +16616,8 @@
         "sprite": null,
         "image_color": [
           1.0,
-          0.0,
           0.8470588326454163,
+          0.0,
           1.0
         ]
       },
@@ -16748,10 +16764,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
           0.0,
           0.0,
-          0.0
+          0.0,
+          1.0
         ],
         "font_size": 40,
         "font": "Arial",
@@ -16759,10 +16775,10 @@
         "text": "",
         "sprite": null,
         "image_color": [
-          1.0,
           0.0,
           0.0,
-          0.0
+          0.0,
+          1.0
         ]
       },
       "need-bladder-icon": {
@@ -16909,8 +16925,8 @@
         },
         "color": [
           1.0,
-          0.0,
           0.847058892250061,
+          0.0,
           1.0
         ],
         "font_size": 40,
@@ -16920,8 +16936,8 @@
         "sprite": 14,
         "image_color": [
           1.0,
-          0.0,
           0.847058892250061,
+          0.0,
           1.0
         ]
       },
@@ -17098,10 +17114,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
-          0.0,
+          0.5,
           0.33203125,
-          0.5
+          0.0,
+          1.0
         ],
         "font_size": 40,
         "font": "Arial",
@@ -17109,10 +17125,10 @@
         "text": "",
         "sprite": null,
         "image_color": [
-          1.0,
-          0.0,
+          0.5,
           0.33203125,
-          0.5
+          0.0,
+          1.0
         ]
       },
       "need-bowel-background": {
@@ -17258,10 +17274,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
           0.0,
           0.0,
-          0.0
+          0.0,
+          1.0
         ],
         "font_size": 40,
         "font": "Arial",
@@ -17269,10 +17285,10 @@
         "text": "",
         "sprite": null,
         "image_color": [
-          1.0,
           0.0,
           0.0,
-          0.0
+          0.0,
+          1.0
         ]
       },
       "need-bowel-icon": {
@@ -17418,10 +17434,10 @@
           "screen_match": 1
         },
         "color": [
-          1.0,
-          0.0,
+          0.49803924560546875,
           0.3333333432674408,
-          0.49803924560546875
+          0.0,
+          1.0
         ],
         "font_size": 40,
         "font": "Arial",
@@ -17429,10 +17445,10 @@
         "text": "",
         "sprite": 15,
         "image_color": [
-          1.0,
-          0.0,
+          0.49803924560546875,
           0.3333333432674408,
-          0.49803924560546875
+          0.0,
+          1.0
         ]
       },
       "can-sleep": {
@@ -31440,239 +31456,6 @@
         "key": "V"
       }
     ],
-    "audio": [
-      {
-        "role": "eat",
-        "source": {
-          "file": "level1",
-          "path_id": 64919
-        },
-        "clips": [
-          {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 4295
-            },
-            "path": "reference/survival-audio-sharedassets1.assets-4295.wav",
-            "sha256": "fddd6451faa39c935f745dd8eb1db181869a946bf4caf7bfdd2504376d0e1d3a",
-            "duration_seconds": 1.968639455782313,
-            "frames": 86817,
-            "frequency": 44100,
-            "channels": 1
-          },
-          {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 4052
-            },
-            "path": "reference/survival-audio-sharedassets1.assets-4052.wav",
-            "sha256": "793279b5500a3598df83dad93347f18ddda09e8ef3a65eb164c88d3ebe589014",
-            "duration_seconds": 2.6693197278911565,
-            "frames": 117717,
-            "frequency": 44100,
-            "channels": 1
-          },
-          {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 4186
-            },
-            "path": "reference/survival-audio-sharedassets1.assets-4186.wav",
-            "sha256": "ac1c249582eb2625ac9d16a0b913a26d93681e8cca8992e96a81e9f6928cb023",
-            "duration_seconds": 2.102108843537415,
-            "frames": 92703,
-            "frequency": 44100,
-            "channels": 1
-          }
-        ]
-      },
-      {
-        "role": "death",
-        "source": {
-          "file": "level1",
-          "path_id": 64919
-        },
-        "clips": [
-          {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 4290
-            },
-            "path": "reference/survival-audio-sharedassets1.assets-4290.wav",
-            "sha256": "5b58b05f37e549634b67103404ce93d5bd684788f4011c407fbcd488dbe241c8",
-            "duration_seconds": 15.014965986394557,
-            "frames": 331080,
-            "frequency": 22050,
-            "channels": 1
-          }
-        ]
-      },
-      {
-        "role": "burp",
-        "source": {
-          "file": "level1",
-          "path_id": 70770
-        },
-        "clips": [
-          {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 4172
-            },
-            "path": "reference/survival-audio-sharedassets1.assets-4172.wav",
-            "sha256": "7123d537d814284afeced7b2ddfe37ffcc334f43511b6e80e8b387161ed2a063",
-            "duration_seconds": 0.5839229024943311,
-            "frames": 25751,
-            "frequency": 44100,
-            "channels": 1
-          },
-          {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 4398
-            },
-            "path": "reference/survival-audio-sharedassets1.assets-4398.wav",
-            "sha256": "20b26cbabfdef5bd2df20fdb18433f1e2d6975ddda60f6cb18dc5032040ceb4b",
-            "duration_seconds": 1.317981859410431,
-            "frames": 58123,
-            "frequency": 44100,
-            "channels": 1
-          },
-          {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 4069
-            },
-            "path": "reference/survival-audio-sharedassets1.assets-4069.wav",
-            "sha256": "c9bcc1372fe0e0b5da24b19bfc842cb3b944dee7a9b6da0f2e678e945f69f85a",
-            "duration_seconds": 1.267936507936508,
-            "frames": 55916,
-            "frequency": 44100,
-            "channels": 1
-          },
-          {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 4055
-            },
-            "path": "reference/survival-audio-sharedassets1.assets-4055.wav",
-            "sha256": "d785d98b6b7272a3f891a4596d7612c53bbc25b5fb3263ad3ba8d379fb114412",
-            "duration_seconds": 1.2345804988662132,
-            "frames": 54445,
-            "frequency": 44100,
-            "channels": 1
-          }
-        ]
-      },
-      {
-        "role": "fart",
-        "source": {
-          "file": "level1",
-          "path_id": 70770
-        },
-        "clips": [
-          {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 4345
-            },
-            "path": "reference/survival-audio-sharedassets1.assets-4345.wav",
-            "sha256": "b68acba30048c18f37473baac297c939d2e277755e2fdaa63474326f86a603f4",
-            "duration_seconds": 0.31696875,
-            "frames": 10143,
-            "frequency": 32000,
-            "channels": 1
-          },
-          {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 4444
-            },
-            "path": "reference/survival-audio-sharedassets1.assets-4444.wav",
-            "sha256": "88f0dcc08998e56aff3f36fa127c57f834b03ba450ba39330231b7da9c7c3fa6",
-            "duration_seconds": 0.7006875,
-            "frames": 22422,
-            "frequency": 32000,
-            "channels": 1
-          }
-        ]
-      },
-      {
-        "role": "shit",
-        "source": {
-          "file": "level1",
-          "path_id": 70770
-        },
-        "clips": [
-          {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 4102
-            },
-            "path": "reference/survival-audio-sharedassets1.assets-4102.wav",
-            "sha256": "2e3d31bd683b39a60a5db05c16751d8063b093b20853dbbac948fb6d6ec18a3e",
-            "duration_seconds": 4.721383219954649,
-            "frames": 208213,
-            "frequency": 44100,
-            "channels": 1
-          },
-          {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 4439
-            },
-            "path": "reference/survival-audio-sharedassets1.assets-4439.wav",
-            "sha256": "8ffd626a256e6744951edc849316ef67c6eed68864057cd786954f1a1e6fae7a",
-            "duration_seconds": 3.420090702947846,
-            "frames": 150826,
-            "frequency": 44100,
-            "channels": 1
-          }
-        ]
-      },
-      {
-        "role": "sleep",
-        "source": {
-          "file": "level1",
-          "path_id": 56133
-        },
-        "clips": [
-          {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 4472
-            },
-            "path": "reference/survival-audio-sharedassets1.assets-4472.wav",
-            "sha256": "fb64bb1e76a7ca53bc8ce5868113f4fa9b50a4e979453a8d20e7735856bbcb97",
-            "duration_seconds": 12.526666666666667,
-            "frames": 276213,
-            "frequency": 22050,
-            "channels": 1
-          }
-        ]
-      },
-      {
-        "role": "storm",
-        "source": {
-          "file": "sharedassets1.assets",
-          "path_id": 123416
-        },
-        "clips": [
-          {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 4297
-            },
-            "path": "reference/survival-audio-sharedassets1.assets-4297.wav",
-            "sha256": "4ac10202c141d6857835074d49b94a75cfed8c0ad78e84b79c2e00be3731a012",
-            "duration_seconds": 100.86740625,
-            "frames": 3227757,
-            "frequency": 32000,
-            "channels": 1
-          }
-        ]
-      }
-    ],
     "mode_source": {
       "file": "level0",
       "path_id": 17179
@@ -36444,5 +36227,918 @@
         }
       }
     ]
+  },
+  "audio": {
+    "bindings": [
+      {
+        "role": "eat",
+        "kind": 0,
+        "source": {
+          "file": "level1",
+          "path_id": 64919
+        },
+        "audio_source": {
+          "file": "sharedassets1.assets",
+          "path_id": 123167
+        },
+        "transform": {
+          "file": "sharedassets1.assets",
+          "path_id": 58171
+        },
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "clips": [
+          0,
+          1,
+          2
+        ],
+        "gain": [
+          1.0,
+          1.0
+        ],
+        "pitch": [
+          1.0,
+          1.0
+        ],
+        "looped": false,
+        "spatial_blend": 1.0,
+        "min_distance": 0.5,
+        "max_distance": 200.0,
+        "rolloff_mode": 0,
+        "rolloff_curve": [
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 0.0,
+            "value": 1.0,
+            "weightedMode": 0
+          },
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 1.0,
+            "value": 0.0,
+            "weightedMode": 0
+          }
+        ],
+        "priority": 70,
+        "mixer": {
+          "file": "sharedassets0.assets",
+          "path_id": 819
+        },
+        "mixer_route": [
+          6,
+          5,
+          4,
+          3,
+          0
+        ],
+        "mixer_gain": 1.0,
+        "mixer_pitch": 1.0,
+        "clip_length_lifetime": true,
+        "doppler": 1.0,
+        "spread": 0.0,
+        "pan": 0.0
+      },
+      {
+        "role": "burp",
+        "kind": 1,
+        "source": {
+          "file": "level1",
+          "path_id": 70770
+        },
+        "audio_source": {
+          "file": "level1",
+          "path_id": 56321
+        },
+        "transform": {
+          "file": "level1",
+          "path_id": 29299
+        },
+        "offset": [
+          0.0,
+          0.6499999761581421,
+          0.0
+        ],
+        "clips": [
+          3,
+          4,
+          5,
+          6
+        ],
+        "gain": [
+          0.10000000149011612,
+          0.4000000059604645
+        ],
+        "pitch": [
+          0.8500000238418579,
+          1.149999976158142
+        ],
+        "looped": false,
+        "spatial_blend": 1.0,
+        "min_distance": 0.20000000298023224,
+        "max_distance": 100.0,
+        "rolloff_mode": 0,
+        "rolloff_curve": [
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 0.0,
+            "value": 1.0,
+            "weightedMode": 0
+          },
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 1.0,
+            "value": 0.0,
+            "weightedMode": 0
+          }
+        ],
+        "priority": 128,
+        "mixer": {
+          "file": "sharedassets0.assets",
+          "path_id": 819
+        },
+        "mixer_route": [
+          6,
+          5,
+          4,
+          3,
+          0
+        ],
+        "mixer_gain": 1.0,
+        "mixer_pitch": 1.0,
+        "clip_length_lifetime": false,
+        "doppler": 1.0,
+        "spread": 0.0,
+        "pan": 0.0
+      },
+      {
+        "role": "fart",
+        "kind": 2,
+        "source": {
+          "file": "level1",
+          "path_id": 70770
+        },
+        "audio_source": {
+          "file": "level1",
+          "path_id": 56131
+        },
+        "transform": {
+          "file": "level1",
+          "path_id": 37528
+        },
+        "offset": [
+          0.0,
+          -0.3699999749660492,
+          0.0
+        ],
+        "clips": [
+          7,
+          8
+        ],
+        "gain": [
+          0.800000011920929,
+          1.0
+        ],
+        "pitch": [
+          0.8500000238418579,
+          1.149999976158142
+        ],
+        "looped": false,
+        "spatial_blend": 1.0,
+        "min_distance": 1.0,
+        "max_distance": 100.0,
+        "rolloff_mode": 0,
+        "rolloff_curve": [
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 0.0,
+            "value": 1.0,
+            "weightedMode": 0
+          },
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 1.0,
+            "value": 0.0,
+            "weightedMode": 0
+          }
+        ],
+        "priority": 120,
+        "mixer": {
+          "file": "sharedassets0.assets",
+          "path_id": 819
+        },
+        "mixer_route": [
+          6,
+          5,
+          4,
+          3,
+          0
+        ],
+        "mixer_gain": 1.0,
+        "mixer_pitch": 1.0,
+        "clip_length_lifetime": false,
+        "doppler": 1.0,
+        "spread": 0.0,
+        "pan": 0.0
+      },
+      {
+        "role": "shit",
+        "kind": 9,
+        "source": {
+          "file": "level1",
+          "path_id": 70770
+        },
+        "audio_source": {
+          "file": "level1",
+          "path_id": 56131
+        },
+        "transform": {
+          "file": "level1",
+          "path_id": 37528
+        },
+        "offset": [
+          0.0,
+          -0.3699999749660492,
+          0.0
+        ],
+        "clips": [
+          9,
+          10
+        ],
+        "gain": [
+          0.800000011920929,
+          1.0
+        ],
+        "pitch": [
+          0.8500000238418579,
+          1.149999976158142
+        ],
+        "looped": false,
+        "spatial_blend": 1.0,
+        "min_distance": 1.0,
+        "max_distance": 100.0,
+        "rolloff_mode": 0,
+        "rolloff_curve": [
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 0.0,
+            "value": 1.0,
+            "weightedMode": 0
+          },
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 1.0,
+            "value": 0.0,
+            "weightedMode": 0
+          }
+        ],
+        "priority": 120,
+        "mixer": {
+          "file": "sharedassets0.assets",
+          "path_id": 819
+        },
+        "mixer_route": [
+          6,
+          5,
+          4,
+          3,
+          0
+        ],
+        "mixer_gain": 1.0,
+        "mixer_pitch": 1.0,
+        "clip_length_lifetime": false,
+        "doppler": 1.0,
+        "spread": 0.0,
+        "pan": 0.0
+      },
+      {
+        "role": "death",
+        "kind": 5,
+        "source": {
+          "file": "level1",
+          "path_id": 64919
+        },
+        "audio_source": {
+          "file": "level1",
+          "path_id": 56499
+        },
+        "transform": {
+          "file": "level1",
+          "path_id": 33364
+        },
+        "offset": [
+          0.0,
+          0.6499999761581421,
+          0.0
+        ],
+        "clips": [
+          11
+        ],
+        "gain": [
+          1.0,
+          1.0
+        ],
+        "pitch": [
+          0.8,
+          1.2
+        ],
+        "looped": false,
+        "spatial_blend": 0.0,
+        "min_distance": 1.0,
+        "max_distance": 500.0,
+        "rolloff_mode": 0,
+        "rolloff_curve": [
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 0.0,
+            "value": 1.0,
+            "weightedMode": 0
+          },
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 1.0,
+            "value": 0.0,
+            "weightedMode": 0
+          }
+        ],
+        "priority": 120,
+        "mixer": {
+          "file": "sharedassets0.assets",
+          "path_id": 812
+        },
+        "mixer_route": [
+          1,
+          0
+        ],
+        "mixer_gain": 0.5418092634586288,
+        "mixer_pitch": 1.0,
+        "clip_length_lifetime": false,
+        "doppler": 1.0,
+        "spread": 0.0,
+        "pan": 0.0
+      },
+      {
+        "role": "sleep",
+        "kind": 4,
+        "source": {
+          "file": "level1",
+          "path_id": 56133
+        },
+        "audio_source": {
+          "file": "level1",
+          "path_id": 56133
+        },
+        "transform": {
+          "file": "level1",
+          "path_id": 37616
+        },
+        "offset": [
+          0.0,
+          0.6499999761581421,
+          0.0
+        ],
+        "clips": [
+          12
+        ],
+        "gain": [
+          0.0,
+          0.0
+        ],
+        "pitch": [
+          1.0,
+          1.0
+        ],
+        "looped": true,
+        "spatial_blend": 0.0,
+        "min_distance": 1.0,
+        "max_distance": 500.0,
+        "rolloff_mode": 0,
+        "rolloff_curve": [
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 0.0,
+            "value": 1.0,
+            "weightedMode": 0
+          },
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 1.0,
+            "value": 0.0,
+            "weightedMode": 0
+          }
+        ],
+        "priority": 128,
+        "mixer": {
+          "file": "sharedassets0.assets",
+          "path_id": 819
+        },
+        "mixer_route": [
+          6,
+          5,
+          4,
+          3,
+          0
+        ],
+        "mixer_gain": 1.0,
+        "mixer_pitch": 1.0,
+        "clip_length_lifetime": false,
+        "doppler": 1.0,
+        "spread": 0.0,
+        "pan": 0.0
+      },
+      {
+        "role": "storm",
+        "kind": 6,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 123416
+        },
+        "audio_source": {
+          "file": "sharedassets1.assets",
+          "path_id": 123416
+        },
+        "transform": {
+          "file": "sharedassets1.assets",
+          "path_id": 87821
+        },
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "clips": [
+          13
+        ],
+        "gain": [
+          1.0,
+          1.0
+        ],
+        "pitch": [
+          1.0,
+          1.0
+        ],
+        "looped": true,
+        "spatial_blend": 1.0,
+        "min_distance": 500.0,
+        "max_distance": 2000.0,
+        "rolloff_mode": 0,
+        "rolloff_curve": [
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 0.0,
+            "value": 1.0,
+            "weightedMode": 0
+          },
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 1.0,
+            "value": 0.0,
+            "weightedMode": 0
+          }
+        ],
+        "priority": 128,
+        "mixer": {
+          "file": "sharedassets0.assets",
+          "path_id": 815
+        },
+        "mixer_route": [
+          7,
+          6,
+          5,
+          4,
+          3,
+          0
+        ],
+        "mixer_gain": 1.0,
+        "mixer_pitch": 1.0,
+        "clip_length_lifetime": false,
+        "doppler": 1.0,
+        "spread": 0.0,
+        "pan": 0.0
+      },
+      {
+        "role": "ambient_day",
+        "kind": 7,
+        "source": {
+          "file": "level1",
+          "path_id": 56222
+        },
+        "audio_source": {
+          "file": "level1",
+          "path_id": 56222
+        },
+        "transform": {
+          "file": "level1",
+          "path_id": 22471
+        },
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "clips": [
+          14
+        ],
+        "gain": [
+          1.0,
+          1.0
+        ],
+        "pitch": [
+          1.0,
+          1.0
+        ],
+        "looped": true,
+        "spatial_blend": 0.0,
+        "min_distance": 1.0,
+        "max_distance": 500.0,
+        "rolloff_mode": 0,
+        "rolloff_curve": [
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 0.0,
+            "value": 1.0,
+            "weightedMode": 0
+          },
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 1.0,
+            "value": 0.0,
+            "weightedMode": 0
+          }
+        ],
+        "priority": 128,
+        "mixer": {
+          "file": "sharedassets0.assets",
+          "path_id": 815
+        },
+        "mixer_route": [
+          7,
+          6,
+          5,
+          4,
+          3,
+          0
+        ],
+        "mixer_gain": 1.0,
+        "mixer_pitch": 1.0,
+        "clip_length_lifetime": false,
+        "doppler": 1.0,
+        "spread": 0.0,
+        "pan": 0.0
+      },
+      {
+        "role": "ambient_night",
+        "kind": 8,
+        "source": {
+          "file": "level1",
+          "path_id": 56789
+        },
+        "audio_source": {
+          "file": "level1",
+          "path_id": 56789
+        },
+        "transform": {
+          "file": "level1",
+          "path_id": 26405
+        },
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "clips": [
+          15
+        ],
+        "gain": [
+          1.0,
+          1.0
+        ],
+        "pitch": [
+          1.0,
+          1.0
+        ],
+        "looped": true,
+        "spatial_blend": 0.0,
+        "min_distance": 1.0,
+        "max_distance": 500.0,
+        "rolloff_mode": 0,
+        "rolloff_curve": [
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 0.0,
+            "value": 1.0,
+            "weightedMode": 0
+          },
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 1.0,
+            "value": 0.0,
+            "weightedMode": 0
+          }
+        ],
+        "priority": 128,
+        "mixer": {
+          "file": "sharedassets0.assets",
+          "path_id": 815
+        },
+        "mixer_route": [
+          7,
+          6,
+          5,
+          4,
+          3,
+          0
+        ],
+        "mixer_gain": 1.0,
+        "mixer_pitch": 1.0,
+        "clip_length_lifetime": false,
+        "doppler": 1.0,
+        "spread": 0.0,
+        "pan": 0.0
+      }
+    ],
+    "clips": [
+      {
+        "id": 0,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 4295
+        },
+        "path": "reference/survival-audio-sharedassets1.assets-4295.wav",
+        "sha256": "fddd6451faa39c935f745dd8eb1db181869a946bf4caf7bfdd2504376d0e1d3a",
+        "duration_seconds": 1.968639455782313,
+        "frames": 86817,
+        "frequency": 44100,
+        "channels": 1
+      },
+      {
+        "id": 1,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 4052
+        },
+        "path": "reference/survival-audio-sharedassets1.assets-4052.wav",
+        "sha256": "793279b5500a3598df83dad93347f18ddda09e8ef3a65eb164c88d3ebe589014",
+        "duration_seconds": 2.6693197278911565,
+        "frames": 117717,
+        "frequency": 44100,
+        "channels": 1
+      },
+      {
+        "id": 2,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 4186
+        },
+        "path": "reference/survival-audio-sharedassets1.assets-4186.wav",
+        "sha256": "ac1c249582eb2625ac9d16a0b913a26d93681e8cca8992e96a81e9f6928cb023",
+        "duration_seconds": 2.102108843537415,
+        "frames": 92703,
+        "frequency": 44100,
+        "channels": 1
+      },
+      {
+        "id": 3,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 4172
+        },
+        "path": "reference/survival-audio-sharedassets1.assets-4172.wav",
+        "sha256": "7123d537d814284afeced7b2ddfe37ffcc334f43511b6e80e8b387161ed2a063",
+        "duration_seconds": 0.5839229024943311,
+        "frames": 25751,
+        "frequency": 44100,
+        "channels": 1
+      },
+      {
+        "id": 4,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 4398
+        },
+        "path": "reference/survival-audio-sharedassets1.assets-4398.wav",
+        "sha256": "20b26cbabfdef5bd2df20fdb18433f1e2d6975ddda60f6cb18dc5032040ceb4b",
+        "duration_seconds": 1.317981859410431,
+        "frames": 58123,
+        "frequency": 44100,
+        "channels": 1
+      },
+      {
+        "id": 5,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 4069
+        },
+        "path": "reference/survival-audio-sharedassets1.assets-4069.wav",
+        "sha256": "c9bcc1372fe0e0b5da24b19bfc842cb3b944dee7a9b6da0f2e678e945f69f85a",
+        "duration_seconds": 1.267936507936508,
+        "frames": 55916,
+        "frequency": 44100,
+        "channels": 1
+      },
+      {
+        "id": 6,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 4055
+        },
+        "path": "reference/survival-audio-sharedassets1.assets-4055.wav",
+        "sha256": "d785d98b6b7272a3f891a4596d7612c53bbc25b5fb3263ad3ba8d379fb114412",
+        "duration_seconds": 1.2345804988662132,
+        "frames": 54445,
+        "frequency": 44100,
+        "channels": 1
+      },
+      {
+        "id": 7,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 4345
+        },
+        "path": "reference/survival-audio-sharedassets1.assets-4345.wav",
+        "sha256": "b68acba30048c18f37473baac297c939d2e277755e2fdaa63474326f86a603f4",
+        "duration_seconds": 0.31696875,
+        "frames": 10143,
+        "frequency": 32000,
+        "channels": 1
+      },
+      {
+        "id": 8,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 4444
+        },
+        "path": "reference/survival-audio-sharedassets1.assets-4444.wav",
+        "sha256": "88f0dcc08998e56aff3f36fa127c57f834b03ba450ba39330231b7da9c7c3fa6",
+        "duration_seconds": 0.7006875,
+        "frames": 22422,
+        "frequency": 32000,
+        "channels": 1
+      },
+      {
+        "id": 9,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 4102
+        },
+        "path": "reference/survival-audio-sharedassets1.assets-4102.wav",
+        "sha256": "2e3d31bd683b39a60a5db05c16751d8063b093b20853dbbac948fb6d6ec18a3e",
+        "duration_seconds": 4.721383219954649,
+        "frames": 208213,
+        "frequency": 44100,
+        "channels": 1
+      },
+      {
+        "id": 10,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 4439
+        },
+        "path": "reference/survival-audio-sharedassets1.assets-4439.wav",
+        "sha256": "8ffd626a256e6744951edc849316ef67c6eed68864057cd786954f1a1e6fae7a",
+        "duration_seconds": 3.420090702947846,
+        "frames": 150826,
+        "frequency": 44100,
+        "channels": 1
+      },
+      {
+        "id": 11,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 4290
+        },
+        "path": "reference/survival-audio-sharedassets1.assets-4290.wav",
+        "sha256": "5b58b05f37e549634b67103404ce93d5bd684788f4011c407fbcd488dbe241c8",
+        "duration_seconds": 15.014965986394557,
+        "frames": 331080,
+        "frequency": 22050,
+        "channels": 1
+      },
+      {
+        "id": 12,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 4472
+        },
+        "path": "reference/survival-audio-sharedassets1.assets-4472.wav",
+        "sha256": "fb64bb1e76a7ca53bc8ce5868113f4fa9b50a4e979453a8d20e7735856bbcb97",
+        "duration_seconds": 12.526666666666667,
+        "frames": 276213,
+        "frequency": 22050,
+        "channels": 1
+      },
+      {
+        "id": 13,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 4297
+        },
+        "path": "reference/survival-audio-sharedassets1.assets-4297.wav",
+        "sha256": "4ac10202c141d6857835074d49b94a75cfed8c0ad78e84b79c2e00be3731a012",
+        "duration_seconds": 100.86740625,
+        "frames": 3227757,
+        "frequency": 32000,
+        "channels": 1
+      },
+      {
+        "id": 14,
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 760
+        },
+        "path": "reference/survival-audio-sharedassets0.assets-760.wav",
+        "sha256": "b78f13aad1c41ac575b349121e617c7fae8e47b7e614171aa4e2e7fc4b13786d",
+        "duration_seconds": 279.22284375,
+        "frames": 8935131,
+        "frequency": 32000,
+        "channels": 1
+      },
+      {
+        "id": 15,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 4434
+        },
+        "path": "reference/survival-audio-sharedassets1.assets-4434.wav",
+        "sha256": "77ca37bd30069f4b1d250eede8d844a5085a870f542a45e9889c9a9f45dee8e4",
+        "duration_seconds": 210.54365079365078,
+        "frames": 9284975,
+        "frequency": 44100,
+        "channels": 1
+      }
+    ],
+    "manager": {
+      "file": "globalgamemanagers",
+      "path_id": 4
+    },
+    "real_voices": 128,
+    "virtual_voices": 512,
+    "queue_capacity": 512,
+    "evidence": {
+      "assembly_sha256": "9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e",
+      "methods": [
+        "component.priority = priority;",
+        "UnityEngine.Object.Destroy(component.gameObject, component.clip.length);",
+        "SFart.Play();",
+        "SBurp.Play();",
+        "SDeathBellSource.pitch = UnityEngine.Random.Range(0.8f, 1.2f);"
+      ]
+    }
   }
 }

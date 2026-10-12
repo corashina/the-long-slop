@@ -1,6 +1,38 @@
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(js_namespace=window,js_name=gameSurvival)]
+    pub fn game_survival(
+        hp: f32,
+        food: f32,
+        water: f32,
+        bowel: f32,
+        bladder: f32,
+        opacity: f32,
+        dead: bool,
+        look_scale: f32,
+        menu_due: bool,
+    );
+    #[wasm_bindgen(js_namespace=window,js_name=gameAudio)]
+    pub fn game_audio(ids: &[u32], values: &[f32]);
+    #[wasm_bindgen(js_namespace=window,js_name=gameAudioListener)]
+    pub fn game_audio_listener(
+        session: u32,
+        x: f32,
+        y: f32,
+        z: f32,
+        fx: f32,
+        fy: f32,
+        fz: f32,
+        ux: f32,
+        uy: f32,
+        uz: f32,
+        master_gain: f32,
+        origin_x: f64,
+        origin_y: f64,
+        origin_z: f64,
+    );
+
     #[wasm_bindgen(js_namespace = window, js_name = gameReady)]
     pub fn game_ready();
     #[wasm_bindgen(js_namespace = window, js_name = gameFailure)]

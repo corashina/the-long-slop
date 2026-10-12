@@ -330,7 +330,7 @@ impl SurvivalState {
         NeedsOutput {
             needs: self.needs,
             bladder_liters: self.bladder.mixture.total(),
-            can_eat: self.needs.bowel + self.pending.bowel < self.maximum.bowel,
+            can_eat: !self.dead && self.needs.bowel + self.pending.bowel < self.maximum.bowel,
             opacity,
             dead: self.dead,
             death_seconds: self.death_elapsed,

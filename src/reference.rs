@@ -9,7 +9,9 @@ use std::{
     fmt,
 };
 
+pub mod audio;
 pub mod survival;
+pub use audio::*;
 pub mod weather;
 pub use survival::*;
 pub use weather::*;
@@ -768,6 +770,7 @@ pub struct LibraryProvenance {
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
     pub survival: SurvivalReference,
+    pub audio: AudioReference,
     pub sleep: SleepReference,
     pub weather: WeatherReference,
     pub ui: UiReference,
@@ -871,6 +874,7 @@ impl ReferenceManifest {
         )?;
         self.lighting.validate(self)?;
         self.survival.validate(self)?;
+        self.audio.validate(self)?;
         self.sleep.validate(self)?;
         self.weather.validate(self)?;
         require(

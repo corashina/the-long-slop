@@ -82,7 +82,7 @@ def lighting_resources(manifest):
 
 
 def audio_resources(manifest):
-    return [clip for group in manifest.get('survival',{}).get('audio',[]) for clip in group['clips']]
+    return manifest['audio']['clips']
 
 
 def validate_runtime_paths(manifest):
@@ -125,6 +125,7 @@ def validate_runtime_manifest(content: bytes) -> None:
         '--mount', 'type=volume,source=tld-wasm-cargo,target=/cargo',
         '--mount', 'type=volume,source=tld-wasm-target,target=/target',
         '--env', f'CARGO_TARGET_DIR=/target/{namespace}',
+        '--env', 'CARGO_BUILD_JOBS=2',
         'my-summer-slop-toolchain', 'cargo', 'run', '--quiet', '--locked',
         '--bin', 'validate-reference']
     try:
@@ -149,6 +150,8 @@ def verify_reference(output: Path, library) -> None:
     validate_runtime_paths(manifest)
     from .survival import validate_survival_export
     from .weather import validate_weather_export
+    from .audio import validate_audio_export
+    validate_audio_export(manifest['audio'],output,library)
     validate_survival_export(manifest['survival'],manifest)
     validate_weather_export(manifest['weather'],manifest)
     names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json'}

@@ -112,6 +112,9 @@ impl InteractionState {
         physics: &PhysicsWorld,
         needs: crate::survival::NeedsOutput,
     ) -> ActionAvailability {
+        if needs.dead {
+            return ActionAvailability::default();
+        }
         let valid = |target: Option<AimTarget>| {
             target.filter(|target| {
                 target.distance.is_finite()

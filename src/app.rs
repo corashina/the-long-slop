@@ -333,7 +333,7 @@ fn read_input(
         drive.runtime.paused = true;
         clear_input(&mut drive);
     }
-    if actions & 5 != 0 && drive.ready {
+    if actions & 5 != 0 && drive.ready && !drive.runtime.needs_output().menu_due {
         drive.runtime.started = true;
         drive.runtime.paused = false;
         clear_input(&mut drive);
@@ -362,7 +362,10 @@ fn read_input(
     if actions & 31 != 0 {
         return;
     }
-    if frame.pressed & keys::CAMERA != 0 && drive.runtime.area.player.seat().is_some() {
+    if !drive.runtime.needs_output().dead
+        && frame.pressed & keys::CAMERA != 0
+        && drive.runtime.area.player.seat().is_some()
+    {
         drive.camera = match drive.camera {
             CameraMode::Cockpit => CameraMode::Chase,
             CameraMode::Chase => CameraMode::Cockpit,
@@ -486,6 +489,48 @@ fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveC
     }
 }
 fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
+    let needs = drive.runtime.needs_output();
+    game_survival(
+        needs.needs.hp,
+        needs.needs.food,
+        needs.needs.water,
+        needs.needs.bowel,
+        needs.bladder_liters,
+        needs.opacity,
+        needs.dead,
+        needs.look_scale,
+        needs.menu_due,
+    );
+    let origin = drive.runtime.stream.origin.offset;
+    let listener = presentation::transform(drive.rendered);
+    let forward = listener.rotation * Vec3::NEG_Z;
+    let up = listener.rotation * Vec3::Y;
+    let p = listener.translation;
+    // Source SetVolume uses natural log, followed by a decibel mixer gain.
+    let level = if needs.dead {
+        (1. - needs.death_seconds as f32 / reference.0.survival.death_seconds).clamp(0.001, 1.)
+    } else {
+        1.
+    };
+    game_audio_listener(
+        drive.runtime.audio_session,
+        p.x,
+        p.y,
+        p.z,
+        forward.x,
+        forward.y,
+        forward.z,
+        up.x,
+        up.y,
+        up.z,
+        10_f32.powf(level.ln()),
+        origin[0],
+        origin[1],
+        origin[2],
+    );
+    drive.runtime.audio.pack(origin);
+    game_audio(&drive.runtime.audio.ids, &drive.runtime.audio.values);
+    drive.runtime.audio.clear_events();
     let runtime = &drive.runtime;
     let snapshot = runtime.physics.snapshot();
     let position = runtime.area.player.focus_position(&runtime.physics);

@@ -492,6 +492,12 @@ pub fn initial_vehicle_pose(reference: &ReferenceManifest) -> Result<VehiclePose
 pub struct GarageRuntime {
     pub survival: crate::survival::SurvivalState,
     pub simulation_seconds: f64,
+    pub audio: crate::audio::AudioState,
+    pub audio_session: u32,
+    survival_draw: u64,
+    previous_speed: Option<f32>,
+    death_protected: bool,
+    death_announced: bool,
     pub lighting: crate::lighting::LightingState,
     pub physics: PhysicsWorld,
     pub area: StartingArea,
@@ -559,6 +565,12 @@ impl GarageRuntime {
         Ok(Self {
             survival: crate::survival::SurvivalState::new(&reference.survival),
             simulation_seconds: 0.,
+            audio: crate::audio::AudioState::new(&reference.audio),
+            audio_session: 1,
+            survival_draw: 0,
+            previous_speed: None,
+            death_protected: true,
+            death_announced: false,
             physics,
             area,
             stream,
@@ -630,10 +642,23 @@ impl GarageRuntime {
         }
     }
 
-    pub fn step(&mut self, reference: &ReferenceManifest, input: FrameInput) {
+    pub fn step(&mut self, reference: &ReferenceManifest, mut input: FrameInput) {
         if !self.started || self.paused {
             self.clear_input();
             return;
+        }
+        self.advance_needs(reference, FIXED_DT, 1.);
+        if self.paused {
+            return;
+        }
+        self.process_toilet(reference, input, FIXED_DT);
+        let needs = self.needs_output();
+        if needs.dead {
+            input = FrameInput {
+                mouse: input.mouse.map(|v| v * needs.look_scale),
+                ..FrameInput::default()
+            };
+            self.clear_input();
         }
         self.area
             .interaction
@@ -1030,6 +1055,13 @@ impl GarageRuntime {
             ),
         );
         self.physics.step_physics();
+        self.sample_survival_speed(reference);
+        self.audio.advance(
+            FIXED_DT,
+            &reference.audio,
+            self.area.player.body_pose(&self.physics),
+            self.stream.origin.offset,
+        );
         self.area.interaction.sync_mechanisms(&mut self.physics);
         self.area.sync_attachments(&mut self.physics, false);
         self.area.sync_compound(&mut self.physics);
@@ -1088,12 +1120,24 @@ impl GarageRuntime {
         self.area
             .interaction
             .drop_held(&mut self.area.items, &mut self.physics);
-        *self = Self::new(reference)?;
+        let session = self
+            .audio_session
+            .checked_add(1)
+            .ok_or_else(|| ReferenceError("Audio session exhausted".into()))?;
+        let mut next = Self::new(reference)?;
+        next.audio_session = session;
+        next.audio.reset(session);
+        *self = next;
         self.started = true;
         Ok(())
     }
 
     pub fn recover(&mut self, reference: &ReferenceManifest) {
+        if self.needs_output().dead {
+            return;
+        }
+        self.previous_speed = None;
+        self.death_protected = true;
         self.clear_input();
         self.area
             .interaction

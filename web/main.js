@@ -1,9 +1,11 @@
+import {createAudio} from './audio.js';
+import {createSurvival} from './survival.js';
 import {createInput} from './input.js';
 import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
 import {loadUiAssets} from './ui-layout.js';
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
-let menu,feedback,failed=false,timeout,actions=0,frame;
+let menu,feedback,audio,survival,dead=false,failed=false,timeout,actions=0,frame;
 const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',condition:-1,held:'',throwCharge:0,throwActive:false,quantities:[0,0,0,0,0,0]};
 const input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas);
 window.gameKeys=()=>{frame=input.takeFrame();return frame.held;};
@@ -25,7 +27,10 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, chunks, colliders, abs
   state.rebases = rebases; state.travelM = travelM; state.lateralBand = lateralBand;
   state.fuelLiters = fuelLiters; state.paused = paused; state.started = started;
   menu?.sync(started,paused,travelM);
-  feedback?.setVisible(started&&!paused&&Boolean(mode)&&menu?.model.state==='playing');
+  feedback?.setVisible(started&&!paused&&!dead&&Boolean(mode)&&menu?.model.state==='playing');
+  survival?.setVisible(started&&!paused&&menu?.model.state==='playing');
+  audio?.setPlaying(started&&!paused&&menu?.model.state==='playing');
+  if(paused)audio?.pause();
 };
 window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,noText,fluidName,condition,held,charge,throwing,rpm,ignition,running,starter,seated,handbrake,gas,oil,alcohol,water,blood,diesel,control,lmbUse)=>{
  record.actions=mask;record.context=context;record.lmbUse=lmbUse;record.name=name;record.notice=notice;record.carrying=carrying;record.amount=amount;record.capacity=capacity;record.hasName=hasName;record.noText=noText;record.fluidName=fluidName;
@@ -37,6 +42,13 @@ window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,n
  state.rpm=rpm;state.ignition=ignition;state.running=running;state.starter=starter;state.seated=seated;state.handbrake=handbrake;
  feedback?.update(record);
 };
+const needs={hp:0,food:0,water:0,bowel:0,bladder:0,opacity:0,dead:false,lookScale:1,menuDue:false};
+window.gameSurvival=(hp,food,water,bowel,bladder,opacity,isDead,lookScale,menuDue)=>{
+ needs.hp=hp;needs.food=food;needs.water=water;needs.bowel=bowel;needs.bladder=bladder;needs.opacity=opacity;needs.dead=isDead;needs.lookScale=lookScale;needs.menuDue=menuDue;dead=isDead;survival?.update(needs);menu?.survival(isDead,menuDue);
+};
+window.gameAudio=(ids,values)=>audio?.publish(ids,values);
+window.gameAudioListener=(session,x,y,z,fx,fy,fz,ux,uy,uz,gain,ox,oy,oz)=>audio?.setListener(session,x,y,z,fx,fy,fz,ux,uy,uz,gain,ox,oy,oz);
+window.addEventListener('pagehide',()=>audio?.dispose());
 function fail(message){failed=true;clearTimeout(timeout);const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}}
 window.gameFailure=fail;
 window.gameReady=()=>{if(failed)return;clearTimeout(timeout);menu.ready();};
@@ -52,7 +64,9 @@ async function load(){
  const text=await response.text(),manifest=JSON.parse(text);
  status.textContent='Loading interface assets...';
  await loadUiAssets(manifest.ui);
- menu=createMenu({canvas,ui:manifest.ui,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ audio=createAudio({bindings:manifest.audio,onError:error=>console.warn('Audio disabled:',error.message)});
+ survival=createSurvival(manifest.ui);
+ menu=createMenu({canvas,ui:manifest.ui,audio,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  const switchIconUrl='./assets/'+manifest.lighting.switch_icon.path;
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
  feedback=createFeedback(manifest.ui,switchIconUrl);

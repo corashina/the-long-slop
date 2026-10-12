@@ -74,12 +74,12 @@ def export_ui(source, output, library):
         color=textdata.get('m_fontColor',textdata.get('m_Color',{'r':1.,'g':1.,'b':1.,'a':1.}))
         font=textdata.get('m_FontData',{})
         layouts[role]={'source':source_id(reader),'rect':list(screen),'ancestry':list(reversed(ancestry)),'canvas':canvas,
-            'color':list(color.values()),'font_size':textdata.get('m_fontSize',font.get('m_FontSize',40)),
+            'color':[color[channel] for channel in 'rgba'],'font_size':textdata.get('m_fontSize',font.get('m_FontSize',40)),
             'font':'Liberation Sans' if 'm_fontSize' in textdata else 'Arial',
             'alignment':textdata.get('m_textAlignment',font.get('m_Alignment',0)),
             'text':textdata.get('m_text',textdata.get('m_Text','')),
             'sprite':sprite(source.resolve(image,im['m_Sprite']),role) if im and im['m_Sprite']['m_PathID'] else None,
-            'image_color':list(im['m_Color'].values()) if im else [1.,1.,1.,1.]}
+            'image_color':[im['m_Color'][channel] for channel in 'rgba'] if im else [1.,1.,1.,1.]}
     menu=source.get('level1',74691);md=source.read(menu)
     main=source.get('level0',16795);main_data=source.read(main)
     def label_of(go):
