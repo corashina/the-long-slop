@@ -138,3 +138,36 @@ The initial installed seat check could not see the Windows junction in Docker.
 I added a read-only mount of its resolved records target and reran the original assertion.
 I added no package or Bevy audio feature. I added no radio or interaction effect.
 Other prior driving2 controls remain outside this audio task.
+
+
+## Review fix round 1
+
+Fix base: 4bfa5d4.
+Commit subject: Reset reused vehicle effect playback offsets.
+Status: DONE_WITH_CONCERNS. Task 6 retains the assembled and device acceptance gaps.
+
+I fixed the Important effect-slot finding in task-3-review.md.
+VoiceBank.event now calls stop(slot, false) before each fresh assignment.
+This resets the effect offset and pending callback token, including after natural completion.
+I kept retained loop pause and resume behavior unchanged.
+
+I added fresh_effects_start_at_zero_after_natural_completion.
+The test advances AudioContext time and updates the active effect parameters.
+It completes each source through onended, then reuses the same slot.
+It checks two starter shots and one engine stop effect start at offset zero.
+
+RED command:
+node --test --test-name-pattern=fresh_effects_start_at_zero_after_natural_completion tests/web/audio.test.mjs
+The assertion failed: actual [0, 0.5, 1], expected [0, 0, 0].
+Log: task-3-fix-round-1-red.log.
+
+GREEN command:
+node --test tests/web/audio.test.mjs tests/web/input.test.mjs tests/web/menu.test.mjs
+Result: 32 passed, zero failed, zero skipped; exit 0.
+Log: task-3-fix-round-1-green.log.
+The existing loop pause/resume offset test also passed.
+git diff --check exited 0.
+
+I reviewed the diff. I changed only web/audio/voices.js, tests/web/audio.test.mjs, and this report.
+Rust and the bridge remain unchanged. I did not repeat the WASM build or browser route.
+The inherited warning-output Minor and Task 6 acceptance gaps remain open.

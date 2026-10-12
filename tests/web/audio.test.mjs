@@ -45,3 +45,20 @@ test('starter_uses_source_interval',async()=>{const bank=vehicleBank(),id=raw.en
 test('starter_release_cancels_decode',async()=>{const bank=vehicleBank();let complete;bank.cache.effect=()=>new Promise(r=>complete=r);bank.begin();bank.emitter(raw.engine.emitter,[0,0,0],[0,0,0,1],true);bank.starter(raw.engine.emitter,true,10);bank.starter(raw.engine.emitter,false,10);complete({duration:1});await Promise.resolve();assert.equal(Fake.starts.length,0);bank.dispose();});
 
 test('engine_removal_keeps_horn_owner',async()=>{const bank=vehicleBank();vehicleFrame(bank);await Promise.resolve();bank.starter(raw.engine.emitter,true,10);await Promise.resolve();bank.remove(raw.engine.emitter);const horn=bank.voices.get(raw.horn.voice);assert.ok(horn.source);assert.ok(Fake.starts.filter(s=>s!==horn.source).every(s=>s.stopped));bank.dispose();});
+
+test('fresh_effects_start_at_zero_after_natural_completion',async()=>{
+ const bank=vehicleBank(),id=raw.engine.emitter,stop=raw.bindings.find(b=>b.id===raw.engine.stop_binding);
+ bank.begin();bank.emitter(id,[0,0,0],[0,0,0,1],true);
+ bank.starter(id,true,1);await Promise.resolve();
+ const slot=bank.effects.find(s=>s.playing);
+ bank.context.currentTime=.5;bank.finish();
+ bank.context.currentTime=slot.buffer.duration;slot.source.onended();
+ bank.starter(id,true,2);await Promise.resolve();
+ assert.equal(bank.effects.find(s=>s.playing),slot,'reuse the completed starter slot');
+ bank.context.currentTime+=.5;bank.finish();
+ bank.context.currentTime+=slot.buffer.duration;slot.source.onended();
+ bank.event(stop,id,0,0,0,1,1);await Promise.resolve();
+ assert.equal(bank.effects.find(s=>s.playing),slot,'reuse the completed slot for the stop effect');
+ assert.deepEqual(Fake.starts.map(s=>s.offset),[0,0,0]);
+ bank.dispose();
+});
