@@ -38,6 +38,8 @@ impl CompoundCollider {
 }
 
 pub struct StartingArea {
+    pub plates: crate::plates::PlateState,
+    _plate_draw: crate::plates::StartupDraw,
     pub bodies: HashMap<BodyId, RigidBodyHandle>,
     pub items: ItemStore,
     pub interaction: InteractionState,
@@ -56,6 +58,9 @@ impl StartingArea {
         physics: &mut PhysicsWorld,
         origin: [f64; 3],
     ) -> Result<Self, ReferenceError> {
+        let mut plate_draw = crate::plates::StartupDraw::new(DEFAULT_SEED);
+        let plates =
+            crate::plates::PlateState::new(&reference.plates, &mut |a, b| plate_draw.draw(a, b))?;
         let mut items = ItemStore::new(reference)?;
         let mut interaction = InteractionState::new(reference)?;
         let mut bodies = HashMap::with_capacity(reference.bodies.len());
@@ -318,6 +323,8 @@ impl StartingArea {
             attachments,
             render_poses,
             item_render_poses,
+            plates,
+            _plate_draw: plate_draw,
             compound_colliders,
             portable_mass,
         })
