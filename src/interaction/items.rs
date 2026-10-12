@@ -5,7 +5,8 @@ use rapier3d::prelude::RigidBodyHandle;
 
 use crate::fluids::{FluidContainer, VehicleFluids};
 use crate::reference::{
-    BodyId, ItemId, NodeId, PartSlotId, ReferenceError, ReferenceManifest, WheelSlotId,
+    BodyId, FoodReference, ItemId, NodeId, PartSlotId, ReferenceError, ReferenceManifest,
+    WheelSlotId,
 };
 use crate::vehicle::{PhysicsWorld, VehiclePose, from_rapier, to_rapier};
 
@@ -16,6 +17,12 @@ pub enum ItemLocation {
     Held,
     Attached(ItemId),
     WheelSlot(WheelSlotId),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FoodState {
+    pub prototype_index: usize,
+    pub bite: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -29,6 +36,8 @@ pub struct ItemState {
     pub condition: f32,
     pub temperature: Option<f32>,
     pub fluid: Option<FluidContainer>,
+    pub food: Option<FoodState>,
+    pub removed: bool,
 }
 
 pub struct ItemStore {
@@ -43,6 +52,12 @@ pub struct ItemStore {
 
 impl ItemStore {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
+        let sausage = reference
+            .survival
+            .foods
+            .iter()
+            .position(|food| food.kind == crate::reference::FoodKind::Sausage)
+            .ok_or_else(|| ReferenceError("Missing sausage prototype".into()))?;
         let mut states = Vec::with_capacity(reference.items.len());
         let mut indices = HashMap::with_capacity(reference.items.len());
         let mut body_ids = Vec::with_capacity(reference.items.len());
@@ -79,6 +94,11 @@ impl ItemStore {
                 temperature: (item.id == reference.engine.item)
                     .then_some(reference.engine.initial_temperature),
                 fluid,
+                food: (item.id == reference.survival.starter_food).then_some(FoodState {
+                    prototype_index: sausage,
+                    bite: reference.survival.foods[sausage].index,
+                }),
+                removed: false,
             });
         }
         let ids = [
@@ -208,7 +228,51 @@ impl ItemStore {
                     quantities_liters: [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 },
             }),
+            food: None,
+            removed: false,
         });
+    }
+
+    pub fn insert_consumable(
+        &mut self,
+        id: ItemId,
+        prototype_index: usize,
+        reference: &FoodReference,
+        pose: VehiclePose,
+        body: RigidBodyHandle,
+    ) -> Result<(), ReferenceError> {
+        if self.indices.contains_key(&id) || reference.index >= reference.bites {
+            return Err(ReferenceError("Invalid consumable identity".into()));
+        }
+        self.indices.insert(id, self.states.len());
+        self.body_ids.push(BodyId(u32::MAX));
+        self.names.push(match reference.kind {
+            crate::reference::FoodKind::Sausage => "Sausage".into(),
+            crate::reference::FoodKind::Turd => "Turd".into(),
+        });
+        self.states.push(ItemState {
+            id,
+            body: Some(body),
+            location: ItemLocation::World,
+            pose,
+            local_pose: VehiclePose {
+                position: [0.; 3],
+                rotation: [0., 0., 0., 1.],
+            },
+            condition: 1.,
+            temperature: None,
+            fluid: None,
+            food: Some(FoodState {
+                prototype_index,
+                bite: reference.index,
+            }),
+            removed: false,
+        });
+        Ok(())
+    }
+
+    pub fn body_id(&self, id: ItemId) -> Option<BodyId> {
+        self.indices.get(&id).map(|index| self.body_ids[*index])
     }
     pub fn is_empty(&self) -> bool {
         self.states.is_empty()

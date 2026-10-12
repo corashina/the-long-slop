@@ -1,4 +1,5 @@
 pub mod carry;
+pub mod consumption;
 pub mod feedback;
 pub mod items;
 pub mod labels;
@@ -18,6 +19,7 @@ use crate::reference::{
     ReferenceManifest, SeatId, TankRole, WheelSlotId,
 };
 use crate::simulation::{FrameInput, keys};
+use crate::survival::NeedsOutput;
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
 use items::{ItemLocation, ItemStore};
 use rapier3d::math::{Pose, Vector};
@@ -55,6 +57,16 @@ pub enum InteractionAction {
         source: ItemId,
         destination: ItemId,
         liters: f32,
+    },
+    Consume(ItemId),
+    Drink {
+        source: ItemId,
+        requested_liters: f32,
+    },
+    DrinkContact {
+        source: ItemId,
+        poured_liters: f32,
+        fractions: [f32; 6],
     },
     WheelRemove(ItemId),
     PartRemove(ItemId),
@@ -145,6 +157,8 @@ pub struct InteractionState {
     supplies: HashSet<ItemId>,
     tank_rules: HashMap<ItemId, TankRules>,
     slow_oil_modifier: f32,
+    drink_flow_liters_per_second: f32,
+    drink_contact_radius: f32,
     latched_mechanism: Option<(ItemId, BodyId, Vector, ColliderHandle)>,
     use_consumed: bool,
     mechanism_release_distance_squared: f32,
@@ -399,6 +413,17 @@ impl InteractionState {
                 })
                 .collect(),
             slow_oil_modifier: reference.fluid_rules.slow_oil_modifier,
+            drink_flow_liters_per_second: reference.fluid_rules.pour_speed
+                * reference.survival.drinking.valve
+                * reference.survival.drinking.radius.powi(2)
+                * std::f32::consts::PI
+                * 0.025
+                * reference.survival.drink_modifier,
+            drink_contact_radius: reference.survival.drinking.radius
+                * reference
+                    .survival
+                    .drinking
+                    .particle_contact_radius_multiplier,
             latched_mechanism: None,
             use_consumed: false,
             mechanism_release_distance_squared: (reference.player.aim_reach * 1.5).powi(2),
@@ -545,6 +570,7 @@ impl InteractionState {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
         dt: f32,
+        needs: NeedsOutput,
     ) -> Option<InteractionAction> {
         self.finish_cancelled_input(player, physics);
         if !dt.is_finite() || dt <= 0.0 {
@@ -559,10 +585,10 @@ impl InteractionState {
         if input.held & keys::USE == 0 {
             self.seat_action_latched = false;
         }
-        let availability = self.available_actions(&aim, player, items, physics);
+        let availability = self.available_actions(&aim, player, items, physics, needs);
         let light_action = availability.light_control.filter(|_| {
             input.pressed & keys::USE != 0
-                || (input.pressed & keys::FILL != 0 && availability.lmb_use)
+                || (input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
         });
         let target = aim
             .use_target
@@ -644,7 +670,7 @@ impl InteractionState {
             }
         } else if let Some(target) = use_target {
             if input.pressed & keys::USE != 0
-                || (input.pressed & keys::FILL != 0 && availability.lmb_use)
+                || (input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
             {
                 for opening in &mut self.openings {
                     if opening.reference.cap == target.item && opening.reference.can_toggle {
@@ -690,7 +716,7 @@ impl InteractionState {
             }
             if self.mechanisms.contains(target.item)
                 && (input.pressed & keys::USE != 0
-                    || (input.pressed & keys::FILL != 0
+                    || (input.pressed & keys::PRIMARY != 0
                         && self.mechanisms.primary_switch(target.item))
                     || input.held & keys::USE != 0
                     || (input.wheel != 0.0 && self.mechanisms.scroll_eligible(target.item)))
@@ -702,7 +728,7 @@ impl InteractionState {
             }
         }
 
-        let available = self.available_actions(&aim, player, items, physics);
+        let available = self.available_actions(&aim, player, items, physics, needs);
         if input.pressed & keys::GRAB != 0 {
             self.f_gesture_consumed = false;
         }
@@ -848,7 +874,7 @@ impl InteractionState {
         self.mechanisms.sync(physics, false);
         items.sync_poses(physics);
         let mut filling = None;
-        if input.held & keys::FILL != 0
+        if input.held & keys::PRIMARY != 0
             && available.actions.0 & ActionMask::FILL != 0
             && let Some(held) = self.held()
             && let Some(target) = filling_target
@@ -941,14 +967,49 @@ impl InteractionState {
                 if !opening.reference.angle_disabled && angle <= threshold {
                     continue;
                 }
-                spill(
-                    fluid,
-                    factor * opening.valve * opening.reference.flow_liters_per_second * dt,
-                );
+                let requested_liters =
+                    factor * opening.valve * opening.reference.flow_liters_per_second * dt;
+                let outlet = (to_rapier(item.pose) * opening.local_pose).translation;
+                let mouth = Vector::from_array(player.view_pose(physics).position);
+                if action.is_none()
+                    && requested_liters > 0.
+                    && (outlet - mouth).length() < self.drink_contact_radius
+                {
+                    let total = fluid.mixture.total();
+                    if total > 0. {
+                        let fractions =
+                            fluid.mixture.quantities_liters.map(|amount| amount / total);
+                        let poured_liters = spill(fluid, requested_liters);
+                        action = Some(InteractionAction::DrinkContact {
+                            source: opening.reference.tank,
+                            poured_liters,
+                            fractions,
+                        });
+                    }
+                } else {
+                    spill(fluid, requested_liters);
+                }
             }
         }
         if input.released & keys::GRAB != 0 {
             self.f_gesture_consumed = false;
+        }
+        if action.is_none()
+            && input.pressed & keys::PRIMARY != 0
+            && available.actions.0 & ActionMask::CONSUME != 0
+            && let Some(item) = self.held()
+        {
+            action = Some(InteractionAction::Consume(item));
+        }
+        if action.is_none()
+            && input.held & keys::PRIMARY != 0
+            && available.actions.0 & ActionMask::DRINK != 0
+            && let Some(source) = self.held()
+        {
+            action = Some(InteractionAction::Drink {
+                source,
+                requested_liters: self.drink_flow_liters_per_second * dt,
+            });
         }
         self.fill_opening = availability.fill_reservation;
         action

@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod consumables;
 pub mod instruments;
 pub mod lighting;
 pub mod materials;

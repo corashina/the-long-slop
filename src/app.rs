@@ -27,7 +27,7 @@ pub(crate) struct Drive {
     pub runtime: GarageRuntime,
     instruments: InstrumentState,
     input: FrameInput,
-    clock: StepClock,
+    pub(crate) clock: StepClock,
     previous: VehiclePose,
     current: VehiclePose,
     rendered: VehiclePose,
@@ -119,6 +119,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
                 advance_physics,
                 sync_world,
                 sync_imported,
+                presentation::consumables::sync,
                 sync_instruments,
                 presentation::lighting::sync_control_visuals,
                 update_camera,
@@ -151,6 +152,7 @@ fn setup(
     visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
     commands.insert_resource(visuals);
     commands.insert_resource(InstrumentVisuals::default());
+    commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
     presentation::materials::load_materials(&mut commands, &server, &reference.0.rendering);
     presentation::lighting::load_lighting(&mut commands, &server, &reference.0.lighting);
     presentation::lighting::load_lamp_materials(&mut commands, &gltf_extensions, &reference.0);
@@ -526,6 +528,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         &runtime.area.player,
         &runtime.area.items,
         &runtime.physics,
+        runtime.survival.output(),
     );
     let info = runtime
         .area

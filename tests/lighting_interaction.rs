@@ -78,6 +78,7 @@ fn step(
         s,
         w,
         0.016,
+        Default::default(),
     )
 }
 #[test]
@@ -100,7 +101,8 @@ fn switch_aim_obeys_reach_and_occlusion() {
     let t = i.resolve(&w, pose(), &s);
     assert_eq!(t.light_target.unwrap().collider, ColliderId(10));
     assert_eq!(
-        i.available_actions(&t, &p, &s, &w).light_control,
+        i.available_actions(&t, &p, &s, &w, Default::default(),)
+            .light_control,
         Some(LightControlId(1))
     );
     w.rapier_mut().insert(
@@ -110,7 +112,8 @@ fn switch_aim_obeys_reach_and_occlusion() {
     w.refresh_queries();
     let blocked = i.resolve(&w, pose(), &s);
     assert_eq!(
-        i.available_actions(&blocked, &p, &s, &w).light_control,
+        i.available_actions(&blocked, &p, &s, &w, Default::default(),)
+            .light_control,
         None
     );
 }
@@ -125,7 +128,7 @@ fn use_and_click_toggle_once() {
         &mut p,
         &mut s,
         &mut w,
-        keys::USE | keys::FILL,
+        keys::USE | keys::PRIMARY,
     );
     assert_eq!(
         action,
@@ -145,14 +148,15 @@ fn use_and_click_toggle_once() {
     assert_eq!(
         i.step(
             FrameInput {
-                held: keys::USE | keys::FILL,
+                held: keys::USE | keys::PRIMARY,
                 ..Default::default()
             },
             target(1),
             &mut p,
             &mut s,
             &mut w,
-            0.016
+            0.016,
+            Default::default(),
         ),
         None
     );
@@ -175,7 +179,7 @@ fn switch_feedback_matches_execution() {
     let (mut i, mut s, mut w, mut p) = fixture();
     for id in [1, 2, 3, 4, 5, 7, 8] {
         let t = target(id);
-        let a = i.available_actions(&t, &p, &s, &w);
+        let a = i.available_actions(&t, &p, &s, &w, Default::default());
         assert_eq!(a.context, FeedbackContext::LightSwitch);
         assert_ne!(a.actions.0 & ActionMask::USE, 0);
         assert_eq!(
@@ -185,7 +189,7 @@ fn switch_feedback_matches_execution() {
     }
     let mut t = target(1);
     t.light_target.as_mut().unwrap().distance = 100.;
-    let a = i.available_actions(&t, &p, &s, &w);
+    let a = i.available_actions(&t, &p, &s, &w, Default::default());
     assert_eq!(a.light_control, None);
     assert_eq!(step(&mut i, t, &mut p, &mut s, &mut w, keys::USE), None);
 }
@@ -329,7 +333,7 @@ fn cabin_modes_override_strict_door_threshold_before_fade() {
 fn physical_headlight_switch_cycles_the_shared_car_request_once() {
     let r = common::reference();
     let (mut i, mut items, mut w, mut p) = fixture();
-    let a = i.available_actions(&target(9), &p, &items, &w);
+    let a = i.available_actions(&target(9), &p, &items, &w, Default::default());
     assert_eq!(a.light_control, Some(LightControlId(8)));
     let action = step(
         &mut i,
@@ -337,7 +341,7 @@ fn physical_headlight_switch_cycles_the_shared_car_request_once() {
         &mut p,
         &mut items,
         &mut w,
-        keys::USE | keys::FILL,
+        keys::USE | keys::PRIMARY,
     );
     assert_eq!(
         action,
@@ -440,6 +444,7 @@ fn exported_house_controls_use_native_confirmed_poses() {
                     &runtime.area.player,
                     &runtime.area.items,
                     &runtime.physics,
+                    Default::default(),
                 );
                 if a.light_control != Some(c.id) {
                     continue;
@@ -473,7 +478,8 @@ fn exported_house_controls_use_native_confirmed_poses() {
                                 &runtime.aim,
                                 &runtime.area.player,
                                 &runtime.area.items,
-                                &runtime.physics
+                                &runtime.physics,
+                                Default::default(),
                             )
                             .light_control,
                         Some(c.id)
@@ -580,7 +586,8 @@ fn exported_cabin_and_headlight_controls_work_from_driver_seat() {
                     &runtime.aim,
                     &runtime.area.player,
                     &runtime.area.items,
-                    &runtime.physics
+                    &runtime.physics,
+                    Default::default(),
                 )
                 .light_control,
             Some(c.id)
@@ -660,6 +667,7 @@ fn exported_cabin_door_values_keep_all_four_source_mappings() {
                 &mut runtime.area.items,
                 &mut runtime.physics,
                 0.016,
+                Default::default(),
             );
             if runtime
                 .area
@@ -742,15 +750,16 @@ fn held_container_fixture(
 }
 #[test]
 fn drinkable_container_reserves_click_while_use_can_switch() {
+    use my_summer_slop::reference::ItemId;
     let (mut i, mut items, mut w, mut p) = held_container_fixture(true, false);
     let aim = target(1);
-    let a = i.available_actions(&aim, &p, &items, &w);
+    let a = i.available_actions(&aim, &p, &items, &w, Default::default());
     assert!(!a.lmb_use);
     assert_eq!(a.light_control, Some(LightControlId(1)));
-    assert_eq!(
-        step(&mut i, aim, &mut p, &mut items, &mut w, keys::FILL),
-        None
-    );
+    assert!(matches!(
+        step(&mut i, aim, &mut p, &mut items, &mut w, keys::PRIMARY),
+        Some(InteractionAction::Drink { source: ItemId(1), requested_liters }) if requested_liters > 0.
+    ));
     assert_eq!(
         step(&mut i, aim, &mut p, &mut items, &mut w, keys::USE),
         Some(InteractionAction::LightControl(LightControlId(1)))
@@ -768,18 +777,21 @@ fn full_destination_reserves_click_after_fill_aim_changes() {
         point: [10., 2., -1.],
         slot: None,
     });
-    let a = i.available_actions(&aim, &p, &items, &w);
+    let a = i.available_actions(&aim, &p, &items, &w, Default::default());
     assert_eq!(a.fill_reservation, Some(common::reference().openings[0].id));
     assert_eq!(a.actions.0 & ActionMask::FILL, 0);
     assert!(!a.lmb_use);
     assert_eq!(
-        step(&mut i, aim, &mut p, &mut items, &mut w, keys::FILL),
+        step(&mut i, aim, &mut p, &mut items, &mut w, keys::PRIMARY),
         None
     );
     let switch = target(1);
-    assert!(!i.available_actions(&switch, &p, &items, &w).lmb_use);
+    assert!(
+        !i.available_actions(&switch, &p, &items, &w, Default::default(),)
+            .lmb_use
+    );
     assert_eq!(
-        step(&mut i, switch, &mut p, &mut items, &mut w, keys::FILL),
+        step(&mut i, switch, &mut p, &mut items, &mut w, keys::PRIMARY),
         None
     );
 }

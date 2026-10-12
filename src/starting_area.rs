@@ -19,6 +19,10 @@ use rapier3d::prelude::{
 };
 use std::collections::HashMap;
 
+mod survival;
+pub use survival::DrinkResult;
+pub(crate) use survival::spawn_consumable;
+
 struct CompoundCollider {
     handle: crate::vehicle::ColliderHandle,
     body: BodyId,
@@ -462,6 +466,8 @@ pub fn initial_vehicle_pose(reference: &ReferenceManifest) -> Result<VehiclePose
 }
 
 pub struct GarageRuntime {
+    pub survival: crate::survival::SurvivalState,
+    pub simulation_seconds: f64,
     pub lighting: crate::lighting::LightingState,
     pub physics: PhysicsWorld,
     pub area: StartingArea,
@@ -501,6 +507,7 @@ impl GarageRuntime {
             &mut area.interaction,
             &mut physics,
         );
+        crate::world::sync_station_food(&mut stream, reference, &mut area, &mut physics)?;
         let mut wheels = crate::interaction::wheels::WheelAssemblies::new(reference)?;
         wheels.sync(&mut area.items, &mut physics)?;
         physics.refresh_queries();
@@ -526,6 +533,8 @@ impl GarageRuntime {
             }
         }
         Ok(Self {
+            survival: crate::survival::SurvivalState::new(&reference.survival),
+            simulation_seconds: 0.,
             physics,
             area,
             stream,
@@ -629,6 +638,7 @@ impl GarageRuntime {
             &mut self.area.items,
             &mut self.physics,
             FIXED_DT,
+            self.survival.output(),
         );
         if action.is_none()
             && (input.pressed | input.released) & keys::GRAB != 0
@@ -637,6 +647,31 @@ impl GarageRuntime {
             self.notice = block.notice();
         }
         match action {
+            Some(InteractionAction::Consume(item)) => {
+                if self.consume(reference, item).is_err() {
+                    self.notice = "Cannot eat this item.";
+                }
+            }
+            Some(InteractionAction::Drink {
+                source,
+                requested_liters,
+            }) => {
+                if self.drink(reference, source, requested_liters).is_err() {
+                    self.notice = "Cannot drink from this item.";
+                }
+            }
+            Some(InteractionAction::DrinkContact {
+                source,
+                poured_liters,
+                fractions,
+            }) => {
+                if self
+                    .drink_contact(reference, source, poured_liters, fractions)
+                    .is_err()
+                {
+                    self.notice = "Cannot drink this fluid.";
+                }
+            }
             Some(InteractionAction::LightControl(control)) => {
                 self.lighting.use_control(&reference.lighting, control);
                 self.notice = "";
@@ -1001,6 +1036,13 @@ impl GarageRuntime {
             &mut self.area.interaction,
             &mut self.physics,
         );
+        crate::world::sync_station_food(
+            &mut self.stream,
+            reference,
+            &mut self.area,
+            &mut self.physics,
+        )
+        .expect("valid station food");
     }
 
     pub fn clear_input(&mut self) {
@@ -1074,6 +1116,13 @@ impl GarageRuntime {
             &mut self.area.interaction,
             &mut self.physics,
         );
+        crate::world::sync_station_food(
+            &mut self.stream,
+            reference,
+            &mut self.area,
+            &mut self.physics,
+        )
+        .expect("valid station food");
         self.physics.reset(pose);
         let cargo_delta = to_rapier(pose) * inverse;
         for &body in &self.recovery_bodies {

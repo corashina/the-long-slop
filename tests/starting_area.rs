@@ -187,7 +187,7 @@ fn pause_freezes_complete_state() {
         .map(|hinge| runtime.area.interaction.mechanisms.value(hinge.item, false))
         .collect();
     let input = FrameInput {
-        held: keys::FORWARD | keys::IGNITION | keys::USE | keys::FILL,
+        held: keys::FORWARD | keys::IGNITION | keys::USE | keys::PRIMARY,
         pressed: keys::SPACE | keys::IGNITION,
         mouse: [10.0; 2],
         ..FrameInput::default()
@@ -235,6 +235,7 @@ fn restart_after_carry_detach_rebase() {
             &mut runtime.area.items,
             &mut runtime.physics,
             1.0 / 60.0,
+            Default::default(),
         );
         assert_eq!(runtime.area.interaction.held(), Some(reference.items[0].id));
         assert!(!runtime.physics.rapier().impulse_joints.is_empty());
@@ -382,6 +383,7 @@ fn production_garage_bindings_fill_start_and_move() {
         &mut runtime.area.items,
         &mut runtime.physics,
         1.0 / 60.0,
+        Default::default(),
     );
     assert_eq!(runtime.area.interaction.opening_valve(faucet.id), 1.0);
     let opening = reference
@@ -400,6 +402,7 @@ fn production_garage_bindings_fill_start_and_move() {
         &mut runtime.area.items,
         &mut runtime.physics,
         1.0 / 60.0,
+        Default::default(),
     );
     assert!(runtime.area.interaction.opening_is_open(opening.id));
     let can = reference
@@ -439,6 +442,7 @@ fn production_garage_bindings_fill_start_and_move() {
         &mut runtime.area.items,
         &mut runtime.physics,
         1.0 / 60.0,
+        Default::default(),
     );
     assert_eq!(runtime.area.interaction.held(), Some(can));
     let cap = aim_at(&mut runtime, &reference, opening.cap);
@@ -454,7 +458,7 @@ fn production_garage_bindings_fill_start_and_move() {
         .total();
     let fill_action = runtime.area.interaction.step(
         FrameInput {
-            held: keys::FILL,
+            held: keys::PRIMARY,
             ..FrameInput::default()
         },
         common::resolved(Some(cap)),
@@ -462,6 +466,7 @@ fn production_garage_bindings_fill_start_and_move() {
         &mut runtime.area.items,
         &mut runtime.physics,
         1.0 / 60.0,
+        Default::default(),
     );
     assert!(matches!(
         fill_action,
@@ -697,6 +702,7 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
         &mut runtime.area.items,
         &mut runtime.physics,
         1.0 / 60.0,
+        Default::default(),
     );
     assert_eq!(
         runtime
@@ -748,6 +754,7 @@ fn dry_recovery_keeps_a_carried_can_reachable() {
         &mut runtime.area.items,
         &mut runtime.physics,
         1.0 / 60.0,
+        Default::default(),
     );
     assert_eq!(runtime.area.interaction.held(), Some(can));
     runtime
@@ -808,6 +815,7 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
         &mut runtime.area.items,
         &mut runtime.physics,
         1.0 / 60.0,
+        Default::default(),
     );
     assert_eq!(runtime.area.interaction.held(), Some(can));
     runtime
@@ -1657,6 +1665,7 @@ fn aimed_handbrake_uses_the_space_state() {
         &mut runtime.area.items,
         &mut runtime.physics,
         1.0 / 60.0,
+        Default::default(),
     );
     assert_eq!(runtime.area.player.seat(), seat_before);
     assert_eq!(
@@ -1718,6 +1727,7 @@ fn focus_loss_cancels_throw_push_and_drag() {
             &mut runtime.area.items,
             &mut runtime.physics,
             0.02,
+            Default::default(),
         );
         assert!(action.is_none());
         assert_eq!(runtime.physics.rapier().bodies[body].linvel(), velocity);
@@ -1769,6 +1779,7 @@ fn focus_loss_cancels_throw_push_and_drag() {
         &mut runtime.area.items,
         &mut runtime.physics,
         0.02,
+        Default::default(),
     );
     assert!(runtime.area.interaction.dragging_mechanism().is_some());
     let value = runtime
@@ -1790,6 +1801,7 @@ fn focus_loss_cancels_throw_push_and_drag() {
         &mut runtime.area.items,
         &mut runtime.physics,
         0.02,
+        Default::default(),
     );
     assert_eq!(runtime.area.interaction.dragging_mechanism(), None);
     assert_eq!(
@@ -1864,6 +1876,7 @@ fn gripped_runtime() -> (my_summer_slop::reference::ReferenceManifest, GarageRun
         &mut runtime.area.items,
         &mut runtime.physics,
         0.02,
+        Default::default(),
     );
     assert!(runtime.area.interaction.push_gripping());
     (reference, runtime)
@@ -1918,6 +1931,7 @@ fn pause_and_capture_release_grip_at_the_physical_pose() {
             &mut runtime.area.items,
             &mut runtime.physics,
             0.0,
+            Default::default(),
         );
         assert!(runtime.physics.rapier().impulse_joints.is_empty());
         assert!(runtime.physics.rapier().bodies[player].is_kinematic());
@@ -1965,6 +1979,7 @@ fn establish_throw_charge(runtime: &mut GarageRuntime, item: my_summer_slop::ref
         &mut runtime.area.items,
         &mut runtime.physics,
         0.02,
+        Default::default(),
     );
     runtime.area.interaction.step(
         FrameInput {
@@ -1977,6 +1992,7 @@ fn establish_throw_charge(runtime: &mut GarageRuntime, item: my_summer_slop::ref
         &mut runtime.area.items,
         &mut runtime.physics,
         0.4,
+        Default::default(),
     );
     assert!(runtime.area.interaction.throw_charge() > 0.2);
 }
@@ -2018,6 +2034,7 @@ fn pause_cancels_established_throw_charge_without_delayed_release() {
         &mut runtime.area.items,
         &mut runtime.physics,
         0.02,
+        Default::default(),
     );
     assert_eq!(action, None);
     assert_eq!(runtime.physics.rapier().bodies[body].linvel(), velocity);
@@ -2059,6 +2076,7 @@ fn restart_cancels_established_throw_charge_without_delayed_release() {
         &mut runtime.area.items,
         &mut runtime.physics,
         0.02,
+        Default::default(),
     );
     assert_eq!(action, None);
     assert_eq!(runtime.physics.rapier().bodies[body].linvel(), velocity);

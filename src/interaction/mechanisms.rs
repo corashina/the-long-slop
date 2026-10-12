@@ -356,7 +356,7 @@ impl MechanismState {
             return;
         }
         if input.pressed & keys::USE != 0
-            || (input.pressed & keys::FILL != 0 && self.primary_switch(item))
+            || (input.pressed & keys::PRIMARY != 0 && self.primary_switch(item))
         {
             let c = &mut self.controls[index];
             if let Some(turn) = &c.reference.turn {

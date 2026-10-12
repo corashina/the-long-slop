@@ -327,7 +327,8 @@ impl SurvivalReference {
                 && finite(&[d.radius, d.valve, d.particle_contact_radius_multiplier])
                 && d.radius > 0.
                 && d.valve > 0.
-                && d.is_drink_cap,
+                && d.is_drink_cap
+                && d.tank == self.toilet.bladder,
             "drinking contacts",
         )?;
         require(self.audio.len() == 7, "survival audio")?;

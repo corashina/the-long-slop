@@ -69,6 +69,64 @@ pub fn spill(container: &mut FluidContainer, liters: f32) -> f32 {
     removed
 }
 
+/// Source drink pour uses the remaining source fraction for each fluid.
+pub fn drink_transfer(
+    source: &mut FluidContainer,
+    destination: &mut FluidContainer,
+    liters: f32,
+    filter_water: bool,
+    filter_blood: bool,
+) -> f32 {
+    if !liters.is_finite() || liters <= 0. {
+        return 0.;
+    }
+    let mut debited = 0.;
+    for index in 0..6 {
+        let total = source.mixture.total();
+        if total <= 0. || source.mixture.quantities_liters[index] <= 0. {
+            continue;
+        }
+        let fraction = source.mixture.quantities_liters[index] / total;
+        let capacity = (destination.capacity_liters - destination.mixture.total()).max(0.);
+        let accepted = (liters * fraction)
+            .min(source.mixture.quantities_liters[index])
+            .min(capacity);
+        destination.mixture.quantities_liters[index] += accepted;
+        source.mixture.quantities_liters[index] -= accepted;
+        debited += accepted;
+        if (index == 3 && filter_water) || (index == 4 && filter_blood) {
+            destination.mixture.quantities_liters[index] =
+                (destination.mixture.quantities_liters[index] - liters * fraction).max(0.);
+        }
+    }
+    debited
+}
+
+/// Particle contact adds emitted fluid to the bladder without another source debit.
+pub fn contact_drink_transfer(
+    destination: &mut FluidContainer,
+    fractions: [f32; 6],
+    liters: f32,
+    filter_water: bool,
+    filter_blood: bool,
+) {
+    if !liters.is_finite() || liters <= 0. {
+        return;
+    }
+    for (index, fraction) in fractions.into_iter().enumerate() {
+        let amount = liters * fraction;
+        if amount <= 0. {
+            continue;
+        }
+        let capacity = (destination.capacity_liters - destination.mixture.total()).max(0.);
+        destination.mixture.quantities_liters[index] += amount.min(capacity);
+        if (index == 3 && filter_water) || (index == 4 && filter_blood) {
+            destination.mixture.quantities_liters[index] =
+                (destination.mixture.quantities_liters[index] - amount).max(0.);
+        }
+    }
+}
+
 /// The source `canRun` takes the smallest supplied-to-required fluid fraction.
 pub fn suitability(container: &FluidContainer, required: &FluidMixture) -> f32 {
     let total = container.mixture.total();

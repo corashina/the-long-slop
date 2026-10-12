@@ -18,7 +18,7 @@ pub struct ToiletOutput {
     pub poured_liters: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct NeedsOutput {
     pub needs: NeedValues,
     pub bladder_liters: f32,

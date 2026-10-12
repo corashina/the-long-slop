@@ -10,8 +10,14 @@ test('mm_button_is_rotate_and_rmb_moves',()=>{
  i.clear();i.code('Mouse2',true);assert.equal(i.takeFrame().held,16384);
 });
 test('backspace_and_obsolete_controls_are_interface_only',()=>{
- const i=new InputState();for(const key of ['Backspace','KeyR','KeyP','ArrowUp'])i.code(key,true);
+ const i=new InputState();for(const key of ['Backspace','KeyR','ArrowUp'])i.code(key,true);
  assert.equal(i.takeFrame().held,0);
+});
+test('toilet_keys_and_primary_release_are_distinct',()=>{
+ const i=new InputState();i.code('KeyP',true);i.code('KeyB',true);i.code('Mouse0',true);
+ assert.equal(i.takeFrame().pressed,262144|524288|512);
+ i.code('Mouse0',false);
+ assert.equal(i.takeFrame().released,512);
 });
 test('release_survives_a_frame_without_physics',()=>{
  const i=new InputState();i.code('KeyF',true);i.code('KeyF',false);

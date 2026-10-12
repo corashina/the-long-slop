@@ -1,6 +1,7 @@
 mod common;
 
 use my_summer_slop::simulation::DriveInput;
+use my_summer_slop::starting_area::GarageRuntime;
 use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose};
 use my_summer_slop::world::{
     ChunkData, ChunkKey, WorldOrigin, WorldStream, active_chunks, generate_chunk,
@@ -556,4 +557,96 @@ fn road_lamp_window_bound_comes_from_actual_chunks() {
         maximum = maximum.max(count);
     }
     assert_eq!(maximum, 15);
+}
+
+#[test]
+fn station_food_stays_consumed_after_stream_rebase_and_recovery() {
+    let reference = common::reference();
+    let mut runtime = GarageRuntime::new(&reference).unwrap();
+    runtime.started = true;
+    let starter = reference.survival.starter_food;
+    let station_food = runtime
+        .area
+        .items
+        .iter()
+        .find(|item| item.food.is_some() && item.id != starter)
+        .unwrap()
+        .id;
+    let body = runtime.area.items.get(station_food).unwrap().body.unwrap();
+    let absolute = runtime
+        .stream
+        .origin
+        .absolute(runtime.area.items.get(station_food).unwrap().pose.position);
+    let station = runtime
+        .stream
+        .chunks()
+        .flat_map(|chunk| &chunk.data.stations)
+        .find(|station| {
+            (station.absolute_point[0] + 1. - absolute[0]).abs() < 0.001
+                && (station.absolute_point[2] - 2. - absolute[2]).abs() < 0.001
+        })
+        .unwrap();
+    let mut food_min = [f32::INFINITY; 3];
+    let mut food_max = [f32::NEG_INFINITY; 3];
+    for &handle in runtime.physics.rapier().bodies[body].colliders() {
+        let aabb = runtime.physics.rapier().colliders[handle].compute_aabb();
+        for axis in 0..3 {
+            food_min[axis] = food_min[axis].min(aabb.mins[axis]);
+            food_max[axis] = food_max[axis].max(aabb.maxs[axis]);
+        }
+    }
+    let station_point = runtime.stream.origin.local(station.absolute_point);
+    assert!(
+        food_min[0] > station_point[0] + 0.35,
+        "food={food_min:?} station={station_point:?}"
+    );
+    assert!(
+        food_max[0] < station_point[0] + 4.,
+        "food={food_max:?} station={station_point:?}"
+    );
+    assert!(
+        food_min[1] > station_point[1] - 0.1,
+        "food={food_min:?} station={station_point:?}"
+    );
+    for _ in 0..6 {
+        assert!(runtime.consume(&reference, station_food).unwrap());
+    }
+    assert!(runtime.physics.rapier().bodies.get(body).is_none());
+    runtime
+        .stream
+        .sync_at([0., 0., -10_000.], &mut runtime.physics);
+    my_summer_slop::world::sync_station_food(
+        &mut runtime.stream,
+        &reference,
+        &mut runtime.area,
+        &mut runtime.physics,
+    )
+    .unwrap();
+    runtime.stream.sync_at(absolute, &mut runtime.physics);
+    my_summer_slop::world::sync_station_food(
+        &mut runtime.stream,
+        &reference,
+        &mut runtime.area,
+        &mut runtime.physics,
+    )
+    .unwrap();
+    if runtime
+        .stream
+        .rebase([1024., 0., 0.], &mut runtime.physics)
+        .is_some()
+    {
+        runtime.area.sync_origin(runtime.stream.origin.offset);
+    }
+    runtime.recover(&reference);
+    assert_eq!(
+        runtime
+            .area
+            .items
+            .iter()
+            .filter(|item| item.id == station_food)
+            .count(),
+        1
+    );
+    assert!(runtime.area.items.get(station_food).unwrap().removed);
+    assert!(runtime.area.items.get(station_food).unwrap().body.is_none());
 }

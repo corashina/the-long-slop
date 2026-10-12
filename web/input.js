@@ -1,4 +1,4 @@
-const BITS={KeyW:1,KeyS:2,KeyA:4,KeyD:8,Space:16,KeyE:32,ShiftLeft:64,ShiftRight:64,ControlLeft:128,ControlRight:128,KeyF:256,Mouse0:512,KeyI:1024,KeyC:2048,Mouse1:4096,KeyX:8192,Mouse2:16384,Tab:32768,KeyL:65536};
+const BITS={KeyW:1,KeyS:2,KeyA:4,KeyD:8,Space:16,KeyE:32,ShiftLeft:64,ShiftRight:64,ControlLeft:128,ControlRight:128,KeyF:256,Mouse0:512,KeyI:1024,KeyC:2048,Mouse1:4096,KeyX:8192,Mouse2:16384,Tab:32768,KeyL:65536,KeyP:262144,KeyB:524288};
 export class InputState {
  constructor(){this.codes=new Set();this.frame={held:0,pressed:0,released:0,mouseX:0,mouseY:0,wheel:0};this.clear();}
  code(code,down){if(!(code in BITS))return false;const old=this.held;if(down)this.codes.add(code);else this.codes.delete(code);this.held=0;for(const k of this.codes)this.held|=BITS[k];this.pressed|=this.held&~old;this.released|=old&~this.held;return true;}
