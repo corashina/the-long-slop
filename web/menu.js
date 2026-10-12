@@ -9,15 +9,15 @@ export class MenuState {
  back(){if(this.state==='controls')this.state=this.origin;}
  recover(){if(this.state==='pause-menu')this.actions=ACTIONS.RECOVER;}
  takeActions(){const a=this.actions;this.actions=0;return a;}
- async capture(action,request){
+ async capture(action,request,unlock){
   if(!this.readyFlag || this.pending || !['start-menu','pause-menu'].includes(this.state))return false;
   const token=++this.generation;this.pending=true;this.error='';
-  try {await request();if(token!==this.generation)return false;this.started=true;this.actions=action;this.state='playing';return true;}
+  try {try{unlock?.();}catch{}await request();if(token!==this.generation)return false;this.started=true;this.actions=action;this.state='playing';return true;}
   catch(error){if(token===this.generation){this.error='Mouse capture failed. '+error.message+' Select '+(this.started?'Continue':'Start')+' to try again.';this.state=this.started?'pause-menu':'start-menu';}return false;}
   finally {if(token===this.generation)this.pending=false;}
  }
 }
-export function createMenu({canvas,ui,clearInput,queueAction}) {
+export function createMenu({canvas,ui,clearInput,queueAction,audio}) {
  const model=new MenuState(),menu=document.querySelector('#menu'),controls=document.querySelector('#controls-screen');
  const initial=document.querySelector('#start-actions'),paused=document.querySelector('#pause-actions'),error=document.querySelector('#capture-error'),status=document.querySelector('#status');
  const art=document.querySelector('#menu-art'),frame=document.querySelector('#menu-frame'),hud=document.querySelector('#hud');
@@ -50,8 +50,8 @@ export function createMenu({canvas,ui,clearInput,queueAction}) {
   }
  }
  function flush(){const a=model.takeActions();if(a)queueAction(a);}
- function pause(){clearInput();model.pause();if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();}
- async function capture(action){clearInput();const pending=model.capture(action,async()=>{canvas.focus();await canvas.requestPointerLock();if(document.pointerLockElement!==canvas)throw Error('The browser did not capture the mouse.');});paint();const success=await pending;if(!success && document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();}
+ function pause(){audio?.pause();clearInput();model.pause();if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();}
+ async function capture(action){if(action===ACTIONS.RESTART)audio?.restart(audio.session+1);clearInput();const pending=model.capture(action,async()=>{canvas.focus();await canvas.requestPointerLock();if(document.pointerLockElement!==canvas)throw Error('The browser did not capture the mouse.');},()=>audio?.unlock());paint();const success=await pending;if(!success)audio?.pause();if(!success && document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();}
  document.querySelector('#start').addEventListener('click',()=>capture(ACTIONS.START));
  document.querySelector('#resume').addEventListener('click',()=>capture(ACTIONS.CONTINUE));
  document.querySelector('#restart').addEventListener('click',()=>capture(ACTIONS.RESTART));

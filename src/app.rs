@@ -128,6 +128,10 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
         )
         .add_systems(
             PostUpdate,
+            publish_audio.after(bevy::transform::TransformSystems::Propagate),
+        )
+        .add_systems(
+            PostUpdate,
             presentation::lighting::sync_lighting
                 .after(bevy::transform::TransformSystems::Propagate)
                 .before(bevy::light::SimulationLightSystems::AssignLightsToClusters)
@@ -623,4 +627,70 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         );
         drive.last_feedback = Some(stamp);
     }
+}
+
+fn publish_audio(
+    time: Res<Time<Real>>,
+    mut drive: ResMut<Drive>,
+    visuals: Res<ReferenceVisuals>,
+    globals: Query<&GlobalTransform>,
+    camera: Query<&GlobalTransform, With<DriveCamera>>,
+) {
+    let runtime = &mut drive.runtime;
+    let Some(audio) = &mut runtime.audio else {
+        return;
+    };
+    game_audio_begin(
+        audio.session,
+        runtime.started,
+        runtime.paused,
+        audio.game_seconds,
+    );
+    if let Ok(camera) = camera.single() {
+        let (_, q, p) = camera.to_scale_rotation_translation();
+        game_audio_listener(p.x, p.y, p.z, q.x, q.y, q.z, q.w);
+    }
+    for emitter in &audio.reference.emitters {
+        let alive = emitter
+            .item
+            .is_none_or(|id| runtime.area.items.get(id).is_some());
+        if let Some(global) = visuals
+            .nodes
+            .get(&emitter.node)
+            .and_then(|&entity| globals.get(entity).ok())
+        {
+            let (_, q, p) = global.to_scale_rotation_translation();
+            game_audio_emitter(emitter.id, p.x, p.y, p.z, q.x, q.y, q.z, q.w, alive);
+        }
+    }
+    if runtime.started && !runtime.paused {
+        audio.update_mixers(&runtime.area, time.delta_secs());
+    }
+    for (id, db) in audio.mixer_outputs() {
+        game_audio_mixer(id, db);
+    }
+    for (index, route) in audio.reference.routes.iter().enumerate() {
+        for &id in &route.voices {
+            game_audio_route(id, audio.route_mixers[index]);
+        }
+    }
+    for signal in &audio.signals {
+        game_audio_voice(signal.id, signal.playing, signal.gain, signal.pitch);
+    }
+    while let Some(event) = audio.pop_event() {
+        game_audio_event(
+            event.session,
+            event.sequence,
+            event.binding,
+            event.emitter,
+            event.position[0],
+            event.position[1],
+            event.position[2],
+            event.gain,
+            event.pitch,
+            event.time_seconds,
+        );
+    }
+    game_audio_radio(audio.game_seconds);
+    game_audio_end();
 }

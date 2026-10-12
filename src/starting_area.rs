@@ -462,6 +462,7 @@ pub fn initial_vehicle_pose(reference: &ReferenceManifest) -> Result<VehiclePose
 }
 
 pub struct GarageRuntime {
+    pub audio: Option<crate::audio::AudioState>,
     pub lighting: crate::lighting::LightingState,
     pub physics: PhysicsWorld,
     pub area: StartingArea,
@@ -525,7 +526,15 @@ impl GarageRuntime {
                 recovery_bounds.max[i] = recovery_bounds.max[i].max(aabb.maxs[i]);
             }
         }
+        let audio = crate::reference::AudioReference::from_value(&reference.audio, reference)
+            .ok()
+            .map(|r| {
+                let mut state = crate::audio::AudioState::new(r, 1);
+                state.bind_game(reference, &area, &physics);
+                state
+            });
         Ok(Self {
+            audio,
             physics,
             area,
             stream,
@@ -863,6 +872,7 @@ impl GarageRuntime {
                 .map_or(1.0, |item| item.condition))
             * 4.0)
             .round() as u8;
+        let was_ignition = self.engine_output.ignition;
         let was_running = self.engine_output.running;
         self.engine_output = self.engine.step(
             EngineInput {
@@ -885,6 +895,11 @@ impl GarageRuntime {
             start_sample(DEFAULT_SEED, self.attempts),
             FIXED_DT,
         );
+        if self.engine_output.ignition != was_ignition {
+            if let Some(audio) = &mut self.audio {
+                audio.ignition_changed(&self.area);
+            }
+        }
         self.area
             .items
             .get_mut(reference.engine.item)
@@ -974,6 +989,9 @@ impl GarageRuntime {
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, false);
+        if let Some(audio) = &mut self.audio {
+            audio.fixed_step(&self.area, &self.physics, FIXED_DT);
+        }
         let current = self
             .stream
             .origin
@@ -989,6 +1007,11 @@ impl GarageRuntime {
         if self.stream.rebase(focus, &mut self.physics).is_some() {
             let old_origin = self.area.origin;
             self.area.sync_origin(self.stream.origin.offset);
+            if let Some(audio) = &mut self.audio {
+                audio.rebase(std::array::from_fn(|i| {
+                    (self.area.origin[i] - old_origin[i]) as f32
+                }));
+            }
             self.aim.rebase(std::array::from_fn(|i| {
                 (self.area.origin[i] - old_origin[i]) as f32
             }));
@@ -1012,7 +1035,14 @@ impl GarageRuntime {
         self.area
             .interaction
             .drop_held(&mut self.area.items, &mut self.physics);
+        let session = self
+            .audio
+            .as_ref()
+            .map_or(1, |audio| audio.session.wrapping_add(1));
         *self = Self::new(reference)?;
+        if let Some(audio) = &mut self.audio {
+            audio.reset(session);
+        }
         self.started = true;
         Ok(())
     }

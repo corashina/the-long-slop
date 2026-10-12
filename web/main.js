@@ -1,9 +1,10 @@
+import {createAudio,installAudioBridge} from './audio.js';
 import {createInput} from './input.js';
 import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
 import {loadUiAssets} from './ui-layout.js';
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
-let menu,feedback,failed=false,timeout,actions=0,frame;
+let audio,menu,feedback,failed=false,timeout,actions=0,frame;
 const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',condition:-1,held:'',throwCharge:0,throwActive:false,quantities:[0,0,0,0,0,0]};
 const input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas);
 window.gameKeys=()=>{frame=input.takeFrame();return frame.held;};
@@ -52,7 +53,9 @@ async function load(){
  const text=await response.text(),manifest=JSON.parse(text);
  status.textContent='Loading interface assets...';
  await loadUiAssets(manifest.ui);
- menu=createMenu({canvas,ui:manifest.ui,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ audio=createAudio(manifest.audio);installAudioBridge(window,audio);
+ window.addEventListener('pagehide',()=>audio.dispose());
+ menu=createMenu({canvas,ui:manifest.ui,audio,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  const switchIconUrl='./assets/'+manifest.lighting.switch_icon.path;
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
  feedback=createFeedback(manifest.ui,switchIconUrl);

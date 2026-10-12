@@ -24,3 +24,5 @@ test('recover_does_not_resume',()=>{
  const m=new MenuState();m.ready();m.started=true;m.pause();m.recover();
  assert.equal(m.state,'pause-menu');assert.equal(m.takeActions(),16);
 });
+
+test('audio_unlock_throw_keeps_capture_working',async()=>{const m=new MenuState();m.ready();await m.capture(ACTIONS.START,async()=>{},()=>{throw Error('audio');});assert.equal(m.state,'playing');assert.equal(m.takeActions(),ACTIONS.START);});

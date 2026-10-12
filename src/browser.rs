@@ -1,6 +1,46 @@
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioBegin)]
+    pub fn game_audio_begin(session: u32, started: bool, paused: bool, time: f64);
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioListener)]
+    pub fn game_audio_listener(x: f32, y: f32, z: f32, qx: f32, qy: f32, qz: f32, qw: f32);
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioEmitter)]
+    pub fn game_audio_emitter(
+        id: u32,
+        x: f32,
+        y: f32,
+        z: f32,
+        qx: f32,
+        qy: f32,
+        qz: f32,
+        qw: f32,
+        alive: bool,
+    );
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioVoice)]
+    pub fn game_audio_voice(id: u32, playing: bool, gain: f32, pitch: f32);
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioEvent)]
+    pub fn game_audio_event(
+        session: u32,
+        sequence: u32,
+        binding: u32,
+        emitter: u32,
+        x: f32,
+        y: f32,
+        z: f32,
+        gain: f32,
+        pitch: f32,
+        time: f64,
+    );
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioMixer)]
+    pub fn game_audio_mixer(id: u32, db: f32);
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioRoute)]
+    pub fn game_audio_route(id: u32, mixer: u32);
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioRadio)]
+    pub fn game_audio_radio(game_seconds: f64);
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioEnd)]
+    pub fn game_audio_end();
+
     #[wasm_bindgen(js_namespace = window, js_name = gameReady)]
     pub fn game_ready();
     #[wasm_bindgen(js_namespace = window, js_name = gameFailure)]
