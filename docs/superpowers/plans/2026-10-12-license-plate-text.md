@@ -218,12 +218,13 @@ assert_eq!(upper_boundary.text(rear), Some("ZZZ-999"));
 `plate_layout_uses_source_metrics` checks bearings, baseline, advances, kerning, bounds, and signed bold scale in UV1.
 Use a small font fixture with point size `10`, font size `0.8`, and glyph `A` advance `10`.
 Set its bearing to `(1,8)`, width to `6`, height to `8`, and `AA` advance adjustment to `-2`.
-For `AA`, assert quad width `0.48` and left-edge distance `0.64`, within `0.00001`.
+Use the source `orthographic=false` flag and TMP world scale factor `0.1`.
+For `AA`, assert quad width `0.048` and left-edge distance `0.064`, within `0.00001`.
 Keep the source alignment codes and validate their common translation independently.
 
 ```rust
-assert!((mesh.vertices[1].position[0] - mesh.vertices[0].position[0] - 0.48).abs() < 0.00001);
-assert!((mesh.vertices[4].position[0] - mesh.vertices[0].position[0] - 0.64).abs() < 0.00001);
+assert!((mesh.vertices[1].position[0] - mesh.vertices[0].position[0] - 0.048).abs() < 0.00001);
+assert!((mesh.vertices[4].position[0] - mesh.vertices[0].position[0] - 0.064).abs() < 0.00001);
 ```
 Assert missing glyphs and nonfinite layout values return errors.
 
