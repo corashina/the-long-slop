@@ -25,7 +25,8 @@ pub(crate) struct RuntimeReference(pub Arc<ReferenceManifest>);
 #[derive(Resource)]
 pub(crate) struct Drive {
     pub runtime: GarageRuntime,
-    instruments: InstrumentState,
+    /// Gauge state per vehicle.
+    instruments: Vec<InstrumentState>,
     input: FrameInput,
     clock: StepClock,
     previous: VehiclePose,
@@ -72,7 +73,11 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
     App::new()
         .insert_resource(RuntimeReference(reference.clone()))
         .insert_resource(Drive {
-            instruments: InstrumentState::new(&reference.instruments),
+            instruments: reference
+                .vehicles
+                .iter()
+                .map(|vehicle| InstrumentState::new(&vehicle.instruments))
+                .collect(),
             runtime,
             input: FrameInput::default(),
             clock: StepClock::default(),
@@ -352,7 +357,9 @@ fn read_input(
         }
         source.reset_instances(&mut commands);
         commands.queue(presentation::mirrors::reset_mirrors);
-        drive.instruments.reset(&reference.0.instruments);
+        for (state, vehicle) in drive.instruments.iter_mut().zip(&reference.0.vehicles) {
+            state.reset(&vehicle.instruments);
+        }
         drive.camera = CameraMode::default();
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
         clear_input(&mut drive);
@@ -451,6 +458,7 @@ fn sync_instruments(
     mut materials: Query<&mut MeshMaterial3d<presentation::materials::SourceMaterial>>,
     mut casters: Query<&mut MeshMaterial3d<StandardMaterial>>,
 ) {
+    let drive = &mut *drive;
     let run = &drive.runtime;
     let amount = |id: ItemId| {
         run.area
@@ -459,20 +467,23 @@ fn sync_instruments(
             .and_then(|i| i.fluid.as_ref())
             .map_or(0., |f| f.mixture.total())
     };
-    let r = &reference.0.instruments;
-    let sample = InstrumentSample {
-        speed_kmh: run.physics.snapshot().speed_mps * 3.6,
-        fuel_liters: amount(reference.0.engine.fuel_tank),
-        oil_liters: amount(reference.0.engine.oil_tank),
-        temperature: run.engine_output.temperature,
-        rpm: run.engine_output.rpm,
-        headlights: run.lighting.headlights(),
-        local_ignition: run.engine_output.ignition
-            && r.electronics_output > r.electronics_off_threshold,
-        distance_m: run.trip_m,
-    };
-    if run.started && !run.paused {
-        drive.instruments.update(r, sample, time.delta_secs());
+    for (index, vehicle) in reference.0.vehicles.iter().enumerate() {
+        let r = &vehicle.instruments;
+        let state = &run.vehicles[index];
+        let sample = InstrumentSample {
+            speed_kmh: run.physics.snapshot(index).speed_mps * 3.6,
+            fuel_liters: amount(vehicle.engine.fuel_tank),
+            oil_liters: amount(vehicle.engine.oil_tank),
+            temperature: state.engine_output.temperature,
+            rpm: state.engine_output.rpm,
+            headlights: run.lighting.headlights(index),
+            local_ignition: state.engine_output.ignition
+                && r.electronics_output > r.electronics_off_threshold,
+            distance_m: state.trip_m,
+        };
+        if run.started && !run.paused {
+            drive.instruments[index].update(r, sample, time.delta_secs());
+        }
     }
     visuals.update(
         &reference.0,
@@ -486,7 +497,10 @@ fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveC
     for mut transform in &mut query {
         *transform =
             if drive.camera == CameraMode::Chase && drive.runtime.area.player.seat().is_some() {
-                presentation::camera::pose(CameraMode::Chase, drive.runtime.physics.snapshot().pose)
+                presentation::camera::pose(
+                    CameraMode::Chase,
+                    drive.runtime.physics.snapshot(drive.runtime.vehicle).pose,
+                )
             } else {
                 presentation::transform(drive.rendered)
             };
@@ -494,7 +508,8 @@ fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveC
 }
 fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let runtime = &drive.runtime;
-    let snapshot = runtime.physics.snapshot();
+    let current = &runtime.vehicles[runtime.vehicle];
+    let snapshot = runtime.physics.snapshot(runtime.vehicle);
     let position = runtime.area.player.focus_position(&runtime.physics);
     let absolute = runtime.stream.origin.absolute(position);
     let origin = runtime.stream.origin.offset;
@@ -506,7 +521,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let fuel = runtime
         .area
         .items
-        .get(reference.0.engine.fuel_tank)
+        .get(reference.0.vehicles[runtime.vehicle].engine.fuel_tank)
         .and_then(|item| item.fluid.as_ref())
         .map_or(0.0, |fluid| fluid.mixture.total());
     game_update(
@@ -526,7 +541,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         origin[1],
         origin[2],
         runtime.rebases,
-        runtime.trip_m,
+        current.trip_m,
         runtime.stream.lateral_band() as f64,
         fuel,
         runtime.paused,
@@ -572,13 +587,13 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         held,
         throw_charge: runtime.area.interaction.throw_charge().to_bits(),
         throw_active: runtime.area.interaction.throw_active(),
-        rpm: runtime.engine_output.rpm.to_bits(),
+        rpm: current.engine_output.rpm.to_bits(),
         engine_flags: [
-            runtime.engine_output.ignition,
-            runtime.engine_output.running,
-            runtime.engine_output.starter,
+            current.engine_output.ignition,
+            current.engine_output.running,
+            current.engine_output.starter,
             runtime.area.player.seat().is_some(),
-            runtime.handbrake,
+            current.handbrake,
         ],
         actions: info.actions.0,
         context: info.context as u32,
@@ -617,12 +632,12 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
                 .unwrap_or(""),
             runtime.area.interaction.throw_charge(),
             runtime.area.interaction.throw_active(),
-            runtime.engine_output.rpm,
-            runtime.engine_output.ignition,
-            runtime.engine_output.running,
-            runtime.engine_output.starter,
+            current.engine_output.rpm,
+            current.engine_output.ignition,
+            current.engine_output.running,
+            current.engine_output.starter,
             runtime.area.player.seat().is_some(),
-            runtime.handbrake,
+            current.handbrake,
             quantities[0],
             quantities[1],
             quantities[2],

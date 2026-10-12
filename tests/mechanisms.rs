@@ -15,7 +15,7 @@ fn fixture() -> ReferenceManifest {
     let mut r = common::reference();
     let mut body = r.bodies[1].clone();
     body.id = BodyId(90);
-    body.parent_body = Some(r.vehicle.body);
+    body.parent_body = Some(r.vehicles[0].body);
     r.bodies.push(body);
     common::add_rotation(&mut r, 1, 90, [-30.0, 40.0]);
     let root = r.mechanisms[0].driven_nodes[0];

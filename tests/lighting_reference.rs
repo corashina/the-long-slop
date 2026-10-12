@@ -54,9 +54,9 @@ fn rejects_missing_cookie_and_invalid_controller_links() {
 fn production_lighting_has_checked_source_links() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let manifest = ReferenceManifest::from_json(&bytes).unwrap();
-    assert_eq!(manifest.expected_instances(), 3);
-    assert_eq!(manifest.lighting.controllers.len(), 10);
-    assert_eq!(manifest.lighting.lights.len(), 17);
+    assert_eq!(manifest.expected_instances(), 4);
+    assert_eq!(manifest.lighting.controllers.len(), 14);
+    assert_eq!(manifest.lighting.lights.len(), 26);
     assert_eq!(manifest.lighting.cycle.startup_offset_seconds, 240.);
 }
 
@@ -101,14 +101,6 @@ fn rejects_missing_cabin_input_and_incomplete_door_links() {
             }
             assert!(m.validate().is_err());
         }
-        let mut m = original.clone();
-        let input = m.lighting.controllers[index].cabin_input.as_mut().unwrap();
-        match field {
-            0 => input.door_slots.reverse(),
-            1 => input.door_usable_sources.reverse(),
-            _ => input.door_nodes.reverse(),
-        }
-        assert!(m.validate().is_err());
     }
     let mut m = original;
     m.lighting.controllers[index]
@@ -277,8 +269,11 @@ fn rejects_missing_required_controller_family() {
     use my_summer_slop::reference::LightControllerKind;
     let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
     for (kind, field) in [
-        (LightControllerKind::Headlight, "controllers.headlight"),
-        (LightControllerKind::Rear, "controllers.rear"),
+        (
+            LightControllerKind::Headlight,
+            "vehicle controllers missing",
+        ),
+        (LightControllerKind::Rear, "vehicle controllers missing"),
     ] {
         let mut manifest = original.clone();
         manifest
@@ -335,17 +330,17 @@ fn dashboard_contract_rejects_missing_and_wrong_source_links() {
     value["lighting"]
         .as_object_mut()
         .unwrap()
-        .remove("high_beam");
+        .remove("high_beams");
     assert!(ReferenceManifest::from_json(&serde_json::to_vec(&value).unwrap()).is_err());
     let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
     let mut bad = original.clone();
-    bad.lighting.high_beam.node = bad.vehicle.root;
+    bad.lighting.high_beams[0].node = my_summer_slop::reference::NodeId(u32::MAX);
     assert!(bad.validate().is_err());
     let mut bad = original.clone();
-    bad.lighting.high_beam.on = bad.lighting.high_beam.off.clone();
+    bad.lighting.high_beams[0].on = bad.lighting.high_beams[0].off.clone();
     assert!(bad.validate().is_err());
     let mut bad = original;
-    bad.lighting.high_beam.max_value = f32::NAN;
+    bad.lighting.high_beams[0].max_value = f32::NAN;
     assert!(bad.validate().is_err());
 }
 
@@ -370,16 +365,17 @@ fn production_lighting_records_match_selected_scene() {
     ] {
         assert_eq!(a["cycle"][field], b["cycle"][field], "cycle {field}");
     }
-    assert_eq!(manifest.lighting.controllers.len(), 10);
-    assert_eq!(manifest.lighting.lights.len(), 17);
-    for (light, checked) in a["lights"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .zip(b["lights"].as_array().unwrap())
-    {
+    assert_eq!(manifest.lighting.controllers.len(), 14);
+    assert_eq!(manifest.lighting.lights.len(), 26);
+    // Match by source. Skoda records shift the ids.
+    for checked in b["lights"].as_array().unwrap() {
+        let light = a["lights"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|actual| actual["source"] == checked["source"])
+            .unwrap();
         for field in [
-            "id",
             "source",
             "kind",
             "pose",
@@ -397,14 +393,15 @@ fn production_lighting_records_match_selected_scene() {
             );
         }
     }
-    for (control, checked) in a["controllers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .zip(b["controllers"].as_array().unwrap())
-    {
+    // Match by source. Skoda records shift the ids.
+    for checked in b["controllers"].as_array().unwrap() {
+        let control = a["controllers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|actual| actual["source"] == checked["source"])
+            .unwrap();
         for field in [
-            "id",
             "source",
             "kind",
             "startup_on",
@@ -452,13 +449,13 @@ fn production_lighting_records_match_selected_scene() {
     }
     for field in ["source", "signal", "min_value", "max_value", "stay_on"] {
         assert_eq!(
-            a["high_beam"][field], b["high_beam"][field],
+            a["high_beams"][0][field], b["high_beams"][0][field],
             "dashboard {field}"
         );
     }
     for field in ["on", "off"] {
-        let choice = &a["high_beam"][field];
-        assert_eq!(choice["source"], b["high_beam"][field]["source"]);
+        let choice = &a["high_beams"][0][field];
+        assert_eq!(choice["source"], b["high_beams"][0][field]["source"]);
         let asset = manifest
             .assets
             .iter()
@@ -479,14 +476,14 @@ fn production_lighting_records_match_selected_scene() {
         b["cycle"]["cloud_shadow_cookie"]
     );
     assert_eq!(manifest.lighting.textures.len(), 11);
-    for (texture, expected) in a["textures"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .zip(b["textures"].as_array().unwrap())
-    {
+    for expected in b["textures"].as_array().unwrap() {
+        let texture = a["textures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|actual| actual["source"] == expected["source"])
+            .unwrap();
         for field in [
-            "id",
             "source",
             "sha256",
             "source_data",

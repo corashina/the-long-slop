@@ -6,7 +6,7 @@ use rapier3d::math::{Rotation, Vector};
 #[test]
 fn source_endpoints_and_reverse_speed() {
     let r = common::reference();
-    let refs = &r.instruments;
+    let refs = &r.vehicles[0].instruments;
     assert_eq!(needle_angle(&refs.needles[0], 0.), -64.);
     assert_eq!(needle_angle(&refs.needles[0], 160.), 64.);
     assert_eq!(needle_angle(&refs.needles[1], 10.), -30.);
@@ -28,7 +28,7 @@ fn source_endpoints_and_reverse_speed() {
 #[test]
 fn ignition_gates_fuel_temperature_and_lamps() {
     let r = common::reference();
-    let refs = &r.instruments;
+    let refs = &r.vehicles[0].instruments;
     let mut s = InstrumentState::new(refs);
     s.update(
         refs,
@@ -75,7 +75,7 @@ fn ignition_gates_fuel_temperature_and_lamps() {
 #[test]
 fn source_two_stage_smoothing() {
     let r = common::reference();
-    let refs = &r.instruments;
+    let refs = &r.vehicles[0].instruments;
     let mut s = InstrumentState::new(refs);
     s.update(
         refs,
@@ -99,7 +99,7 @@ fn reflected_parent_preserves_single_handedness_conversion() {
 #[test]
 fn odometer_rollover_repeat_sample_and_restart() {
     let r = common::reference();
-    let refs = &r.instruments;
+    let refs = &r.vehicles[0].instruments;
     let mut s = InstrumentState::new(refs);
     let sample = InstrumentSample {
         distance_m: 10000.,
@@ -118,9 +118,9 @@ fn odometer_rollover_repeat_sample_and_restart() {
 #[test]
 fn odometer_half_turn_follows_unity_positive_direction() {
     let r = common::reference();
-    let mut s = InstrumentState::new(&r.instruments);
+    let mut s = InstrumentState::new(&r.vehicles[0].instruments);
     s.update(
-        &r.instruments,
+        &r.vehicles[0].instruments,
         InstrumentSample {
             distance_m: 5000.,
             ..Default::default()
@@ -135,12 +135,12 @@ fn runtime_recovery_and_rebase_preserve_odometer() {
     let r = common::reference();
     let mut run = my_summer_slop::starting_area::GarageRuntime::new(&r).unwrap();
     run.started = true;
-    run.trip_m = 12345.;
-    let mut s = InstrumentState::new(&r.instruments);
+    run.vehicles[0].trip_m = 12345.;
+    let mut s = InstrumentState::new(&r.vehicles[0].instruments);
     s.update(
-        &r.instruments,
+        &r.vehicles[0].instruments,
         InstrumentSample {
-            distance_m: run.trip_m,
+            distance_m: run.vehicles[0].trip_m,
             ..Default::default()
         },
         1.,
@@ -149,25 +149,25 @@ fn runtime_recovery_and_rebase_preserve_odometer() {
     run.recover(&r);
     run.stream.rebase([600., 0., 900.], &mut run.physics);
     s.update(
-        &r.instruments,
+        &r.vehicles[0].instruments,
         InstrumentSample {
-            distance_m: run.trip_m,
+            distance_m: run.vehicles[0].trip_m,
             ..Default::default()
         },
         1.,
     );
     assert_eq!(s.digit_angles, angles);
-    assert_eq!(run.trip_m, 12345.);
+    assert_eq!(run.vehicles[0].trip_m, 12345.);
     run.restart(&r).unwrap();
-    s.reset(&r.instruments);
-    assert_eq!(run.trip_m, 0.);
+    s.reset(&r.vehicles[0].instruments);
+    assert_eq!(run.vehicles[0].trip_m, 0.);
     assert_eq!(s.digit_angles, [0.; 5]);
 }
 
 #[test]
 fn headlights_gate_high_beam_indicator_and_digit_illumination() {
     let mut r = common::reference();
-    let mut state = InstrumentState::new(&r.instruments);
+    let mut state = InstrumentState::new(&r.vehicles[0].instruments);
     for (headlights, ignition, high_beam, digits_lit) in [
         (0, true, false, false),
         (1, true, false, true),
@@ -177,7 +177,7 @@ fn headlights_gate_high_beam_indicator_and_digit_illumination() {
         (0, false, false, false),
     ] {
         state.update(
-            &r.instruments,
+            &r.vehicles[0].instruments,
             InstrumentSample {
                 headlights,
                 local_ignition: ignition,
@@ -188,9 +188,10 @@ fn headlights_gate_high_beam_indicator_and_digit_illumination() {
         assert_eq!(state.lamp_bits & 8 != 0, high_beam);
         assert_eq!(state.digits_lit, digits_lit);
     }
-    r.instruments.electronics_output = r.instruments.electronics_off_threshold;
+    r.vehicles[0].instruments.electronics_output =
+        r.vehicles[0].instruments.electronics_off_threshold;
     state.update(
-        &r.instruments,
+        &r.vehicles[0].instruments,
         InstrumentSample {
             headlights: 2,
             local_ignition: false,
@@ -200,7 +201,7 @@ fn headlights_gate_high_beam_indicator_and_digit_illumination() {
     );
     assert_eq!(state.lamp_bits & 8, 0);
     assert!(!state.digits_lit);
-    state.reset(&r.instruments);
+    state.reset(&r.vehicles[0].instruments);
     assert_eq!(state.lamp_bits, 0);
     assert!(!state.digits_lit);
 }
@@ -210,7 +211,7 @@ mod lighting_merge {
     #[test]
     fn high_beam_selects_checked_dashboard_materials() {
         let r = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
-        let lamp = &r.lighting.high_beam;
+        let lamp = &r.lighting.high_beams[0];
         assert_eq!(lamp.signal, "headlight2");
         let off = update_high_beam(lamp, false);
         let on = update_high_beam(lamp, true);

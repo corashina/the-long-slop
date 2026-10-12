@@ -43,6 +43,7 @@ struct Occupancy {
     id: SeatId,
     local_pose: Pose,
     yaw_limits: [f32; 2],
+    vehicle: usize,
     driver: bool,
 }
 
@@ -138,8 +139,8 @@ impl PlayerState {
         self.pitch = self.pitch.clamp(-89.0, 89.0);
         if let Some(seat) = self.occupancy {
             self.yaw = self.yaw.clamp(seat.yaw_limits[0], seat.yaw_limits[1]);
-            self.pose =
-                *physics.rapier().bodies[physics.chassis_handle()].position() * seat.local_pose;
+            self.pose = *physics.rapier().bodies[physics.chassis_handle(seat.vehicle)].position()
+                * seat.local_pose;
             physics.rapier_mut().bodies[self.body].set_next_kinematic_position(self.pose);
             return;
         }
@@ -303,9 +304,8 @@ impl PlayerState {
         let mut local_pose = to_rapier(pose);
         let center_offset = self.reference.camera_height - self.reference.standing_height * 0.5;
         local_pose.translation += local_pose.rotation * (Vector::Y * center_offset);
-        let seated_pose =
-            *physics.rapier().bodies[physics.chassis_handle()].position() * local_pose;
-        let chassis = physics.chassis_handle();
+        let chassis = physics.chassis_handle(seat.vehicle);
+        let seated_pose = *physics.rapier().bodies[chassis].position() * local_pose;
         let outside_vehicle = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
             collider.parent() != Some(chassis)
         };
@@ -331,6 +331,7 @@ impl PlayerState {
             id,
             local_pose,
             yaw_limits: seat.yaw_limits_degrees,
+            vehicle: seat.vehicle,
             driver: seat.driver,
         });
         self.pose = seated_pose;
@@ -428,9 +429,10 @@ impl PlayerState {
         let Some(candidate) = self.exit_pose(physics, limits) else {
             return false;
         };
+        let chassis = physics.chassis_handle(self.occupancy.unwrap().vehicle);
         self.pose = candidate;
         self.yaw = yaw_from_rotation(candidate.rotation);
-        self.vertical_velocity = physics.rapier().bodies[physics.chassis_handle()].linvel().y * 0.3;
+        self.vertical_velocity = physics.rapier().bodies[chassis].linvel().y * 0.3;
         self.occupancy = None;
         self.crouched = false;
         self.grounded = false;
@@ -444,6 +446,10 @@ impl PlayerState {
     }
     pub fn seat(&self) -> Option<SeatId> {
         self.occupancy.map(|seat| seat.id)
+    }
+    /// Returns the vehicle that owns the occupied seat.
+    pub fn seat_vehicle(&self) -> Option<usize> {
+        self.occupancy.map(|seat| seat.vehicle)
     }
     pub fn mode(&self) -> PlayerMode {
         if self.occupancy.is_some() {
@@ -511,7 +517,8 @@ impl PlayerState {
             walking_pose.translation = physics.rapier().bodies[self.body].position().translation;
         }
         let pose = self.occupancy.map_or(walking_pose, |seat| {
-            *physics.rapier().bodies[physics.chassis_handle()].position() * seat.local_pose
+            *physics.rapier().bodies[physics.chassis_handle(seat.vehicle)].position()
+                * seat.local_pose
         });
         from_rapier(pose)
     }

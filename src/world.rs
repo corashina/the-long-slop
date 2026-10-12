@@ -342,6 +342,8 @@ pub struct WorldStream {
     interiors: Vec<Bounds>,
     station_items: Vec<(i64, crate::reference::ItemId)>,
     vehicle_support: Vec<(ChunkKey, i64, ColliderHandle)>,
+    /// Reused list of the chunk cells that the vehicles need.
+    support_cells: Vec<(ChunkKey, i64)>,
 }
 
 impl WorldStream {
@@ -354,7 +356,8 @@ impl WorldStream {
             starting_area: None,
             interiors: Vec::new(),
             station_items: Vec::new(),
-            vehicle_support: Vec::with_capacity(3),
+            vehicle_support: Vec::with_capacity(6),
+            support_cells: Vec::with_capacity(6),
         }
     }
 
@@ -471,34 +474,43 @@ impl WorldStream {
         self.sync_vehicle_support(physics);
     }
 
+    /// Keeps terrain under every vehicle, also far from the streamed focus.
     fn sync_vehicle_support(&mut self, physics: &mut PhysicsWorld) {
-        let car = self.origin.absolute(physics.snapshot().pose.position);
-        let distance = -car[2];
-        let lateral = car[0] - road_sample(self.seed, distance).center[0];
-        let band = (lateral / LATERAL_BAND_WIDTH).round() as i64;
-        let center = ChunkKey((distance / CHUNK_LENGTH).floor() as i64);
-        let keys = [ChunkKey(center.0 - 1), center, ChunkKey(center.0 + 1)];
-        // One terrain cell covers the fixed car's full footprint.
-        let covered = |key: ChunkKey| {
-            self.chunks.iter().any(|chunk| {
-                chunk.data.key == key
-                    && (lateral - chunk.data.lateral_band as f64 * LATERAL_BAND_WIDTH).abs()
-                        < TERRAIN_HALF_WIDTH - 8.0
-            })
-        };
-        self.vehicle_support.retain(|&(key, old_band, handle)| {
-            if keys.contains(&key) && old_band == band && !covered(key) {
+        self.support_cells.clear();
+        for vehicle in 0..physics.vehicle_count() {
+            let car = self
+                .origin
+                .absolute(physics.snapshot(vehicle).pose.position);
+            let distance = -car[2];
+            let lateral = car[0] - road_sample(self.seed, distance).center[0];
+            let band = (lateral / LATERAL_BAND_WIDTH).round() as i64;
+            let center = (distance / CHUNK_LENGTH).floor() as i64;
+            for key in [center - 1, center, center + 1] {
+                // One terrain cell covers the fixed car's full footprint.
+                let covered = self.chunks.iter().any(|chunk| {
+                    chunk.data.key == ChunkKey(key)
+                        && (lateral - chunk.data.lateral_band as f64 * LATERAL_BAND_WIDTH).abs()
+                            < TERRAIN_HALF_WIDTH - 8.0
+                });
+                if !covered && !self.support_cells.contains(&(ChunkKey(key), band)) {
+                    self.support_cells.push((ChunkKey(key), band));
+                }
+            }
+        }
+        let cells = &self.support_cells;
+        self.vehicle_support.retain(|&(key, band, handle)| {
+            if cells.contains(&(key, band)) {
                 return true;
             }
             physics.remove_collider(handle);
             false
         });
-        for key in keys {
-            if covered(key)
-                || self
-                    .vehicle_support
-                    .iter()
-                    .any(|&(old_key, old_band, _)| old_key == key && old_band == band)
+        for index in 0..self.support_cells.len() {
+            let (key, band) = self.support_cells[index];
+            if self
+                .vehicle_support
+                .iter()
+                .any(|&(old_key, old_band, _)| old_key == key && old_band == band)
             {
                 continue;
             }

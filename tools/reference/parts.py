@@ -3,13 +3,13 @@ from .source import source_id, vector
 from .gltf import convert_point
 
 
-def recover_parts(source,nodes,components,item_nodes,node_readers,colliders,car_root,pointer_node,anchor,euler):
+def recover_parts(source,nodes,components,item_nodes,node_readers,colliders,car_roots,pointer_node,anchor,euler):
     def within(node,root):
         while node is not None:
             if node==root:return True
             node=nodes[node-1]['parent']
         return False
-    selected={node for node,group in components.items() if nodes[node-1]['active'] and within(node,car_root)}
+    selected={node for node,group in components.items() if nodes[node-1]['active'] and any(within(node,root) for root in car_roots)}
     part_nodes={node for node in selected if 'partscript' in components[node] and not {'wheelscript','gumiscript'}.intersection(components[node])}
     # Wheel slots and rim/tire assembly stay in the wheel module.
     wheel_covers={source.read(group['partscript'][0])['cover_CantCraftIfCovered']['m_PathID'] for node,group in components.items() if nodes[node-1]['active'] and 'wheelscript' in group}

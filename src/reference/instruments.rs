@@ -83,7 +83,7 @@ impl InstrumentReference {
     ) -> Result<(), ReferenceError> {
         require(
             self.needles.len() == 3 && self.lamps.len() == 4 && self.odometer.digits.len() == 5,
-            "Lada instruments",
+            "instrument counts",
         )?;
         ids(
             self.needles.iter().map(|n| &n.signal),

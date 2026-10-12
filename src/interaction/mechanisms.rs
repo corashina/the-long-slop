@@ -367,7 +367,7 @@ impl MechanismState {
                     c.turn_state + 1
                 };
                 self.control_action = Some(match &turn.action {
-                    TurnAction::ToggleHandbrake => ControlAction::ToggleHandbrake,
+                    TurnAction::ToggleHandbrake => ControlAction::ToggleHandbrake(item),
                     TurnAction::CycleHeadlights => ControlAction::CycleHeadlights,
                     TurnAction::InteriorLight => ControlAction::InteriorLight(c.turn_state),
                     TurnAction::ToggleHomeLight { source } => {
@@ -611,7 +611,8 @@ fn inverse_lerp(a: f32, b: f32, value: f32) -> f32 {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ControlAction {
-    ToggleHandbrake,
+    /// The item is the lever. Its body selects the vehicle.
+    ToggleHandbrake(ItemId),
     CycleHeadlights,
     InteriorLight(u8),
     ToggleHomeLight(SourceId),

@@ -1,6 +1,7 @@
 # My Summer Slop
 
 Prepare a fixed Lada 2101 in the starting garage. Drive onto the desert road.
+A source Skoda waits in the yard north of the garage. Read [vehicles](docs/vehicles.md).
 The home, car, and supplies come from installed Steam build 11140890.
 Rust, Bevy, and Rapier run the browser game through WebAssembly.
 
@@ -47,7 +48,7 @@ Startup requests contain only selected runtime assets.
 Use [export stages and verification commands](tools/reference/README.md) to access the library.
 Read [coverage and support limits](docs/research/2026-10-10-full-asset-audit.md) before using an asset.
 The library includes embedded Liberation Sans. The current shell uses self-hosted Liberation Sans and Arial.
-Development availability does not add vehicles, audio, animation playback, or other gameplay.
+Development availability does not add further vehicles, audio, animation playback, or other gameplay.
 
 ## Controls
 
@@ -84,6 +85,7 @@ Open carried containers before filling them at roadside pumps.
 Open containers spill when tilted. Pumps retain unlimited gasoline stock.
 The Lada starts with 0.5 L gasoline, 2.5 L oil, and 3.6 L water.
 Its capacities are 39 L fuel, 5 L oil, and 5 L coolant.
+The Skoda starts with the same fluids. Its capacities are 32 L fuel, 5 L oil, and 5 L coolant.
 
 Use Recover in the pause menu. Use Controls for bindings and Fullscreen.
 Aim at a tire and press F to dismount it. Release F to mount a held tire or rim.

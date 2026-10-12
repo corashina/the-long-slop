@@ -85,4 +85,4 @@ Reuse retained evidence and passed checks when their inputs remain unchanged.
 - Embedded-browser pointer lock limits continuous gameplay verification.
 - Logical GPU byte counts exclude driver memory and overhead.
 
-Dynamic vehicle mirrors, plate text, audio, survival, other vehicles, saves, multiplayer, and deployment remain outside scope.
+Dynamic vehicle mirrors, plate text, audio, survival, further vehicles, saves, multiplayer, and deployment remain outside scope.
