@@ -311,7 +311,7 @@ impl SurvivalState {
 
     pub fn output(&self) -> NeedsOutput {
         let age = (self.elapsed - self.stats_shown_at) as f32;
-        let opacity = if self.dead || age >= self.show_seconds {
+        let opacity = if age >= self.show_seconds {
             0.
         } else if age < self.hide_seconds {
             1.

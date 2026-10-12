@@ -138,6 +138,21 @@ fn death_does_not_heal() {
 }
 
 #[test]
+fn feedback_timer_continues_during_death() {
+    let mut r = common::reference().survival;
+    r.food_loss = 0.;
+    let mut state = SurvivalState::new(&r);
+    state.show_stats();
+    state.damage_instant(&r, r.initial.hp);
+    assert!(state.output().dead);
+    close(state.output().opacity, 1.);
+    state.advance(&r, 0., 20., 1.);
+    close(state.advance(&r, 4.5, 20., 1.).opacity, 0.5);
+    close(state.advance(&r, 0.5, 20., 1.).opacity, 0.);
+    assert!(!state.output().menu_due);
+}
+
+#[test]
 fn drinking_uses_all_six_source_fractions() {
     let mut r = common::reference().survival;
     r.initial.water = 1.;
