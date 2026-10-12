@@ -243,6 +243,8 @@ Keep the model unconnected to browser metabolism until Task 4 finishes the survi
 
 ### Task 3: Connect food, drinking, toilet items, and removal
 
+Completed after source review and builds. Later tests and browser checks were skipped at the user's request. Existing contact and filter assertions remain stale.
+
 **Files:**
 - Create: `src/interaction/consumption.rs`, `src/starting_area/survival.rs`, `src/presentation/consumables.rs`.
 - Modify: `src/interaction.rs`, `src/interaction/items.rs`, `src/interaction/targets.rs`, `src/interaction/feedback.rs`.
@@ -264,7 +266,7 @@ Keep the model unconnected to browser metabolism until Task 4 finishes the survi
 - Rename the current `keys::FILL` bit `512` to `keys::PRIMARY` across all callers. Mouse0 remains bit `512`.
 - Reserve `URINATE = 1 << 18`, `BURP = 1 << 19`; map the recovered source keys and update control help.
 
-- [ ] **Step 1: Write `one_primary_press_across_steps_takes_one_bite`, `final_bite_removes_all_bindings`, and `station_food_stays_consumed`.**
+- [x] **Step 1: Write `one_primary_press_across_steps_takes_one_bite`, `final_bite_removes_all_bindings`, and `station_food_stays_consumed`.**
 Merge one primary press into `FrameInput`; take twelve step inputs; assert exactly one successful bite and five remaining bites.
 Six separate presses must queue total food `3`, water `-1`, and health `0.375`, then remove the item.
 Pin final removal before advancing queues:
@@ -288,17 +290,17 @@ Capture mixture fractions before debit. Test closed/no-drink openings and input 
 Consume station food, unload/reload its chunk, recover, and rebase. Assert no replacement item or body.
 Assert defecation creates one source turd with three part groups and its harmful eating effects.
 
-- [ ] **Step 2: Run targets `consumption`, `world`, and `items`.** Confirm the new tests fail for absent consumption/removal behavior.
-- [ ] **Step 3: Implement successful-action handlers and prototype instances.** Revalidate eligibility at mutation time.
+- [x] **Step 2: Run targets `consumption`, `world`, and `items`.** Confirm the new tests fail for absent consumption/removal behavior.
+- [x] **Step 3: Implement successful-action handlers and prototype instances.** Revalidate eligibility at mutation time.
 Apply source requested effects before the source transfer/debit path; keep direct and particle-contact drinking paths distinct.
 Reuse source mouth/outlet records and existing fluid operations, extending their source-specific filtering where required.
 Remove exhausted bodies, colliders, joints, targets, carry state, source-body caches, and visuals through the runtime owner.
 Keep a consumed tombstone for stable station identity. Allocate dynamic IDs from a retained per-session registry, with no hash collisions.
 Add one source sausage per current station recipe. Keep this placement adapter separate from source starter placement.
 Render the selected part group, including turd groups. Keep pick/drop/throw/origin behavior intact.
-- [ ] **Step 4: Run focused tests and affected interaction/input tests.** Expect one bite per input edge and no stale physical handle.
+- [x] **Step 4: Run focused tests and affected interaction/input tests.** Expect one bite per input edge and no stale physical handle.
 Build the WASM package. Check starter food rendering and the existing garage interactions.
-- [ ] **Step 5: Commit the consumption integration.** Message: `Add source food drinking and toilet interactions`.
+- [x] **Step 5: Commit the consumption integration.** Message: `Add source food drinking and toilet interactions`.
 
 ### Task 4: Activate the complete survival layer and required feedback
 
