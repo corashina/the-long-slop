@@ -138,13 +138,13 @@ impl MirrorRecord {
         )?;
         require(self.mirrors.len() == 3, "three selected mirror captures")?;
         let expected = [
-            (66131, 40260, 43665, 28414, 39254),
-            (67237, 40324, 40735, 38060, 31061),
-            (70638, 40222, 44371, 32190, 26965),
+            (66131, 40260, 43665, 31962, 28414, 39254),
+            (67237, 40324, 40735, 33202, 38060, 31061),
+            (70638, 40222, 44371, 28868, 32190, 26965),
         ];
         let mut owners = HashSet::new();
         let mut cameras = HashSet::new();
-        for (m, (component, camera, surface, plane, camera_transform)) in
+        for (m, (component, camera, surface, screen, plane, camera_transform)) in
             self.mirrors.iter().zip(expected)
         {
             let label = format!("{}:{}", m.source.file, m.source.path_id);
@@ -166,7 +166,7 @@ impl MirrorRecord {
             )?;
             for (id, field, source) in [
                 (m.owner_node, "owner_node", None),
-                (m.surface_node, "surface_node", None),
+                (m.surface_node, "surface_node", Some(screen)),
                 (m.plane_node, "plane_node", Some(plane)),
                 (m.camera_node, "camera_node", Some(camera_transform)),
             ] {
@@ -233,7 +233,10 @@ impl MirrorRecord {
                     && m.live_material.source.path_id == 624
                     && m.disabled_material.source.file == "sharedassets0.assets"
                     && m.disabled_material.source.path_id == 116
-                    && descendant(m.surface_node, m.plane_node)
+                    && manifest
+                        .nodes
+                        .iter()
+                        .any(|n| n.id == m.surface_node && n.parent == Some(m.plane_node))
                     && [m.surface_node, m.plane_node, m.camera_node]
                         .into_iter()
                         .all(|node| descendant(node, m.owner_node))

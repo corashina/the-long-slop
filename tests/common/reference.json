@@ -4910,6 +4910,99 @@
           1
         ]
       }
+    },
+    {
+      "id": 129,
+      "source": {
+        "file": "level1",
+        "path_id": 31962
+      },
+      "name": "surface_node",
+      "hierarchy_path": "Fixture2/Mirror0/plane_node/surface_node",
+      "asset": 2,
+      "gltf_node": 65,
+      "parent": 123,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 130,
+      "source": {
+        "file": "level1",
+        "path_id": 33202
+      },
+      "name": "surface_node",
+      "hierarchy_path": "Fixture2/Mirror1/plane_node/surface_node",
+      "asset": 2,
+      "gltf_node": 66,
+      "parent": 125,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 131,
+      "source": {
+        "file": "level1",
+        "path_id": 28868
+      },
+      "name": "surface_node",
+      "hierarchy_path": "Fixture2/Mirror2/plane_node/surface_node",
+      "asset": 2,
+      "gltf_node": 67,
+      "parent": 127,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
     }
   ],
   "bodies": [
@@ -19143,7 +19236,7 @@
         },
         "owner": 1,
         "owner_node": 2,
-        "surface_node": 123,
+        "surface_node": 129,
         "surface_source": {
           "file": "level1",
           "path_id": 43665
@@ -19208,7 +19301,7 @@
         },
         "owner": 2,
         "owner_node": 2,
-        "surface_node": 125,
+        "surface_node": 130,
         "surface_source": {
           "file": "level1",
           "path_id": 40735
@@ -19273,7 +19366,7 @@
         },
         "owner": 3,
         "owner_node": 2,
-        "surface_node": 127,
+        "surface_node": 131,
         "surface_source": {
           "file": "level1",
           "path_id": 44371

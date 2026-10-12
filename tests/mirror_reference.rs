@@ -15,6 +15,36 @@ fn mirror_contract_rejects_bad_inputs() {
     }
 }
 #[test]
+fn mirror_contract_rejects_wrong_surface_nodes() {
+    let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    let mut plane_as_screen = original.clone();
+    plane_as_screen.mirrors.mirrors[0].surface_node = plane_as_screen.mirrors.mirrors[0].plane_node;
+    let error = plane_as_screen.validate().unwrap_err().to_string();
+    assert!(error.contains("surface_node"), "{error}");
+
+    let mut wrong_sibling = original.clone();
+    let screen = wrong_sibling.mirrors.mirrors[0].surface_node;
+    let mut sibling = wrong_sibling
+        .nodes
+        .iter()
+        .find(|node| node.id == screen)
+        .unwrap()
+        .clone();
+    sibling.id.0 = wrong_sibling
+        .nodes
+        .iter()
+        .map(|node| node.id.0)
+        .max()
+        .unwrap()
+        + 1;
+    sibling.source.path_id = 999_999;
+    wrong_sibling.mirrors.mirrors[0].surface_node = sibling.id;
+    wrong_sibling.nodes.push(sibling);
+    let error = wrong_sibling.validate().unwrap_err().to_string();
+    assert!(error.contains("surface_node"), "{error}");
+}
+
+#[test]
 fn obsolete_manifest_requires_fresh_export() {
     let mut value: serde_json::Value =
         serde_json::from_slice(include_bytes!("common/reference.json")).unwrap();

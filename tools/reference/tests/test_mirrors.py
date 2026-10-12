@@ -40,6 +40,13 @@ class MirrorRecoveryTests(unittest.TestCase):
         self.assertEqual([m['surface_source']['path_id'] for m in result['mirrors']],[43665,40735,44371])
         by_id={n['id']:n['source']['path_id'] for n in self.nodes}
         self.assertEqual([by_id[m['plane_node']] for m in result['mirrors']],[28414,38060,32190])
+        self.assertEqual([by_id[m['surface_node']] for m in result['mirrors']],[31962,33202,28868])
+        for mirror in result['mirrors']:
+            screen=self.source.get('level1',by_id[mirror['surface_node']])
+            self.assertEqual(self.source.read(screen)['m_Father']['m_PathID'],by_id[mirror['plane_node']])
+            renderer=self.source.get('level1',mirror['surface_source']['path_id'])
+            game_object=self.source.resolve(renderer,self.source.read(renderer)['m_GameObject'])
+            self.assertEqual(self.source.transform_for(game_object).path_id,screen.path_id)
         self.assertEqual([by_id[m['camera_node']] for m in result['mirrors']],[39254,31061,26965])
         self.assertEqual(result['target']['extent'],[256,256]); self.assertEqual(result['target']['samples'],1)
         self.assertEqual(result['rules']['fov_bounds_degrees'],[10,55]); self.assertEqual(result['rules']['distance_bounds_meters'],[0,4])
