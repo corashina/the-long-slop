@@ -222,12 +222,12 @@ impl ItemStore {
             },
             condition: 1.0,
             temperature: None,
-            fluid: Some(FluidContainer {
-                capacity_liters: 1000.0,
-                mixture: crate::fluids::FluidMixture {
+            fluid: Some(FluidContainer::new(
+                1000.0,
+                crate::fluids::FluidMixture {
                     quantities_liters: [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 },
-            }),
+            )),
             food: None,
             removed: false,
         });

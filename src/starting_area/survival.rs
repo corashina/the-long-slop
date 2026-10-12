@@ -197,6 +197,7 @@ impl GarageRuntime {
         let after = self.survival.pending();
         contact_drink_transfer(
             &mut self.survival.bladder,
+            self.area.items.get(source).unwrap().fluid.as_ref().unwrap(),
             fractions,
             poured_liters,
             filter_water,

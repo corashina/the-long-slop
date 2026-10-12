@@ -55,12 +55,12 @@ impl SurvivalState {
     pub fn new(reference: &SurvivalReference) -> Self {
         Self {
             needs: reference.initial,
-            bladder: FluidContainer {
-                capacity_liters: reference.bladder_capacity_liters,
-                mixture: FluidMixture {
+            bladder: FluidContainer::new(
+                reference.bladder_capacity_liters,
+                FluidMixture {
                     quantities_liters: reference.initial_bladder,
                 },
-            },
+            ),
             pending: reference.initial_queue,
             maximum: reference.maximum,
             show_seconds: reference.food_stat_show_time,
@@ -348,6 +348,7 @@ impl SurvivalState {
         let addition = (amount * reference.water_to_piss_ratio)
             .min((self.bladder.capacity_liters - self.bladder.mixture.total()).max(0.));
         self.bladder.mixture.quantities_liters[3] += addition;
+        self.bladder.record_type(3);
     }
 
     fn change_without_mix(&mut self, amount: f32) {
