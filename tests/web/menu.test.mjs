@@ -5,7 +5,7 @@ import {MenuState,ACTIONS,createMenu} from '../../web/menu.js';
 import {createSaveSession} from '../../web/save-session.js';
 
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
-async function savedRecord(payload={schema_version:1}){const json=JSON.stringify(payload),hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(json));return {version:1,payload:json,checksum:Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('')};}
+async function savedRecord(payload={schema_version:1}){const json=JSON.stringify(payload),hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(json));return {version:1,payload,checksum:Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('')};}
 function setup({record=null,readError,writeError,prepareError,delay,captureDelay,readDelay,started=true}={}){
  const nodes=new Map(),calls={capture:0,commit:0,pointerLock:0,actions:[],write:0};
  function node(selector){if(!nodes.has(selector))nodes.set(selector,{style:{},hidden:false,disabled:false,textContent:'',classList:{toggle(){}},listeners:{},addEventListener(name,handler){this.listeners[name]=handler;},querySelectorAll(){return [];},focus(){},async click(){if(!this.disabled)return this.listeners.click?.();}});return nodes.get(selector);}
@@ -15,7 +15,7 @@ function setup({record=null,readError,writeError,prepareError,delay,captureDelay
  const layout={canvas:{resolution:[1024,768],mode:0},ancestry:[],font:'Arial',font_size:18,color:[1,1,1,1],sprite:null};
  const ui={layouts:new Proxy({},{get:()=>layout}),urls:[],layoutUrls:{},pairUrls:[{background:'art',frame:'frame'}]};
  const storage={async read(){if(readDelay)await readDelay.promise;if(readError)throw Error(readError);return record;},async write(payload){calls.write++;if(writeError)throw Error(writeError);record=await savedRecord(payload);}};
- const runtime={async capture(){calls.capture++;if(captureDelay)await captureDelay.promise;return {schema_version:1};},async prepare(){if(prepareError)throw Error(prepareError);return 7;},async prepareNewGame(){if(delay)await delay.promise;return 8;},async commit(){calls.commit++;},discard(){}};
+ const runtime={async capture(){calls.capture++;if(captureDelay)await captureDelay.promise;return {schema_version:1};},async prepare(){if(prepareError)throw Error(prepareError);return 7;},async prepareNewGame(){if(delay)await delay.promise;return 8;},async commit(token,onDispatch){onDispatch();calls.commit++;},discard(){}};
  const saveSession=createSaveSession({storage,runtime});
  const menu=createMenu({canvas,ui,saveSession,clearInput(){},queueAction:a=>calls.actions.push(a)});menu.ready();if(started){menu.model.started=true;menu.model.pause();menu.sync(true,true,0);}
  return {menu,storage,calls,node};

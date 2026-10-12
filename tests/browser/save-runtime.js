@@ -44,10 +44,10 @@ function reconstructed(actual,expected){
 }
 
 const frame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-let action=0,fixtureSequence=0,fixtureQueue=[],fixturePending=new Map(),commitCalls=0,discardedCandidate,delayResult=null;
+let action=0,fixtureSequence=0,fixtureQueue=[],fixturePending=new Map(),commitCalls=0,discardedCandidate,delayResult=null,holdDispatch=false,holdCommitQueue=null,holdCommitResult=null;
 const actions=window.gameActions,hasRequest=window.gameHasSaveRequest,takeRequest=window.gameSaveRequest,result=window.gameSaveResult;
 window.gameActions=()=>{const value=actions()|action;action=0;return value;};
-window.gameHasSaveRequest=()=>fixtureQueue.length!==0||hasRequest();
+window.gameHasSaveRequest=()=>!holdDispatch&&(fixtureQueue.length!==0||hasRequest());
 window.gameSaveRequest=()=>{
  const text=fixtureQueue.length?JSON.stringify(fixtureQueue.shift()):takeRequest();
  const request=JSON.parse(text);
@@ -56,6 +56,8 @@ window.gameSaveRequest=()=>{
  return text;
 };
 window.gameSaveResult=(id,kind,payload,error)=>{
+ if(holdCommitQueue&&kind==='PrepareNewGame'&&!error){holdDispatch=true;result(id,kind,payload,error);holdCommitQueue(JSON.parse(payload));holdCommitQueue=null;return;}
+ if(holdCommitResult&&kind==='Commit'){holdCommitResult([id,kind,payload,error]);holdCommitResult=null;return;}
  if(fixturePending.has(id)){
   const {resolve,reject}=fixturePending.get(id);fixturePending.delete(id);
   error?reject(Error(error)):resolve(payload?JSON.parse(payload):undefined);return;
@@ -67,9 +69,12 @@ function fixture(kind){const id=0xf0000000+(++fixtureSequence);return new Promis
 function state(){const s=window.gameState;return {camera:s.camera,origin:[s.originX,s.originY,s.originZ]};}
 async function rejects(work,path){let error;try{await work();}catch(value){error=value;}assert(error,'Expected rejection.');if(path)assert(error.message.includes(path),'Missing asset path absent: '+error.message);}
 async function continueCheck(){
- const before=window.gameState.totalSteps;action=4;await frame();await frame();
- assert(!window.gameState.paused&&window.gameState.totalSteps>before,'Continue did not resume simulation.');
- action=2;await frame();assert(window.gameState.paused,'Pause did not stop simulation.');
+ const before=window.gameState.totalSteps,deadline=performance.now()+10000;action=4;
+ // Continue clears the step clock and skips elapsed time on its first runtime frame.
+ while(window.gameState.paused||window.gameState.totalSteps<=before){await frame();assert(performance.now()<deadline,'Continue did not resume simulation: '+JSON.stringify({before,steps:window.gameState.totalSteps,paused:window.gameState.paused,started:window.gameState.started}));}
+ assert(window.gameState.started&&!window.gameState.paused,'Continue did not retain the active session.');
+ action=2;while(!window.gameState.paused){await frame();assert(performance.now()<deadline,'Pause did not stop simulation.');}
+ assert(window.gameState.started&&window.gameState.paused,'Pause did not retain the active session.');
  log('PASS usable_continue');
 }
 async function roundtrip(){
@@ -112,6 +117,35 @@ if(!document.querySelector('#new-game').disabled)fixtureReady();
 for(const [button,work] of [[buttons[0],checks],[buttons[1],continueCheck],[buttons[2],roundtrip],[buttons[3],async()=>{await roundtrip();await missingHandleCheck();}]])button.addEventListener('click',()=>{buttons.forEach(b=>b.disabled=true);work().catch(error=>log('FAIL '+error.stack)).finally(enable);});
 import {createSaveStorage,verifyRecord} from '../../web/save-storage.js';
 const storage=createSaveStorage(),session=createSaveSession({runtime,storage});
+async function lifecycleChecks(){
+ await session.newGame();await frame();
+ for(const name of ['save','newGame','load']){
+  action=4;await frame();await frame();assert(!window.gameState.paused,'Continue failed before '+name);
+  action=2;await session[name]();await frame();assert(window.gameState.paused,'Same-frame '+name+' resumed simulation.');
+  log('PASS same_frame_pause_'+name);
+ }
+ const before=normalize(await runtime.capture()),presentation=state(),commits=commitCalls,states=[];
+ const controlled=createSaveSession({runtime,storage,onStatus:s=>states.push([s.state,controlled.pending])});
+ const queued=new Promise(resolve=>{holdCommitQueue=resolve;});
+ const pending=controlled.newGame(),candidate=await queued;
+ controlled.cancel();assert(!controlled.pending,'Queued Commit did not cancel.');
+ const next=controlled.save();assert(controlled.pending,'Next Save did not start.');holdDispatch=false;
+ await pending;await next;await frame();
+ equal(normalize(await runtime.capture()),before,'Canceled queued Commit changed the runtime.');equal(state(),presentation,'Canceled queued Commit changed presentation.');
+ assert(commitCalls===commits,'Canceled queued Commit dispatched.');assert(discardedCandidate===candidate,'Canceled candidate was not discarded.');
+ equal(states,[['pending',true],['canceled',false],['pending',true],['success',false]],'Cancel status order changed.');
+ log('PASS queued_commit_cancel_preserves_runtime_and_next_operation');
+ const dispatched=new Promise(resolve=>{holdCommitResult=resolve;}),replacement=controlled.newGame(),response=await dispatched;
+ controlled.cancel();assert(controlled.pending,'Dispatched Commit lost pending state.');
+ assert(states.at(-1)[0]==='pending','Dispatched Commit reported canceled.');
+ result(...response);await replacement;
+ assert(!controlled.pending&&states.at(-1)[0]==='success','Dispatched Commit lost completion.');
+ log('PASS dispatched_commit_preserves_completion');await continueCheck();
+}
+parentDocument.querySelector('#lifecycle').addEventListener('click',async()=>{
+ const button=parentDocument.querySelector('#lifecycle');button.disabled=true;
+ try{await lifecycleChecks();}catch(error){log('FAIL '+error.stack);}finally{holdDispatch=false;holdCommitQueue=null;holdCommitResult=null;button.disabled=false;}
+});
 const proofKey='tld-assembled-save-proof';
 const physicalButtons=[...parentDocument.querySelectorAll('[data-physical]')];
 let heldKeys=0,pressedKeys=0,releasedKeys=0;
@@ -221,10 +255,10 @@ async function activeFailureChecks(){
  await session.newGame();await frame();await session.save();
  const original=await storage.read(),before=normalize(await runtime.capture()),presentation=state();
  const preserved=async(label,work)=>{await rejects(work);equal(normalize(await runtime.capture()),before,label+' changed active state.');equal(state(),presentation,label+' changed camera/origin.');log('PASS active_session_preserved_'+label);};
- await rawRecord({...original,payload:'pending replacement'},true);equal(await storage.read(),original,'Abort changed slot.');equal(normalize(await runtime.capture()),before,'Abort changed runtime.');log('PASS abort_preserves_slot_and_active_session');
- await rawRecord({...original,payload:original.payload+' '});const corrupt=await storage.read();await preserved('corrupt',()=>session.load());equal(await storage.read(),corrupt,'Corrupt load changed record.');
+ await rawRecord({...original,payload:{...original.payload,saved_at:'pending replacement'}},true);equal(await storage.read(),original,'Abort changed slot.');equal(normalize(await runtime.capture()),before,'Abort changed runtime.');log('PASS abort_preserves_slot_and_active_session');
+ await rawRecord({...original,payload:{...original.payload,saved_at:'changed'}});const corrupt=await storage.read();await preserved('corrupt',()=>session.load());equal(await storage.read(),corrupt,'Corrupt load changed record.');
  await rawRecord(original);
- const source=JSON.parse(original.payload);source.source.manifest_sha256='0'.repeat(64);await storage.write(source);const incompatible=await storage.read();await preserved('source_mismatch',()=>session.load());equal(await storage.read(),incompatible,'Source mismatch changed record.');
+ const source=structuredClone(original.payload);source.source.manifest_sha256='0'.repeat(64);await storage.write(source);const incompatible=await storage.read();await preserved('source_mismatch',()=>session.load());equal(await storage.read(),incompatible,'Source mismatch changed record.');
  await rawRecord(original);
  const unavailable=createSaveSession({runtime,storage:createSaveStorage({indexedDB:null})});await preserved('storage_unavailable',()=>unavailable.save());equal(await storage.read(),original,'Storage failure changed slot.');
  const path=await fixture('FixtureRemoveAsset');try{await preserved('missing_asset',()=>session.load());equal(await storage.read(),original,'Missing asset changed slot.');}finally{await fixture('FixtureRestoreAsset');}
@@ -232,7 +266,7 @@ async function activeFailureChecks(){
 }
 for(const [id,work] of [['stored-release',async()=>{await session.load();await frame();assert((await runtime.capture()).player.carry,'Saved item is not held.');await releaseHeld();assert((await runtime.capture()).player.carry===null,'Normal grab input did not drop restored item.');log('PASS restored_carry_normal_drop');}],['original-carry',async()=>{await session.newGame();await frame();await inputSteps(0,120);await fixture('FixtureDetachAndCarry');const before=await topology(),saved=await runtime.capture();await inputSteps(0,12);const after=await topology();log('ORIGINAL_CARRY '+JSON.stringify({before,after,player:saved.player,heldBody:saved.bodies.find(b=>JSON.stringify(b.identity.root)===JSON.stringify(saved.player.carry?.item))}));assert(after.carryJoints===1&&after.held!==null,'Original carry also drops before any save/load.');log('PASS original_carry_survives_resume');}],['inspect-topology',async()=>log('TOPOLOGY '+JSON.stringify(await fixture('FixtureInspect')))],['drive-save',driveSave],['interaction-save',interactionSave],['active-failures',activeFailureChecks]])parentDocument.querySelector('#'+id).addEventListener('click',()=>{physicalButtons.forEach(b=>b.disabled=true);work().catch(e=>log('FAIL '+e.stack)).finally(()=>physicalButtons.forEach(b=>b.disabled=!fixtureEnabled));});
 const previousFixtureReady=fixtureReady;
-fixtureReady=async()=>{await previousFixtureReady();physicalButtons.forEach(b=>b.disabled=!fixtureEnabled);parentDocument.querySelector('#manual-reload').disabled=false;await resumeReloadProof().catch(e=>log('FAIL '+e.stack));};
+fixtureReady=async()=>{await previousFixtureReady();physicalButtons.forEach(b=>b.disabled=!fixtureEnabled);parentDocument.querySelector('#manual-reload').disabled=false;parentDocument.querySelector('#lifecycle').disabled=false;await resumeReloadProof().catch(e=>log('FAIL '+e.stack));};
 parentDocument.querySelector('#manual-reload').addEventListener('click',async()=>{
  const button=parentDocument.querySelector('#manual-reload');button.disabled=true;
  try{

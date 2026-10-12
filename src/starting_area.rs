@@ -1057,6 +1057,9 @@ impl GarageRuntime {
 
     pub fn clear_input(&mut self) {
         self.steering.clear();
+        self.ignition_held = false;
+        self.engine.clear_input();
+        self.engine_output.starter = false;
         self.area.interaction.cancel_input();
     }
 

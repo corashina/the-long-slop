@@ -11,11 +11,10 @@ export async function manifestStamp(manifestBytes,reference,crypto=globalThis.cr
  return {app_id:reference.app_id,build_id:reference.build_id,manifest_sha256:await sha256(manifestBytes,crypto),source_hashes:reference.source_hashes.map(({file,sha256})=>({file,sha256}))};
 }
 export async function verifyRecord(record,crypto=globalThis.crypto){
- if(!record||record.version!==VERSION||typeof record.payload!=='string'||typeof record.checksum!=='string')throw new Error('Invalid save record.');
- if(await sha256(encoder.encode(record.payload),crypto)!==record.checksum)throw new Error('Save checksum does not match.');
- const payload=JSON.parse(record.payload);
- if(!payload||typeof payload!=='object'||Array.isArray(payload))throw new Error('Invalid save payload.');
- return payload;
+ if(!record||record.version!==VERSION||!record.payload||typeof record.payload!=='object'||Array.isArray(record.payload)||typeof record.checksum!=='string')throw new Error('Invalid save record.');
+ const json=JSON.stringify(record.payload),checksum=record.checksum;
+ if(await sha256(encoder.encode(json),crypto)!==checksum)throw new Error('Save checksum does not match.');
+ return JSON.parse(json);
 }
 export function createSaveStorage({indexedDB=globalThis.indexedDB,crypto=globalThis.crypto}={}){
  let connection=null,opening=null,closed=false;
@@ -74,10 +73,13 @@ export function createSaveStorage({indexedDB=globalThis.indexedDB,crypto=globalT
   async read(){return transaction(await open(),'readonly');},
   async write(payload,{signal}={}){
    checkSignal(signal);
-   // Keep Rust field order. Hash the exact stored JSON before opening a transaction.
+   if(!payload||typeof payload!=='object'||Array.isArray(payload))throw new Error('Invalid save payload.');
+   // Detach the stored object before hashing. Keep Rust field order in both copies.
    const json=JSON.stringify(payload);
    if(typeof json!=='string')throw new Error('Invalid save payload.');
-   const record={version:VERSION,payload:json,checksum:await sha256(encoder.encode(json),crypto)};
+   const frozen=JSON.parse(json);
+   if(!frozen||typeof frozen!=='object'||Array.isArray(frozen))throw new Error('Invalid save payload.');
+   const record={version:VERSION,payload:frozen,checksum:await sha256(encoder.encode(json),crypto)};
    checkSignal(signal);
    const db=await open();
    checkSignal(signal);

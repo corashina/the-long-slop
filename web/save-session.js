@@ -25,8 +25,8 @@ export function createSaveSession({storage,runtime,onStatus=()=>{}}){
  async function prepare(operation,build){
   const token=await build();
   if(!current(operation)){runtime.discard(token);return;}
-  operation.candidate=token;operation.committing=true;
-  await runtime.commit(token);
+  operation.candidate=token;
+  await runtime.commit(token,()=>{operation.committing=true;});
   operation.candidate=null;
  }
  return {
@@ -50,10 +50,10 @@ export function createSaveSession({storage,runtime,onStatus=()=>{}}){
   });},
   newGame(){return run('newGame',operation=>prepare(operation,()=>runtime.prepareNewGame()));},
   cancel(){
-   if(!active)return;
+   if(!active||active.committing)return;
    const operation=active;active=null;sequence++;
    operation.controller.abort();
-   if(operation.candidate!==null&&!operation.committing){runtime.discard(operation.candidate);operation.candidate=null;}
+   if(operation.candidate!==null){runtime.discard(operation.candidate);operation.candidate=null;}
    onStatus({operation:operation.name,state:'canceled'});
   }
  };

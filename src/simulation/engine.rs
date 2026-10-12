@@ -139,6 +139,12 @@ pub struct EngineState {
 }
 
 impl EngineState {
+    pub fn clear_input(&mut self) {
+        self.ignition_hold_seconds = 0.;
+        self.last_ignition_held = false;
+        self.starter = false;
+        self.last_output.starter = false;
+    }
     pub fn running(&self) -> bool {
         self.elapsed - self.last_run_time < RUN_GRACE_SECONDS
     }
@@ -165,9 +171,7 @@ impl EngineState {
         self.random_start = saved.random_start;
         self.supplied_fuel = saved.supplied_fuel;
         self.fan_on = saved.fan_on;
-        self.ignition_hold_seconds = 0.;
-        self.last_ignition_held = false;
-        self.starter = false;
+        self.clear_input();
         self.last_output = EngineOutput {
             ignition: self.ignition,
             running: self.running(),

@@ -19,10 +19,11 @@ async function storageChecks(){
  await removeDatabase();const storage=createSaveStorage({indexedDB,crypto});let db;
  try{
   await storage.write(snapshotA);const recordA=await storage.read();
-  await pass('stored_property_order_and_checksum',async()=>{assert(recordA.payload===JSON.stringify(snapshotA),'Stored property order changed.');equal(await verifyRecord(recordA,crypto),snapshotA);});
+  await pass('stored_object_property_order_and_checksum',async()=>{assert(recordA.payload&&typeof recordA.payload==='object'&&!Array.isArray(recordA.payload),'Payload is not an object.');assert(JSON.stringify(recordA.payload)===JSON.stringify(snapshotA),'Stored property order changed.');equal(await verifyRecord(recordA,crypto),snapshotA);});
   db=await open();
-  await pass('aborted_write_keeps_previous_record',async()=>{await replace(db,{...recordA,payload:'B'},true);equal(await storage.read(),recordA);});
-  await pass('corrupt_record_rejected',async()=>{await replace(db,{...recordA,payload:recordA.payload+' '});let rejected=false;try{await verifyRecord(await storage.read(),crypto);}catch(error){rejected=/checksum/.test(error.message);}assert(rejected,'Corrupt record passed verification.');await storage.write(snapshotA);});
+  await pass('aborted_write_keeps_previous_record',async()=>{await replace(db,{...recordA,payload:{...snapshotA,saved_at:'B'}},true);equal(await storage.read(),recordA);});
+  await pass('corrupt_record_rejected',async()=>{await replace(db,{...recordA,payload:{...recordA.payload,saved_at:'changed'}});let rejected=false;try{await verifyRecord(await storage.read(),crypto);}catch(error){rejected=/checksum/.test(error.message);}assert(rejected,'Corrupt record passed verification.');await storage.write(snapshotA);});
+  await pass('string_payload_rejected',async()=>{await replace(db,{...recordA,payload:JSON.stringify(snapshotA)});let rejected=false;try{await verifyRecord(await storage.read(),crypto);}catch(error){rejected=/record/.test(error.message);}assert(rejected,'String payload passed verification.');await storage.write(snapshotA);});
   await pass('normalize_preserves_absolute_coordinates',async()=>{const a=structuredClone(snapshotA),b=structuredClone(snapshotA);a.items=[{instance:instance('2'),pose:{position:[1048577.25,0,0]}},{instance:instance('1'),pose:{position:[-4096.5,0,0]}}];b.items=a.items.toReversed();b.saved_at='B';equal(normalizeSnapshot(a),normalizeSnapshot(b));assert(normalizeSnapshot(a).player.pose.position[0]===1048577.25,'Coordinates changed.');equal(a.items[0].instance,instance('2'));});
  }finally{db?.close();storage.close();}
  log('Storage checks complete.');
@@ -37,7 +38,7 @@ async function interruptedWrite(child){
  try{
   const ready=helperMessage('interrupt_ready');channel.postMessage({type:'probe'});await ready;
   await storage.write(snapshotA);const recordA=await storage.read();
-  const pending=helperMessage('write_pending');channel.postMessage({type:'start_interruption',record:{...recordA,payload:'incomplete B'}});await pending;
+  const pending=helperMessage('write_pending');channel.postMessage({type:'start_interruption',record:{...recordA,payload:{...snapshotA,saved_at:'incomplete B'}}});await pending;
   assert(child,'Open the interruption tab from this button.');child.close();
   await pass('interrupted_page_reads_complete_record',async()=>equal(await storage.read(),recordA));
  }finally{storage.close();child?.close();}

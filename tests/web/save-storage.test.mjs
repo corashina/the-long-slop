@@ -16,9 +16,21 @@ async function connect(b){while(!b.open.onsuccess)await tick();b.open.result=b.d
 
 test('record_checksum_rejects_corruption_and_preserves_property_order',async()=>{
  const b=boundary();const promise=b.storage.write(payload);await connect(b);b.request.onsuccess?.();b.tx.oncomplete();await promise;
- assert.equal(b.tx.record.payload,JSON.stringify(payload));assert.deepEqual(await verifyRecord(b.tx.record,crypto),payload);
- await assert.rejects(verifyRecord({...b.tx.record,payload:b.tx.record.payload+' '},crypto),/checksum/i);
+ assert.equal(typeof b.tx.record.payload,'object');assert.equal(JSON.stringify(b.tx.record.payload),JSON.stringify(payload));assert.deepEqual(await verifyRecord(b.tx.record,crypto),payload);
+ await assert.rejects(verifyRecord({...b.tx.record,payload:{...payload,saved_at:'changed'}},crypto),/checksum/i);
+ await assert.rejects(verifyRecord({...b.tx.record,payload:Object.fromEntries(Object.entries(payload).reverse())},crypto),/checksum/i);
+ await assert.rejects(verifyRecord({...b.tx.record,payload:JSON.stringify(payload)},crypto),/record/i);
  await assert.rejects(verifyRecord({...b.tx.record,version:2},crypto),/record/i);
+});
+test('write_freezes_object_before_delayed_hash_and_verify_freezes_before_hash',async()=>{
+ const b=boundary();let finish;
+ const delayedCrypto={subtle:{digest:(...args)=>new Promise(resolve=>{finish=()=>crypto.subtle.digest(...args).then(resolve);})}};
+ const storage=createSaveStorage({indexedDB:b.indexedDB,crypto:delayedCrypto});
+ const original=structuredClone(payload),mutable=structuredClone(payload),write=storage.write(mutable);
+ mutable.world.seed='changed';await finish();await connect(b);b.tx.oncomplete();await write;
+ assert.equal(JSON.stringify(b.tx.record.payload),JSON.stringify(original));
+ const verification=verifyRecord(b.tx.record,delayedCrypto);b.tx.record.payload.world.seed='changed again';await finish();
+ assert.deepEqual(await verification,original);
 });
 test('manifest_stamp_hashes_original_bytes_and_copies_reference_fields',async()=>{
  const bytes=new TextEncoder().encode('{ "build_id":11140890 }');

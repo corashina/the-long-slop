@@ -117,10 +117,10 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
             Update,
             (
                 check_ready,
+                read_input,
+                save::dispatch,
                 presentation::lighting::bind_lighting,
                 presentation::lighting::lighting_readiness,
-                save::dispatch,
-                read_input,
                 advance_physics,
                 sync_world,
                 sync_imported,

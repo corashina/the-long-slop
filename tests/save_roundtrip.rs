@@ -134,6 +134,68 @@ fn assert_logical_equal(a: &SaveSnapshot, b: &SaveSnapshot) {
     );
 }
 #[test]
+fn pause_save_continue_clears_short_ignition_hold() {
+    starter_boundary(1, false);
+}
+#[test]
+fn pause_save_continue_clears_engaged_starter() {
+    starter_boundary(120, true);
+}
+fn starter_boundary(steps: usize, engaged: bool) {
+    use my_summer_slop::simulation::keys;
+    let r = fixture();
+    let mut original = GarageRuntime::new(&r).unwrap();
+    original.started = true;
+    let seat = r.seats.iter().find(|s| s.driver).unwrap();
+    assert!(original.area.player.enter(
+        seat.id,
+        my_summer_slop::vehicle::VehiclePose {
+            position: [0., 1., 0.],
+            rotation: [0., 0., 0., 1.]
+        },
+        &mut original.physics
+    ));
+    for step in 0..steps {
+        original.step(
+            &r,
+            FrameInput {
+                held: keys::IGNITION,
+                pressed: if step == 0 { keys::IGNITION } else { 0 },
+                ..Default::default()
+            },
+        );
+    }
+    assert_eq!(original.engine_output.starter, engaged);
+    original.paused = true;
+    let before = capture(&original, &r);
+    original.clear_input();
+    let saved = capture(&original, &r);
+    assert_eq!(saved.vehicles[0].engine, before.vehicles[0].engine);
+    assert_eq!(saved.progress, before.progress);
+    assert_eq!(saved.player.recoil_velocity, before.player.recoil_velocity);
+    assert_eq!(saved.items, before.items);
+    assert!(
+        !original.engine_output.starter,
+        "cached starter remains engaged"
+    );
+    let mut loaded = GarageRuntime::from_save(&r, &stamp(&r), &saved).unwrap();
+    assert_eq!(original.engine.capture_save(), loaded.engine.capture_save());
+    original.clear_input();
+    loaded.clear_input();
+    original.paused = false;
+    loaded.paused = false;
+    original.step(&r, FrameInput::default());
+    loaded.step(&r, FrameInput::default());
+    assert_eq!(
+        original.engine.ignition, saved.vehicles[0].engine.ignition,
+        "neutral input released a canceled short hold"
+    );
+    assert_eq!(original.engine.ignition, loaded.engine.ignition);
+    assert!(!original.engine_output.starter);
+    assert!(!loaded.engine_output.starter);
+    assert_eq!(original.attempts, loaded.attempts);
+}
+#[test]
 fn driven_rebased_roundtrip_preserves_logic_and_resumes() {
     let mut r = fixture();
     r.engine.start_chance = 1.;

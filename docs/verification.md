@@ -1,5 +1,100 @@
 # Verification record
 
+## Save lifecycle review fixes: 2026-10-12
+
+The fix range starts at `028bc222f0609f1e45923b25b3ec2cf0cd92ecd0` on `codex/save-load`.
+The frame reads lifecycle input before save dispatch. Dispatch precedes lighting bindings and fixed simulation steps.
+Capture clears input gestures. Commit clears the sampled frame and replaces the prepared runtime before simulation resumes.
+
+The session calls `commit(token, onDispatch)` after preparation.
+The bridge calls `onDispatch` when Rust takes the queued request for synchronous processing.
+The callback remains outside the serialized request.
+Before dispatch, cancellation removes Commit and puts Discard before later requests.
+After dispatch starts, cancellation preserves pending status and the operation result.
+Pause and Continue clear the engine starter gesture, runtime ignition latch, and cached starter output.
+The native regressions compare Save/Continue against Save/Load/Continue after short and engaged ignition holds.
+They also check that gesture clearing preserves captured engine state, item fluids, progress, and recoil.
+
+The current IndexedDB record contains an object payload and its checksum.
+Storage serializes and detaches the object before hashing or opening a transaction.
+Verification hashes the stored field order and returns that exact checked snapshot.
+String payloads fail validation. The schema remains version 1, with no migration.
+
+Use `Check lifecycle boundaries` in `tests/browser/save-runtime.html` for same-frame pause operations and Commit cancellation.
+This control works with the default build. It uses fixture input and queue gates, without new runtime hooks.
+The storage fixture checks real object payloads, field order, corruption, string rejection, aborts, interruption, and blocked access.
+Earlier artifact hashes and browser results below describe their original runs.
+
+Before the fix, two bridge tests exposed queued Commit dispatch after cancellation and lost pending status after dispatch.
+Two storage tests exposed the old string payload contract. All four passed after the fixes.
+The native short-hold test reproduced a false-to-true ignition change after neutral Continue.
+The engaged-starter test reproduced active cached starter output after input clear.
+Both native tests passed after the narrow gesture clear.
+
+The new lifecycle fixture failed against the old default package with `Pause the game first`.
+Fixed default WASM `3180fb3674e6ae5f638ee406d7bc878fdf0f61603d5bdaf557319691bbf86b36` passed all six lifecycle checks.
+Those checks cover Pause/Save, Pause/New game, Pause/Load, queued cancellation, dispatched completion, and usable Continue.
+The first Continue check used four animation-frame callbacks and failed after the other five checks passed.
+An immediate standalone Continue check passed.
+Continue clears the step clock and skips its first frame's elapsed time.
+The fixture now waits for an actual fixed step, with a ten-second limit and started/paused assertions.
+The complete lifecycle rerun passed after this fixture timing correction. No product change followed that failure.
+
+The fixed default package also passed a real object-slot save and complete page reload.
+Maximum position error was 0.000003337860107421875 m; maximum quaternion component error was 0.0000001199999999368373.
+Continue passed after reload. Feature-only controls stayed disabled.
+Real IndexedDB checks passed object type, property order/checksum, abort preservation, corruption, string rejection, and page interruption.
+The normalization check retained exact absolute coordinates.
+Second-tab blocking, late successful-open closure, and incompatible-database rejection also passed: nine named storage checks in total.
+The parent reset only the fixture origin to database version 1 before further runtime checks.
+
+`scripts/check.ps1` passed formatting, 55 Node tests, 256 native tests, and default release WASM compilation.
+It ignored 46 source-dependent cases. A separate 27-test save selection passed with all four installed-source save cases included.
+`scripts/build.ps1` passed default compilation and binding generation.
+The default WASM has 54504608 bytes.
+Its generated JS remains `8952a24bfbc1aa1218016128df6a00720c61ff8cc793f468e2d2b3f7d8cc33b0`, 104757 bytes.
+The source manifest remains `d62630828b68c154c9351203b11f67427916390bd9a3eac1b911fda8efb5c74e`, 5712654 bytes.
+Pointer-lock play, exact browser version, physical quota exhaustion, and 42 unrelated installed-source cases remain unverified.
+Controlled inputs and fixture gates do not establish unrestricted captured-mouse play or Unity physics parity.
+
+The final-wave feature build and binding generation passed in 1m 40s.
+The feature package and final fixtures have these identities:
+
+| File | Bytes | SHA256 |
+| --- | ---: | --- |
+| Feature WASM | 54542158 | `9c321c663a33a13721e4a493cf116a68c868b552fd68170524c4f2c78d606430` |
+| Feature generated JS | 104757 | `93050b64d3674688e758dd716f334e3b8e8068ae7849148411321c8735f5b796` |
+| `tests/browser/save-runtime.js` | 23107 | `8adc482f3e1ef0ffd29a4b89f45f22e2080ae9329ee2b17f938df963897c0a07` |
+| `tests/browser/save-load.js` | 9544 | `7a0e7c3228e4f17f1a2bbdc38ea2712136366f260d9367e4432e066429396c42` |
+| `tests/browser/save-runtime.html` | 1590 | `43d4e1386ff7a1d2a3cdf47a2dcec350f4e0fce5401219efa59bc0ada96e1872` |
+
+This feature package passed driving, real rebase, object-slot save, full page reload, and resumed collision checks.
+Throttle moved the chassis 42.89838212814972 m. Gasoline fell from 22.5 to 22.48727962 L.
+Trip distance reached 42.91876908789497 m.
+Reload errors were 0.0000016987323760986328 m for positions and 0.0000001299999999870849 for quaternion components.
+The reconstructed runtime had 66 bodies, 481 colliders, four wheel supports, zero bad owners, and zero duplicate bodies.
+Four contacts returned after Continue. Chassis Z moved from -2086.8976287841797 to -2102.4931130111217 m with stable height.
+
+The same final feature package passed parts, fluids, carry, cycle, full reload, resumed interaction, and normal F release.
+Reload errors were 0.000003337860107421875 m and 0.0000001299999999870849 quaternion component error.
+The runtime had 68 bodies, 481 colliders, three supports, one carry joint, zero bad owners, and zero duplicates.
+The fixture checked five rim, two hubcap, and four tire colliders against their current owners.
+Source rim `level1:24797`, hubcap `level1:26305`, and tire `level1:40000` correctly retained their shared former chassis `level1:50613`.
+The first 0.25 L transfer changed totals from [2, 0.5] to [1.75, 0.75] L.
+The resumed transfer changed them to [1.5, 1] L.
+Cycle time wrapped from 1499.95 to 0.1709 seconds. The fixture asserted an actual fade-state change.
+Normal F release cleared carry, throw charge, and throw-active state after reload.
+
+Final feature fault checks passed for aborted writes, corruption, source mismatch, unavailable storage, and missing required metadata.
+Each check retained the exact active normalized state, camera, origin, and required stored record.
+The parent closed the feature page before restoring the verified default package bytes.
+The restored default identity is the 3180fb36 WASM and 8952a24b generated JS recorded above.
+
+The installed-source selection command was:
+`cargo test --locked --test save_roundtrip --test save_capture --test save_schema --test save_world -- --include-ignored`.
+Feature validation used `cargo build --locked --release --features save-fixture --target wasm32-unknown-unknown --lib`, then wasm-bindgen.
+All commands used the existing Docker image, Cargo volume, and worktree-specific target directory.
+
 ## Browser saves: 2026-10-12
 
 Save work uses branch `codex/save-load`, based on `be698aaec0b5a203ec94f452485d371b687c2824` for combined acceptance.

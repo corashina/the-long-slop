@@ -2,6 +2,7 @@
 <html lang="en"><meta charset="utf-8"><title>Runtime save tests</title>
 <style>body{margin:0;font:14px sans-serif}header{padding:8px}iframe{width:100%;height:72vh;border:0}pre{max-height:18vh;overflow:auto;margin:8px;white-space:pre-wrap}</style>
 <header><button id="roundtrip" disabled>Run paused round trip</button><button id="handle" disabled>Run required handle check</button><button id="runtime" disabled>Run runtime checks</button><button id="continue" disabled>Check Continue</button><button id="manual-reload" disabled>Save slot and reload</button><button id="stored-release" data-physical disabled>Check stored carry release</button><button id="original-carry" data-physical disabled>Check original carry</button><button id="inspect-topology" data-physical disabled>Inspect topology</button><button id="drive-save" data-physical disabled>Drive, save, reload</button><button id="interaction-save" data-physical disabled>Parts, fluids, cycle, reload</button><button id="active-failures" data-physical disabled>Check active storage failures</button><span id="state">Loading runtime...</span></header>
+<button id="lifecycle" disabled>Check lifecycle boundaries</button>
 <iframe id="runtime-frame" src="/web/index.html" allow="fullscreen"></iframe><pre id="results">Ready.</pre>
 <script type="module">
 const frame=document.querySelector('iframe');

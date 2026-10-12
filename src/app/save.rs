@@ -53,7 +53,7 @@ impl SaveRequests {
     }
 }
 
-/// Runs between complete fixed-step batches, before input and simulation updates.
+/// Runs after lifecycle input, between fixed-step batches and before binding updates.
 pub fn dispatch(world: &mut World) {
     if !game_has_save_request() {
         return;
@@ -188,6 +188,8 @@ fn process(
                 return Err(invalid("Pause the game first"));
             }
             if request.kind == "Capture" {
+                let mut drive = world.resource_mut::<Drive>();
+                super::clear_input(&mut drive);
                 let snapshot = drive.runtime.capture_save(
                     &reference,
                     &requests.source,
