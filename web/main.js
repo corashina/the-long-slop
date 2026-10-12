@@ -5,7 +5,7 @@ import {createFeedback} from './feedback.js';
 import {loadUiAssets} from './ui-layout.js';
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
 let audio,menu,feedback,failed=false,timeout,actions=0,frame;
-const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',condition:-1,held:'',throwCharge:0,throwActive:false,quantities:[0,0,0,0,0,0]};
+const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',condition:-1,held:'',throwCharge:0,throwActive:false,radioVolume:undefined,radioFrequency:undefined,radioAm:false,quantities:[0,0,0,0,0,0]};
 const input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas);
 window.gameKeys=()=>{frame=input.takeFrame();return frame.held;};
 window.gamePressed=()=>frame.pressed;window.gameReleased=()=>frame.released;
@@ -26,6 +26,7 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, chunks, colliders, abs
   state.rebases = rebases; state.travelM = travelM; state.lateralBand = lateralBand;
   state.fuelLiters = fuelLiters; state.paused = paused; state.started = started;
   menu?.sync(started,paused,travelM);
+  if(record.context===11||record.context===12){const radio=audio?.radioFrame;record.radioVolume=radio?.volume;record.radioFrequency=radio?.frequency;record.radioAm=radio?.am;feedback?.update(record);}
   feedback?.setVisible(started&&!paused&&Boolean(mode)&&menu?.model.state==='playing');
 };
 window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,noText,fluidName,condition,held,charge,throwing,rpm,ignition,running,starter,seated,handbrake,gas,oil,alcohol,water,blood,diesel,control,lmbUse)=>{

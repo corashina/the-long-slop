@@ -767,12 +767,21 @@ impl InteractionState {
             if self.mechanisms.contains(target.item)
                 && (input.pressed & keys::USE != 0
                     || (input.pressed & keys::FILL != 0
-                        && self.mechanisms.primary_switch(target.item))
+                        && self.mechanisms.primary_switch(target.item)
+                        && availability.lmb_use)
                     || input.held & keys::USE != 0
+                    || (input.held & keys::FILL != 0
+                        && self.mechanisms.radio_tunable(target.item)
+                        && availability.lmb_use)
                     || (input.wheel != 0.0 && self.mechanisms.scroll_eligible(target.item)))
             {
+                let mut mechanism_input = input;
+                if !availability.lmb_use {
+                    mechanism_input.held &= !keys::FILL;
+                    mechanism_input.pressed &= !keys::FILL;
+                }
                 self.mechanisms
-                    .step(target.item, input, player.view_pose(physics), dt);
+                    .step(target.item, mechanism_input, player.view_pose(physics), dt);
                 carry_input.wheel = 0.0;
                 action = Some(InteractionAction::Mechanism(target.item));
             }

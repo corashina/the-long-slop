@@ -383,6 +383,12 @@ fn advance_physics(
         drive.skip_elapsed = false;
         return;
     }
+    if let Some(audio) = &mut drive.runtime.audio {
+        let calendar = game_audio_calendar();
+        audio
+            .radio
+            .calendar((calendar / 100) as u8, (calendar % 100) as u8);
+    }
     drive
         .runtime
         .advance_lighting(&reference.0, time.delta_secs_f64());
@@ -679,6 +685,9 @@ fn publish_audio(
         }
     }
     for signal in &audio.signals {
+        if audio.reference.radio.voices.contains(&signal.id) {
+            continue;
+        }
         game_audio_voice(
             signal.id,
             signal.playing,
@@ -706,6 +715,21 @@ fn publish_audio(
             event.time_seconds,
         );
     }
-    game_audio_radio(audio.game_seconds);
+    let radio = audio.radio_frame;
+    game_audio_radio(
+        radio.power,
+        radio.am,
+        radio.frequency,
+        radio.volume,
+        radio.static_gain,
+        radio.primary.clip.unwrap_or(0),
+        radio.primary.offset_seconds,
+        radio.primary.gain,
+        radio.primary.next_clip.unwrap_or(0),
+        radio.secondary.clip.unwrap_or(0),
+        radio.secondary.offset_seconds,
+        radio.secondary.gain,
+        radio.secondary.next_clip.unwrap_or(0),
+    );
     game_audio_end();
 }

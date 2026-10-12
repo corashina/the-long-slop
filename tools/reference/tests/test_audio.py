@@ -75,10 +75,12 @@ class SelectedAudio(unittest.TestCase):
         car=add('level1',302,'MonoBehaviour',{'m_GameObject':ptr(go),'SHornSound':ptr(horn),
             'SSounds':ptr(horn),'turnedRadioSOund':ptr(clip),'HornPitchMin':0.9,
             'HornPitchMax':1.0,'HornSwitch':[]},'carscript')
+        electronics=add('level1',305,'MonoBehaviour',{'maxOutput':1,'jamValue':0},'electronicsscript')
+        volume=add('level1',306,'MonoBehaviour',{'m_GameObject':ptr(go),'m_Enabled':1,'disable':0,'tuneAble':1,'turnable':0},'usablescript')
         radio=add('level1',303,'MonoBehaviour',cls='radioscript')
-        records[key(radio)]={'m_GameObject':ptr(go),'SS':ptr(radio_voices[0]),
+        records[key(radio)]={'m_GameObject':ptr(go),'electronics':ptr(electronics),'SS':ptr(radio_voices[0]),
             'SC':ptr(radio_voices[1]),'SC2':ptr(radio_voices[2]),
-            'Bvolume':null,'Btune':null,'BChangeAMFM':null,'Cturned':ptr(clip),
+            'Bvolume':ptr(volume),'Btune':null,'BChangeAMFM':null,'Cturned':ptr(clip),
             'AMmin':540,'AMmax':1600,'FMmin':88,'FMmax':108,'AMStep':5,'FMStep':0.1,
             'vSpeed':0.1,'turnVolume':1,'ON':False,'amfm':False,'currentTeker':0.325,'v':0}
         cycle=add('level1',304,'MonoBehaviour',{'tempNights':[-9],'tempDays':[35]})
@@ -121,7 +123,7 @@ class SelectedAudio(unittest.TestCase):
             def components(self,selected):return None,[prefab]
             def class_name(self,obj):return classes[key(obj)]
         manifest={'nodes':[{'id':1,'source':source_id(transform),'parent':None}],
-            'items':[],'mechanisms':[],'colliders':[],'part_slots':[],
+            'items':[{'id':1,'node':1}],'mechanisms':[],'colliders':[],'part_slots':[],
             'lighting':{'controllers':[]}}
         receipt={'input':{'file':'Assembly-CSharp.dll','sha256':'a'*64},
             'output':{'sha256':'b'*64}}
@@ -147,6 +149,11 @@ class SelectedAudio(unittest.TestCase):
                 self.assertEqual(idle['priority'],80)
                 self.assertEqual(idle['methods'][0]['method'],'Start')
                 self.assertEqual(audio['radio']['stations'][0]['frequency'],1080)
+                self.assertEqual(audio['radio']['electronics_source'],{'file':'level1','path_id':305})
+                self.assertEqual(audio['radio']['electronics_output'],1)
+                self.assertEqual(audio['radio']['tuning_repeat_seconds'],0.2)
+                self.assertEqual(audio['radio']['holiday_ranges'],[[10,15,11,15],[12,15,1,15]])
+                self.assertEqual(audio['radio']['controls']['volume'],{'source':{'file':'level1','path_id':306},'node':1,'item':1,'enabled':True,'tune':True,'turnable':False})
                 self.assertIn(ObjectId('level1',301),library.selected_records)
                 self.assertIn(ObjectId('sharedassets1.assets',4423),library.selected_records)
                 engine['SAlap']={'file':'level1','m_PathID':999999}

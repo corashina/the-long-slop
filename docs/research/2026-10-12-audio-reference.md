@@ -259,6 +259,52 @@ custommusicscript loads external `.ogg`, `.wav`, and `.mp3` user files.
 We did not scan user folders or invent a playlist.
 The export retains this unavailable external station and its source static rule.
 
+## Runtime radio
+
+I connected the selected Lada's source controls to ItemIds 94, 95, and 96.
+The source pointers are level1:77810, 70967, and 78052.
+The first two controls permit tuning. The third permits band switching.
+I retain their enabled flags and source eligibility.
+I use scroll direction, or held Use/LMB with LOOKY, through the existing input rules.
+fpscontroller.Update uses `Lerp(0.2, 0, abs(LOOKY))` between held tuning steps.
+Its zero LOOKY guard produces no tuning step.
+
+radioscript.Update uses vSpeed 0.10000000149011612 and clamps volume to [0, 1].
+It uses FM [88, 108], step 0.10000000149011612, and AM [540, 1600], step 5.
+I preserve source rounding and normalized tuning.
+UpdValues formats volume times ten with two digits, FM with one decimal, and AM with three digits.
+I show Tune, frequency, and volume from source state when playback fails.
+
+The radio uses electronics level1:68491, separate from the car's Rear controller.
+electronicsscript.Start computes output 1 from maxOutput 1 and jamValue 0.
+I preserve the source cutoff 0.2.
+SetRadio uses tolerances 0.4000000059604645 for FM and 20 for AM.
+It keeps the last prior best station as secondary. It does not sort the stations.
+I apply playlist gain to primary playback only, as SetRadio does.
+Missing custom AM 1080 has no recording. At exact tuning, its source static gain is zero.
+Detuning produces the source static signal. I added no external content controls.
+
+I advance broadcasts from scaled single-player game time, including when radio power is off.
+Pause and focus loss freeze that clock and mute browser output.
+I retain the source music/talk transitions and random draws without replacement.
+I use a runtime random sequence. I do not claim Unity random sequence parity.
+CheckHoliday includes Oct 15 through Nov 15, and Dec 15 through Jan 15.
+I refresh the local calendar at day changes and preserve each current deck until its reset.
+I select upcoming clips from existing decks. I defer a new deck until its source reset.
+
+The browser retains routing nodes and frame fields.
+Its recording cache holds at most four unique buffers, including pending decodes.
+It shares duplicate recordings and keeps effect buffers separate.
+Late decodes join the current broadcast. I use the source correction threshold of 0.5 seconds.
+Restart and radio removal reject stale loads. Engine removal keeps the radio owner alive.
+Power and band clicks use SS.transform.position and the radio's logical owner.
+
+Source methods: fpscontroller.Update 17770-17809; radioscript.UpdValues 49909-49930;
+radioscript.Update 49932-49999; TurnRadio 50001-50021; SetRadio 50023-50118;
+radioCH selection/reset/advance 27947-28052; mainscript.RADIO 30303-30344;
+electronicsscript.Start/UpdOutPut 11456-11485; CheckHoliday 29348-29380.
+I recovered holidayDates at 28525-28528.
+
 ## Validation limits
 
 The export validates source receipts, WAV hashes, WAV metadata, file closure, and native audio types.

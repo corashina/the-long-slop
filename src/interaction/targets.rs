@@ -449,6 +449,9 @@ impl InteractionState {
         }
         if let Some(target) = aim.use_target {
             if self.mechanisms.contains(target.item) {
+                if self.mechanisms.radio_tunable(target.item) {
+                    return "Hold E + mouse or scroll: tune";
+                }
                 return if self.mechanisms.primary_switch(target.item) {
                     "E / LMB: switch"
                 } else if self.mechanisms.turn_state(target.item).is_some() {

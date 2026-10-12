@@ -284,7 +284,7 @@ Modify `src/browser.rs`, `src/app.rs`, `web/audio.js`, and `web/audio/clips.js`.
 Extend `tests/web/audio.test.mjs` and the source audio research document.
 
 **Interfaces:**
-Produce `RadioState::new(reference: &RadioReference) -> Self`.
+Produce `RadioState::new(rules: &RadioAudioReference, clips: &[AudioClipReference], calendar: [u8; 2]) -> Self`.
 Produce `RadioState::control(control: RadioControl)` where the enum contains `VolumeUp`, `VolumeDown`, `TuneUp`, `TuneDown`, and `Band`.
 Produce `RadioState::advance(game_seconds: f64, electronics_output: f32) -> RadioFrame`.
 `RadioFrame` contains power, band, frequency, volume, static gain, and primary/secondary station playback fields.

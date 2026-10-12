@@ -252,10 +252,19 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
                 if not d[field]['m_PathID']: return None
                 reader = source.resolve(c,d[field]); eid = emitter(reader)
                 node = audio['emitters'][eid-1]['node']
-                mechanism = next((m['id'] for m in manifest['mechanisms'] if m['source'] == source_id(reader)), None)
-                return {'source':source_id(reader),'node':node,'mechanism':mechanism}
+                values = source.read(reader)
+                item = next(i['id'] for i in manifest['items'] if i['node'] == node)
+                return {'source':source_id(reader),'node':node,'item':item,
+                    'enabled':bool(values['m_Enabled']) and not bool(values['disable']),
+                    'tune':bool(values['tuneAble']),'turnable':bool(values['turnable'])}
             controls = {name:control(field) for name,field in [('volume','Bvolume'),('tuning','Btune'),('band','BChangeAMFM')]}
+            electronics_reader = source.resolve(c,d['electronics'])
+            electronics = source.read(electronics_reader)
+            if electronics['jamValue'] != 0:
+                raise ValueError('Radio nonzero startup jam requires source rule')
             audio['radio'] = {'source':source_id(c),'emitter':emitter(c),'voices':rvoices,'controls':controls,
+                'electronics_source':source_id(electronics_reader),'electronics_output':electronics['maxOutput'],
+                'tuning_repeat_seconds':0.2,'holiday_ranges':[[10,15,11,15],[12,15,1,15]],
                 'constants':{k:d[k] for k in ['AMmin','AMmax','FMmin','FMmax','AMStep','FMStep','vSpeed','turnVolume']},
                 'initial_on':bool(d['ON']),'initial_am':bool(d['amfm']),'initial_tuning':d['currentTeker'],'initial_volume':d['v'],
                 'fm_tolerance':main['FRTFM'],'am_tolerance':main['FRTAM'],'electronics_cutoff':0.2,
@@ -266,7 +275,8 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
                     'multiplayer':method('mainscript','RADIO2')},
                 'click_binding':binding(c,'radio_power_band',[d['Cturned']],d['turnVolume'],[0.85,1.15],PRIORITIES[4],method(cls,'TurnRadio')),
                 'stations':station_records(source,main_r,main,lambda reader:clip(reader,'radio')),'methods':[method(cls,'SetRadio'),method(cls,'Update'),method('mainscript','Update'),
-                    method('radioCH','SelectRandomMusic'),method('radioCH','SelectRandomTalk'),method('radioCH','AdvanceRadio')]}
+                    method('radioCH','SelectRandomMusic'),method('radioCH','SelectRandomTalk'),method('radioCH','AdvanceRadio'),
+                    method('fpscontroller','Update'),method('electronicsscript','Start'),method('electronicsscript','UpdOutPut'),method('mainscript','CheckHoliday')]}
     def control_reader(reader):
         if reader is None: return None
         eid = emitter(reader); node = audio['emitters'][eid-1]['node']

@@ -39,7 +39,23 @@ extern "C" {
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioRoute)]
     pub fn game_audio_route(id: u32, mixer: u32);
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioRadio)]
-    pub fn game_audio_radio(game_seconds: f64);
+    pub fn game_audio_radio(
+        power: bool,
+        am: bool,
+        frequency: f32,
+        volume: f32,
+        static_gain: f32,
+        primary_clip: u32,
+        primary_offset: f64,
+        primary_gain: f32,
+        primary_next: u32,
+        secondary_clip: u32,
+        secondary_offset: f64,
+        secondary_gain: f32,
+        secondary_next: u32,
+    );
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioCalendar)]
+    pub fn game_audio_calendar() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioEnd)]
     pub fn game_audio_end();
 

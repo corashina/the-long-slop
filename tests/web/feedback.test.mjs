@@ -50,3 +50,15 @@ test('light_switch_uses_source_icon_without_changing_mechanism_feedback',()=>{
  assert.equal(selectIcon(2,7,false),'door');
  assert.equal(selectIcon(64|1,2,false),'fill');
 });
+
+test('radio_feedback_uses_source_values_without_playback',async()=>{
+ const {createAudio,installAudioBridge}=await import('../../web/audio.js');
+ const a=createAudio({}),bridge={};installAudioBridge(bridge,a);
+ bridge.gameAudioRadio(false,false,94.5,.3,0,0,0,0,0,0,0,0,0);
+ const m=new FeedbackState(),r={...tank(0),noText:true,name:'RadioColVolume',actions:128,context:11,radioVolume:a.radioFrame.volume};
+ assert.equal(m.update(r),true);assert.equal(m.fluidText,'Volume: 03');assert.equal(m.targetName,'Volume +/-');assert.equal(m.update(r),false);
+ r.context=12;r.radioFrequency=a.radioFrame.frequency;r.radioAm=false;m.update(r);assert.equal(m.fluidText,'FM 94.5');assert.equal(m.targetName,'Tune');
+ r.radioAm=true;r.radioFrequency=630;m.update(r);assert.equal(m.fluidText,'AM 630');
+ r.radioFrequency=undefined;m.update(r);assert.equal(m.fluidText,'');
+ r.context=2;m.update(r);assert.equal(m.targetName,'RadioColVolume');assert.equal(m.fluidText,'');a.dispose();
+});

@@ -61,7 +61,15 @@ record!(HornAudioReference {
     temperature_min: f32, temperature_max: f32, switches: Vec<SourceId>, method: AudioMethod
 });
 record!(AudioControlReference { source: SourceId, node: NodeId, mechanism: Option<MechanismId> });
-record!(RadioControls { volume: Option<AudioControlReference>, tuning: Option<AudioControlReference>, band: Option<AudioControlReference> });
+record!(RadioControlReference {
+    source: SourceId,
+    node: NodeId,
+    item: ItemId,
+    enabled: bool,
+    tune: bool,
+    turnable: bool
+});
+record!(RadioControls { volume: Option<RadioControlReference>, tuning: Option<RadioControlReference>, band: Option<RadioControlReference> });
 record!(RadioStationReference {
     id: u32, band: String, frequency: f32, name: String, custom: bool, content: String,
     initial_music: bool, start_time: f32, initial_time: f32, initial_max_time: f32, initial_gain: f32,
@@ -80,7 +88,8 @@ record!(RadioAudioReference {
     constants: BTreeMap<String, f32>, initial_on: bool, initial_am: bool,
     initial_tuning: f32, initial_volume: f32, fm_tolerance: f32, am_tolerance: f32,
     electronics_cutoff: f32, time_correction_seconds: f32, late_seek_margin_seconds: f32,
-    custom_gain: f32, clock: RadioClockReference, click_binding: Option<u32>, stations: Vec<RadioStationReference>, methods: Vec<AudioMethod>
+    custom_gain: f32, clock: RadioClockReference, click_binding: Option<u32>, stations: Vec<RadioStationReference>, methods: Vec<AudioMethod>,
+    electronics_source: SourceId, electronics_output: f32, tuning_repeat_seconds: f32, holiday_ranges: [[u8;4];2]
 });
 record!(MechanismAudioReference {
     source: SourceId, emitter: u32, movement_voice: Option<u32>, audio_multiplier: f32,
@@ -526,8 +535,27 @@ impl AudioReference {
             .into_iter()
             .flatten()
         {
-            require(control(c), "audio radio control")?;
+            require(
+                game.items
+                    .iter()
+                    .any(|i| i.id == c.item && i.node == c.node),
+                "audio radio control",
+            )?;
         }
+        require(
+            r.electronics_output.is_finite()
+                && r.electronics_output >= 0.
+                && r.electronics_source.path_id != 0
+                && r.tuning_repeat_seconds.is_finite()
+                && r.tuning_repeat_seconds > 0.
+                && r.holiday_ranges.iter().all(|&[sm, sd, em, ed]| {
+                    (1..=12).contains(&sm)
+                        && (1..=31).contains(&sd)
+                        && (1..=12).contains(&em)
+                        && (1..=31).contains(&ed)
+                }),
+            "audio radio source controls",
+        )?;
         for i in &self.interiors {
             require(
                 game.nodes.iter().any(|n| n.id == i.node)

@@ -631,6 +631,12 @@ impl GarageRuntime {
         }
         self.aim = aim;
         let seated = self.area.player.seat().is_some();
+        let availability = self.area.interaction.available_actions(
+            &aim,
+            &self.area.player,
+            &self.area.items,
+            &self.physics,
+        );
         let action = self.area.interaction.step(
             input,
             aim,
@@ -785,6 +791,11 @@ impl GarageRuntime {
             ) {
                 self.handbrake = !self.handbrake;
             }
+            if let crate::interaction::mechanisms::ControlAction::Radio(control) = action
+                && let Some(audio) = &mut self.audio
+            {
+                audio.radio_control(control);
+            }
         }
         self.lighting.update_cabin(
             &reference.lighting,
@@ -808,6 +819,11 @@ impl GarageRuntime {
         let mut walking_input = input;
         if (input.held & keys::USE != 0 && self.area.interaction.dragging_mechanism().is_some())
             || (input.held & keys::USE != 0 && self.area.interaction.tuning_opening().is_some())
+            || (input.held & keys::FILL != 0
+                && availability.lmb_use
+                && availability
+                    .item
+                    .is_some_and(|id| self.area.interaction.mechanisms.radio_tunable(id)))
             || (input.held & (keys::ROTATE | keys::TRANSLATE) != 0
                 && self.area.interaction.held().is_some())
         {

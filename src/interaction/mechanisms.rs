@@ -32,6 +32,10 @@ struct Control {
     turn_state: u8,
 }
 pub struct MechanismState {
+    radio_controls: HashMap<ItemId, (RadioControlReference, u8)>,
+    radio_seconds: f32,
+    last_radio_tune: f32,
+    radio_repeat: f32,
     controls: Vec<Control>,
     items: HashMap<ItemId, usize>,
     frames: Vec<Frame>,
@@ -148,7 +152,27 @@ impl MechanismState {
             })
             .collect();
         let order = (0..frames.len()).collect();
+        let audio = AudioReference::from_value(&reference.audio, reference).ok();
+        let mut radio_controls = HashMap::with_capacity(3);
+        if let Some(a) = &audio {
+            for (role, control) in [
+                &a.radio.controls.volume,
+                &a.radio.controls.tuning,
+                &a.radio.controls.band,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if let Some(c) = control {
+                    radio_controls.insert(c.item, (c.clone(), role as u8));
+                }
+            }
+        }
         let mut state = Self {
+            radio_controls,
+            radio_seconds: 0.,
+            last_radio_tune: 0.,
+            radio_repeat: audio.as_ref().map_or(0., |a| a.radio.tuning_repeat_seconds),
             order,
             controls,
             items,
@@ -169,6 +193,9 @@ impl MechanismState {
         self.control_action.take()
     }
     pub fn primary_switch(&self, item: ItemId) -> bool {
+        if let Some((c, _)) = self.radio_controls.get(&item) {
+            return c.enabled && c.turnable;
+        }
         self.items.get(&item).is_some_and(|i| {
             self.controls[*i].enabled
                 && self.controls[*i]
@@ -179,15 +206,22 @@ impl MechanismState {
         })
     }
     pub fn turn_state(&self, item: ItemId) -> Option<u8> {
+        if let Some((c, _)) = self.radio_controls.get(&item) {
+            return (c.enabled && c.turnable).then_some(0);
+        }
         let c = &self.controls[*self.items.get(&item)?];
         c.reference.turn.as_ref().map(|_| c.turn_state)
     }
     pub fn contains(&self, item: ItemId) -> bool {
+        if let Some((c, _)) = self.radio_controls.get(&item) {
+            return c.enabled && (c.tune || c.turnable);
+        }
         self.items
             .get(&item)
             .is_some_and(|i| self.controls[*i].enabled)
     }
     pub fn begin_audio_step(&mut self) {
+        self.radio_seconds += crate::simulation::FIXED_DT;
         for c in &mut self.controls {
             c.audio_active = false;
             c.audio_delta = [0.; 2];
@@ -214,6 +248,9 @@ impl MechanismState {
         c.reference.rotation.as_ref().map(|_| c.degrees)
     }
     pub fn scroll_eligible(&self, item: ItemId) -> bool {
+        if self.radio_tunable(item) {
+            return true;
+        }
         self.items.get(&item).is_some_and(|i| {
             self.controls[*i].enabled
                 && self.controls[*i]
@@ -375,6 +412,39 @@ impl MechanismState {
         {
             return;
         }
+        if let Some((c, role)) = self.radio_controls.get(&item) {
+            use crate::simulation::radio::RadioControl;
+            if !c.enabled {
+                return;
+            }
+            if c.turnable && input.pressed & (keys::USE | keys::FILL) != 0 {
+                self.control_action = Some(ControlAction::Radio(RadioControl::Band));
+            } else if c.tune {
+                let look_y = -input.mouse[1];
+                let direction = if input.wheel != 0. {
+                    input.wheel
+                } else if input.held & (keys::USE | keys::FILL) != 0
+                    && look_y != 0.
+                    && self.radio_seconds - self.last_radio_tune
+                        >= self.radio_repeat * (1. - look_y.abs().clamp(0., 1.))
+                {
+                    self.last_radio_tune = self.radio_seconds;
+                    look_y
+                } else {
+                    0.
+                };
+                if direction != 0. {
+                    let control = match (*role, direction > 0.) {
+                        (0, true) => RadioControl::VolumeUp,
+                        (0, false) => RadioControl::VolumeDown,
+                        (_, true) => RadioControl::TuneUp,
+                        (_, false) => RadioControl::TuneDown,
+                    };
+                    self.control_action = Some(ControlAction::Radio(control));
+                }
+            }
+            return;
+        }
         let Some(&index) = self.items.get(&item) else {
             return;
         };
@@ -469,6 +539,16 @@ impl MechanismState {
             c.slide = c.slide.clamp(0.0, 1.0);
         }
         self.apply(index);
+    }
+    pub fn radio_tunable(&self, item: ItemId) -> bool {
+        self.radio_controls
+            .get(&item)
+            .is_some_and(|(c, _)| c.enabled && c.tune)
+    }
+    pub fn radio_volume(&self, item: ItemId) -> bool {
+        self.radio_controls
+            .get(&item)
+            .is_some_and(|(_, role)| *role == 0)
     }
     fn propagate(&mut self) {
         for &i in &self.order {
@@ -640,6 +720,7 @@ fn inverse_lerp(a: f32, b: f32, value: f32) -> f32 {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ControlAction {
+    Radio(crate::simulation::radio::RadioControl),
     ToggleHandbrake,
     CycleHeadlights,
     InteriorLight(u8),

@@ -5,6 +5,8 @@ import {webcrypto} from 'node:crypto';
 import {createAudio} from '../../web/audio.js';
 import {MenuState,ACTIONS,captureWithAudio} from '../../web/menu.js';
 import {spatialValues,VoiceBank} from '../../web/audio/voices.js';
+import {ClipCache} from '../../web/audio/clips.js';
+import {installAudioBridge} from '../../web/audio.js';
 const raw=JSON.parse(readFileSync(new URL('../../web/assets/reference/manifest.json',import.meta.url))).audio;
 const binding=raw.bindings.find(b=>b.trigger==='ignition');
 const samples=readFileSync(new URL('../../web/assets/'+raw.clips.find(c=>c.id===binding.clips[0]).path,import.meta.url));
@@ -106,4 +108,53 @@ test('non_loop_fluid_completion_restarts_at_zero',async()=>{
  bank.begin();bank.emitter(record.emitter,[0,0,0],[0,0,0,1],true);bank.update(id,true,.5,1,false);await Promise.resolve();
  const slot=bank.voices.get(id);bank.context.currentTime=.5;bank.parameters(slot);slot.source.onended();bank.update(id,true,.5,1,false);
  assert.deepEqual(Fake.starts.map(s=>s.offset),[0,0]);bank.dispose();
+});
+
+function radioSamples(id){const clip=raw.clips.find(c=>c.id===id),bytes=readFileSync(new URL('../../web/assets/'+clip.path,import.meta.url));return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);}
+function radioSetup(Context=Fake){const a=setup(Context);globalThis.fetch=async url=>{const clip=raw.clips.find(c=>'./assets/'+c.path===url);return {ok:true,arrayBuffer:async()=>radioSamples(clip.id)};};return a;}
+const recording=raw.radio.stations[0].music[0];
+function radioFrame(a,offset=0,clip=recording){a.begin(a.session,true,false,offset);a.emitter(raw.radio.emitter,[0,0,0],[0,0,0,1],true);for(const id of raw.radio.voices)a.emitter(raw.voices.find(v=>v.id===id).emitter,[0,0,0],[0,0,0,1],true);a.radio({power:true,am:false,frequency:89.2,volume:.1,staticGain:0,primary:{clip,offsetSeconds:offset,gain:.1,nextClip:null},secondary:{clip:null,offsetSeconds:0,gain:0,nextClip:null}});a.finish();}
+async function radioLoaded(a){await Promise.all([...a.cache.radioPending.values()].map(e=>e.task));await loaded(a);}
+test('late_radio_decode_joins_broadcast',async()=>{
+ let complete;const duration=raw.clips.find(c=>c.id===recording).duration_seconds;
+ class Slow extends Fake{decodeAudioData(){return new Promise(r=>complete=r);}}
+ const a=radioSetup(Slow);a.unlock();await settle();const staticClip=raw.clips.find(c=>c.id===raw.voices.find(v=>v.id===raw.radio.voices[0]).clip);a.cache.buffers.set(staticClip.id,{duration:staticClip.duration_seconds});radioFrame(a,0);await decoding(()=>complete);radioFrame(a,3);
+ const before=Fake.starts.length;complete({duration,numberOfChannels:raw.clips.find(c=>c.id===recording).channels});await radioLoaded(a);radioFrame(a,5);
+ assert.equal(Fake.starts.length,before+1);assert.equal(Fake.starts.at(-1).offset,5);
+ const source=Fake.starts.at(-1);a.context.currentTime=.25;radioFrame(a,5.5);assert.equal(Fake.starts.length,before+1,'source threshold retains playback');
+ radioFrame(a,6);assert.equal(source.stopped,true);assert.equal(Fake.starts.at(-1).offset,6);a.dispose();
+});
+test('radio_cache_is_bounded',async()=>{
+ const waiting=[],ids=raw.radio.stations.flatMap(s=>s.music).filter((id,i,a)=>a.indexOf(id)===i);
+ class Slow extends Fake{decodeAudioData(bytes){return new Promise(resolve=>waiting.push({resolve,bytes}));}}
+ const a=radioSetup(Slow);a.unlock();await settle();a.cache.radio(ids.slice(0,2),ids.slice(2,4),1);await decoding(()=>waiting.length===4);
+ assert.equal(a.cache.radioPending.size,4);
+ for(let i=4;i<30;i++){a.cache.radio([ids[i],ids[i+1]],[ids[i+2],ids[i+3]],1);assert.ok(a.cache.radioPending.size+a.cache.radioBuffers.size<=4);}
+ a.restart(2);a.cache.radio([ids[31],ids[32]],[ids[33],ids[34]],2);assert.equal(waiting.length,4,'stale decodes still occupy slots');
+ a.cache.radio([ids[0],ids[1]],[null,null],1);assert.ok(a.cache.radioWanted.has(ids[31]));assert.ok(!a.cache.radioWanted.has(ids[0]),'old demand cannot replace current demand');
+ for(const pending of waiting)pending.resolve({duration:1,numberOfChannels:1});await Promise.all([...a.cache.radioPending.values()].map(e=>e.task));
+ assert.equal(a.cache.radioBuffers.size,0,'stale requests cannot return buffers');assert.equal(a.cache.radioPending.size,0);
+ a.cache.radio([ids[31],ids[31]],[null,null],2);await decoding(()=>waiting.length===5);assert.equal(a.cache.radioPending.size,1,'duplicate recording uses one slot');
+ a.dispose();waiting[4].resolve({duration:1,numberOfChannels:1});await settle();assert.equal(a.cache.radioBuffers.size,0);
+});
+test('radio_frame_bridge_is_retained',()=>{
+ let first;const target={};installAudioBridge(target,{radio(frame){if(first){assert.equal(frame,first);assert.equal(frame.primary,first.primary);}else first=frame;}});
+ target.gameAudioRadio(true,false,89.2,.1,0,recording,3,.1,0,0,0,0,0);target.gameAudioRadio(true,true,630,.2,0,recording,4,.2,0,0,0,0,0);
+ assert.equal(first.primary.offsetSeconds,4);assert.equal(first.secondary.clip,null);
+});
+test('radio_removal_rejects_late_load_and_engine_owner_is_separate',async()=>{
+ let complete;const clip=raw.clips.find(c=>c.id===recording);
+ class Slow extends Fake{decodeAudioData(){return new Promise(r=>complete=r);}}
+ const a=radioSetup(Slow);a.unlock();await settle();const staticClip=raw.clips.find(c=>c.id===raw.voices.find(v=>v.id===raw.radio.voices[0]).clip);a.cache.buffers.set(staticClip.id,{duration:staticClip.duration_seconds});radioFrame(a,3);await decoding(()=>complete);
+ a.emitter(raw.engine.emitter,[0,0,0],[0,0,0,1],false);assert.equal(a.bank.emitters.get(raw.radio.emitter).alive,true);
+ a.emitter(raw.radio.emitter,[0,0,0],[0,0,0,1],false);complete({duration:clip.duration_seconds,numberOfChannels:clip.channels});await radioLoaded(a);
+ assert.ok(Fake.starts.every(s=>s.stopped));assert.equal(a.cache.radioBuffers.size,0);a.dispose();
+});
+
+test('radio_pause_mutes_and_resume_joins_retained_clock',async()=>{
+ const a=radioSetup();a.unlock();await settle();const clip=raw.clips.find(c=>c.id===recording),buffer={duration:clip.duration_seconds};
+ const staticClip=raw.clips.find(c=>c.id===raw.voices.find(v=>v.id===raw.radio.voices[0]).clip);a.cache.buffers.set(staticClip.id,{duration:staticClip.duration_seconds});a.cache.radioBuffers.set(recording,buffer);
+ radioFrame(a,3);const first=a.bank.voices.get(raw.radio.voices[1]).source;assert.equal(first.offset,3);
+ a.pause();assert.equal(first.stopped,true);radioFrame(a,3);assert.equal(a.bank.voices.get(raw.radio.voices[1]).source,null);
+ a.unlock();await settle();a.cache.radioBuffers.set(recording,buffer);radioFrame(a,3);const resumed=a.bank.voices.get(raw.radio.voices[1]).source;assert.ok(resumed);assert.equal(resumed.offset,3);a.dispose();
 });

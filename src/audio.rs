@@ -127,7 +127,8 @@ pub struct AudioState {
     pub sensor: SensorLatch,
     pub route_mixers: Vec<u32>,
     pub engine_constants: BTreeMap<String, f32>,
-    pub radio_constants: BTreeMap<String, f32>,
+    pub radio: crate::simulation::radio::RadioState,
+    pub radio_frame: crate::simulation::radio::RadioFrame,
     queue: [Option<AudioEvent>; 64],
     length: usize,
     sequence: u32,
@@ -238,7 +239,12 @@ impl AudioState {
                 .find(|m| m.name == "CarSounds")
                 .map_or(0, |m| m.id),
             engine_constants: reference.engine.constants.clone(),
-            radio_constants: reference.radio.constants.clone(),
+            radio: crate::simulation::radio::RadioState::new(
+                &reference.radio,
+                &reference.clips,
+                [0, 0],
+            ),
+            radio_frame: crate::simulation::radio::RadioFrame::default(),
             collider_nodes: HashMap::new(),
             route_sensors: reference
                 .routes
@@ -448,12 +454,21 @@ impl AudioState {
             return;
         }
         self.sequence = self.sequence.wrapping_add(1);
+        let position = if b.trigger == "radio_power_band" {
+            let voice = &self.reference.voices[self.voice_indices[&self.reference.radio.voices[0]]];
+            self.positions
+                .get(&voice.emitter)
+                .copied()
+                .unwrap_or([0.; 3])
+        } else {
+            self.positions.get(&b.emitter).copied().unwrap_or([0.; 3])
+        };
         self.push_event(AudioEvent {
             session: self.session,
             sequence: self.sequence,
             binding: id,
             emitter: b.emitter,
-            position: self.positions.get(&b.emitter).copied().unwrap_or([0.; 3]),
+            position,
             gain,
             pitch,
             time_seconds: simulation_seconds,
@@ -788,6 +803,12 @@ impl AudioState {
         event
     }
     pub fn reset(&mut self, session: u32) {
+        self.radio = crate::simulation::radio::RadioState::new(
+            &self.reference.radio,
+            &self.reference.clips,
+            [0, 0],
+        );
+        self.radio_frame = crate::simulation::radio::RadioFrame::default();
         self.session = session;
         self.queue.fill(None);
         self.length = 0;
@@ -884,6 +905,9 @@ impl AudioState {
     }
     pub fn fixed_step(&mut self, area: &StartingArea, physics: &PhysicsWorld, dt: f32) {
         self.game_seconds += f64::from(dt);
+        self.radio_frame = self
+            .radio
+            .advance(self.game_seconds, self.reference.radio.electronics_output);
         if let Some(&(anchor, local)) = self.emitter_anchors.get(&self.reference.engine.emitter) {
             let mut world = anchor
                 .and_then(|node| area.interaction.mechanisms.node_pose(node))
@@ -1024,6 +1048,19 @@ impl AudioState {
             .and_then(|id| self.control_items.get(&id))
             .and_then(|&id| area.interaction.mechanisms.value(id, true))
             .unwrap_or(1.)
+    }
+    pub fn radio_control(&mut self, control: crate::simulation::radio::RadioControl) {
+        if !self.owner_alive(self.reference.radio.emitter) {
+            return;
+        }
+        let on = self.radio.on;
+        let am = self.radio.am;
+        self.radio.control(control);
+        if (on != self.radio.on || am != self.radio.am)
+            && let Some(id) = self.reference.radio.click_binding
+        {
+            self.emit(id, 1., self.game_seconds);
+        }
     }
     fn slot(&self, slot: crate::reference::PartSlotId, area: &StartingArea) -> f32 {
         area.interaction

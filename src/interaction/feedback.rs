@@ -39,6 +39,8 @@ pub enum FeedbackContext {
     Part = 8,
     Push = 9,
     LightSwitch = 10,
+    RadioVolume = 11,
+    RadioTuning = 12,
 }
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ActionAvailability {
@@ -146,7 +148,14 @@ impl InteractionState {
         if let Some(t) = use_target {
             if self.mechanisms.contains(t.item) {
                 a.context = FeedbackContext::Mechanism;
-                if self.mechanisms.turn_state(t.item).is_some() {
+                if self.mechanisms.radio_tunable(t.item) {
+                    a.context = if self.mechanisms.radio_volume(t.item) {
+                        FeedbackContext::RadioVolume
+                    } else {
+                        FeedbackContext::RadioTuning
+                    };
+                    a.actions.0 |= ActionMask::TUNE | ActionMask::SCROLL;
+                } else if self.mechanisms.turn_state(t.item).is_some() {
                     a.actions.0 |= ActionMask::SWITCH;
                     if self.mechanisms.primary_switch(t.item) {
                         a.actions.0 |= ActionMask::PRIMARY_SWITCH;

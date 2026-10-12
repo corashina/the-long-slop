@@ -1,6 +1,7 @@
 import {applyLayout} from './ui-layout.js';
 export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,SPLIT:16384,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144};
 const FLUIDS=['Gas','Oil','Alcohol','Water','Blood','Diesel'];
+export function formatRadio(r){if(r.context===11&&Number.isFinite(r.radioVolume))return 'Volume: '+Math.round(r.radioVolume*10).toString().padStart(2,'0');if(r.context===12&&Number.isFinite(r.radioFrequency))return (r.radioAm?'AM '+r.radioFrequency.toFixed(0).padStart(3,'0'):'FM '+r.radioFrequency.toFixed(1).padStart(4,'0'));return '';}
 function volume(value){return (Math.round(value*10)/10).toFixed(1).replace(/\.0$/,'');}
 export function formatTank(r) {
  if(r.noText)return '';
@@ -31,14 +32,17 @@ export class FeedbackState {
  toggle(){this.enabled=!this.enabled;this.visible=this.active&&this.enabled;}
  update(r){
   const amountKey=Math.round(r.amount*10),empty=r.amount<=Math.fround(.05);
-  let changed=amountKey!==this.amountKey||r.capacity!==this.capacity||r.fluidName!==this.fluidName||r.hasName!==this.hasName||r.noText!==this.noText||empty!==this.empty;
+  let changed=r.context!==this.context||amountKey!==this.amountKey||r.capacity!==this.capacity||r.fluidName!==this.fluidName||r.hasName!==this.hasName||r.noText!==this.noText||empty!==this.empty;
   for(let i=0;i<6;i++){const percent=r.amount>0?Math.fround(Math.fround(r.quantities[i]/r.amount)*100):0;const key=percent>=1?Math.round(percent):-1;if(this.percentKeys[i]!==key){changed=true;this.percentKeys[i]=key;}}
-  if(changed){this.fluidText=formatTank(r);this.amountKey=amountKey;this.empty=empty;this.capacity=r.capacity;this.fluidName=r.fluidName;this.hasName=r.hasName;this.noText=r.noText;}
-  const detailChanged=r.name!==this.targetName||r.condition!==this.condition||r.throwCharge!==this.throwCharge||r.throwActive!==this.throwActive;
-  this.targetName=r.name;this.condition=r.condition;this.throwCharge=r.throwCharge;this.throwActive=r.throwActive;
+  const radioChanged=r.radioAm!==this.radioAm||r.radioFrequency!==this.radioFrequency||r.radioVolume!==this.radioVolume;
+  if(changed||radioChanged){this.fluidText=r.context===11||r.context===12?formatRadio(r):formatTank(r);this.amountKey=amountKey;this.empty=empty;this.capacity=r.capacity;this.fluidName=r.fluidName;this.hasName=r.hasName;this.noText=r.noText;}
+  this.radioAm=r.radioAm;this.radioFrequency=r.radioFrequency;this.radioVolume=r.radioVolume;
+  const targetName=r.context===11?'Volume +/-':r.context===12?'Tune':r.name;
+  const detailChanged=targetName!==this.targetName||r.condition!==this.condition||r.throwCharge!==this.throwCharge||r.throwActive!==this.throwActive;
+  this.targetName=targetName;this.condition=r.condition;this.throwCharge=r.throwCharge;this.throwActive=r.throwActive;
   const actionsChanged=r.actions!==this.actions||r.context!==this.context||r.carrying!==this.carrying||r.notice!==this.notice||r.lmbUse!==this.lmbUse;
   this.lmbUse=r.lmbUse;this.actions=r.actions;this.context=r.context;this.carrying=r.carrying;this.notice=r.notice;
-  return changed||actionsChanged||detailChanged;
+  return changed||radioChanged||actionsChanged||detailChanged;
  }
 }
 export function createFeedback(ui,switchIconUrl) {
@@ -63,7 +67,7 @@ export function createFeedback(ui,switchIconUrl) {
   [ACTION.SPLIT,'split','[X]: Split / assemble'],
   [ACTION.SCROLL,'scroll','[Scroll]: Open/Close']
  ].map(([bit,role,text])=>{const n=document.createElement('p');n.textContent=text;n.className='action-row';n.hidden=true;root.append(n);return {bit,role,n,family:0,top:0,line:0,offset:-1};});
- let lastIcon='',lastFluid='',lastNotice='',lastName='',lastCondition='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='';
+ let lastIcon='',lastFluid='',lastNotice='',lastName='',lastCondition='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='';
  const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance / [Tab]: Center';
  const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance / [Tab]: Center';
  const counts=new Uint8Array(4);
@@ -93,6 +97,11 @@ export function createFeedback(ui,switchIconUrl) {
   if(doorText!==lastDoor){rows[1].n.textContent=doorText;lastDoor=doorText;}
   const useText=state.context===10?(state.lmbUse?'[E] / [LMB]: Switch':'[E]: Switch'):'[E]: Open/Close';
   if(useText!==lastUse){rows[0].n.textContent=useText;lastUse=useText;}
+  const radio=state.context===11||state.context===12;
+  const tuneText=radio?(state.lmbUse?'[E] / [LMB]+[Mouse]: Tune':'[E]+[Mouse]: Tune'):'[E]+[Mouse] / [Scroll]: Open/Close';
+  if(tuneText!==lastTune){rows[7].n.textContent=tuneText;lastTune=tuneText;}
+  const scrollText=radio?'[Scroll]: Tune':'[Scroll]: Open/Close';
+  if(scrollText!==lastScroll){rows[17].n.textContent=scrollText;lastScroll=scrollText;}
   placeRows();
   if(state.targetName!==lastName){target.textContent=state.targetName;lastName=state.targetName;}target.hidden=!state.targetName;
   const detail=state.condition>=0?'Condition '+Math.round(state.condition*100)+'%':'';

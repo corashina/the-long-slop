@@ -6513,6 +6513,51 @@
         ],
         "recenter_distance": -0.5
       }
+    },
+    {
+      "id": 20,
+      "source": {
+        "file": "level1",
+        "path_id": 29550
+      },
+      "node": 2,
+      "body": 2,
+      "name": "RadioColVolume",
+      "kind": "decoration",
+      "condition": 1,
+      "mass_kg": 0.0,
+      "attached_to": null,
+      "pickup": null
+    },
+    {
+      "id": 21,
+      "source": {
+        "file": "level1",
+        "path_id": 36512
+      },
+      "node": 2,
+      "body": 2,
+      "name": "RadioColTune",
+      "kind": "decoration",
+      "condition": 1,
+      "mass_kg": 0.0,
+      "attached_to": null,
+      "pickup": null
+    },
+    {
+      "id": 22,
+      "source": {
+        "file": "level1",
+        "path_id": 39332
+      },
+      "node": 2,
+      "body": 2,
+      "name": "RadioAMFMChange",
+      "kind": "decoration",
+      "condition": 1,
+      "mass_kg": 0.0,
+      "attached_to": null,
+      "pickup": null
     }
   ],
   "openings": [
@@ -36219,24 +36264,33 @@
             "file": "level1",
             "path_id": 77810
           },
-          "node": 1,
-          "mechanism": null
+          "node": 2,
+          "item": 20,
+          "enabled": true,
+          "tune": true,
+          "turnable": false
         },
         "tuning": {
           "source": {
             "file": "level1",
             "path_id": 70967
           },
-          "node": 1,
-          "mechanism": null
+          "node": 2,
+          "item": 21,
+          "enabled": true,
+          "tune": true,
+          "turnable": false
         },
         "band": {
           "source": {
             "file": "level1",
             "path_id": 78052
           },
-          "node": 1,
-          "mechanism": null
+          "node": 2,
+          "item": 22,
+          "enabled": true,
+          "tune": false,
+          "turnable": true
         }
       },
       "constants": {
@@ -37070,7 +37124,27 @@
           "line_end": 30352,
           "sha256": "22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee"
         }
-      }
+      },
+      "electronics_source": {
+        "file": "level1",
+        "path_id": 68491
+      },
+      "electronics_output": 1.0,
+      "tuning_repeat_seconds": 0.2,
+      "holiday_ranges": [
+        [
+          10,
+          15,
+          11,
+          15
+        ],
+        [
+          12,
+          15,
+          1,
+          15
+        ]
+      ]
     },
     "engine": {
       "source": {
