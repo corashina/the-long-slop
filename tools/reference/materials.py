@@ -157,10 +157,6 @@ def recover_material(source, reader, color_override=None, condition=None):
             'sampler': {'filter': settings['m_FilterMode'], 'wrap_u': settings['m_WrapU'],
                 'wrap_v': settings['m_WrapV'], 'aniso': settings['m_Aniso'], 'mip_bias': settings['m_MipBias'],
                 'mip_count': texture['m_MipCount']}, 'mips': mips})
-    if source_id(reader) == {'file': 'sharedassets1.assets', 'path_id': 624}:
-        exclusions.extend({'slot': slot, 'source': entry, 'reason': 'live_mirror'}
-                          for entry in getattr(source, 'live_mirror_sources', [])
-                          for slot in ('_MainTex', '_EmissionMap'))
     alpha = 'opaque'
     if family == 'standard':
         alpha = ('premultiply' if '_ALPHAPREMULTIPLY_ON' in keywords else

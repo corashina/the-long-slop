@@ -9,6 +9,8 @@ use std::{
     fmt,
 };
 
+pub mod mirrors;
+pub use mirrors::*;
 pub mod instruments;
 pub mod ui;
 pub use instruments::*;
@@ -745,6 +747,7 @@ pub struct ReferenceManifest {
     pub instruments: InstrumentReference,
     pub library: LibraryProvenance,
     pub lighting: LightingRecord,
+    pub mirrors: MirrorRecord,
     pub app_id: u32,
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
@@ -841,6 +844,7 @@ impl ReferenceManifest {
             "app/build",
         )?;
         self.lighting.validate(self)?;
+        self.mirrors.validate(self)?;
         require(
             self.bodies.iter().all(|b| {
                 self.nodes.iter().any(|n| {

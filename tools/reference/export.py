@@ -45,10 +45,10 @@ def derive_reference(snapshot: Snapshot, library: LibraryReceipt, output: Path) 
         if target.is_relative_to(protected) or protected.is_relative_to(target):
             raise ValueError('Runtime output overlaps accepted library storage')
     from .library.storage import RUNTIME_BYTES, check_space, tree_bytes
-    check_space('runtime: selected scene staging', reader.records_root.parent,
+    check_space('runtime: selected scene staging', target.parent,
                 RUNTIME_BYTES, retained=tree_bytes(output))
     output.parent.mkdir(parents=True, exist_ok=True)
-    staged = Path(tempfile.mkdtemp(prefix='runtime-', dir=reader.records_root.parent / 'work'))
+    staged = Path(tempfile.mkdtemp(prefix='runtime-', dir=target.parent))
     _export_selected(LibrarySource(reader), staged, reader, snapshot)
     verify_reference(staged, library)
     promote_reference(staged, output)
@@ -139,7 +139,7 @@ def verify_reference(output: Path, library) -> None:
         raise ValueError('Unsupported runtime provenance')
     validate_runtime_manifest(content)
     validate_runtime_paths(manifest)
-    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json'}
+    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json'}
     for asset in manifest['assets']:
         for record in [asset, *asset['dependencies']]:
             name = record.get('file', record.get('path')).removeprefix('reference/')
@@ -194,21 +194,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
         raise ValueError('Selected home link differs from the required home')
     if source.read(source.get('level1',64898))['StartCar02']['m_PathID']!=206:
         raise ValueError('Selected Lada starter link differs from the required car')
-    source.live_mirror_sources = []
-    source.live_mirror_renderers = {}
-    main_reader = source.get('level1', 64919)
-    main = source.read(main_reader)
-    mirror_material = source.resolve(main_reader, main['defMirrorMaterial'])
-    mirror_texture = source.resolve(main_reader, main['defMirrorTexture'])
-    from .source import source_id, key
-    for node in source.hierarchy(roots['lada'][0], activate_root=True):
-        for reader in node['components']:
-            if reader.type.name == 'MonoBehaviour' and source.class_name(reader) == 'mirrorscript':
-                data = source.read(reader)['M']
-                if data['R']['m_PathID'] and data['C']['m_PathID']:
-                    source.live_mirror_sources.append(source_id(reader))
-                    source.live_mirror_renderers[key(source.resolve(reader, data['R']))] = mirror_material
-    source.live_mirror_sources.append(source_id(mirror_texture))
+    from .mirrors import prepare_mirror_materials
+    prepare_mirror_materials(source, roots['lada'][0])
     prepare_conditions(source,[root for readers in roots.values() for root in readers])
     output.mkdir(parents=True, exist_ok=True)
     native_engine = native_engine_evidence(snapshot.root)
@@ -239,6 +226,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     hashes=[{'file':record.file.removeprefix('TheLongDrive_Data/'),'sha256':record.sha256}
             for record in snapshot.files if record.file.startswith('TheLongDrive_Data/')]
     manifest=build_manifest(source,roots,report,hashes,library)
+    from .mirrors import mirror_source_evidence
+    (output/'mirror-evidence.json').write_text(json.dumps(mirror_source_evidence(source,manifest['mirrors']),indent=2,allow_nan=False),encoding='utf-8')
     manifest['library']=provenance(library.receipt)
     manifest['ui']=export_ui(source,output,library)
     manifest['instruments']=recover_instruments(source,manifest,report)

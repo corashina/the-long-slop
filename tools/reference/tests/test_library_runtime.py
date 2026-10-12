@@ -271,7 +271,7 @@ class RuntimeContractTests(unittest.TestCase):
             for asset in manifest['assets']:
                 for dependency in asset['dependencies']:
                     if dependency['file']==resource['path']:dependency['sha256']=resource['sha256']
-        for name in ('geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json'):
+        for name in ('geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json'):
             (root/name).write_text('{}')
         return manifest,receipt
 

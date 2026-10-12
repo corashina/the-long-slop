@@ -892,7 +892,7 @@
         "path_id": 37191
       },
       "dependencies": [],
-      "material_count": 65,
+      "material_count": 67,
       "usage": "unique_scene"
     },
     {
@@ -4722,6 +4722,192 @@
           5.0,
           2.5,
           5.0
+        ]
+      }
+    },
+    {
+      "id": 123,
+      "source": {
+        "file": "level1",
+        "path_id": 28414
+      },
+      "name": "plane_node",
+      "hierarchy_path": "Fixture2/Mirror0/plane_node",
+      "asset": 2,
+      "gltf_node": 59,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 124,
+      "source": {
+        "file": "level1",
+        "path_id": 39254
+      },
+      "name": "camera_node",
+      "hierarchy_path": "Fixture2/Mirror0/camera_node",
+      "asset": 2,
+      "gltf_node": 60,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 125,
+      "source": {
+        "file": "level1",
+        "path_id": 38060
+      },
+      "name": "plane_node",
+      "hierarchy_path": "Fixture2/Mirror1/plane_node",
+      "asset": 2,
+      "gltf_node": 61,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 126,
+      "source": {
+        "file": "level1",
+        "path_id": 31061
+      },
+      "name": "camera_node",
+      "hierarchy_path": "Fixture2/Mirror1/camera_node",
+      "asset": 2,
+      "gltf_node": 62,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 127,
+      "source": {
+        "file": "level1",
+        "path_id": 32190
+      },
+      "name": "plane_node",
+      "hierarchy_path": "Fixture2/Mirror2/plane_node",
+      "asset": 2,
+      "gltf_node": 63,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 128,
+      "source": {
+        "file": "level1",
+        "path_id": 26965
+      },
+      "name": "camera_node",
+      "hierarchy_path": "Fixture2/Mirror2/camera_node",
+      "asset": 2,
+      "gltf_node": 64,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
         ]
       }
     }
@@ -18757,6 +18943,393 @@
           "defaults": {},
           "exclusions": []
         }
+      },
+      {
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 624
+        },
+        "shader_family": "standard",
+        "color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "condition": null,
+        "keywords": [
+          "_EMISSION"
+        ],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {
+            "_Cutoff": 0.5,
+            "_Glossiness": 0.0,
+            "_GlossMapScale": 1.0,
+            "_SmoothnessTextureChannel": 0.0,
+            "_Metallic": 1.0,
+            "_SpecularHighlights": 1.0,
+            "_GlossyReflections": 1.0,
+            "_BumpScale": 1.0,
+            "_Parallax": 0.019999999552965164,
+            "_OcclusionStrength": 1.0,
+            "_DetailNormalMapScale": 1.0,
+            "_UVSec": 0.0,
+            "_Mode": 0.0,
+            "_SrcBlend": 1.0,
+            "_DstBlend": 0.0,
+            "_ZWrite": 1.0
+          },
+          "colors": {
+            "_Color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "_EmissionColor": [
+              0.8942506909370422,
+              0.8900325298309326,
+              0.8900325298309326,
+              1.0
+            ]
+          },
+          "textures": [],
+          "defaults": {
+            "_MainTex": "white",
+            "_OcclusionMap": "white",
+            "_EmissionMap": "white"
+          },
+          "exclusions": []
+        },
+        "asset": 2,
+        "gltf_material": 65
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 116
+        },
+        "shader_family": "standard",
+        "color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {
+            "_Cutoff": 0.5,
+            "_Glossiness": 0.9800000190734863,
+            "_GlossMapScale": 1.0,
+            "_SmoothnessTextureChannel": 0.0,
+            "_Metallic": 0.9800000190734863,
+            "_SpecularHighlights": 1.0,
+            "_GlossyReflections": 1.0,
+            "_BumpScale": 1.0,
+            "_Parallax": 0.019999999552965164,
+            "_OcclusionStrength": 1.0,
+            "_DetailNormalMapScale": 1.0,
+            "_UVSec": 0.0,
+            "_Mode": 0.0,
+            "_SrcBlend": 1.0,
+            "_DstBlend": 0.0,
+            "_ZWrite": 1.0
+          },
+          "colors": {
+            "_Color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "_EmissionColor": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "textures": [],
+          "defaults": {
+            "_MainTex": "white",
+            "_OcclusionMap": "white"
+          },
+          "exclusions": []
+        },
+        "asset": 2,
+        "gltf_material": 66
+      }
+    ]
+  },
+  "mirrors": {
+    "rules": {
+      "source": {
+        "file": "level1",
+        "path_id": 64919
+      },
+      "settings_source": {
+        "file": "level0",
+        "path_id": 16865
+      },
+      "draw_distance_source": {
+        "file": "level0",
+        "path_id": 18331
+      },
+      "enabled_source": {
+        "file": "level0",
+        "path_id": 19029
+      },
+      "enabled": true,
+      "draw_distance_meters": 100.0,
+      "fov_bounds_degrees": [
+        10.0,
+        55.0
+      ],
+      "distance_bounds_meters": [
+        0.0,
+        4.0
+      ],
+      "count_limit": 5
+    },
+    "target": {
+      "source": {
+        "file": "sharedassets1.assets",
+        "path_id": 4495
+      },
+      "extent": [
+        256,
+        256
+      ],
+      "samples": 1,
+      "color_format_code": 8,
+      "depth_stencil_format_code": 92,
+      "linear": true,
+      "filter": 1,
+      "wrap": [
+        1,
+        1,
+        1
+      ],
+      "mip_sampling": false,
+      "generate_mips": true,
+      "mip_count": -1,
+      "dynamic_scale": false
+    },
+    "mirrors": [
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 66131
+        },
+        "owner": 1,
+        "owner_node": 2,
+        "surface_node": 123,
+        "surface_source": {
+          "file": "level1",
+          "path_id": 43665
+        },
+        "plane_node": 123,
+        "camera_node": 124,
+        "camera_source": {
+          "file": "level1",
+          "path_id": 40260
+        },
+        "camera_script_source": {
+          "file": "level1",
+          "path_id": 77725
+        },
+        "near_plane": 0.10000000149011612,
+        "serialized_far_plane": 1500.0,
+        "initial_far_plane": 1500.0,
+        "serialized_fov_degrees": 60.0,
+        "culling_mask": 73113395,
+        "hdr": true,
+        "clear_flags": 1,
+        "clear_color": [
+          0.1921568661928177,
+          0.3019607961177826,
+          0.4745098054409027,
+          0.0
+        ],
+        "occlusion_culling": true,
+        "allow_msaa": true,
+        "serialized_rendering_path": -1,
+        "rendering_path": 1,
+        "orthographic": false,
+        "update_mirrors": false,
+        "postprocessing_sources": [],
+        "depth_source": null,
+        "heat_haze_source": null,
+        "live_material": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 624
+          },
+          "asset": 2,
+          "gltf_material": 65
+        },
+        "disabled_material": {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 116
+          },
+          "asset": 2,
+          "gltf_material": 66
+        },
+        "live_texture_slots": [
+          "_MainTex",
+          "_EmissionMap"
+        ]
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 67237
+        },
+        "owner": 2,
+        "owner_node": 2,
+        "surface_node": 125,
+        "surface_source": {
+          "file": "level1",
+          "path_id": 40735
+        },
+        "plane_node": 125,
+        "camera_node": 126,
+        "camera_source": {
+          "file": "level1",
+          "path_id": 40324
+        },
+        "camera_script_source": {
+          "file": "level1",
+          "path_id": 65584
+        },
+        "near_plane": 0.10000000149011612,
+        "serialized_far_plane": 1500.0,
+        "initial_far_plane": 1500.0,
+        "serialized_fov_degrees": 60.0,
+        "culling_mask": 73113395,
+        "hdr": true,
+        "clear_flags": 1,
+        "clear_color": [
+          0.1921568661928177,
+          0.3019607961177826,
+          0.4745098054409027,
+          0.0
+        ],
+        "occlusion_culling": true,
+        "allow_msaa": true,
+        "serialized_rendering_path": -1,
+        "rendering_path": 1,
+        "orthographic": false,
+        "update_mirrors": false,
+        "postprocessing_sources": [],
+        "depth_source": null,
+        "heat_haze_source": null,
+        "live_material": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 624
+          },
+          "asset": 2,
+          "gltf_material": 65
+        },
+        "disabled_material": {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 116
+          },
+          "asset": 2,
+          "gltf_material": 66
+        },
+        "live_texture_slots": [
+          "_MainTex",
+          "_EmissionMap"
+        ]
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 70638
+        },
+        "owner": 3,
+        "owner_node": 2,
+        "surface_node": 127,
+        "surface_source": {
+          "file": "level1",
+          "path_id": 44371
+        },
+        "plane_node": 127,
+        "camera_node": 128,
+        "camera_source": {
+          "file": "level1",
+          "path_id": 40222
+        },
+        "camera_script_source": {
+          "file": "level1",
+          "path_id": 72547
+        },
+        "near_plane": 0.10000000149011612,
+        "serialized_far_plane": 1500.0,
+        "initial_far_plane": 1500.0,
+        "serialized_fov_degrees": 50.0,
+        "culling_mask": 73113395,
+        "hdr": true,
+        "clear_flags": 1,
+        "clear_color": [
+          0.1921568661928177,
+          0.3019607961177826,
+          0.4745098054409027,
+          0.0
+        ],
+        "occlusion_culling": true,
+        "allow_msaa": true,
+        "serialized_rendering_path": -1,
+        "rendering_path": 1,
+        "orthographic": false,
+        "update_mirrors": false,
+        "postprocessing_sources": [],
+        "depth_source": null,
+        "heat_haze_source": null,
+        "live_material": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 624
+          },
+          "asset": 2,
+          "gltf_material": 65
+        },
+        "disabled_material": {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 116
+          },
+          "asset": 2,
+          "gltf_material": 66
+        },
+        "live_texture_slots": [
+          "_MainTex",
+          "_EmissionMap"
+        ]
       }
     ]
   }

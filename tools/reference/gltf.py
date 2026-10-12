@@ -279,7 +279,7 @@ class GltfExporter(GltfBuilder):
                     color=getattr(self.source,'condition_colors',{}).get(key(renderer))
                     condition=getattr(self.source,'condition_renderers',{}).get(key(renderer))
                     if condition:node.extras['condition']=condition
-                    mirror = getattr(self.source, 'live_mirror_renderers', {}).get(key(renderer))
+                    mirror = getattr(self.source, 'mirror_renderers', {}).get(key(renderer))
                     if mirror:
                         materials = [mirror]
                     if not materials or any(r is None for r in materials):
@@ -323,6 +323,9 @@ class GltfExporter(GltfBuilder):
                 else:pointers=[v[k] for v in data['szamok'] for k in ('MOn','MOff')]
                 for ptr in pointers:
                     if ptr['m_PathID']:self.material(self.source.resolve(component,ptr))
+        if self.asset_id == 2:
+            for reader in (self.source.mirror_live_material, self.source.mirror_disabled_material):
+                self.material(reader)
         self.document.scenes.append(gl.Scene(nodes=root_nodes))
         self.document.scene = 0
         self.document.buffers.append(gl.Buffer(uri=self.output.with_suffix('.bin').name,byteLength=len(self.binary)))

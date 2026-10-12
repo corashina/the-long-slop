@@ -368,6 +368,8 @@ def build_manifest(source, roots, reports, hashes, library):
     result['pushables']=recover_pushables(source,nodes,components,item_nodes,colliders,bodies,player_record['action_masks']['push_mask'])
     result['action_bindings']=recover_bindings(source,nodes,components,item_nodes,colliders,mechanisms,openings,seats)
     result['vehicle']['colliders']=[c['id'] for c in colliders if c['body']==car_body and c['enabled']]
+    from .mirrors import recover_mirrors
+    result['mirrors']=recover_mirrors(source,nodes,components,pointer_node,item_nodes,reports)
     result['lighting']=source.lighting
     collider_ids={(c['source']['file'],c['source']['path_id']):c['id'] for c in colliders}
     old_colliders={v:k for k,v in source.lighting_collider_ids.items()}
