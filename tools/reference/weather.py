@@ -64,6 +64,7 @@ def recover_weather(source, output):
         'storm':{'source':source_id(storm),'biome':d['biome'],**{snake(k):d[k] for k in STORM_FIELDS},
             **{snake(k):rgba(d[k]) for k in ['nightColor','skyColor','skyGroundColor','fogColor','CloudColor']},
             'day_color1':gradient(d['dayColor1']),'day_color2':gradient(d['dayColor2']),'wind_lm':d['windLm']['m_Bits'],
+            'current_force':list(vector(d['currentForce'])),'next_force':list(vector(d['nextForce'])),'distance_lerp':d['distanceLerp'],
             'size_range':[.5,1.5],'speed_range':[3.,12.],'wind_time_range':[.1,1.5],'wind_scan_seconds':1.,'wind_bounds_range':[1.,30.]},
         'evidence':managed_evidence(source,['size = UnityEngine.Random.Range(0.5f, 1.5f);','speed = UnityEngine.Random.Range(3f, 12f);',
             'yield return new WaitForSeconds(1f);','nextWindTime = Time.time + UnityEngine.Random.Range(0.1f, 1.5f);',

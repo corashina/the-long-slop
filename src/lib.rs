@@ -17,6 +17,7 @@ pub mod sleep;
 pub mod starting_area;
 pub mod survival;
 pub mod vehicle;
+pub mod weather;
 pub mod world;
 
 #[cfg(target_arch = "wasm32")]

@@ -32629,7 +32629,18 @@
       "wind_bounds_range": [
         1.0,
         30.0
-      ]
+      ],
+      "current_force": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "next_force": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "distance_lerp": 0.0
     },
     "evidence": {
       "assembly_sha256": "9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e",

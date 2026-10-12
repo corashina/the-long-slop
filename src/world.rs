@@ -124,6 +124,16 @@ fn height(seed: u64, distance: f64, lateral: f64) -> f64 {
                 + 1.2 * (distance / 41.0 - lateral / 24.0).sin())
 }
 
+/// Current desert ground height in absolute coordinates, using the terrain generator's rule.
+pub fn terrain_height(seed: u64, absolute: [f64; 3]) -> f32 {
+    let distance = -absolute[2];
+    height(
+        seed,
+        distance,
+        absolute[0] - road_sample(seed, distance).center[0],
+    ) as f32
+}
+
 pub fn generate_chunk(seed: u64, key: ChunkKey) -> ChunkData {
     generate_chunk_in_band(seed, key, 0)
 }

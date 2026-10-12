@@ -20,6 +20,7 @@ use rapier3d::prelude::{
 use std::collections::HashMap;
 
 mod survival;
+mod weather;
 pub use survival::DrinkResult;
 pub(crate) use survival::spawn_consumable;
 
@@ -492,6 +493,8 @@ pub fn initial_vehicle_pose(reference: &ReferenceManifest) -> Result<VehiclePose
 pub struct GarageRuntime {
     pub survival: crate::survival::SurvivalState,
     pub sleep: crate::sleep::SleepState,
+    pub weather: crate::weather::WeatherState,
+    weather_bindings: weather::WeatherBindings,
     sleep_camera: Option<crate::sleep::SleepCamera>,
     pub sleep_camera_allowed: bool,
     pub audio_motion_revision: u32,
@@ -566,7 +569,10 @@ impl GarageRuntime {
                 recovery_bounds.max[i] = recovery_bounds.max[i].max(aabb.maxs[i]);
             }
         }
-        Ok(Self {
+        let weather_bindings = weather::WeatherBindings::new(reference, &area.bodies)?;
+        let mut runtime = Self {
+            weather: crate::weather::WeatherState::new(&reference.weather, DEFAULT_SEED),
+            weather_bindings,
             survival: crate::survival::SurvivalState::new(&reference.survival),
             sleep: crate::sleep::SleepState::new(&reference.sleep),
             sleep_camera: None,
@@ -626,7 +632,9 @@ impl GarageRuntime {
                     None
                 })
                 .collect(),
-        })
+        };
+        runtime.sync_weather_bindings(reference);
+        Ok(runtime)
     }
 
     pub fn clock_factors(&self, reference: &ReferenceManifest) -> crate::sleep::ClockFactors {
@@ -1080,6 +1088,7 @@ impl GarageRuntime {
                 drive_count,
             ),
         );
+        self.sync_weather_bindings(reference);
         self.physics.step_physics();
         self.sample_survival_speed(reference);
         self.audio.advance(
@@ -1135,6 +1144,7 @@ impl GarageRuntime {
             &mut self.physics,
         )
         .expect("valid station food");
+        self.sync_weather_bindings(reference);
         self.advance_light_fades(reference, FIXED_DT);
         self.advance_needs(reference, FIXED_DT, factors.need_scale);
         let was_sleeping = self.sleeping();
@@ -1324,6 +1334,7 @@ impl GarageRuntime {
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, true);
+        self.sync_weather_bindings(reference);
     }
 }
 

@@ -71,6 +71,9 @@ pub struct StormReference {
     pub ambient_decrease: f32,
     pub yoffset: f32,
     pub wind_force: f32,
+    pub current_force: [f32; 3],
+    pub next_force: [f32; 3],
+    pub distance_lerp: f32,
     pub def_s_rate_t: f32,
     pub def_s_rate_d: f32,
     pub def_b_rate_t: f32,
@@ -188,12 +191,16 @@ impl WeatherReference {
                 s.ambient_decrease,
                 s.yoffset,
                 s.wind_force,
+                s.distance_lerp,
                 s.def_s_rate_t,
                 s.def_s_rate_d,
                 s.def_b_rate_t,
                 s.def_b_rate_d,
                 s.wind_scan_seconds,
-            ]) && s.radius > 0.
+            ]) && finite(&s.current_force)
+                && finite(&s.next_force)
+                && s.distance_lerp >= 0.
+                && s.radius > 0.
                 && s.destroy_dist >= s.radius
                 && s.life_gain > 0.
                 && s.life_loss_on_other_biome > 0.
