@@ -15,7 +15,7 @@ def build_manifest(source, roots, reports, hashes, library):
     assets=[]
     for asset_id,(name,readers) in enumerate(roots.items(),1):
         report=reports[name]
-        assets.append({'id':asset_id,'material_count':report['material_count'],'usage':'road_lamp_prototype' if name=='road_lamp' else 'sky_prototype' if name=='sky' else 'unique_scene','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
+        assets.append({'id':asset_id,'material_count':report['material_count'],'usage':'food_prototype' if name=='food' else 'road_lamp_prototype' if name=='road_lamp' else 'sky_prototype' if name=='sky' else 'unique_scene','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
         records=[]
         for root in readers:records.extend(source.hierarchy(root,activate_root=True))
         for entry,record in zip(report['nodes'],records):
@@ -94,7 +94,7 @@ def build_manifest(source, roots, reports, hashes, library):
         if key(node_readers[node])==('level1',21482):name='Garage door right'
         elif key(node_readers[node])==('level1',21464):name='Garage door left'
         elif key(node_readers[node])==('level1',21450):name='Door'
-        for class_name,kind_name in [('tankscript','container'),('enginescript','engine'),('coolantTankscript','radiator'),('gumiscript','tire'),('wheelscript','rim'),('seatscript','seat'),('tankcapscript','cap')]:
+        for class_name,kind_name in [('tankscript','container'),('enginescript','engine'),('coolantTankscript','radiator'),('gumiscript','tire'),('wheelscript','rim'),('seatscript','seat'),('tankcapscript','cap'),('ediblescript','food')]:
             if class_name in group:kind=kind_name
         if node in mechanism_nodes:kind='hood' if 'Hood' in nodes[node-1]['hierarchy_path'] else 'trunk' if 'Trunk' in nodes[node-1]['hierarchy_path'] else 'door'
         condition=data(node,'partconditionscript')

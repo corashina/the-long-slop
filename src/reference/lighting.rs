@@ -440,6 +440,11 @@ impl LightingRecord {
             "startup overrides",
         )?;
         sky(&self.skybox)?;
+        for particle in &manifest.weather.particles {
+            for material in &particle.materials {
+                sky(material)?;
+            }
+        }
         for property in ["_SunSize", "_SunSizeConvergence"] {
             check(
                 self.skybox.floats.contains_key(property),

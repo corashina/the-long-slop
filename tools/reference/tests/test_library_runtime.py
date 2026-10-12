@@ -18,7 +18,7 @@ class RuntimeTests(unittest.TestCase):
         from tools.reference.export import validate_runtime_paths
         with self.assertRaises(ValueError): validate_runtime_paths({'assets':[{'path':'library/models/unused.gltf','dependencies':[]}]})
         manifest = {'assets': [{'path': f'reference/{name}.gltf', 'dependencies': []}
-                               for name in ('home', 'lada', 'items', 'road_lamp', 'sky')]}
+                               for name in ('home', 'lada', 'items', 'road_lamp', 'sky', 'food')]}
         validate_runtime_paths(manifest)
         manifest['ui']={'sprites':[{'path':'reference/ui-test-3.png','source':{'file':'test','path_id':3}}]}
         validate_runtime_paths(manifest)
@@ -31,7 +31,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_lighting_dependency_receipts_require_matching_typed_hashes(self):
         from tools.reference.export import validate_runtime_paths
-        manifest={'assets':[{'path':f'reference/{name}.gltf','dependencies':[]} for name in ('home','lada','items','road_lamp','sky')]}
+        manifest={'assets':[{'path':f'reference/{name}.gltf','dependencies':[]} for name in ('home','lada','items','road_lamp','sky','food')]}
         resource={'path':'reference/lighting-test-1.smip','sha256':'a'*64}
         manifest['lighting']={'textures':[resource]}
         manifest['assets'][0]['dependencies']=[{'file':resource['path'],'sha256':resource['sha256']}]
@@ -232,12 +232,6 @@ class RuntimeContractTests(unittest.TestCase):
         receipt=NS(manifest_sha256='a'*64,catalog_sha256='b'*64,source_manifest_sha256='c'*64)
         manifest=json.loads((Path(__file__).resolve().parents[3]/'tests/common/reference.json').read_bytes())
         manifest['library']=provenance(receipt)
-        manifest['assets'].append({'id':5,'usage':'unique_scene','material_count':1,'path':'reference/items.gltf','sha256':'a'*64,'root':{'file':'fixture','path_id':999},'dependencies':[]})
-        manifest['rendering']['materials'].append({
-            'source':{'file':'fixture','path_id':999},'asset':5,'gltf_material':0,
-            'shader_family':'unlit_color','color':[1.,1.,1.,1.],'condition':None,'keywords':[],
-            'state':{'alpha_mode':'opaque','cull':2,'z_write':True,'z_test':4,'src_blend':1,'dst_blend':0,'render_queue':-1},
-            'properties':{'floats':{},'colors':{'_Color':[1.,1.,1.,1.]},'textures':[],'defaults':{},'exclusions':[]}})
         for asset in manifest['assets']:
             scene={'asset':{'version':'2.0'},'nodes':[],'scenes':[{'nodes':[]}],'scene':0}
             content=json.dumps(scene).encode()
@@ -251,7 +245,8 @@ class RuntimeContractTests(unittest.TestCase):
                     content=b'fixture source mip bytes'
                     (root/Path(dependency['file']).name).write_bytes(content)
                     dependency['sha256']=hashlib.sha256(content).hexdigest()
-        for sprite in manifest.get('ui', {}).get('sprites', []):
+        from tools.reference.export import audio_resources
+        for sprite in [*manifest.get('ui', {}).get('sprites', []), *audio_resources(manifest)]:
             content=b'fixture sprite bytes'
             (root/Path(sprite['path']).name).write_bytes(content)
             sprite['sha256']=hashlib.sha256(content).hexdigest()
@@ -264,6 +259,7 @@ class RuntimeContractTests(unittest.TestCase):
             elif isinstance(value,list):
                 for child in value:update_resource_hashes(child)
         update_resource_hashes(manifest['lighting'])
+        update_resource_hashes(manifest['weather'])
         for resource in lighting_resources(manifest):
             content=b'fixture lighting bytes'
             (root/Path(resource['path']).name).write_bytes(content)
@@ -286,7 +282,7 @@ class RuntimeContractTests(unittest.TestCase):
     def test_runtime_contract_rejects_missing_records(self):
         with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'):
             root=Path(tmp);manifest,receipt=self.runtime(root)
-            for field in ('app_id','build_id','nodes','player','vehicle','colliders'):
+            for field in ('app_id','build_id','nodes','player','vehicle','colliders','survival','sleep','weather'):
                 incomplete=dict(manifest);del incomplete[field];self.save(root,incomplete)
                 with self.subTest(field=field),self.assertRaisesRegex(ValueError,'Runtime manifest contract'):
                     verify_reference(root,receipt)

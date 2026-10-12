@@ -116,8 +116,22 @@ def export_ui(source, output, library):
         icons[role]=sprite(source.resolve(menu,md[field]),role)
     for role,field in [('default','GCDef'),('pickup','GCCanPickup'),('dismount','GCDismount'),('carrying','GCPickup')]:
         image=source.resolve(menu,md[field]);icons[role]=sprite(source.resolve(image,source.read(image)['m_Sprite']),role)
+    need_sliders={}
+    for role,field in [('food','SFood'),('water','SWater'),('hp','SHp'),('bladder','SPiss'),('bowel','SShit'),('sleep','SSleepValue')]:
+        slider=source.resolve(menu,md[field]);d=source.read(slider)
+        layout(slider,'need-'+role)
+        need_sliders[role]={'source':source_id(slider),'minimum':d['m_MinValue'],'maximum':d['m_MaxValue'],
+            'direction':d['m_Direction'],'whole_numbers':bool(d['m_WholeNumbers'])}
+    for role,field in [('food','Food'),('water','Water'),('hp','HP'),('bladder','Piss'),('bowel','Shit')]:
+        for suffix,label in [('', 'fill'),('BG','background'),('Icon','icon')]:
+            layout(source.resolve(menu,md['survivalSlider'+field+suffix]),'need-'+role+'-'+label)
+    for role,field in [('can-sleep','GCanSleep'),('cannot-sleep','GCantSleep')]:
+        go=source.resolve(menu,md[field])
+        for c in components(go):
+            if c.type.name=='MonoBehaviour' and source.class_name(c) in ('Text','TextMeshProUGUI','Image'):
+                layout(c,role);break
     pairs=[{'background':sprite(source.resolve(menu,a),'menu-background'),'frame':sprite(source.resolve(menu,b),'menu-frame')}
            for a,b in zip(md['menuOverlayBGs'],md['menuOverlayBGsKeret'],strict=True)]
     if not pairs:raise ValueError('Missing source menu frames')
-    return {'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
+    return {'need_sliders':need_sliders,'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
             'overlay_color':[180/255,128/255,70/255,64/255],'frame_color':[180/255,128/255,70/255,1.]}

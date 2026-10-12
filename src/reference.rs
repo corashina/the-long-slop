@@ -9,6 +9,10 @@ use std::{
     fmt,
 };
 
+pub mod survival;
+pub mod weather;
+pub use survival::*;
+pub use weather::*;
 pub mod instruments;
 pub mod ui;
 pub use instruments::*;
@@ -68,6 +72,7 @@ pub enum AssetUsage {
     UniqueScene,
     RoadLampPrototype,
     SkyPrototype,
+    FoodPrototype,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -285,6 +290,7 @@ pub struct SlideRotation {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemKind {
+    Food,
     Decoration,
     Door,
     Hood,
@@ -741,6 +747,9 @@ pub struct LibraryProvenance {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
+    pub survival: SurvivalReference,
+    pub sleep: SleepReference,
+    pub weather: WeatherReference,
     pub ui: UiReference,
     pub instruments: InstrumentReference,
     pub library: LibraryProvenance,
@@ -841,6 +850,9 @@ impl ReferenceManifest {
             "app/build",
         )?;
         self.lighting.validate(self)?;
+        self.survival.validate(self)?;
+        self.sleep.validate(self)?;
+        self.weather.validate(self)?;
         require(
             self.bodies.iter().all(|b| {
                 self.nodes.iter().any(|n| {

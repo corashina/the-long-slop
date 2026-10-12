@@ -60,6 +60,7 @@ pub struct UiElement {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UiReference {
+    pub need_sliders: HashMap<String, NeedSlider>,
     pub sprites: Vec<UiSprite>,
     pub pairs: Vec<MenuPair>,
     pub icons: HashMap<String, usize>,
@@ -73,6 +74,22 @@ impl UiReference {
             !self.sprites.is_empty() && !self.pairs.is_empty(),
             "UI assets",
         )?;
+        for role in ["food", "water", "hp", "bladder", "bowel", "sleep"] {
+            let slider = self
+                .need_sliders
+                .get(role)
+                .ok_or_else(|| ReferenceError(format!("Missing need slider: {role}")))?;
+            require(
+                finite(&[slider.minimum, slider.maximum])
+                    && slider.maximum > slider.minimum
+                    && slider.direction <= 3,
+                "need slider",
+            )?;
+            require(
+                self.layouts.contains_key(&format!("need-{role}")),
+                "need layout",
+            )?;
+        }
         for s in &self.sprites {
             require(
                 hash(&s.sha256)
@@ -157,4 +174,14 @@ impl UiReference {
         )?;
         Ok(())
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NeedSlider {
+    pub source: SourceId,
+    pub minimum: f32,
+    pub maximum: f32,
+    pub direction: u8,
+    pub whole_numbers: bool,
 }

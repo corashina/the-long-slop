@@ -32,6 +32,7 @@ pub fn display_name<'a>(
         return display_name(reference, items, parent);
     }
     match item.kind {
+        ItemKind::Food => item.name.as_str(),
         ItemKind::Decoration => reference
             .mechanisms
             .iter()
