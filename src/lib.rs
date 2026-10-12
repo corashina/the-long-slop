@@ -9,6 +9,7 @@ pub mod browser;
 pub mod fluids;
 pub mod interaction;
 pub mod lighting;
+pub mod mirrors;
 pub mod player;
 pub mod reference;
 pub mod simulation;
