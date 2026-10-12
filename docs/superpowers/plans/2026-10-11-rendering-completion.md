@@ -175,4 +175,9 @@ Whole-branch mirror review remains pending. Trusted traversal, sustained powered
 
 ## Outside this plan
 
-Plate text, audio, survival, other vehicles, saves, multiplayer, and deployment remain excluded.
+Audio, survival, other vehicles, saves, multiplayer, and deployment remain excluded.
+The separate equipment work adds source plate text through its forward material path.
+It shares world lighting and the three existing mirror captures.
+It does not complete the deferred TMP shader path.
+Restart waits for current plate and mirror readiness before input or physics resumes.
+See `docs/verification.md` for the plate evidence and limits.

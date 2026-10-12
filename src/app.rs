@@ -206,7 +206,7 @@ fn check_ready(
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
-    mut frames: Local<u8>,
+    mut readiness: Local<(u8, bool)>,
     lighting: Res<presentation::lighting::SourceLighting>,
     mut materials: ResMut<presentation::materials::SourceMaterials>,
     mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
@@ -234,6 +234,7 @@ fn check_ready(
         return;
     }
     if drive.ready {
+        readiness.0 = 0;
         return;
     }
     for (path, handle) in &visuals.handles {
@@ -307,10 +308,13 @@ fn check_ready(
             if !mirrors.ready() || !plates.ready() {
                 return;
             }
-            *frames += 1;
-            if *frames >= 2 {
+            readiness.0 += 1;
+            if readiness.0 >= 2 {
                 drive.ready = true;
-                game_ready();
+                if !readiness.1 {
+                    game_ready();
+                    readiness.1 = true;
+                }
             }
         }
         Ok(false) => {}
@@ -361,6 +365,7 @@ fn read_input(
             game_failure(&error.to_string());
             return;
         }
+        drive.ready = false;
         source.reset_instances(&mut commands);
         commands.queue(presentation::mirrors::reset_mirrors);
         commands.queue(presentation::plates::reset_plate_text);
@@ -374,7 +379,7 @@ fn read_input(
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
         clear_input(&mut drive);
     }
-    if !drive.runtime.started || drive.runtime.paused {
+    if !drive.ready || !drive.runtime.started || drive.runtime.paused {
         drive.input.clear();
         return;
     }
@@ -395,7 +400,7 @@ fn advance_physics(
     mut drive: ResMut<Drive>,
 ) {
     drive.frame_steps = 0;
-    if !drive.runtime.started || drive.runtime.paused {
+    if !drive.ready || !drive.runtime.started || drive.runtime.paused {
         return;
     }
     if drive.skip_elapsed {

@@ -849,3 +849,43 @@ The source and package hashes are in `.cache/equipment-checks/final-package-pair
 The command report is `.superpowers/sdd/2026-10-12-live-mirrors/final-fix-report.md`.
 Controller screenshots are in `C:/Users/Corashina/.codex/visualizations/2026/10/12/01a12ea6-fdca-7740-aa22-558ee084f1ee/`.
 Current lifecycle proof is `mirror-final-lifecycle-pass.jpg`. Earlier checks retain `mirror-gpu-scene.jpg`, `mirror-invalid-clip-pass.jpg`, and `mirror-seated-motion-pass.jpg`.
+
+## Source plate lifecycle, 2026-10-12
+
+The equipment branch retains two imported text entities and two mesh handles.
+Both plates share the checked source font atlas and one plate material.
+Restart replaces each mesh payload under its existing handle.
+Bevy frees old vertex and index allocations before replacement in `MeshAllocator::free_meshes`.
+
+Restart now clears game readiness. Input and physics wait for current plate and mirror preparation.
+The first ready callback opens the start menu. Later ready transitions keep the existing restart menu state.
+`GarageRuntime::restart` starts the new game. The player can pause it through the existing menu.
+Plate binding uses an exclusive world system. It has no queued asynchronous binding work.
+Plate reset advances its instance and invalidates mesh revisions. Mirror preparation rejects earlier instances.
+
+The user asked to skip further tests. No new assertions, Python suites, installed checks, or full checks ran.
+The release product and ignored browser probe builds completed.
+The controller uses held browser stages for loading restart, plate transactions, pause, resize, and three restart cycles.
+The ignored observer counts live GL buffers and requested bytes without changing GL state.
+The source and product package receipts are in `.cache/equipment-checks/plate-lifecycle-pairing.json`.
+Source library, font, atlas, and scene receipts are in `plate-lifecycle-source-receipts.json` in the same directory.
+
+These browser checks use scripted camera poses and item transactions.
+Trusted mouse capture and matched Unity appearance remain unproved.
+The source TMP shader uses the supported forward path. Full Unity deferred shader behavior remains outside this work.
+
+The controller observed four ready states across three restart cycles, with plate instances 3, 4,5,6.
+Each retained 251 meshes, 130 images, one plate material, 297 source materials, 1373 GL buffers, and 11029400 requested buffer bytes.
+The backend retained 152 textures, 58 programs, 11 target textures, and three RGBA8 capture targets plus three HDR intermediates.
+Current main targets resized from 1280x720 to 1024x576 and returned. Target storage returned to 82268768 bytes.
+The readiness logs retained 48 capture variants. The controller found no warning, runtime error, or GL error.
+The visible front, rear, carry, drop, remount, bumper, plate removal, and origin-shift labels remained readable.
+The loading hold covered game readiness; synchronous text binding could finish before release.
+The first mirror placement screenshot proves placement only. It does not prove readable text in a capture.
+
+The final held resume view reported paused=false twice. Physics steps increased from 44 to 1527.
+The active source mirror showed partial DG/DGR glyphs from the selected plate through the existing capture path.
+Full mirror label readability remains unproved because the string was clipped or occluded.
+The controller restored production and observed ready=true with Start and Controls enabled, errors 0, and glErrors 0.
+The controller verified all 85 source/package/asset hash entries after restoration.
+Final screenshots include plate-lifecycle-resumed.png, plate-source-mirror-text-settled.png, and plate-final-production.png.

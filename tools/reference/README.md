@@ -190,3 +190,13 @@ cargo test --locked --test lighting_reference --test lighting_interaction --test
 It uses the toolchain's `sha256sum` utility. It adds no runtime dependency.
 The validator filters one exact pinned pygltflib provisional notice. Other warnings and validation errors remain visible.
 Keep source recovery, analysis, scenario patches, and captures outside Git.
+
+## Source plate ownership
+
+The selected Lada uses two imported plate items and two retained text meshes.
+The manifest requires the recovered plate contract, source font tables, atlas receipt, and separate text material.
+Restart regenerates native labels and replaces each mesh payload under its retained handle.
+Pause, resize, attachment changes, and origin changes keep the labels fixed.
+The renderer shares the checked atlas and material across game instances.
+Keep extracted font data, shader bytes, scenes, browser probes, and captures outside Git.
+See `docs/verification.md` for the current evidence and skipped checks.
