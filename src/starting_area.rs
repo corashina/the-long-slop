@@ -492,6 +492,9 @@ pub fn initial_vehicle_pose(reference: &ReferenceManifest) -> Result<VehiclePose
 pub struct GarageRuntime {
     pub survival: crate::survival::SurvivalState,
     pub sleep: crate::sleep::SleepState,
+    sleep_camera: Option<crate::sleep::SleepCamera>,
+    pub sleep_camera_allowed: bool,
+    pub audio_motion_revision: u32,
     pub simulation_seconds: f64,
     pub audio: crate::audio::AudioState,
     pub audio_session: u32,
@@ -566,6 +569,9 @@ impl GarageRuntime {
         Ok(Self {
             survival: crate::survival::SurvivalState::new(&reference.survival),
             sleep: crate::sleep::SleepState::new(&reference.sleep),
+            sleep_camera: None,
+            sleep_camera_allowed: true,
+            audio_motion_revision: 0,
             simulation_seconds: 0.,
             audio: crate::audio::AudioState::new(&reference.audio),
             audio_session: 1,
@@ -654,7 +660,12 @@ impl GarageRuntime {
                     .then_some(sleep.progress),
             },
         );
-        self.process_toilet(reference, input, FIXED_DT, factors.fluid_scale);
+        let sleep_held = input.held & keys::SLEEP != 0;
+        if self.sleeping() {
+            input = FrameInput::default();
+        } else {
+            self.process_toilet(reference, input, FIXED_DT, factors.fluid_scale);
+        }
         let needs = self.needs_output();
         if needs.dead {
             input = FrameInput {
@@ -671,11 +682,15 @@ impl GarageRuntime {
             .origin
             .absolute(self.physics.snapshot().pose.position);
         self.area.begin_step();
-        let aim = self.area.interaction.resolve(
-            &self.physics,
-            self.area.player.view_pose(&self.physics),
-            &self.area.items,
-        );
+        let aim = if self.sleeping() {
+            ResolvedAim::default()
+        } else {
+            self.area.interaction.resolve(
+                &self.physics,
+                self.area.player.view_pose(&self.physics),
+                &self.area.items,
+            )
+        };
         if !self.aim.same_actions(&aim)
             || input.pressed & (keys::GRAB | keys::USE | keys::ASSEMBLE) != 0
         {
@@ -1122,18 +1137,19 @@ impl GarageRuntime {
         .expect("valid station food");
         self.advance_light_fades(reference, FIXED_DT);
         self.advance_needs(reference, FIXED_DT, factors.need_scale);
-        // Task 6 supplies held sleep input and the active camera eligibility here.
+        let was_sleeping = self.sleeping();
         let output = self.sleep.step(
             &reference.sleep,
             crate::sleep::SleepInput {
-                held: false,
+                held: sleep_held,
                 active: !self.paused,
-                camera_allowed: true,
+                camera_allowed: self.sleep_camera_allowed || self.area.player.seat().is_none(),
                 dead: self.needs_output().dead,
             },
             self.simulation_seconds,
             FIXED_DT,
         );
+        self.sync_sleep_transition(reference, was_sleeping);
         self.lighting.cycle.set_sleep_progress(
             &reference.lighting.cycle,
             (output.phase == crate::sleep::SleepPhase::Sleeping).then_some(output.progress),
@@ -1141,6 +1157,9 @@ impl GarageRuntime {
     }
 
     pub fn clear_input(&mut self) {
+        self.sleep.cancel_charge();
+        self.ignition_held = false;
+        self.engine.clear_ignition_input();
         self.steering.clear();
         self.area.interaction.cancel_input();
     }
@@ -1165,6 +1184,8 @@ impl GarageRuntime {
         if self.needs_output().dead {
             return;
         }
+        self.interrupt_sleep(reference);
+        self.audio_motion_revision = self.audio_motion_revision.wrapping_add(1);
         self.previous_speed = None;
         self.death_protected = true;
         self.clear_input();

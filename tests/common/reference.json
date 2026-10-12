@@ -17451,6 +17451,356 @@
           1.0
         ]
       },
+      "need-sleep-fill": {
+        "source": {
+          "file": "level1",
+          "path_id": 77519
+        },
+        "rect": [
+          760.0,
+          966.0000032186508,
+          0.0,
+          0.0
+        ],
+        "ancestry": [
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 62386
+            },
+            "anchor_min": [
+              0.0,
+              0.0
+            ],
+            "anchor_max": [
+              1.0,
+              1.0
+            ],
+            "position": [
+              0.0,
+              -0.0
+            ],
+            "size": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0
+            ]
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 63993
+            },
+            "anchor_min": [
+              0.5,
+              0.0
+            ],
+            "anchor_max": [
+              0.5,
+              1.0
+            ],
+            "position": [
+              0.0,
+              -0.0
+            ],
+            "size": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "scale": [
+              1.0,
+              1.0
+            ]
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 62042
+            },
+            "anchor_min": [
+              0.5,
+              0.8875000029802322
+            ],
+            "anchor_max": [
+              0.5,
+              0.8875000029802322
+            ],
+            "position": [
+              0.0,
+              -0.0
+            ],
+            "size": [
+              400.0,
+              30.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "scale": [
+              1.0,
+              1.0
+            ]
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 62460
+            },
+            "anchor_min": [
+              0.0,
+              0.25
+            ],
+            "anchor_max": [
+              1.0,
+              0.75
+            ],
+            "position": [
+              0.0,
+              -0.0
+            ],
+            "size": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "scale": [
+              1.0,
+              1.0
+            ]
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 62544
+            },
+            "anchor_min": [
+              0.0,
+              1.0
+            ],
+            "anchor_max": [
+              0.0,
+              1.0
+            ],
+            "position": [
+              0.0,
+              -0.0
+            ],
+            "size": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "scale": [
+              1.0,
+              1.0
+            ]
+          }
+        ],
+        "canvas": {
+          "resolution": [
+            1920.0,
+            1080.0
+          ],
+          "mode": 1,
+          "match": 1.0,
+          "screen_match": 1
+        },
+        "color": [
+          1.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "font_size": 40,
+        "font": "Arial",
+        "alignment": 0,
+        "text": "",
+        "sprite": null,
+        "image_color": [
+          1.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "need-sleep-background": {
+        "source": {
+          "file": "level1",
+          "path_id": 71072
+        },
+        "rect": [
+          760.0,
+          951.0000032186508,
+          400.0,
+          15.0
+        ],
+        "ancestry": [
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 62386
+            },
+            "anchor_min": [
+              0.0,
+              0.0
+            ],
+            "anchor_max": [
+              1.0,
+              1.0
+            ],
+            "position": [
+              0.0,
+              -0.0
+            ],
+            "size": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0
+            ]
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 63993
+            },
+            "anchor_min": [
+              0.5,
+              0.0
+            ],
+            "anchor_max": [
+              0.5,
+              1.0
+            ],
+            "position": [
+              0.0,
+              -0.0
+            ],
+            "size": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "scale": [
+              1.0,
+              1.0
+            ]
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 62042
+            },
+            "anchor_min": [
+              0.5,
+              0.8875000029802322
+            ],
+            "anchor_max": [
+              0.5,
+              0.8875000029802322
+            ],
+            "position": [
+              0.0,
+              -0.0
+            ],
+            "size": [
+              400.0,
+              30.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "scale": [
+              1.0,
+              1.0
+            ]
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 63706
+            },
+            "anchor_min": [
+              0.0,
+              0.25
+            ],
+            "anchor_max": [
+              1.0,
+              0.75
+            ],
+            "position": [
+              0.0,
+              -0.0
+            ],
+            "size": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "scale": [
+              1.0,
+              1.0
+            ]
+          }
+        ],
+        "canvas": {
+          "resolution": [
+            1920.0,
+            1080.0
+          ],
+          "mode": 1,
+          "match": 1.0,
+          "screen_match": 1
+        },
+        "color": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "font_size": 40,
+        "font": "Arial",
+        "alignment": 0,
+        "text": "",
+        "sprite": null,
+        "image_color": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
       "can-sleep": {
         "source": {
           "file": "level1",

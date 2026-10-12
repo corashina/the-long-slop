@@ -1,7 +1,14 @@
 //! Source sleep deadlines use normal simulation time.
 use crate::reference::SleepReference;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SleepCamera {
+    pub absolute_position: [f64; 3],
+    pub rotation: [f32; 4],
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
 pub enum SleepPhase {
     Idle,
     Charging,

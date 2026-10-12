@@ -23,6 +23,7 @@ pub mod keys {
     pub const TRANSLATE: u32 = 16384;
     pub const RECENTER: u32 = 32768;
     pub const LIGHTS: u32 = 65536;
+    pub const SLEEP: u32 = 1 << 17;
     pub const URINATE: u32 = 1 << 18;
     pub const BURP: u32 = 1 << 19;
 }

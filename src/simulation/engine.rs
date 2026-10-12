@@ -141,6 +141,12 @@ pub struct EngineState {
 }
 
 impl EngineState {
+    pub fn clear_ignition_input(&mut self) {
+        self.last_ignition_held = false;
+        self.ignition_hold_seconds = 0.;
+        self.starter = false;
+    }
+
     pub fn new(reference: &EngineReference) -> Self {
         Self {
             ignition: false,

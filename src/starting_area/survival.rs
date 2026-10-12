@@ -171,7 +171,7 @@ impl GarageRuntime {
         reference: &ReferenceManifest,
         item: ItemId,
     ) -> Result<bool, ReferenceError> {
-        if self.needs_output().dead || !self.survival.output().can_eat {
+        if self.needs_output().dead || self.sleeping() || !self.survival.output().can_eat {
             return Ok(false);
         }
         let Some(state) = self.area.items.get(item) else {
@@ -214,8 +214,8 @@ impl GarageRuntime {
         source: ItemId,
         requested_liters: f32,
     ) -> Result<DrinkResult, ReferenceError> {
-        if self.needs_output().dead {
-            return Err(ReferenceError("Player is dead".into()));
+        if self.needs_output().dead || self.sleeping() {
+            return Err(ReferenceError("Player cannot drink".into()));
         }
         if !requested_liters.is_finite() || requested_liters < 0. {
             return Err(ReferenceError("Invalid drink volume".into()));
@@ -297,8 +297,8 @@ impl GarageRuntime {
         source: ItemId,
         requested_liters: f32,
     ) -> Result<DrinkResult, ReferenceError> {
-        if self.needs_output().dead {
-            return Err(ReferenceError("Player is dead".into()));
+        if self.needs_output().dead || self.sleeping() {
+            return Err(ReferenceError("Player cannot drink".into()));
         }
         if !requested_liters.is_finite() || requested_liters < 0. {
             return Err(ReferenceError("Invalid drink volume".into()));
@@ -484,6 +484,7 @@ impl GarageRuntime {
     fn announce_death(&mut self, reference: &ReferenceManifest) {
         if self.needs_output().dead && !self.death_announced {
             self.death_announced = true;
+            self.interrupt_sleep(reference);
             self.clear_input();
             self.area
                 .interaction
@@ -494,7 +495,7 @@ impl GarageRuntime {
     pub(super) fn sample_survival_speed(&mut self, reference: &ReferenceManifest) {
         // Kinematic controller velocity comes from Rapier's completed fixed step.
         // Seat entry and exit are placement operations, not source acceleration.
-        if self.area.player.seat().is_some() {
+        if self.area.player.seat().is_some() || self.sleeping() {
             self.previous_speed = None;
             return;
         }
@@ -522,7 +523,7 @@ impl GarageRuntime {
         dt: f32,
         fluid_scale: f32,
     ) {
-        if self.needs_output().dead {
+        if self.needs_output().dead || self.sleeping() {
             return;
         }
         use crate::audio::AudioKind;
@@ -568,5 +569,132 @@ impl GarageRuntime {
         if self.apply_toilet_output(reference, output).is_err() {
             self.notice = "Cannot create toilet item.";
         }
+    }
+}
+
+impl GarageRuntime {
+    pub fn sleeping(&self) -> bool {
+        self.sleep.output().phase == crate::sleep::SleepPhase::Sleeping
+    }
+
+    pub fn sleep_camera(&self) -> Option<crate::sleep::SleepCamera> {
+        self.sleep_camera
+    }
+
+    fn select_sleep_camera(&mut self, reference: &ReferenceManifest) {
+        use rapier3d::math::{Rotation, Vector};
+        use rapier3d::prelude::{ColliderHandle, QueryFilter, Ray};
+        let r = &reference.sleep;
+        // Uniform direction matches normalized insideUnitCircle; the sequence is a runtime adapter.
+        let angle = self.draw_survival() * std::f32::consts::TAU;
+        let radius = r.sleep_cam_ring_min
+            + self.draw_survival() * (r.sleep_cam_ring_max - r.sleep_cam_ring_min);
+        let target = Vector::from_array(self.area.player.body_pose(&self.physics).position);
+        let ray = Ray::new(
+            target + Vector::new(angle.cos() * radius, 10000., angle.sin() * radius),
+            -Vector::Y,
+        );
+        let mask = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
+            collider.is_enabled()
+                && collider.collision_groups().memberships.bits() & r.sleep_layer_mask != 0
+                && !collider
+                    .shape()
+                    .contains_point(collider.position(), ray.origin)
+        };
+        let hit = self
+            .physics
+            .queries(QueryFilter::default().predicate(&mask))
+            .cast_ray(&ray, f32::INFINITY, true);
+        let (position, rotation) = if let Some((_, distance)) = hit {
+            let height = r.sleep_cam_height_min
+                + self.draw_survival() * (r.sleep_cam_height_max - r.sleep_cam_height_min);
+            let position = ray.point_at(distance) + Vector::Y * height;
+            let direction = (target - position).normalize();
+            let rotation = Rotation::from_rotation_y((-direction.x).atan2(-direction.z))
+                * Rotation::from_rotation_x(direction.y.asin());
+            (position, rotation)
+        } else {
+            let yaw = self.draw_survival() * std::f32::consts::TAU;
+            (
+                target + Vector::Y * 50.,
+                Rotation::from_rotation_y(yaw)
+                    * Rotation::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+            )
+        };
+        self.sleep_camera = Some(crate::sleep::SleepCamera {
+            absolute_position: self.stream.origin.absolute(position.to_array()),
+            rotation: rotation.to_array(),
+        });
+    }
+
+    pub(super) fn sync_sleep_transition(
+        &mut self,
+        reference: &ReferenceManifest,
+        was_sleeping: bool,
+    ) {
+        if self.sleeping() {
+            if !was_sleeping {
+                self.select_sleep_camera(reference);
+                self.clear_input();
+                self.aim = super::ResolvedAim::default();
+                self.notice = "";
+                self.audio_motion_revision = self.audio_motion_revision.wrapping_add(1);
+            }
+            let progress = self.sleep.output().progress;
+            let gain = ((progress - 0.05) / 0.35)
+                .clamp(0., 1.)
+                .min(((0.95 - progress) / 0.35).clamp(0., 1.));
+            self.sleep_audio(
+                reference,
+                if was_sleeping {
+                    crate::audio::AudioAction::Update
+                } else {
+                    crate::audio::AudioAction::Start
+                },
+                gain,
+            );
+        } else if was_sleeping {
+            self.interrupt_sleep(reference);
+        }
+    }
+
+    pub(super) fn interrupt_sleep(&mut self, reference: &ReferenceManifest) {
+        self.sleep.interrupt();
+        if self.sleep_camera.take().is_some() {
+            self.sleep_audio(reference, crate::audio::AudioAction::Stop, 0.);
+            self.audio_motion_revision = self.audio_motion_revision.wrapping_add(1);
+            self.previous_speed = None;
+        }
+        self.lighting
+            .cycle
+            .set_sleep_progress(&reference.lighting.cycle, None);
+    }
+
+    fn sleep_audio(
+        &mut self,
+        reference: &ReferenceManifest,
+        action: crate::audio::AudioAction,
+        gain: f32,
+    ) {
+        let kind = crate::audio::AudioKind::Sleep;
+        let binding = reference.audio.binding(kind as u32);
+        let position = self.sleep_camera.map_or_else(
+            || {
+                self.stream
+                    .origin
+                    .absolute(self.area.player.view_pose(&self.physics).position)
+            },
+            |camera| camera.absolute_position,
+        );
+        self.audio.emit(crate::audio::AudioEvent {
+            session: self.audio_session,
+            emitter: 0,
+            kind,
+            action,
+            clip: binding.clips[0],
+            gain,
+            pitch: binding.pitch[0],
+            position,
+        });
     }
 }

@@ -3,7 +3,7 @@ export function createAudio({bindings: reference,onError=()=>{}}) {
  let context,master,session=0,epoch=0,paused=true,playing=false,desiredGain=1,disposed=false,disabled=false;
  const errors=new Set(),buffers=new Map(),loads=new Map(),routes=new Map(),voices=[];
  const origin=[0,0,0],listener=[0,0,0],listenerAbsolute=[0,0,0],listenerVelocity=[0,0,0];
- let previousSeconds=null,frameSeconds=0,frameDelta=0;
+ let previousSeconds=null,frameSeconds=0,frameDelta=0,motionRevision=0;
  function clearMotion(){previousSeconds=null;frameDelta=0;listenerVelocity.fill(0);for(const v of voices){v.vx=0;v.vy=0;v.vz=0;}}
  function report(key,error){if(errors.has(key))return;errors.add(key);try{onError(error);}catch{}}
  try {
@@ -77,7 +77,7 @@ export function createAudio({bindings: reference,onError=()=>{}}) {
   }catch(error){stop(v);report('play:'+v.clip,error);}
  }
  function publish(ids,values){
-  if(disabled||disposed||paused||!context)return;
+  if(disabled||disposed||!context)return;
   if(ids.length%5 || values.length!==ids.length){report('event',Error('Invalid audio event fields'));return;}
   try{for(let i=0;i<ids.length;i+=5){
    if(ids[i]!==session)continue;
@@ -86,6 +86,7 @@ export function createAudio({bindings: reference,onError=()=>{}}) {
    let voice=voices.find(v=>v.active&&v.emitter===emitter&&v.kind===kind);
    if(action===1&&!voice&&binding.looped)action=0;
    if(action===2){if(voice)stop(voice);continue;}
+   if(paused)continue;
    if(action===1){if(!voice)continue;}
    else if(action===0){
     if(voice && (binding.looped||kind!==0)){if(binding.looped&&voice.clip===clip){}else{stop(voice);voice=null;}}
@@ -103,8 +104,9 @@ export function createAudio({bindings: reference,onError=()=>{}}) {
    if(!voice.source&&action===0){const buffer=buffers.get(clip);if(buffer)play(voice,buffer,voice.token,epoch);else if(binding.looped&&!voice.loading){voice.loading=true;const token=voice.token,ownerEpoch=epoch;void load(reference.clips[clip]).then(b=>{if(voice.token===token)voice.loading=false;play(voice,b,token,ownerEpoch);});}else if(!binding.looped)stop(voice);}
   }}catch(error){report('publish',error);}
  }
- function setListener(next,x,y,z,fx,fy,fz,ux,uy,uz,masterGain,ox,oy,oz,seconds){
+ function setListener(next,revision,x,y,z,fx,fy,fz,ux,uy,uz,masterGain,ox,oy,oz,seconds){
   if(next<session)return;if(next!==session)reset(next);
+  if(revision!==motionRevision){motionRevision=revision;clearMotion();}
   frameSeconds=seconds;frameDelta=previousSeconds!==null&&seconds>previousSeconds&&playing&&!paused?seconds-previousSeconds:0;
   const ax=x+ox,ay=y+oy,az=z+oz;
   listenerVelocity[0]=frameDelta>0?(ax-listenerAbsolute[0])/frameDelta:0;

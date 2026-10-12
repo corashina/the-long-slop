@@ -51,3 +51,5 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #throw-level {vertical-align:middle;width:120px;}
 
 #survival,#death-shade{position:fixed;inset:0;pointer-events:none}#survival{z-index:3}.need-part{position:absolute;background-size:100% 100%;background-repeat:no-repeat}.need-value{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}#death-shade{z-index:2;background:#000}
+
+#sleep-feedback{position:fixed;inset:0;pointer-events:none;z-index:3}.sleep-label{position:absolute;text-align:center;white-space:nowrap}

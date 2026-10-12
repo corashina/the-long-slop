@@ -366,6 +366,7 @@ fn read_input(
         return;
     }
     if !drive.runtime.needs_output().dead
+        && !drive.runtime.sleeping()
         && frame.pressed & keys::CAMERA != 0
         && drive.runtime.area.player.seat().is_some()
     {
@@ -374,6 +375,7 @@ fn read_input(
             CameraMode::Chase => CameraMode::Cockpit,
         };
     }
+    drive.runtime.sleep_camera_allowed = drive.camera == CameraMode::Cockpit;
     drive.input.merge(frame);
 }
 fn advance_physics(
@@ -494,14 +496,18 @@ fn sync_instruments(
         &mut casters,
     );
 }
+fn active_camera(drive: &Drive) -> Transform {
+    if let Some(camera) = drive.runtime.sleep_camera() {
+        presentation::camera::sleep_pose(camera, &drive.runtime.stream.origin)
+    } else if drive.camera == CameraMode::Chase && drive.runtime.area.player.seat().is_some() {
+        presentation::camera::pose(CameraMode::Chase, drive.runtime.physics.snapshot().pose)
+    } else {
+        presentation::transform(drive.rendered)
+    }
+}
 fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveCamera>>) {
     for mut transform in &mut query {
-        *transform =
-            if drive.camera == CameraMode::Chase && drive.runtime.area.player.seat().is_some() {
-                presentation::camera::pose(CameraMode::Chase, drive.runtime.physics.snapshot().pose)
-            } else {
-                presentation::transform(drive.rendered)
-            };
+        *transform = active_camera(&drive);
     }
 }
 fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
@@ -517,8 +523,16 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         needs.look_scale,
         needs.menu_due,
     );
+    let sleep = drive.runtime.sleep.output();
+    game_sleep(
+        sleep.phase as u32,
+        sleep.eligible,
+        sleep.charge,
+        sleep.cooldown_remaining,
+        sleep.progress,
+    );
     let origin = drive.runtime.stream.origin.offset;
-    let listener = presentation::transform(drive.rendered);
+    let listener = active_camera(&drive);
     let forward = listener.rotation * Vec3::NEG_Z;
     let up = listener.rotation * Vec3::Y;
     let p = listener.translation;
@@ -530,6 +544,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     };
     game_audio_listener(
         drive.runtime.audio_session,
+        drive.runtime.audio_motion_revision,
         p.x,
         p.y,
         p.z,

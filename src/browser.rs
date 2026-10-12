@@ -15,11 +15,20 @@ extern "C" {
         look_scale: f32,
         menu_due: bool,
     );
+    #[wasm_bindgen(js_namespace=window,js_name=gameSleep)]
+    pub fn game_sleep(
+        phase: u32,
+        eligible: bool,
+        charge: f32,
+        cooldown_remaining: f64,
+        progress: f32,
+    );
     #[wasm_bindgen(js_namespace=window,js_name=gameAudio)]
     pub fn game_audio(ids: &[u32], values: &[f32]);
     #[wasm_bindgen(js_namespace=window,js_name=gameAudioListener)]
     pub fn game_audio_listener(
         session: u32,
+        motion_revision: u32,
         x: f32,
         y: f32,
         z: f32,

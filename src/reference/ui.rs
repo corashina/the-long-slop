@@ -136,6 +136,11 @@ impl UiReference {
             "reticle",
             "foot",
             "driving",
+            "can-sleep",
+            "cannot-sleep",
+            "need-sleep",
+            "need-sleep-background",
+            "need-sleep-fill",
         ] {
             let e = self
                 .layouts
@@ -143,8 +148,11 @@ impl UiReference {
                 .ok_or_else(|| ReferenceError(format!("Missing UI layout {role}")))?;
             require(
                 finite(&e.rect)
-                    && e.rect[2] > 0.
-                    && e.rect[3] > 0.
+                    && if role == "need-sleep-fill" {
+                        e.rect[2] >= 0. && e.rect[3] >= 0.
+                    } else {
+                        e.rect[2] > 0. && e.rect[3] > 0.
+                    }
                     && e.font_size.is_finite()
                     && e.font_size > 0.
                     && finite(&e.canvas.resolution)

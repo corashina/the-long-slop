@@ -125,6 +125,21 @@ def export_ui(source, output, library):
     for role,field in [('food','Food'),('water','Water'),('hp','HP'),('bladder','Piss'),('bowel','Shit')]:
         for suffix,label in [('', 'fill'),('BG','background'),('Icon','icon')]:
             layout(source.resolve(menu,md['survivalSlider'+field+suffix]),'need-'+role+'-'+label)
+    sleep_slider=source.resolve(menu,md['SSleepValue'])
+    sleep_data=source.read(sleep_slider)
+    fill_rect=source.resolve(sleep_slider,sleep_data['m_FillRect'])
+    fill_go=source.resolve(fill_rect,source.read(fill_rect)['m_GameObject'])
+    fill_image=next(c for c in components(fill_go) if c.type.name=='MonoBehaviour' and source.class_name(c)=='Image')
+    layout(fill_image,'need-sleep-fill')
+    slider_go=source.resolve(sleep_slider,sleep_data['m_GameObject'])
+    background=[]
+    for node in source.hierarchy(rect_for(slider_go),activate_root=True):
+        for component in node['components']:
+            if component.type.name=='MonoBehaviour' and source.class_name(component)=='Image':
+                data=source.read(component)
+                if data['m_Enabled'] and key(component)!=key(fill_image):background.append(component)
+    if len(background)!=1:raise ValueError('Sleep slider must have one active background')
+    layout(background[0],'need-sleep-background')
     for role,field in [('can-sleep','GCanSleep'),('cannot-sleep','GCantSleep')]:
         go=source.resolve(menu,md[field])
         for c in components(go):
