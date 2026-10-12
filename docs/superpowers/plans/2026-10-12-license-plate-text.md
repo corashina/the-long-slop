@@ -12,7 +12,7 @@ A separate attachment module connects the plates to existing carry, physics, and
 
 **Spec:** [Approved plate design](../specs/2026-10-12-license-plate-text-design.md).
 
-**Status:** The user approved the spec and authorized this plan on 2026-10-12. Implementation is in progress.
+**Status:** The user approved the spec and authorized this plan on 2026-10-12. All implementation tasks are complete. Whole-branch review is pending.
 **Execution:** Preserve the user's selected subagent-driven method after plan approval.
 **Base:** Local `master`, `a623c23`. The mirror implementation is merged at `62393dc`.
 
@@ -408,6 +408,8 @@ Commit message: `feat: support source plate removal and mounting`.
 
 ### Task 5: Verify lifecycle, resources, and the assembled product
 
+**User override:** Continue. Ignore tests. Automated assertions and suites in Steps 1 and 2 were skipped.
+
 **Files:** Modify plate presentation lifecycle, `src/app.rs`, and related native tests if acceptance finds a defect.
 Update `docs/verification.md`, `tools/reference/README.md`, and `docs/superpowers/plans/2026-10-11-rendering-completion.md`.
 Keep browser harnesses, captures, generated assets, and source extracts outside Git.
@@ -418,7 +420,7 @@ Keep browser harnesses, captures, generated assets, and source extracts outside 
 - Use `reset_plate_text(world)` before disposing old game-owned text assets.
 - Preserve shared checked source assets according to existing asset ownership.
 
-- [ ] **Step 1: Add the missing lifecycle assertions to the ignored browser harness.**
+- [ ] **Skipped by user: Step 1: Add the missing lifecycle assertions to the ignored browser harness.**
 
 `plate_restart_during_loading_rejects_stale_epoch` restarts before text readiness.
 Assert only the current instance can bind or report ready.
@@ -427,12 +429,12 @@ Compare post-readiness material, image, mesh, render-target, and pipeline counts
 Require stable ownership counts and zero unknown pipeline keys after readiness.
 Require exactly three mirror capture targets, unchanged from the merged mirror implementation.
 
-- [ ] **Step 2: Run these checks against the current build and record any failure.**
+- [ ] **Skipped by user: Step 2: Run these checks against the current build and record any failure.**
 
 Use the actual imported Lada and labelled browser diagnostics.
 A passing check requires no lifecycle code change solely to manufacture a failing test.
 
-- [ ] **Step 3: Complete lifecycle integration where the checks show a gap.**
+- [x] **Step 3: Complete lifecycle integration where the checks show a gap.**
 
 Reject stale binding work with the current instance epoch.
 Release replaced glyph meshes and per-game text entities.
@@ -441,9 +443,9 @@ Keep strings fixed during pause, resize, mount, and origin changes.
 Run cold pipeline preparation during each game loading phase before readiness.
 Do not specialize new pipelines during playing-state item transitions.
 
-- [ ] **Step 4: Run full acceptance on one implementation revision.**
+- [x] **Step 4: Run full acceptance on one implementation revision.**
 
-Run Python plate and export staging checks, all installed plate checks, `./scripts/check.ps1`, and `./scripts/build.ps1`.
+The user excluded further automated tests on 2026-10-12. Run the release build and visible browser checks.
 Verify readable front/rear text, bumper removal, individual removal, carry, drop, remount, origin shift, resize, pause, and restart.
 Check eligible mirror text and main-view lighting on that same build.
 Record code, WASM, manifest, source-library, font, and atlas hashes.
@@ -451,7 +453,7 @@ Record visible screenshots, errors, resource counts, and pipeline counts.
 Label scripted input, trusted-input limits, random-sequence differences, and unsupported source shader behavior.
 Do not claim matched Unity appearance without matched source runtime views.
 
-- [ ] **Step 5: Commit the acceptance record and any verified lifecycle fixes.**
+- [x] **Step 5: Commit the acceptance record and any verified lifecycle fixes.**
 
 Commit message: `test: verify source plate lifecycle and browser rendering`.
 Mark completed checkboxes only after their evidence exists.
