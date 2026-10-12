@@ -207,6 +207,15 @@ impl TaaPass {
             logical_bytes: u64::from(width) * u64::from(height) * 16,
         })
     }
+    pub fn recreate(&mut self) {
+        self.reset_history();
+        self.next_output = 0;
+        self.initialized = false;
+        self.seed_bindings = None;
+    }
+    pub fn history(&self) -> [u32; 2] {
+        [self.next_output as u32, u32::from(self.initialized)]
+    }
     pub fn reset_history(&mut self) {
         self.reset = true;
         self.pending = false;

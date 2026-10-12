@@ -316,7 +316,7 @@ fn sync_lighting_readiness(
     materials: Option<Res<super::materials::SourceMaterials>>,
     master: Option<Res<super::lighting::SourceLighting>>,
     status: Res<SourceLightingStatus>,
-    gate: Res<SourceExecutionGate>,
+    epoch: Res<super::view_frame::SourceSceneEpoch>,
     graph: Option<Res<super::frame_graph::SourceGraphProgress>>,
 ) {
     let probe_readiness = graph.as_ref().map(|graph| graph.probe_readiness());
@@ -357,24 +357,36 @@ fn sync_lighting_readiness(
         lighting.probe_pipelines_ready = pipelines;
         lighting.first_probe_ready = published;
     }
-    lighting.first_submission_validated = gate.validated();
+    let [resources, surfaces, shadows, effects, complete] =
+        graph.as_ref().map_or([false; 5], |g| g.readiness(epoch.0));
+    lighting.resources_ready = resources;
+    lighting.surface_pipelines_ready = surfaces;
+    lighting.shadow_pipelines_ready = shadows;
+    lighting.postprocessing_pipelines_ready = effects;
+    lighting.first_submission_validated = complete;
     lighting.update_readiness();
+    *shared = lighting.state.clone();
 }
 fn source_render_error(
     error: &bevy::render::error_handler::RenderError,
     main: &mut World,
     _: &mut World,
 ) -> bevy::render::error_handler::RenderErrorPolicy {
-    let failure = RenderingState::Failed(format!(
-        "Source rendering {:?}: {}",
-        error.ty, error.description
-    ));
+    let failure = {
+        let mut shared = main
+            .resource::<SourceLightingStatus>()
+            .0
+            .lock()
+            .expect("source lighting status lock");
+        if !matches!(*shared, RenderingState::Failed(_)) {
+            *shared = RenderingState::Failed(format!(
+                "Source rendering {:?}: {}",
+                error.ty, error.description
+            ));
+        }
+        shared.clone()
+    };
     main.resource_mut::<SourceLighting>().state = failure.clone();
-    *main
-        .resource::<SourceLightingStatus>()
-        .0
-        .lock()
-        .expect("source lighting status lock") = failure.clone();
     if let Some(mut materials) = main.get_resource_mut::<super::materials::SourceMaterials>() {
         materials.state = failure;
     }

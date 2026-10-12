@@ -13,6 +13,27 @@ use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::{ecs as bevy_ecs, render as bevy_render};
 
+#[derive(Resource)]
+pub struct ProbeActivation {
+    pub enabled: bool,
+    pub checks: u32,
+    pub distance_squared: f32,
+    scene: u32,
+    elapsed: f32,
+    last_check: f32,
+}
+impl Default for ProbeActivation {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            checks: 0,
+            distance_squared: 0.,
+            scene: 0,
+            elapsed: 0.,
+            last_check: 0.,
+        }
+    }
+}
 #[derive(Resource, Default)]
 pub struct SourceWorldOrigin(pub [f64; 3]);
 
@@ -67,6 +88,8 @@ pub(crate) fn sync_lighting(
     drive: Option<Res<Drive>>,
     reference: Option<Res<RuntimeReference>>,
     mut origin: ResMut<SourceWorldOrigin>,
+    mut activation: ResMut<ProbeActivation>,
+    epoch: Res<super::view_frame::SourceSceneEpoch>,
     transforms: Query<&GlobalTransform>,
     mut scene: ResMut<SourceSceneLighting>,
     mut lighting: ResMut<SourceLighting>,
@@ -86,7 +109,32 @@ pub(crate) fn sync_lighting(
     }
     origin.0 = drive.runtime.area.origin;
     match scene_value(&assets, &visuals, &master, &drive, &reference, &transforms) {
-        Ok(value) => scene.0 = Some(value),
+        Ok(mut value) => {
+            if activation.scene != epoch.0 {
+                activation.scene = epoch.0;
+                activation.enabled = true;
+                activation.last_check = 0.;
+                activation.checks = 0;
+            }
+            activation.elapsed += drive.render_delta_seconds;
+            let player = Vec3::from_array(
+                drive
+                    .runtime
+                    .area
+                    .player
+                    .body_pose(&drive.runtime.physics)
+                    .position,
+            );
+            activation.distance_squared = player.distance_squared(value.probe_position);
+            // Installed ReflectionDisableDistance: one selected probe, limit ten, strict squared distance.
+            if activation.elapsed - activation.last_check >= 5. {
+                activation.last_check = activation.elapsed;
+                activation.enabled = activation.distance_squared < 2500.;
+                activation.checks += 1;
+            }
+            value.probe_extents.w = f32::from(activation.enabled);
+            scene.0 = Some(value);
+        }
         Err(error) => {
             let failure = RenderingState::Failed(format!("Source lighting pose: {error}"));
             lighting.state = failure.clone();

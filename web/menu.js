@@ -2,7 +2,8 @@ import {applyLayout,layoutBox,rgba} from './ui-layout.js';
 export const ACTIONS={START:1,PAUSE:2,CONTINUE:4,RESTART:8,RECOVER:16};
 export class MenuState {
  constructor(){this.state='loading';this.readyFlag=false;this.started=false;this.actions=0;this.error='';this.generation=0;this.pending=false;this.origin='start-menu';}
- ready(){if(this.state==='error')return;this.readyFlag=true;this.state='start-menu';}
+ ready(){if(this.state==='error')return;this.readyFlag=true;this.state=this.started?'pause-menu':'start-menu';}
+ loading(){if(this.state==='error')return;this.generation++;this.pending=false;this.readyFlag=false;this.actions=0;this.state='loading';this.error='';}
  fail(message){this.generation++;this.pending=false;this.readyFlag=false;this.state='error';this.error=message;this.actions=this.started?ACTIONS.PAUSE:0;}
  pause(){this.generation++;this.pending=false;this.actions=this.started?ACTIONS.PAUSE:0;if(this.state==='error')return;if(this.state==='controls'){this.origin=this.started?'pause-menu':'start-menu';return;}this.state=this.readyFlag?(this.started?'pause-menu':'start-menu'):'loading';}
  controls(){if(this.pending)return;if(this.state!=='start-menu' && this.state!=='pause-menu')return;this.origin=this.state;this.state='controls';}
@@ -65,5 +66,5 @@ export function createMenu({canvas,ui,clearInput,queueAction}) {
  document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==canvas && model.state==='playing')pause();});
  window.addEventListener('blur',pause);document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});
  window.addEventListener('resize',resize);resize();paint();
- return {model,ready(){model.ready();status.textContent='The garage is ready.';paint();},sync(started,stopped,travelM){model.started=started;if(stopped && started && model.state==='playing'){model.pause();paint();}const km=Math.round(travelM/10)/100;if(lastTravel!==km){document.querySelector('#session-distance').textContent='Session distance: '+km.toFixed(2)+' km';lastTravel=km;}},fail(message){clearInput();model.fail(message);if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();},dispose(){window.removeEventListener('resize',resize);}};
+ return {model,loading(){clearInput();model.loading();if(document.pointerLockElement===canvas)document.exitPointerLock();status.textContent='Loading the garage...';paint();},ready(){model.ready();status.textContent='The garage is ready.';paint();},sync(started,stopped,travelM){model.started=started;if(stopped && started && model.state==='playing'){model.pause();paint();}const km=Math.round(travelM/10)/100;if(lastTravel!==km){document.querySelector('#session-distance').textContent='Session distance: '+km.toFixed(2)+' km';lastTravel=km;}},fail(message){clearInput();model.fail(message);if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();},dispose(){window.removeEventListener('resize',resize);}};
 }

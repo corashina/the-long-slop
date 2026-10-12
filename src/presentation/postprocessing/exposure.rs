@@ -140,6 +140,13 @@ impl ExposurePass {
         self.pending
             .or_else(|| self.initialized.then_some(self.output_index))
     }
+    pub fn recreate(&mut self) {
+        self.reset_history();
+        self.output_index = 0;
+    }
+    pub fn history(&self) -> [u32; 2] {
+        [self.output_index as u32, u32::from(self.initialized)]
+    }
     pub fn reset_history(&mut self) {
         self.initialized = false;
         self.pending = None;

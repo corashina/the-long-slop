@@ -1,6 +1,8 @@
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(js_namespace = window, js_name = gameLoading)]
+    pub fn game_loading();
     #[wasm_bindgen(js_namespace = window, js_name = gameReady)]
     pub fn game_ready();
     #[wasm_bindgen(js_namespace = window, js_name = gameFailure)]

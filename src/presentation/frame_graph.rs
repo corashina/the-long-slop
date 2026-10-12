@@ -65,6 +65,11 @@ impl ExtractComponent for SourceSkyExtra {
 struct SkyExtras(bevy::ecs::entity::EntityHashMap<(Entity, u32)>);
 #[derive(Default, serde::Serialize)]
 struct FrameProgress {
+    scene: u32,
+    extent: [u32; 2],
+    first_token: u32,
+    first_jitter: [f32; 2],
+    jitter: [f32; 2],
     frame: u32,
     mask: u16,
     sky: bool,
@@ -89,6 +94,34 @@ impl SourceGraphProgress {
     pub(crate) fn publish_effects(&self, audit: super::source_effects::EffectsAudit) {
         self.0.lock().unwrap().effects = audit;
     }
+    pub(crate) fn readiness(&self, scene: u32) -> [bool; 5] {
+        let s = self.0.lock().unwrap();
+        if s.scene != scene {
+            return [false; 5];
+        }
+        let gpu = &s.gpu_boundary;
+        let complete = s.presented
+            && s.sky
+            && s.mask == 7
+            && s.token != 0
+            && s.motion.frame == s.frame
+            && s.motion.submitted_token == s.token
+            && s.motion.validated
+            && s.effects.complete(s.frame, s.token)
+            && s.validated;
+        [
+            gpu.source_targets
+                && gpu.lighting_textures != 0
+                && gpu.lighting_gpu_textures == gpu.lighting_textures,
+            gpu.source_surface_ready
+                && gpu.source_camera_ready
+                && gpu.source_sky_ready
+                && gpu.source_cloud_ready,
+            gpu.source_caster_ready,
+            s.effects.pipelines_ready(),
+            complete,
+        ]
+    }
     pub fn probe_readiness(&self) -> (bool, bool) {
         let state = self.0.lock().unwrap();
         (state.probe.pipelines_ready, state.probe.published)
@@ -108,6 +141,9 @@ pub(crate) struct FrameResources {
 
 #[derive(Clone, Copy, Default, serde::Serialize)]
 struct ProbeAudit {
+    enabled: bool,
+    checks: u32,
+    distance_squared: f32,
     token: u32,
     job: u8,
     face_mask: u8,
@@ -122,6 +158,7 @@ struct ProbeAudit {
 }
 #[derive(Resource)]
 pub(crate) struct ProbeFrame {
+    scene: u32,
     filter: ProbeFilter,
     publication: ProbePublication,
     encoded_token: Option<u32>,
@@ -145,6 +182,9 @@ impl ProbeFrame {
 
 #[derive(Clone, Copy, Default, serde::Serialize)]
 struct MotionAudit {
+    first_token: u32,
+    first_draws: [u32; 3],
+    first_camera_registered: bool,
     pipelines_ready: bool,
     objects_ready: bool,
     frame: u32,
@@ -152,6 +192,8 @@ struct MotionAudit {
     object_token: u32,
     submitted_token: u32,
     registered_objects: u32,
+    allocated_slots: u32,
+    reused_slots: u32,
     draws: [u32; 3],
     extent: [u32; 2],
     validation: u32,
@@ -161,6 +203,10 @@ struct MotionAudit {
 }
 #[derive(Resource)]
 pub(crate) struct MotionFrame {
+    scene: u32,
+    first_token: u32,
+    first_draws: [u32; 3],
+    first_camera_registered: bool,
     pass: Option<SourceMotionPass>,
     targets: Arc<super::render_targets::SourceViewTargets>,
     origin: [f64; 3],
@@ -577,6 +623,25 @@ pub(crate) fn surface_ready(
 }
 fn begin_frame(frame: Res<SourceViewFrame>, progress: Res<SourceGraphProgress>) {
     let mut state = progress.0.lock().unwrap();
+    if state.scene != frame.scene {
+        let cpu = state.cpu_boundary;
+        let gpu = state.gpu_boundary;
+        *state = FrameProgress {
+            scene: frame.scene,
+            cpu_boundary: cpu,
+            gpu_boundary: gpu,
+            ..default()
+        };
+    }
+    if let Some(view) = frame.views[1] {
+        let extent = view.extent.to_array();
+        if state.extent != extent {
+            state.extent = extent;
+            state.validation = 0;
+            state.validated = false;
+        }
+    }
+    state.jitter = frame.jitter.map_or([0.; 2], |j| j.pixels);
     state.frame = frame.frame;
     state.mask = 0;
     state.sky = false;
@@ -834,6 +899,10 @@ fn submitted(
     }
     let mut state = progress.0.lock().unwrap();
     if state.presented {
+        if state.first_token == 0 {
+            state.first_token = state.token;
+            state.first_jitter = state.jitter;
+        }
         acks.main_submitted(state.token);
         if state.validation == 0 {
             state.validation = gate.watch_submission(&queue);
@@ -870,6 +939,9 @@ fn submitted(
         return;
     }
     state.probe = ProbeAudit {
+        enabled: frame.probe_enabled,
+        checks: frame.probe_checks,
+        distance_squared: frame.probe_distance_squared,
         token: frame.probe_token,
         job: match frame.probe_job {
             Some(ProbeJob::Face(face)) => face + 1,
@@ -908,6 +980,18 @@ struct SourceDiagnostics {
     gate: SourceExecutionGate,
 }
 static SOURCE_DIAGNOSTICS: OnceLock<SourceDiagnostics> = OnceLock::new();
+
+/// Browser graphics failures use the same terminal state as native device errors.
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn source_render_failure(message: &str) {
+    let Some(renderer) = SOURCE_DIAGNOSTICS.get() else {
+        return;
+    };
+    let mut state = renderer.status.lock().unwrap();
+    if !matches!(*state, RenderingState::Failed(_)) {
+        *state = RenderingState::Failed(message.to_owned());
+    }
+}
 
 /// Serialize only on explicit diagnostic calls. Render frames copy fixed-size counters.
 #[wasm_bindgen::prelude::wasm_bindgen]
@@ -949,6 +1033,7 @@ struct CpuBoundary {
 }
 #[derive(Clone, Copy, Default, serde::Serialize)]
 struct GpuBoundary {
+    asset_audit_refreshes: u32,
     view_keys: u32,
     gpu_meshes: u32,
     prepared_materials: u32,
@@ -1026,8 +1111,21 @@ fn cpu_boundaries(
     boundary.visuals_bound = visuals.is_some_and(|v| v.bound);
     progress.0.lock().unwrap().cpu_boundary = boundary;
 }
+#[derive(Default)]
+struct AssetAuditCache {
+    stamps: Option<[Option<u32>; 4]>,
+    counts: [u32; 5],
+    cloud: bool,
+    refreshes: u32,
+}
+fn resource_stamp<T: Resource>(world: &World) -> Option<u32> {
+    world
+        .get_resource_ref::<T>()
+        .map(|resource| resource.last_changed().get())
+}
 fn gpu_boundaries(
     world: &World,
+    mut audit: Local<AssetAuditCache>,
     views: Query<(
         &SourceSurfaceView,
         Option<&super::source_lighting::SourceViewLighting>,
@@ -1044,18 +1142,51 @@ fn gpu_boundaries(
     if let Some(keys) = world.get_resource::<ViewKeyCache>() {
         boundary.view_keys = keys.len() as u32;
     }
-    if let Some(meshes) = world.get_resource::<RenderAssets<RenderMesh>>() {
-        boundary.gpu_meshes = meshes.iter().count() as u32;
+    let stamps = [
+        resource_stamp::<RenderAssets<RenderMesh>>(world),
+        resource_stamp::<ErasedRenderAssets<PreparedMaterial>>(world),
+        resource_stamp::<LightingRenderAssets>(world),
+        resource_stamp::<RenderAssets<GpuImage>>(world),
+    ];
+    if audit.stamps != Some(stamps) {
+        audit.stamps = Some(stamps);
+        audit.counts = [0; 5];
+        audit.cloud = false;
+        audit.refreshes += 1;
+        if let Some(meshes) = world.get_resource::<RenderAssets<RenderMesh>>() {
+            audit.counts[0] = meshes.iter().count() as u32;
+        }
+        if let Some(materials) = world.get_resource::<ErasedRenderAssets<PreparedMaterial>>() {
+            audit.counts[1] = materials.iter().count() as u32;
+            audit.counts[2] = materials
+                .iter()
+                .filter(|(id, _)| {
+                    id.type_id() == std::any::TypeId::of::<super::materials::SourceMaterial>()
+                })
+                .count() as u32;
+        }
+        if let Some(assets) = world.get_resource::<LightingRenderAssets>() {
+            audit.counts[3] = assets.textures.len() as u32;
+            if let Some(images) = world.get_resource::<RenderAssets<GpuImage>>() {
+                audit.counts[4] = assets
+                    .textures
+                    .values()
+                    .filter(|image| images.get(image.id()).is_some())
+                    .count() as u32;
+            }
+            audit.cloud = world
+                .get_resource::<RenderAssets<RenderMesh>>()
+                .is_some_and(|meshes| meshes.get(assets.cloud_mesh.id()).is_some());
+        }
     }
-    if let Some(materials) = world.get_resource::<ErasedRenderAssets<PreparedMaterial>>() {
-        boundary.prepared_materials = materials.iter().count() as u32;
-        boundary.source_prepared_materials = materials
-            .iter()
-            .filter(|(id, _)| {
-                id.type_id() == std::any::TypeId::of::<super::materials::SourceMaterial>()
-            })
-            .count() as u32;
-    }
+    boundary.gpu_meshes = audit.counts[0];
+    boundary.prepared_materials = audit.counts[1];
+    boundary.source_prepared_materials = audit.counts[2];
+    boundary.lighting_textures = audit.counts[3];
+    boundary.lighting_gpu_textures = audit.counts[4];
+    boundary.cloud_gpu_mesh = audit.cloud;
+    boundary.asset_audit_refreshes = audit.refreshes;
+    boundary.lighting_render_assets = stamps[2].is_some();
     if let Some(master) = world.get_resource::<super::lighting::LightingGpu>() {
         boundary.master_cookies = master.cookies.is_some();
         boundary.master_uniform = master.uniform.buffer().is_some();
@@ -1064,20 +1195,6 @@ fn gpu_boundaries(
             super::lighting::RenderingState::Ready => 1,
             super::lighting::RenderingState::Failed(_) => 2,
         };
-    }
-    if let Some(assets) = world.get_resource::<LightingRenderAssets>() {
-        boundary.lighting_render_assets = true;
-        boundary.lighting_textures = assets.textures.len() as u32;
-        if let Some(images) = world.get_resource::<RenderAssets<GpuImage>>() {
-            boundary.lighting_gpu_textures = assets
-                .textures
-                .values()
-                .filter(|image| images.get(image.id()).is_some())
-                .count() as u32;
-        }
-        boundary.cloud_gpu_mesh = world
-            .get_resource::<RenderAssets<RenderMesh>>()
-            .is_some_and(|meshes| meshes.get(assets.cloud_mesh.id()).is_some());
     }
     let cache = world.resource::<PipelineCache>();
     boundary.source_targets = world.contains_resource::<SurfaceResources>();
@@ -1155,7 +1272,8 @@ fn prepare_probe(
     mut commands: Commands,
     surfaces: Option<Res<SurfaceResources>>,
     assets: Option<Res<LightingRenderAssets>>,
-    existing: Option<Res<ProbeFrame>>,
+    existing: Option<ResMut<ProbeFrame>>,
+    frame: Res<SourceViewFrame>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
@@ -1164,7 +1282,24 @@ fn prepare_probe(
     if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
         return;
     }
-    if let Some(existing) = existing {
+    if let Some(mut existing) = existing {
+        if existing.scene != frame.scene {
+            let Some(surfaces) = surfaces else {
+                return;
+            };
+            surfaces.probe.clear_publication(&queue);
+            existing.scene = frame.scene;
+            existing.publication = ProbePublication::default();
+            existing.encoded_token = None;
+            existing.publication_encoded = None;
+            existing.filter_validation = 0;
+            existing.publication_validation = 0;
+            existing.publication_token = 0;
+            existing.submitted_token = 0;
+            existing.published_token = 0;
+            existing.sky_frame = 0;
+            existing.sky_face = 0;
+        }
         if let Some(error) = existing.filter.failure(&cache) {
             *status.0.lock().unwrap() = RenderingState::Failed(error);
         }
@@ -1174,6 +1309,7 @@ fn prepare_probe(
         return;
     };
     commands.insert_resource(ProbeFrame {
+        scene: frame.scene,
         filter: ProbeFilter::new(
             &device,
             &queue,
@@ -1355,6 +1491,18 @@ fn prepare_motion(
     };
     let result = (|| -> Result<(), String> {
         if let Some(existing) = existing.as_mut() {
+            if existing.scene != frame.scene {
+                existing.scene = frame.scene;
+                existing.first_token = 0;
+                existing.first_draws = [0; 3];
+                existing.first_camera_registered = false;
+                existing.pass.as_mut().unwrap().recreate(snapshot);
+                existing.origin = origin;
+                existing.camera_frame = 0;
+                existing.camera_token = 0;
+                existing.submitted_token = 0;
+                existing.validation = 0;
+            }
             let delta = Vec3::from_array(std::array::from_fn(|i| {
                 (origin[i] - existing.origin[i]) as f32
             }));
@@ -1412,6 +1560,10 @@ fn prepare_motion(
                 pass.copied_depth.clone(),
             ));
             commands.insert_resource(MotionFrame {
+                scene: frame.scene,
+                first_token: 0,
+                first_draws: [0; 3],
+                first_camera_registered: false,
                 pass: Some(pass),
                 targets: targets.0.clone(),
                 origin,
@@ -1456,6 +1608,13 @@ fn encode_motion_camera(
     let (Some(motion), Some(snapshot)) = (motion.as_mut(), frame.views[1].as_ref()) else {
         return;
     };
+    if motion.first_token == 0 {
+        motion.first_camera_registered = motion
+            .pass
+            .as_ref()
+            .unwrap()
+            .camera_history_matches(snapshot);
+    }
     match motion.pass.as_mut().unwrap().encode_camera(
         context.command_encoder(),
         &device,
@@ -1537,12 +1696,19 @@ fn submit_motion(
                 RenderingState::Failed("Source motion history submission did not match".into());
             return;
         }
+        if motion.first_token == 0 {
+            motion.first_token = token;
+            motion.first_draws = draw.counts();
+        }
         motion.submitted_token = token;
         if motion.validation == 0 {
             motion.validation = gate.watch_submission(&queue);
         }
     }
     state.motion = MotionAudit {
+        first_token: motion.first_token,
+        first_draws: motion.first_draws,
+        first_camera_registered: motion.first_camera_registered,
         pipelines_ready: pipelines.ready(&cache) && motion.pass.as_ref().unwrap().ready(&cache),
         objects_ready: objects.matches(frame.frame, token),
         frame: motion.camera_frame,
@@ -1550,6 +1716,8 @@ fn submit_motion(
         object_token: draw.encoded_token(),
         submitted_token: motion.submitted_token,
         registered_objects: objects.count() as u32,
+        allocated_slots: objects.allocated_slots(),
+        reused_slots: objects.reused_slots(),
         draws: draw.counts(),
         extent: motion.pass.as_ref().unwrap().extent.to_array(),
         validation: motion.validation,

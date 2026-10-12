@@ -34,6 +34,33 @@ impl SourceSubmissionAcks {
         self.0.probe.fetch_max(token, Ordering::Release);
     }
 }
+#[derive(Resource)]
+pub struct SourceSceneEpoch(pub u32);
+impl Default for SourceSceneEpoch {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+/// The source restart caller recreates its scene. GPU allocations remain owned by the renderer.
+pub fn restart_scene(world: &mut World) {
+    let acks = world.resource::<SourceSubmissionAcks>().clone();
+    if let Err(error) = world.resource_mut::<SourceViewClock>().restart(&acks) {
+        *world.resource::<SourceLightingStatus>().0.lock().unwrap() =
+            RenderingState::Failed(error.into());
+        return;
+    }
+    let next = world
+        .resource::<SourceSceneEpoch>()
+        .0
+        .checked_add(1)
+        .expect("Source scene generation exhausted");
+    world.resource_mut::<SourceSceneEpoch>().0 = next;
+    let mut lighting = world.resource_mut::<super::source_lighting::SourceLighting>();
+    lighting.state = RenderingState::Loading;
+    lighting.first_probe_ready = false;
+    lighting.first_submission_validated = false;
+    *world.resource::<SourceLightingStatus>().0.lock().unwrap() = RenderingState::Loading;
+}
 #[derive(Resource, Default)]
 pub struct SourceViewClock {
     taa: TaaSequence,
@@ -49,6 +76,7 @@ impl SourceViewClock {
         acks: &SourceSubmissionAcks,
         spread: f32,
         extent: [u32; 2],
+        probe_enabled: bool,
     ) -> Result<(), &'static str> {
         if self.main_token == 0 {
             self.main_token = 1;
@@ -66,7 +94,7 @@ impl SourceViewClock {
                 .ok_or("Source main render token exhausted")?;
             self.jitter = None;
         }
-        if probe == self.probe_token {
+        if probe_enabled && probe == self.probe_token {
             if self.probe.job() == ProbeJob::RemainingMipsAndPublish
                 && acks.0.publication.load(Ordering::Acquire) != probe
             {
@@ -111,6 +139,10 @@ pub struct ViewSnapshot {
 }
 #[derive(Resource, Clone, Default, ExtractResource)]
 pub struct SourceViewFrame {
+    pub scene: u32,
+    pub probe_enabled: bool,
+    pub probe_checks: u32,
+    pub probe_distance_squared: f32,
     pub sky_clip_from_world: Option<Mat4>,
     pub skybox_clip_from_world: Option<Mat4>,
     pub frame: u32,
@@ -152,13 +184,17 @@ pub fn gpu_projection(source: Mat4) -> Mat4 {
 pub fn snapshot(
     assets: Option<Res<LightingAssets>>,
     scene: Res<SourceSceneLighting>,
+    epoch: Res<SourceSceneEpoch>,
+    activation: Res<super::lighting_scene::ProbeActivation>,
     acks: Res<SourceSubmissionAcks>,
     mut clock: ResMut<SourceViewClock>,
     mut frame: ResMut<SourceViewFrame>,
     status: Res<SourceLightingStatus>,
     views: Query<(&SourceSurfaceView, &Camera, &GlobalTransform)>,
-    sky_view: Query<&GlobalTransform, With<super::frame_graph::SourceSkyCamera>>,
+    sky_view: Query<(&Camera, &GlobalTransform), With<super::frame_graph::SourceSkyCamera>>,
 ) {
+    frame.scene = epoch.0;
+    frame.probe_job = None;
     frame.views = [None; 9];
     frame.sky_clip_from_world = None;
     frame.skybox_clip_from_world = None;
@@ -178,6 +214,9 @@ pub fn snapshot(
                 RenderingState::Failed("Source snapshot view identity is invalid".into());
             return;
         }
+        if !camera.is_active {
+            return;
+        }
         let Some(extent) = camera.physical_viewport_size() else {
             return;
         };
@@ -189,11 +228,22 @@ pub fn snapshot(
     if input.iter().any(Option::is_none) {
         return;
     }
+    let Ok((sky_camera, sky_pose)) = sky_view.single() else {
+        return;
+    };
+    if !sky_camera.is_active
+        || sky_camera
+            .physical_viewport_size()
+            .is_none_or(|size| size.x == 0 || size.y == 0)
+    {
+        return;
+    }
     let main = input[1].unwrap().0;
     if let Err(error) = clock.consume(
         &acks,
         assets.record.postprocessing.taa.jitter_spread,
         main.to_array(),
+        activation.enabled,
     ) {
         *status.0.lock().unwrap() = RenderingState::Failed(error.into());
         return;
@@ -285,7 +335,7 @@ pub fn snapshot(
             shadow_distance: distance,
         })
     });
-    let sky_clips = sky_view.single().ok().map(|pose| {
+    let sky_clips = Some(sky_pose).map(|pose| {
         let sky = &assets.record.cameras[0];
         let projection = Mat4::perspective_rh_gl(
             sky.field_of_view.to_radians(),
@@ -302,12 +352,16 @@ pub fn snapshot(
         (gpu_projection(projection) * view, skybox_projection * view)
     });
     *frame = SourceViewFrame {
+        scene: epoch.0,
+        probe_enabled: activation.enabled,
+        probe_checks: activation.checks,
+        probe_distance_squared: activation.distance_squared,
         sky_clip_from_world: sky_clips.map(|(camera, _)| camera),
         skybox_clip_from_world: sky_clips.map(|(_, skybox)| skybox),
         frame: clock.frame,
         main_token: clock.main_token,
         probe_token: clock.probe_token,
-        probe_job: Some(clock.probe.job()),
+        probe_job: activation.enabled.then(|| clock.probe.job()),
         jitter: clock.jitter,
         views: snapshots,
     };
@@ -355,6 +409,8 @@ pub fn install(app: &mut App) {
     let acks = SourceSubmissionAcks::default();
     app.insert_resource(acks.clone())
         .init_resource::<SourceViewClock>()
+        .init_resource::<SourceSceneEpoch>()
+        .init_resource::<super::lighting_scene::ProbeActivation>()
         .init_resource::<SourceViewFrame>()
         .add_plugins(bevy::render::extract_resource::ExtractResourcePlugin::<
             SourceViewFrame,

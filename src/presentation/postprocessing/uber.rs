@@ -210,6 +210,13 @@ impl UberPass {
             main: main.is_some(),
         })
     }
+    pub fn recreate(&mut self) {
+        self.sequence = DitherSequence::default();
+        self.pending = None;
+    }
+    pub fn noise_index(&self) -> u32 {
+        self.sequence.noise_index()
+    }
     pub fn completed(&mut self) {
         if let Some(sequence) = self.pending.take() {
             self.sequence = sequence;

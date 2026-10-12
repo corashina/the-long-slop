@@ -113,6 +113,7 @@ fn extract_models(input: Extract<Res<MotionScene>>, mut output: ResMut<MotionSce
     output.origin = input.origin;
 }
 struct MotionObject {
+    entity: Option<Entity>,
     history: Mutex<MotionModelHistory>,
     uniform: UniformBuffer<MotionObjectParams>,
     binding: BindGroup,
@@ -121,7 +122,10 @@ struct MotionObject {
 }
 #[derive(Resource, Default)]
 pub struct MotionObjects {
-    objects: bevy::ecs::entity::EntityHashMap<MotionObject>,
+    scene: u32,
+    slots: Vec<MotionObject>,
+    lookup: bevy::ecs::entity::EntityHashMap<usize>,
+    reused_slots: u32,
     pub frame: u32,
     token: u32,
     origin: Option<[f64; 3]>,
@@ -149,16 +153,76 @@ impl MotionObjects {
         {
             return false;
         }
-        for object in self.objects.values() {
-            object.history.lock().unwrap().completed(token);
+        for &index in self.lookup.values() {
+            self.slots[index].history.lock().unwrap().completed(token);
         }
         true
     }
     pub fn count(&self) -> usize {
-        self.objects.len()
+        self.lookup.len()
+    }
+    pub fn allocated_slots(&self) -> u32 {
+        self.slots.len() as u32
+    }
+    pub fn reused_slots(&self) -> u32 {
+        self.reused_slots
+    }
+    fn get(&self, entity: Entity) -> Option<&MotionObject> {
+        self.lookup.get(&entity).map(|&index| &self.slots[index])
+    }
+    fn sync_membership(
+        &mut self,
+        rows: &[ModelSnapshot],
+        frame: u32,
+        token: u32,
+    ) -> Result<(), &'static str> {
+        if rows.len() > self.slots.len() {
+            return Err("Source motion object capacity was exceeded");
+        }
+        for slot in &mut self.slots {
+            slot.frame = 0;
+        }
+        let mut changed = rows.len() != self.lookup.len();
+        // Protect every retained slot before assigning any new entity.
+        for row in rows {
+            if let Some(&index) = self.lookup.get(&row.entity) {
+                self.slots[index].frame = frame;
+            } else {
+                changed = true;
+            }
+        }
+        if !changed {
+            return Ok(());
+        }
+        let mut free = 0;
+        for row in rows {
+            if self.lookup.contains_key(&row.entity) {
+                continue;
+            }
+            while free < self.slots.len() && self.slots[free].frame != 0 {
+                free += 1;
+            }
+            let slot = self
+                .slots
+                .get_mut(free)
+                .ok_or("Source motion object capacity was exceeded")?;
+            self.reused_slots += u32::from(slot.entity.is_some());
+            slot.entity = Some(row.entity);
+            slot.frame = frame;
+            slot.eligible = false;
+            *slot.history.get_mut().unwrap() = MotionModelHistory::new(row.model, token);
+        }
+        // Clearing restores the preallocated hash table after streaming removals.
+        self.lookup.clear();
+        for (index, slot) in self.slots.iter().enumerate() {
+            if slot.frame == frame {
+                self.lookup.insert(slot.entity.unwrap(), index);
+            }
+        }
+        Ok(())
     }
     pub fn logical_uniform_bytes(&self) -> u64 {
-        self.objects.len() as u64 * 144
+        self.slots.len() as u64 * 144
     }
 }
 // Runtime render poses subtract this same target-space shift on all three axes.
@@ -167,6 +231,7 @@ fn target_rebase_delta(current: [f64; 3], previous: [f64; 3]) -> Vec3 {
 }
 fn prepare_models(
     scene: Res<MotionScene>,
+    frame: Res<SourceViewFrame>,
     mut objects: ResMut<MotionObjects>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
@@ -177,68 +242,65 @@ fn prepare_models(
     if scene.frame == 0 {
         return;
     }
-    if objects.objects.capacity() == 0 {
-        objects.objects.reserve(scene.rows.capacity());
-    }
-    for object in objects.objects.values_mut() {
-        object.frame = 0;
-    }
-    for row in &scene.rows {
-        if let Some(object) = objects.objects.get_mut(&row.entity) {
-            object.frame = scene.frame;
+    if objects.slots.is_empty() {
+        let capacity = scene.rows.capacity();
+        objects.slots.reserve_exact(capacity);
+        objects.lookup.reserve(capacity);
+        let layout = cache.get_bind_group_layout(&SourceMotionPass::object_layout());
+        for _ in 0..capacity {
+            let history = MotionModelHistory::new(Mat4::IDENTITY, 0);
+            let mut uniform = UniformBuffer::from(history.params(0, MotionMode::Object));
+            uniform.write_buffer(&device, &queue);
+            let binding = device.create_bind_group(
+                "source_motion_object",
+                &layout,
+                &BindGroupEntries::single(uniform.binding().unwrap()),
+            );
+            objects.slots.push(MotionObject {
+                entity: None,
+                history: Mutex::new(history),
+                uniform,
+                binding,
+                eligible: false,
+                frame: 0,
+            });
         }
     }
-    objects
-        .objects
-        .retain(|_, object| object.frame == scene.frame);
+    let recreate = objects.scene != frame.scene;
+    objects.scene = frame.scene;
+    if recreate {
+        objects.origin = None;
+        objects.completed.store(0, Ordering::Release);
+    }
     let delta = objects
         .origin
         .map_or(Vec3::ZERO, |old| target_rebase_delta(scene.origin, old));
     if delta != Vec3::ZERO {
-        for object in objects.objects.values_mut() {
+        for object in &mut objects.slots {
             object.history.get_mut().unwrap().rebase(delta);
         }
     }
     objects.origin = Some(scene.origin);
+    if scene.rows.iter().any(|row| !row.model.is_finite()) {
+        *status.0.lock().unwrap() = RenderingState::Failed("Source motion model is invalid".into());
+        return;
+    }
+    if let Err(error) = objects.sync_membership(&scene.rows, scene.frame, scene.token) {
+        *status.0.lock().unwrap() = RenderingState::Failed(error.into());
+        return;
+    }
     for row in &scene.rows {
-        if !row.model.is_finite() {
-            *status.0.lock().unwrap() =
-                RenderingState::Failed("Source motion model is invalid".into());
-            return;
+        let index = objects.lookup[&row.entity];
+        let object = &mut objects.slots[index];
+        let history = object.history.get_mut().unwrap();
+        if recreate {
+            *history = MotionModelHistory::new(row.model, scene.token);
         }
-        if let Some(object) = objects.objects.get_mut(&row.entity) {
-            let history = object.history.get_mut().unwrap();
-            history.update(scene.token, row.model);
-            object.eligible = history.eligible(scene.token, row.mode);
-            object.frame = scene.frame;
-            if object.eligible {
-                object.uniform.set(history.params(scene.token, row.mode));
-                object.uniform.write_buffer(&device, &queue);
-            }
-        } else {
-            if objects.objects.len() == objects.objects.capacity() {
-                *status.0.lock().unwrap() =
-                    RenderingState::Failed("Source motion object capacity was exceeded".into());
-                return;
-            }
-            let history = MotionModelHistory::new(row.model, scene.token);
-            let mut uniform = UniformBuffer::from(history.params(scene.token, row.mode));
-            uniform.write_buffer(&device, &queue);
-            let binding = device.create_bind_group(
-                "source_motion_object",
-                &cache.get_bind_group_layout(&SourceMotionPass::object_layout()),
-                &BindGroupEntries::single(uniform.binding().unwrap()),
-            );
-            objects.objects.insert(
-                row.entity,
-                MotionObject {
-                    eligible: history.eligible(scene.token, row.mode),
-                    history: Mutex::new(history),
-                    uniform,
-                    binding,
-                    frame: scene.frame,
-                },
-            );
+        history.update(scene.token, row.model);
+        object.eligible = history.eligible(scene.token, row.mode);
+        if object.eligible {
+            object.uniform.set(history.params(scene.token, row.mode));
+            object.uniform.write_buffer(&device, &queue);
         }
     }
     objects.token = scene.token;
@@ -413,7 +475,7 @@ impl<P: CachedRenderPipelinePhaseItem> RenderCommand<P> for SelectMotion {
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let objects = objects.into_inner();
-        let Some(object) = objects.objects.get(&item.main_entity().id()) else {
+        let Some(object) = objects.get(item.main_entity().id()) else {
             return RenderCommandResult::Failure("Source motion object is missing");
         };
         if !object.eligible || object.frame != objects.frame {
@@ -511,8 +573,7 @@ pub(crate) fn split_draw<'w, P: MotionBatchItem>(
                 continue;
             }
             let object = objects
-                .objects
-                .get(&main.id())
+                .get(main.id())
                 .ok_or(DrawError::RenderCommandFailure(
                     "Source motion batch model is missing",
                 ))?;

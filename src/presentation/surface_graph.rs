@@ -41,15 +41,14 @@ pub fn install(app: &mut SubApp) {
         .take_extract()
         .expect("Source surface requires Bevy extraction");
     app.set_extract(move |main, render| {
+        if stop_failed_renderer(render) {
+            return;
+        }
         original(main, render);
         // Extract commands run with Schedules removed. Perform setup outside that scope.
-        if render.resource::<SourcePhaseSetup>().requested
-            && !matches!(
-                *render.resource::<SourceLightingStatus>().0.lock().unwrap(),
-                RenderingState::Failed(_)
-            )
-        {
+        if !stop_failed_renderer(render) && render.resource::<SourcePhaseSetup>().requested {
             remove_builtin_phases(render);
+            stop_failed_renderer(render);
         }
     });
     app.init_resource::<SourcePhaseSetup>()
@@ -87,6 +86,21 @@ pub fn install(app: &mut SubApp) {
                     .run_if(super::shadow_queue::collector_encoded),
             ),
         );
+}
+
+fn stop_failed_renderer(render: &mut World) -> bool {
+    let failed = matches!(
+        *render.resource::<SourceLightingStatus>().0.lock().unwrap(),
+        RenderingState::Failed(_)
+    );
+    if failed {
+        // Stop extraction and render schedules. Bevy still sends time to the main app.
+        render
+            .resource_mut::<bevy::render::RenderScheduleOrder>()
+            .labels
+            .clear();
+    }
+    failed
 }
 
 fn opaque(

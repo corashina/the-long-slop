@@ -458,6 +458,38 @@ impl ProbeTargets {
             capture_sample_view,
         }
     }
+    /// Scene recreation invalidates the retained publication before any new scene samples it.
+    pub fn clear_publication(&self, queue: &RenderQueue) {
+        const ZERO_FACE: [u8; 64 * 64 * 8] = [0; 64 * 64 * 8];
+        for mip in 0..7 {
+            let side = 64 >> mip;
+            for face in 0..6 {
+                queue.write_texture(
+                    TexelCopyTextureInfo {
+                        texture: &self.published,
+                        mip_level: mip,
+                        origin: Origin3d {
+                            x: 0,
+                            y: 0,
+                            z: face,
+                        },
+                        aspect: TextureAspect::All,
+                    },
+                    &ZERO_FACE[..(side * side * 8) as usize],
+                    TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(side * 8),
+                        rows_per_image: Some(side),
+                    },
+                    Extent3d {
+                        width: side,
+                        height: side,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
+        }
+    }
     /// Called only after the last filter pass. Queue order preserves previous-frame sampling.
     pub fn publish(&self, encoder: &mut CommandEncoder) {
         for mip in 0..7 {

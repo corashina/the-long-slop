@@ -1,6 +1,86 @@
 # Verification record
 
-The checkpoint results below precede this merge. They do not replace merged-tree verification.
+## Rendering completion, 2026-10-12
+
+Branch: `codex/rendering-completion`. Isolated worktree; no merge or push.
+Source authority: installed Steam build 11140890, Unity 2021.3.18f1.
+
+All seven layers passed their required implementation and native hardware gates.
+The root inspected upright shadow, effect, glass, and controlled door images.
+Full audits record issued draws, GPU completion, current tokens, resize, and stable storage.
+The glass fixture preserves 98 shipping source files and the shipping glass/order shaders.
+Its overlapping real doors issue two draws and two captures, then restore the original scene.
+
+Layer evidence: `.cache/layer2-browser/` through `.cache/layer6-browser/` in the rendering worktree.
+Task 7 evidence: `.cache/layer7-browser/` and `.cache/lifecycle-check/`.
+The lifecycle contract passed three extracted state tests and one large-delta transition test.
+The large-delta test covers loading, Start, pause, and Continue.
+
+| Final command check | Result |
+| --- | --- |
+| Native suite | Final rerun: 240 passed; 42 installed cases ignored by default |
+| Installed-source tests | 42 passed |
+| Exporter suite | 171 passed; one installed UI test skipped |
+| Skipped installed UI test | Passed separately with only input and output paths changed |
+| Web suite | 24 passed |
+| Context fault handlers | Two exact-handler tests passed |
+| Motion slot churn and history | Three exact-source tests passed; 4,096 membership changes |
+| Formatting and WASM all-target check | Passed |
+| Release build and wasm-bindgen | Passed |
+| Fresh selected export | 1,388 checks passed; all 1,380 shipping files matched |
+| Frozen source and package hashes | Matched the corrected build receipts |
+
+The installed-source run first lacked library receipts. Read-only input mounts resolved that environment failure.
+Export regeneration used a separate output directory. No regenerated files replaced shipping files.
+The final WASM contains 56,772,820 bytes.
+Its SHA256 is `365a657aad3ca3586b8d40c2b14190df5566ad7191b9ebc1b8461fad12c11d60`.
+
+Corrected stock readiness was observed by 72,746 ms, within the 120-second gate.
+Start stayed disabled until the complete renderer passed.
+The browser rejected pointer capture. Continuous mouse control remains unverified.
+Lifecycle checks used existing game actions after genuine rendering readiness.
+
+| Native lifecycle check | Result |
+| --- | --- |
+| Pause | Physics and renderer delta stopped; probe checks held |
+| Resize | Main targets changed to 960x540; probe capture stayed 64x64; graph validation passed |
+| Restart | Scene 2 closed readiness, then restored cold histories and a fresh validated probe |
+| Restart storage | Compatible allocation counts stayed fixed |
+| Missing texture | Required texture 735 produced a named failure and closed all controls |
+| Invalid pipeline | Uber binding 15 failed GPU pipeline creation and closed all controls |
+| Context loss | Shared state became Failed; the complete later render audit stayed identical |
+| Probe distance | Real player bodies disabled and restored the probe through its scaled-time checks |
+| Actual rebases | Forward and return runtime rebases matched motion and area origins |
+| Streaming storage | All five stages retained 780 GPU slots; 910 slot reuses by the return stage |
+
+The context-loss test used the actual WebGL context-loss extension after active physics.
+Frame 3,677, token 3,673, all histories, and probe publication stayed fixed after failure.
+Physics stayed paused at 922 steps. Start, Continue, and Restart stayed disabled.
+The terminal wrapper stops extraction and rendering, while Bevy still sends time to the main app.
+
+All five physics fixture stages passed. The fixture changes only app.rs.
+It preserves 98 Rust source files and all 27 shipping shaders.
+It uses real player bodies and the normal runtime rebase path. It cannot bypass rendering readiness.
+Forward origin was [2304, 0, -128]. Return origin was [0, 0, -128].
+Runtime and motion rebase counts both advanced from zero to two. Stream and area origins agreed.
+The returned probe was enabled and published. All motion tokens matched the submitted graph token.
+Live dither indices matched the source sequence in all three camera chains.
+The far body fell outside existing ground. The distance check includes that real vertical displacement.
+No fixture code wrote renderer clocks, histories, readiness, or origin values.
+
+Whole-branch review found one motion streaming fault. Fixed GPU slots replaced the map capacity check.
+The scoped correction review passed. Three exact-source tests and the native rerun passed.
+The final correction receipts are in `.cache/final-motion-fix/`.
+The native physics receipt is `.cache/layer7-browser/physics3-native-receipt.json`.
+Final native rerun: `.cache/final-motion-fix/native-final.log`; 240 passed, zero failed.
+The 42 installed-source cases passed separately before the final WASM-only corrections.
+Source and package hashes remained unchanged through final native acceptance.
+The [execution ledger](research/2026-10-12-rendering-completion-ledger.md) preserves the source rulings and evidence paths.
+
+These results establish the tested target behavior. Matched native pixels remain unavailable.
+See [the roadmap](roadmap.md) for limits and current scope.
+
+The following sections preserve earlier checkpoint results.
 
 ## Earlier material checkpoint, 2026-10-11
 
@@ -30,9 +110,8 @@ WASM SHA256: `4ecef4e02520bb660612ed05c3729b619fa65065fdf92144f1ff8a14adb88c2d`.
 Web audit SHA256: `7aefc0918a62daa32f98fc269964b342188765a1979484c7f08f3ac2b9fea2e6`.
 Build logs and the audit remain in `.superpowers/sdd/2026-10-10-material-parity/` and `.cache/`.
 
-The accepted material layer is not complete material or lighting parity.
-Source texture storage-color corrections remain on the recovery branch.
-Full shadows, probe publication, postprocessing, and stained-glass capture remain deferred.
+At this earlier checkpoint, texture corrections and the full rendering graph remained deferred.
+The rendering completion section above records the later approved integration.
 See [the roadmap](roadmap.md) and [remaining plan](superpowers/plans/2026-10-11-rendering-completion.md).
 
 

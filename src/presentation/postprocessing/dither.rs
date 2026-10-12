@@ -47,6 +47,9 @@ impl Default for DitherSequence {
     }
 }
 impl DitherSequence {
+    pub fn noise_index(&self) -> u32 {
+        self.noise_index as u32
+    }
     fn sample(&mut self) -> f32 {
         let mut a = self.next + 1;
         if a >= 56 {

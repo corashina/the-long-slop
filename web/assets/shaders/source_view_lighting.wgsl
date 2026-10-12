@@ -27,7 +27,7 @@ struct LightingUniform {
 // IntersectionAABBAABB361490 includes touching bounds. Positive influence then
 // reaches CalculateReflectionProbeLerpValue2a86e5: a sole usage1 probe has weight1.
 fn probe_weight(model: mat4x4<f32>, center_usage: vec4<f32>, extents_flags: vec4<f32>) -> f32 {
-    if center_usage.w == 0.0 { return 0.0; }
+    if center_usage.w == 0.0 || lighting.probe_extents.w == 0.0 { return 0.0; }
     let center = (model * vec4(center_usage.xyz,1.0)).xyz;
     let extents = max(abs(model[0].xyz)*extents_flags.x
         + abs(model[1].xyz)*extents_flags.y + abs(model[2].xyz)*extents_flags.z,

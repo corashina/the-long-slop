@@ -24,3 +24,18 @@ test('recover_does_not_resume',()=>{
  const m=new MenuState();m.ready();m.started=true;m.pause();m.recover();
  assert.equal(m.state,'pause-menu');assert.equal(m.takeActions(),16);
 });
+
+
+test('scene_loading_rejects_late_capture_and_requires_new_continue',async()=>{
+ const m=new MenuState();m.ready();m.started=true;m.pause();m.takeActions();
+ let resolve;const pending=m.capture(ACTIONS.RESTART,()=>new Promise(r=>{resolve=r;}));
+ m.loading();resolve();assert.equal(await pending,false);
+ assert.equal(m.readyFlag,false);assert.equal(m.state,'loading');assert.equal(m.takeActions(),0);
+ assert.equal(await m.capture(ACTIONS.CONTINUE,async()=>{}),false);
+ m.ready();assert.equal(m.state,'pause-menu');
+ assert.equal(await m.capture(ACTIONS.CONTINUE,async()=>{}),true);assert.equal(m.takeActions(),ACTIONS.CONTINUE);
+});
+test('scene_loading_cannot_reopen_a_terminal_failure',()=>{
+ const m=new MenuState();m.ready();m.started=true;m.fail('GPU failed');m.loading();m.ready();
+ assert.equal(m.state,'error');assert.equal(m.readyFlag,false);assert.equal(m.takeActions(),ACTIONS.PAUSE);
+});

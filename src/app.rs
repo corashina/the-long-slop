@@ -32,6 +32,7 @@ pub(crate) struct Drive {
     rendered: VehiclePose,
     camera: CameraMode,
     frame_steps: u32,
+    pub render_delta_seconds: f32,
     skip_elapsed: bool,
     ready: bool,
     last_feedback: Option<FeedbackStamp>,
@@ -80,6 +81,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
             rendered: current,
             camera: CameraMode::default(),
             frame_steps: 0,
+            render_delta_seconds: 0.,
             skip_elapsed: false,
             ready: false,
             last_feedback: None,
@@ -183,7 +185,6 @@ fn check_ready(
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
-    mut frames: Local<u8>,
     lighting: Res<presentation::lighting::SourceLighting>,
     source_lighting: Res<presentation::source_lighting::SourceLighting>,
     mut materials: ResMut<presentation::materials::SourceMaterials>,
@@ -280,11 +281,8 @@ fn check_ready(
             if source_lighting.state != presentation::materials::RenderingState::Ready {
                 return;
             }
-            *frames += 1;
-            if *frames >= 2 {
-                drive.ready = true;
-                game_ready();
-            }
+            drive.ready = true;
+            game_ready();
         }
         Ok(false) => {}
         Err(error) => {
@@ -334,6 +332,10 @@ fn read_input(
             game_failure(&error.to_string());
             return;
         }
+        drive.ready = false;
+        drive.runtime.paused = true;
+        crate::browser::game_loading();
+        commands.queue(presentation::view_frame::restart_scene);
         source.reset_instances(&mut commands);
         drive.instruments.reset(&reference.0.instruments);
         drive.camera = CameraMode::default();
@@ -366,6 +368,7 @@ fn advance_physics(
     mut drive: ResMut<Drive>,
 ) {
     drive.frame_steps = 0;
+    drive.render_delta_seconds = 0.;
     if !drive.runtime.started || drive.runtime.paused {
         return;
     }
@@ -373,6 +376,7 @@ fn advance_physics(
         drive.skip_elapsed = false;
         return;
     }
+    drive.render_delta_seconds = time.delta_secs();
     drive
         .runtime
         .advance_lighting(&reference.0, time.delta_secs_f64());

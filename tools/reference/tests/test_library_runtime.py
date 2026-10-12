@@ -235,7 +235,7 @@ class RuntimeContractTests(unittest.TestCase):
         manifest['assets'].append({'id':5,'usage':'unique_scene','material_count':1,'path':'reference/items.gltf','sha256':'a'*64,'root':{'file':'fixture','path_id':999},'dependencies':[]})
         manifest['rendering']['materials'].append({
             'source':{'file':'fixture','path_id':999},'asset':5,'gltf_material':0,
-            'shader_family':'unlit_color','color':[1.,1.,1.,1.],'condition':None,'keywords':[],
+            'shader_family':'unlit_color','enable_instancing':False,'color':[1.,1.,1.,1.],'condition':None,'keywords':[],
             'state':{'alpha_mode':'opaque','cull':2,'z_write':True,'z_test':4,'src_blend':1,'dst_blend':0,'render_queue':-1},
             'properties':{'floats':{},'colors':{'_Color':[1.,1.,1.,1.]},'textures':[],'defaults':{},'exclusions':[]}})
         for asset in manifest['assets']:

@@ -319,6 +319,29 @@ impl SourcePostChain {
                 })
             })
     }
+    pub fn recreate(&mut self) {
+        self.pending = None;
+        self.completed = 0;
+        self.uber.recreate();
+        if let Some(main) = &mut self.main {
+            main.taa.recreate();
+            main.exposure.recreate();
+            main.motion.reset_history();
+            main.lut_baked = false;
+        }
+    }
+    /// Noise index, TAA next/initialized, exposure output/initialized.
+    pub fn history(&self) -> [u32; 5] {
+        let taa = self.main.as_ref().map_or([0; 2], |m| m.taa.history());
+        let exposure = self.main.as_ref().map_or([0; 2], |m| m.exposure.history());
+        [
+            self.uber.noise_index(),
+            taa[0],
+            taa[1],
+            exposure[0],
+            exposure[1],
+        ]
+    }
     pub fn reset_history(&mut self) {
         self.pending = None;
         if let Some(main) = &mut self.main {

@@ -29,6 +29,7 @@ use std::sync::Arc;
 
 #[derive(Resource, Clone, Default, ExtractResource)]
 struct EffectInput {
+    scene: u32,
     frame: u32,
     shutter: f32,
     delta_seconds: f32,
@@ -38,9 +39,14 @@ fn snapshot_input(
     frame: Res<SourceViewFrame>,
     assets: Option<Res<LightingAssets>>,
     drive: Res<crate::app::Drive>,
-    time: Res<Time<Real>>,
     mut input: ResMut<EffectInput>,
 ) {
+    if input.scene != frame.scene {
+        *input = EffectInput {
+            scene: frame.scene,
+            ..default()
+        };
+    }
     input.frame = 0;
     let Some(assets) = assets else { return };
     if !assets.loaded || frame.views[1].is_none() {
@@ -51,11 +57,7 @@ fn snapshot_input(
         input.shutter = settings.shutter_range[0];
         input.initialized = true;
     }
-    let delta = if drive.runtime.started && !drive.runtime.paused {
-        time.delta_secs()
-    } else {
-        0.
-    };
+    let delta = drive.render_delta_seconds;
     let physics = &drive.runtime.physics;
     let body = if drive.runtime.area.player.seat().is_some() {
         physics.chassis_handle()
@@ -75,6 +77,11 @@ fn snapshot_input(
 
 #[derive(Clone, Copy, Default, serde::Serialize)]
 pub(crate) struct EffectsAudit {
+    scene: u32,
+    first_token: u32,
+    first_before: [[u32; 5]; 3],
+    first_after: [[u32; 5]; 3],
+    histories: [[u32; 5]; 3],
     frame: u32,
     token: u32,
     ao_frame: u32,
@@ -100,6 +107,20 @@ pub(crate) struct EffectsAudit {
     validated: bool,
     shutter: f32,
     delta_seconds: f32,
+}
+impl EffectsAudit {
+    pub(crate) fn pipelines_ready(&self) -> bool {
+        self.pipelines_ready && self.inputs_ready
+    }
+    pub(crate) fn complete(&self, frame: u32, token: u32) -> bool {
+        self.frame == frame
+            && self.token == token
+            && self.submitted_token == token
+            && self.completed_tokens == [token; 3]
+            && self.post_mask == 7
+            && self.callback_mask == 31
+            && self.validated
+    }
 }
 struct EffectTargets {
     colors: Arc<SourceColorTargets>,
@@ -199,6 +220,7 @@ fn shaders(assets: &LightingRenderAssets) -> PostShaders {
 }
 fn prepare(
     mut effects: ResMut<SourceEffects>,
+    frame: Res<SourceViewFrame>,
     surfaces: Option<Res<SurfaceResources>>,
     assets: Option<Res<LightingRenderAssets>>,
     images: Res<RenderAssets<GpuImage>>,
@@ -210,6 +232,22 @@ fn prepare(
 ) {
     if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
         return;
+    }
+    if effects.audit.scene != frame.scene {
+        if let Some(targets) = effects.targets.as_mut() {
+            for chain in &mut targets.chains {
+                chain.as_mut().unwrap().recreate();
+            }
+        }
+        let a = &mut effects.audit;
+        a.scene = frame.scene;
+        a.first_token = 0;
+        a.first_before = [[0; 5]; 3];
+        a.first_after = [[0; 5]; 3];
+        a.submitted_token = 0;
+        a.completed_tokens = [0; 3];
+        a.validation = 0;
+        a.validated = false;
     }
     if let Some(error) = effects.failure(&cache) {
         *status.0.lock().unwrap() = RenderingState::Failed(error);
@@ -241,7 +279,10 @@ fn prepare(
     let textures = PostTextures {
         noise: std::array::from_fn(|i| &image(&record.blue_noise[i]).unwrap().texture_view),
         dirt: &dirt.texture_view,
-        dirt_extent: [dirt.texture_descriptor.size.width, dirt.texture_descriptor.size.height],
+        dirt_extent: [
+            dirt.texture_descriptor.size.width,
+            dirt.texture_descriptor.size.height,
+        ],
     };
     let colors = surfaces.targets.stack.clone();
     let extent = [colors.width, colors.height];
@@ -525,6 +566,7 @@ pub(crate) fn submitted(
                 RenderingState::Failed("Source effect submission token mismatch".into());
             return;
         }
+        let before = std::array::from_fn(|i| targets.chains[i].as_ref().unwrap().history());
         for chain in &mut targets.chains {
             if !chain.as_mut().unwrap().completed(token) {
                 *status.0.lock().unwrap() =
@@ -532,8 +574,16 @@ pub(crate) fn submitted(
                 return;
             }
         }
-        effects.audit.completed_tokens =
+        let completed =
             std::array::from_fn(|i| targets.chains[i].as_ref().unwrap().completed_token());
+        let after = std::array::from_fn(|i| targets.chains[i].as_ref().unwrap().history());
+        effects.audit.completed_tokens = completed;
+        effects.audit.histories = after;
+        if effects.audit.first_token == 0 {
+            effects.audit.first_token = token;
+            effects.audit.first_before = before;
+            effects.audit.first_after = after;
+        }
         effects.audit.submitted_token = token;
         // Foreground's final callback is the existing display copy; presented proves its encode.
         effects.audit.callback_mask |= 16;

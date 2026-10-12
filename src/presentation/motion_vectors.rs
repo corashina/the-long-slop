@@ -108,6 +108,14 @@ pub struct SourceMotionPass {
     completed: u32,
 }
 impl SourceMotionPass {
+    pub fn camera_history_matches(&self, snapshot: &ViewSnapshot) -> bool {
+        self.previous_vp == snapshot.raster_projection * snapshot.view_from_world
+    }
+    pub fn recreate(&mut self, snapshot: &ViewSnapshot) {
+        self.register_camera(snapshot);
+        self.pending = None;
+        self.completed = 0;
+    }
     pub fn camera_layout() -> BindGroupLayoutDescriptor {
         BindGroupLayoutDescriptor::new(
             "source_motion_camera",
