@@ -221,6 +221,14 @@ impl WheelAssemblies {
             .items
             .iter()
             .filter(|item| {
+                if reference
+                    .plates
+                    .plates
+                    .iter()
+                    .any(|plate| plate.item == item.id)
+                {
+                    return true;
+                }
                 let mut node = Some(item.node);
                 while let Some(id) = node {
                     if reference.parts.iter().any(|p| p.node == id) {

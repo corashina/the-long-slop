@@ -504,3 +504,34 @@ fn installed_empty_target_keeps_loose_bumper_pickup() {
         0
     );
 }
+#[test]
+#[ignore = "requires installed rear plate mass records"]
+fn installed_rear_plate_remove_remount_updates_chassis_mass() {
+    let r =
+        ReferenceManifest::from_json(&std::fs::read("web/assets/reference/manifest.json").unwrap())
+            .unwrap();
+    let mut g = GarageRuntime::new(&r).unwrap();
+    let p = &r.plates.plates[1];
+    g.wheels.sync(&mut g.area.items, &mut g.physics).unwrap();
+    let chassis = g.physics.chassis_handle();
+    let mass_before = g.physics.rapier().bodies[chassis].mass();
+    let point = g.area.items.get(p.item).unwrap().pose.position;
+    g.area
+        .interaction
+        .remove_plate(
+            p.item,
+            point,
+            &g.area.player,
+            &mut g.area.items,
+            &mut g.physics,
+        )
+        .unwrap();
+    g.wheels.sync(&mut g.area.items, &mut g.physics).unwrap();
+    assert!((mass_before - g.physics.rapier().bodies[chassis].mass() - p.mass_kg).abs() < 1e-4);
+    g.area
+        .interaction
+        .mount_plate(p.item, p.startup_target, &mut g.area.items, &mut g.physics)
+        .unwrap();
+    g.wheels.sync(&mut g.area.items, &mut g.physics).unwrap();
+    assert!((g.physics.rapier().bodies[chassis].mass() - mass_before).abs() < 1e-4);
+}
