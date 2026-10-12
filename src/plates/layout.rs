@@ -255,3 +255,37 @@ pub fn layout_text(
     }
     Ok(mesh)
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct SdfParameters {
+    pub face_color: [f32; 4],
+    pub outline_color: [f32; 4],
+    pub face_dilate: f32,
+    pub outline_width: f32,
+    pub outline_softness: f32,
+    pub gradient_scale: f32,
+    pub perspective_filter: f32,
+    pub scale_ratio_a: f32,
+    pub weight: f32,
+}
+pub fn sdf_parameters(
+    material: &PlateMaterialReference,
+    layout: &PlateLayoutReference,
+) -> SdfParameters {
+    let p = &material.floats;
+    SdfParameters {
+        face_color: material.colors["_FaceColor"],
+        outline_color: material.colors["_OutlineColor"],
+        face_dilate: p["_FaceDilate"],
+        outline_width: p["_OutlineWidth"],
+        outline_softness: p["_OutlineSoftness"],
+        gradient_scale: p["_GradientScale"],
+        perspective_filter: p["_PerspectiveFilter"],
+        scale_ratio_a: p["_ScaleRatioA"],
+        weight: p[if layout.font_style & 1 != 0 {
+            "_WeightBold"
+        } else {
+            "_WeightNormal"
+        }],
+    }
+}

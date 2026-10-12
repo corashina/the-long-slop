@@ -107,6 +107,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
         .add_plugins((
             presentation::lighting::SourceLightingPlugin,
             presentation::materials::SourceMaterialPlugin,
+            presentation::plates::PlateTextPlugin,
             presentation::mirrors::SourceMirrorPlugin,
         ))
         .add_systems(Startup, setup)
@@ -152,7 +153,12 @@ fn setup(
     visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
     commands.insert_resource(visuals);
     commands.insert_resource(InstrumentVisuals::default());
-    presentation::materials::load_materials(&mut commands, &server, &reference.0.rendering);
+    presentation::materials::load_materials(
+        &mut commands,
+        &server,
+        &reference.0.rendering,
+        &reference.0.plates.material,
+    );
     presentation::lighting::load_lighting(&mut commands, &server, &reference.0.lighting);
     presentation::lighting::load_lamp_materials(&mut commands, &gltf_extensions, &reference.0);
     presentation::reference::load(&mut commands, &server, &reference.0);
@@ -204,9 +210,14 @@ fn check_ready(
     lighting: Res<presentation::lighting::SourceLighting>,
     mut materials: ResMut<presentation::materials::SourceMaterials>,
     mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
+    plates: Res<presentation::plates::PlateTextStatus>,
 ) {
     if let Some(error) = mirrors.failure() {
         game_failure(&error);
+        visuals.failed = true;
+    }
+    if let Some(error) = plates.failure() {
+        game_failure(error);
         visuals.failed = true;
     }
     if visuals.failed {
@@ -293,7 +304,7 @@ fn check_ready(
             if materials.state != presentation::materials::RenderingState::Ready {
                 return;
             }
-            if !mirrors.ready() {
+            if !mirrors.ready() || !plates.ready() {
                 return;
             }
             *frames += 1;
@@ -352,6 +363,7 @@ fn read_input(
         }
         source.reset_instances(&mut commands);
         commands.queue(presentation::mirrors::reset_mirrors);
+        commands.queue(presentation::plates::reset_plate_text);
         drive.instruments.reset(&reference.0.instruments);
         drive.camera = CameraMode::default();
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);

@@ -29,7 +29,6 @@ use bevy::{
     render as bevy_render,
 };
 use std::{
-    any::TypeId,
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
@@ -118,7 +117,7 @@ pub struct SourceMaterials {
 #[derive(Clone)]
 struct PipelineRequest {
     mesh: AssetId<Mesh>,
-    material: AssetId<SourceMaterial>,
+    material: UntypedAssetId,
     label: String,
 }
 #[derive(Resource, Clone, ExtractResource)]
@@ -160,39 +159,44 @@ impl Plugin for SourceMaterialPlugin {
     }
 }
 
-pub fn load_materials(commands: &mut Commands, server: &AssetServer, rendering: &RenderingRecord) {
+pub fn load_materials(
+    commands: &mut Commands,
+    server: &AssetServer,
+    rendering: &RenderingRecord,
+    plates: &source::PlateMaterialReference,
+) {
     let mut textures = Vec::new();
     let mut texture_indices = HashMap::new();
-    for record in &rendering.materials {
-        for texture in &record.properties.textures {
-            if texture_indices.contains_key(&texture.file) {
-                continue;
-            }
-            let srgb = texture.color_space == TextureColorSpace::Srgb;
-            let levels = texture
-                .mips
-                .iter()
-                .map(|mip| {
-                    server
-                        .load_builder()
-                        .with_settings(move |settings: &mut ImageLoaderSettings| {
-                            settings.is_srgb = srgb;
-                            settings.asset_usage = RenderAssetUsages::MAIN_WORLD;
-                        })
-                        .load(mip.file.clone())
-                })
-                .collect();
-            texture_indices.insert(texture.file.clone(), textures.len());
-            textures.push(SourceTexture {
-                record: texture.clone(),
-                levels,
-                image: None,
-                label: format!(
-                    "material {}:{} {}",
-                    record.source.file, record.source.path_id, texture.slot
-                ),
-            });
+    for texture in rendering
+        .materials
+        .iter()
+        .flat_map(|r| &r.properties.textures)
+        .chain(&plates.textures)
+    {
+        if texture_indices.contains_key(&texture.file) {
+            continue;
         }
+        let srgb = texture.color_space == TextureColorSpace::Srgb;
+        let levels = texture
+            .mips
+            .iter()
+            .map(|mip| {
+                server
+                    .load_builder()
+                    .with_settings(move |settings: &mut ImageLoaderSettings| {
+                        settings.is_srgb = srgb;
+                        settings.asset_usage = RenderAssetUsages::MAIN_WORLD;
+                    })
+                    .load(mip.file.clone())
+            })
+            .collect();
+        texture_indices.insert(texture.file.clone(), textures.len());
+        textures.push(SourceTexture {
+            record: texture.clone(),
+            levels,
+            image: None,
+            label: format!("source texture {}", texture.file),
+        });
     }
     commands.insert_resource(SourceMaterials {
         standard_records: HashMap::new(),
@@ -397,7 +401,7 @@ pub fn bind_authored_materials(
         if variants.insert((mesh.0.id(), handle.id())) {
             requests.push(PipelineRequest {
                 mesh: mesh.0.id(),
-                material: handle.id(),
+                material: handle.id().untyped(),
                 label,
             });
         }
@@ -416,8 +420,8 @@ pub fn bind_authored_materials(
     );
     source.bound = true;
     let mut pending = loading.0.lock().unwrap();
-    pending.requests = requests;
-    pending.sealed = true;
+    pending.requests.extend(requests);
+    pending.sealed = false;
 }
 
 fn make_material(
@@ -672,7 +676,7 @@ fn prewarm_materials(world: &mut World) {
                     );
                 work.push((
                     ErasedMaterialPipelineKey {
-                        type_id: TypeId::of::<SourceMaterial>(),
+                        type_id: request.material.type_id(),
                         mesh_key: ErasedMeshPipelineKey::new(mesh_key),
                         material_key: material.properties.material_key.clone(),
                     },
@@ -1625,7 +1629,7 @@ pub(crate) fn warm_mirror_material(
     let mut pending = loading.0.lock().unwrap();
     pending.requests.push(PipelineRequest {
         mesh,
-        material,
+        material: material.untyped(),
         label: "source mirror surface".into(),
     });
 }
@@ -1641,18 +1645,15 @@ pub(crate) fn release_mirror_warmup(
         .lock()
         .unwrap()
         .requests
-        .retain(|request| request.material != live && request.material != disabled);
+        .retain(|request| {
+            request.material != live.untyped() && request.material != disabled.untyped()
+        });
 }
 
 /// Retain all source choices, including hidden lamps, for capture loading.
 pub(crate) fn mirror_warmup_pairs(world: &World, pairs: &mut Vec<(AssetId<Mesh>, UntypedAssetId)>) {
     let loading = world.resource::<MaterialLoading>().0.lock().unwrap();
-    pairs.extend(
-        loading
-            .requests
-            .iter()
-            .map(|r| (r.mesh, r.material.untyped())),
-    );
+    pairs.extend(loading.requests.iter().map(|r| (r.mesh, r.material)));
     for target in &world
         .resource::<super::lighting::SourceLighting>()
         .lamp_materials
@@ -1664,5 +1665,32 @@ pub(crate) fn mirror_warmup_pairs(world: &World, pairs: &mut Vec<(AssetId<Mesh>,
                 }
             }
         }
+    }
+}
+
+impl SourceMaterials {
+    pub(crate) fn texture(&self, file: &str) -> Option<Handle<Image>> {
+        self.texture_indices
+            .get(file)
+            .and_then(|i| self.textures[*i].image.clone())
+    }
+}
+pub(crate) fn warm_plate_material(world: &World, mesh: AssetId<Mesh>, material: UntypedAssetId) {
+    world
+        .resource::<MaterialLoading>()
+        .0
+        .lock()
+        .unwrap()
+        .requests
+        .push(PipelineRequest {
+            mesh,
+            material,
+            label: "source plate text".into(),
+        });
+}
+
+pub(crate) fn seal_plate_materials(world: &World) {
+    if world.resource::<SourceMaterials>().bound {
+        world.resource::<MaterialLoading>().0.lock().unwrap().sealed = true;
     }
 }

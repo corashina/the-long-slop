@@ -146,3 +146,19 @@ fn installed_generated_glyphs_resolve() {
         assert!(mesh.vertices.iter().all(|v| v.position[2] == 0.0));
     }
 }
+#[test]
+fn plate_text_uniforms_keep_source_surface_values() {
+    let r = record();
+    let p = my_summer_slop::plates::layout::sdf_parameters(&r.material, &r.plates[0].layout);
+    assert_eq!(
+        p.face_color,
+        [16.0 / 255.0, 16.0 / 255.0, 16.0 / 255.0, 1.0]
+    );
+    assert_eq!(p.face_dilate, 0.1);
+    assert_eq!(p.outline_width, 0.1);
+    assert_eq!(p.outline_softness, 0.2);
+    assert_eq!(p.gradient_scale, 10.0);
+    assert_eq!(p.weight, 0.75);
+    assert_eq!(p.scale_ratio_a, 0.9);
+    assert_eq!(p.perspective_filter, 0.875);
+}

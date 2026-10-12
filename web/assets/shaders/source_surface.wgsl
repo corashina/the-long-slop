@@ -1,3 +1,4 @@
+#define_import_path source_surface
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_fragment::{pbr_input_from_vertex_output, pbr_input_from_standard_material},

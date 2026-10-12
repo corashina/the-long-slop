@@ -145,6 +145,7 @@ fn collect_mirror_warmup(world: &mut World) {
     });
     let mut pairs = Vec::new();
     super::materials::mirror_warmup_pairs(world, &mut pairs);
+    super::plates::plate_warmup_pairs(world, &mut pairs);
     for (mesh, source, standard, sky) in world
         .query::<(
             &Mesh3d,
