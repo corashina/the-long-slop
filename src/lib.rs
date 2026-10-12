@@ -11,6 +11,7 @@ pub mod interaction;
 pub mod lighting;
 pub mod player;
 pub mod reference;
+pub mod save;
 pub mod simulation;
 pub mod starting_area;
 pub mod vehicle;

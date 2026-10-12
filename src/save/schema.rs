@@ -1,0 +1,255 @@
+use super::{InstanceId, SaveError, SourceKey};
+use serde::{Deserialize, Serialize};
+
+pub const SAVE_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceHash {
+    pub file: String,
+    pub sha256: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceStamp {
+    pub app_id: u32,
+    pub build_id: u32,
+    pub manifest_sha256: String,
+    pub source_hashes: Vec<SourceHash>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SaveSnapshot {
+    pub schema_version: u32,
+    pub saved_at: String,
+    pub source: SourceStamp,
+    pub world: WorldSnapshot,
+    pub player: PlayerSnapshot,
+    pub vehicles: Vec<VehicleSnapshot>,
+    pub bodies: Vec<BodySnapshot>,
+    pub items: Vec<ItemSnapshot>,
+    pub attachments: AttachmentsSnapshot,
+    pub mechanisms: MechanismsSnapshot,
+    pub progress: ProgressSnapshot,
+    pub lighting: LightingSnapshot,
+    pub view: ViewSnapshot,
+}
+impl SaveSnapshot {
+    pub fn from_json(bytes: &[u8]) -> Result<Self, SaveError> {
+        serde_json::from_slice(bytes).map_err(|e| SaveError::CorruptData(e.to_string()))
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AbsolutePose {
+    pub position: [f64; 3],
+    pub rotation: [f32; 4],
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalPose {
+    pub position: [f32; 3],
+    pub rotation: [f32; 4],
+}
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum BodyIdentity {
+    Source { source: SourceKey },
+    Assembly { root: InstanceId },
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BodySnapshot {
+    pub identity: BodyIdentity,
+    pub pose: AbsolutePose,
+    pub linear_velocity: [f32; 3],
+    pub angular_velocity: [f32; 3],
+    pub sleeping: bool,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldSnapshot {
+    pub seed: String,
+    pub records: Vec<WorldRecord>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WorldRecord {
+    Pump { instance: InstanceId, valve: f32 },
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayerSnapshot {
+    pub pose: AbsolutePose,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub seat: Option<SeatSnapshot>,
+    pub crouched: bool,
+    pub vertical_velocity: f32,
+    pub recoil_velocity: [f32; 3],
+    pub running: bool,
+    pub carry: Option<CarrySnapshot>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SeatSnapshot {
+    pub vehicle: InstanceId,
+    pub source: SourceKey,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CarrySnapshot {
+    pub item: InstanceId,
+    pub offset: [f32; 3],
+    pub rotation: [f32; 4],
+    pub local_grip: LocalPose,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VehicleSnapshot {
+    pub instance: InstanceId,
+    pub body: BodySnapshot,
+    pub engine: EngineSnapshot,
+    pub auto_gear: usize,
+    pub handbrake: bool,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EngineSnapshot {
+    pub ignition: bool,
+    pub rpm: f32,
+    pub temperature: f32,
+    pub elapsed: f32,
+    pub last_run_time: f32,
+    pub last_start_chance_time: f32,
+    pub random_start: f32,
+    pub supplied_fuel: f32,
+    pub fan_on: bool,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ItemSnapshot {
+    pub instance: InstanceId,
+    pub pose: AbsolutePose,
+    /// Offset in the owning body or attachment frame.
+    pub local_pose: LocalPose,
+    pub location: ItemLocationSave,
+    pub condition: f32,
+    pub temperature: Option<f32>,
+    pub fluids: Option<[f32; 6]>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ItemLocationSave {
+    World,
+    Held,
+    PartSlot { slot: SourceKey },
+    WheelSlot { slot: SourceKey },
+    Attached { owner: InstanceId },
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AttachmentsSnapshot {
+    pub parts: Vec<PartAttachment>,
+    pub wheels: Vec<WheelAttachment>,
+    pub tires: Vec<TireAttachment>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PartAttachment {
+    pub slot: SourceKey,
+    pub part: Option<InstanceId>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WheelAttachment {
+    pub slot: SourceKey,
+    pub rim: Option<InstanceId>,
+    pub rotation: f32,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TireAttachment {
+    pub rim: InstanceId,
+    pub tire: InstanceId,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MechanismsSnapshot {
+    pub controls: Vec<MechanismSnapshot>,
+    pub openings: Vec<OpeningSnapshot>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MechanismSnapshot {
+    pub source: SourceKey,
+    pub degrees: [f32; 2],
+    pub slide: f32,
+    pub enabled: bool,
+    pub turn_state: u8,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpeningSnapshot {
+    pub source: SourceKey,
+    pub valve: f32,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProgressSnapshot {
+    pub trip_m: f64,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LightingSnapshot {
+    pub cycle: CycleSnapshot,
+    pub requested_headlights: u8,
+    pub controllers: Vec<ControllerSnapshot>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CycleSnapshot {
+    pub elapsed_seconds: f64,
+    pub cycle_seconds: f64,
+    pub evaluated_cycle_seconds: f64,
+    pub cloud_coordinate: f32,
+    pub star_rotation: f32,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControllerSnapshot {
+    pub source: SourceKey,
+    pub current_state: usize,
+    pub requested_state: usize,
+    pub refreshed_state: usize,
+    pub energy: f32,
+    pub enabled: bool,
+    pub on: bool,
+    pub cabin_mode: Option<usize>,
+    pub switch_motion: Option<SwitchMotionSave>,
+    pub switch_poses: Vec<SwitchPoseSnapshot>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SwitchMotionSave {
+    Initial,
+    Moving { progress: f32 },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ViewSnapshot {
+    pub camera: CameraSave,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CameraSave {
+    FirstPerson,
+    Chase,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SwitchPoseSnapshot {
+    pub node: SourceKey,
+    pub pose: LocalPose,
+}
