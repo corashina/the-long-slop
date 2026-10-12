@@ -1,3 +1,4 @@
+pub mod attachments;
 pub mod carry;
 pub mod feedback;
 pub mod items;
@@ -13,9 +14,9 @@ pub use targets::{InteractionBlock, LightAim, ResolvedAim};
 use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
 use crate::reference::{
-    ActionBinding, ActionMasks, BodyId, ColliderId, ItemId, ItemKind, LightControlId,
-    LightControllerKind, NodeId, OpeningId, OpeningRecord, PartSlotId, ReferenceError,
-    ReferenceManifest, SeatId, TankRole, WheelSlotId,
+    ActionBinding, ActionMasks, AttachmentTargetId, BodyId, ColliderId, ItemId, ItemKind,
+    LightControlId, LightControllerKind, NodeId, OpeningId, OpeningRecord, PartSlotId,
+    ReferenceError, ReferenceManifest, SeatId, TankRole, WheelSlotId,
 };
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
@@ -39,6 +40,7 @@ pub struct AimTarget {
 pub enum SlotTarget {
     Wheel(WheelSlotId),
     Part(PartSlotId),
+    Attachment(AttachmentTargetId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -58,6 +60,8 @@ pub enum InteractionAction {
     },
     WheelRemove(ItemId),
     PartRemove(ItemId),
+    PlateRemove(ItemId),
+    PlateMount(ItemId),
     PartInstall(ItemId),
     WheelInstall {
         item: ItemId,
@@ -133,6 +137,7 @@ pub struct InteractionState {
     bodies: HashMap<BodyId, RigidBodyHandle>,
     pub mechanisms: mechanisms::MechanismState,
     pub parts: parts::PartAttachments,
+    pub attachments: attachments::PlateAttachments,
     mechanism_bodies: HashMap<ItemId, BodyId>,
     openings: Vec<OpeningState>,
     seats: Vec<SeatState>,
@@ -368,6 +373,7 @@ impl InteractionState {
             bodies: HashMap::with_capacity(reference.bodies.len()),
             mechanisms: mechanisms::MechanismState::new(reference)?,
             parts: parts::PartAttachments::new(reference)?,
+            attachments: attachments::PlateAttachments::new(reference)?,
             mechanism_bodies: reference.items.iter().map(|i| (i.id, i.body)).collect(),
             openings,
             seats,
@@ -535,6 +541,7 @@ impl InteractionState {
     pub fn rebase(&mut self, shift: [f32; 3]) {
         self.mechanisms.rebase(shift);
         self.parts.rebase(shift);
+        self.attachments.rebase(shift);
     }
 
     pub fn step(
@@ -730,6 +737,11 @@ impl InteractionState {
                             target: slot,
                         });
                     }
+                    SlotTarget::Attachment(target) => {
+                        self.mount_plate(held, target, items, physics)
+                            .expect("validated plate mount");
+                        action = Some(InteractionAction::PlateMount(held));
+                    }
                     SlotTarget::Part(slot) => {
                         self.drop_held(items, physics);
                         self.parts
@@ -755,7 +767,11 @@ impl InteractionState {
                 if let Some(rim) = available.rim {
                     action = Some(InteractionAction::WheelSplit(rim));
                 } else if let Some(target) = grab_target {
-                    if self.parts.contains(target.item) {
+                    if self.attachments.contains(target.item) {
+                        self.remove_plate(target.item, target.point, player, items, physics)
+                            .expect("validated plate removal");
+                        action = Some(InteractionAction::PlateRemove(target.item));
+                    } else if self.parts.contains(target.item) {
                         self.parts
                             .remove(target.item, items, physics)
                             .expect("validated removal");
@@ -954,6 +970,49 @@ impl InteractionState {
         action
     }
 
+    pub fn remove_plate(
+        &mut self,
+        item: ItemId,
+        point: [f32; 3],
+        player: &PlayerState,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        if !self
+            .carry
+            .allows_pickup(item, player.seat().is_some(), true)
+        {
+            return Err(ReferenceError("Cannot remove plate".into()));
+        }
+        let body = self
+            .attachments
+            .loose_body(item)
+            .ok_or_else(|| ReferenceError("Missing loose plate body".into()))?;
+        self.carry.can_acquire(item, point, player, body, physics)?;
+        self.attachments.remove(item, items, physics)?;
+        self.carry.pickup(item, point, player, items, physics)?;
+        self.parts.sync(items, physics)?;
+        Ok(())
+    }
+    pub fn mount_plate(
+        &mut self,
+        item: ItemId,
+        target: AttachmentTargetId,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        self.attachments
+            .can_mount(item, target, items)
+            .map_err(|_| ReferenceError("Cannot mount plate".into()))?;
+        self.attachments
+            .preflight_mount(item, target, items, physics)?;
+        if self.held() != Some(item) {
+            return Err(ReferenceError("Plate is not held".into()));
+        }
+        self.drop_held(items, physics);
+        self.attachments.mount(item, target, items, physics)?;
+        self.parts.sync(items, physics)
+    }
     pub fn sync_parts(
         &mut self,
         items: &mut ItemStore,
@@ -963,6 +1022,8 @@ impl InteractionState {
         self.mechanisms.sync(physics, true);
         self.parts
             .capture_mechanisms(items, &self.mechanisms, physics)?;
+        self.attachments.sync(items, physics)?;
+        self.parts.sync(items, physics)?;
         Ok(())
     }
     pub fn sync_mechanisms(&mut self, physics: &mut PhysicsWorld) {

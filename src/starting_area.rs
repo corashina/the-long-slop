@@ -219,6 +219,7 @@ impl StartingArea {
             physics.rapier_mut().colliders[collider.handle].set_position_wrt_parent(local);
         }
         interaction.parts.bind(&mut items, physics)?;
+        interaction.attachments.bind(&mut items, physics)?;
         interaction.sync_parts(&mut items, physics)?;
         physics.refresh_queries();
         items.sync_poses(physics);
@@ -382,6 +383,15 @@ impl StartingArea {
     }
     pub fn sync_compound(&self, physics: &mut PhysicsWorld) {
         for record in &self.compound_colliders {
+            if self
+                .interaction
+                .attachments
+                .owns_collider(crate::reference::ColliderId(
+                    (physics.rapier().colliders[record.handle].user_data >> 64) as u32,
+                ))
+            {
+                continue;
+            }
             if physics.rapier().colliders[record.handle].parent() != Some(physics.chassis_handle())
             {
                 continue;

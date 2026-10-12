@@ -242,6 +242,20 @@ impl InteractionState {
                     a.context = FeedbackContext::Wheel;
                 }
                 match item.location {
+                    ItemLocation::Attached(_)
+                        if self.attachments.target(t.item).is_some()
+                            && self
+                                .carry
+                                .allows_pickup(t.item, player.seat().is_some(), true)
+                            && self.attachments.loose_body(t.item).is_some_and(|body| {
+                                self.carry
+                                    .can_acquire(t.item, t.point, player, body, physics)
+                                    .is_ok()
+                            }) =>
+                    {
+                        a.actions.0 |= ActionMask::DISMOUNT;
+                        a.context = FeedbackContext::Part;
+                    }
                     ItemLocation::PartSlot(_)
                         if self.parts.can_remove(t.item, player, items).is_ok()
                             && self.parts.loose_body(t.item).is_some_and(|body| {
@@ -288,6 +302,9 @@ impl InteractionState {
             {
                 let fits = match slot {
                     SlotTarget::Part(slot) => self.parts.can_install(held, slot, items).is_ok(),
+                    SlotTarget::Attachment(target) => {
+                        self.attachments.can_mount(held, target, items).is_ok()
+                    }
                     SlotTarget::Wheel(_) => self.wheel_installation_block(aim, items).is_none(),
                 };
                 if fits {

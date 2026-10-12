@@ -58,6 +58,7 @@ pub struct PartAttachments {
     wheel_covers: HashMap<ItemId, PartSlotId>,
     chassis: BodyId,
     bound: bool,
+    plate_mass: Vec<(ItemId, f32)>,
 }
 impl PartAttachments {
     pub fn new(r: &ReferenceManifest) -> Result<Self, ReferenceError> {
@@ -91,11 +92,20 @@ impl PartAttachments {
             let members: Vec<_> = r
                 .items
                 .iter()
-                .filter(|x| ancestry(x.node) == Some(i))
+                .filter(|x| {
+                    ancestry(x.node) == Some(i) && !r.plates.plates.iter().any(|p| p.item == x.id)
+                })
                 .map(|x| (x.id, x.node, x.mass_kg))
                 .collect();
             let mut shapes = Vec::new();
             for id in &p.colliders {
+                if r.plates
+                    .plates
+                    .iter()
+                    .any(|plate| plate.colliders.contains(id))
+                {
+                    continue;
+                }
                 let c = r
                     .colliders
                     .iter()
@@ -195,6 +205,12 @@ impl PartAttachments {
             collider_slots,
             chassis: r.vehicle.body,
             bound: false,
+            plate_mass: r
+                .plates
+                .plates
+                .iter()
+                .map(|p| (p.item, p.mass_kg))
+                .collect(),
             wheel_covers: r
                 .wheel_parts
                 .iter()
@@ -753,7 +769,19 @@ impl PartAttachments {
             let body = self.parts[i]
                 .body
                 .ok_or_else(|| error("Part bodies are not bound"))?;
-            let mass = (self.parts[i].assembly_dry_mass
+            let mounted_plate_mass: f32 = self
+                .plate_mass
+                .iter()
+                .filter(|(id, _)| {
+                    items.get(*id).is_some_and(|item| {
+                        matches!(item.location, ItemLocation::Attached(_))
+                            && item.body == Some(body)
+                    })
+                })
+                .map(|(_, mass)| *mass)
+                .sum();
+            let mass = (mounted_plate_mass
+                + self.parts[i].assembly_dry_mass
                 + self.parts[i]
                     .assembly_fluids
                     .iter()
@@ -770,7 +798,9 @@ impl PartAttachments {
                     .sum::<f32>())
             .max(0.001);
             if self.parts[i].mass != mass {
-                physics.rapier_mut().bodies[body].set_additional_mass(mass, true);
+                let world = physics.rapier_mut();
+                world.bodies[body].set_additional_mass(mass, true);
+                world.bodies[body].recompute_mass_properties_from_colliders(&world.colliders);
                 self.parts[i].mass = mass;
             }
         }

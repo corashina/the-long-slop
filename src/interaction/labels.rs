@@ -6,6 +6,9 @@ pub fn display_name<'a>(
     items: &'a crate::interaction::items::ItemStore,
     id: ItemId,
 ) -> &'a str {
+    if reference.plates.plates.iter().any(|plate| plate.item == id) {
+        return "License plate";
+    }
     let Some(item) = reference.items.iter().find(|item| item.id == id) else {
         return items.name(id).unwrap_or("");
     };
