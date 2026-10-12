@@ -489,6 +489,8 @@ Confirm physics and camera remain finite after a stall and an origin shift.
 
 ### Task 7: Implement source storm scheduling, movement, and wind
 
+Completed after source review, compilation, and strict validation. Tests and browser acceptance were skipped at the user's request.
+
 **Files:** Create `src/weather.rs`, `src/starting_area/weather.rs`; modify `src/lib.rs`, `src/starting_area.rs`, `src/world.rs`.
 - Test: `tests/weather.rs`, source-unit wind tests inside `src/weather.rs`, and `tests/weather_lifecycle.rs`.
 
@@ -505,7 +507,7 @@ Confirm physics and camera remain finite after a stall and an origin shift.
 - `GarageRuntime` owns `weather: WeatherState`, shelter bindings, and retained body-root maps.
 - Extract `terrain_height(seed: u64, absolute: [f64; 3]) -> f32` from the current terrain generator's existing height rule.
 
-- [ ] **Step 1: Write `source_schedule_and_influence_boundaries`, `storm_life_uses_previous_distance`, and `wind_skips_shelter_and_removed_bodies`.**
+- [x] **Step 1: Write `source_schedule_and_influence_boundaries`, `storm_life_uses_previous_distance`, and `wind_skips_shelter_and_removed_bodies`.**
 For deterministic native seeds, assert interval `[1200, 5400]`, spawn ring `15000`, size `[0.5, 1.5]`, and speed `[3, 12]`.
 At the exact scheduler deadline, spawn once and resample before creation.
 With size/life one, assert strength `0` at distance `750`, `1` at `375`, and `0.5` at `562.5`.
@@ -526,8 +528,8 @@ assert_eq!(weather.storms().len(), 1);
 assert!(weather.next_spawn_time() > due);
 ```
 
-- [ ] **Step 2: Run targets `weather` and `weather_lifecycle`.** Confirm missing weather behavior fails the tests.
-- [ ] **Step 3: Implement the source scheduler and storm state.** Use a separate deterministic storm random stream with source ranges and draw order.
+- [x] **Step 2: Run targets `weather` and `weather_lifecycle`.** Confirm missing weather behavior fails the tests.
+- [x] **Step 3: Implement the source scheduler and storm state.** Use a separate deterministic storm random stream with source ranges and draw order.
 Use normal simulation time, current procedural desert height, and source biome zero.
 Preserve previous-distance life evaluation, movement order, influence, destruction, and strongest selection.
 Apply each storm's own strength to its wind targets. Strongest selection affects lighting only.
@@ -540,10 +542,10 @@ Update retained shelter bounds from current body poses before wind application, 
 Allocate scan capacity during lifecycle events.
 Remove destroyed storm bindings and skip invalid body handles before applying force.
 Do not add direct health, traction, vehicle-condition, or temperature effects.
-- [ ] **Step 4: Run focused tests and existing world/vehicle tests.** Expect finite forces and no change to clear-weather driving.
+- [x] **Step 4: Run focused tests and existing world/vehicle tests.** Expect finite forces and no change to clear-weather driving.
 Build the release WASM package with normal source scheduling intact.
 Keep weather advancement disconnected from normal play until Task 8 provides its visual and audio signals.
-- [ ] **Step 5: Commit the gameplay weather model.** Message: `Implement source sandstorm scheduling and wind`.
+- [x] **Step 5: Commit the gameplay weather model.** Message: `Implement source sandstorm scheduling and wind`.
 
 ### Task 8: Compose source weather lighting and render selected particles
 
