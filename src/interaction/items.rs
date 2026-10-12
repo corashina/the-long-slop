@@ -22,6 +22,7 @@ pub enum ItemLocation {
 pub struct ItemState {
     pub id: ItemId,
     pub body: Option<RigidBodyHandle>,
+    pub inactive_pose: Option<crate::save::AbsolutePose>,
     pub location: ItemLocation,
     pub pose: VehiclePose,
     pub local_pose: VehiclePose,
@@ -70,6 +71,7 @@ impl ItemStore {
             states.push(ItemState {
                 id: item.id,
                 body: None,
+                inactive_pose: None,
                 location: item
                     .attached_to
                     .map_or(ItemLocation::World, ItemLocation::Attached),
@@ -170,7 +172,9 @@ impl ItemStore {
             let item = self.get(id).ok_or_else(|| {
                 crate::save::SaveError::InvalidLinks("Missing source item".into())
             })?;
-            let (position, rotation) = if let Some(handle) = item.body {
+            let (position, rotation) = if let Some(pose) = item.inactive_pose {
+                (pose.position, pose.rotation)
+            } else if let Some(handle) = item.body {
                 let body = physics.rapier().bodies.get(handle).ok_or_else(|| {
                     crate::save::SaveError::InvalidLinks("Missing item body".into())
                 })?;
@@ -253,6 +257,7 @@ impl ItemStore {
         self.states.push(ItemState {
             id,
             body: None,
+            inactive_pose: None,
             location: ItemLocation::World,
             pose,
             local_pose: VehiclePose {
@@ -329,6 +334,9 @@ impl ItemStore {
 
     pub fn sync_poses(&mut self, physics: &PhysicsWorld) {
         for state in &mut self.states {
+            if state.inactive_pose.is_some() {
+                continue;
+            }
             if let Some(handle) = state.body
                 && let Some(body) = physics.rapier().bodies.get(handle)
             {
@@ -339,6 +347,9 @@ impl ItemStore {
 
     pub fn rebase(&mut self, shift: [f32; 3]) {
         for state in &mut self.states {
+            if state.inactive_pose.is_some() {
+                continue;
+            }
             for (position, shift) in state.pose.position.iter_mut().zip(shift) {
                 *position -= shift;
             }

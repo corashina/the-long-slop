@@ -2,6 +2,8 @@
 pub mod identity;
 pub mod schema;
 mod validate;
+pub mod world;
+pub use world::PersistentWorld;
 
 pub use identity::*;
 pub use schema::*;

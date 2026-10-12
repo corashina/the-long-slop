@@ -624,6 +624,12 @@ impl PartAttachments {
     }
     pub fn prepare_mechanisms(&mut self, items: &ItemStore, m: &mut MechanismState) {
         for p in &self.parts {
+            if items
+                .get(p.reference.item)
+                .is_some_and(|item| item.inactive_pose.is_some())
+            {
+                continue;
+            }
             if p.slot.is_none() {
                 m.set_part_root(p.reference.node, p.body);
             }
@@ -651,6 +657,12 @@ impl PartAttachments {
             slot.detach_pose = slot.detach_node.and_then(|n| m.node_pose(n)).map(to_rapier);
         }
         for p in &mut self.parts {
+            if items
+                .get(p.reference.item)
+                .is_some_and(|item| item.inactive_pose.is_some())
+            {
+                continue;
+            }
             p.pose = to_rapier(
                 m.node_pose(p.reference.node)
                     .ok_or_else(|| error("Missing part transform"))?,
@@ -662,6 +674,12 @@ impl PartAttachments {
             }
         }
         for i in 0..self.parts.len() {
+            if items
+                .get(self.parts[i].reference.item)
+                .is_some_and(|item| item.inactive_pose.is_some())
+            {
+                continue;
+            }
             let body = self.physical_body(i, items, physics);
             let inverse = physics.rapier().bodies[body].position().inverse();
             for &(id, _, _) in &self.parts[i].members {
@@ -767,6 +785,12 @@ impl PartAttachments {
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
         for i in 0..self.parts.len() {
+            if items
+                .get(self.parts[i].reference.item)
+                .is_some_and(|item| item.inactive_pose.is_some())
+            {
+                continue;
+            }
             if self.parts[i].slot.is_some() {
                 continue;
             }

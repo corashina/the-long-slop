@@ -17,7 +17,12 @@ impl SaveSnapshot {
         let seed = identity::unsigned(&self.world.seed)?;
         let mut stations = HashSet::new();
         for WorldRecord::Pump { instance, valve } in &self.world.records {
-            let (record_seed, _) = instance.station()?;
+            let (record_seed, index) = instance.station()?;
+            data(
+                (index as f64 * crate::world::STATION_SPACING).abs()
+                    <= crate::world::MAX_ABSOLUTE_COORDINATE,
+                "Station position",
+            )?;
             links(
                 record_seed == seed && stations.insert(instance),
                 "Duplicate or mismatched station",
@@ -670,7 +675,9 @@ fn quaternion(rotation: &[f32; 4]) -> Result<(), SaveError> {
 }
 fn absolute(pose: &AbsolutePose) -> Result<(), SaveError> {
     data(
-        pose.position.iter().all(|v| v.is_finite()),
+        pose.position
+            .iter()
+            .all(|v| v.is_finite() && v.abs() <= crate::world::MAX_ABSOLUTE_COORDINATE),
         "Absolute position",
     )?;
     quaternion(&pose.rotation)

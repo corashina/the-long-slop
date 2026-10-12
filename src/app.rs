@@ -417,10 +417,26 @@ fn sync_world(
 }
 fn sync_imported(
     drive: Res<Drive>,
-    mut query: Query<(&BodyVisual, &mut Transform)>,
-    mut items: Query<(&ItemVisual, &mut Transform), Without<BodyVisual>>,
+    mut query: Query<(
+        &BodyVisual,
+        &mut Transform,
+        &mut Visibility,
+        Option<&ValveVisibility>,
+    )>,
+    mut items: Query<
+        (
+            &ItemVisual,
+            &mut Transform,
+            &mut Visibility,
+            Option<&ValveVisibility>,
+        ),
+        Without<BodyVisual>,
+    >,
     mut caps: Query<(&CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
-    mut visibility: Query<(&ValveVisibility, &mut Visibility)>,
+    mut visibility: Query<
+        (&ValveVisibility, &mut Visibility),
+        (Without<BodyVisual>, Without<ItemVisual>),
+    >,
 ) {
     presentation::reference::sync(
         &drive.runtime.area,

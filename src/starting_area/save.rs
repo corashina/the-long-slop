@@ -16,11 +16,33 @@ impl GarageRuntime {
         let ids = IdentityMap::new(reference)?;
         let origin = &self.stream.origin;
         let (wheels, tires) = self.wheels.capture_save(&ids, &self.physics)?;
-        let snapshot = SaveSnapshot {
+        let mut world = self
+            .persistent_world
+            .capture(&self.area, &self.physics, origin, &ids)?;
+        for record in self.stream.capture_save(&self.area.interaction).records {
+            let WorldRecord::Pump { instance, .. } = &record;
+            if let Some(old) = world.records.iter_mut().find(|old| {
+                let WorldRecord::Pump {
+                    instance: other, ..
+                } = old;
+                instance == other
+            }) {
+                *old = record;
+            } else {
+                world.records.push(record);
+            }
+        }
+        world.seed = self.stream.seed.to_string();
+        world.records.sort_by(|a, b| {
+            let WorldRecord::Pump { instance: a, .. } = a;
+            let WorldRecord::Pump { instance: b, .. } = b;
+            a.cmp(b)
+        });
+        let mut snapshot = SaveSnapshot {
             schema_version: SAVE_SCHEMA_VERSION,
             saved_at: saved_at.into(),
             source: source.clone(),
-            world: self.stream.capture_save(&self.area.interaction),
+            world,
             player: self.area.player.capture_save(
                 &ids,
                 origin,
@@ -42,9 +64,13 @@ impl GarageRuntime {
                 auto_gear: self.auto_gear,
                 handbrake: self.handbrake,
             }],
-            bodies: self
-                .area
-                .capture_save(reference, &ids, origin, &self.physics)?,
+            bodies: self.area.capture_save(
+                reference,
+                &ids,
+                origin,
+                &self.physics,
+                &self.persistent_world,
+            )?,
             items: self.area.items.capture_save(&ids, origin, &self.physics)?,
             attachments: AttachmentsSnapshot {
                 parts: self.area.interaction.parts.capture_save(&ids)?,
@@ -59,6 +85,12 @@ impl GarageRuntime {
             lighting: self.lighting.capture_save(&reference.lighting, &ids)?,
             view: ViewSnapshot { camera: view },
         };
+        if let Some(saved) = self.persistent_world.body_snapshot(
+            self.physics.chassis_handle(),
+            snapshot.vehicles[0].body.identity.clone(),
+        ) {
+            snapshot.vehicles[0].body = saved;
+        }
         snapshot.validate(reference, source)?;
         Ok(snapshot)
     }
@@ -70,6 +102,7 @@ impl StartingArea {
         ids: &IdentityMap,
         origin: &WorldOrigin,
         physics: &PhysicsWorld,
+        world: &PersistentWorld,
     ) -> Result<Vec<BodySnapshot>, SaveError> {
         let mut records = Vec::new();
         let mut captured = HashSet::new();
@@ -101,13 +134,14 @@ impl StartingArea {
                 .bodies
                 .get(handle)
                 .ok_or_else(|| SaveError::InvalidLinks("Missing detached body".into()))?;
-            records.push(capture_body_save(
-                body,
-                BodyIdentity::Assembly {
-                    root: ids.item_instance(item.id)?,
-                },
-                origin,
-            ));
+            let identity = BodyIdentity::Assembly {
+                root: ids.item_instance(item.id)?,
+            };
+            records.push(
+                world
+                    .body_snapshot(handle, identity.clone())
+                    .unwrap_or_else(|| capture_body_save(body, identity, origin)),
+            );
         }
         for record in &reference.bodies {
             if record.parent_body.is_some() {
@@ -125,13 +159,12 @@ impl StartingArea {
                 .bodies
                 .get(handle)
                 .ok_or_else(|| SaveError::InvalidLinks("Missing source body".into()))?;
-            let saved = capture_body_save(
-                body,
-                BodyIdentity::Source {
-                    source: SourceKey::from(&record.source),
-                },
-                origin,
-            );
+            let identity = BodyIdentity::Source {
+                source: SourceKey::from(&record.source),
+            };
+            let saved = world
+                .body_snapshot(handle, identity.clone())
+                .unwrap_or_else(|| capture_body_save(body, identity, origin));
             if saved.pose.position != record.pose.translation.map(f64::from)
                 || saved.pose.rotation != record.pose.rotation
                 || saved.linear_velocity != [0.; 3]

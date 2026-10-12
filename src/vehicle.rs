@@ -50,6 +50,7 @@ impl VehicleSnapshot {
 pub struct PhysicsWorld {
     physics: rapier3d::prelude::PhysicsWorld,
     chassis: RigidBodyHandle,
+    pub(crate) inactive_bodies: std::collections::HashSet<RigidBodyHandle>,
     controller: DynamicRayCastVehicleController,
     resting_wheels: [Wheel; 4],
     wheel_references: [WheelSlotReference; 4],
@@ -176,6 +177,9 @@ impl PhysicsWorld {
         );
         controller.wheels_mut().copy_from_slice(&resting_wheels);
         Ok(Self {
+            inactive_bodies: std::collections::HashSet::with_capacity(
+                reference.bodies.len() + reference.parts.len() + reference.wheel_parts.len(),
+            ),
             physics,
             chassis,
             controller,
@@ -208,6 +212,9 @@ impl PhysicsWorld {
     }
 
     pub fn apply_vehicle_forces(&mut self, input: DriveInput, drive_force: f32) {
+        if !self.body_active(self.chassis) {
+            return;
+        }
         if input.accelerate
             || input.brake_reverse
             || input.steer != 0.0
@@ -286,6 +293,10 @@ impl PhysicsWorld {
                 / std::f32::consts::TAU;
             self.wheel_rotations[slot] = wheel.rotation;
         }
+    }
+
+    pub fn body_active(&self, handle: RigidBodyHandle) -> bool {
+        !self.inactive_bodies.contains(&handle)
     }
 
     pub fn step_physics(&mut self) {
@@ -489,6 +500,26 @@ impl PhysicsWorld {
         }
     }
 
+    pub fn reset_preserving_wheels(&mut self, pose: VehiclePose) {
+        let rotations = std::array::from_fn::<_, 4, _>(|index| self.wheel_save_state(index).0);
+        let previous = self.wheel_rotations;
+        let rpm = self.wheel_rpm;
+        self.reset(pose);
+        for (wheel, &slot) in self
+            .controller
+            .wheels_mut()
+            .iter_mut()
+            .zip(&self.active_slots)
+        {
+            wheel.rotation = rotations[slot];
+        }
+        for (wheel, rotation) in self.resting_wheels.iter_mut().zip(rotations) {
+            wheel.rotation = rotation;
+        }
+        self.wheel_rotations = previous;
+        self.wheel_rpm = rpm;
+    }
+
     pub fn reset(&mut self, pose: VehiclePose) {
         let body = &mut self.physics.bodies[self.chassis];
         body.set_position(to_rapier(pose), true);
@@ -550,7 +581,10 @@ impl PhysicsWorld {
 
     pub fn rebase(&mut self, shift: [f32; 3]) {
         let shift = Vector::from_array(shift);
-        for (_, body) in self.physics.bodies.iter_mut() {
+        for (handle, body) in self.physics.bodies.iter_mut() {
+            if self.inactive_bodies.contains(&handle) {
+                continue;
+            }
             body.set_translation(body.translation() - shift, false);
         }
         for (_, collider) in self.physics.colliders.iter_mut() {

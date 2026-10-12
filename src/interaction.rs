@@ -499,6 +499,15 @@ impl InteractionState {
         });
         Ok(())
     }
+    pub(crate) fn restore_pump_valve(&mut self, item: ItemId, valve: f32) {
+        if let Some(opening) = self
+            .openings
+            .iter_mut()
+            .find(|opening| opening.reference.cap == item)
+        {
+            opening.valve = valve;
+        }
+    }
     pub fn opening_is_open(&self, id: OpeningId) -> bool {
         self.opening_valve(id) > 0.0
     }
@@ -960,6 +969,9 @@ impl InteractionState {
             let Some(item) = items.get_mut(opening.reference.tank) else {
                 continue;
             };
+            if item.inactive_pose.is_some() {
+                continue;
+            }
             let forward = (to_rapier(item.pose) * opening.local_pose).rotation * opening.tilt_axis;
             let angle = forward.dot(Vector::Y).clamp(-1.0, 1.0).acos().to_degrees();
             if let Some(fluid) = item.fluid.as_mut() {

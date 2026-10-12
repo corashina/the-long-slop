@@ -668,12 +668,25 @@ impl WheelAssemblies {
         }
     }
 
+    pub fn sync_activity(&mut self, physics: &mut PhysicsWorld) {
+        let active = physics.body_active(physics.chassis_handle());
+        for slot in &self.slots {
+            if let Some(handle) = slot.sensor {
+                physics.rapier_mut().colliders[handle].set_enabled(active);
+            }
+        }
+    }
+
     pub fn sync(
         &mut self,
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
         self.bind(items, physics)?;
+        if !physics.body_active(physics.chassis_handle()) {
+            self.sync_activity(physics);
+            return Ok(());
+        }
         let snapshot = physics.snapshot();
         let chassis = physics.chassis_handle();
         let inverse = to_rapier(snapshot.pose).inverse();
@@ -747,6 +760,7 @@ impl WheelAssemblies {
             if let Some(item) = items.get(self.parts[index].item)
                 && matches!(item.location, ItemLocation::World | ItemLocation::Held)
                 && let Some(body) = item.body
+                && physics.body_active(body)
             {
                 self.update_body_mass(index, body, items, physics);
             }

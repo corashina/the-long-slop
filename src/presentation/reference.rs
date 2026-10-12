@@ -316,7 +316,10 @@ pub fn bind(
 pub fn sync_caps(
     area: &StartingArea,
     caps: &mut Query<(&CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
-    visibility: &mut Query<(&ValveVisibility, &mut Visibility)>,
+    visibility: &mut Query<
+        (&ValveVisibility, &mut Visibility),
+        (Without<BodyVisual>, Without<ItemVisual>),
+    >,
 ) {
     for (cap, mut transform) in caps {
         let valve = area.interaction.opening_valve(cap.opening);
@@ -351,9 +354,33 @@ pub fn sync_caps(
 pub fn sync_items(
     area: &StartingArea,
     alpha: f32,
-    query: &mut Query<(&ItemVisual, &mut Transform), Without<BodyVisual>>,
+    query: &mut Query<
+        (
+            &ItemVisual,
+            &mut Transform,
+            &mut Visibility,
+            Option<&ValveVisibility>,
+        ),
+        Without<BodyVisual>,
+    >,
 ) {
-    for (binding, mut transform) in query {
+    for (binding, mut transform, mut visibility, valve) in query {
+        let active = area
+            .items
+            .get(binding.item)
+            .is_some_and(|item| item.inactive_pose.is_none());
+        visibility.set_if_neq(
+            if active
+                && valve.is_none_or(|v| (area.interaction.opening_valve(v.opening) > 0.) == v.open)
+            {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            },
+        );
+        if !active {
+            continue;
+        }
         if let Some((_, previous, current)) = area
             .item_render_poses
             .iter()
@@ -369,11 +396,32 @@ pub fn sync_items(
 
 pub fn sync(
     area: &StartingArea,
-    _physics: &PhysicsWorld,
+    physics: &PhysicsWorld,
     alpha: f32,
-    query: &mut Query<(&BodyVisual, &mut Transform)>,
+    query: &mut Query<(
+        &BodyVisual,
+        &mut Transform,
+        &mut Visibility,
+        Option<&ValveVisibility>,
+    )>,
 ) {
-    for (binding, mut transform) in query {
+    for (binding, mut transform, mut visibility, valve) in query {
+        let active = area
+            .bodies
+            .get(&binding.body)
+            .is_some_and(|h| physics.body_active(*h));
+        visibility.set_if_neq(
+            if active
+                && valve.is_none_or(|v| (area.interaction.opening_valve(v.opening) > 0.) == v.open)
+            {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            },
+        );
+        if !active {
+            continue;
+        }
         if let Some((_, previous, current)) = area
             .render_poses
             .iter()
