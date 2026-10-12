@@ -1,7 +1,7 @@
 # Source-based game audio
 
 Date: 2026-10-12, Europe/Warsaw.
-Status: The user approved the chat design. This written spec awaits review.
+Status: The user approved this written spec in chat on 2026-10-12.
 Branch: `codex/audio`.
 
 ## Intent and scope
