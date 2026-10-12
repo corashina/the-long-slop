@@ -1,7 +1,7 @@
 pub mod carry;
 pub mod consumption;
 pub mod feedback;
-mod fluid_contact;
+pub mod fluid_contact;
 pub mod items;
 pub mod labels;
 pub mod mechanisms;
@@ -210,6 +210,18 @@ impl InteractionState {
                 particles: Some(opening.particles.clone()),
                 contact: Some(fluid_contact::FluidContact::new(
                     &opening.particles,
+                    reference
+                        .weather
+                        .particles
+                        .iter()
+                        .find(|p| p.role == format!("outlet_{}", opening.id.0))
+                        .unwrap(),
+                    reference
+                        .weather
+                        .particles
+                        .iter()
+                        .find(|p| p.role == format!("splash_{}", opening.id.0))
+                        .unwrap(),
                     opening.id.0,
                 )),
             });
@@ -582,6 +594,13 @@ impl InteractionState {
         self.carry.pickup(item, point, player, items, physics)
     }
 
+    pub fn fluid_particles(
+        &self,
+    ) -> impl Iterator<Item = (OpeningId, &fluid_contact::FluidContact)> {
+        self.openings
+            .iter()
+            .filter_map(|o| o.contact.as_ref().map(|c| (o.reference.id, c)))
+    }
     pub fn rebase(&mut self, shift: [f32; 3]) {
         self.mechanisms.rebase(shift);
         self.parts.rebase(shift);
@@ -1022,6 +1041,9 @@ impl InteractionState {
             }
             let view = to_rapier(player.view_pose(physics));
             let cap_center = view.translation + view.rotation * self.drink_collider_center;
+            if poured.is_some() {
+                contact.set_color(fractions);
+            }
             let hit = contact.advance(
                 particles,
                 cap_pose,

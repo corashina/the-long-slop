@@ -32666,13 +32666,13 @@
         "simulation_space": 2,
         "local_pose": {
           "translation": [
-            -3.7100014686584473,
-            -20.0,
-            14.260004043579102
+            0.0,
+            0.0,
+            0.0
           ],
           "rotation": [
             0.7071068286895752,
-            -0.0,
+            0.0,
             0.0,
             0.7071068286895752
           ],
@@ -33415,6 +33415,7 @@
           "scalingMode": 0,
           "simulationSpeed": 1.0,
           "stopAction": 0,
+          "gameObject.layer": 0,
           "renderer.m_RenderMode": 0,
           "renderer.m_SortMode": 1,
           "renderer.m_MinParticleSize": 0.0,
@@ -33450,7 +33451,9 @@
           "looping": true,
           "playOnAwake": true,
           "prewarm": false,
-          "useUnscaledTime": false
+          "useUnscaledTime": false,
+          "gameObject.active": true,
+          "renderer.enabled": true
         },
         "links": {
           "m_GameObject": {
@@ -33522,7 +33525,24 @@
             ]
           }
         ],
-        "limits": []
+        "limits": [
+          {
+            "source": {
+              "file": "sharedassets1.assets",
+              "path_id": 128154
+            },
+            "module": "TriggerModule",
+            "visible_effect": "Retained shelter AABBs adapt native particle collider overlap, including radiusScale."
+          },
+          {
+            "source": {
+              "file": "sharedassets1.assets",
+              "path_id": 128154
+            },
+            "module": "material.soft_particles",
+            "visible_effect": "Source Ultra enables soft particles. The current camera path has no sampled scene depth; dust intersections keep hard depth edges."
+          }
+        ]
       },
       {
         "source": {
@@ -33537,13 +33557,13 @@
         "simulation_space": 2,
         "local_pose": {
           "translation": [
-            -3.7100014686584473,
-            -20.0,
-            14.260004043579102
+            0.0,
+            0.0,
+            0.0
           ],
           "rotation": [
             0.7071068286895752,
-            -0.0,
+            0.0,
             0.0,
             0.7071068286895752
           ],
@@ -34324,6 +34344,7 @@
           "scalingMode": 0,
           "simulationSpeed": 1.0,
           "stopAction": 0,
+          "gameObject.layer": 0,
           "renderer.m_RenderMode": 0,
           "renderer.m_SortMode": 1,
           "renderer.m_MinParticleSize": 0.0,
@@ -34359,7 +34380,9 @@
           "looping": true,
           "playOnAwake": true,
           "prewarm": false,
-          "useUnscaledTime": false
+          "useUnscaledTime": false,
+          "gameObject.active": true,
+          "renderer.enabled": true
         },
         "links": {
           "m_GameObject": {
@@ -34431,7 +34454,24 @@
             ]
           }
         ],
-        "limits": []
+        "limits": [
+          {
+            "source": {
+              "file": "sharedassets1.assets",
+              "path_id": 128153
+            },
+            "module": "TriggerModule",
+            "visible_effect": "Retained shelter AABBs adapt native particle collider overlap, including radiusScale."
+          },
+          {
+            "source": {
+              "file": "sharedassets1.assets",
+              "path_id": 128153
+            },
+            "module": "material.soft_particles",
+            "visible_effect": "Source Ultra enables soft particles. The current camera path has no sampled scene depth; dust intersections keep hard depth edges."
+          }
+        ]
       },
       {
         "source": {
@@ -34446,15 +34486,15 @@
         "simulation_space": 2,
         "local_pose": {
           "translation": [
-            43.37601623162006,
-            2.188999891281128,
-            -68.07400512359415
+            -5.6343818499726694e-15,
+            0.0,
+            -0.025000007090471385
           ],
           "rotation": [
-            -0.0,
-            0.7071068286895752,
             0.0,
-            0.7071068286895752
+            0.0,
+            0.0,
+            1.0000001343588565
           ],
           "scale": [
             1.0,
@@ -35043,6 +35083,41 @@
             0.0,
             0.0,
             0.0
+          ],
+          "outlet.forceColor": [
+            1.0,
+            0.8470588326454163,
+            0.0
+          ],
+          "fluid.0": [
+            0.843137264251709,
+            1.0,
+            0.0
+          ],
+          "fluid.1": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "fluid.2": [
+            1.0,
+            0.886274516582489,
+            0.0
+          ],
+          "fluid.3": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "fluid.4": [
+            0.6274510025978088,
+            0.0,
+            0.0
+          ],
+          "fluid.5": [
+            0.7843137383460999,
+            0.7843137383460999,
+            0.0
           ]
         },
         "scalars": {
@@ -35091,6 +35166,7 @@
           "scalingMode": 1,
           "simulationSpeed": 1.0,
           "stopAction": 0,
+          "gameObject.layer": 4,
           "renderer.m_RenderMode": 0,
           "renderer.m_SortMode": 0,
           "renderer.m_MinParticleSize": 0.0,
@@ -35099,7 +35175,18 @@
           "renderer.m_VelocityScale": 0.0,
           "renderer.m_LengthScale": 2.0,
           "renderer.m_SortingFudge": -1.0,
-          "renderer.m_RenderAlignment": 0
+          "renderer.m_RenderAlignment": 0,
+          "outlet.maxSpeed": 4.5,
+          "outlet.minRate": 0.0,
+          "outlet.maxRate": 1000.0,
+          "outlet.forceColorM": 0.25,
+          "outlet.forceAlpha": 1.0,
+          "fluid.0.alpha": 0.3921568691730499,
+          "fluid.1.alpha": 1.0,
+          "fluid.2.alpha": 0.3921568691730499,
+          "fluid.3.alpha": 0.13725490868091583,
+          "fluid.4.alpha": 0.5882353186607361,
+          "fluid.5.alpha": 0.3921568691730499
         },
         "flags": {
           "CollisionModule.collidesWithDynamic": true,
@@ -35126,7 +35213,10 @@
           "looping": true,
           "playOnAwake": true,
           "prewarm": true,
-          "useUnscaledTime": false
+          "useUnscaledTime": false,
+          "gameObject.active": true,
+          "renderer.enabled": true,
+          "outlet.forceColor": true
         },
         "links": {
           "m_GameObject": {
@@ -35310,7 +35400,15 @@
               "path_id": 58924
             },
             "module": "CollisionModule",
-            "visible_effect": "Unity collision bounce and splash appearance need a particle renderer adapter; gameplay drinking contacts remain required."
+            "visible_effect": "Rapier swept spheres adapt Unity particle collision; world tank fill routing and native collision cache differ."
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 58924
+            },
+            "module": "material.distortion",
+            "visible_effect": "Material sharedassets1.assets:481 uses EFFECT_BUMP with distortion strength 50. Current source surfaces have no scene-color copy; fluid sprites do not refract the background."
           }
         ]
       },
@@ -35327,15 +35425,15 @@
         "simulation_space": 2,
         "local_pose": {
           "translation": [
-            43.37601623162006,
-            2.188999891281128,
-            -68.07400512359415
+            -5.6343818499726694e-15,
+            0.0,
+            -0.025000007090471385
           ],
           "rotation": [
-            -0.0,
-            0.7071068286895752,
             0.0,
-            0.7071068286895752
+            0.0,
+            0.0,
+            1.0000001343588565
           ],
           "scale": [
             1.0,
@@ -35915,6 +36013,41 @@
             0.0,
             0.0,
             0.0
+          ],
+          "outlet.forceColor": [
+            1.0,
+            0.8470588326454163,
+            0.0
+          ],
+          "fluid.0": [
+            0.843137264251709,
+            1.0,
+            0.0
+          ],
+          "fluid.1": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "fluid.2": [
+            1.0,
+            0.886274516582489,
+            0.0
+          ],
+          "fluid.3": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "fluid.4": [
+            0.6274510025978088,
+            0.0,
+            0.0
+          ],
+          "fluid.5": [
+            0.7843137383460999,
+            0.7843137383460999,
+            0.0
           ]
         },
         "scalars": {
@@ -35958,6 +36091,7 @@
           "scalingMode": 1,
           "simulationSpeed": 1.0,
           "stopAction": 0,
+          "gameObject.layer": 4,
           "renderer.m_RenderMode": 0,
           "renderer.m_SortMode": 0,
           "renderer.m_MinParticleSize": 0.0,
@@ -35966,7 +36100,18 @@
           "renderer.m_VelocityScale": 0.0,
           "renderer.m_LengthScale": 2.0,
           "renderer.m_SortingFudge": 0.0,
-          "renderer.m_RenderAlignment": 0
+          "renderer.m_RenderAlignment": 0,
+          "outlet.maxSpeed": 4.5,
+          "outlet.minRate": 0.0,
+          "outlet.maxRate": 1000.0,
+          "outlet.forceColorM": 0.25,
+          "outlet.forceAlpha": 1.0,
+          "fluid.0.alpha": 0.3921568691730499,
+          "fluid.1.alpha": 1.0,
+          "fluid.2.alpha": 0.3921568691730499,
+          "fluid.3.alpha": 0.13725490868091583,
+          "fluid.4.alpha": 0.5882353186607361,
+          "fluid.5.alpha": 0.3921568691730499
         },
         "flags": {
           "ColorModule.enabled": true,
@@ -35987,7 +36132,10 @@
           "looping": true,
           "playOnAwake": true,
           "prewarm": true,
-          "useUnscaledTime": false
+          "useUnscaledTime": false,
+          "gameObject.active": false,
+          "renderer.enabled": true,
+          "outlet.forceColor": true
         },
         "links": {
           "m_GameObject": {
@@ -36164,7 +36312,1866 @@
             ]
           }
         ],
-        "limits": []
+        "limits": [
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 59006
+            },
+            "module": "material.distortion",
+            "visible_effect": "Material sharedassets1.assets:481 uses EFFECT_BUMP with distortion strength 50. Current source surfaces have no scene-color copy; fluid sprites do not refract the background."
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 58739
+        },
+        "role": "outlet_1",
+        "capacity": 10000,
+        "rate_over_time": 500.0,
+        "rate_over_distance": 0.0,
+        "duration": 5.0,
+        "simulation_space": 2,
+        "local_pose": {
+          "translation": [
+            0.24469439247740116,
+            8.492595549025594e-08,
+            -0.32030425344888724
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            -5.960465278380254e-08,
+            1.0000001939635093
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "module_flags": {
+          "ClampVelocityModule": false,
+          "CollisionModule": true,
+          "ColorBySpeedModule": false,
+          "ColorModule": true,
+          "CustomDataModule": false,
+          "EmissionModule": false,
+          "ExternalForcesModule": false,
+          "ForceModule": false,
+          "InheritVelocityModule": false,
+          "InitialModule": true,
+          "LifetimeByEmitterSpeedModule": false,
+          "LightsModule": false,
+          "NoiseModule": false,
+          "RotationBySpeedModule": false,
+          "RotationModule": false,
+          "ShapeModule": true,
+          "SizeBySpeedModule": false,
+          "SizeModule": true,
+          "SubModule": false,
+          "TrailModule": false,
+          "TriggerModule": false,
+          "UVModule": false,
+          "VelocityModule": false
+        },
+        "curves": {
+          "CollisionModule.m_Bounce": {
+            "mode": 0,
+            "min_scalar": 1.0,
+            "scalar": 0.4000000059604645,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "CollisionModule.m_Dampen": {
+            "mode": 0,
+            "min_scalar": 0.0,
+            "scalar": 0.30000001192092896,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "CollisionModule.m_EnergyLossOnCollision": {
+            "mode": 0,
+            "min_scalar": 0.0,
+            "scalar": 0.5,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.gravityModifier": {
+            "mode": 0,
+            "min_scalar": 0.0,
+            "scalar": 0.25,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startLifetime": {
+            "mode": 0,
+            "min_scalar": 5.0,
+            "scalar": 5.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startRotation": {
+            "mode": 3,
+            "min_scalar": 0.0,
+            "scalar": 6.283185005187988,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startRotationX": {
+            "mode": 3,
+            "min_scalar": 0.0,
+            "scalar": 0.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startRotationY": {
+            "mode": 3,
+            "min_scalar": 0.0,
+            "scalar": 0.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startSize": {
+            "mode": 0,
+            "min_scalar": 0.019999999552965164,
+            "scalar": 0.03999999910593033,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startSizeY": {
+            "mode": 0,
+            "min_scalar": 1.0,
+            "scalar": 1.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startSizeZ": {
+            "mode": 0,
+            "min_scalar": 1.0,
+            "scalar": 1.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startSpeed": {
+            "mode": 0,
+            "min_scalar": 0.0,
+            "scalar": 0.5,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "ShapeModule.arc.speed": {
+            "mode": 0,
+            "min_scalar": 1.0,
+            "scalar": 1.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "ShapeModule.m_MeshSpawn.speed": {
+            "mode": 0,
+            "min_scalar": 1.0,
+            "scalar": 1.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "ShapeModule.radius.speed": {
+            "mode": 0,
+            "min_scalar": 1.0,
+            "scalar": 1.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "SizeModule.curve": {
+            "mode": 1,
+            "min_scalar": 1.0,
+            "scalar": 1.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [
+                {
+                  "time": 0.0,
+                  "value": 0.0,
+                  "in_tangent": 0.0,
+                  "out_tangent": 0.0,
+                  "in_weight": 0.3333333432674408,
+                  "out_weight": 0.3333333432674408,
+                  "weighted_mode": 0
+                },
+                {
+                  "time": 0.09782469272613525,
+                  "value": 0.9376242160797119,
+                  "in_tangent": 0.06630614399909973,
+                  "out_tangent": 0.06630614399909973,
+                  "in_weight": 0.3333333432674408,
+                  "out_weight": 0.15398457646369934,
+                  "weighted_mode": 0
+                },
+                {
+                  "time": 1.0,
+                  "value": 1.0,
+                  "in_tangent": -0.026937082409858704,
+                  "out_tangent": -0.026937082409858704,
+                  "in_weight": 0.17553381621837616,
+                  "out_weight": 0.3333333432674408,
+                  "weighted_mode": 0
+                }
+              ],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "SizeModule.y": {
+            "mode": 1,
+            "min_scalar": 1.0,
+            "scalar": 1.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [
+                {
+                  "time": 0.0,
+                  "value": 0.0,
+                  "in_tangent": 0.0,
+                  "out_tangent": 1.0,
+                  "in_weight": 0.3333333432674408,
+                  "out_weight": 0.3333333432674408,
+                  "weighted_mode": 0
+                },
+                {
+                  "time": 1.0,
+                  "value": 1.0,
+                  "in_tangent": 1.0,
+                  "out_tangent": 0.0,
+                  "in_weight": 0.3333333432674408,
+                  "out_weight": 0.3333333432674408,
+                  "weighted_mode": 0
+                }
+              ],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "SizeModule.z": {
+            "mode": 1,
+            "min_scalar": 1.0,
+            "scalar": 1.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [
+                {
+                  "time": 0.0,
+                  "value": 0.0,
+                  "in_tangent": 0.0,
+                  "out_tangent": 1.0,
+                  "in_weight": 0.3333333432674408,
+                  "out_weight": 0.3333333432674408,
+                  "weighted_mode": 0
+                },
+                {
+                  "time": 1.0,
+                  "value": 1.0,
+                  "in_tangent": 1.0,
+                  "out_tangent": 0.0,
+                  "in_weight": 0.3333333432674408,
+                  "out_weight": 0.3333333432674408,
+                  "weighted_mode": 0
+                }
+              ],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "startDelay": {
+            "mode": 0,
+            "min_scalar": 0.0,
+            "scalar": 0.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          }
+        },
+        "colors": {
+          "ColorModule.gradient": {
+            "mode": 1,
+            "min_color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "max_color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "min_gradient": {
+              "mode": 0,
+              "colors": [
+                {
+                  "time": 0.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                {
+                  "time": 1.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                }
+              ],
+              "alphas": [
+                {
+                  "time": 0.0,
+                  "value": 1.0
+                },
+                {
+                  "time": 1.0,
+                  "value": 1.0
+                }
+              ]
+            },
+            "max_gradient": {
+              "mode": 0,
+              "colors": [
+                {
+                  "time": 0.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                {
+                  "time": 1.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                }
+              ],
+              "alphas": [
+                {
+                  "time": 0.0,
+                  "value": 1.0
+                },
+                {
+                  "time": 0.9000076295109484,
+                  "value": 1.0
+                },
+                {
+                  "time": 1.0,
+                  "value": 0.0
+                }
+              ]
+            }
+          },
+          "InitialModule.startColor": {
+            "mode": 0,
+            "min_color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "max_color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "min_gradient": {
+              "mode": 0,
+              "colors": [
+                {
+                  "time": 0.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                {
+                  "time": 1.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                }
+              ],
+              "alphas": [
+                {
+                  "time": 0.0,
+                  "value": 1.0
+                },
+                {
+                  "time": 1.0,
+                  "value": 1.0
+                }
+              ]
+            },
+            "max_gradient": {
+              "mode": 0,
+              "colors": [
+                {
+                  "time": 0.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                {
+                  "time": 1.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                }
+              ],
+              "alphas": [
+                {
+                  "time": 0.0,
+                  "value": 1.0
+                },
+                {
+                  "time": 1.0,
+                  "value": 1.0
+                }
+              ]
+            }
+          }
+        },
+        "vectors": {
+          "InitialModule.customEmitterVelocity": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "ShapeModule.boxThickness": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "ShapeModule.m_Position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "ShapeModule.m_Rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "ShapeModule.m_Scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "renderer.m_Pivot": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "renderer.m_Flip": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "outlet.forceColor": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "fluid.0": [
+            0.843137264251709,
+            1.0,
+            0.0
+          ],
+          "fluid.1": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "fluid.2": [
+            1.0,
+            0.886274516582489,
+            0.0
+          ],
+          "fluid.3": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "fluid.4": [
+            0.6274510025978088,
+            0.0,
+            0.0
+          ],
+          "fluid.5": [
+            0.7843137383460999,
+            0.7843137383460999,
+            0.0
+          ]
+        },
+        "scalars": {
+          "CollisionModule.colliderForce": 0.0,
+          "CollisionModule.collidesWith.m_Bits": 10127377,
+          "CollisionModule.collisionMode": 0,
+          "CollisionModule.maxCollisionShapes": 256,
+          "CollisionModule.maxKillSpeed": 10000.0,
+          "CollisionModule.minKillSpeed": 0.0,
+          "CollisionModule.quality": 0,
+          "CollisionModule.radiusScale": 1.0,
+          "CollisionModule.type": 1,
+          "CollisionModule.voxelSize": 0.5,
+          "InitialModule.maxNumParticles": 10000,
+          "InitialModule.randomizeRotationDirection": 0.0,
+          "ShapeModule.angle": 6.0,
+          "ShapeModule.arc.mode": 0,
+          "ShapeModule.arc.spread": 0.0,
+          "ShapeModule.arc.value": 360.0,
+          "ShapeModule.donutRadius": 0.20000000298023224,
+          "ShapeModule.length": 5.0,
+          "ShapeModule.m_MeshMaterialIndex": 0,
+          "ShapeModule.m_MeshNormalOffset": 0.0,
+          "ShapeModule.m_MeshSpawn.mode": 0,
+          "ShapeModule.m_MeshSpawn.spread": 0.0,
+          "ShapeModule.m_TextureClipChannel": 3,
+          "ShapeModule.m_TextureClipThreshold": 0.0,
+          "ShapeModule.m_TextureUVChannel": 0,
+          "ShapeModule.placementMode": 0,
+          "ShapeModule.radius.mode": 0,
+          "ShapeModule.radius.spread": 0.0,
+          "ShapeModule.radius.value": 9.999999747378752e-05,
+          "ShapeModule.radiusThickness": 1.0,
+          "ShapeModule.randomDirectionAmount": 0.0,
+          "ShapeModule.randomPositionAmount": 0.0,
+          "ShapeModule.sphericalDirectionAmount": 0.0,
+          "ShapeModule.type": 4,
+          "cullingMode": 3,
+          "emitterVelocityMode": 1,
+          "lengthInSec": 5.0,
+          "moveWithTransform": 2,
+          "randomSeed": 0,
+          "ringBufferLoopRange.x": 0.0,
+          "ringBufferLoopRange.y": 1.0,
+          "ringBufferMode": 0,
+          "scalingMode": 1,
+          "simulationSpeed": 1.0,
+          "stopAction": 0,
+          "gameObject.layer": 4,
+          "renderer.m_RenderMode": 0,
+          "renderer.m_SortMode": 0,
+          "renderer.m_MinParticleSize": 0.0,
+          "renderer.m_MaxParticleSize": 10.0,
+          "renderer.m_CameraVelocityScale": 0.0,
+          "renderer.m_VelocityScale": 0.0,
+          "renderer.m_LengthScale": 2.0,
+          "renderer.m_SortingFudge": -1.0,
+          "renderer.m_RenderAlignment": 0,
+          "outlet.maxSpeed": 0.5,
+          "outlet.minRate": 0.0,
+          "outlet.maxRate": 500.0,
+          "outlet.forceColorM": 0.0,
+          "outlet.forceAlpha": 0.0,
+          "fluid.0.alpha": 0.3921568691730499,
+          "fluid.1.alpha": 1.0,
+          "fluid.2.alpha": 0.3921568691730499,
+          "fluid.3.alpha": 0.13725490868091583,
+          "fluid.4.alpha": 0.5882353186607361,
+          "fluid.5.alpha": 0.3921568691730499
+        },
+        "flags": {
+          "CollisionModule.collidesWithDynamic": true,
+          "CollisionModule.collisionMessages": true,
+          "CollisionModule.enabled": true,
+          "CollisionModule.interiorCollisions": false,
+          "CollisionModule.multiplyColliderForceByCollisionAngle": true,
+          "CollisionModule.multiplyColliderForceByParticleSize": false,
+          "CollisionModule.multiplyColliderForceByParticleSpeed": false,
+          "ColorModule.enabled": true,
+          "InitialModule.enabled": true,
+          "InitialModule.rotation3D": false,
+          "InitialModule.size3D": false,
+          "ShapeModule.alignToDirection": false,
+          "ShapeModule.enabled": true,
+          "ShapeModule.m_TextureAlphaAffectsParticles": true,
+          "ShapeModule.m_TextureBilinearFiltering": false,
+          "ShapeModule.m_TextureColorAffectsParticles": true,
+          "ShapeModule.m_UseMeshColors": true,
+          "ShapeModule.m_UseMeshMaterialIndex": false,
+          "SizeModule.enabled": true,
+          "SizeModule.separateAxes": false,
+          "autoRandomSeed": true,
+          "looping": true,
+          "playOnAwake": true,
+          "prewarm": true,
+          "useUnscaledTime": false,
+          "gameObject.active": true,
+          "renderer.enabled": true,
+          "outlet.forceColor": false
+        },
+        "links": {
+          "m_GameObject": {
+            "file": "level1",
+            "path_id": 306
+          }
+        },
+        "materials": [
+          {
+            "source": {
+              "file": "sharedassets1.assets",
+              "path_id": 481
+            },
+            "shader": {
+              "source": {
+                "file": "globalgamemanagers.assets",
+                "path_id": 9
+              },
+              "path": "reference/lighting-globalgamemanagers.assets-9.shader.json",
+              "sha256": "95d37ecf10c42349f0fdb2c4bc3ef8d4d736e6df06e7c9dc529aae5637be8595",
+              "compiled_data": {
+                "source": {
+                  "file": "globalgamemanagers.assets",
+                  "path_id": 9
+                },
+                "path": "reference/lighting-globalgamemanagers.assets-9.shader.bin",
+                "sha256": "c00c84dd0d9e2ded70b0d4cbe9a0d1f700da7119e716f3b9af89074845ecb144"
+              },
+              "name": "Particles/Standard Unlit"
+            },
+            "source_data": {
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 481
+              },
+              "path": "reference/lighting-sharedassets1.assets-481.bin",
+              "sha256": "ae63f0fae4d9857b89924e6f8862e3ddbbff7ea752e6066a21c3a9e3b9ee29df"
+            },
+            "floats": {
+              "_BlendOp": 0.0,
+              "_BumpAmt": 6.0,
+              "_BumpScale": 1.0,
+              "_CameraFadingEnabled": 0.0,
+              "_CameraFarFadeDistance": 2.0,
+              "_CameraNearFadeDistance": 1.0,
+              "_ColorMode": 0.0,
+              "_Cull": 2.0,
+              "_Cutoff": 0.5,
+              "_DetailNormalMapScale": 1.0,
+              "_DistortionBlend": 0.10000000149011612,
+              "_DistortionEnabled": 1.0,
+              "_DistortionStrength": 50.0,
+              "_DistortionStrengthScaled": 5.0,
+              "_DstBlend": 10.0,
+              "_EdgeLength": 10.0,
+              "_EmissionEnabled": 0.0,
+              "_FlipbookMode": 0.0,
+              "_GlossMapScale": 1.0,
+              "_Glossiness": 0.0,
+              "_GlossyReflections": 1.0,
+              "_InvFade": 0.009999999776482582,
+              "_LightingEnabled": 0.0,
+              "_Metallic": 0.0,
+              "_Mode": 2.0,
+              "_OcclusionStrength": 1.0,
+              "_Outline": 0.004999999888241291,
+              "_Parallax": 0.019999999552965164,
+              "_ReflDistort": 0.4399999976158142,
+              "_RefrDistort": 0.4000000059604645,
+              "_Shininess": 0.078125,
+              "_SmoothnessTextureChannel": 0.0,
+              "_SoftParticlesEnabled": 0.0,
+              "_SoftParticlesFarFadeDistance": 1.0,
+              "_SoftParticlesNearFadeDistance": 0.0,
+              "_SpecularHighlights": 1.0,
+              "_SrcBlend": 5.0,
+              "_UVSec": 0.0,
+              "_WaveScale": 0.027300000190734863,
+              "_ZWrite": 0.0
+            },
+            "colors": {
+              "WaveSpeed": [
+                19.0,
+                9.0,
+                -16.0,
+                -7.0
+              ],
+              "_Color": [
+                2.0,
+                2.0,
+                2.0,
+                1.0
+              ],
+              "_ColorAddSubDiff": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              "_EmissionColor": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "_HorizonColor": [
+                0.1719999611377716,
+                0.46299993991851807,
+                0.4349999725818634,
+                1.0
+              ],
+              "_OutlineColor": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "_ReflectColor": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "_RefrColor": [
+                0.3399999737739563,
+                0.8500000238418579,
+                0.9200000166893005,
+                1.0
+              ],
+              "_SpecColor": [
+                0.5,
+                0.5,
+                0.5,
+                1.0
+              ],
+              "_TintColor": [
+                0.5,
+                0.5,
+                0.5,
+                0.5
+              ],
+              "_horizonColor": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            "textures": [
+              {
+                "property": "_BumpMap",
+                "texture": 13,
+                "scale": [
+                  1.0,
+                  1.0
+                ],
+                "offset": [
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "property": "_MainTex",
+                "texture": 14,
+                "scale": [
+                  1.0,
+                  1.0
+                ],
+                "offset": [
+                  0.0,
+                  0.0
+                ]
+              }
+            ]
+          }
+        ],
+        "limits": [
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 58739
+            },
+            "module": "CollisionModule",
+            "visible_effect": "Rapier swept spheres adapt Unity particle collision; world tank fill routing and native collision cache differ."
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 58739
+            },
+            "module": "material.distortion",
+            "visible_effect": "Material sharedassets1.assets:481 uses EFFECT_BUMP with distortion strength 50. Current source surfaces have no scene-color copy; fluid sprites do not refract the background."
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 58728
+        },
+        "role": "splash_1",
+        "capacity": 500,
+        "rate_over_time": 0,
+        "rate_over_distance": 0.0,
+        "duration": 1.0,
+        "simulation_space": 2,
+        "local_pose": {
+          "translation": [
+            0.24469439247740116,
+            8.492595549025594e-08,
+            -0.32030425344888724
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            -5.960465278380254e-08,
+            1.0000001939635093
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "module_flags": {
+          "ClampVelocityModule": false,
+          "CollisionModule": false,
+          "ColorBySpeedModule": false,
+          "ColorModule": true,
+          "CustomDataModule": false,
+          "EmissionModule": true,
+          "ExternalForcesModule": false,
+          "ForceModule": false,
+          "InheritVelocityModule": false,
+          "InitialModule": true,
+          "LifetimeByEmitterSpeedModule": false,
+          "LightsModule": false,
+          "NoiseModule": false,
+          "RotationBySpeedModule": false,
+          "RotationModule": false,
+          "ShapeModule": true,
+          "SizeBySpeedModule": false,
+          "SizeModule": true,
+          "SubModule": false,
+          "TrailModule": false,
+          "TriggerModule": false,
+          "UVModule": false,
+          "VelocityModule": false
+        },
+        "curves": {
+          "EmissionModule.m_Bursts.0.countCurve": {
+            "mode": 0,
+            "min_scalar": 30.0,
+            "scalar": 1.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "EmissionModule.rateOverDistance": {
+            "mode": 0,
+            "min_scalar": 0.0,
+            "scalar": 0.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "EmissionModule.rateOverTime": {
+            "mode": 0,
+            "min_scalar": 10.0,
+            "scalar": 0.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.gravityModifier": {
+            "mode": 0,
+            "min_scalar": 0.0,
+            "scalar": 0.15000000596046448,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startLifetime": {
+            "mode": 0,
+            "min_scalar": 5.0,
+            "scalar": 1.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startRotation": {
+            "mode": 0,
+            "min_scalar": 0.0,
+            "scalar": 0.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startRotationX": {
+            "mode": 0,
+            "min_scalar": 0.0,
+            "scalar": 0.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startRotationY": {
+            "mode": 0,
+            "min_scalar": 0.0,
+            "scalar": 0.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startSize": {
+            "mode": 0,
+            "min_scalar": 1.0,
+            "scalar": 0.800000011920929,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startSizeY": {
+            "mode": 0,
+            "min_scalar": 1.0,
+            "scalar": 0.5,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startSizeZ": {
+            "mode": 0,
+            "min_scalar": 1.0,
+            "scalar": 0.5,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "InitialModule.startSpeed": {
+            "mode": 0,
+            "min_scalar": 5.0,
+            "scalar": 0.30000001192092896,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "ShapeModule.arc.speed": {
+            "mode": 0,
+            "min_scalar": 1.0,
+            "scalar": 1.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "ShapeModule.m_MeshSpawn.speed": {
+            "mode": 0,
+            "min_scalar": 1.0,
+            "scalar": 1.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "ShapeModule.radius.speed": {
+            "mode": 0,
+            "min_scalar": 1.0,
+            "scalar": 1.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "SizeModule.curve": {
+            "mode": 1,
+            "min_scalar": 1.0,
+            "scalar": 2.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [
+                {
+                  "time": 0.0,
+                  "value": 0.4889869689941406,
+                  "in_tangent": 0.0,
+                  "out_tangent": 0.0,
+                  "in_weight": 0.3333333432674408,
+                  "out_weight": 0.3333333432674408,
+                  "weighted_mode": 0
+                },
+                {
+                  "time": 1.0,
+                  "value": 1.0,
+                  "in_tangent": 1.0,
+                  "out_tangent": 1.0,
+                  "in_weight": 0.3333333432674408,
+                  "out_weight": 0.3333333432674408,
+                  "weighted_mode": 0
+                }
+              ],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "SizeModule.y": {
+            "mode": 1,
+            "min_scalar": 1.0,
+            "scalar": 1.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [
+                {
+                  "time": 0.0,
+                  "value": 0.0,
+                  "in_tangent": 0.0,
+                  "out_tangent": 1.0,
+                  "in_weight": 0.3333333432674408,
+                  "out_weight": 0.3333333432674408,
+                  "weighted_mode": 0
+                },
+                {
+                  "time": 1.0,
+                  "value": 1.0,
+                  "in_tangent": 1.0,
+                  "out_tangent": 0.0,
+                  "in_weight": 0.3333333432674408,
+                  "out_weight": 0.3333333432674408,
+                  "weighted_mode": 0
+                }
+              ],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "SizeModule.z": {
+            "mode": 1,
+            "min_scalar": 1.0,
+            "scalar": 1.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [
+                {
+                  "time": 0.0,
+                  "value": 0.0,
+                  "in_tangent": 0.0,
+                  "out_tangent": 1.0,
+                  "in_weight": 0.3333333432674408,
+                  "out_weight": 0.3333333432674408,
+                  "weighted_mode": 0
+                },
+                {
+                  "time": 1.0,
+                  "value": 1.0,
+                  "in_tangent": 1.0,
+                  "out_tangent": 0.0,
+                  "in_weight": 0.3333333432674408,
+                  "out_weight": 0.3333333432674408,
+                  "weighted_mode": 0
+                }
+              ],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          },
+          "startDelay": {
+            "mode": 0,
+            "min_scalar": 0.0,
+            "scalar": 0.0,
+            "min_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            },
+            "max_curve": {
+              "keys": [],
+              "pre_wrap_mode": 2,
+              "post_wrap_mode": 2
+            }
+          }
+        },
+        "colors": {
+          "ColorModule.gradient": {
+            "mode": 1,
+            "min_color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "max_color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "min_gradient": {
+              "mode": 0,
+              "colors": [
+                {
+                  "time": 0.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                {
+                  "time": 1.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                }
+              ],
+              "alphas": [
+                {
+                  "time": 0.0,
+                  "value": 1.0
+                },
+                {
+                  "time": 1.0,
+                  "value": 1.0
+                }
+              ]
+            },
+            "max_gradient": {
+              "mode": 0,
+              "colors": [
+                {
+                  "time": 0.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                {
+                  "time": 1.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                }
+              ],
+              "alphas": [
+                {
+                  "time": 0.0,
+                  "value": 1.0
+                },
+                {
+                  "time": 0.49951934081025406,
+                  "value": 1.0
+                },
+                {
+                  "time": 1.0,
+                  "value": 0.0
+                }
+              ]
+            }
+          },
+          "InitialModule.startColor": {
+            "mode": 0,
+            "min_color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "max_color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "min_gradient": {
+              "mode": 0,
+              "colors": [
+                {
+                  "time": 0.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                {
+                  "time": 1.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                }
+              ],
+              "alphas": [
+                {
+                  "time": 0.0,
+                  "value": 1.0
+                },
+                {
+                  "time": 1.0,
+                  "value": 1.0
+                }
+              ]
+            },
+            "max_gradient": {
+              "mode": 0,
+              "colors": [
+                {
+                  "time": 0.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                {
+                  "time": 1.0,
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                }
+              ],
+              "alphas": [
+                {
+                  "time": 0.0,
+                  "value": 1.0
+                },
+                {
+                  "time": 1.0,
+                  "value": 1.0
+                }
+              ]
+            }
+          }
+        },
+        "vectors": {
+          "InitialModule.customEmitterVelocity": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "ShapeModule.boxThickness": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "ShapeModule.m_Position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "ShapeModule.m_Rotation": [
+            -90.0,
+            0.0,
+            0.0
+          ],
+          "ShapeModule.m_Scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "renderer.m_Pivot": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "renderer.m_Flip": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "outlet.forceColor": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "fluid.0": [
+            0.843137264251709,
+            1.0,
+            0.0
+          ],
+          "fluid.1": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "fluid.2": [
+            1.0,
+            0.886274516582489,
+            0.0
+          ],
+          "fluid.3": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "fluid.4": [
+            0.6274510025978088,
+            0.0,
+            0.0
+          ],
+          "fluid.5": [
+            0.7843137383460999,
+            0.7843137383460999,
+            0.0
+          ]
+        },
+        "scalars": {
+          "EmissionModule.m_BurstCount": 1,
+          "EmissionModule.m_Bursts.0.cycleCount": 1,
+          "EmissionModule.m_Bursts.0.probability": 1.0,
+          "EmissionModule.m_Bursts.0.repeatInterval": 0.009999999776482582,
+          "EmissionModule.m_Bursts.0.time": 0.0,
+          "InitialModule.maxNumParticles": 500,
+          "InitialModule.randomizeRotationDirection": 0.0,
+          "ShapeModule.angle": 20.0,
+          "ShapeModule.arc.mode": 0,
+          "ShapeModule.arc.spread": 0.0,
+          "ShapeModule.arc.value": 360.0,
+          "ShapeModule.donutRadius": 0.20000000298023224,
+          "ShapeModule.length": 5.0,
+          "ShapeModule.m_MeshMaterialIndex": 0,
+          "ShapeModule.m_MeshNormalOffset": 0.0,
+          "ShapeModule.m_MeshSpawn.mode": 0,
+          "ShapeModule.m_MeshSpawn.spread": 0.0,
+          "ShapeModule.m_TextureClipChannel": 3,
+          "ShapeModule.m_TextureClipThreshold": 0.0,
+          "ShapeModule.m_TextureUVChannel": 0,
+          "ShapeModule.placementMode": 0,
+          "ShapeModule.radius.mode": 0,
+          "ShapeModule.radius.spread": 0.0,
+          "ShapeModule.radius.value": 9.999999747378752e-05,
+          "ShapeModule.radiusThickness": 1.0,
+          "ShapeModule.randomDirectionAmount": 0.0,
+          "ShapeModule.randomPositionAmount": 0.0,
+          "ShapeModule.sphericalDirectionAmount": 0.0,
+          "ShapeModule.type": 4,
+          "cullingMode": 3,
+          "emitterVelocityMode": 1,
+          "lengthInSec": 1.0,
+          "moveWithTransform": 2,
+          "randomSeed": 0,
+          "ringBufferLoopRange.x": 0.0,
+          "ringBufferLoopRange.y": 1.0,
+          "ringBufferMode": 1,
+          "scalingMode": 1,
+          "simulationSpeed": 1.0,
+          "stopAction": 0,
+          "gameObject.layer": 4,
+          "renderer.m_RenderMode": 0,
+          "renderer.m_SortMode": 0,
+          "renderer.m_MinParticleSize": 0.0,
+          "renderer.m_MaxParticleSize": 10.0,
+          "renderer.m_CameraVelocityScale": 0.0,
+          "renderer.m_VelocityScale": 0.0,
+          "renderer.m_LengthScale": 2.0,
+          "renderer.m_SortingFudge": 0.0,
+          "renderer.m_RenderAlignment": 0,
+          "outlet.maxSpeed": 0.5,
+          "outlet.minRate": 0.0,
+          "outlet.maxRate": 500.0,
+          "outlet.forceColorM": 0.0,
+          "outlet.forceAlpha": 0.0,
+          "fluid.0.alpha": 0.3921568691730499,
+          "fluid.1.alpha": 1.0,
+          "fluid.2.alpha": 0.3921568691730499,
+          "fluid.3.alpha": 0.13725490868091583,
+          "fluid.4.alpha": 0.5882353186607361,
+          "fluid.5.alpha": 0.3921568691730499
+        },
+        "flags": {
+          "ColorModule.enabled": true,
+          "EmissionModule.enabled": true,
+          "InitialModule.enabled": true,
+          "InitialModule.rotation3D": false,
+          "InitialModule.size3D": false,
+          "ShapeModule.alignToDirection": false,
+          "ShapeModule.enabled": true,
+          "ShapeModule.m_TextureAlphaAffectsParticles": true,
+          "ShapeModule.m_TextureBilinearFiltering": false,
+          "ShapeModule.m_TextureColorAffectsParticles": true,
+          "ShapeModule.m_UseMeshColors": true,
+          "ShapeModule.m_UseMeshMaterialIndex": false,
+          "SizeModule.enabled": true,
+          "SizeModule.separateAxes": false,
+          "autoRandomSeed": true,
+          "looping": true,
+          "playOnAwake": true,
+          "prewarm": true,
+          "useUnscaledTime": false,
+          "gameObject.active": false,
+          "renderer.enabled": true,
+          "outlet.forceColor": false
+        },
+        "links": {
+          "m_GameObject": {
+            "file": "level1",
+            "path_id": 196
+          }
+        },
+        "materials": [
+          {
+            "source": {
+              "file": "sharedassets1.assets",
+              "path_id": 481
+            },
+            "shader": {
+              "source": {
+                "file": "globalgamemanagers.assets",
+                "path_id": 9
+              },
+              "path": "reference/lighting-globalgamemanagers.assets-9.shader.json",
+              "sha256": "95d37ecf10c42349f0fdb2c4bc3ef8d4d736e6df06e7c9dc529aae5637be8595",
+              "compiled_data": {
+                "source": {
+                  "file": "globalgamemanagers.assets",
+                  "path_id": 9
+                },
+                "path": "reference/lighting-globalgamemanagers.assets-9.shader.bin",
+                "sha256": "c00c84dd0d9e2ded70b0d4cbe9a0d1f700da7119e716f3b9af89074845ecb144"
+              },
+              "name": "Particles/Standard Unlit"
+            },
+            "source_data": {
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 481
+              },
+              "path": "reference/lighting-sharedassets1.assets-481.bin",
+              "sha256": "ae63f0fae4d9857b89924e6f8862e3ddbbff7ea752e6066a21c3a9e3b9ee29df"
+            },
+            "floats": {
+              "_BlendOp": 0.0,
+              "_BumpAmt": 6.0,
+              "_BumpScale": 1.0,
+              "_CameraFadingEnabled": 0.0,
+              "_CameraFarFadeDistance": 2.0,
+              "_CameraNearFadeDistance": 1.0,
+              "_ColorMode": 0.0,
+              "_Cull": 2.0,
+              "_Cutoff": 0.5,
+              "_DetailNormalMapScale": 1.0,
+              "_DistortionBlend": 0.10000000149011612,
+              "_DistortionEnabled": 1.0,
+              "_DistortionStrength": 50.0,
+              "_DistortionStrengthScaled": 5.0,
+              "_DstBlend": 10.0,
+              "_EdgeLength": 10.0,
+              "_EmissionEnabled": 0.0,
+              "_FlipbookMode": 0.0,
+              "_GlossMapScale": 1.0,
+              "_Glossiness": 0.0,
+              "_GlossyReflections": 1.0,
+              "_InvFade": 0.009999999776482582,
+              "_LightingEnabled": 0.0,
+              "_Metallic": 0.0,
+              "_Mode": 2.0,
+              "_OcclusionStrength": 1.0,
+              "_Outline": 0.004999999888241291,
+              "_Parallax": 0.019999999552965164,
+              "_ReflDistort": 0.4399999976158142,
+              "_RefrDistort": 0.4000000059604645,
+              "_Shininess": 0.078125,
+              "_SmoothnessTextureChannel": 0.0,
+              "_SoftParticlesEnabled": 0.0,
+              "_SoftParticlesFarFadeDistance": 1.0,
+              "_SoftParticlesNearFadeDistance": 0.0,
+              "_SpecularHighlights": 1.0,
+              "_SrcBlend": 5.0,
+              "_UVSec": 0.0,
+              "_WaveScale": 0.027300000190734863,
+              "_ZWrite": 0.0
+            },
+            "colors": {
+              "WaveSpeed": [
+                19.0,
+                9.0,
+                -16.0,
+                -7.0
+              ],
+              "_Color": [
+                2.0,
+                2.0,
+                2.0,
+                1.0
+              ],
+              "_ColorAddSubDiff": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              "_EmissionColor": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "_HorizonColor": [
+                0.1719999611377716,
+                0.46299993991851807,
+                0.4349999725818634,
+                1.0
+              ],
+              "_OutlineColor": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "_ReflectColor": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "_RefrColor": [
+                0.3399999737739563,
+                0.8500000238418579,
+                0.9200000166893005,
+                1.0
+              ],
+              "_SpecColor": [
+                0.5,
+                0.5,
+                0.5,
+                1.0
+              ],
+              "_TintColor": [
+                0.5,
+                0.5,
+                0.5,
+                0.5
+              ],
+              "_horizonColor": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            "textures": [
+              {
+                "property": "_BumpMap",
+                "texture": 13,
+                "scale": [
+                  1.0,
+                  1.0
+                ],
+                "offset": [
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "property": "_MainTex",
+                "texture": 14,
+                "scale": [
+                  1.0,
+                  1.0
+                ],
+                "offset": [
+                  0.0,
+                  0.0
+                ]
+              }
+            ]
+          }
+        ],
+        "limits": [
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 58728
+            },
+            "module": "material.distortion",
+            "visible_effect": "Material sharedassets1.assets:481 uses EFFECT_BUMP with distortion strength 50. Current source surfaces have no scene-color copy; fluid sprites do not refract the background."
+          }
+        ]
       }
     ],
     "shelters": [

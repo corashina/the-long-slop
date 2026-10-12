@@ -551,6 +551,17 @@ impl GarageRuntime {
         } else {
             (0, 0., 1., 0.)
         };
+        let total = self.survival.bladder.mixture.total();
+        let fill = (total / self.survival.bladder.capacity_liters).clamp(0., 1.);
+        if total > 0. {
+            self.urine.set_color(
+                self.survival
+                    .bladder
+                    .mixture
+                    .quantities_liters
+                    .map(|v| v / total),
+            );
+        }
         let output = self.survival.toilet_step(
             &reference.survival,
             crate::survival::ToiletInput {
@@ -563,6 +574,15 @@ impl GarageRuntime {
             selection.3,
             fluid_scale,
         );
+        if output.poured_liters > 0. {
+            let flow = output.poured_liters / (dt * fluid_scale);
+            self.urine_emission = [
+                reference.survival.toilet.min_rate
+                    + (reference.survival.toilet.max_rate - reference.survival.toilet.min_rate)
+                        * flow.clamp(0., 1.),
+                reference.survival.toilet.max_speed * fill,
+            ];
+        }
         if output.burp || output.fart || output.defecated {
             self.emit_selected_audio(reference, kind, selection);
         }
@@ -696,5 +716,47 @@ impl GarageRuntime {
             pitch: binding.pitch[0],
             position,
         });
+    }
+}
+
+impl GarageRuntime {
+    pub(super) fn advance_urine(&mut self, reference: &ReferenceManifest, dt: f32) {
+        use rapier3d::math::{Rotation, Vector};
+        use rapier3d::prelude::{QueryFilter, Ray};
+        let body = self.area.player.body_handle();
+        let view = to_rapier(self.area.player.view_pose(&self.physics));
+        let mut cap = to_rapier(self.area.player.body_pose(&self.physics));
+        let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
+        let surfaces = |_: rapier3d::prelude::ColliderHandle, c: &rapier3d::prelude::Collider| {
+            c.is_enabled()
+                && !c.is_sensor()
+                && c.parent() != Some(body)
+                && c.collision_groups().memberships.bits() & reference.player.action_masks.use_mask
+                    != 0
+        };
+        let distance = self
+            .physics
+            .queries(QueryFilter::default().predicate(&surfaces))
+            .cast_ray(&ray, reference.player.aim_reach, true)
+            .map_or(reference.player.aim_reach, |(_, t)| t);
+        let direction =
+            (ray.point_at(distance) - cap.translation + Vector::Y * 0.25).normalize_or_zero();
+        cap.rotation = Rotation::from_rotation_arc(-Vector::Z, direction);
+        // The mouth and urine outlet own tank 73403. Source Tankolas excludes self-drinking.
+        self.urine.advance(
+            &self.urine_reference,
+            cap,
+            -Vector::Z,
+            None,
+            Some(body),
+            Vector::ZERO,
+            0.,
+            0.,
+            &self.physics,
+            dt,
+            self.urine_emission[0],
+            self.urine_emission[1],
+            None,
+        );
     }
 }

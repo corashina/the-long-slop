@@ -273,7 +273,10 @@ impl WeatherReference {
                 "shelter root and geometry",
             )?;
         }
-        require(self.particles.len() == 4, "selected particles")?;
+        require(
+            self.particles.len() == 4 + 2 * m.openings.len(),
+            "selected particles",
+        )?;
         ids(
             self.particles.iter().map(|p| &p.source),
             "duplicate particle",
@@ -282,7 +285,80 @@ impl WeatherReference {
             self.particles.iter().map(|p| p.role.as_str()),
             "duplicate particle role",
         )?;
+        require(
+            self.particles[0].role == "storm_big" && self.particles[1].role == "storm_small",
+            "storm particle order",
+        )?;
+        for role in ["urine", "urine_splash"] {
+            require(
+                self.particles.iter().any(|p| p.role == role),
+                "player particle roles",
+            )?;
+        }
+        for o in &m.openings {
+            for role in [format!("outlet_{}", o.id.0), format!("splash_{}", o.id.0)] {
+                require(
+                    self.particles.iter().any(|p| p.role == role),
+                    "outlet particle roles",
+                )?;
+            }
+        }
         for p in &self.particles {
+            require(
+                p.flags.contains_key("gameObject.active")
+                    && p.flags.contains_key("renderer.enabled")
+                    && p.scalars.contains_key("gameObject.layer"),
+                "particle renderer owner",
+            )?;
+            require(
+                p.scalars.get("ShapeModule.type")
+                    == Some(&if p.role.starts_with("storm_") { 2. } else { 4. }),
+                "selected particle shape",
+            )?;
+            for name in [
+                "InitialModule.startSize",
+                "InitialModule.startSpeed",
+                "InitialModule.startRotation",
+                "InitialModule.startLifetime",
+                "InitialModule.gravityModifier",
+                "SizeModule.curve",
+            ] {
+                require(p.curves.contains_key(name), "particle required curve")?;
+            }
+            for name in ["InitialModule.startColor", "ColorModule.gradient"] {
+                require(p.colors.contains_key(name), "particle required gradient")?;
+            }
+            for name in ["ShapeModule.m_Rotation", "ShapeModule.m_Scale"] {
+                require(p.vectors.contains_key(name), "particle required vector")?;
+            }
+            for name in [
+                "ShapeModule.angle",
+                "ShapeModule.radius.value",
+                "ShapeModule.radiusThickness",
+                "ShapeModule.randomPositionAmount",
+                "renderer.m_SortMode",
+                "renderer.m_MinParticleSize",
+                "renderer.m_MaxParticleSize",
+                "ringBufferMode",
+            ] {
+                require(p.scalars.contains_key(name), "particle required scalar")?;
+            }
+            require(
+                p.materials.len() == 1
+                    && p.materials[0]
+                        .textures
+                        .iter()
+                        .any(|t| t.property == "_MainTex"),
+                "particle source material",
+            )?;
+            for c in p.curves.values() {
+                require(
+                    (c.mode != 1 && c.mode != 2 || !c.max_curve.keys.is_empty())
+                        && (c.mode != 2 || !c.min_curve.keys.is_empty()),
+                    "particle curve keys",
+                )?;
+            }
+
             require(
                 p.capacity > 0
                     && p.capacity <= 1_000_000
@@ -294,7 +370,7 @@ impl WeatherReference {
                     && p.rate_over_time >= 0.
                     && p.rate_over_distance >= 0.
                     && p.duration > 0.
-                    && p.simulation_space <= 2
+                    && p.simulation_space == 2
                     && transform(&p.local_pose),
                 "particle rates",
             )?;
@@ -330,7 +406,9 @@ impl WeatherReference {
             for l in &p.limits {
                 require(
                     l.source == p.source
-                        && p.module_flags.get(&l.module) == Some(&true)
+                        && (p.module_flags.get(&l.module) == Some(&true)
+                            || l.module == "material.soft_particles"
+                            || l.module == "material.distortion")
                         && !l.visible_effect.is_empty(),
                     "particle limit",
                 )?;

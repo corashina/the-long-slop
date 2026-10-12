@@ -1,6 +1,9 @@
 //! Source sandstorm simulation. Presentation consumes this state without advancing it.
+mod particles;
 use crate::reference::{Bounds, WeatherReference};
 use crate::vehicle::PhysicsWorld;
+pub use particles::{ParticleOutput, ParticleState};
+pub(crate) use particles::{color as particle_color, curve as particle_curve};
 use rapier3d::math::{Pose, Vector};
 use rapier3d::prelude::{Ball, Collider, ColliderHandle, QueryFilter, RigidBodyHandle};
 
@@ -49,6 +52,8 @@ pub struct Storm {
     wind_force: f32,
     wind_bounds_range: [f32; 2],
     targets: Vec<WindTarget>,
+    pub particles: [ParticleState; 2],
+    last_player: [f64; 3],
 }
 
 pub struct WeatherState {
@@ -168,6 +173,17 @@ impl WeatherState {
             wind_force: r.wind_force,
             wind_bounds_range: r.wind_bounds_range,
             targets: Vec::with_capacity(self.body_capacity),
+            particles: std::array::from_fn(|i| {
+                let role = if i == 0 { "storm_big" } else { "storm_small" };
+                let mut p = ParticleState::new(
+                    reference.particles.iter().find(|p| p.role == role).unwrap(),
+                    id.0 as u64 * 2 + i as u64 + 1,
+                );
+                p.radius_scale = size;
+                p.rotation = rapier3d::math::Rotation::from_rotation_y(-yaw_degrees.to_radians());
+                p
+            }),
+            last_player: self.origin,
         });
         id
     }
@@ -247,6 +263,54 @@ impl WeatherState {
             }
         }
         self.storms.retain(|storm| storm.life > 0.);
+    }
+
+    pub fn advance_particles(
+        &mut self,
+        reference: &WeatherReference,
+        dt: f32,
+        player: [f64; 3],
+        night: f32,
+        shelters: &[ShelterVolume],
+    ) {
+        for storm in &mut self.storms {
+            let small = std::array::from_fn(|i| {
+                (player[i]
+                    + (player[i] - storm.last_player[i]) / dt.clamp(0.0001, 1.) as f64 * 2.
+                    + storm.last_player[i]
+                    + if i == 1 {
+                        reference.storm.yoffset as f64
+                    } else {
+                        0.
+                    })
+                    * 0.5
+            });
+            for (i, p) in storm.particles.iter_mut().enumerate() {
+                let first = crate::lighting::gradient(&reference.storm.day_color1, p.time());
+                let second = crate::lighting::gradient(&reference.storm.day_color2, p.time());
+                let draw = p.random_color_draw();
+                p.start_color = Some(std::array::from_fn(|j| {
+                    let day = first[j] + (second[j] - first[j]) * draw;
+                    day + (reference.storm.night_color[j] - day) * night
+                }));
+                p.origin = self.origin;
+                p.advance(
+                    dt,
+                    if i == 0 {
+                        storm.absolute_position
+                    } else {
+                        small
+                    },
+                    if i == 0 {
+                        storm.life_strength
+                    } else {
+                        storm.strength
+                    },
+                    shelters,
+                );
+            }
+            storm.last_player = player;
+        }
     }
 
     /// Refresh cached ownership before forces, independently of overlap scan deadlines.
@@ -358,6 +422,7 @@ impl WeatherState {
 }
 
 /// A separate deterministic stream. Unity's native random sequence is unrecovered.
+#[derive(Debug)]
 struct StormRandom(u64);
 impl StormRandom {
     fn unit(&mut self) -> f32 {
@@ -377,5 +442,29 @@ impl StormRandom {
             vertical * radius,
             horizontal * angle.sin() * radius,
         ]
+    }
+}
+
+/// The same collision owner serves the player outlet and container outlets.
+pub(crate) fn fluid_reference(
+    p: &crate::reference::ParticleReference,
+) -> crate::reference::FluidParticleReference {
+    crate::reference::FluidParticleReference {
+        source: p.source.clone(),
+        local_pose: p.local_pose.clone(),
+        capacity: p.capacity,
+        cone_degrees: p.scalars["ShapeModule.angle"],
+        cone_radius: p.scalars["ShapeModule.radius.value"],
+        lifetime_seconds: p.curves["InitialModule.startLifetime"].scalar,
+        radius: p.curves["InitialModule.startSize"].scalar
+            * 0.5
+            * p.scalars["CollisionModule.radiusScale"],
+        gravity_multiplier: p.curves["InitialModule.gravityModifier"].scalar,
+        collision_mask: p.scalars["CollisionModule.collidesWith.m_Bits"] as u32,
+        bounce: p.curves["CollisionModule.m_Bounce"].scalar,
+        dampen: p.curves["CollisionModule.m_Dampen"].scalar,
+        max_speed: p.scalars["outlet.maxSpeed"],
+        min_rate: p.scalars["outlet.minRate"],
+        max_rate: p.scalars["outlet.maxRate"],
     }
 }

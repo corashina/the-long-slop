@@ -19,12 +19,12 @@ def color(data):
     return {'mode':data['minMaxState'],'min_color':rgba(data['minColor']),'max_color':rgba(data['maxColor']),
         'min_gradient':gradient(data['minGradient']),'max_gradient':gradient(data['maxGradient'])}
 
-def particle(source,reader,role,rate,output):
+def particle(source,reader,role,rate,output,owner=None):
     d=source.read(reader);root=source.transform_for(source.resolve(reader,d['m_GameObject']))
     renderer=component(source,root,'ParticleSystemRenderer');rd=source.read(renderer)
     result={'source':source_id(reader),'role':role,'capacity':d['InitialModule']['maxNumParticles'],
         'rate_over_time':rate,'rate_over_distance':d['EmissionModule']['rateOverDistance']['scalar'],
-        'duration':d['lengthInSec'],'simulation_space':d['moveWithTransform'],'local_pose':world_pose(source,root),
+        'duration':d['lengthInSec'],'simulation_space':d['moveWithTransform'],'local_pose':relative_pose(source,root,owner) if owner is not None else world_pose(source,root),
         'module_flags':{k:bool(v['enabled']) for k,v in d.items() if isinstance(v,dict) and 'enabled' in v},
         'curves':{},'colors':{},'vectors':{},'scalars':{},'flags':{},'links':{},
         'materials':[sky_material(source,source.resolve(renderer,p),output) for p in rd['m_Materials'] if p['m_PathID']],
@@ -48,13 +48,24 @@ def particle(source,reader,role,rate,output):
     for k,v in d.items():
         if isinstance(v,dict) and 'enabled' in v and not v['enabled']:continue
         visit(v,k)
+    result['flags']['gameObject.active']=bool(source.read(source.resolve(reader,d['m_GameObject']))['m_IsActive'])
+    result['flags']['renderer.enabled']=bool(rd['m_Enabled'])
+    result['scalars']['gameObject.layer']=source.read(source.resolve(reader,d['m_GameObject']))['m_Layer']
     for k in ['m_RenderMode','m_SortMode','m_MinParticleSize','m_MaxParticleSize','m_CameraVelocityScale','m_VelocityScale','m_LengthScale','m_SortingFudge','m_RenderAlignment','m_Pivot','m_Flip']:
         visit(rd[k],'renderer.'+k)
     if result['module_flags']['CollisionModule']:
-        result['limits'].append({'source':source_id(reader),'module':'CollisionModule','visible_effect':'Unity collision bounce and splash appearance need a particle renderer adapter; gameplay drinking contacts remain required.'})
+        result['limits'].append({'source':source_id(reader),'module':'CollisionModule','visible_effect':'Rapier swept spheres adapt Unity particle collision; world tank fill routing and native collision cache differ.'})
+    if result['module_flags'].get('TriggerModule'):
+        result['limits'].append({'source':source_id(reader),'module':'TriggerModule','visible_effect':'Retained shelter AABBs adapt native particle collider overlap, including radiusScale.'})
+    for m in result['materials']:
+        if m['shader']['name']=='Legacy Shaders/Particles/Alpha Blended':
+            result['limits'].append({'source':source_id(reader),'module':'material.soft_particles','visible_effect':'Source Ultra enables soft particles. The current camera path has no sampled scene depth; dust intersections keep hard depth edges.'})
+        if m['floats'].get('_DistortionEnabled')==1:
+            result['limits'].append({'source':source_id(reader),'module':'material.distortion','visible_effect':'Material sharedassets1.assets:481 uses EFFECT_BUMP with distortion strength 50. Current source surfaces have no scene-color copy; fluid sprites do not refract the background.'})
     return result
 
 def recover_weather(source, output):
+    source.particle_output=output
     main=source.get('level1',64919);scheduler=source.resolve(main,source.read(main)['sandStormSpawn']);sd=source.read(scheduler)
     database=source.get('level1',66024)
     root=source.transform_for(source.resolve(database,source.read(database)['storms'][sd['prefabid']]))
@@ -70,11 +81,14 @@ def recover_weather(source, output):
             'yield return new WaitForSeconds(1f);','nextWindTime = Time.time + UnityEngine.Random.Range(0.1f, 1.5f);',
             'mainscript.M.interiorCols[j].transform.root != windRbs[i].transform.root']), 'particles':[]}
     for role,field,rate in [('storm_big','bigParticleSystem',d['defBRateT']),('storm_small','smallParticleSystem',d['defSRateT'])]:
-        record['particles'].append(particle(source,source.resolve(storm,d[field]),role,rate,output))
+        record['particles'].append(particle(source,source.resolve(storm,d[field]),role,rate,output,root))
     player=source.get('level1',80125);outlet=source.resolve(player,source.read(player)['piss']);od=source.read(outlet)
+    player_root=source.transform_for(source.resolve(outlet,od['m_GameObject']))
     for role,field in [('urine','ps'),('urine_splash','sps')]:
         reader=source.resolve(outlet,od[field]);rate=od['maxRate'] if field=='ps' else source.read(reader)['EmissionModule']['rateOverTime']['scalar']
-        record['particles'].append(particle(source,reader,role,rate,output))
+        record['particles'].append(particle(source,reader,role,rate,output,player_root))
+    for p in record['particles'][2:]:
+        outlet_values(source,p,od)
     record['ambient']=recover_ambient(source)
     source.lighting['textures']=list(source.lighting_textures.values())
     source.weather=record
@@ -98,6 +112,8 @@ def bind_weather(source,manifest):
                 pose['scale']=[1.,1.,1.]
                 record['shelters'].append({'source':source_id(c),'root':body['id'],
                     'geometry':geometry(source,exporter,collider,node['reader'],world_pose(source,node['reader']),False),'local_pose':pose})
+    record['particles'].extend(recover_outlet_particles(source,manifest,source.particle_output))
+    manifest['lighting']['textures']=list(source.lighting_textures.values())
     manifest['weather']=record
     validate_weather_export(record,manifest)
 
@@ -111,7 +127,7 @@ def validate_weather_export(record,manifest):
         identity=shelter['source'];owner=owners.get(identity['path_id']) if identity['file']=='level1' else None
         body=bodies.get(shelter['root']);node=nodes.get(body['node']) if body else None
         if owner is None or not node or body['parent_body'] is not None or node['source']!={'file':'level1','path_id':owner}:raise ValueError('Invalid shelter owner')
-    if len(record['particles'])!=4 or len({p['role'] for p in record['particles']})!=4:raise ValueError('Missing selected particles')
+    if len(record['particles'])!=4+2*len(manifest['openings']) or len({p['role'] for p in record['particles']})!=len(record['particles']):raise ValueError('Missing selected particles')
     textures={t['id'] for t in manifest['lighting']['textures']}
     for p in record['particles']:
         if not 0<p['capacity']<=1000000 or p['rate_over_time']<0 or p['rate_over_distance']<0:raise ValueError('Invalid particle capacity or rate')
@@ -135,3 +151,48 @@ def validate_ambient_export(record, library):
     source=LibrarySource(LibraryReader(library))
     if record['ambient'] != recover_ambient(source):
         raise ValueError('Selected weather ambient differs from source')
+
+def relative_pose(source, root, owner):
+    from .gltf import transform_point
+    a=world_pose(source,owner);b=world_pose(source,root)
+    inverse=[-v for v in a['rotation'][:3]]+[a['rotation'][3]]
+    delta=[b['translation'][i]-a['translation'][i] for i in range(3)]
+    return {'translation':list(transform_point(delta,(0.,0.,0.),inverse,(1.,1.,1.))),
+        'rotation':list(quaternion_product(inverse,b['rotation'])),
+        'scale':[b['scale'][i]/a['scale'][i] for i in range(3)]}
+
+def outlet_values(source,p,cap):
+    p['scalars'].update({'outlet.maxSpeed':cap['maxSpeed'],'outlet.minRate':cap['minRate'],'outlet.maxRate':cap['maxRate'],
+        'outlet.forceColorM':cap['forceColorM']})
+    p['flags']['outlet.forceColor']=bool(cap['BforceColor'])
+    p['vectors']['outlet.forceColor']=rgba(cap['forceColor'])[:3]
+    p['scalars']['outlet.forceAlpha']=cap['forceColor']['a']
+    main=source.read(source.get('level1',64919))
+    for i,f in enumerate(main['fluids']):
+        p['vectors'][f'fluid.{i}']=rgba(f['color'])[:3]
+        p['scalars'][f'fluid.{i}.alpha']=f['color']['a']
+
+def recover_outlet_particles(source,manifest,output):
+    particles=[]
+    for opening in manifest['openings']:
+        cap=source.get(opening['source']['file'],opening['source']['path_id']);cd=source.read(cap)
+        owner=source.transform_for(source.resolve(cap,cd['m_GameObject']))
+        for prefix,field in [('outlet','ps'),('splash','sps')]:
+            reader=source.resolve(cap,cd[field]);rate=cd['maxRate'] if field=='ps' else source.read(reader)['EmissionModule']['rateOverTime']['scalar']
+            p=particle(source,reader,f'{prefix}_{opening["id"]}',rate,output,owner)
+            outlet_values(source,p,cd);particles.append(p)
+    return particles
+
+def validate_particle_export(record, manifest, library):
+    from .library.reader import LibraryReader
+    from .source import LibrarySource
+    from tempfile import TemporaryDirectory
+    from pathlib import Path
+    checked=LibrarySource(LibraryReader(library))
+    checked.lighting={'textures':manifest['lighting']['textures']}
+    checked.lighting_textures={(t['source']['file'],t['source']['path_id']):t for t in manifest['lighting']['textures']}
+    with TemporaryDirectory(prefix='source-particles-') as temp:
+        recovered=recover_weather(checked,Path(temp))['particles']
+        recovered.extend(recover_outlet_particles(checked,manifest,Path(temp)))
+    if record['particles']!=recovered:
+        raise ValueError('Selected particle source records differ')

@@ -6,32 +6,84 @@ use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::parry::query::ShapeCastOptions;
 use rapier3d::prelude::{Ball, ColliderHandle, QueryFilter, RigidBodyHandle};
 
-struct Particle {
-    position: Vector,
+pub struct FluidParticle {
+    pub position: Vector,
+    pub size: f32,
+    pub color: [f32; 4],
+    pub rotation: f32,
+    pub age: f32,
+    start_color: [f32; 4],
     velocity: Vector,
     remaining: f32,
 }
 
-pub(super) struct FluidContact {
-    particles: Vec<Particle>,
+pub struct FluidContact {
+    particles: Vec<FluidParticle>,
     emission_remainder: f32,
     last_emitter: Option<Vector>,
     random: u32,
-    pub(super) last_poured: f32,
+    pub(crate) last_poured: f32,
+    visual: crate::reference::ParticleReference,
+    pub(crate) splash: crate::weather::ParticleState,
+    colors: [[f32; 4]; 6],
+    start_color: [f32; 4],
+    origin: [f64; 3],
 }
 
 impl FluidContact {
-    pub(super) fn new(reference: &FluidParticleReference, seed: u32) -> Self {
+    pub(crate) fn new(
+        reference: &FluidParticleReference,
+        visual: &crate::reference::ParticleReference,
+        splash: &crate::reference::ParticleReference,
+        seed: u32,
+    ) -> Self {
         Self {
             particles: Vec::with_capacity(reference.capacity as usize),
             emission_remainder: 0.,
             last_emitter: None,
             random: seed.max(1),
             last_poured: 0.,
+            visual: visual.clone(),
+            splash: crate::weather::ParticleState::new(splash, seed as u64),
+            colors: std::array::from_fn(|i| {
+                let c = visual.vectors[&format!("fluid.{i}")];
+                [
+                    c[0],
+                    c[1],
+                    c[2],
+                    visual.scalars[&format!("fluid.{i}.alpha")],
+                ]
+            }),
+            start_color: [1.; 4],
+            origin: [0.; 3],
         }
     }
 
-    pub(super) fn rebase(&mut self, shift: Vector) {
+    pub fn particles(&self) -> &[FluidParticle] {
+        &self.particles
+    }
+    pub fn visual(&self) -> &crate::reference::ParticleReference {
+        &self.visual
+    }
+    pub fn splash(&self) -> &[crate::weather::ParticleOutput] {
+        self.splash.particles()
+    }
+    pub(crate) fn set_color(&mut self, fractions: [f32; 6]) {
+        self.start_color =
+            std::array::from_fn(|i| (0..6).map(|j| fractions[j] * self.colors[j][i]).sum());
+        if self.visual.flags["outlet.forceColor"] {
+            let c = self.visual.vectors["outlet.forceColor"];
+            let force = [c[0], c[1], c[2], self.visual.scalars["outlet.forceAlpha"]];
+            for i in 0..4 {
+                self.start_color[i] +=
+                    (force[i] - self.start_color[i]) * self.visual.scalars["outlet.forceColorM"];
+            }
+        }
+    }
+    pub(crate) fn rebase(&mut self, shift: Vector) {
+        for i in 0..3 {
+            self.origin[i] += shift[i] as f64;
+        }
         for particle in &mut self.particles {
             particle.position -= shift;
         }
@@ -48,7 +100,7 @@ impl FluidContact {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn advance(
+    pub(crate) fn advance(
         &mut self,
         reference: &FluidParticleReference,
         cap_pose: Pose,
@@ -64,7 +116,17 @@ impl FluidContact {
         speed: f32,
         poured: Option<f32>,
     ) -> bool {
+        if !dt.is_finite() || dt <= 0. {
+            return false;
+        }
         self.last_poured = poured.unwrap_or(0.);
+        self.splash.rotation = cap_pose.rotation;
+        self.splash.advance(
+            dt,
+            std::array::from_fn(|i| cap_pose.translation[i] as f64 + self.origin[i]),
+            0.,
+            &[],
+        );
         let emitter = cap_pose
             * Pose::from_parts(
                 Vector::from_array(reference.local_pose.translation),
@@ -99,7 +161,18 @@ impl FluidContact {
                     axis * cosine + (tangent * azimuth.cos() + bitangent * azimuth.sin()) * radial;
                 let offset_radius = self.random().sqrt() * reference.cone_radius;
                 let offset_angle = self.random() * std::f32::consts::TAU;
-                self.particles.push(Particle {
+                let draw = self.random();
+                let rotation = crate::weather::particle_curve(
+                    &self.visual.curves["InitialModule.startRotation"],
+                    0.,
+                    draw,
+                );
+                self.particles.push(FluidParticle {
+                    size: self.visual.curves["InitialModule.startSize"].scalar,
+                    color: self.start_color,
+                    start_color: self.start_color,
+                    rotation,
+                    age: 0.,
                     position: emitter.translation
                         + (tangent * offset_angle.cos() + bitangent * offset_angle.sin())
                             * offset_radius,
@@ -113,6 +186,13 @@ impl FluidContact {
         while index < self.particles.len() {
             let particle = &mut self.particles[index];
             particle.remaining -= dt;
+            particle.age += dt;
+            let t = (particle.age / reference.lifetime_seconds).clamp(0., 1.);
+            particle.size = self.visual.curves["InitialModule.startSize"].scalar
+                * crate::weather::particle_curve(&self.visual.curves["SizeModule.curve"], t, 0.);
+            let color =
+                crate::weather::particle_color(&self.visual.colors["ColorModule.gradient"], t, 0.);
+            particle.color = std::array::from_fn(|i| particle.start_color[i] * color[i]);
             if particle.remaining <= 0. {
                 self.particles.swap_remove(index);
                 continue;
@@ -121,8 +201,12 @@ impl FluidContact {
                 particle.velocity + Vector::new(0., -9.81 * reference.gravity_multiplier, 0.) * dt;
             let travel = velocity * dt;
             particle.velocity = velocity;
-            let radius = reference.radius;
-            let cap_hit = sphere_hit(particle.position, travel, cap_center, cap_radius + radius);
+            let radius = particle.size * 0.5 * self.visual.scalars["CollisionModule.radiusScale"];
+            let cap_hit = if contact_radius > 0. {
+                sphere_hit(particle.position, travel, cap_center, cap_radius + radius)
+            } else {
+                None
+            };
             let surfaces = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
                 collider.is_enabled()
                     && !collider.is_sensor()
@@ -154,6 +238,13 @@ impl FluidContact {
                 self.particles.swap_remove(index);
             } else if let Some(hit) = world_hit {
                 if hit.time_of_impact <= 0. {
+                    self.particles.swap_remove(index);
+                    continue;
+                }
+                particle.remaining -= reference.lifetime_seconds
+                    * self.visual.curves["CollisionModule.m_EnergyLossOnCollision"].scalar;
+                particle.age = reference.lifetime_seconds - particle.remaining;
+                if particle.remaining <= 0. {
                     self.particles.swap_remove(index);
                     continue;
                 }

@@ -168,6 +168,20 @@ impl GarageRuntime {
             &reference.weather,
             self.simulation_seconds,
         );
+        let cycle = self.lighting.cycle.output();
+        let night = match cycle.phase {
+            crate::lighting::CyclePhase::Day => 0.,
+            crate::lighting::CyclePhase::Night => 1.,
+            crate::lighting::CyclePhase::Dawn => 1. - cycle.progress,
+            crate::lighting::CyclePhase::Dusk => cycle.progress,
+        };
+        self.weather.advance_particles(
+            &reference.weather,
+            dt,
+            player,
+            night,
+            &self.weather_bindings.volumes,
+        );
         self.lighting
             .cycle
             .compose_weather(&reference.weather, self.weather.influence());

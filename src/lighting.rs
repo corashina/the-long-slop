@@ -525,7 +525,7 @@ fn lerp3(a: f32, b: f32, c: f32, t: f32) -> f32 {
         lerp(b, c, inverse_lerp(0.5, 1., t))
     }
 }
-fn gradient(g: &GradientReference, time: f32) -> [f32; 4] {
+pub(crate) fn gradient(g: &GradientReference, time: f32) -> [f32; 4] {
     let time = time.clamp(0., 1.);
     let mut color = g.colors[0].value;
     for keys in g.colors.windows(2) {

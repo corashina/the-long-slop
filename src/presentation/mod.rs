@@ -30,3 +30,4 @@ pub fn interpolate(a: VehiclePose, b: VehiclePose, alpha: f32) -> VehiclePose {
 pub mod textures;
 
 pub mod sky;
+pub mod weather;

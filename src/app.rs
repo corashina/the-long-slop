@@ -110,6 +110,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
         .add_plugins((
             presentation::lighting::SourceLightingPlugin,
             presentation::materials::SourceMaterialPlugin,
+            presentation::weather::SourceWeatherPlugin,
         ))
         .add_systems(Startup, setup)
         .add_systems(
