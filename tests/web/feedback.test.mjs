@@ -19,7 +19,7 @@ test('same_volume_new_container_refreshes_capacity_and_name',()=>{
  m.update({...tank(.5,5),hasName:true,name:'Oil cap',fluidName:'Oil Tank',actions:1,context:2,carrying:false,notice:''});
  assert.match(m.fluidText,/Oil Tank:\n0.5 \/ 5 L/);
 });
-test('chase_and_menu_hide_feedback_and_restart_preserves_choice',()=>{
+test('chase_and_menu_hide_feedback_and_new_game_preserves_choice',()=>{
  const m=new FeedbackState();m.setVisible(false);assert.equal(m.visible,false);
  m.toggle();m.setVisible(true);assert.equal(m.visible,false);
  m.setVisible(false);m.setVisible(true);assert.equal(m.visible,false);

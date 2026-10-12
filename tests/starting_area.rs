@@ -114,7 +114,7 @@ fn keyboard_steering_rises_returns_and_reverses_at_source_rate() {
 }
 
 #[test]
-fn keyboard_steering_resets_on_pause_recovery_and_restart() {
+fn keyboard_steering_resets_on_pause_recovery_and_new_game() {
     let (reference, mut runtime) = seated_steering();
     let left = FrameInput {
         held: keys::LEFT,
@@ -143,7 +143,8 @@ fn keyboard_steering_resets_on_pause_recovery_and_restart() {
     for _ in 0..24 {
         runtime.step(&reference, left);
     }
-    runtime.restart(&reference).unwrap();
+    runtime = GarageRuntime::new(&reference).unwrap();
+    runtime.started = true;
     runtime.step(&reference, FrameInput::default());
     assert!(steering_fraction(&reference, &runtime).abs() < 0.00001);
 }
@@ -209,7 +210,7 @@ fn pause_freezes_complete_state() {
     }
 }
 #[test]
-fn restart_after_carry_detach_rebase() {
+fn new_game_after_carry_detach_rebase() {
     let (reference, mut runtime) = initial();
     let count = (
         runtime.physics.rapier().bodies.len(),
@@ -260,7 +261,8 @@ fn restart_after_carry_detach_rebase() {
         }
         runtime.trip_m = 100.0;
         runtime.handbrake = false;
-        runtime.restart(&reference).unwrap();
+        runtime = GarageRuntime::new(&reference).unwrap();
+        runtime.started = true;
         assert_eq!(
             (
                 runtime.physics.rapier().bodies.len(),
@@ -1935,9 +1937,11 @@ fn pause_and_capture_release_grip_at_the_physical_pose() {
 }
 
 #[test]
-fn restart_cancels_latched_grip() {
+fn new_game_cancels_latched_grip() {
     let (reference, mut runtime) = gripped_runtime();
-    runtime.restart(&reference).unwrap();
+    assert!(runtime.area.interaction.push_gripping());
+    runtime = GarageRuntime::new(&reference).unwrap();
+    runtime.started = true;
     assert!(!runtime.area.interaction.push_gripping());
     assert_eq!(runtime.area.interaction.push_steering(), None);
     assert!(runtime.physics.rapier().impulse_joints.is_empty());
@@ -2034,12 +2038,13 @@ fn pause_cancels_established_throw_charge_without_delayed_release() {
 }
 
 #[test]
-fn restart_cancels_established_throw_charge_without_delayed_release() {
+fn new_game_cancels_established_throw_charge_without_delayed_release() {
     use my_summer_slop::interaction::ResolvedAim;
     let (reference, mut runtime) = initial();
     let item = reference.items[0].id;
     establish_throw_charge(&mut runtime, item);
-    runtime.restart(&reference).unwrap();
+    runtime = GarageRuntime::new(&reference).unwrap();
+    runtime.started = true;
     assert_eq!(runtime.area.interaction.throw_charge(), 0.0);
     assert_eq!(runtime.area.interaction.held(), None);
     assert!(runtime.physics.rapier().impulse_joints.is_empty());
@@ -2192,7 +2197,8 @@ fn lighting_lifecycle_preserves_and_resets_owned_state() {
         active,
         "recovery must retain unfinished fades and switch movement"
     );
-    runtime.restart(&reference).unwrap();
+    runtime = GarageRuntime::new(&reference).unwrap();
+    runtime.started = true;
     assert_eq!(lighting_snapshot(&runtime), startup);
     assert_eq!(runtime.lighting.cycle.elapsed_seconds(), 0.);
     assert_eq!(runtime.lighting.cycle.output().cycle_seconds, 240.);

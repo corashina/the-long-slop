@@ -1060,13 +1060,6 @@ impl GarageRuntime {
         self.area.interaction.cancel_input();
     }
 
-    pub fn restart(&mut self, reference: &ReferenceManifest) -> Result<(), ReferenceError> {
-        let candidate = Self::new(reference)?;
-        *self = candidate;
-        self.started = true;
-        Ok(())
-    }
-
     pub fn recover(&mut self, reference: &ReferenceManifest) {
         let dormant = !self.physics.body_active(self.physics.chassis_handle());
         if dormant {

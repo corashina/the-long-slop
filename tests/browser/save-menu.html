@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Save menu checks</title>
+<style>body{margin:0;font:14px sans-serif}header{padding:8px;display:flex;gap:8px;flex-wrap:wrap}iframe{width:100%;height:calc(100dvh - 120px);border:0}#results{white-space:pre-wrap;margin:8px}</style>
+<header><button id="pending-save" disabled>Hold Save</button><button id="pending-load" disabled>Hold Load</button><button id="pending-new-game" disabled>Hold New game</button><button id="release" disabled>Release operation</button><button id="missing" disabled>Load missing save</button><button id="incompatible" disabled>Load incompatible save</button><button id="storage-failure" disabled>Fail storage</button><button id="storage-restore" disabled>Restore storage</button><button id="continue" disabled>Check Continue</button><button id="preserve" disabled>Check New game preserves save</button></header>
+<iframe src="/web/index.html" allow="fullscreen"></iframe><p id="results" role="status">Loading runtime...</p>
+<script type="module">
+const frame=document.querySelector('iframe');frame.addEventListener('load',()=>{const script=frame.contentDocument.createElement('script');script.type='module';script.src='/tests/browser/save-menu.js';frame.contentDocument.body.append(script);});
+</script></html>

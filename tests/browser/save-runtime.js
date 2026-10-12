@@ -108,5 +108,5 @@ async function fixtureReady(){
  enable();parentDocument.querySelector('#state').textContent=fixtureEnabled?'Runtime ready. Fault checks enabled.':'Runtime ready. Fault checks require the save-fixture build.';
 }
 const ready=window.gameReady;window.gameReady=()=>{ready();fixtureReady();};
-if(!document.querySelector('#start').disabled)fixtureReady();
+if(!document.querySelector('#new-game').disabled)fixtureReady();
 for(const [button,work] of [[buttons[0],checks],[buttons[1],continueCheck],[buttons[2],roundtrip],[buttons[3],async()=>{await roundtrip();await missingHandleCheck();}]])button.addEventListener('click',()=>{buttons.forEach(b=>b.disabled=true);work().catch(error=>log('FAIL '+error.stack)).finally(enable);});

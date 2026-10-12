@@ -97,7 +97,7 @@ fn reflected_parent_preserves_single_handedness_conversion() {
     assert!((reflected - Vector::new(-2., 0., 0.)).length() < 0.00001);
 }
 #[test]
-fn odometer_rollover_repeat_sample_and_restart() {
+fn odometer_rollover_repeat_sample_and_new_game() {
     let r = common::reference();
     let refs = &r.instruments;
     let mut s = InstrumentState::new(refs);
@@ -158,7 +158,8 @@ fn runtime_recovery_and_rebase_preserve_odometer() {
     );
     assert_eq!(s.digit_angles, angles);
     assert_eq!(run.trip_m, 12345.);
-    run.restart(&r).unwrap();
+    run = my_summer_slop::starting_area::GarageRuntime::new(&r).unwrap();
+    run.started = true;
     s.reset(&r.instruments);
     assert_eq!(run.trip_m, 0.);
     assert_eq!(s.digit_angles, [0.; 5]);

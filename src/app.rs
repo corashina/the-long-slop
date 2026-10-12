@@ -335,7 +335,7 @@ fn read_input(
         drive.runtime.paused = true;
         clear_input(&mut drive);
     }
-    if actions & 5 != 0 && drive.ready {
+    if actions & 4 != 0 && drive.ready {
         drive.runtime.started = true;
         drive.runtime.paused = false;
         clear_input(&mut drive);
@@ -349,7 +349,7 @@ fn read_input(
         drive.input.clear();
         return;
     }
-    if actions & 31 != 0 {
+    if actions & 22 != 0 {
         return;
     }
     if frame.pressed & keys::CAMERA != 0 && drive.runtime.area.player.seat().is_some() {

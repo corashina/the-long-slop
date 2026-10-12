@@ -1,6 +1,8 @@
-import {manifestStamp} from './save-storage.js';
+import {manifestStamp,createSaveStorage} from './save-storage.js';
+import {createSaveSession} from './save-session.js';
 import {createSaveBridge} from './save-bridge.js';
 export const saveRuntime=createSaveBridge();
+const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime});
 import {createInput} from './input.js';
 import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
@@ -61,7 +63,7 @@ async function load(){
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
  status.textContent='Loading interface assets...';
  await loadUiAssets(manifest.ui);
- menu=createMenu({canvas,ui:manifest.ui,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ menu=createMenu({canvas,ui:manifest.ui,saveSession,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  const switchIconUrl='./assets/'+manifest.lighting.switch_icon.path;
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
  feedback=createFeedback(manifest.ui,switchIconUrl);
