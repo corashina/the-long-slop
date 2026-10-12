@@ -431,7 +431,12 @@ impl GarageRuntime {
         let b = reference.audio.binding(kind as u32);
         let clip = b.clips
             [((self.draw_survival() * b.clips.len() as f32) as usize).min(b.clips.len() - 1)];
-        let gain = b.gain[0] + (b.gain[1] - b.gain[0]) * self.draw_survival();
+        let gain_draw = self.draw_survival();
+        // Keep source draw order and gate timing when playback is disabled.
+        let gain = reference.audio.playback().map_or(0., |p| {
+            let b = p.binding(kind as u32);
+            b.gain[0] + (b.gain[1] - b.gain[0]) * gain_draw
+        });
         let pitch = b.pitch[0] + (b.pitch[1] - b.pitch[0]) * self.draw_survival();
         (
             clip,
@@ -446,7 +451,10 @@ impl GarageRuntime {
         kind: crate::audio::AudioKind,
         selection: (u32, f32, f32, f32),
     ) {
-        let b = reference.audio.binding(kind as u32);
+        let Ok(playback) = reference.audio.playback() else {
+            return;
+        };
+        let b = playback.binding(kind as u32);
         let pose = if kind == crate::audio::AudioKind::Eat {
             self.area.player.view_pose(&self.physics)
         } else {

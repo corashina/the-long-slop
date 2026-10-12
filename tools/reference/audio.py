@@ -60,6 +60,7 @@ def recover_audio(source: LibrarySource, output: Path) -> dict:
         blend=ad['panLevelCustomCurve']['m_Curve']
         if len(blend)!=1 or blend[0]['value'] not in (0.,1.):raise ValueError('Selected spatial blend differs')
         transform=source.transform_for(source.resolve(audio,ad['m_GameObject']))
+        if any(c.type.name=='Rigidbody' for c in source.components(transform)[1]):raise ValueError('Selected audio velocity needs a Rigidbody route')
         pose=world_pose(source,transform)
         player_pose=world_pose(source,source.transform_for(source.resolve(player,pd['m_GameObject'])))
         position=[pose['translation'][i]-player_pose['translation'][i] for i in range(3)] if role in ('burp','fart','shit','death','sleep') else [0.,0.,0.]
@@ -73,7 +74,10 @@ def recover_audio(source: LibrarySource, output: Path) -> dict:
     evidence=managed_evidence(source,['component.priority = priority;','UnityEngine.Object.Destroy(component.gameObject, component.clip.length);','SFart.Play();','SBurp.Play();','SDeathBellSource.pitch = UnityEngine.Random.Range(0.8f, 1.2f);'])
     # AudioPriorities[4] is the default one-shot priority.
     managed_evidence(source,['public static byte[] AudioPriorities = new byte[8] { 10, 25, 40, 55, 70, 80, 85, 100 };'])
-    result={'bindings':bindings,'clips':clips,'manager':source_id(manager),'real_voices':manager_data['m_RealVoiceCount'],'virtual_voices':manager_data['m_VirtualVoiceCount'],'queue_capacity':512,'evidence':evidence}
+    from .export import native_engine_evidence
+    doppler={'factor':manager_data['Doppler Factor'],'speed_of_sound':340.,'minimum_pitch':1e-6,'velocity_mode':'transform_delta',
+        'engine':native_engine_evidence(library.snapshot.root),'method':'AudioSource::CacheFrameParameters','method_rva':0x9a5840}
+    result={'doppler':doppler,'bindings':bindings,'clips':clips,'manager':source_id(manager),'real_voices':manager_data['m_RealVoiceCount'],'virtual_voices':manager_data['m_VirtualVoiceCount'],'queue_capacity':512,'evidence':evidence}
     finite_record(result)
     return result
 

@@ -1,4 +1,4 @@
-//! Validate runtime manifests with the same contract as the game.
+//! Validate the strict export contract, including playback routes.
 use my_summer_slop::reference::ReferenceManifest;
 use std::io::{self, Read};
 

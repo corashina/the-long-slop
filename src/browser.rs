@@ -1,6 +1,8 @@
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(js_namespace=window,js_name=gameAudioError)]
+    pub fn game_audio_error(message: &str);
     #[wasm_bindgen(js_namespace=window,js_name=gameSurvival)]
     pub fn game_survival(
         hp: f32,
@@ -31,6 +33,7 @@ extern "C" {
         origin_x: f64,
         origin_y: f64,
         origin_z: f64,
+        seconds: f64,
     );
 
     #[wasm_bindgen(js_namespace = window, js_name = gameReady)]

@@ -30,7 +30,7 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, chunks, colliders, abs
   feedback?.setVisible(started&&!paused&&!dead&&Boolean(mode)&&menu?.model.state==='playing');
   survival?.setVisible(started&&!paused&&menu?.model.state==='playing');
   audio?.setPlaying(started&&!paused&&menu?.model.state==='playing');
-  if(paused)audio?.pause();
+
 };
 window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,noText,fluidName,condition,held,charge,throwing,rpm,ignition,running,starter,seated,handbrake,gas,oil,alcohol,water,blood,diesel,control,lmbUse)=>{
  record.actions=mask;record.context=context;record.lmbUse=lmbUse;record.name=name;record.notice=notice;record.carrying=carrying;record.amount=amount;record.capacity=capacity;record.hasName=hasName;record.noText=noText;record.fluidName=fluidName;
@@ -46,8 +46,9 @@ const needs={hp:0,food:0,water:0,bowel:0,bladder:0,opacity:0,dead:false,lookScal
 window.gameSurvival=(hp,food,water,bowel,bladder,opacity,isDead,lookScale,menuDue)=>{
  needs.hp=hp;needs.food=food;needs.water=water;needs.bowel=bowel;needs.bladder=bladder;needs.opacity=opacity;needs.dead=isDead;needs.lookScale=lookScale;needs.menuDue=menuDue;dead=isDead;survival?.update(needs);menu?.survival(isDead,menuDue);
 };
+window.gameAudioError=message=>audio?.disable(Error(message));
 window.gameAudio=(ids,values)=>audio?.publish(ids,values);
-window.gameAudioListener=(session,x,y,z,fx,fy,fz,ux,uy,uz,gain,ox,oy,oz)=>audio?.setListener(session,x,y,z,fx,fy,fz,ux,uy,uz,gain,ox,oy,oz);
+window.gameAudioListener=(session,x,y,z,fx,fy,fz,ux,uy,uz,gain,ox,oy,oz,seconds)=>audio?.setListener(session,x,y,z,fx,fy,fz,ux,uy,uz,gain,ox,oy,oz,seconds);
 window.addEventListener('pagehide',()=>audio?.dispose());
 function fail(message){failed=true;clearTimeout(timeout);const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}}
 window.gameFailure=fail;

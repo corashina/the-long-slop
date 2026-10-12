@@ -64,9 +64,12 @@ struct FeedbackStamp {
 pub fn run(reference_json: &str) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
     let reference = Arc::new(
-        ReferenceManifest::from_json(reference_json.as_bytes())
+        ReferenceManifest::from_runtime_json(reference_json.as_bytes())
             .map_err(|e| JsValue::from_str(&e.to_string()))?,
     );
+    if let Err(error) = reference.audio.playback() {
+        game_audio_error(error);
+    }
     let runtime = GarageRuntime::new(&reference).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let current = runtime.area.player.view_pose(&runtime.physics);
     App::new()
@@ -488,7 +491,7 @@ fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveC
             };
     }
 }
-fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
+fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>, time: Res<Time<Real>>) {
     let needs = drive.runtime.needs_output();
     game_survival(
         needs.needs.hp,
@@ -527,6 +530,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         origin[0],
         origin[1],
         origin[2],
+        time.elapsed_secs_f64(),
     );
     drive.runtime.audio.pack(origin);
     game_audio(&drive.runtime.audio.ids, &drive.runtime.audio.values);

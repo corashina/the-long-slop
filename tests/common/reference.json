@@ -36229,6 +36229,19 @@
     ]
   },
   "audio": {
+    "doppler": {
+      "factor": 1.0,
+      "speed_of_sound": 340.0,
+      "minimum_pitch": 1e-06,
+      "velocity_mode": "transform_delta",
+      "engine": {
+        "file": "UnityPlayer.dll",
+        "version": "2021.3.18f1 (3129e69bc0c7)",
+        "sha256": "553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86"
+      },
+      "method": "AudioSource::CacheFrameParameters",
+      "method_rva": 10115136
+    },
     "bindings": [
       {
         "role": "eat",

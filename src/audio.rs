@@ -52,29 +52,33 @@ impl AudioState {
     pub fn new(reference: &AudioReference) -> Self {
         let mut priorities = [256; 10];
         let mut looped = [false; 10];
-        for b in &reference.bindings {
+        let playback = reference.playback().ok();
+        for b in playback.into_iter().flat_map(|p| &p.bindings) {
             priorities[b.kind as usize] = b.priority;
             looped[b.kind as usize] = b.looped;
         }
+        let voice_capacity = playback.map_or(0, |p| p.real_voices);
+        let capacity = playback.map_or(0, |p| p.queue_capacity);
         Self {
             session: 1,
-            voices: Vec::with_capacity(reference.real_voices),
-            voice_capacity: reference.real_voices,
+            voices: Vec::with_capacity(voice_capacity),
+            voice_capacity,
             durations: reference
                 .clips
                 .iter()
                 .map(|c| c.duration_seconds as f32)
                 .collect(),
             looped,
-            events: Vec::with_capacity(reference.queue_capacity),
+            events: Vec::with_capacity(capacity),
             priorities,
-            capacity: reference.queue_capacity,
-            ids: Vec::with_capacity(reference.queue_capacity * 5),
-            values: Vec::with_capacity(reference.queue_capacity * 5),
+            capacity,
+            ids: Vec::with_capacity(capacity * 5),
+            values: Vec::with_capacity(capacity * 5),
         }
     }
     pub fn emit(&mut self, event: AudioEvent) {
-        if event.session != self.session
+        if self.capacity == 0
+            || event.session != self.session
             || event.kind == AudioKind::Urinate
             || !event.gain.is_finite()
             || !event.pitch.is_finite()
@@ -153,6 +157,9 @@ impl AudioState {
         pose: crate::vehicle::VehiclePose,
         origin: [f64; 3],
     ) {
+        let Ok(playback) = reference.playback() else {
+            return;
+        };
         for index in (0..self.voices.len()).rev() {
             let voice = &mut self.voices[index];
             voice.remaining -= dt;
@@ -164,7 +171,7 @@ impl AudioState {
                 voice.event.kind,
                 AudioKind::Burp | AudioKind::Fart | AudioKind::Shit | AudioKind::Death
             ) {
-                let offset = reference.binding(voice.event.kind as u32).offset;
+                let offset = playback.binding(voice.event.kind as u32).offset;
                 let p =
                     crate::vehicle::to_rapier(pose) * rapier3d::math::Vector::from_array(offset);
                 voice.event.position = std::array::from_fn(|i| p[i] as f64 + origin[i]);

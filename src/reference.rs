@@ -860,7 +860,20 @@ impl ReferenceManifest {
         Ok(manifest)
     }
 
+    pub fn from_runtime_json(bytes: &[u8]) -> Result<Self, ReferenceError> {
+        require(bytes.len() <= 64 * 1024 * 1024, "manifest size")?;
+        let manifest: Self =
+            serde_json::from_slice(bytes).map_err(|e| ReferenceError(e.to_string()))?;
+        manifest.validate_gameplay()?;
+        Ok(manifest)
+    }
+
     pub fn validate(&self) -> Result<(), ReferenceError> {
+        self.audio.validate(self)?;
+        self.validate_gameplay()
+    }
+
+    fn validate_gameplay(&self) -> Result<(), ReferenceError> {
         require(
             self.library.schema_version == 1
                 && hash(&self.library.manifest_sha256)
@@ -874,7 +887,7 @@ impl ReferenceManifest {
         )?;
         self.lighting.validate(self)?;
         self.survival.validate(self)?;
-        self.audio.validate(self)?;
+        self.audio.validate_gates()?;
         self.sleep.validate(self)?;
         self.weather.validate(self)?;
         require(
