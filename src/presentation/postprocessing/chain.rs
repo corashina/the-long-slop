@@ -93,7 +93,6 @@ pub struct SourcePostChain {
     pub startup_count: u32,
     pub resize_count: u32,
     _initial: ColorTarget,
-    output: ColorTarget,
     copy: CopyPass,
     uber: UberPass,
     main: Option<MainChain>,
@@ -130,7 +129,6 @@ impl SourcePostChain {
         let resize_count = previous.as_ref().map_or(0, |old| old.resize_count + 1);
         let completed = previous.as_ref().map_or(0, |old| old.completed);
         let initial = ColorTarget::new(device, extent);
-        let output = ColorTarget::new(device, extent);
         let (mut copy, old_main, old_uber) = match previous {
             Some(old) => (old.copy, old.main, Some(old.uber)),
             None => (
@@ -261,7 +259,7 @@ impl SourcePostChain {
             old_uber,
         )?;
         let area = u64::from(extent[0]) * u64::from(extent[1]);
-        let logical_bytes = area * 16
+        let logical_bytes = area * 8
             + main.as_ref().map_or(0, |main| {
                 area * 8
                     + main.taa.logical_bytes
@@ -279,7 +277,6 @@ impl SourcePostChain {
             startup_count,
             resize_count,
             _initial: initial,
-            output,
             copy,
             uber,
             main,
@@ -288,8 +285,11 @@ impl SourcePostChain {
             pending: None,
         })
     }
-    pub fn output(&self) -> &TextureView {
-        &self.output.view
+    pub fn completed_token(&self) -> u32 {
+        self.completed
+    }
+    pub fn pending_token(&self) -> Option<u32> {
+        self.pending
     }
     pub fn ready(&self, cache: &PipelineCache) -> bool {
         self.copy.ready(cache)
@@ -336,6 +336,8 @@ impl SourcePostChain {
         queue: &RenderQueue,
         cache: &PipelineCache,
         frame: PostFrame,
+        output: &TextureView,
+        resolve: &TextureView,
     ) -> Result<bool, String> {
         if frame.token == 0 || frame.token <= self.completed {
             return Ok(false);
@@ -389,7 +391,8 @@ impl SourcePostChain {
             device,
             queue,
             cache,
-            &self.output.view,
+            output,
+            resolve,
             exposure_index,
         ) {
             return Err("Source Uber did not encode a ready pipeline".into());

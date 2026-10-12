@@ -103,6 +103,10 @@ impl UberPass {
                         })],
                         ..default()
                     }),
+                    multisample: MultisampleState {
+                        count: 8,
+                        ..default()
+                    },
                     ..default()
                 })
             },
@@ -224,6 +228,7 @@ impl UberPass {
         queue: &RenderQueue,
         cache: &PipelineCache,
         output: &TextureView,
+        resolve: &TextureView,
         exposure_index: usize,
     ) -> bool {
         if !self.ready(cache) || exposure_index > usize::from(self.main) {
@@ -237,9 +242,9 @@ impl UberPass {
         let colors = [Some(RenderPassColorAttachment {
             view: output,
             depth_slice: None,
-            resolve_target: None,
+            resolve_target: Some(resolve),
             ops: Operations {
-                load: LoadOp::Clear(default()),
+                load: LoadOp::Load,
                 store: StoreOp::Store,
             },
         })];

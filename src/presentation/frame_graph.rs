@@ -77,10 +77,18 @@ struct FrameProgress {
     gpu_boundary: GpuBoundary,
     probe: ProbeAudit,
     motion: MotionAudit,
+    effects: super::source_effects::EffectsAudit,
 }
 #[derive(Resource, Clone, Default)]
 pub struct SourceGraphProgress(Arc<Mutex<FrameProgress>>);
 impl SourceGraphProgress {
+    pub(crate) fn frame_submission(&self) -> (u32, u32, bool) {
+        let state = self.0.lock().unwrap();
+        (state.frame, state.token, state.presented)
+    }
+    pub(crate) fn publish_effects(&self, audit: super::source_effects::EffectsAudit) {
+        self.0.lock().unwrap().effects = audit;
+    }
     pub fn probe_readiness(&self) -> (bool, bool) {
         let state = self.0.lock().unwrap();
         (state.probe.pipelines_ready, state.probe.published)
@@ -152,7 +160,7 @@ struct MotionAudit {
     rebase_count: u32,
 }
 #[derive(Resource)]
-struct MotionFrame {
+pub(crate) struct MotionFrame {
     pass: Option<SourceMotionPass>,
     targets: Arc<super::render_targets::SourceViewTargets>,
     origin: [f64; 3],
@@ -162,6 +170,12 @@ struct MotionFrame {
     validation: u32,
     resize_count: u32,
     rebase_count: u32,
+}
+
+impl MotionFrame {
+    pub(crate) fn encoded(&self, frame: u32, token: u32) -> bool {
+        self.camera_frame == frame && self.camera_token == token
+    }
 }
 
 pub struct SourceFramePlugin;
@@ -194,6 +208,7 @@ impl Plugin for SourceFramePlugin {
         super::shadow_queue::install(app);
         super::shadow_collector::install(app);
         super::motion_draw::install(app);
+        super::source_effects::install(app);
         let render = app.sub_app_mut(RenderApp);
         render
             .insert_resource(progress)
@@ -247,7 +262,7 @@ impl Plugin for SourceFramePlugin {
             )
             .add_systems(
                 RenderGraph,
-                (submitted, submit_motion)
+                (submitted, submit_motion, super::source_effects::submitted)
                     .chain()
                     .in_set(RenderGraphSystems::Finish),
             );
@@ -545,6 +560,7 @@ pub(crate) fn surface_ready(
     resources: Option<Res<FrameResources>>,
     probe: Option<Res<ProbeFrame>>,
     cache: Res<PipelineCache>,
+    effects: Option<Res<super::source_effects::SourceEffects>>,
 ) -> bool {
     let index = view.into_inner().index;
     let state = progress.0.lock().unwrap();
@@ -552,6 +568,7 @@ pub(crate) fn surface_ready(
         && frame.views[index].is_some()
         && camera.ready()
         && resources.is_some_and(|r| r.display.ready(&cache))
+        && effects.is_some_and(|effects| effects.ready(&cache))
         && state.sky
         && (index < 3
             || (state.presented
@@ -722,6 +739,7 @@ fn finish_surface(
     surfaces: Res<SurfaceResources>,
     mut probe: Option<ResMut<ProbeFrame>>,
     cache: Res<PipelineCache>,
+    effects: Res<super::source_effects::SourceEffects>,
     status: Res<SourceLightingStatus>,
     mut context: RenderContext,
 ) {
@@ -780,6 +798,9 @@ fn finish_surface(
             return;
         }
         probe.encoded_token = Some(frame.probe_token);
+        return;
+    }
+    if !effects.encoded(source.index, frame.frame, frame.main_token) {
         return;
     }
     state.mask |= 1 << source.index;

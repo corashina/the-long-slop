@@ -129,6 +129,14 @@ pub fn load_lighting(commands: &mut Commands, server: &AssetServer, record: &Lig
             caster_math: server.load("shaders/source_caster_math.wgsl"),
             motion_camera: server.load("shaders/source_motion_vectors.wgsl"),
             motion_objects: server.load("shaders/source_motion_objects.wgsl"),
+            motion_blur: server.load("shaders/source_motion_blur.wgsl"),
+            bloom: server.load("shaders/source_bloom.wgsl"),
+            lut: server.load("shaders/source_lut.wgsl"),
+            uber: server.load("shaders/source_uber.wgsl"),
+            ao_depth: server.load("shaders/source_ao_depth.wgsl"),
+            ao_render: server.load("shaders/source_ao_render.wgsl"),
+            ao_upsample: server.load("shaders/source_ao_upsample.wgsl"),
+            ao_composite: server.load("shaders/source_ao_composite.wgsl"),
         },
         loaded: false,
         texture_bytes: 0,
@@ -320,9 +328,17 @@ pub struct LightingShaders {
     pub caster_math: Handle<Shader>,
     pub motion_camera: Handle<Shader>,
     pub motion_objects: Handle<Shader>,
+    pub motion_blur: Handle<Shader>,
+    pub bloom: Handle<Shader>,
+    pub lut: Handle<Shader>,
+    pub uber: Handle<Shader>,
+    pub ao_depth: Handle<Shader>,
+    pub ao_render: Handle<Shader>,
+    pub ao_upsample: Handle<Shader>,
+    pub ao_composite: Handle<Shader>,
 }
 impl LightingShaders {
-    fn handles(&self) -> [&Handle<Shader>; 14] {
+    fn handles(&self) -> [&Handle<Shader>; 22] {
         [
             &self.lighting,
             &self.cloud,
@@ -338,6 +354,14 @@ impl LightingShaders {
             &self.caster_math,
             &self.motion_camera,
             &self.motion_objects,
+            &self.motion_blur,
+            &self.bloom,
+            &self.lut,
+            &self.uber,
+            &self.ao_depth,
+            &self.ao_render,
+            &self.ao_upsample,
+            &self.ao_composite,
         ]
     }
 }

@@ -28,6 +28,7 @@ pub enum SourceSurfaceStage {
     Opaque,
     AfterOpaque,
     Transparent,
+    Postprocessing,
     AfterTransparent,
 }
 
@@ -64,6 +65,7 @@ pub fn install(app: &mut SubApp) {
                 SourceSurfaceStage::Opaque,
                 SourceSurfaceStage::AfterOpaque,
                 SourceSurfaceStage::Transparent,
+                SourceSurfaceStage::Postprocessing,
                 SourceSurfaceStage::AfterTransparent,
             )
                 .chain(),

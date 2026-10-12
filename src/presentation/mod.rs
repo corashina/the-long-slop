@@ -48,6 +48,7 @@ pub mod shadow_collector;
 pub mod shadow_phase;
 pub mod shadow_queue;
 pub mod shadow_scene;
+pub mod source_effects;
 pub mod source_images;
 pub mod source_lighting;
 pub mod source_sky;
