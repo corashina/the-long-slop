@@ -130,6 +130,12 @@ fn process(
             Ok(String::new())
         }
 
+        #[cfg(feature = "save-fixture")]
+        "FixtureSetupDriving"
+        | "FixtureDetachAndCarry"
+        | "FixtureTransferFluid"
+        | "FixtureSetupCycle"
+        | "FixtureInspect" => super::save_fixture::process(world, &request.kind),
         "Discard" => {
             if requests
                 .candidate

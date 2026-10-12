@@ -1,4 +1,6 @@
 mod save;
+#[cfg(feature = "save-fixture")]
+mod save_fixture;
 use crate::browser::*;
 use crate::interaction::labels::display_name;
 use crate::presentation::instruments::InstrumentVisuals;
