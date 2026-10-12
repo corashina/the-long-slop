@@ -488,7 +488,17 @@ impl AudioReference {
         for m in &self.mechanisms {
             require(
                 emitters.contains(&m.emitter)
-                    && m.movement_voice.is_none_or(|v| voices.contains(&v))
+                    && m.movement_voice.is_none_or(|v| {
+                        self.voices
+                            .iter()
+                            .find(|voice| voice.id == v)
+                            .and_then(|voice| voice.clip)
+                            .is_some_and(|clip| {
+                                self.clips.iter().any(|c| {
+                                    c.id == clip && c.usages.iter().any(|usage| usage == "effect")
+                                })
+                            })
+                    })
                     && m.endpoints.iter().all(|b| bindings.contains(b))
                     && m.turn_binding.is_none_or(|b| bindings.contains(&b))
                     && values([

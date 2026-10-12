@@ -653,6 +653,10 @@ fn publish_audio(
         runtime.paused,
         audio.game_seconds,
     );
+    let shift = audio.take_origin_shift();
+    if shift != [0.; 3] {
+        game_audio_origin_shift(shift[0], shift[1], shift[2]);
+    }
     if let Ok(camera) = camera.single() {
         let (_, q, p) = camera.to_scale_rotation_translation();
         game_audio_listener(p.x, p.y, p.z, q.x, q.y, q.z, q.w);

@@ -19,7 +19,27 @@ async function loaded(audio){await Promise.all(audio.cache?.pending.values()??[]
 async function decoding(ready){for(let i=0;i<100&&!ready();i++)await new Promise(r=>setTimeout(r,10));assert.ok(ready(),'decode started');}
 function event(a,session=1,sequence=1){a.begin(session,true,false,0);a.emitter(binding.emitter,new Float32Array([0,0,0]),new Float32Array([0,0,0,1]),true);a.event(session,sequence,binding.id,binding.emitter,0,0,0,1,1,0);a.finish();}
 test('gesture_precedes_pointer_lock',async()=>{const a=setup();const m=new MenuState();m.ready();await m.capture(ACTIONS.START,()=>{assert.equal(Fake.contexts.length,1);return Promise.resolve();},()=>a.unlock());assert.equal(m.state,'playing');a.dispose();});
-test('audio_failure_keeps_start_working',async()=>{for(const mode of ['fetch','decode','resume','validation']){class Bad extends Fake {resume(){return mode==='resume'?Promise.reject(Error('resume')):super.resume();}decodeAudioData(){return mode==='decode'?Promise.reject(Error('decode')):super.decodeAudioData();}}const a=setup(Bad);if(mode==='fetch')globalThis.fetch=async()=>{throw Error('fetch');};if(mode==='validation')globalThis.fetch=async()=>({ok:true,arrayBuffer:async()=>new ArrayBuffer(2)});const m=new MenuState();m.ready();await m.capture(ACTIONS.START,async()=>{},()=>a.unlock());await settle();event(a);await loaded(a);assert.equal(m.state,'playing');assert.equal(Fake.starts.length,0);a.dispose();}const a=createAudio({});assert.doesNotThrow(()=>a.unlock());a.dispose();});
+test('audio_failure_keeps_start_working',async()=>{
+ const warnings=[],originalWarn=console.warn;
+ console.warn=message=>warnings.push(message);
+ try{
+  for(const mode of ['fetch','decode','resume','validation']){
+   class Bad extends Fake {resume(){return mode==='resume'?Promise.reject(Error('resume')):super.resume();}decodeAudioData(){return mode==='decode'?Promise.reject(Error('decode')):super.decodeAudioData();}}
+   const a=setup(Bad);
+   if(mode==='fetch')globalThis.fetch=async()=>{throw Error('fetch');};
+   if(mode==='validation')globalThis.fetch=async()=>({ok:true,arrayBuffer:async()=>new ArrayBuffer(2)});
+   const m=new MenuState();m.ready();await m.capture(ACTIONS.START,async()=>{},()=>a.unlock());await settle();event(a);await loaded(a);
+   assert.equal(m.state,'playing');assert.equal(Fake.starts.length,0);
+   assert.equal(a.disabled,mode==='resume');
+   event(a,1,2);await loaded(a);
+   const detail=mode==='validation'?'Audio byte count':mode;
+   assert.deepEqual(warnings,[mode==='resume'?'Audio disabled: resume':`Audio clip ${binding.clips[0]} disabled: ${detail}`]);
+   warnings.length=0;a.dispose();
+  }
+  const a=createAudio({});assert.doesNotThrow(()=>a.unlock());
+  assert.deepEqual(warnings,['Audio disabled: Invalid audio data']);a.dispose();
+ }finally{console.warn=originalWarn;}
+});
 test('restart_rejects_pending_decode',async()=>{let complete;class Slow extends Fake {decodeAudioData(){return new Promise(r=>{complete=r;});}}const a=setup(Slow);a.unlock();await settle();event(a);await decoding(()=>complete);assert.ok(complete);a.restart(2);complete({duration:1});await settle();assert.equal(Fake.starts.length,0);a.dispose();});
 test('restarted_session_can_unlock',async()=>{let attempts=0;class Fail extends Fake {resume(){attempts++;return Promise.reject(Error('resume'));}}const a=setup(Fail);a.unlock();await settle();a.restart(2);a.unlock();await settle();assert.equal(attempts,2);a.dispose();});
 test('rebase_preserves_distance',()=>{const v=raw.voices.find(v=>v.id===binding.voice),out=new Float32Array(6);spatialValues(v,[10,3,20],[1,2,3],[0,0,0,1],out);assert.ok(Array.from(out).every(Number.isFinite));assert.ok(Math.abs(out[0]-1/Math.sqrt(371))<1e-7);const before=Array.from(out);spatialValues(v,[-90,3,-80],[-99,2,-97],[0,0,0,1],out);assert.ok(Array.from(out).every(Number.isFinite));assert.deepEqual(Array.from(out),before);});

@@ -3,6 +3,8 @@ use wasm_bindgen::prelude::*;
 extern "C" {
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioBegin)]
     pub fn game_audio_begin(session: u32, started: bool, paused: bool, time: f64);
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioOriginShift)]
+    pub fn game_audio_origin_shift(x: f32, y: f32, z: f32);
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioListener)]
     pub fn game_audio_listener(x: f32, y: f32, z: f32, qx: f32, qy: f32, qz: f32, qw: f32);
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioEmitter)]

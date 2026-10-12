@@ -115,6 +115,7 @@ pub struct AudioState {
     horn_gain: f32,
     last_running: bool,
     engine_position: [f32; 3],
+    origin_shift: [f32; 3],
     engine_formula: [f32; 11],
     voice_indices: HashMap<u32, usize>,
     head_offset: f32,
@@ -182,6 +183,7 @@ impl AudioState {
             horn_gain: 0.,
             last_running: false,
             engine_position: [0.; 3],
+            origin_shift: [0.; 3],
             engine_formula,
             signals: reference
                 .voices
@@ -814,6 +816,7 @@ impl AudioState {
         self.length = 0;
         self.sequence = 0;
         self.game_seconds = 0.;
+        self.origin_shift = [0.; 3];
         self.random = session.wrapping_add(0x9e3779b9);
         self.removed.clear();
         for m in &mut self.mechanism_sounds {
@@ -849,6 +852,9 @@ impl AudioState {
         }
     }
     pub fn rebase(&mut self, shift: [f32; 3]) {
+        for (total, delta) in self.origin_shift.iter_mut().zip(shift) {
+            *total += delta;
+        }
         for position in self.positions.values_mut() {
             for (p, d) in position.iter_mut().zip(shift) {
                 *p -= d;
@@ -862,6 +868,9 @@ impl AudioState {
                 *p -= d;
             }
         }
+    }
+    pub fn take_origin_shift(&mut self) -> [f32; 3] {
+        std::mem::take(&mut self.origin_shift)
     }
     pub fn binding(&self, id: u32) -> Option<&crate::reference::AudioEventBinding> {
         self.bindings.get(&id).map(|&i| &self.reference.bindings[i])

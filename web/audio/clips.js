@@ -1,14 +1,15 @@
 // Accepted WAV bytes are checked before browser decoding.
 export class ClipCache {
- constructor(context,raw,current,fail){this.context=context;this.clips=new Map(raw.clips.map(c=>[c.id,c]));this.current=current;this.fail=fail;this.buffers=new Map();this.pending=new Map();this.controllers=new Set();this.generation=0;this.radioBuffers=new Map();this.radioPending=new Map();this.radioWanted=new Set();this.radioDemand=[null,null,null,null];this.radioDirty=true;}
+ constructor(context,raw,current,fail){this.context=context;this.clips=new Map(raw.clips.map(c=>[c.id,c]));this.current=current;this.fail=fail;this.buffers=new Map();this.pending=new Map();this.failed=new Set();this.controllers=new Set();this.generation=0;this.radioBuffers=new Map();this.radioPending=new Map();this.radioWanted=new Set();this.radioDemand=[null,null,null,null];this.radioDirty=true;}
  async effect(id,session){
+  if(this.failed.has(id))return null;
   if(this.buffers.has(id))return this.buffers.get(id);
   if(this.pending.has(id))return this.pending.get(id);
   const generation=this.generation,abort=new AbortController();this.controllers.add(abort);
   const task=(async()=>{try{
    const buffer=await this.decode(id,session,'effect',generation,abort);
-   if(buffer)this.buffers.set(id,buffer);return buffer;
-  }catch(error){if(generation===this.generation&&session===this.current()&&error.name!=='AbortError')this.fail(error);return null;}
+   if(buffer&&generation===this.generation&&session===this.current())this.buffers.set(id,buffer);return buffer;
+  }catch(error){if(generation===this.generation&&session===this.current()&&error.name!=='AbortError'){this.failed.add(id);this.fail(id,error);}return null;}
   finally{this.controllers.delete(abort);if(generation===this.generation)this.pending.delete(id);}})();
   this.pending.set(id,task);return task;
  }
@@ -35,15 +36,15 @@ export class ClipCache {
   for(const id of this.radioBuffers.keys())if(!this.radioWanted.has(id))this.radioBuffers.delete(id);
   for(const entry of this.radioPending.values())if(!this.radioWanted.has(entry.id)){entry.stale=true;entry.abort.abort();}
   for(const id of this.radioWanted){
-   if(this.radioBuffers.has(id)||this.radioPending.has(id))continue;
+   if(this.failed.has(id)||this.radioBuffers.has(id)||this.radioPending.has(id))continue;
    if(this.radioBuffers.size+this.radioPending.size>=4)break;
    const generation=this.generation,abort=new AbortController(),entry={id,abort,stale:false,task:null};
    this.radioPending.set(id,entry);
    entry.task=this.decode(id,session,'radio',generation,abort).then(buffer=>{
     if(buffer&&!entry.stale&&generation===this.generation&&session===this.current()&&this.radioWanted.has(id)){this.radioPending.delete(id);this.radioBuffers.set(id,buffer);}
-   }).catch(error=>{if(!entry.stale&&generation===this.generation&&session===this.current()&&error.name!=='AbortError')this.fail(error);}).finally(()=>{if(this.radioPending.get(id)===entry)this.radioPending.delete(id);this.radioDirty=true;});
+   }).catch(error=>{if(!entry.stale&&generation===this.generation&&session===this.current()&&error.name!=='AbortError'){this.failed.add(id);this.fail(id,error);}}).finally(()=>{if(this.radioPending.get(id)===entry)this.radioPending.delete(id);this.radioDirty=true;});
   }
  }
- reset(){this.generation++;for(const controller of this.controllers)controller.abort();this.controllers.clear();this.pending.clear();this.radioWanted.clear();this.radioDemand.fill(null);this.radioDirty=true;this.radioBuffers.clear();for(const entry of this.radioPending.values()){entry.stale=true;entry.abort.abort();}}
+ reset(){this.generation++;for(const controller of this.controllers)controller.abort();this.controllers.clear();this.pending.clear();this.failed.clear();this.radioWanted.clear();this.radioDemand.fill(null);this.radioDirty=true;this.radioBuffers.clear();for(const entry of this.radioPending.values()){entry.stale=true;entry.abort.abort();}}
  dispose(){this.reset();this.buffers.clear();}
 }
