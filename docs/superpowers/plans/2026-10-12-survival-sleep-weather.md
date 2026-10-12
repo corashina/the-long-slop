@@ -11,7 +11,7 @@
 **Spec:** [Approved specification](../specs/2026-10-12-survival-sleep-weather-design.md).
 **Evidence:** [Source audit](../../research/2026-10-12-survival-sleep-weather-reference.md).
 **Branch:** `codex/survival-weather`, isolated checkout based on `d7995c8`.
-**Execution:** Awaiting plan review and method selection. No implementation task has started.
+**Execution:** The user selected Subagent-driven execution through the active thread goal. Implementation is in progress.
 
 ## Global Constraints
 
@@ -104,11 +104,11 @@ Docker checks can require sandbox escalation. Preserve diagnostics and use the n
 
 **Files:** No product changes. Logs under `.cache/survival-weather/`.
 
-- [ ] Confirm `git status --short`, branch, HEAD, git-dir, common-dir, and absence of a superproject.
-- [ ] Verify source build and assembly hash against the approved audit.
-- [ ] Run full checks once and retain the output. Expect successful native tests, web tests, and release WASM compilation.
-- [ ] Verify the accepted shared library using `verify_library`; do not derive new assets yet.
-- [ ] Investigate any failure before feature work. Record unresolved baseline failures and seek the user's direction if they prevent progress.
+- [x] Confirm `git status --short`, branch, HEAD, git-dir, common-dir, and absence of a superproject.
+- [x] Verify source build and assembly hash against the approved audit.
+- [x] Run full checks once and retain the output. Expect successful native tests, web tests, and release WASM compilation.
+- [x] Verify the accepted shared library using `verify_library`; do not derive new assets yet.
+- [x] Investigate any failure before feature work. Record unresolved baseline failures and seek the user's direction if they prevent progress.
 
 ## Layer 1: Survival
 
