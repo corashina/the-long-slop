@@ -202,7 +202,28 @@ fn driven_rebased_roundtrip_preserves_logic_and_resumes() {
 }
 #[test]
 fn removed_part_split_wheel_and_held_item_rebuild() {
-    let r = fixture();
+    let mut r = fixture();
+    let portable = ItemId(18);
+    let node = r.items.iter().find(|i| i.id == portable).unwrap().node;
+    let mut body = r.bodies[1].clone();
+    body.id = BodyId(91);
+    body.source.path_id = 90093;
+    body.node = node;
+    body.parent_body = None;
+    body.mass_kg = 75.0; // Six kilograms dry plus 69 liters from the source tank.
+    body.pose.translation = [10., 5., 0.];
+    r.bodies.push(body);
+    let node = r.nodes.iter_mut().find(|n| n.id == node).unwrap();
+    node.parent = None;
+    node.transform.translation = [10., 5., 0.];
+    for id in [portable, ItemId(19)] {
+        r.items.iter_mut().find(|i| i.id == id).unwrap().body = BodyId(91);
+    }
+    r.tanks
+        .iter_mut()
+        .find(|t| t.item == portable)
+        .unwrap()
+        .role = TankRole::Portable;
     let mut g = GarageRuntime::new(&r).unwrap();
     g.started = true;
     for _ in 0..120 {
@@ -220,6 +241,30 @@ fn removed_part_split_wheel_and_held_item_rebuild() {
         &mut g.physics,
     );
     g.area.items.get_mut(engine).unwrap().condition = 0.42;
+    g.area
+        .items
+        .get_mut(portable)
+        .unwrap()
+        .fluid
+        .as_mut()
+        .unwrap()
+        .mixture
+        .quantities_liters = [0., 0., 0., 10., 0., 0.];
+    // Normal simulation commits the changed masses before the save.
+    g.step(&r, FrameInput::default());
+    let portable_body = g.area.items.get(portable).unwrap().body.unwrap();
+    let portable_mass = g.physics.rapier().bodies[portable_body].mass();
+    let portable_volume = g
+        .area
+        .items
+        .get(portable)
+        .unwrap()
+        .fluid
+        .as_ref()
+        .unwrap()
+        .mixture
+        .total();
+    assert!(portable_mass < 75. && (portable_mass - 6. - portable_volume).abs() < 1e-5);
     let slot = r.wheel_slots[0].id;
     let rim = g
         .wheels
@@ -274,6 +319,24 @@ fn removed_part_split_wheel_and_held_item_rebuild() {
     assert!(
         (g.physics.rapier().bodies[old].mass() - loaded.physics.rapier().bodies[new].mass()).abs()
             < 1e-5
+    );
+    let masses: Vec<_> = [engine, portable]
+        .into_iter()
+        .map(|id| {
+            let old = g.area.items.get(id).unwrap().body.unwrap();
+            let new = loaded.area.items.get(id).unwrap().body.unwrap();
+            (
+                id,
+                g.physics.rapier().bodies[old].mass(),
+                loaded.physics.rapier().bodies[new].mass(),
+            )
+        })
+        .collect();
+    assert!(
+        masses
+            .iter()
+            .all(|(_, old, new)| *old > 0. && (old - new).abs() < 1e-5),
+        "paused candidate mass mismatch: {masses:?}"
     );
     g.started = true;
     loaded.paused = false;

@@ -87,6 +87,14 @@ impl GarageRuntime {
             .sync(&mut candidate.area.items, &mut candidate.physics)?;
         candidate.area.items.restore_save(&ids, &saved.items)?;
         candidate.area.items.sync_poses(&candidate.physics);
+        // Rapier defers collider and additional-mass updates until a step or recomputation.
+        // Commit them while paused, before restoring motion and sleep.
+        let world = candidate.physics.rapier_mut();
+        for (_, body) in world.bodies.iter_mut() {
+            if body.is_dynamic() {
+                body.recompute_mass_properties_from_colliders(&world.colliders);
+            }
+        }
         // Mass and collider assembly may wake bodies. Restore velocities and sleep last.
         for record in saved
             .bodies
