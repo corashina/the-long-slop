@@ -2,7 +2,7 @@
 
 Date: 2026-10-12, Europe/Warsaw.
 Branch: `codex/survival-weather`.
-Status: The user approved the chat design. This written specification awaits review.
+Status: The user approved this written specification in chat on 2026-10-12.
 
 ## Intent and scope
 
