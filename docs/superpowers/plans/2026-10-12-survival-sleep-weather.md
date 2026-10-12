@@ -375,6 +375,8 @@ Capture this first working layer under `.cache/survival-weather/layer-1/`; recor
 
 ### Task 5: Implement sleep state and separate clock routing
 
+Completed after source review, compilation, and strict validation. Tests and browser acceptance were skipped at the user's request. Removed-API test cases remain stale.
+
 **Files:** Create `src/sleep.rs`; modify `src/lib.rs`, `src/simulation.rs`, `src/lighting.rs`, `src/app.rs`.
 - Modify: `src/starting_area.rs`, `src/starting_area/survival.rs`, `src/simulation/engine.rs`, `src/fluids.rs`.
 - Modify: engine reference fields/export, common fixture, and all existing cycle/clock callers.
@@ -396,7 +398,7 @@ Capture this first working layer under `.cache/survival-weather/layer-1/`; recor
 - Add `GarageRuntime::clock_factors(&self, reference: &ReferenceManifest) -> ClockFactors`.
 - `GarageRuntime` owns `sleep: SleepState`. `SleepOutput` and `ClockFactors` derive Copy, Debug, and PartialEq.
 
-- [ ] **Step 1: Write `sleep_hold_cooldown_and_wake_boundaries`, `sleep_clocks_are_separate`, and `mixed_frame_scales_do_not_double_count`.**
+- [x] **Step 1: Write `sleep_hold_cooldown_and_wake_boundaries`, `sleep_clocks_are_separate`, and `mixed_frame_scales_do_not_double_count`.**
 Use direct deadline cases and source literals. Add these clock-factor assertions after entering sleep:
 
 ```rust
@@ -420,8 +422,8 @@ Test negative, NaN, infinite, and ten-second frame deltas. A valid stalled frame
 Assert no more than six awake or twelve sleeping fixed steps; each step retains `FIXED_DT`.
 Pin engine RPM/unscaled heat to simulation time, and fuel/oil/coolant/thermal loss to the source sleep factor.
 
-- [ ] **Step 2: Run targets `sleep`, `input`, `engine`, and `lighting`.** Expect missing sleep state and changed clock APIs.
-- [ ] **Step 3: Implement state and replace obsolete clock routing.** Clamp incoming real delta before scaling.
+- [x] **Step 2: Run targets `sleep`, `input`, `engine`, and `lighting`.** Expect missing sleep state and changed clock APIs.
+- [x] **Step 3: Implement state and replace obsolete clock routing.** Clamp incoming real delta before scaling.
 `take_step` spends `FIXED_DT / time_scale` real seconds. A frame touching sleep has budget twelve; an awake frame has budget six.
 Keep only fractional carry after the budget. Reject invalid delta without changing the accumulator.
 Sample factors before a step; apply entry/wake/death at its endpoint, then sample factors for the next step.
@@ -433,9 +435,9 @@ Retain the source previous-step star extra and the `Felho` cloud-speed curve. Re
 Remove the separate raw real-frame `advance_lighting` path. Use one authoritative accepted interval route.
 Route lamp fades and shader time through normal simulation time, including sleep's twofold rate.
 Remove the raw real-frame `advance_light_fades` caller; advance the existing fade owner from accepted simulation slices.
-- [ ] **Step 4: Run focused targets and release WASM build.** Expect numeric boundary tests and existing lighting/engine checks to pass.
+- [x] **Step 4: Run focused targets and release WASM build.** Expect numeric boundary tests and existing lighting/engine checks to pass.
 Use fixed-step tolerance for endpoint frames; do not widen tolerance to conceal a wrong multiplier.
-- [ ] **Step 5: Commit clock routing.** Message: `Add source sleep clocks without large physics steps`.
+- [x] **Step 5: Commit clock routing.** Message: `Add source sleep clocks without large physics steps`.
 
 ### Task 6: Connect sleep input, camera, feedback, and lifecycle
 
