@@ -48,7 +48,7 @@ window.gameSurvival=(hp,food,water,bowel,bladder,opacity,isDead,lookScale,menuDu
 };
 const sleep={phase:0,eligible:false,charge:0,cooldownRemaining:0,progress:0,held:false,dead:false};
 window.gameSleep=(phase,eligible,charge,cooldownRemaining,progress)=>{
- sleep.phase=phase;sleep.eligible=eligible;sleep.charge=charge;sleep.cooldownRemaining=cooldownRemaining;sleep.progress=progress;sleep.held=(input.state.held&131072)!==0;sleep.dead=dead;sleeping=phase===2;survival?.updateSleep(sleep);
+ sleep.phase=phase;sleep.eligible=eligible;sleep.charge=charge;sleep.cooldownRemaining=cooldownRemaining;sleep.progress=progress;sleep.held=(input.state.held&131072)!==0;sleep.dead=dead;sleeping=phase===2;survival?.updateSleep(sleep,feedback?.state.enabled);
 };
 window.gameAudioError=message=>audio?.disable(Error(message));
 window.gameAudio=(ids,values)=>audio?.publish(ids,values);

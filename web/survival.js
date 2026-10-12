@@ -10,8 +10,8 @@ export function createSurvival(ui,cooldownSeconds) {
  fillAncestry[fillAncestry.length-1]={...fillAncestry.at(-1),anchor_min:[0,0],anchor_max:[1,1]};
  const sleepFill={...sourceFill,ancestry:fillAncestry};
  function resizeSleep(){for(const [role,node] of Object.entries(sleepNodes)){const layout=role==='need-sleep-fill'?sleepFill:ui.layouts[role];applyLayout(node,layout,ui.urls);if(node.className==='need-part')node.style.backgroundColor=rgba(layout.image_color);}}
- function updateSleep(output){
-  sleepVisible=output.held&&!output.dead&&output.phase!==2;sleepRoot.hidden=!visible||!sleepVisible;
+ function updateSleep(output,hudEnabled){
+  sleepVisible=hudEnabled&&output.held&&!output.dead&&output.phase!==2;sleepRoot.hidden=!visible||!sleepVisible;
   sleepNodes['can-sleep'].hidden=!output.eligible;sleepNodes['cannot-sleep'].hidden=output.eligible;
   const value=output.eligible?output.charge:Math.max(0,Math.min(1,output.cooldownRemaining/cooldownSeconds));
   const slider=ui.need_sliders.sleep,fill=Math.max(0,Math.min(1,(value-slider.minimum)/(slider.maximum-slider.minimum)))*100;
