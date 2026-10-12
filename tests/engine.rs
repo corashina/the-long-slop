@@ -9,8 +9,12 @@ use my_summer_slop::simulation::{
 
 fn fluids() -> [FluidContainer; 3] {
     let r = common::reference();
-    [r.engine.fuel_tank, r.engine.oil_tank, r.engine.coolant_tank]
-        .map(|id| FluidContainer::from(r.tanks.iter().find(|t| t.item == id).unwrap()))
+    [
+        r.vehicles[0].engine.fuel_tank,
+        r.vehicles[0].engine.oil_tank,
+        r.vehicles[0].engine.coolant_tank,
+    ]
+    .map(|id| FluidContainer::from(r.tanks.iter().find(|t| t.item == id).unwrap()))
 }
 
 fn step(
@@ -35,7 +39,7 @@ fn step(
 
 #[test]
 fn ignition_edges_and_start() {
-    let r = common::reference().engine;
+    let r = common::reference().vehicles.remove(0).engine;
     let mut tanks = fluids();
     let mut state = EngineState::new(&r);
     let tap = EngineInput {
@@ -80,7 +84,7 @@ fn ignition_edges_and_start() {
 
 #[test]
 fn bad_fuel_oil_and_heat_prevent_running() {
-    let r = common::reference().engine;
+    let r = common::reference().vehicles.remove(0).engine;
     for fault in 0..5 {
         let mut tanks = fluids();
         let mut state = EngineState::new(&r);
@@ -102,7 +106,7 @@ fn bad_fuel_oil_and_heat_prevent_running() {
 
 #[test]
 fn torque_fuel_and_penalties_follow_source_formulas() {
-    let r = common::reference().engine;
+    let r = common::reference().vehicles.remove(0).engine;
     let mut tanks = fluids();
     let mut state = EngineState::new(&r);
     state.ignition = true;
@@ -191,7 +195,7 @@ fn torque_fuel_and_penalties_follow_source_formulas() {
 
 #[test]
 fn shutdown_uses_grace_then_stops_fuel_consumption() {
-    let r = common::reference().engine;
+    let r = common::reference().vehicles.remove(0).engine;
     let mut tanks = fluids();
     let mut state = EngineState::new(&r);
     state.rpm = r.idle_rpm;
@@ -217,7 +221,7 @@ fn shutdown_uses_grace_then_stops_fuel_consumption() {
 
 #[test]
 fn start_chance_uses_the_recovered_interval() {
-    let mut r = common::reference().engine;
+    let mut r = common::reference().vehicles.remove(0).engine;
     r.start_chance = 0.5;
     let mut tanks = fluids();
     let mut state = EngineState::new(&r);
@@ -249,7 +253,7 @@ fn start_chance_uses_the_recovered_interval() {
 
 #[test]
 fn missing_coolant_changes_cooling_without_a_start_lock() {
-    let r = common::reference().engine;
+    let r = common::reference().vehicles.remove(0).engine;
     let mut wet = fluids();
     let mut dry = wet.clone();
     dry[2].mixture.quantities_liters = [0.0; 6];
@@ -267,7 +271,7 @@ fn missing_coolant_changes_cooling_without_a_start_lock() {
 
 #[test]
 fn removed_engine_stops_and_removed_radiator_cannot_cool_or_consume_contents() {
-    let r = common::reference().engine;
+    let r = common::reference().vehicles.remove(0).engine;
     let mut tanks = fluids();
     let mut state = EngineState::new(&r);
     state.rpm = 3000.;

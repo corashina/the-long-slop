@@ -46,6 +46,8 @@ struct Slot {
     compatible: Vec<ItemId>,
     mount_pose: Pose,
     detach_pose: Option<Pose>,
+    /// The vehicle whose hierarchy holds the slot.
+    vehicle: Option<usize>,
 }
 pub struct PartAttachments {
     scan_mask: u32,
@@ -56,7 +58,8 @@ pub struct PartAttachments {
     slot_indices: HashMap<PartSlotId, usize>,
     collider_slots: HashMap<ColliderId, PartSlotId>,
     wheel_covers: HashMap<ItemId, PartSlotId>,
-    chassis: BodyId,
+    /// Chassis body per vehicle.
+    chassis: Vec<BodyId>,
     bound: bool,
 }
 impl PartAttachments {
@@ -163,6 +166,18 @@ impl PartAttachments {
                         })
                     })
                     .collect::<Result<_, ReferenceError>>()?,
+                vehicle: {
+                    let mut node = Some(s.node);
+                    let mut vehicle = None;
+                    while let Some(id) = node {
+                        vehicle = r.vehicles.iter().position(|v| v.root == id);
+                        if vehicle.is_some() {
+                            break;
+                        }
+                        node = r.nodes.iter().find(|n| n.id == id).and_then(|n| n.parent);
+                    }
+                    vehicle
+                },
                 reference: s.clone(),
                 part: s
                     .part
@@ -193,7 +208,7 @@ impl PartAttachments {
             slots,
             slot_indices,
             collider_slots,
-            chassis: r.vehicle.body,
+            chassis: r.vehicles.iter().map(|v| v.body).collect(),
             bound: false,
             wheel_covers: r
                 .wheel_parts
@@ -566,7 +581,8 @@ impl PartAttachments {
                     .colliders
                     .set_parent(handle, Some(body), &mut world.bodies);
                 world.colliders[handle].set_position_wrt_parent(local);
-                world.colliders[handle].set_enabled(
+                crate::vehicle::set_collider_enabled(
+                    &mut world.colliders[handle],
                     p.slot
                         .is_none_or(|s| !self.slots[s].reference.disable_colliders_on_craft)
                         && shape.enabled,
@@ -650,11 +666,13 @@ impl PartAttachments {
                 state.local_pose = from_rapier(&(inverse * to_rapier(state.pose)));
             }
             for shape in &self.parts[i].shapes {
-                let local = if body == physics.chassis_handle() {
-                    m.body_local_pose(shape.body, self.chassis)
+                let vehicle = physics.vehicle_of(body);
+                let local = if let Some(vehicle) = vehicle {
+                    let chassis = self.chassis[vehicle];
+                    m.body_local_pose(shape.body, chassis)
                         .map(|pose| pose * shape.shape)
                         .unwrap_or_else(|| {
-                            m.node_local_pose(self.parts[i].reference.node, self.chassis)
+                            m.node_local_pose(self.parts[i].reference.node, chassis)
                                 .unwrap()
                                 * shape.part_local
                         })
@@ -664,7 +682,6 @@ impl PartAttachments {
                             .map(|pose| pose * shape.shape)
                             .unwrap_or(self.parts[i].pose * shape.part_local)
                 };
-                let vehicle = body == physics.chassis_handle();
                 let h = shape.handle.unwrap();
                 let world = physics.rapier_mut();
                 if world.colliders[h].parent() != Some(body) {
@@ -679,9 +696,9 @@ impl PartAttachments {
                     .is_none_or(|s| !self.slots[s].reference.disable_colliders_on_craft)
                     && shape.enabled;
                 if c.is_enabled() != enabled {
-                    c.set_enabled(enabled);
+                    crate::vehicle::set_collider_enabled(c, enabled);
                 }
-                if vehicle {
+                if vehicle.is_some() {
                     c.user_data |= VEHICLE_COLLIDER_FLAG;
                 } else {
                     c.user_data &= !VEHICLE_COLLIDER_FLAG;
@@ -702,7 +719,7 @@ impl PartAttachments {
                 return p.body.unwrap();
             };
             let Some(owner) = self.slots[s].reference.owner else {
-                return physics.chassis_handle();
+                return physics.chassis_handle(self.slots[s].vehicle.expect("vehicle slot"));
             };
             if let Some(&parent) = self.indices.get(&owner) {
                 i = parent;

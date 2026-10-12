@@ -1,6 +1,7 @@
 """Offline export for the selected Steam build."""
 import argparse
 import hashlib
+import math
 import json
 import re
 import subprocess
@@ -80,9 +81,40 @@ def lighting_resources(manifest):
     return list(resources.values())
 
 
+# Start cars in manifest order: root GameObject, starter field, and starter GameObject.
+CARS={'lada':(17687,'StartCar02',206),'skoda':(6890,'StartCar01',298)}
+# Unity world x and z of the parked Skoda, on the flat yard north of the garage.
+SKODA_PARKING=(38.5,58.5)
+
+
+def relocate(source, transform, position, yaw_degrees):
+    """Move a root transform in world x and z and turn it about world y."""
+    from .collision import quaternion_product
+    from .gltf import transform_point
+    from .source import vector
+    chain=source.chain(transform);data=chain[0]
+    parent_position=(0.,0.,0.);parent_rotation=(0.,0.,0.,1.);parent_scale=(1.,1.,1.)
+    for item in chain[1:]:
+        parent_position=transform_point(parent_position,vector(item['m_LocalPosition']),vector(item['m_LocalRotation'],4),vector(item['m_LocalScale']))
+        parent_rotation=quaternion_product(vector(item['m_LocalRotation'],4),parent_rotation)
+        parent_scale=tuple(parent_scale[i]*vector(item['m_LocalScale'])[i] for i in range(3))
+    if any(abs(v-1.)>1e-6 for v in parent_scale):raise ValueError('Relocated car parent must not scale')
+    world_position=transform_point(vector(data['m_LocalPosition']),parent_position,parent_rotation,(1.,1.,1.))
+    world_rotation=quaternion_product(parent_rotation,vector(data['m_LocalRotation'],4))
+    half=math.radians(yaw_degrees)*.5
+    rotation=quaternion_product((0.,math.sin(half),0.,math.cos(half)),world_rotation)
+    target=(position[0],world_position[1],position[1])
+    inverse=(-parent_rotation[0],-parent_rotation[1],-parent_rotation[2],parent_rotation[3])
+    offset=tuple(target[i]-parent_position[i] for i in range(3))
+    local=transform_point(offset,(0.,0.,0.),inverse,(1.,1.,1.))
+    local_rotation=quaternion_product(inverse,rotation)
+    data['m_LocalPosition']=dict(zip('xyz',local))
+    data['m_LocalRotation']=dict(zip('xyzw',local_rotation))
+
+
 def validate_runtime_paths(manifest):
     assets = manifest.get('assets', [])
-    if {a['path'] for a in assets} != {'reference/home.gltf','reference/lada.gltf','reference/items.gltf','reference/road_lamp.gltf','reference/sky.gltf'} or len(assets) != 5:
+    if {a['path'] for a in assets} != {f'reference/{name}.gltf' for name in ('home',*CARS,'items','road_lamp','sky')} or len(assets) != 4+len(CARS):
         raise ValueError('Runtime must contain only the selected scenes')
     resources = {item['path']:item['sha256'] for item in lighting_resources(manifest)}
     for asset in assets:
@@ -181,7 +213,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     if output.resolve().is_relative_to(source.root.resolve()):
         raise ValueError('Keep generated files outside the source installation')
     def transform(go):return source.transform_for(source.get('level1',go))
-    roots = {'home':[source.get('level1',21400)], 'lada':[transform(17687)],
+    roots = {'home':[source.get('level1',21400)], **{name:[transform(go)] for name,(go,_,_) in CARS.items()},
         'items':[transform(go) for go in (13023,13027,18878,13019,15637)]}
     spare=source.get('level1',71403)
     roots['items'].append(source.transform_for(source.resolve(spare,source.read(spare)['m_GameObject'])))
@@ -192,8 +224,12 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
         raise ValueError('Selected scene Lada differs from the required prefab hierarchy')
     if source.read(source.get('level1',64896))['FirstHome']['m_PathID']!=21400:
         raise ValueError('Selected home link differs from the required home')
-    if source.read(source.get('level1',64898))['StartCar02']['m_PathID']!=206:
-        raise ValueError('Selected Lada starter link differs from the required car')
+    starters=source.read(source.get('level1',64898))
+    for name,(go,field,starter) in CARS.items():
+        if starters[field]['m_PathID']!=starter or source.read(roots[name][0])['m_Father']['m_PathID']!=source.transform_for(source.get('level1',starter)).path_id:
+            raise ValueError(f'Selected {name} starter link differs from the required car')
+    # Every start car shares one garage spot. The project parks the other cars in the yard.
+    relocate(source,roots['skoda'][0],SKODA_PARKING,180.)
     source.live_mirror_sources = []
     source.live_mirror_renderers = {}
     main_reader = source.get('level1', 64919)
@@ -201,7 +237,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     mirror_material = source.resolve(main_reader, main['defMirrorMaterial'])
     mirror_texture = source.resolve(main_reader, main['defMirrorTexture'])
     from .source import source_id, key
-    for node in source.hierarchy(roots['lada'][0], activate_root=True):
+    for node in [n for name in CARS for n in source.hierarchy(roots[name][0], activate_root=True)]:
         for reader in node['components']:
             if reader.type.name == 'MonoBehaviour' and source.class_name(reader) == 'mirrorscript':
                 data = source.read(reader)['M']
@@ -217,14 +253,15 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     clouds=source.get('level1',27217)
     source.lighting_prototype_roots={key(pole),key(clouds)}
     source.lighting_pole_root=key(pole)
-    source.lighting_root_assets[key(clouds)]=5
-    source.lighting_root_assets[key(pole)]=4
+    source.lighting_root_assets[key(pole)]=len(roots)+1
+    source.lighting_root_assets[key(clouds)]=len(roots)+2
+    source.lighting_cars=[roots[name][0] for name in CARS]
     recover_lighting(source,[root for readers in roots.values() for root in readers],output)
     roots['road_lamp']=[pole]
     roots['sky']=[clouds]
     report = {}
     for name, readers in roots.items():
-        report[name] = export_gltf((source,readers),output/f'{name}.gltf',library,list(roots).index(name)+1)
+        report[name] = export_gltf((source,readers),output/f'{name}.gltf',library,list(roots).index(name)+1,name!='sky')
         print(f'Exported {name}: {report[name]["node_count"]} nodes',flush=True)
     (output/'material-evidence.json').write_text(json.dumps(list(source.material_evidence.values()), indent=2, allow_nan=False), encoding='utf-8')
     (output/'geometry-evidence.json').write_text(json.dumps(report,indent=2,allow_nan=False),encoding='utf-8')
@@ -238,17 +275,18 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
         raise ValueError(f'Incomplete parameter recovery: {parameters["errors"]}')
     hashes=[{'file':record.file.removeprefix('TheLongDrive_Data/'),'sha256':record.sha256}
             for record in snapshot.files if record.file.startswith('TheLongDrive_Data/')]
-    manifest=build_manifest(source,roots,report,hashes,library)
+    manifest=build_manifest(source,roots,report,hashes,library,list(CARS))
     manifest['library']=provenance(library.receipt)
     manifest['ui']=export_ui(source,output,library)
-    manifest['instruments']=recover_instruments(source,manifest,report)
+    for index,name in enumerate(CARS):
+        manifest['vehicles'][index]['instruments']=recover_instruments(source,manifest,report,name,roots[name][0])
     validate_lighting_export(manifest,output)
     (output/'lighting-evidence.json').write_text(json.dumps({'lighting':manifest['lighting'],'byte_checks':source.evidence,'native_engine':native_engine,'fog_setting':source.lighting_fog_evidence,'library':manifest['library']},indent=2,allow_nan=False),encoding='utf-8')
     parameters['controls']={
         'source':{'file':'level0','path_id':16865},
         'defaults':{'object_move':manifest['player']['obj_move_sensitivity'],'object_rotation':manifest['player']['obj_rotation_sensitivity'],
             'look_xy':manifest['player']['look_sensitivity'],'foot_fov':manifest['player']['field_of_view_degrees'],
-            'keyboard_steering_rate':manifest['vehicle']['keyboard_steering_rate']},
+            'keyboard_steering_rate':manifest['vehicles'][0]['keyboard_steering_rate']},
         'slider_source_ids':[18564,18972,19178,17280,18711,17625,18360,18191],
         'slider_multiplier_rule':'slidersettingscript.FStart changes zero valueMultipler to one; GetValue returns value * valueMultipler.',
         'carry_minimum_rule':'Distance range derives from the authored carry marker and maxPickupDist offset sphere.',

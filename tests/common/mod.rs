@@ -27,7 +27,7 @@ pub fn reference() -> ReferenceManifest {
         half_extents: [0.65, 0.36, 0.72],
         rotation: [0.0, 0.0, 0.0, 1.0],
     };
-    reference.vehicle.colliders.push(cabin.id);
+    reference.vehicles[0].colliders.push(cabin.id);
     reference
         .action_bindings
         .push(my_summer_slop::reference::ActionBinding {
@@ -44,10 +44,10 @@ pub fn reference() -> ReferenceManifest {
 pub fn world() -> PhysicsWorld {
     PhysicsWorld::new(
         &reference(),
-        VehiclePose {
+        &[VehiclePose {
             position: [0.0, 1.1, 0.0],
             rotation: [0.0, 0.0, 0.0, 1.0],
-        },
+        }],
     )
     .expect("valid fixture physics")
 }

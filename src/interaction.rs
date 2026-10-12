@@ -116,7 +116,8 @@ struct SeatState {
 pub struct InteractionState {
     light_controls: HashMap<ColliderId, LightControlId>,
     light_nodes: HashMap<ColliderId, NodeId>,
-    cabin_doors: [Option<(ItemId, ItemId)>; 4],
+    /// Door usable and owner per lighting controller. Only cabin controllers have links.
+    cabin_doors: Vec<[Option<(ItemId, ItemId)>; 4]>,
     seat_action_latched: bool,
     usable_light_controls: HashSet<LightControlId>,
     fill_opening: Option<OpeningId>,
@@ -319,16 +320,18 @@ impl InteractionState {
             .lighting
             .controllers
             .iter()
-            .find_map(|c| c.cabin_input.as_ref())
-            .map_or([None; 4], |input| {
-                std::array::from_fn(|i| {
-                    reference
-                        .mechanisms
-                        .iter()
-                        .find(|m| m.source == input.door_usable_sources[i])
-                        .map(|m| (m.item, m.parent_item.unwrap_or(m.item)))
+            .map(|c| {
+                c.cabin_input.as_ref().map_or([None; 4], |input| {
+                    std::array::from_fn(|i| {
+                        reference
+                            .mechanisms
+                            .iter()
+                            .find(|m| m.source == input.door_usable_sources[i])
+                            .map(|m| (m.item, m.parent_item.unwrap_or(m.item)))
+                    })
                 })
-            });
+            })
+            .collect();
         Ok(Self {
             light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
             light_controls,
@@ -487,14 +490,15 @@ impl InteractionState {
     pub fn throw_active(&self) -> bool {
         self.carry.throw_active()
     }
-    pub fn push_steering(&self) -> Option<f32> {
+    /// Returns the pushed body and its steering input.
+    pub fn push_steering(&self) -> Option<(RigidBodyHandle, f32)> {
         self.push.steering()
     }
     pub fn push_gripping(&self) -> bool {
         self.push.gripping()
     }
-    pub fn cabin_door_values(&self, items: &ItemStore) -> [f32; 4] {
-        self.cabin_doors.map(|link| {
+    pub fn cabin_door_values(&self, control: usize, items: &ItemStore) -> [f32; 4] {
+        self.cabin_doors[control].map(|link| {
             link.filter(|(_, owner)| items.mounted(*owner))
                 .and_then(|(usable, _)| self.mechanisms.value(usable, false))
                 .unwrap_or(0.)
