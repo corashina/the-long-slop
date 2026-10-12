@@ -13,7 +13,10 @@ Run from the isolated source-world worktree:
 `ReferenceRoot` identifies the project with the accepted library and Python environment.
 The checked local harness is required. Its manifest hash is pinned in `world_probe.py`.
 The script builds hooks, prepares a scratch player, captures five seeds, repeats capture, and checks payload hashes.
-Use `-Verify` to check an existing envelope.
+Use `-Verify` to check an existing envelope against both retained numeric capture groups.
+Verification reads native JSON, managed CSV files, and assembled runtime JSON; it does not launch a sampler.
+A separate checked input contract binds startup frames, terrain caller arrays, native rows, and provenance receipts.
+Required arrays may be empty only when the checked source capture establishes that value.
 Source bodies, captures, instruction maps, and expected values must remain outside Git.
 
 ## Source authority

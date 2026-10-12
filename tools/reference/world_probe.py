@@ -22,7 +22,10 @@ SEGMENTS = [0, 1, 99, 100, 255, 256, 257, 999, 1000, 9999, 49999]
 MANAGED_SHA256 = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e'
 HARNESS_SHA256 = 'b4ed417e66d9e14aaa297e07ed2715b8d6fd023078f524481a985bffca9a77a1'
 LIBRARY_SHA256 = '92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99'
+INPUT_CONTRACT_SHA256 = 'b32029791397f5ceb00178adde8ed00dc5ec90ca8a65d5e5974ad640553ecaa6'
 PAYLOAD_FIELDS = ('native', 'managed', 'assembled')
+MANAGED_FILES = {'placement_diagnostic': 'placement.csv', 'terrain_diagnostic': 'placement.terrain.csv',
+                 'road_diagnostic': 'placement.road.csv'}
 
 
 def digest(path: Path) -> str:
@@ -32,7 +35,11 @@ def digest(path: Path) -> str:
 
 def payload_digest(envelope: dict) -> str:
     payload = {key: envelope[key] for key in PAYLOAD_FIELDS}
-    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+    return value_digest(payload)
+
+
+def value_digest(value) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
 
 def checked_harness() -> dict:
@@ -63,18 +70,27 @@ def sample_native_noise() -> list[dict]:
     return json.loads(result)['native']
 
 
+def _read_payload(directory: Path, seeds: list[int]) -> dict:
+    try:
+        native = json.loads((directory / 'native.json').read_text())
+        managed = {}
+        for kind, name in MANAGED_FILES.items():
+            with (directory / name).open(newline='') as stream:
+                managed[kind] = list(csv.DictReader(stream))
+        assembled = [json.loads((directory / f'seed-{seed}/runtime.json').read_text()) for seed in seeds]
+    except (OSError, ValueError) as exc:
+        raise ValueError(f'Missing or invalid retained source artifact: {directory}') from exc
+    return {'native': native, 'managed': managed, 'assembled': assembled}
+
+
 def _sample(destination: Path, seeds: list[int]) -> dict:
     destination.mkdir(parents=True)
-    native = json.loads(_run([sys.executable, '-B', str(PROBE_ROOT / 'native_probe.py'), str(STEAM_ROOT)]))
+    native = _run([sys.executable, '-B', str(PROBE_ROOT / 'native_probe.py'), str(STEAM_ROOT)])
+    (destination / 'native.json').write_text(native)
     _run(['pwsh', '-NoProfile', '-File', str(PROBE_ROOT / 'compile_managed.ps1')], destination / 'compile-managed.log')
     _run([sys.executable, '-B', str(PROBE_ROOT / 'mono_probe.py'), str(destination / 'placement.csv')], destination / 'managed.log')
-    managed = {}
-    for kind, name in [('placement_diagnostic', 'placement.csv'), ('terrain_diagnostic', 'placement.terrain.csv'), ('road_diagnostic', 'placement.road.csv')]:
-        with (destination / name).open(newline='') as stream:
-            managed[kind] = list(csv.DictReader(stream))
     _run(['pwsh', '-NoProfile', '-File', str(PROBE_ROOT / 'run_runtime.ps1'), '-OutputRoot', str(destination), '-SeedList', ','.join(map(str, seeds))], destination / 'runtime.log')
-    assembled = [json.loads((destination / f'seed-{seed}/runtime.json').read_text()) for seed in seeds]
-    return {'native': native, 'managed': managed, 'assembled': assembled}
+    return _read_payload(destination, seeds)
 
 
 def capture(reference_root: Path, output: Path, seeds: list[int]) -> dict:
@@ -127,11 +143,16 @@ def capture(reference_root: Path, output: Path, seeds: list[int]) -> dict:
     return envelope
 
 
-def _verify_runtime_logs(output: Path) -> None:
+def _capture_root(output: Path) -> Path:
     pointer = output / 'last-run.txt'
     run = Path(pointer.read_text()).resolve() if pointer.is_file() else output.resolve()
     if not run.is_relative_to(PROBE_ROOT.resolve()):
         raise ValueError('Source capture log path leaves ignored probe storage')
+    return run
+
+
+def _verify_runtime_logs(output: Path) -> None:
+    run = _capture_root(output)
     for group in ('first', 'replay'):
         for seed in SEEDS:
             path = run / group / f'seed-{seed}' / 'unity.log'
@@ -180,6 +201,48 @@ def verify(output: Path) -> None:
     harness = checked_harness()
     if envelope.get('source_context') != harness['context'] or envelope.get('library', {}).get('manifest_sha256') != LIBRARY_SHA256:
         raise ValueError('Source context or library provenance changed')
+    contract_path = PROBE_ROOT / 'input-contract.json'
+    if not contract_path.is_file() or digest(contract_path) != INPUT_CONTRACT_SHA256:
+        raise ValueError('Checked source input contract is missing or changed')
+    contract = json.loads(contract_path.read_text())
+    if envelope.get('library') != contract['library'] or envelope.get('native_engine') != contract['native_engine']:
+        raise ValueError('Source provenance receipt is missing or changed')
+    _validate_payload(envelope, harness, contract)
+    run = _capture_root(output)
+    for group in ('first', 'replay'):
+        retained = _read_payload(run / group, SEEDS)
+        _validate_payload(retained, harness, contract)
+        if payload_digest(retained) != actual:
+            raise ValueError(f'Retained {group} source payload differs from envelope')
+    _verify_runtime_logs(output)
+
+
+def _caller_inputs(row: dict) -> dict:
+    # This subset binds source frames and caller arrays, including valid empty arrays.
+    road_fields = ('segment', 'coords', 'angles', 'roadFrame', 'skinFrame', 'bones', 'skinBones',
+                   'bindPoses', 'pole', 'sourceVertices', 'sourceNormals', 'uv', 'weights', 'triangles')
+    tile_fields = ('center', 'resolution', 'tileSize', 'roadCoords', 'buildingCoords', 'buildingRanges', 'holeCoords')
+    try:
+        return {'startObjects': row['startObjects'], 'holes': row['holes'], 'foundations': row['foundations'],
+                'numeric': row['numeric'], 'spawnInputs': row['spawnInputs'],
+                'distances': [row[key] for key in ('distances', 'minDistances', 'maxDistances')],
+                'roads': [{key: road[key] for key in road_fields} for road in row['roads']],
+                'terrain': [{key: tile[key] for key in tile_fields} for tile in row['terrain']],
+                'terrainDirect': [{key: tile[key] for key in tile_fields} for tile in row['terrainDirect']],
+                'rebaseFrames': [{key: rebase[key] for key in ('segment', 'delta', 'roadOrigin', 'terrainOrigin')}
+                                 for rebase in row['rebases']]}
+    except (KeyError, TypeError) as exc:
+        raise ValueError('Missing required source caller inputs') from exc
+
+
+def _validate_payload(envelope: dict, harness: dict, contract: dict) -> None:
+    native = envelope['native']
+    if value_digest(native) != contract['native_sha256']:
+        raise ValueError('Missing or changed checked native rows or inputs')
+    for name, shape in contract['managed_shapes'].items():
+        rows = envelope['managed'].get(name, [])
+        if len(rows) != shape['rows'] or any(sorted(row) != shape['fields'] for row in rows):
+            raise ValueError('Missing managed diagnostic rows or inputs')
     positions = {(row['x'], row['y']) for row in native['native']}
     if len(positions) < 7 or not any(x < 0 < y for x, y in positions) or not any(y < 0 < x for x, y in positions):
         raise ValueError('Missing full 2D native rows')
@@ -211,6 +274,8 @@ def verify(output: Path) -> None:
         roads = row.get('roads', [])
         if len(roads) != len(SEGMENTS) or [item['segment'] for item in roads] != SEGMENTS:
             raise ValueError('Missing assembled road rows')
+        if value_digest(_caller_inputs(row)) != contract['caller_inputs_sha256'].get(str(row['seed'])):
+            raise ValueError('Missing or changed checked source caller inputs')
         for road in roads:
             if any(len(road.get(key, [])) != size for key, size in [('bones', 10), ('skinBones', 11), ('bindPoses', 11), ('bakedVertices', 88), ('bakedNormals', 88), ('coords', 10), ('angles', 10), ('sourceVertices', 88), ('sourceNormals', 88), ('weights', 88), ('uv', 88)]):
                 raise ValueError('Missing source geometry rows')
@@ -259,7 +324,7 @@ def verify(output: Path) -> None:
                 raise ValueError('Missing checked Unity random state')
             if key == 'initialRandomState' and [state[f's{i}'] for i in range(4)] != harness['context']['shared_random_input']['state']:
                 raise ValueError('Shared Unity random input changed')
-    _verify_runtime_logs(output)
+
 
 
 def main() -> None:
