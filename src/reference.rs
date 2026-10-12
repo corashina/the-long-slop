@@ -586,6 +586,7 @@ pub struct SeatReference {
     pub item: ItemId,
     pub anchor: AnchorId,
     pub driver: bool,
+    pub driving2: bool,
     pub hit_nodes: Vec<NodeId>,
     pub yaw_limits_degrees: [f32; 2],
     pub exit_distance: f32,

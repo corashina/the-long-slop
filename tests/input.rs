@@ -624,3 +624,96 @@ fn exported_reverse_lights_follow_selected_reverse_gear() {
         );
     }
 }
+
+#[test]
+fn driving2_uses_car_controls_without_throttle() {
+    use my_summer_slop::{starting_area::GarageRuntime, vehicle::VehiclePose};
+    let mut game = common::reference();
+    let seat = game.seats.iter_mut().find(|s| s.driver).unwrap();
+    seat.driver = false;
+    seat.driving2 = true;
+    let id = seat.id;
+    let car = game
+        .items
+        .iter()
+        .find(|i| i.node == game.vehicle.root)
+        .unwrap()
+        .id;
+    game.items
+        .iter_mut()
+        .find(|i| i.id == game.engine.item)
+        .unwrap()
+        .attached_to = Some(car);
+    let mut run = GarageRuntime::new(&game).unwrap();
+    run.started = true;
+    assert!(run.area.player.enter(
+        id,
+        VehiclePose {
+            position: [20., 2., 20.],
+            rotation: [0., 0., 0., 1.]
+        },
+        &mut run.physics
+    ));
+    assert!(!run.area.player.driving());
+    assert!(run.area.player.driving2());
+    run.step(
+        &game,
+        FrameInput {
+            held: keys::HORN | keys::FORWARD,
+            ..Default::default()
+        },
+    );
+    let state = run.audio.as_ref().unwrap();
+    assert!(
+        state
+            .signals
+            .iter()
+            .find(|s| s.id == state.reference.horn.voice)
+            .unwrap()
+            .playing
+    );
+    assert!(!run.engine_output.starter);
+    assert!(
+        !run.engine_output.ignition,
+        "driving2 forward must not trigger automatic throttle ignition"
+    );
+    run.step(
+        &game,
+        FrameInput {
+            held: keys::IGNITION,
+            pressed: keys::IGNITION,
+            ..Default::default()
+        },
+    );
+    run.step(
+        &game,
+        FrameInput {
+            released: keys::IGNITION,
+            ..Default::default()
+        },
+    );
+    assert!(run.engine_output.ignition, "driving2 must allow ignition");
+}
+#[test]
+#[ignore = "requires installed source export"]
+fn installed_driving2_matches_source_seats() {
+    use my_summer_slop::reference::ReferenceManifest;
+    let game =
+        ReferenceManifest::from_json(&std::fs::read("web/assets/reference/manifest.json").unwrap())
+            .unwrap();
+    for seat in &game.seats {
+        let record: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(format!(
+                ".cache/reference-library/records/{}/{}.json",
+                seat.source.file, seat.source.path_id
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            seat.driving2,
+            record["data"]["driverSeat1"].as_u64().unwrap() != 0
+        );
+    }
+    assert!(game.seats.iter().any(|s| s.driving2 && !s.driver));
+}

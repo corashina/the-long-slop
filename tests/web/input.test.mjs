@@ -28,3 +28,5 @@ test('headlights_do_not_overlap_carry_controls',()=>{
  assert.equal(i.takeFrame().held,65536|16384|32768);
  i.code('KeyL',false);assert.equal(i.takeFrame().released,65536);
 });
+
+test('source_horn_keys_share_a_held_bit',()=>{const i=new InputState();i.code('KeyH',true);assert.equal(i.takeFrame().held,131072);i.code('Numpad8',true);i.code('KeyH',false);assert.equal(i.takeFrame().held,131072);i.code('Numpad8',false);const f=i.takeFrame();assert.equal(f.held,0);assert.equal(f.released,131072);});

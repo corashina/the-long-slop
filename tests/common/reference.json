@@ -6966,6 +6966,7 @@
         1
       ],
       "driver": true,
+      "driving2": true,
       "yaw_limits_degrees": [
         -179,
         179

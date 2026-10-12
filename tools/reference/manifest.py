@@ -195,6 +195,7 @@ def build_manifest(source, roots, reports, hashes, library):
             seat_node=pointer_node(reader,value['sitPos']) if value['sitPos']['m_PathID'] else node
             seats.append({'id':len(seats)+1,'source':source_id(reader),'item':item_nodes[node],'anchor':anchor(seat_node),
                 'hit_nodes':seat_hits[key(reader)],'driver':bool(value['driverSeat0']) and key(source.resolve(reader,value['Car']))==key(car_reader),
+                'driving2':bool(value['driverSeat1']) and key(source.resolve(reader,value['Car']))==key(car_reader),
                 'yaw_limits_degrees':[-value['rotLimit'],value['rotLimit']],'exit_distance':player['CanGetOutDist'],
                 'min_exit_angle_degrees':value['minGetUpAnlge'],'exit_height':value['getOutHeight']})
     wheel_slots=[]

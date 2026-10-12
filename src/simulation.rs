@@ -23,6 +23,7 @@ pub mod keys {
     pub const TRANSLATE: u32 = 16384;
     pub const RECENTER: u32 = 32768;
     pub const LIGHTS: u32 = 65536;
+    pub const HORN: u32 = 131072;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {webcrypto} from 'node:crypto';
 import {createAudio} from '../../web/audio.js';
 import {MenuState,ACTIONS,captureWithAudio} from '../../web/menu.js';
-import {spatialValues} from '../../web/audio/voices.js';
+import {spatialValues,VoiceBank} from '../../web/audio/voices.js';
 const raw=JSON.parse(readFileSync(new URL('../../web/assets/reference/manifest.json',import.meta.url))).audio;
 const binding=raw.bindings.find(b=>b.trigger==='ignition');
 const samples=readFileSync(new URL('../../web/assets/'+raw.clips.find(c=>c.id===binding.clips[0]).path,import.meta.url));
@@ -37,3 +37,11 @@ for(const nextAction of [ACTIONS.CONTINUE,ACTIONS.RESTART])test('failed_restart_
  const action=menu.takeActions(),nativeSession=action===ACTIONS.RESTART?2:1;await settle();event(audio,nativeSession,nextAction===ACTIONS.RESTART?1:10);await loaded(audio);
  assert.equal(audio.session,nativeSession);assert.equal(audio.accepted,true);assert.equal(Fake.starts.length,1);audio.dispose();
 });
+
+function vehicleBank(){Fake.starts=[];const context=new Fake(),cache={effect:async id=>({duration:raw.clips.find(c=>c.id===id).duration_seconds})};return new VoiceBank(context,raw,cache,new Map(raw.mixers.map(m=>[m.id,new Node()])),()=>1,()=>true,error=>{throw error;});}
+function vehicleFrame(bank,t=1){bank.begin();for(const id of [raw.engine.emitter,raw.voices.find(v=>v.id===raw.horn.voice).emitter])bank.emitter(id,[0,0,0],[0,0,0,1],true);for(const id of [raw.engine.idle_voice,raw.engine.motor_voice,raw.horn.voice])bank.update(id,true,.7,1);bank.finish();}
+test('vehicle_updates_retain_voices',async()=>{const bank=vehicleBank();vehicleFrame(bank);await Promise.resolve();for(let i=0;i<600;i++)vehicleFrame(bank);assert.equal(Fake.starts.length,3);bank.dispose();});
+test('starter_uses_source_interval',async()=>{const bank=vehicleBank(),id=raw.engine.emitter,b=raw.bindings.find(b=>b.id===raw.engine.starter_binding),duration=raw.clips.find(c=>c.id===b.clips[0]).source_duration_seconds,interval=duration*raw.engine.constants.engineStartTimeModifier;bank.begin();bank.emitter(id,[0,0,0],[0,0,0,1],true);bank.starter(id,true,interval);await Promise.resolve();assert.equal(Fake.starts.length,0);bank.starter(id,true,interval+.125);await Promise.resolve();assert.equal(Fake.starts.length,1);bank.starter(id,true,2*interval+.125);await Promise.resolve();assert.equal(Fake.starts.length,1);bank.starter(id,true,2*interval+.25);await Promise.resolve();assert.equal(Fake.starts.length,2);bank.starter(id,false,10);assert.ok(Fake.starts.every(s=>!s.stopped),'release preserves started tails');bank.remove(id);assert.ok(Fake.starts.every(s=>s.stopped));bank.dispose();});
+test('starter_release_cancels_decode',async()=>{const bank=vehicleBank();let complete;bank.cache.effect=()=>new Promise(r=>complete=r);bank.begin();bank.emitter(raw.engine.emitter,[0,0,0],[0,0,0,1],true);bank.starter(raw.engine.emitter,true,10);bank.starter(raw.engine.emitter,false,10);complete({duration:1});await Promise.resolve();assert.equal(Fake.starts.length,0);bank.dispose();});
+
+test('engine_removal_keeps_horn_owner',async()=>{const bank=vehicleBank();vehicleFrame(bank);await Promise.resolve();bank.starter(raw.engine.emitter,true,10);await Promise.resolve();bank.remove(raw.engine.emitter);const horn=bank.voices.get(raw.horn.voice);assert.ok(horn.source);assert.ok(Fake.starts.filter(s=>s!==horn.source).every(s=>s.stopped));bank.dispose();});

@@ -630,6 +630,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
 }
 
 fn publish_audio(
+    reference: Res<RuntimeReference>,
     time: Res<Time<Real>>,
     mut drive: ResMut<Drive>,
     visuals: Res<ReferenceVisuals>,
@@ -651,9 +652,11 @@ fn publish_audio(
         game_audio_listener(p.x, p.y, p.z, q.x, q.y, q.z, q.w);
     }
     for emitter in &audio.reference.emitters {
-        let alive = emitter
-            .item
-            .is_none_or(|id| runtime.area.items.get(id).is_some());
+        let alive = (emitter.id != audio.reference.engine.emitter
+            || runtime.area.items.mounted(reference.0.engine.item))
+            && emitter
+                .item
+                .is_none_or(|id| runtime.area.items.get(id).is_some());
         if let Some(global) = visuals
             .nodes
             .get(&emitter.node)
@@ -677,6 +680,11 @@ fn publish_audio(
     for signal in &audio.signals {
         game_audio_voice(signal.id, signal.playing, signal.gain, signal.pitch);
     }
+    game_audio_starter(
+        audio.reference.engine.emitter,
+        audio.starter_enabled,
+        audio.game_seconds,
+    );
     while let Some(event) = audio.pop_event() {
         game_audio_event(
             event.session,

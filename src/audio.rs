@@ -67,8 +67,27 @@ pub struct AudioSignal {
     pub gain: f32,
     pub pitch: f32,
 }
+#[derive(Clone, Copy, Debug, Default)]
+pub struct VehicleAudioInput {
+    pub rpm: f32,
+    pub ignition: bool,
+    pub running: bool,
+    pub starter: bool,
+    pub horn: bool,
+    pub ambient_temperature: f32,
+    pub electronics_output: f32,
+    pub engine_present: bool,
+}
+fn inverse_lerp(a: f32, b: f32, value: f32) -> f32 {
+    ((value - a) / (b - a)).clamp(0., 1.)
+}
 pub struct AudioState {
     pub signals: Vec<AudioSignal>,
+    pub starter_enabled: bool,
+    horn_gain: f32,
+    last_running: bool,
+    engine_position: [f32; 3],
+    engine_formula: [f32; 11],
     voice_indices: HashMap<u32, usize>,
     head_offset: f32,
     emitter_anchors: HashMap<u32, (Option<NodeId>, rapier3d::math::Pose)>,
@@ -105,7 +124,26 @@ impl AudioState {
             outside.sensor.initial_count,
             reference.interiors.len() + 256,
         );
+        let c = &reference.engine.constants;
+        let engine_formula = [
+            c["SMinAlapRpm"],
+            c["SMaxAlapRpm"],
+            c["SMinMotorRpm"],
+            c["SMaxMotorRpm"],
+            c["SMaxAlapSound"],
+            c["SMaxMotorSound"],
+            c["minAlapPitch"],
+            c["maxAlapPitch"],
+            c["minMotorPitch"],
+            c["maxMotorPitch"],
+            c["maxRpm"],
+        ];
         Self {
+            starter_enabled: false,
+            horn_gain: 0.,
+            last_running: false,
+            engine_position: [0.; 3],
+            engine_formula,
             signals: reference
                 .voices
                 .iter()
@@ -239,6 +277,72 @@ impl AudioState {
             signal.pitch = pitch;
         }
     }
+    pub fn vehicle(&mut self, input: VehicleAudioInput, dt: f32, simulation_seconds: f64) {
+        let [
+            idle_min,
+            idle_max,
+            motor_min,
+            motor_max,
+            idle_gain,
+            motor_gain,
+            ip_min,
+            ip_max,
+            mp_min,
+            mp_max,
+            max_rpm,
+        ] = self.engine_formula;
+        let running = input.engine_present && input.running;
+        self.voice(
+            self.reference.engine.idle_voice,
+            running,
+            inverse_lerp(idle_max, idle_min, input.rpm) * idle_gain,
+            ip_min
+                + (ip_max - ip_min)
+                    * (inverse_lerp(0., idle_max, input.rpm)
+                        + inverse_lerp(idle_max, idle_max * 2., input.rpm)),
+        );
+        self.voice(
+            self.reference.engine.motor_voice,
+            running,
+            inverse_lerp(motor_min, motor_max, input.rpm) * motor_gain,
+            mp_min
+                + (mp_max - mp_min)
+                    * (inverse_lerp(motor_min, max_rpm, input.rpm)
+                        + inverse_lerp(max_rpm, max_rpm * 2., input.rpm)),
+        );
+        self.starter_enabled = input.engine_present && input.starter;
+        if input.engine_present && self.last_running && !running {
+            if let Some(id) = self.reference.engine.stop_binding {
+                let b = self.binding(id).unwrap();
+                let event = AudioEvent {
+                    session: self.session,
+                    sequence: self.sequence.wrapping_add(1),
+                    binding: id,
+                    emitter: b.emitter,
+                    position: self.engine_position,
+                    gain: 1.,
+                    pitch: 1.,
+                    time_seconds: simulation_seconds,
+                    priority: b.priority,
+                };
+                self.sequence = event.sequence;
+                self.push_event(event);
+            }
+        }
+        self.last_running = running;
+        let h = &self.reference.horn;
+        let target = if input.horn { 1. } else { 0. };
+        let step = h.attack_release_rate * dt;
+        self.horn_gain += (target - self.horn_gain).clamp(-step, step);
+        let pitch = h.pitch_min
+            + (h.pitch_max - h.pitch_min)
+                * inverse_lerp(
+                    h.temperature_min,
+                    h.temperature_max,
+                    input.ambient_temperature,
+                );
+        self.voice(h.voice, self.horn_gain > 0., self.horn_gain, pitch);
+    }
     pub fn event_count(&self) -> usize {
         self.length
     }
@@ -279,6 +383,9 @@ impl AudioState {
         self.length = 0;
         self.sequence = 0;
         self.game_seconds = 0.;
+        self.starter_enabled = false;
+        self.horn_gain = 0.;
+        self.last_running = false;
         self.outside_gain = self.reference.mixer_controls.outside.initial_gain;
         self.sensor.sensed = false;
         self.sensor.count = 0;
@@ -296,6 +403,9 @@ impl AudioState {
         }
     }
     pub fn rebase(&mut self, shift: [f32; 3]) {
+        for (p, d) in self.engine_position.iter_mut().zip(shift) {
+            *p -= d;
+        }
         for event in self.queue.iter_mut().flatten() {
             for (p, d) in event.position.iter_mut().zip(shift) {
                 *p -= d;
@@ -344,6 +454,16 @@ impl AudioState {
     }
     pub fn fixed_step(&mut self, area: &StartingArea, physics: &PhysicsWorld, dt: f32) {
         self.game_seconds += f64::from(dt);
+        if let Some(&(anchor, local)) = self.emitter_anchors.get(&self.reference.engine.emitter) {
+            let mut world = anchor
+                .and_then(|node| area.interaction.mechanisms.node_pose(node))
+                .map_or(local, |pose| to_rapier(pose) * local);
+            if anchor.is_none() {
+                world.translation -=
+                    rapier3d::math::Vector::from_array(area.origin.map(|v| v as f32));
+            }
+            self.engine_position = crate::vehicle::from_rapier(&world).position;
+        }
         self.sensor.begin_step();
         for (index, (id, latch)) in self.route_sensors.iter_mut().enumerate() {
             latch.begin_step();

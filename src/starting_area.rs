@@ -828,15 +828,16 @@ impl GarageRuntime {
                 .sqrt();
         let throttle = axis != 0.0
             && (direction.abs() <= reference.vehicle.auto_move_min || direction * axis > 0.0);
-        let ignition_held = driving
+        let car_controls = driving || self.area.player.driving2();
+        let ignition_held = car_controls
             && (input.held & keys::IGNITION != 0
                 || (!reference.vehicle.dont_ignite_with_throttle_in_automatic
                     && throttle
                     && !self.engine_output.running));
-        let ignition_pressed = (driving && input.pressed & keys::IGNITION != 0)
+        let ignition_pressed = (car_controls && input.pressed & keys::IGNITION != 0)
             || (ignition_held && !self.ignition_held);
         let ignition_released = !ignition_held
-            && (self.ignition_held || (driving && input.released & keys::IGNITION != 0));
+            && (self.ignition_held || (car_controls && input.released & keys::IGNITION != 0));
         self.ignition_held = ignition_held;
         if ignition_pressed {
             self.attempts = self.attempts.wrapping_add(1);
@@ -991,6 +992,20 @@ impl GarageRuntime {
         self.area.commit_poses(&self.physics, false);
         if let Some(audio) = &mut self.audio {
             audio.fixed_step(&self.area, &self.physics, FIXED_DT);
+            audio.vehicle(
+                crate::audio::VehicleAudioInput {
+                    rpm: self.engine_output.rpm,
+                    ignition: self.engine_output.ignition,
+                    running: self.engine_output.running,
+                    starter: self.engine_output.starter,
+                    horn: car_controls && input.held & keys::HORN != 0,
+                    ambient_temperature: self.lighting.cycle.output().visual_temperature,
+                    electronics_output: electronics.electronics_output,
+                    engine_present: self.area.items.mounted(reference.engine.item),
+                },
+                FIXED_DT,
+                audio.game_seconds,
+            );
         }
         let current = self
             .stream

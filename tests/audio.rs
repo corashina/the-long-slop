@@ -260,3 +260,234 @@ fn installed_doors_change_source_interior_mixer() {
         state.reference.routes[0].car_mixer.unwrap()
     );
 }
+
+#[test]
+fn engine_formula_boundaries() {
+    use my_summer_slop::audio::{AudioState, VehicleAudioInput};
+    let game = common::reference();
+    let mut state = AudioState::new(AudioReference::from_value(&game.audio, &game).unwrap(), 1);
+    let e = state.reference.engine.clone();
+    for (rpm, idle, motor, ip, mp) in [
+        (
+            600.,
+            0.7,
+            0.0875,
+            0.9 + 0.3 * 600. / 1400.,
+            0.8 + 0.7 * 100. / 6100.,
+        ),
+        (1400., 0., 0.7, 1.2, 0.8 + 0.7 * 900. / 6100.),
+        (6600., 0., 0.7, 1.5, 1.5),
+        (13200., 0., 0.7, 1.5, 2.2),
+    ] {
+        state.vehicle(
+            VehicleAudioInput {
+                rpm,
+                running: true,
+                engine_present: true,
+                ..Default::default()
+            },
+            1. / 60.,
+            1.,
+        );
+        let a = state.signals.iter().find(|s| s.id == e.idle_voice).unwrap();
+        let b = state
+            .signals
+            .iter()
+            .find(|s| s.id == e.motor_voice)
+            .unwrap();
+        for (actual, expected) in [
+            (a.gain, idle),
+            (b.gain, motor),
+            (a.pitch, ip),
+            (b.pitch, mp),
+        ] {
+            assert!(
+                (actual - expected).abs() < 1e-5,
+                "{rpm}: {actual} != {expected}"
+            );
+        }
+        assert!(a.playing && b.playing);
+    }
+}
+#[test]
+fn horn_uses_ambient_temperature() {
+    use my_summer_slop::audio::{AudioState, VehicleAudioInput};
+    let game = common::reference();
+    let mut state = AudioState::new(AudioReference::from_value(&game.audio, &game).unwrap(), 1);
+    let h = state.reference.horn.clone();
+    for (temp, pitch, gain) in [
+        (h.temperature_min, h.pitch_min, 0.1),
+        (h.temperature_max, h.pitch_max, 0.2),
+    ] {
+        state.vehicle(
+            VehicleAudioInput {
+                horn: true,
+                ambient_temperature: temp,
+                ..Default::default()
+            },
+            0.01,
+            1.,
+        );
+        let s = state.signals.iter().find(|s| s.id == h.voice).unwrap();
+        assert!((s.pitch - pitch).abs() < 1e-6);
+        assert!((s.gain - gain).abs() < 1e-6);
+        assert!(s.playing);
+    }
+    state.vehicle(VehicleAudioInput::default(), 0.01, 1.);
+    assert!((state.signals.iter().find(|s| s.id == h.voice).unwrap().gain - 0.1).abs() < 1e-6);
+    state.vehicle(VehicleAudioInput::default(), 0.01, 1.);
+    assert!(
+        !state
+            .signals
+            .iter()
+            .find(|s| s.id == h.voice)
+            .unwrap()
+            .playing
+    );
+}
+#[test]
+fn engine_removal_preserves_car_audio() {
+    use my_summer_slop::audio::{AudioState, VehicleAudioInput};
+    let game = common::reference();
+    let mut state = AudioState::new(AudioReference::from_value(&game.audio, &game).unwrap(), 1);
+    let radio = state.reference.radio.voices[0];
+    state.voice(radio, true, 1., 1.);
+    state.vehicle(
+        VehicleAudioInput {
+            running: true,
+            starter: true,
+            engine_present: true,
+            horn: true,
+            ..Default::default()
+        },
+        0.1,
+        1.,
+    );
+    state.vehicle(
+        VehicleAudioInput {
+            horn: true,
+            ..Default::default()
+        },
+        0.1,
+        2.,
+    );
+    assert!(!state.starter_enabled);
+    assert!(
+        !state
+            .signals
+            .iter()
+            .find(|s| s.id == state.reference.engine.idle_voice)
+            .unwrap()
+            .playing
+    );
+    assert!(
+        state
+            .signals
+            .iter()
+            .find(|s| s.id == state.reference.horn.voice)
+            .unwrap()
+            .playing
+    );
+    assert!(
+        state
+            .signals
+            .iter()
+            .find(|s| s.id == radio)
+            .unwrap()
+            .playing
+    );
+    assert_eq!(
+        state.event_count(),
+        0,
+        "removal must not play an engine stop tail"
+    );
+}
+#[test]
+fn ignition_edges_survive_fixed_steps() {
+    use my_summer_slop::{
+        simulation::{FrameInput, keys},
+        starting_area::GarageRuntime,
+        vehicle::VehiclePose,
+    };
+    let mut game = common::reference();
+    let car = game
+        .items
+        .iter()
+        .find(|i| i.node == game.vehicle.root)
+        .unwrap()
+        .id;
+    game.items
+        .iter_mut()
+        .find(|i| i.id == game.engine.item)
+        .unwrap()
+        .attached_to = Some(car);
+    let mut run = GarageRuntime::new(&game).unwrap();
+    run.started = true;
+    let seat = game.seats.iter().find(|s| s.driver).unwrap();
+    assert!(run.area.player.enter(
+        seat.id,
+        VehiclePose {
+            position: [20., 2., 20.],
+            rotation: [0., 0., 0., 1.]
+        },
+        &mut run.physics
+    ));
+    for expected in [true, false] {
+        run.step(
+            &game,
+            FrameInput {
+                held: keys::IGNITION,
+                pressed: keys::IGNITION,
+                ..Default::default()
+            },
+        );
+        run.step(
+            &game,
+            FrameInput {
+                released: keys::IGNITION,
+                ..Default::default()
+            },
+        );
+        assert_eq!(run.engine_output.ignition, expected);
+    }
+    let state = run.audio.as_mut().unwrap();
+    assert_eq!(state.pop_event().unwrap().sequence, 1);
+    assert_eq!(state.pop_event().unwrap().sequence, 2);
+    assert!(state.pop_event().is_none());
+}
+
+#[test]
+fn engine_stop_edge_emits_once() {
+    use my_summer_slop::audio::{AudioState, VehicleAudioInput};
+    let game = common::reference();
+    let mut state = AudioState::new(AudioReference::from_value(&game.audio, &game).unwrap(), 1);
+    state.vehicle(
+        VehicleAudioInput {
+            running: true,
+            engine_present: true,
+            ..Default::default()
+        },
+        0.1,
+        1.,
+    );
+    state.vehicle(
+        VehicleAudioInput {
+            engine_present: true,
+            ..Default::default()
+        },
+        0.1,
+        2.,
+    );
+    state.vehicle(
+        VehicleAudioInput {
+            engine_present: true,
+            ..Default::default()
+        },
+        0.1,
+        3.,
+    );
+    let event = state.pop_event().unwrap();
+    assert_eq!(event.binding, state.reference.engine.stop_binding.unwrap());
+    assert_eq!(event.time_seconds, 2.);
+    assert!(state.pop_event().is_none());
+}

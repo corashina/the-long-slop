@@ -44,6 +44,7 @@ struct Occupancy {
     local_pose: Pose,
     yaw_limits: [f32; 2],
     driver: bool,
+    driving2: bool,
 }
 
 pub struct PlayerState {
@@ -332,6 +333,7 @@ impl PlayerState {
             local_pose,
             yaw_limits: seat.yaw_limits_degrees,
             driver: seat.driver,
+            driving2: seat.driving2,
         });
         self.pose = seated_pose;
         self.crouched = false;
@@ -454,6 +456,9 @@ impl PlayerState {
     }
     pub fn driving(&self) -> bool {
         self.occupancy.is_some_and(|seat| seat.driver)
+    }
+    pub fn driving2(&self) -> bool {
+        self.occupancy.is_some_and(|seat| seat.driving2)
     }
     pub fn crouched(&self) -> bool {
         self.crouched
