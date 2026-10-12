@@ -28,6 +28,8 @@ pub struct WorldReference {
     pub part_scope_slots: Vec<WorldPartScopeSlot>,
     pub generators: Vec<WorldGeneratorReference>,
     pub startup: Vec<WorldStartupReference>,
+    pub startup_holes: Vec<WorldStartupHole>,
+    pub collision_rules: WorldCollisionRules,
     pub prototypes: Vec<WorldPrototypeReference>,
     pub records: Vec<WorldSourceRecord>,
     pub receipts: Vec<WorldSourceReceipt>,
@@ -82,6 +84,7 @@ pub struct WorldSkinReference {
     pub bind_poses: Vec<[f32; 16]>,
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
+    pub tangents: Vec<[f32; 4]>,
     pub uv: Vec<[f32; 2]>,
     pub joints: Vec<[u32; 4]>,
     pub weights: Vec<[f32; 4]>,
@@ -154,6 +157,25 @@ pub struct WorldStartupReference {
     pub group: String,
     pub source: SourceId,
     pub pose: Transform,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldCollisionRules {
+    pub source: SourceId,
+    pub record_sha256: String,
+    pub layers: [u32; 32],
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldStartupHole {
+    pub component: SourceId,
+    pub filter: SourceId,
+    pub mesh: SourceId,
+    pub mesh_sha256: String,
+    /// Exact first four vertices, before coordinate conversion.
+    pub vertices: [[f32; 3]; 4],
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -523,6 +545,52 @@ impl WorldReference {
                 require(r.fields.contains_key(*name), &field(&r.source, name))?;
             }
         }
+        let collision = checked_record(
+            &record_map,
+            &self.collision_rules.source,
+            &["PhysicsManager"],
+        )?;
+        let rows = match collision.fields.get("m_LayerCollisionMatrix") {
+            Some(WorldValue::Array(rows)) => rows,
+            _ => return Err(ReferenceError("Missing source collision matrix".into())),
+        };
+        require(rows.len() == 32 && rows.iter().zip(self.collision_rules.layers).all(|(value, row)|
+            matches!(value, WorldValue::Integer(value) if *value == row as i64))
+            && self.receipts.iter().any(|receipt| receipt.source == self.collision_rules.source
+                && receipt.sha256 == self.collision_rules.record_sha256), "source collision matrix receipt and rows")?;
+        require(
+            self.prototypes
+                .iter()
+                .all(|prototype| prototype.nodes.iter().all(|node| node.layer < 32)),
+            "source prototype collision layers",
+        )?;
+        let mut hole_components = HashSet::new();
+        for hole in &self.startup_holes {
+            let component = checked_record(&record_map, &hole.component, &["digholescript2"])?;
+            let filter = checked_record(&record_map, &hole.filter, &["MeshFilter"])?;
+            require(
+                hole_components.insert(&hole.component)
+                    && record_link(component, "m_GameObject")
+                        == record_link(filter, "m_GameObject")
+                    && record_link(filter, "m_Mesh") == Some(&hole.mesh)
+                    && self
+                        .receipts
+                        .iter()
+                        .any(|r| r.source == hole.mesh && r.sha256 == hole.mesh_sha256)
+                    && hole.vertices.iter().all(|v| finite(v)),
+                &field(&hole.component, "startup hole mesh"),
+            )?;
+        }
+        for component in self.records.iter().filter(|r| {
+            r.class_name == "digholescript2"
+                && r.source.file == "level1"
+                && matches!(r.source.path_id, 68463 | 77620)
+        }) {
+            require(
+                hole_components.contains(&component.source),
+                &field(&component.source, "required startup hole mesh"),
+            )?;
+        }
         for s in [
             &self.road.source,
             &self.terrain.source,
@@ -620,6 +688,18 @@ impl WorldReference {
                 && t.edge_of_world_gradient > 0.,
             &field(&t.source, "terrain inputs"),
         )?;
+        for (tier, prefab) in t.prefabs.iter().enumerate() {
+            let transform = checked_record(&record_map, prefab, &["Transform"])?;
+            let owner = record_link(transform, "m_GameObject")
+                .ok_or_else(|| ReferenceError(format!("Terrain prefab {tier} owner")))?;
+            let object = checked_record(&record_map, owner, &["GameObject"])?;
+            require(
+                receipts.contains(owner)
+                    && matches!(object.fields.get("m_Layer"),
+                Some(WorldValue::Integer(layer)) if (0..32).contains(layer)),
+                "terrain source collision layer",
+            )?;
+        }
         let resources: Vec<_> = t
             .materials
             .iter()
@@ -1098,6 +1178,7 @@ impl WorldReference {
                     && skin.bind_poses.iter().all(|v| finite(v))
                     && count > 0
                     && skin.normals.len() == count
+                    && (skin.tangents.is_empty() || skin.tangents.len() == count)
                     && skin.uv.len() == count
                     && skin.joints.len() == count
                     && skin.weights.len() == count,
@@ -1115,6 +1196,7 @@ impl WorldReference {
             require(
                 skin.positions.iter().all(|v| finite(v))
                     && skin.normals.iter().all(|v| finite(v))
+                    && skin.tangents.iter().all(|v| finite(v))
                     && skin.uv.iter().all(|v| finite(v)),
                 &f,
             )?;

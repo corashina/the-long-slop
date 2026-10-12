@@ -50,8 +50,8 @@ pub struct SupplyDefinition {
     pub no_fill_from: bool,
     pub no_fill_this: bool,
     pub no_pour: bool,
-    pub min_rate: f32,
-    pub max_rate: f32,
+    pub emission_min_rate: f32,
+    pub emission_max_rate: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -426,6 +426,16 @@ impl PlacementIndex {
 
     pub fn foundation_source(&self, point: &FoundationPoint) -> &SourceId {
         &self.sequence.inputs.prototypes[point.prototype_index].helpers[point.helper_index].source
+    }
+
+    pub fn supplies_for_building(&self, index: u32, output: &mut Vec<SupplyPoint>) {
+        output.clear();
+        output.extend(
+            self.supplies
+                .iter()
+                .filter(|point| point.building_index == index)
+                .copied(),
+        );
     }
 
     pub fn nearest_supply_point(&self, point: [f64; 3]) -> Option<SupplyPoint> {
@@ -860,8 +870,8 @@ fn copy_prototype(
             no_fill_from,
             no_fill_this: number(&tank.fields["noFillThis"]) != 0.0,
             no_pour,
-            min_rate: number(&component.fields["minRate"]),
-            max_rate: number(&component.fields["maxRate"]),
+            emission_min_rate: number(&component.fields["minRate"]),
+            emission_max_rate: number(&component.fields["maxRate"]),
         });
     }
     for collider in &prototype.colliders {

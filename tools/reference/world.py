@@ -204,6 +204,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) ->
         selected.record(material_owner)
         terrain_materials.append(source_material(source,selected,material_owner,output,terrain_source))
         for node in source.hierarchy(_source_root(source,target)):
+            selected.record(source.resolve(node['reader'],source.read(node['reader'])['m_GameObject']))
             for component in node['components']:
                 selected.record(component)
                 if component.type.name=='MeshFilter' and source.read(component)['m_Mesh']['m_PathID']:
@@ -381,6 +382,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) ->
                         'bind_poses':convert_bind_poses(source.read(mesh)['m_BindPose']),
                         'positions':exporter.rows(doc,directory,primitive.attributes.POSITION),
                         'normals':exporter.rows(doc,directory,primitive.attributes.NORMAL),
+                        'tangents':exporter.rows(doc,directory,primitive.attributes.TANGENT) if primitive.attributes.TANGENT is not None else [],
                         'uv':exporter.rows(doc,directory,primitive.attributes.TEXCOORD_0),
                         'joints':exporter.rows(doc,directory,primitive.attributes.JOINTS_0),
                         'weights':exporter.rows(doc,directory,primitive.attributes.WEIGHTS_0),
@@ -410,6 +412,26 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) ->
             'asset_record':{'id':index,'material_count':report['material_count'],'usage':'world_prototype','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(root),'dependencies':report['dependencies']},
             'materials':[dict(material,asset=index) for material in report['materials']]})
         print(f'Exported {name}: {len(nodes)} nodes, {len(colliders)} colliders',flush=True)
+    physics=next(owner for owner in source.objects.values() if owner.type.name=='PhysicsManager')
+    selected.record(physics)
+    collision_rows=source.read(physics)['m_LayerCollisionMatrix']
+    if len(collision_rows)!=32:raise ValueError('Physics layer matrix must have 32 masks')
+    collision_rules={'source':source_id(physics),'record_sha256':selected.receipts[key(physics)]['sha256'],
+        'layers':collision_rows}
+    startup_holes=[]
+    for component_id,filter_id in ((68463,46406),(77620,49294)):
+        component=source.get('level1',component_id);mesh_filter=source.get('level1',filter_id)
+        selected.record(component);selected.record(mesh_filter)
+        owner=source.read(mesh_filter);mesh=source.resolve(mesh_filter,owner['m_Mesh'])
+        if source.read(component)['m_GameObject']!=owner['m_GameObject']:
+            raise ValueError(f'level1:{component_id} startup hole owner mismatch')
+        selected.receipt(mesh)
+        doc,directory,mesh_index=reader.mesh(ObjectId(*key(mesh)))
+        points=GltfExporter.rows(None,doc,directory,doc.meshes[mesh_index].primitives[0].attributes.POSITION)
+        if len(points)<4:raise ValueError(f'{key(mesh)} startup hole needs four vertices')
+        startup_holes.append({'component':source_id(component),'filter':source_id(mesh_filter),
+            'mesh':source_id(mesh),'mesh_sha256':selected.receipts[key(mesh)]['sha256'],
+            'vertices':[[x,y,-z] for x,y,z in points[:4]]})
     road_fields=('length','roadBoneNum','roadBoneLength','roadSegmentLength','roadAboveTerrain','width','scale','XmaxAngle','YmaxAngle','startStraight','straightModifier','alignEdgeOfTheWorld','aliignRoad','alignBuildings','forceHomesick','noises','defPointRange','defPointStep','addPoint','buildingBoneNum')
     assembled=samples['assembled'][0]
     world={'sample_payload_sha256':PAYLOAD_SHA256,'managed_sha256':samples['managed_sha256'],'library':dict(schema_version=1,**samples['library']),
@@ -419,7 +441,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) ->
             'tiles':[{k:settings[t][k] for k in ('tileSize','resolution','drawDistance','YCoord')} for t in ('Terrain','DistantTerrain','DistantTerrain2')],
             **{k:settings[k] for k in ('edgeOfWorld','edgeOfWorldGradient','edgeOfWorldGenerationDist','edgeOfWorldWarpDist','edgeOfWorldWarpOffset','randomSeed','seed')}},
         'buildings':{'source':source_id(building_owner),'types':building_types,**{k:buildings[k] for k in ('groups','defaultSides','minStartDist','maxStartDist','distModifier')}},
-        'part_scope_slots':part_scope_slots,'catalog':catalog,'generators':generators,'startup':startup,'prototypes':prototypes,'records':list(selected.records.values()),
+        'part_scope_slots':part_scope_slots,'catalog':catalog,'generators':generators,'startup':startup,'startup_holes':startup_holes,'collision_rules':collision_rules,'prototypes':prototypes,'records':list(selected.records.values()),
         'receipts':list(selected.receipts.values()),'exclusions':excluded,'material_textures':list(source.world_material_source.lighting_textures.values())}
     files={row['source']['file'] for row in world['receipts']}
     world['source_hashes']=[{'file':f,'sha256':reader.source_files[f'TheLongDrive_Data/{f}'].sha256} for f in sorted(files)]

@@ -106,6 +106,7 @@ impl RoadCheckpoint {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RoadSegment {
     pub index: u32,
+    pub biome: u8,
     pub source_position: [f64; 3],
     pub source_origin: [f64; 3],
     pub source_rotations: [[f32; 3]; ROAD_CONTROLS],
@@ -130,6 +131,7 @@ struct RoadInputs {
     angle_limits: [f32; 2],
     width: f32,
     start_straight: u32,
+    biome_override: Option<u8>,
     straight_modifier: f32,
     edge: bool,
     bounds_radius: f64,
@@ -177,6 +179,8 @@ impl RoadSequence {
                 angle_limits: [road.xmax_angle, road.ymax_angle],
                 width: road.width,
                 start_straight: road.start_straight,
+                biome_override: (reference.terrain.game_settings.biome != 0)
+                    .then_some((reference.terrain.game_settings.biome - 1) as u8),
                 straight_modifier: road.straight_modifier,
                 edge: road.align_edge_of_the_world != 0,
                 bounds_radius: bounds_radius(reference)?,
@@ -206,6 +210,16 @@ impl RoadSequence {
         let input = &self.inputs;
         let mut segment = RoadSegment {
             index: self.state.next_segment,
+            biome: super::biome(
+                terrain.color(
+                    [
+                        (input.origin[0] + self.state.source_position[0]) as f32,
+                        (input.origin[2] + self.state.source_position[2]) as f32,
+                    ],
+                    (input.origin[1] + self.state.source_position[1]) as f32,
+                ),
+                input.biome_override,
+            ),
             source_position: self.state.source_position,
             source_origin: input.origin,
             source_rotations: [[0.0; 3]; ROAD_CONTROLS],
@@ -313,6 +327,8 @@ pub struct RoadIndex {
     blocks: Vec<RoadBlock>,
     buffer: Vec<RoadSegment>,
     buffer_first: u32,
+    replay_end: u32,
+    replay_work: usize,
 }
 impl RoadIndex {
     pub fn new(sequence: RoadSequence, terrain: TerrainEvaluator) -> Self {
@@ -330,6 +346,8 @@ impl RoadIndex {
             blocks: Vec::with_capacity(BLOCKS),
             buffer: Vec::with_capacity(ROAD_CHECKPOINT_INTERVAL as usize),
             buffer_first: 0,
+            replay_end: 0,
+            replay_work: 0,
         }
     }
 
@@ -373,24 +391,47 @@ impl RoadIndex {
         }
     }
 
-    /// Replay one block at most. Reuse its fixed-capacity cache for subsequent requests.
-    pub fn segment(&mut self, index: u32) -> RoadSegment {
-        assert!(
-            index < self.sequence.state.next_segment,
-            "road segment is not prepared"
-        );
-        if !(self.buffer_first..self.buffer_first + self.buffer.len() as u32).contains(&index) {
-            let block = self.blocks[(index / ROAD_CHECKPOINT_INTERVAL) as usize];
+    /// Advance replay by a bounded number of source segments.
+    pub fn prepare_segment(&mut self, index: u32, limit: usize) -> Option<RoadSegment> {
+        self.replay_work = 0;
+        if index >= self.sequence.state.next_segment {
+            return None;
+        }
+        if (self.buffer_first..self.buffer_first + self.buffer.len() as u32).contains(&index) {
+            return Some(self.buffer[(index - self.buffer_first) as usize]);
+        }
+        let block = self.blocks[(index / ROAD_CHECKPOINT_INTERVAL) as usize];
+        if self.buffer_first != block.first || self.replay_end == 0 {
             self.replay
                 .restore(&self.checkpoints[(index / ROAD_CHECKPOINT_INTERVAL) as usize]);
             self.buffer.clear();
             self.buffer_first = block.first;
-            for _ in block.first..block.end {
-                self.buffer
-                    .push(self.replay.advance(&self.terrain).unwrap());
-            }
+            self.replay_end = block.first;
         }
-        self.buffer[(index - self.buffer_first) as usize]
+        for _ in 0..limit {
+            if self.replay_end > index {
+                break;
+            }
+            self.buffer
+                .push(self.replay.advance(&self.terrain).unwrap());
+            self.replay_end += 1;
+            self.replay_work += 1;
+        }
+        (self.replay_end > index).then(|| self.buffer[(index - self.buffer_first) as usize])
+    }
+
+    /// Synchronous access for acceptance callers. Runtime jobs use prepare_segment.
+    pub fn segment(&mut self, index: u32) -> RoadSegment {
+        assert!(
+            index < self.prepared_segments(),
+            "road segment is not prepared"
+        );
+        self.prepare_segment(index, ROAD_CHECKPOINT_INTERVAL as usize)
+            .unwrap()
+    }
+
+    pub fn replay_work(&self) -> usize {
+        self.replay_work
     }
 
     pub fn prepared_segments(&self) -> u32 {
@@ -563,4 +604,116 @@ fn forward_step(rotation: [f32; 3], length: f32) -> [f32; 3] {
         ((y * z2 - w * x2) * length as f64) as f32,
         ((1.0 - (x * x2 + y * y2)) * length as f64) as f32,
     ]
+}
+
+/// Deform the admitted road skin in its authored bone and influence order.
+/// Source mesh inputs already contain the Z reflection; do not reflect them again.
+pub fn deform_road(
+    reference: &WorldReference,
+    segment: &RoadSegment,
+    output: &mut super::WorldSurface,
+) {
+    use rapier3d::math::{Rotation, Vector};
+    #[derive(Clone, Copy)]
+    struct Frame {
+        position: Vector,
+        rotation: Rotation,
+        scale: Vector,
+    }
+    let identity = &reference.road.prototypes[segment.biome as usize];
+    let prototype = reference
+        .prototypes
+        .iter()
+        .find(|p| &p.source == identity)
+        .expect("validated road prototype");
+    let mut frames = Vec::with_capacity(prototype.nodes.len());
+    for (index, node) in prototype.nodes.iter().enumerate() {
+        let parent = node.parent.map(|i| frames[i as usize]).unwrap_or(Frame {
+            position: Vector::ZERO,
+            rotation: Rotation::IDENTITY,
+            scale: Vector::ONE,
+        });
+        let mut frame = if index == 0 {
+            parent
+        } else {
+            Frame {
+                position: parent.position
+                    + parent.rotation
+                        * (Vector::from_array(node.transform.translation) * parent.scale),
+                rotation: parent.rotation * Rotation::from_array(node.transform.rotation),
+                scale: parent.scale * Vector::from_array(node.transform.scale),
+            }
+        };
+        if let Some(control) = prototype.controls.iter().position(|&i| i as usize == index) {
+            let angles = segment.source_rotations[control];
+            let axes = [
+                -(parent.rotation * Vector::X),
+                -Vector::Y,
+                -(parent.rotation * Vector::Y),
+            ];
+            for (angle, axis) in angles.into_iter().zip(axes) {
+                let (sin, cos) = half_angle(angle);
+                let axis = axis.normalize() * sin;
+                frame.rotation = Rotation::from_xyzw(axis.x, axis.y, axis.z, cos) * frame.rotation;
+            }
+        }
+        frames.push(frame);
+    }
+    output.origin = segment.position();
+    output.vertices.clear();
+    output.normals.clear();
+    output.tangents.clear();
+    output.uv.clear();
+    output.colors.clear();
+    output.triangles.clear();
+    output.submeshes.clear();
+    for skin in &prototype.skins {
+        let base = output.vertices.len() as u32;
+        output.vertices.reserve(skin.positions.len());
+        output.normals.reserve(skin.positions.len());
+        for index in 0..skin.positions.len() {
+            let p = skin.positions[index];
+            let normal = skin.normals[index];
+            let tangent = skin.tangents.get(index);
+            let mut point = Vector::ZERO;
+            let mut n = Vector::ZERO;
+            let mut t = Vector::ZERO;
+            for influence in 0..4 {
+                let weight = skin.weights[index][influence];
+                if weight == 0.0 {
+                    continue;
+                }
+                let bone = skin.joints[index][influence] as usize;
+                let bind = skin.bind_poses[bone];
+                let frame = frames[skin.bones[bone] as usize];
+                let transform = |v: [f32; 3], w: f32| {
+                    Vector::from_array(std::array::from_fn(|a| {
+                        bind[a] * v[0] + bind[4 + a] * v[1] + bind[8 + a] * v[2] + bind[12 + a] * w
+                    }))
+                };
+                point +=
+                    (frame.position + frame.rotation * (frame.scale * transform(p, 1.0))) * weight;
+                n += (frame.rotation * (frame.scale * transform(normal, 0.0))) * weight;
+                if let Some(tangent) = tangent {
+                    t += (frame.rotation
+                        * (frame.scale * transform([tangent[0], tangent[1], tangent[2]], 0.0)))
+                        * weight;
+                }
+            }
+            output.vertices.push(point.to_array());
+            output.normals.push(n.normalize_or_zero().to_array());
+            if let Some(tangent) = tangent {
+                let t = t.normalize_or_zero();
+                output.tangents.push([t.x, t.y, t.z, tangent[3]]);
+            }
+        }
+        output.uv.extend_from_slice(&skin.uv);
+        for group in &skin.triangles {
+            let first = output.triangles.len();
+            output
+                .triangles
+                .extend(group.iter().map(|triangle| triangle.map(|i| i + base)));
+            output.submeshes.push(first..output.triangles.len());
+        }
+    }
 }

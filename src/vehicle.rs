@@ -513,6 +513,39 @@ impl PhysicsWorld {
         handle
     }
 
+    /// Fallible source mesh publication leaves existing collision untouched on failure.
+    pub fn insert_source_mesh(
+        &mut self,
+        surface: &crate::world::WorldSurface,
+        position: [f32; 3],
+        layer: u8,
+        filter: u32,
+        friction: f32,
+        restitution: f32,
+    ) -> Result<ColliderHandle, ReferenceError> {
+        let mesh = ColliderBuilder::trimesh(
+            surface
+                .vertices
+                .iter()
+                .copied()
+                .map(Vector::from_array)
+                .collect(),
+            surface.triangles.clone(),
+        )
+        .map_err(|error| ReferenceError(format!("Source collision mesh: {error}")))?
+        .friction(friction)
+        .restitution(restitution)
+        .translation(Vector::from_array(position))
+        .collision_groups(InteractionGroups::new(
+            Group::from_bits_truncate(1u32 << layer),
+            Group::from_bits_truncate(filter),
+            InteractionTestMode::And,
+        ));
+        let handle = self.physics.colliders.insert(mesh);
+        self.refresh_queries();
+        Ok(handle)
+    }
+
     pub fn remove_collider(&mut self, handle: ColliderHandle) {
         if self
             .controller

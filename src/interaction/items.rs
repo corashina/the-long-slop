@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use crate::reference::WorldPrototypeReference;
+use crate::world::{AbsolutePose, GeneratedId, SupplyDefinition, WorldOrigin};
+use std::collections::{HashMap, HashSet};
 
 use rapier3d::math::{Rotation, Vector};
 use rapier3d::prelude::RigidBodyHandle;
@@ -39,6 +41,10 @@ pub struct ItemStore {
     names: Vec<String>,
     vehicle_item: ItemId,
     slot_owners: HashMap<PartSlotId, Option<ItemId>>,
+    generated: HashMap<GeneratedId, ItemId>,
+    initialized_supplies: HashSet<ItemId>,
+    next_generated: u32,
+    origin: WorldOrigin,
 }
 
 impl ItemStore {
@@ -125,6 +131,17 @@ impl ItemStore {
             }
         }
         Ok(Self {
+            generated: HashMap::new(),
+            initialized_supplies: HashSet::new(),
+            next_generated: reference
+                .items
+                .iter()
+                .map(|item| item.id.0)
+                .max()
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or_else(|| ReferenceError("Item identity space exhausted".into()))?,
+            origin: WorldOrigin::default(),
             vehicle_item: reference
                 .items
                 .iter()
@@ -184,6 +201,120 @@ impl ItemStore {
         self.indices
             .get(&id)
             .map(|&index| self.names[index].as_str())
+    }
+
+    /// Create an instance identity once. Decoding remains owned by the prototype cache.
+    pub fn insert_generated(
+        &mut self,
+        key: GeneratedId,
+        prototype: &WorldPrototypeReference,
+        pose: AbsolutePose,
+    ) -> Result<ItemId, ReferenceError> {
+        if let Some(id) = self.generated.get(&key) {
+            return Ok(*id);
+        }
+        if !pose.position.into_iter().all(f64::is_finite)
+            || !pose.rotation.into_iter().all(f32::is_finite)
+        {
+            return Err(ReferenceError("Nonfinite generated item pose".into()));
+        }
+        let id = ItemId(self.next_generated);
+        let next = self
+            .next_generated
+            .checked_add(1)
+            .ok_or_else(|| ReferenceError("Item identity space exhausted".into()))?;
+        if self.indices.contains_key(&id) {
+            return Err(ReferenceError("Generated item identity collision".into()));
+        }
+        let root = prototype
+            .nodes
+            .iter()
+            .find(|node| node.parent.is_none())
+            .ok_or_else(|| ReferenceError("Generated prototype has no root".into()))?;
+        self.indices.insert(id, self.states.len());
+        self.body_ids.push(BodyId(u32::MAX));
+        self.names.push(root.name.clone());
+        self.states.push(ItemState {
+            id,
+            body: None,
+            location: ItemLocation::World,
+            pose: VehiclePose {
+                position: self.origin.local(pose.position),
+                rotation: pose.rotation,
+            },
+            local_pose: VehiclePose {
+                position: [0.0; 3],
+                rotation: [0.0, 0.0, 0.0, 1.0],
+            },
+            condition: 1.0,
+            temperature: None,
+            fluid: None,
+        });
+        self.generated.insert(key, id);
+        self.next_generated = next;
+        Ok(id)
+    }
+
+    /// Source stock is applied once; later publications cannot refill the container.
+    pub fn initialize_generated_supply(
+        &mut self,
+        id: ItemId,
+        source: &SupplyDefinition,
+    ) -> Result<(), ReferenceError> {
+        if self.initialized_supplies.contains(&id) {
+            return Ok(());
+        }
+        if !self.generated.values().any(|value| *value == id) {
+            return Err(ReferenceError("Supply is not a generated item".into()));
+        }
+        let mut mixture = crate::fluids::FluidMixture::default();
+        for fluid in &source.fluids {
+            if !(0..6).contains(&fluid.fluid_type)
+                || !fluid.amount.is_finite()
+                || fluid.amount < 0.0
+            {
+                return Err(ReferenceError("Invalid generated source fluid".into()));
+            }
+            mixture.quantities_liters[fluid.fluid_type as usize] += fluid.amount;
+        }
+        if !source.capacity.is_finite() || source.capacity < mixture.total() {
+            return Err(ReferenceError("Invalid generated source capacity".into()));
+        }
+        self.get_mut(id).unwrap().fluid = Some(FluidContainer {
+            capacity_liters: source.capacity,
+            mixture,
+        });
+        self.initialized_supplies.insert(id);
+        Ok(())
+    }
+
+    /// Unbind colliders first. Held, mounted, and attached items retain their identity.
+    pub fn remove_generated(&mut self, id: ItemId) -> bool {
+        if !self.generated.values().any(|value| *value == id) {
+            return false;
+        }
+        let Some(index) = self.indices.get(&id).copied() else {
+            return false;
+        };
+        if self.states[index].location != ItemLocation::World || self.states[index].body.is_some() {
+            return false;
+        }
+        self.generated.retain(|_, value| *value != id);
+        self.initialized_supplies.remove(&id);
+        self.indices.remove(&id);
+        let last = self.states.len() - 1;
+        self.states.swap_remove(index);
+        self.names.swap_remove(index);
+        self.body_ids.swap_remove(index);
+        if index < self.states.len() {
+            self.indices.insert(self.states[index].id, index);
+        }
+        for tank in &mut self.vehicle_tanks {
+            if *tank == last {
+                *tank = index;
+            }
+        }
+        true
     }
 
     pub fn insert_supply(&mut self, id: ItemId, pose: VehiclePose) {
@@ -279,6 +410,7 @@ impl ItemStore {
     }
 
     pub fn rebase(&mut self, shift: [f32; 3]) {
+        self.origin.shift(shift);
         for state in &mut self.states {
             for (position, shift) in state.pose.position.iter_mut().zip(shift) {
                 *position -= shift;

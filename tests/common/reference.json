@@ -18867,6 +18867,10 @@
       {
         "file": "level1",
         "sha256": "94ecc4165c165a1b42b3c4d42ad70441fd52696f9fd2b9a5f00398079d345839"
+      },
+      {
+        "file": "globalgamemanagers",
+        "sha256": "06db41876dbb0124cdb2d68f099158427e91b86b427364c6ef509d0fabba74d0"
       }
     ],
     "road": {
@@ -19567,7 +19571,8 @@
                   1
                 ]
               ]
-            ]
+            ],
+            "tangents": []
           }
         ],
         "colliders": [],
@@ -19864,7 +19869,8 @@
                   1
                 ]
               ]
-            ]
+            ],
+            "tangents": []
           }
         ],
         "colliders": [],
@@ -20161,7 +20167,8 @@
                   1
                 ]
               ]
-            ]
+            ],
+            "tangents": []
           }
         ],
         "colliders": [],
@@ -21588,6 +21595,266 @@
             }
           }
         ]
+      },
+      {
+        "source": {
+          "file": "globalgamemanagers",
+          "path_id": 10
+        },
+        "class_name": "PhysicsManager",
+        "fields": {
+          "m_LayerCollisionMatrix": {
+            "kind": "array",
+            "value": [
+              {
+                "kind": "integer",
+                "value": 4039039487
+              },
+              {
+                "kind": "integer",
+                "value": 4029602303
+              },
+              {
+                "kind": "integer",
+                "value": 4029602303
+              },
+              {
+                "kind": "integer",
+                "value": 4294967295
+              },
+              {
+                "kind": "integer",
+                "value": 4029602303
+              },
+              {
+                "kind": "integer",
+                "value": 4029602303
+              },
+              {
+                "kind": "integer",
+                "value": 4294967295
+              },
+              {
+                "kind": "integer",
+                "value": 4294967295
+              },
+              {
+                "kind": "integer",
+                "value": 4028946943
+              },
+              {
+                "kind": "integer",
+                "value": 4026532040
+              },
+              {
+                "kind": "integer",
+                "value": 4163111112
+              },
+              {
+                "kind": "integer",
+                "value": 4037987839
+              },
+              {
+                "kind": "integer",
+                "value": 4172190207
+              },
+              {
+                "kind": "integer",
+                "value": 4028899528
+              },
+              {
+                "kind": "integer",
+                "value": 4037970431
+              },
+              {
+                "kind": "integer",
+                "value": 4038384127
+              },
+              {
+                "kind": "integer",
+                "value": 4028891336
+              },
+              {
+                "kind": "integer",
+                "value": 4038351103
+              },
+              {
+                "kind": "integer",
+                "value": 4029152767
+              },
+              {
+                "kind": "integer",
+                "value": 4038088959
+              },
+              {
+                "kind": "integer",
+                "value": 4037705929
+              },
+              {
+                "kind": "integer",
+                "value": 4030725631
+              },
+              {
+                "kind": "integer",
+                "value": 4026532040
+              },
+              {
+                "kind": "integer",
+                "value": 4036679881
+              },
+              {
+                "kind": "integer",
+                "value": 4026532040
+              },
+              {
+                "kind": "integer",
+                "value": 4026532040
+              },
+              {
+                "kind": "integer",
+                "value": 4026532040
+              },
+              {
+                "kind": "integer",
+                "value": 4026537160
+              },
+              {
+                "kind": "integer",
+                "value": 4294967295
+              },
+              {
+                "kind": "integer",
+                "value": 4294967295
+              },
+              {
+                "kind": "integer",
+                "value": 4294967295
+              },
+              {
+                "kind": "integer",
+                "value": 4294967295
+              }
+            ]
+          }
+        },
+        "links": []
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900030
+        },
+        "class_name": "Transform",
+        "fields": {
+          "m_GameObject": {
+            "kind": "link",
+            "value": {
+              "file": "level1",
+              "path_id": 900031
+            }
+          }
+        },
+        "links": [
+          {
+            "field": "m_GameObject",
+            "target": {
+              "file": "level1",
+              "path_id": 900031
+            }
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900031
+        },
+        "class_name": "GameObject",
+        "fields": {
+          "m_Layer": {
+            "kind": "integer",
+            "value": 17
+          }
+        },
+        "links": []
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900040
+        },
+        "class_name": "Transform",
+        "fields": {
+          "m_GameObject": {
+            "kind": "link",
+            "value": {
+              "file": "level1",
+              "path_id": 900041
+            }
+          }
+        },
+        "links": [
+          {
+            "field": "m_GameObject",
+            "target": {
+              "file": "level1",
+              "path_id": 900041
+            }
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900041
+        },
+        "class_name": "GameObject",
+        "fields": {
+          "m_Layer": {
+            "kind": "integer",
+            "value": 19
+          }
+        },
+        "links": []
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900050
+        },
+        "class_name": "Transform",
+        "fields": {
+          "m_GameObject": {
+            "kind": "link",
+            "value": {
+              "file": "level1",
+              "path_id": 900051
+            }
+          }
+        },
+        "links": [
+          {
+            "field": "m_GameObject",
+            "target": {
+              "file": "level1",
+              "path_id": 900051
+            }
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900051
+        },
+        "class_name": "GameObject",
+        "fields": {
+          "m_Layer": {
+            "kind": "integer",
+            "value": 19
+          }
+        },
+        "links": []
       }
     ],
     "receipts": [
@@ -21835,6 +22102,34 @@
           "path_id": 910022
         },
         "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      {
+        "source": {
+          "file": "globalgamemanagers",
+          "path_id": 10
+        },
+        "sha256": "d4c5771ca0240fb4e14d193370459013911564395a2c53165f9fdba7746decc7"
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900031
+        },
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900041
+        },
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 900051
+        },
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       }
     ],
     "exclusions": [],
@@ -21847,6 +22142,48 @@
       "categories": []
     },
     "material_textures": [],
-    "part_scope_slots": []
+    "part_scope_slots": [],
+    "startup_holes": [],
+    "collision_rules": {
+      "source": {
+        "file": "globalgamemanagers",
+        "path_id": 10
+      },
+      "record_sha256": "d4c5771ca0240fb4e14d193370459013911564395a2c53165f9fdba7746decc7",
+      "layers": [
+        4039039487,
+        4029602303,
+        4029602303,
+        4294967295,
+        4029602303,
+        4029602303,
+        4294967295,
+        4294967295,
+        4028946943,
+        4026532040,
+        4163111112,
+        4037987839,
+        4172190207,
+        4028899528,
+        4037970431,
+        4038384127,
+        4028891336,
+        4038351103,
+        4029152767,
+        4038088959,
+        4037705929,
+        4030725631,
+        4026532040,
+        4036679881,
+        4026532040,
+        4026532040,
+        4026532040,
+        4026537160,
+        4294967295,
+        4294967295,
+        4294967295,
+        4294967295
+      ]
+    }
   }
 }

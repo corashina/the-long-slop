@@ -143,6 +143,7 @@ pub struct InteractionState {
     action_masks: ActionMasks,
     scroll_sensitivity: f32,
     supplies: HashSet<ItemId>,
+    source_supply_emission: HashMap<ItemId, [f32; 2]>,
     tank_rules: HashMap<ItemId, TankRules>,
     slow_oil_modifier: f32,
     latched_mechanism: Option<(ItemId, BodyId, Vector, ColliderHandle)>,
@@ -330,6 +331,7 @@ impl InteractionState {
                 })
             });
         Ok(Self {
+            source_supply_emission: HashMap::new(),
             light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
             light_controls,
             cabin_doors,
@@ -416,9 +418,174 @@ impl InteractionState {
     pub fn held(&self) -> Option<ItemId> {
         self.carry.held()
     }
+    /// Remove only bindings owned by this generated instance.
+    pub fn unbind_generated(&mut self, id: ItemId, colliders: &[ColliderHandle]) {
+        for collider in colliders {
+            if self.collider_bindings.get(collider).is_some_and(|binding| {
+                [
+                    binding.use_owner,
+                    binding.pickup_owner,
+                    binding.removal_owner,
+                    binding.push_owner,
+                ]
+                .contains(&Some(id))
+            }) {
+                self.collider_bindings.remove(collider);
+            }
+        }
+        self.kinds.remove(&id);
+        self.pickup_layers.remove(&id);
+        self.removal_layers.remove(&id);
+        self.usable_items.remove(&id);
+        self.filling_items.remove(&id);
+        self.supplies.remove(&id);
+        self.source_supply_emission.remove(&id);
+        self.tank_rules.remove(&id);
+        self.openings
+            .retain(|opening| opening.reference.tank != id && opening.reference.cap != id);
+        if self.fill_opening.is_some_and(|opening| {
+            !self
+                .openings
+                .iter()
+                .any(|state| state.reference.id == opening)
+        }) {
+            self.fill_opening = None;
+        }
+        if self.tuning_opening.is_some_and(|opening| {
+            !self
+                .openings
+                .iter()
+                .any(|state| state.reference.id == opening)
+        }) {
+            self.tuning_opening = None;
+        }
+    }
+
     pub fn register_supply(&mut self, item: ItemId) {
         self.supplies.insert(item);
     }
+    /// Bind checked source contents and opening rules once per generated instance.
+    pub fn register_generated_supply(
+        &mut self,
+        tank: ItemId,
+        cap: ItemId,
+        definition: &crate::world::SupplyDefinition,
+        point: &crate::world::SupplyPoint,
+        reference: &ReferenceManifest,
+    ) -> Result<(), ReferenceError> {
+        if self
+            .openings
+            .iter()
+            .any(|opening| opening.reference.cap == cap)
+        {
+            return if self.source_supply_emission.contains_key(&cap) {
+                Ok(())
+            } else {
+                Err(ReferenceError(
+                    "Generated cap overlaps an imported opening".into(),
+                ))
+            };
+        }
+        let get = |source: &crate::reference::SourceId| {
+            reference
+                .world
+                .records
+                .iter()
+                .find(|record| &record.source == source)
+                .ok_or_else(|| {
+                    ReferenceError(format!(
+                        "Missing source supply {}:{}",
+                        source.file, source.path_id
+                    ))
+                })
+        };
+        let cap_record = get(&definition.cap)?;
+        let tank_record = get(&definition.tank)?;
+        let number = |record: &crate::reference::WorldSourceRecord,
+                      name: &str|
+         -> Result<f32, ReferenceError> {
+            use crate::reference::WorldValue;
+            let value = match record.fields.get(name) {
+                Some(WorldValue::Number(value)) => *value as f32,
+                Some(WorldValue::Integer(value)) => *value as f32,
+                Some(WorldValue::Bool(value)) => u8::from(*value) as f32,
+                _ => {
+                    return Err(ReferenceError(format!(
+                        "Missing source supply field {name}"
+                    )));
+                }
+            };
+            if !value.is_finite() {
+                return Err(ReferenceError(format!(
+                    "Nonfinite source supply field {name}"
+                )));
+            }
+            Ok(value)
+        };
+        let radius = number(cap_record, "radius")?;
+        let flow =
+            radius * radius * std::f32::consts::PI * 0.025 * reference.fluid_rules.pour_speed;
+        let valve = number(cap_record, "valve")?;
+        let can_toggle = number(cap_record, "canToggle")? != 0.0;
+        let can_tune = number(cap_record, "canTune")? != 0.0;
+        let rules = OpeningRules {
+            id: OpeningId(
+                self.openings
+                    .iter()
+                    .map(|opening| opening.reference.id.0)
+                    .max()
+                    .unwrap_or(0)
+                    .checked_add(1)
+                    .ok_or_else(|| ReferenceError("Opening identity space exhausted".into()))?,
+            ),
+            tank,
+            cap,
+            flow_liters_per_second: flow,
+            tilt_degrees: number(cap_record, "defPourAngle")?,
+            angle_disabled: number(cap_record, "noAngle")? != 0.0,
+            spill_disabled: definition.no_pour,
+            tube_connected: number(cap_record, "tube")? != 0.0,
+            can_toggle,
+            can_tune,
+            tune_rate: number(cap_record, "tuneSpeed")? * reference.fluid_rules.fluid_tune_speed,
+        };
+        let tank_rules = TankRules {
+            no_drink: number(tank_record, "noDrink")? != 0.0,
+            no_fill_this: definition.no_fill_this,
+            no_fill_from: definition.no_fill_from,
+            slow_oil: number(tank_record, "slowOil")? != 0.0,
+        };
+        // Subtract in f64 before conversion, so distant bindings retain local precision.
+        let relative = VehiclePose {
+            position: std::array::from_fn(|a| {
+                (point.cap_pose.position[a] - point.tank_pose.position[a]) as f32
+            }),
+            rotation: point.cap_pose.rotation,
+        };
+        let tank_rotation = to_rapier(VehiclePose {
+            position: [0.0; 3],
+            rotation: point.tank_pose.rotation,
+        });
+        self.openings.push(OpeningState {
+            reference: rules,
+            local_pose: tank_rotation.inverse() * to_rapier(relative),
+            tilt_axis: -Vector::Z,
+            valve,
+        });
+        self.source_supply_emission.insert(
+            cap,
+            [definition.emission_min_rate, definition.emission_max_rate],
+        );
+        self.tank_rules.insert(tank, tank_rules);
+        self.kinds.insert(cap, ItemKind::Cap);
+        if can_toggle || can_tune {
+            self.usable_items.insert(cap);
+        }
+        self.filling_items.insert(cap);
+        self.supplies.insert(tank);
+        Ok(())
+    }
+
     pub fn register_pump(&mut self, item: ItemId, flow: f32) -> Result<(), ReferenceError> {
         if !flow.is_finite() || flow <= 0.0 {
             return Err(ReferenceError("Invalid pump flow".into()));

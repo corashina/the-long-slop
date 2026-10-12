@@ -746,7 +746,7 @@ pub const MAX_MANIFEST_BYTES: usize = 128 * 1024 * 1024;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
-    pub world: WorldReference,
+    pub world: std::sync::Arc<WorldReference>,
     pub ui: UiReference,
     pub instruments: InstrumentReference,
     pub library: LibraryProvenance,

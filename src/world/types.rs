@@ -45,12 +45,16 @@ pub struct WorldBounds {
     pub min: [f64; 3],
     pub max: [f64; 3],
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldSurface {
     pub origin: [f64; 3],
     pub vertices: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
+    pub tangents: Vec<[f32; 4]>,
+    pub uv: Vec<[f32; 2]>,
+    /// Each range retains one authored material slot.
+    pub submeshes: Vec<std::ops::Range<usize>>,
     pub colors: Vec<[f32; 4]>,
     pub triangles: Vec<[u32; 3]>,
 }

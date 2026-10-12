@@ -10,10 +10,10 @@ fn rejects_missing_world_broken_weights_and_wrong_source_hashes() {
     missing.as_object_mut().unwrap().remove("world");
     assert!(ReferenceManifest::from_json(&serde_json::to_vec(&missing).unwrap()).is_err());
     let mut manifest = ReferenceManifest::from_json(fixture).unwrap();
-    manifest.world.prototypes[0].skins[0].weights[0][0] = -1.0;
+    std::sync::Arc::make_mut(&mut manifest.world).prototypes[0].skins[0].weights[0][0] = -1.0;
     assert!(manifest.world.validate(&manifest).is_err());
     let mut manifest = ReferenceManifest::from_json(fixture).unwrap();
-    manifest.world.source_hashes[0].sha256 = "0".repeat(64);
+    std::sync::Arc::make_mut(&mut manifest.world).source_hashes[0].sha256 = "0".repeat(64);
     assert!(manifest.world.validate(&manifest).is_err());
 }
 
@@ -26,45 +26,52 @@ fn rejects_missing_prototype_dependencies_and_corrupt_local_bindings() {
     m.assets.retain(|a| a.id != m.world.prototypes[0].asset);
     assert!(m.validate().is_err());
     let mut m = original.clone();
-    m.world.prototypes[0].skins[0].bind_poses.pop();
+    std::sync::Arc::make_mut(&mut m.world).prototypes[0].skins[0]
+        .bind_poses
+        .pop();
     assert!(m.validate().is_err());
     let mut m = original.clone();
-    m.world.prototypes[0].skins[0].joints[0][0] = 999;
+    std::sync::Arc::make_mut(&mut m.world).prototypes[0].skins[0].joints[0][0] = 999;
     assert!(m.validate().is_err());
     let mut m = original.clone();
-    m.world.prototypes[0].nodes[1].parent = Some(999);
+    std::sync::Arc::make_mut(&mut m.world).prototypes[0].nodes[1].parent = Some(999);
     assert!(m.validate().is_err());
     let mut m = original.clone();
-    m.world.prototypes[0].skins[0].weights[0] = [0.; 4];
+    std::sync::Arc::make_mut(&mut m.world).prototypes[0].skins[0].weights[0] = [0.; 4];
     assert!(m.validate().is_err());
     let mut m = original.clone();
     let mut stale = m.world.records[0].source.clone();
     stale.path_id = -999;
-    m.world.records[0]
+    std::sync::Arc::make_mut(&mut m.world).records[0]
         .fields
         .insert("broken".into(), WorldValue::Link(stale.clone()));
-    m.world.records[0].links.push(WorldSourceLink {
-        field: "broken".into(),
-        target: stale,
-    });
+    std::sync::Arc::make_mut(&mut m.world).records[0]
+        .links
+        .push(WorldSourceLink {
+            field: "broken".into(),
+            target: stale,
+        });
     assert!(m.validate().is_err());
     let mut m = original.clone();
-    m.world.prototypes[0]
+    let source = m.world.records[0].source.clone();
+    std::sync::Arc::make_mut(&mut m.world).prototypes[0]
         .colliders
         .push(my_summer_slop::reference::WorldColliderReference {
-            source: m.world.records[0].source.clone(),
+            source: source.clone(),
             node: 0,
             body: None,
             enabled: true,
             trigger: false,
             material: None,
             deformed_skin: None,
-            source_empty_mesh: Some(m.world.records[0].source.clone()),
+            source_empty_mesh: Some(source),
             geometry: None,
         });
     assert!(m.validate().is_err());
     let mut m = original;
-    m.world.distances.remove("RoadGenDist");
+    std::sync::Arc::make_mut(&mut m.world)
+        .distances
+        .remove("RoadGenDist");
     assert!(m.validate().is_err());
 }
 

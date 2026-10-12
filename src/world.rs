@@ -17,10 +17,23 @@ pub use noise::{TerrainEvaluator, source_perlin};
 pub use random::{RandomState, SourceRandom};
 pub use road::{
     ROAD_CHECKPOINT_INTERVAL, ROAD_CONTROLS, ROAD_SEGMENTS, RoadCheckpoint, RoadCurve, RoadIndex,
-    RoadSegment, RoadSequence, RoadState,
+    RoadSegment, RoadSequence, RoadState, deform_road,
 };
+mod instances;
+pub use instances::{StructureInstance, StructureRecipe};
+mod stream;
+pub use stream::{
+    PublishedSupply, PublishedSurface, SourceWorldStream, SurfaceKey, WorldFrame, WorldMetrics,
+    WorldRequest,
+};
+mod startup;
+pub use startup::StartupTerrain;
 mod terrain;
 pub use lamps::{RoadLampId, RoadLampPlacement, road_lamp_placement, road_lamp_range};
+pub use terrain::{
+    TerrainContext, TerrainFoundation, TerrainRoadPoint, TerrainSurfaceJob, TerrainTile, biome,
+    terrain_surface,
+};
 
 pub const CHUNK_LENGTH: f64 = 128.0;
 pub const STATION_SPACING: f64 = 640.0;
@@ -613,12 +626,6 @@ pub fn sync_station_supplies(
             );
             let state = items.get_mut(item).expect("registered station supply");
             state.pose = crate::vehicle::from_rapier(physics.rapier().colliders[handle].position());
-            state
-                .fluid
-                .as_mut()
-                .expect("pump reservoir")
-                .mixture
-                .quantities_liters = [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         }
     }
 }
