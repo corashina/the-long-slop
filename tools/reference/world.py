@@ -333,6 +333,9 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) ->
         for material in report['deferred_materials']:
             selected.record(source.get(material['source']['file'],material['source']['path_id']))
         hierarchy=source.hierarchy(root,activate_root=True)
+        for node in hierarchy:
+            selected.record(node['reader'])
+            selected.record(node['game_object'])
         mapping={key(node['reader']):i for i,node in enumerate(hierarchy)}
         nodes=[{'source':r['source'],'name':source.read(n['game_object'])['m_Name'],'parent':mapping[key(n['parent'])] if n['parent'] else None,
                 'active':bool(source.read(n['game_object'])['m_IsActive']),'renderer_enabled':bool(exporter.document.nodes[r['gltf_node']].extras.get('source_renderer_enabled',False)),'layer':source.read(n['game_object'])['m_Layer'],'transform':r['transform'],'gltf_node':r['gltf_node']} for r,n in zip(report['nodes'],hierarchy)]
