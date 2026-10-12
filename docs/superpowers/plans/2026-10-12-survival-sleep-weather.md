@@ -199,7 +199,7 @@ Build the WASM package and check that the existing garage still reaches readines
 - `output(&self) -> NeedsOutput` and `pending(&self) -> ConsumptionEffect` provide read-only values.
 - `SurvivalState` owns the player bladder container. World containers remain in `ItemStore`.
 
-- [ ] **Step 1: Write tests `source_rates_and_queue_order`, `toilet_fullness_and_gate`, and `death_does_not_heal`.**
+- [x] **Step 1: Write tests `source_rates_and_queue_order`, `toilet_fullness_and_gate`, and `death_does_not_heal`.**
 Use initial values from Task 1. Define local test helper `close(actual: f32, expected: f32)` with tolerance `1e-6`.
 Pin the rate and queue tests with these assertions:
 
@@ -230,15 +230,15 @@ Set initial values through a cloned reference to isolate each test.
 Test health-warning equality at 25%, excess food, excess water, urination latch at `0.01`, and release.
 Test all six drinking fractions, including immediate alcohol water conversion and signed queued effects.
 
-- [ ] **Step 2: Run Rust target `survival`.** Expect missing model interfaces.
-- [ ] **Step 3: Implement the model in source order.** Apply metabolism, empty-need damage, healing, then delayed effects.
+- [x] **Step 2: Run Rust target `survival`.** Expect missing model interfaces.
+- [x] **Step 3: Implement the model in source order.** Apply metabolism, empty-need damage, healing, then delayed effects.
 Use source-path clamps and capacities. Retain the source's `foodLoss` water expression and signed food-water effects.
 Gate toilet actions using source clip duration divided by selected playback pitch, not browser playback state.
 Enter death once, preserve its timer, and suppress healing revival.
 Reject invalid deltas without mutating state. Do not add an unused survival settings switch.
-- [ ] **Step 4: Run target `survival`.** Expect passing numeric and boundary tests.
+- [x] **Step 4: Run target `survival`.** Expect passing numeric and boundary tests.
 Keep the model unconnected to browser metabolism until Task 4 finishes the survival layer.
-- [ ] **Step 5: Commit the model and tests.** Message: `Implement source player needs and death state`.
+- [x] **Step 5: Commit the model and tests.** Message: `Implement source player needs and death state`.
 
 ### Task 3: Connect food, drinking, toilet items, and removal
 
