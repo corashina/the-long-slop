@@ -98,6 +98,17 @@ pub fn glass_view_layout() -> BindGroupLayoutDescriptor {
     )
 }
 
+#[derive(Clone, Copy, Default, serde::Serialize)]
+pub struct GlassAudit {
+    pub frame: u32,
+    pub token: u32,
+    pub captures: u32,
+    pub skipped_grabs: u32,
+    pub material_draws: [u32; 2],
+    pub total_captures: u32,
+    pub extent: [u32; 2],
+    pub logical_bytes: u64,
+}
 /// Own one allocation per source view. Only startup and physical resize create it.
 #[derive(Component)]
 pub struct SourceGlassView {
@@ -109,6 +120,7 @@ pub struct SourceGlassView {
     extent: UVec2,
     valid: AtomicBool,
     captures: AtomicU32,
+    audit: std::sync::Mutex<GlassAudit>,
 }
 impl SourceGlassView {
     pub fn new(
@@ -167,7 +179,24 @@ impl SourceGlassView {
             extent,
             valid: AtomicBool::new(false),
             captures: AtomicU32::new(0),
+            audit: std::sync::Mutex::new(GlassAudit::default()),
         })
+    }
+    pub fn audit(&self) -> GlassAudit {
+        *self.audit.lock().unwrap()
+    }
+    pub fn completed(&self, frame: u32, token: u32, counts: [u32; 4]) {
+        *self.audit.lock().unwrap() = GlassAudit {
+            frame,
+            token,
+            captures: counts[0],
+            skipped_grabs: counts[1],
+            material_draws: [counts[2], counts[3]],
+            total_captures: self.captures(),
+            extent: self.extent.to_array(),
+            logical_bytes: self.logical_bytes(),
+        };
+        self.cleanup();
     }
     pub fn extent(&self) -> UVec2 {
         self.extent

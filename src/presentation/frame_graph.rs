@@ -732,6 +732,7 @@ fn finish_surface(
         &super::shadow_phase::ShadowDrawState,
         &super::camera_depth::CameraDepthState,
         &super::surface_graph::SurfaceViewTargets,
+        &super::stained_glass::SourceGlassView,
     )>,
     frame: Res<SourceViewFrame>,
     progress: Res<SourceGraphProgress>,
@@ -743,8 +744,8 @@ fn finish_surface(
     status: Res<SourceLightingStatus>,
     mut context: RenderContext,
 ) {
-    let (source, target, collector, lighting, shadow, depth, targets) = view.into_inner();
-    if collector.encoded_frame() != frame.frame {
+    let (source, target, collector, lighting, shadow, depth, targets, glass) = view.into_inner();
+    if collector.encoded_frame() != frame.frame || glass.audit().frame != frame.frame {
         return;
     }
     if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
@@ -754,6 +755,7 @@ fn finish_surface(
     let (shadow_epoch, shadow_attempts, shadow_issued) = shadow.counts();
     state.views[source.index] = ViewAudit {
         frame: frame.frame,
+        glass: glass.audit(),
         camera_depth: depth.counts(),
         surface: lighting.draws(),
         shadow_epoch,
@@ -890,6 +892,7 @@ fn submitted(
 #[derive(Clone, Copy, Default, serde::Serialize)]
 struct ViewAudit {
     frame: u32,
+    glass: super::stained_glass::GlassAudit,
     camera_depth: [u32; 3],
     surface: [u32; 5],
     shadow_epoch: u32,

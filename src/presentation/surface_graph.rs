@@ -156,7 +156,10 @@ fn transparent(
         &SurfaceViewTargets,
         &SourceTransparentPasses,
         &SourceViewLighting,
+        &super::stained_glass::SourceGlassView,
+        &super::surface_views::SourceSurfaceView,
     )>,
+    frame: Res<super::view_frame::SourceViewFrame>,
     phases: Res<ViewSortedRenderPhases<Transparent3d>>,
     pipelines: Res<SurfacePasses>,
     casters: Res<super::caster::CasterPasses>,
@@ -173,7 +176,8 @@ fn transparent(
         return;
     }
     let entity = view.entity();
-    let (view, targets, order, lighting) = view.into_inner();
+    let (view, targets, order, lighting, glass, source_view) = view.into_inner();
+    glass.cleanup();
     let Some(phase) = phases.get(&view.retained_view_entity) else {
         return;
     };
@@ -188,22 +192,38 @@ fn transparent(
         },
     })];
     let depth = targets.multisample_depth.as_ref().unwrap_or(&targets.depth);
-    let mut pass = context.begin_tracked_render_pass(RenderPassDescriptor {
-        label: Some("source_transparent"),
-        color_attachments: &colors,
-        depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-            view: &depth.attachment,
-            depth_ops: Some(Operations {
-                load: LoadOp::Load,
-                store: StoreOp::Store,
+    SourceTransparentPasses::prepare_draws(world);
+    let mut start = 0;
+    while start < order.len() {
+        if order.capture_at(start) {
+            if let Err(error) = glass.capture(context.command_encoder(), &targets.colors) {
+                *status.0.lock().unwrap() = RenderingState::Failed(error.into());
+                glass.cleanup();
+                return;
+            }
+            start += 1;
+            continue;
+        }
+        let end = order.next_capture(start + 1);
+        let mut pass = context.begin_tracked_render_pass(RenderPassDescriptor {
+            label: Some("source_transparent"),
+            color_attachments: &colors,
+            depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                view: &depth.attachment,
+                depth_ops: Some(Operations {
+                    load: LoadOp::Load,
+                    store: StoreOp::Store,
+                }),
+                stencil_ops: None,
             }),
-            stencil_ops: None,
-        }),
-        ..default()
-    });
-    if let Err(error) = order.render_range(0..order.len(), phase, &mut pass, world, entity) {
-        *status.0.lock().unwrap() =
-            RenderingState::Failed(format!("Source transparent draw: {error:?}"));
+            ..default()
+        });
+        if let Err(error) = order.render_range(start..end, phase, &mut pass, world, entity) {
+            *status.0.lock().unwrap() =
+                RenderingState::Failed(format!("Source transparent draw: {error:?}"));
+        }
+        drop(pass);
+        start = end;
     }
     let [epoch, base_attempts, base_done, add_attempts, add_done] = lighting.draws();
     if base_attempts != base_done || add_attempts != add_done {
@@ -211,6 +231,15 @@ fn transparent(
             "Source surface draw skipped in view {entity:?}, epoch {epoch}: base {base_done}/{base_attempts}, additive {add_done}/{add_attempts}"
         ));
     }
+    glass.completed(
+        frame.frame,
+        if source_view.index < 3 {
+            frame.main_token
+        } else {
+            frame.probe_token
+        },
+        order.glass_counts(),
+    );
 }
 
 #[derive(Resource, Default)]

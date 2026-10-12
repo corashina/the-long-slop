@@ -522,8 +522,10 @@ pub fn bind_authored_materials(
             record.state.alpha_mode,
             source::AlphaMode::Blend | source::AlphaMode::Premultiply | source::AlphaMode::Refract
         ) {
-            transparent_pass_capacity +=
-                1 + usize::from(record.shader_family == ShaderFamily::Standard);
+            transparent_pass_capacity += 1 + usize::from(matches!(
+                record.shader_family,
+                ShaderFamily::Standard | ShaderFamily::StainedGlass
+            ));
             #[derive(serde::Deserialize)]
             struct PrimitiveIdentity {
                 submesh: u16,
@@ -551,6 +553,12 @@ pub fn bind_authored_materials(
             commands.entity(entity).insert((
                 bevy::render::batching::NoAutomaticBatching,
                 super::transparent::SourceSortData {
+                    material_identity: runtime_material,
+                    glass_source: if record.shader_family == ShaderFamily::StainedGlass {
+                        record.source.path_id
+                    } else {
+                        0
+                    },
                     material_key: crate::reference::sorting::material_sort_key(
                         runtime_material,
                         record.enable_instancing,
