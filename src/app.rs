@@ -351,6 +351,7 @@ fn read_input(
             return;
         }
         source.reset_instances(&mut commands);
+        commands.queue(presentation::mirrors::reset_mirrors);
         drive.instruments.reset(&reference.0.instruments);
         drive.camera = CameraMode::default();
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);

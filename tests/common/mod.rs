@@ -163,3 +163,28 @@ pub fn add_rotation(reference: &mut ReferenceManifest, item: u32, body: u32, lim
         turn: None,
     });
 }
+
+pub fn detach(
+    g: &mut my_summer_slop::starting_area::GarageRuntime,
+    item: my_summer_slop::reference::ItemId,
+) {
+    g.area
+        .interaction
+        .parts
+        .can_remove(item, &g.area.player, &g.area.items)
+        .unwrap();
+    g.area
+        .interaction
+        .parts
+        .remove(item, &mut g.area.items, &mut g.physics)
+        .unwrap();
+    g.area.interaction.parts.detach_mechanism(
+        item,
+        &mut g.area.interaction.mechanisms,
+        &mut g.physics,
+    );
+    g.area
+        .interaction
+        .sync_parts(&mut g.area.items, &mut g.physics)
+        .unwrap();
+}

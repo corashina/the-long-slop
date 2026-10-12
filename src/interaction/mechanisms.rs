@@ -45,6 +45,7 @@ impl MechanismState {
         let mut needed = HashSet::new();
         needed.extend(reference.items.iter().map(|i| i.node));
         needed.extend(reference.anchors.iter().map(|a| a.node));
+        needed.extend(reference.mirrors.mirrors.iter().map(|m| m.camera_node));
         let driven: HashSet<_> = reference
             .mechanisms
             .iter()

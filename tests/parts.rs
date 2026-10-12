@@ -16,27 +16,7 @@ fn part(r: &ReferenceManifest, tag: &str) -> ItemId {
         .unwrap()
         .item
 }
-fn detach(g: &mut GarageRuntime, item: ItemId) {
-    g.area
-        .interaction
-        .parts
-        .can_remove(item, &g.area.player, &g.area.items)
-        .unwrap();
-    g.area
-        .interaction
-        .parts
-        .remove(item, &mut g.area.items, &mut g.physics)
-        .unwrap();
-    g.area.interaction.parts.detach_mechanism(
-        item,
-        &mut g.area.interaction.mechanisms,
-        &mut g.physics,
-    );
-    g.area
-        .interaction
-        .sync_parts(&mut g.area.items, &mut g.physics)
-        .unwrap();
-}
+use common::detach;
 fn settle_lamps(g: &mut GarageRuntime, reference: &ReferenceManifest) {
     g.started = true;
     for _ in 0..20 {

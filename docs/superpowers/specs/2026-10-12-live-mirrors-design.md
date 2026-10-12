@@ -90,6 +90,12 @@ Restore the source enabled display and update rules on resume.
 Track removal and mounting through existing node and body bindings, including removal of the containing door.
 Keep loose and carried mirrors eligible under the same source capture rules.
 
+Source ruling, 2026-10-12: individual mirror removal resets its control values and preserves its world angle.
+Reinstallation uses those reset values. Removing the containing door retains the mirror adjustment.
+Installed Assembly-CSharp.cs lines 48561-48590 call `usable.UnCrafted(transform)` through `RefreshCrafted`.
+Lines 66122-66139 reset control values, then correct the loose root rotation to preserve the world angle.
+This source behavior replaces the earlier requirement to retain adjustment after individual removal and reinstallation.
+
 ## Modules and data
 
 Add source recovery in `tools/reference/mirrors.py` and extend the current manifest contract in `src/reference.rs`.
@@ -145,7 +151,7 @@ Use critical interaction tests and visible browser checks. Avoid tests that repe
 | --- | --- |
 | Source export | Three complete Lada captures; verified identities, settings, targets, masks, and material links |
 | Movement and adjustment | Player movement, car movement, and mirror rotation change the view in the correct direction |
-| Removal and mounting | Capture follows the mirror and containing door; reinstallation preserves the adjusted pose |
+| Removal and mounting | Capture follows the mirror and door; door removal retains adjustment; individual removal preserves world angle and resets controls |
 | Carry and drop | The loose mirror capture uses its current pose without a stale body anchor |
 | Floating origin | Capture direction and clipping stay correct through a rebase while mounted and loose |
 | Pause and resume | Display and capture match source pause rules; resume restores capture updates |

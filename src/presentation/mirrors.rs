@@ -95,6 +95,7 @@ struct MirrorBinding {
 }
 #[derive(Resource)]
 pub struct SourceMirrors {
+    instance: u64,
     bindings: Vec<MirrorBinding>,
     normal_camera: Entity,
     native: MirrorState,
@@ -102,6 +103,7 @@ pub struct SourceMirrors {
 }
 #[derive(Resource, Clone, Default, ExtractResource)]
 struct MirrorSurfaces {
+    instance: u64,
     entries: Arc<Vec<(Entity, AssetId<SourceMaterial>, AssetId<SourceMaterial>)>>,
 }
 
@@ -123,6 +125,67 @@ fn resolve_mirror_material(
     current
 }
 
+#[derive(Component, Clone, Copy)]
+struct MirrorInstance(u64);
+impl bevy::render::sync_component::SyncComponent for MirrorInstance {
+    type Target = Self;
+}
+impl ExtractComponent for MirrorInstance {
+    type QueryData = &'static Self;
+    type QueryFilter = ();
+    type Out = Self;
+    fn extract_component(
+        item: bevy::ecs::query::QueryItem<'_, '_, Self::QueryData>,
+    ) -> Option<Self> {
+        Some(*item)
+    }
+}
+
+pub fn reset_mirrors(world: &mut World) {
+    let instance = {
+        let mut status = world.resource::<MirrorGpuStatus>().0.lock().unwrap();
+        let instance = status
+            .instance
+            .checked_add(1)
+            .expect("mirror instance overflow");
+        *status = MirrorGpuData {
+            instance,
+            ..default()
+        };
+        instance
+    };
+    world.insert_resource(MirrorSurfaces {
+        instance,
+        ..default()
+    });
+    if let Some(mirrors) = world.remove_resource::<SourceMirrors>() {
+        debug_assert!(mirrors.instance < instance);
+        for binding in mirrors.bindings {
+            world.despawn(binding.camera);
+            if let Ok(mut screen) = world.get_entity_mut(binding.screen) {
+                screen.remove::<MeshMaterial3d<SourceMaterial>>();
+            }
+            world
+                .resource_mut::<Assets<Image>>()
+                .remove(binding.target.id());
+            world
+                .resource_mut::<Assets<SourceMaterial>>()
+                .remove(binding.live.id());
+            world
+                .resource_mut::<Assets<SourceMaterial>>()
+                .remove(binding.disabled.id());
+            super::materials::release_mirror_warmup(
+                world,
+                binding.live.id(),
+                binding.disabled.id(),
+            );
+        }
+    }
+    if let Some(mut lighting) = world.get_resource_mut::<super::lighting::SourceLighting>() {
+        lighting.sky.reset_capture_views();
+    }
+}
+
 pub struct SourceMirrorPlugin;
 impl Plugin for SourceMirrorPlugin {
     fn build(&self, app: &mut App) {
@@ -130,6 +193,7 @@ impl Plugin for SourceMirrorPlugin {
             .init_resource::<MirrorGpuStatus>()
             .add_plugins((
                 ExtractComponentPlugin::<MirrorViewRole>::default(),
+                ExtractComponentPlugin::<MirrorInstance>::default(),
                 ExtractResourcePlugin::<MirrorSurfaces>::default(),
                 ExtractResourcePlugin::<MirrorGpuStatus>::default(),
             ))
@@ -176,8 +240,20 @@ impl Plugin for SourceMirrorPlugin {
 }
 
 pub fn bind_mirrors(world: &mut World) {
-    if world.contains_resource::<SourceMirrors>() {
-        return;
+    if let Some(mirrors) = world.get_resource::<SourceMirrors>() {
+        let visuals = world.resource::<ReferenceVisuals>();
+        let destroyed = !visuals.bound
+            || mirrors.bindings.iter().any(|binding| {
+                world.get::<GlobalTransform>(binding.plane).is_none()
+                    || world.get::<GlobalTransform>(binding.camera_node).is_none()
+                    || world.get::<Mesh3d>(binding.screen).is_none()
+                    || world.get::<Camera>(binding.camera).is_none()
+            });
+        if destroyed {
+            reset_mirrors(world);
+        } else {
+            return;
+        }
     }
     if !world.resource::<ReferenceVisuals>().bound
         || !world.resource::<SourceMaterials>().textures_ready()
@@ -186,10 +262,40 @@ pub fn bind_mirrors(world: &mut World) {
         return;
     }
     let reference = world.resource::<RuntimeReference>().0.clone();
+    let instance = world
+        .resource::<MirrorGpuStatus>()
+        .0
+        .lock()
+        .unwrap()
+        .instance;
     let normal_camera = world
         .query_filtered::<Entity, With<DriveCamera>>()
         .single(world)
         .unwrap();
+    // Validate the complete imported instance before allocating any owned resources.
+    for record in &reference.mirrors.mirrors {
+        let nodes = &world.resource::<ReferenceVisuals>().nodes;
+        if [record.plane_node, record.camera_node, record.surface_node]
+            .iter()
+            .any(|node| {
+                nodes
+                    .get(node)
+                    .is_none_or(|entity| world.get::<GlobalTransform>(*entity).is_none())
+            })
+        {
+            return;
+        }
+        if world
+            .get::<Children>(nodes[&record.surface_node])
+            .is_none_or(|children| {
+                !children
+                    .iter()
+                    .any(|entity| world.get::<Mesh3d>(entity).is_some())
+            })
+        {
+            return;
+        }
+    }
     let mut bindings = Vec::with_capacity(3);
     let mut surfaces = Vec::with_capacity(3);
     for record in &reference.mirrors.mirrors {
@@ -247,8 +353,8 @@ pub fn bind_mirrors(world: &mut World) {
             mask,
             source,
         );
-        live.mirror = Some((bindings.len(), true));
-        disabled.mirror = Some((bindings.len(), false));
+        live.mirror = Some((instance, bindings.len(), true));
+        disabled.mirror = Some((instance, bindings.len(), false));
         let live = world.resource_mut::<Assets<SourceMaterial>>().add(live);
         let disabled = world.resource_mut::<Assets<SourceMaterial>>().add(disabled);
         world
@@ -270,6 +376,7 @@ pub fn bind_mirrors(world: &mut World) {
                 },
                 RenderTarget::Image(target.clone().into()),
                 MirrorViewRole::Capture(bindings.len()),
+                MirrorInstance(instance),
                 Projection::custom(MirrorProjection {
                     perspective: PerspectiveProjection {
                         fov: record.serialized_fov_degrees.to_radians(),
@@ -311,8 +418,12 @@ pub fn bind_mirrors(world: &mut World) {
             .map(|binding| binding.target.id())
             .collect::<Vec<_>>()
     );
-    world.resource_mut::<MirrorSurfaces>().entries = Arc::new(surfaces);
+    world.insert_resource(MirrorSurfaces {
+        instance,
+        entries: Arc::new(surfaces),
+    });
     world.insert_resource(SourceMirrors {
+        instance,
         normal_camera,
         inputs: vec![MirrorInput::default(); bindings.len()],
         native: MirrorState::new(&reference.mirrors),
@@ -320,15 +431,22 @@ pub fn bind_mirrors(world: &mut World) {
     });
 }
 
-pub fn sync_mirror_views(world: &mut World) {
+pub fn sync_mirror_views(world: &mut World, windows: &mut QueryState<&'static Window>) {
     let Some(mut mirrors) = world.remove_resource::<SourceMirrors>() else {
         return;
     };
     let reference = world.resource::<RuntimeReference>().0.clone();
+    let available = world
+        .get::<Camera>(mirrors.normal_camera)
+        .is_some_and(|camera| camera.is_active)
+        && windows
+            .iter(world)
+            .any(|window| window.physical_width() > 0 && window.physical_height() > 0);
     let drive = world.resource::<Drive>();
     let started = drive.runtime.started;
-    let playing = started && !drive.runtime.paused;
-    let warming = !started && !world.resource::<MirrorGpuStatus>().ready();
+    let playing = started && !drive.runtime.paused && available;
+    let ready = world.resource::<MirrorGpuStatus>().ready();
+    let warming = available && !drive.runtime.paused && !ready;
     let player = drive
         .runtime
         .area
@@ -337,15 +455,15 @@ pub fn sync_mirror_views(world: &mut World) {
         .position;
     let head = world
         .get::<GlobalTransform>(mirrors.normal_camera)
-        .expect("bound normal camera")
-        .translation()
-        .to_array();
+        .map(|pose| pose.translation().to_array())
+        .unwrap_or(player);
     // Compute normal visibility from its current projection, before capture camera visibility runs.
     let frustum = world
         .get::<GlobalTransform>(mirrors.normal_camera)
         .zip(world.get::<Projection>(mirrors.normal_camera))
         .map(|(pose, projection)| projection.compute_frustum(pose));
     for (index, binding) in mirrors.bindings.iter().enumerate() {
+        mirrors.inputs[index] = MirrorInput::default();
         let Some(plane) = world.get::<GlobalTransform>(binding.plane) else {
             continue;
         };
@@ -406,7 +524,7 @@ pub fn sync_mirror_views(world: &mut World) {
                 projection.perspective.far = output.capture_far_plane;
             }
         }
-        let selected = if output.capture && valid_clip {
+        let selected = if output.capture && valid_clip && ready {
             &binding.live
         } else {
             &binding.disabled
@@ -450,15 +568,24 @@ use bevy::render::{
 
 #[derive(Resource, Default)]
 struct CaptureDepths {
+    instance: u64,
     textures: HashMap<usize, CachedTexture>,
 }
 fn prepare_capture_depths(
     mut commands: Commands,
     device: Res<RenderDevice>,
     mut depths: ResMut<CaptureDepths>,
-    views: Query<(Entity, &MirrorViewRole)>,
+    surfaces: Res<MirrorSurfaces>,
+    views: Query<(Entity, &MirrorViewRole, &MirrorInstance)>,
 ) {
-    for (entity, role) in &views {
+    if depths.instance != surfaces.instance {
+        depths.textures.clear();
+        depths.instance = surfaces.instance;
+    }
+    for (entity, role, stamp) in &views {
+        if stamp.0 != surfaces.instance {
+            continue;
+        }
         let MirrorViewRole::Capture(index) = role else {
             continue;
         };
@@ -503,12 +630,19 @@ struct CapturePipelines {
 
 fn prepare_capture_pipelines(
     world: &mut World,
-    views: &mut QueryState<(&'static ExtractedView, &'static MirrorViewRole)>,
+    views: &mut QueryState<(
+        &'static ExtractedView,
+        &'static MirrorViewRole,
+        &'static MirrorInstance,
+    )>,
 ) {
     let mut cache = world.remove_resource::<CapturePipelines>().unwrap();
     cache.jobs.clear();
     let surfaces = world.resource::<MirrorSurfaces>().clone();
-    for (view, role) in views.iter(world) {
+    for (view, role, stamp) in views.iter(world) {
+        if stamp.0 != surfaces.instance {
+            continue;
+        }
         let MirrorViewRole::Capture(index) = role else {
             continue;
         };
@@ -639,6 +773,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMirrorMaterial<I> {
         SRes<RenderMaterialInstances>,
         SRes<MaterialBindGroupAllocators>,
         SRes<MirrorSurfaces>,
+        SRes<super::sky::SkyVariants>,
     );
     type ViewQuery = &'static MirrorViewRole;
     type ItemQuery = ();
@@ -646,7 +781,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMirrorMaterial<I> {
         item: &P,
         role: &'w MirrorViewRole,
         _: Option<()>,
-        (materials, instances, allocators, surfaces): SystemParamItem<'w, '_, Self::Param>,
+        (materials, instances, allocators, surfaces, sky): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(instance) = instances.into_inner().instances.get(&item.main_entity()) else {
@@ -658,6 +793,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMirrorMaterial<I> {
             instance.asset_id,
             surfaces.into_inner(),
         );
+        let selected = sky.into_inner().resolve(*role, selected);
         let Some(material) = materials.into_inner().get(selected) else {
             return RenderCommandResult::Skip;
         };
@@ -698,10 +834,18 @@ fn queue_capture_meshes(
     mut alpha_mask_render_phases: ResMut<ViewBinnedRenderPhases<AlphaMask3d>>,
     mut transmissive_render_phases: ResMut<ViewSortedRenderPhases<Transmissive3d>>,
     mut transparent_render_phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
-    views: Query<(&ExtractedView, &RenderVisibleEntities, &MirrorViewRole)>,
+    views: Query<(
+        &ExtractedView,
+        &RenderVisibleEntities,
+        &MirrorViewRole,
+        &MirrorInstance,
+    )>,
     specialized_material_pipeline_cache: ResMut<SpecializedMaterialPipelineCache>,
-    surfaces: Res<MirrorSurfaces>,
-    captures: Res<CapturePipelines>,
+    (surfaces, sky, captures): (
+        Res<MirrorSurfaces>,
+        Res<super::sky::SkyVariants>,
+        Res<CapturePipelines>,
+    ),
     (draw_opaque, draw_mask, draw_transparent, draw_transmissive): (
         Res<DrawFunctions<Opaque3d>>,
         Res<DrawFunctions<AlphaMask3d>>,
@@ -709,7 +853,10 @@ fn queue_capture_meshes(
         Res<DrawFunctions<Transmissive3d>>,
     ),
 ) {
-    for (view, visible_entities, role) in &views {
+    for (view, visible_entities, role, stamp) in &views {
+        if stamp.0 != surfaces.instance {
+            continue;
+        }
         let MirrorViewRole::Capture(_) = role else {
             continue;
         };
@@ -780,6 +927,7 @@ fn queue_capture_meshes(
                 material_instance.asset_id,
                 &surfaces,
             );
+            let selected = sky.resolve(*role, selected);
             let Some(material) = render_materials.get(selected) else {
                 continue;
             };
@@ -916,6 +1064,7 @@ struct PreparedBanks {
 }
 #[derive(Default)]
 struct MirrorGpuData {
+    instance: u64,
     banks: [[Option<PreparedBanks>; 2]; 3],
     submitted: [bool; 3],
     ready: bool,
@@ -930,7 +1079,7 @@ impl MirrorGpuStatus {
     pub fn failure(&self) -> Option<String> {
         self.0.lock().unwrap().failure.clone()
     }
-    pub fn record(&self, owner: usize, live: bool, bindings: &BindingResources) {
+    pub fn record(&self, instance: u64, owner: usize, live: bool, bindings: &BindingResources) {
         let mut banks = PreparedBanks::default();
         for (binding, resource) in bindings.iter() {
             if let OwnedBindingResource::TextureView(_, view) = resource {
@@ -941,17 +1090,26 @@ impl MirrorGpuStatus {
                 }
             }
         }
-        self.0.lock().unwrap().banks[owner][live as usize] = Some(banks);
+        let mut status = self.0.lock().unwrap();
+        if status.instance == instance {
+            status.banks[owner][live as usize] = Some(banks);
+        }
     }
 }
 fn finish_capture_frame(
     status: Res<MirrorGpuStatus>,
     captures: Res<CapturePipelines>,
     pipelines: Res<PipelineCache>,
-    views: Query<(&ExtractedView, &MirrorViewRole, &ViewDepthTexture)>,
+    surfaces: Res<MirrorSurfaces>,
+    views: Query<(
+        &ExtractedView,
+        &MirrorViewRole,
+        &MirrorInstance,
+        &ViewDepthTexture,
+    )>,
 ) {
     let mut status = status.0.lock().unwrap();
-    if status.ready || status.failure.is_some() {
+    if status.instance != surfaces.instance || status.ready || status.failure.is_some() {
         return;
     }
     if status
@@ -1002,7 +1160,10 @@ fn finish_capture_frame(
             return;
         }
     }
-    for (_, role, depth) in &views {
+    for (_, role, stamp, depth) in &views {
+        if stamp.0 != status.instance {
+            continue;
+        }
         if let MirrorViewRole::Capture(index) = role {
             if depth.texture.format() != TextureFormat::Depth24PlusStencil8 {
                 status.failure = Some("Mirror depth format mismatch".into());

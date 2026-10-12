@@ -816,7 +816,7 @@ use bevy::ecs::system::SystemParamItem;
 /// Forward source surfaces need the six base maps, not Bevy transmission maps.
 #[derive(Asset, TypePath, Clone, Debug, Default)]
 pub struct SourceMaterial {
-    pub(crate) mirror: Option<(usize, bool)>,
+    pub(crate) mirror: Option<(u64, usize, bool)>,
     pub base: StandardMaterial,
     pub extension: SourceExtension,
 }
@@ -854,8 +854,8 @@ impl AsBindGroup for SourceMaterial {
             self.extension
                 .unprepared_bind_group(layout, device, &mut params.1, true)?;
         prepared.bindings.0.extend(extension.bindings.0);
-        if let Some((owner, live)) = self.mirror {
-            params.2.record(owner, live, &prepared.bindings);
+        if let Some((instance, owner, live)) = self.mirror {
+            params.2.record(instance, owner, live, &prepared.bindings);
         }
         Ok(prepared)
     }
@@ -1628,4 +1628,18 @@ pub(crate) fn warm_mirror_material(
         material,
         label: "source mirror surface".into(),
     });
+}
+
+pub(crate) fn release_mirror_warmup(
+    world: &World,
+    live: AssetId<SourceMaterial>,
+    disabled: AssetId<SourceMaterial>,
+) {
+    world
+        .resource::<MaterialLoading>()
+        .0
+        .lock()
+        .unwrap()
+        .requests
+        .retain(|request| request.material != live && request.material != disabled);
 }
