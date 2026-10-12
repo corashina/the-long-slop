@@ -11,8 +11,9 @@
 **Spec:** [Approved specification](../specs/2026-10-12-survival-sleep-weather-design.md).
 **Evidence:** [Source audit](../../research/2026-10-12-survival-sleep-weather-reference.md).
 **Branch:** `codex/survival-weather`, isolated checkout based on `d7995c8`.
-**Execution:** The user selected Subagent-driven execution through the active thread goal. Implementation is in progress.
-**User override:** The user later said 'Skip tests'. Skip further test runs, new behavioral tests, and browser acceptance. Continue implementation, source review, formatting, and build checks. Earlier test results do not certify later changes.
+**Execution:** The user selected Subagent-driven execution. Tasks 1–9 are complete under the user waiver. Final whole-branch review remains required.
+**User override:** The user later said 'Skip tests', then 'Continue. Ignore tests'. Skip further test runs, new behavioral tests, and browser acceptance. Continue implementation, source review, formatting, and build checks. Earlier test results do not certify later changes. Unchecked waived steps below remain skipped, not passed.
+**Completion:** [Tracked evidence and limits](../../research/2026-10-12-survival-sleep-weather-completion.md).
 
 ## Global Constraints
 
@@ -337,7 +338,7 @@ Completed after source review, compilation, and strict export validation. Tests 
 - `createSurvival(ui)` returns `update(output)` and `setVisible(visible)`. It performs no game calculation.
 - Its display object has the flat fields of `gameSurvival`; Rust computes opacity and eligibility.
 
-- [x] **Step 1: Write `recovery_retains_needs_and_restart_rebuilds_startup`, `speed_change_death_uses_source_threshold`, and browser lifecycle tests.**
+- [ ] **Skipped by user. Step 1: Write `recovery_retains_needs_and_restart_rebuilds_startup`, `speed_change_death_uses_source_threshold`, and browser lifecycle tests.**
 At a speed change of `13.5`, the player lives; above it, an unprotected player dies.
 Recovery and rebase must not count as speed changes. Grounding ends startup/recovery protection.
 Recovery retains health, queued effects, and consumed food. Restart restores Task 1 initial values and the starter item.
@@ -357,7 +358,7 @@ Test need display at five seconds and the one-second fade interval.
 Reject stale audio sessions. Fail clip decoding and playback; assert unchanged needs and toilet gate duration.
 Across repeated output frames, assert one AudioContext and retained loop voices, rather than new contexts.
 
-- [x] **Step 2: Run target `survival_lifecycle` and the affected web test files.** Confirm failure for missing feedback and lifecycle wiring.
+- [ ] **Skipped by user. Step 2: Run target `survival_lifecycle` and the affected web test files.** Confirm failure for missing feedback and lifecycle wiring.
 - [x] **Step 3: Activate needs in the fixed runtime update and connect feedback.** Initially use awake factors only.
 Create source input and feedback events at successful mutation points; publish them once after fixed steps.
 Use source sliders/icons and recovered five-second display timing. Keep ordinary actions hidden when dead.
@@ -366,7 +367,8 @@ Keep world and vehicle simulation active through the death transition; pause at 
 Initialize the one shared AudioContext inside Start/Continue's gesture, before awaiting pointer lock.
 Load the selected source eating, toilet, and death clips. Gameplay continues if browser playback fails.
 Update `scripts/check.ps1` to include the new critical web test files; retain existing checks.
-- [x] **Step 4: Run focused tests and the release build.** Exercise eating, drinking, toilet actions, depletion, healing, death, recovery, and restart in the browser.
+- [x] **Step 4: Complete allowed source/build checks.** Tests and browser acceptance were skipped by user.
+Original plan, skipped acceptance: Run focused tests and the release build. Exercise eating, drinking, toilet actions, depletion, healing, death, recovery, and restart in the browser.
 Verify source mixture effects with the native fixture and valid container interactions with the installed export.
 Capture this first working layer under `.cache/survival-weather/layer-1/`; record shader errors and audible feedback.
 - [x] **Step 5: Commit the survival layer.** Message: `Activate survival feedback and death lifecycle`.
@@ -398,7 +400,7 @@ Completed after source review, compilation, and strict validation. Tests and bro
 - Add `GarageRuntime::clock_factors(&self, reference: &ReferenceManifest) -> ClockFactors`.
 - `GarageRuntime` owns `sleep: SleepState`. `SleepOutput` and `ClockFactors` derive Copy, Debug, and PartialEq.
 
-- [x] **Step 1: Write `sleep_hold_cooldown_and_wake_boundaries`, `sleep_clocks_are_separate`, and `mixed_frame_scales_do_not_double_count`.**
+- [ ] **Skipped by user. Step 1: Write `sleep_hold_cooldown_and_wake_boundaries`, `sleep_clocks_are_separate`, and `mixed_frame_scales_do_not_double_count`.**
 Use direct deadline cases and source literals. Add these clock-factor assertions after entering sleep:
 
 ```rust
@@ -422,7 +424,7 @@ Test negative, NaN, infinite, and ten-second frame deltas. A valid stalled frame
 Assert no more than six awake or twelve sleeping fixed steps; each step retains `FIXED_DT`.
 Pin engine RPM/unscaled heat to simulation time, and fuel/oil/coolant/thermal loss to the source sleep factor.
 
-- [x] **Step 2: Run targets `sleep`, `input`, `engine`, and `lighting`.** Expect missing sleep state and changed clock APIs.
+- [ ] **Skipped by user. Step 2: Run targets `sleep`, `input`, `engine`, and `lighting`.** Expect missing sleep state and changed clock APIs.
 - [x] **Step 3: Implement state and replace obsolete clock routing.** Clamp incoming real delta before scaling.
 `take_step` spends `FIXED_DT / time_scale` real seconds. A frame touching sleep has budget twelve; an awake frame has budget six.
 Keep only fractional carry after the budget. Reject invalid delta without changing the accumulator.
@@ -435,7 +437,8 @@ Retain the source previous-step star extra and the `Felho` cloud-speed curve. Re
 Remove the separate raw real-frame `advance_lighting` path. Use one authoritative accepted interval route.
 Route lamp fades and shader time through normal simulation time, including sleep's twofold rate.
 Remove the raw real-frame `advance_light_fades` caller; advance the existing fade owner from accepted simulation slices.
-- [x] **Step 4: Run focused targets and release WASM build.** Expect numeric boundary tests and existing lighting/engine checks to pass.
+- [x] **Step 4: Complete allowed source/build checks.** Tests and browser acceptance were skipped by user.
+Original plan, skipped acceptance: Run focused targets and release WASM build. Expect numeric boundary tests and existing lighting/engine checks to pass.
 Use fixed-step tolerance for endpoint frames; do not widen tolerance to conceal a wrong multiplier.
 - [x] **Step 5: Commit clock routing.** Message: `Add source sleep clocks without large physics steps`.
 
@@ -455,7 +458,7 @@ Completed after source review, compilation, and strict validation. Tests and bro
 - `createSurvival(ui).updateSleep(output)` displays recovered hold and cooldown UI.
 - Existing `clear_input`, `recover`, `restart`, and camera update use the sleep state; add no parallel lifecycle owner.
 
-- [x] **Step 1: Write `pause_suspends_sleep_and_recovery_retains_cooldown`, `sleep_camera_rebases_without_jump`, and `moving_vehicle_sleep_keeps_ignition`.**
+- [ ] **Skipped by user. Step 1: Write `pause_suspends_sleep_and_recovery_retains_cooldown`, `sleep_camera_rebases_without_jump`, and `moving_vehicle_sleep_keeps_ignition`.**
 Pause halfway through sleep; resume after an arbitrary hidden interval. Assert unchanged remaining time and needs while hidden.
 Recovery ends sleep and retains scheduled wake endpoint, cooldown, needs, queues, consumed items, and engine ignition.
 Releasing sleep input after entry does not wake. Death ends sleep once.
@@ -473,14 +476,15 @@ assert_eq!(runtime.sleep.output(), before);
 assert_eq!(runtime.needs_output().needs, needs);
 ```
 
-- [x] **Step 2: Run target `sleep_lifecycle` and affected web tests.** Expect missing input/camera/lifecycle integration.
+- [ ] **Skipped by user. Step 2: Run target `sleep_lifecycle` and affected web tests.** Expect missing input/camera/lifecycle integration.
 - [x] **Step 3: Implement source input and camera behavior.** Use existing physics queries for the source ground ray.
 Store camera position in absolute coordinates; convert through `WorldOrigin` for rendering and audio listener placement.
 Restore the active gameplay camera on wake, death, recovery, and restart.
 Suppress player interactions and drive commands during sleep; retain seat, ignition, gear, latched handbrake, and automatic simulation.
 Pause cancels charge but retains entered sleep. Recovery calls `interrupt` and retains the scheduled cooldown endpoint.
 Connect source sleep audio through the shared owner. Report radio station advancement as unsupported in this scope.
-- [x] **Step 4: Run focused tests and release build.** Check hold, cooldown, sleep, pause/focus loss, moving-vehicle sleep, recovery, death, and restart in the browser.
+- [x] **Step 4: Complete allowed source/build checks.** Tests and browser acceptance were skipped by user.
+Original plan, skipped acceptance: Run focused tests and release build. Check hold, cooldown, sleep, pause/focus loss, moving-vehicle sleep, recovery, death, and restart in the browser.
 Capture the second working layer and clock traces under `.cache/survival-weather/layer-2/`.
 Confirm physics and camera remain finite after a stall and an origin shift.
 - [x] **Step 5: Commit the sleep layer.** Message: `Connect sleep camera feedback and lifecycle`.
@@ -507,7 +511,7 @@ Completed after source review, compilation, and strict validation. Tests and bro
 - `GarageRuntime` owns `weather: WeatherState`, shelter bindings, and retained body-root maps.
 - Extract `terrain_height(seed: u64, absolute: [f64; 3]) -> f32` from the current terrain generator's existing height rule.
 
-- [x] **Step 1: Write `source_schedule_and_influence_boundaries`, `storm_life_uses_previous_distance`, and `wind_skips_shelter_and_removed_bodies`.**
+- [ ] **Skipped by user. Step 1: Write `source_schedule_and_influence_boundaries`, `storm_life_uses_previous_distance`, and `wind_skips_shelter_and_removed_bodies`.**
 For deterministic native seeds, assert interval `[1200, 5400]`, spawn ring `15000`, size `[0.5, 1.5]`, and speed `[3, 12]`.
 At the exact scheduler deadline, spawn once and resample before creation.
 With size/life one, assert strength `0` at distance `750`, `1` at `375`, and `0.5` at `562.5`.
@@ -528,7 +532,7 @@ assert_eq!(weather.storms().len(), 1);
 assert!(weather.next_spawn_time() > due);
 ```
 
-- [x] **Step 2: Run targets `weather` and `weather_lifecycle`.** Confirm missing weather behavior fails the tests.
+- [ ] **Skipped by user. Step 2: Run targets `weather` and `weather_lifecycle`.** Confirm missing weather behavior fails the tests.
 - [x] **Step 3: Implement the source scheduler and storm state.** Use a separate deterministic storm random stream with source ranges and draw order.
 Use normal simulation time, current procedural desert height, and source biome zero.
 Preserve previous-distance life evaluation, movement order, influence, destruction, and strongest selection.
@@ -542,12 +546,15 @@ Update retained shelter bounds from current body poses before wind application, 
 Allocate scan capacity during lifecycle events.
 Remove destroyed storm bindings and skip invalid body handles before applying force.
 Do not add direct health, traction, vehicle-condition, or temperature effects.
-- [x] **Step 4: Run focused tests and existing world/vehicle tests.** Expect finite forces and no change to clear-weather driving.
+- [x] **Step 4: Complete allowed source/build checks.** Tests and browser acceptance were skipped by user.
+Original plan, skipped acceptance: Run focused tests and existing world/vehicle tests. Expect finite forces and no change to clear-weather driving.
 Build the release WASM package with normal source scheduling intact.
 Keep weather advancement disconnected from normal play until Task 8 provides its visual and audio signals.
 - [x] **Step 5: Commit the gameplay weather model.** Message: `Implement source sandstorm scheduling and wind`.
 
 ### Task 8: Compose source weather lighting and render selected particles
+
+Completed after source review and allowed checks. Behavioral tests and browser acceptance were skipped by user.
 
 **Files:** Create `src/presentation/weather.rs`, `web/assets/shaders/source_particles.wgsl`.
 - Modify: `src/lighting.rs`, `src/presentation/lighting.rs`, `src/presentation/sky.rs`, `src/presentation/mod.rs`, `src/app.rs`.
@@ -564,7 +571,7 @@ Keep weather advancement disconnected from normal play until Task 8 provides its
 - Storm loop events and emitter poses use Task 4's shared audio owner and stable `StormId`-derived emitter identities.
 - Select the source desert day/night ambient bindings for weather's ambient-volume reduction, using the same shared owner.
 
-- [ ] **Step 1: Write `weather_composition_preserves_phase_rules` and `particle_capacity_and_origin_are_stable`.**
+- [ ] **Skipped by user. Step 1: Write `weather_composition_preserves_phase_rules` and `particle_capacity_and_origin_are_stable`.**
 At the native fixture's noon, full storm influence gives intensity `0.72`, ambient `0.15`, and source storm fog parameter `0.001`. Final fog density multiplies that parameter by the cycle fog modifier.
 At night it gives intensity `0.135` and ambient `0.015`; night-specific ground/cloud/atmosphere rules remain source-defined.
 Test dawn/dusk boundary expressions and daytime atmosphere's cubic influence.
@@ -586,8 +593,8 @@ Particle tests assert source capacity, lifetime/gradient endpoints, zero paused 
 Restart and storm destruction must leave no active particle or stale audio emitter from the previous owner.
 For base ambient gain `0.8`, source decrease `1`, and strength `0.4`, assert gain `0.4`; full strength clamps gain to zero.
 
-- [ ] **Step 2: Run targets `weather_lighting` and `particles`, and the weather exporter tests.** Confirm missing composition/render data fails.
-- [ ] **Step 3: Implement phase-aware composition and the selected particle subset.** Reuse current fog uniforms, sky materials, lights, clouds, and flare ownership.
+- [ ] **Skipped by user. Step 2: Run targets `weather_lighting` and `particles`, and the weather exporter tests.** Confirm missing composition/render data fails.
+- [x] **Step 3: Implement phase-aware composition and the selected particle subset.** Reuse current fog uniforms, sky materials, lights, clouds, and flare ownership.
 Activate weather advancement and wind in the normal runtime at this layer's complete connection point.
 Preserve the one-second source sky-tint sampling and each phase's separate formulas.
 Build particle buffers from authored capacity at loading or creation; reuse buffers and mesh/material handles.
@@ -595,12 +602,15 @@ Implement active source lifetime, shape, velocity, size, gradient, material, and
 Keep unsupported active modules in the explicit source limit ledger; add no invented replacement effect.
 Use the existing Bevy render pattern and source texture samplers. Avoid duplicate glTF root loads and mismatched image samplers.
 Connect source storm loops and ambient gain reduction through the shared audio owner.
-- [ ] **Step 4: Run focused tests and release build.** Inspect clear weather and controlled storm entry/exit in the browser.
+- [x] **Step 4: Complete allowed source/build checks.** Tests and browser acceptance were skipped by user.
+Original plan, skipped acceptance: Run focused tests and release build. Inspect clear weather and controlled storm entry/exit in the browser.
 Check shader/console text, particle shelter, source sound, lamps, and camera fog at all cycle phases.
 Capture the third working layer under `.cache/survival-weather/layer-3/`.
-- [ ] **Step 5: Commit weather presentation.** Message: `Compose source storm lighting particles and feedback`.
+- [x] **Step 5: Commit weather presentation.** Message: `Compose source storm lighting particles and feedback`.
 
 ### Task 9: Verify the assembled feature and document limits
+
+Completed after source review and allowed checks. Behavioral tests and browser acceptance were skipped by user.
 
 **Files:** Test `tests/survival_weather.rs`; update affected critical web lifecycle tests and `scripts/check.ps1` if needed.
 - Update the source audit and this plan's completed checkboxes.
@@ -608,21 +618,24 @@ Capture the third working layer under `.cache/survival-weather/layer-3/`.
 
 **Interfaces:** Uses the completed runtime, existing `run(reference_json)`, and layer interfaces above. Add no production diagnostic API.
 
-- [ ] **Step 1: Write `assembled_pause_recovery_restart_and_origin` against the native runtime.**
+- [ ] **Skipped by user. Step 1: Write `assembled_pause_recovery_restart_and_origin` against the native runtime.**
 Consume station food, begin sleep in a moving vehicle, enter a controlled storm, pause, resume, recover, rebase, and restart.
 Assert single consumption, source clock factors, retained logical state during pause/recovery, stable storm coordinates, and source reset values.
 Assert dead Continue/Recover cannot revive and stale prior-session feedback cannot affect the new session.
-- [ ] **Step 2: Run target `survival_weather` and confirm any uncovered integration failure.** Use systematic debugging for failures.
-- [ ] **Step 3: Fix only integration failures within the approved scope.** Remove obsolete call paths and any duplicate ownership introduced during integration.
+- [ ] **Skipped by user. Step 2: Run target `survival_weather` and confirm any uncovered integration failure.** Use systematic debugging for failures.
+- [x] **Step 3: Inspect assembled source ownership and lifecycle.**
+No integration defect required a product change. Browser fixture creation and acceptance below were skipped by user.
+Original plan: Fix only integration failures within the approved scope. Remove obsolete call paths and any duplicate ownership introduced during integration.
 Create browser acceptance fixtures by copying the manifest in memory and changing scheduler interval/ring values for controlled storm entry.
 Use the existing `run(reference_json)` entry. Mark fixture captures as controlled tests; retain production manifest bytes and source schedule.
 Test the real production startup and controls separately from the controlled fixture.
-- [ ] **Step 4: Run final checks.** Expect full checks, exporter tests, current reference validation, and release packaging to pass.
+- [x] **Step 4: Complete allowed source/build checks.** Tests and browser acceptance were skipped by user.
+Original plan, skipped acceptance: Run final checks. Expect full checks, exporter tests, current reference validation, and release packaging to pass.
 Run only installed-export tests relevant to the changed source records and visual bindings.
 Check the browser's food, drinking, toilet, sleep, storm, death, pause, focus loss, recovery, restart, and origin behavior.
 Verify audible required feedback, finite physics, source item removal, no shader errors, and unchanged production manifest hash during fixtures.
 Run `git diff --check`; inspect the final branch diff and source limit ledger.
-- [ ] **Step 5: Commit the integration checks and evidence report.** Message: `Verify survival sleep and weather lifecycle`.
+- [x] **Step 5: Commit the integration checks and evidence report.** Message: `Verify survival sleep and weather lifecycle`.
 Report implementation, tests, browser evidence, source adapters, unsupported dependencies, and appearance limits.
 Keep radio sleep advancement, ragdoll/postprocessing, hostile damage, wounds, multiplayer, and expanded saves outside this completion claim.
 Use verification-before-completion before claiming success, then finishing-a-development-branch to choose integration with the user.

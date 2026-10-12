@@ -1,7 +1,9 @@
 # Survival, sleep, and weather source audit
 
 Date: 2026-10-12, Europe/Warsaw.
-Status: Source audit and design inputs. Product implementation has not started.
+Status: Tasks 1–8 implemented and reviewed. Task 9 completed source inspection and documentation.
+Final branch review remains required.
+See the [completion report](2026-10-12-survival-sleep-weather-completion.md) for current evidence and limits.
 
 ## Evidence
 
@@ -133,9 +135,9 @@ It selects the next part group and destroys exhausted items with `destroyOnEnd`.
 A sausage bite queues `0.5` food, `-1/6` water, and `0.0625` health.
 The static starter sausage uses edible record `level1:67140` and GameObject `level1:3542`.
 The starter food belongs to `StartSpawnItems`, which `TerrainGenerationSettings.StartObjs` moves at startup.
-The current runtime manifest contains none of these food nodes.
+The final selected runtime includes the starter sausage and its source part states.
 The shared sausage edible record is `sharedassets1.assets:134643`.
-The smallest food addition can use this one food type and its six source part states.
+The runtime uses sausage with six source part states and the required turd subset.
 Smoking has separate continuous behavior and is not required for this loop.
 
 Drinking affects each fluid fraction:
@@ -179,8 +181,9 @@ The audit does not authorize adding enemies, weapons, or explosion simulation.
 Single-player source then loads `SceneMenu`; multiplayer source respawns the player.
 The current browser runtime has no Unity menu scene, ragdoll, or multiplayer respawn system.
 Its existing menu and restart action need an explicit death adapter.
-Current `GarageRuntime.recover` repositions bodies. It does not define a source revival contract.
-Current `GarageRuntime.restart` reconstructs the runtime.
+`GarageRuntime.recover` rejects dead players. It repositions bodies and retains needs, queues, consumption, cooldown, and storms.
+`GarageRuntime.restart` reconstructs source startup state and advances the audio session.
+The browser adapts SceneMenu with Restart and a black death fade.
 
 ## Sleep rules and clocks
 
@@ -321,21 +324,24 @@ The empty `windscript` class does not establish an additional global wind system
 - `tools/reference/`: strict source export and validated manifest generation.
 - `web/menu.js` and `web/input.js`: focus-loss pause, pointer lock, and input clearing.
 
-The current app advances lighting from real frame delta before fixed physics steps.
-The current engine uses a fixed ambient temperature and awake heat modifier.
-Sleep therefore needs clock routing through cycle, needs, fluids, and engine inputs.
-Physics must retain its fixed step; it must not receive a 500-second step or replay 500 seconds of vehicle movement.
+The app accepts real frame time through one StepClock, with a 0.1-second frame limit.
+GarageRuntime samples SleepState factors once per fixed slice.
+CycleState receives normal simulation delta and the separate cycle extra span.
+Needs use the combined sleep factor. Fluid and thermal-loss paths use the fluid factor once.
+The cycle supplies desert temperature to needs and engine heat. Engine heat gain uses normal simulation delta.
+Physics retains 1/60-second steps. Weather uses normal simulation time before physics.
+Presentation reads outputs and advances no gameplay clock.
 
 ## Source dependencies and limits
 
 | Dependency | Evidence and required treatment |
 | --- | --- |
 | World biome and terrain | Current world uses a procedural desert. Map it to source biome zero and report this map. |
-| Food geometry and bite states | Library records exist; current selected runtime omits food. Export the required source food subset. |
+| Food geometry and bite states | Final export includes starter sausage, six part states, and the required turd subset. |
 | Food replenishment | Starter placement exists. A current-world station recipe requires a stated placement adapter, not a parity claim. |
-| Interior shelter | Source components exist. Export the needed bounds, root identities, and trigger relationships. |
-| Particles | Source records exist. The browser lacks a source particle adapter. Bound the selected storm and toilet subset. |
-| Audio | Source clips exist in the library. The browser needs a playback adapter for selected feedback. |
+| Interior shelter | Final export supplies six source shelters with roots and trigger links. Runtime AABBs adapt native overlap. |
+| Particles | Final export supplies 26 selected systems. Retained rendering uses the existing FluidContact trajectories. See active depth/distortion limits. |
+| Audio | One shared AudioState and AudioContext use ten selected bindings and sixteen recovered WAV clips. |
 | Death | Source ragdoll, Unity volume, and menu scene need adapters or explicit limits. |
 | Wounds and hostile damage | Require weapons, enemies, blood leaks, or explosions. Exclude these absent gameplay systems. |
 | Radio during sleep | Source advances stations during sleep. Current runtime has no radio simulation. Report the omission. |
@@ -343,18 +349,17 @@ Physics must retain its fixed step; it must not receive a 500-second step or rep
 | Weather variety | Rain scheduling and active snow lack source support. Exclude them. |
 | Random draws | Source ranges and draw order exist. Unity's native random sequence remains unrecovered; report that limit. |
 
-## Required verification before delivery
+## Verification status at delivery
 
-Test mode and temperature boundaries, depletion clamps, simultaneous empty needs, healing, delayed effects, and death.
-Test food debit, final bite removal, fluid quantities, mixture effects, eating restrictions, and toilet capacity paths.
-Test sleep hold release, strict cooldown eligibility, deadline wake, pause, focus loss, death, and reset.
-Test separate clock advances, moving-vehicle sleep, engine fluids, and bounded physics under delayed frames.
-Test storm scheduling, movement, life, radius thresholds, overlap selection, shelter, wind units, and phase transitions.
-Test floating origin for storms, particle space, and the sleep camera.
-Check restart resets and define recovery behavior without an implicit health refill.
-Run browser acceptance for food, drinking, sleep, weather, feedback, pause, focus loss, recovery, and restart.
-No product tests or runtime acceptance checks have run for this proposed feature.
-
+The original plan required critical native, exporter, browser, lifecycle, and assembled acceptance checks.
+Those checks cover needs, consumption, toilet paths, sleep boundaries, separate clocks, weather, wind, origin, and resets.
+Task 3 retained earlier test logs and a garage-ready browser capture. Pointer lock blocked its gameplay acceptance.
+The user later said “Skip tests” and “Continue. Ignore tests”. We skipped further behavioral checks and browser acceptance.
+Earlier pass counts do not certify the final code. Behavioral assertions remain unchanged under the waiver.
+Final source/schema, format, native/release/WASM, package, syntax, and shader-build receipts exited zero.
+Task 9 verified unchanged final Task 8B artifact hashes and inspected lifecycle ownership.
+Compilation and source evidence do not prove assembled behavior, audible output, or matched Unity appearance.
+The [completion report](2026-10-12-survival-sleep-weather-completion.md) records receipts, adapters, unsupported dependencies, rulings, and test debt.
 
 ## Implemented clock fields
 
