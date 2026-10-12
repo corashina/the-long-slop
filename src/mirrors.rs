@@ -3,15 +3,15 @@ use rapier3d::math::{Rotation, Vector};
 use crate::reference::{MirrorRecord, MirrorRulesReference};
 use crate::vehicle::VehiclePose;
 
-/// All positions use runtime coordinates. Source axes use Unity coordinates.
-/// The caller obtains the axes from rotation, without hierarchy scale.
+/// Positions and axes use runtime coordinates.
+/// Form axes from the plane world rotation, without hierarchy scale.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MirrorInput {
     pub plane_position: [f32; 3],
-    /// Unity T.up, formed from world rotation without scale.
-    pub source_normal: [f32; 3],
-    /// Unity T.forward, used as the LookAt up axis.
-    pub source_up: [f32; 3],
+    /// Plane world rotation times runtime +Y.
+    pub plane_normal: [f32; 3],
+    /// Plane world rotation times runtime -Z, used as LookAt up.
+    pub camera_up: [f32; 3],
     pub camera_position: [f32; 3],
     pub normal_view_visible: bool,
 }
@@ -139,10 +139,9 @@ impl MirrorState {
             let input = self.inputs[index];
             let plane = vector(input.plane_position);
             let camera = vector(input.camera_position);
-            // The exported hierarchy has already converted positions.
-            // Unity Transform.up/forward are rotation-only source axes.
-            let normal = source_axis(input.source_normal);
-            let up = source_axis(input.source_up);
+            // The producer supplies converted positions and rotation-only axes.
+            let normal = vector(input.plane_normal);
+            let up = vector(input.camera_up);
             let normal_length = normal.length();
             if !finite(&camera) || !finite(&normal) || !finite(&up) || normal_length <= f32::EPSILON
             {
@@ -204,10 +203,6 @@ fn vector(value: [f32; 3]) -> Vector {
     Vector::new(value[0], value[1], value[2])
 }
 
-fn source_axis(value: [f32; 3]) -> Vector {
-    Vector::new(value[0], value[1], -value[2])
-}
-
 fn finite(value: &Vector) -> bool {
     value.x.is_finite() && value.y.is_finite() && value.z.is_finite()
 }
@@ -235,8 +230,8 @@ mod tests {
         let inputs = vec![
             MirrorInput {
                 plane_position: [0.0, 0.0, 2.0],
-                source_normal: [0.0, 1.0, 0.0],
-                source_up: [0.0, 0.0, 1.0],
+                plane_normal: [0.0, 1.0, 0.0],
+                camera_up: [0.0, 0.0, -1.0],
                 camera_position: [0.0; 3],
                 normal_view_visible: true,
             };

@@ -20,8 +20,8 @@ fn frame(head: [f32; 3]) -> MirrorFrame {
 fn input(z: f32) -> MirrorInput {
     MirrorInput {
         plane_position: [0.0, 0.0, z],
-        source_normal: [0.0, 1.0, 0.0],
-        source_up: [0.0, 0.0, 1.0],
+        plane_normal: [0.0, 1.0, 0.0],
+        camera_up: [0.0, 0.0, -1.0],
         camera_position: [0.0, 0.0, 0.0],
         normal_view_visible: true,
     }
@@ -65,7 +65,7 @@ fn source_rank_cutoff_and_pause() {
         input(3.5),
     ];
     inputs[0].normal_view_visible = false;
-    inputs[3].source_normal = [0.0, -1.0, 0.0];
+    inputs[3].plane_normal = [0.0, -1.0, 0.0];
     let mut state = MirrorState::new(&source);
     state.update(&source.rules, frame([0.0, 2.0, 0.0]), &inputs);
     let result = state.outputs();
@@ -149,16 +149,47 @@ fn signed_scale_keeps_transform_axes_rotation_only() {
     let mut source = fixture();
     source.mirrors.truncate(1);
     let mut state = MirrorState::new(&source);
-    // A negative parent scale changes the plane position. Unity Transform.up and
-    // Transform.forward still come from its rotation, so both axes stay positive.
-    let reflected_plane = input(2.0);
-    state.update(&source.rules, frame([0.0, 2.0, 0.0]), &[reflected_plane]);
-    assert!(state.outputs()[0].capture);
-    let first = state.outputs()[0].pose.rotation;
-    state.reset(&source);
-    let mut scaled = reflected_plane;
-    scaled.plane_position = [0.0, 0.0, -2.0];
-    state.update(&source.rules, frame([0.0, 2.0, 0.0]), &[scaled]);
-    assert!(state.outputs()[0].capture);
-    assert_ne!(state.outputs()[0].pose.rotation, first);
+
+    let parent_rotation = Rotation::from_rotation_y(0.37) * Rotation::from_rotation_x(-0.21);
+    let local_rotation = Rotation::from_rotation_y(0.71) * Rotation::from_rotation_z(0.43);
+    let plane_rotation = parent_rotation * local_rotation;
+    let signed_scale = Vector::new(-2.0, 1.2, 0.7);
+    let parent_position = Vector::new(9.0, -3.0, 7.0);
+    let local_position = Vector::new(0.4, 0.2, -0.8);
+    let plane = parent_position + parent_rotation * (signed_scale * local_position);
+    let normal = plane_rotation * Vector::Y;
+    let camera_up = plane_rotation * Vector::NEG_Z;
+    let scaled_normal = parent_rotation * (signed_scale * (local_rotation * Vector::Y));
+    assert!(normal.dot(scaled_normal.normalize()) < 0.99);
+
+    let player = plane + normal * 1.5;
+    let head = plane + normal * 2.0 + camera_up * 0.4;
+    let camera_local = local_position + local_rotation * Vector::new(0.1, 0.2, 0.3);
+    let camera = parent_position + parent_rotation * (signed_scale * camera_local);
+    let input = MirrorInput {
+        plane_position: plane.to_array(),
+        plane_normal: normal.to_array(),
+        camera_up: camera_up.to_array(),
+        camera_position: camera.to_array(),
+        normal_view_visible: true,
+    };
+    state.update(
+        &source.rules,
+        MirrorFrame {
+            player_position: player.to_array(),
+            view_head_position: head.to_array(),
+            source_enabled: true,
+            pointer_locked: true,
+        },
+        &[input],
+    );
+    let output = &state.outputs()[0];
+    assert!(output.capture);
+    let view = plane - head;
+    let reflected = view - normal * (2.0 * view.dot(normal));
+    let expected_forward = (plane + reflected - camera).normalize();
+    let expected_up = (camera_up - expected_forward * camera_up.dot(expected_forward)).normalize();
+    let camera_rotation = Rotation::from_array(output.pose.rotation);
+    assert!((camera_rotation * Vector::NEG_Z).dot(expected_forward) > 0.9999);
+    assert!((camera_rotation * Vector::Y).dot(expected_up) > 0.9999);
 }
