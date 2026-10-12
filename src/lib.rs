@@ -13,6 +13,7 @@ pub mod player;
 pub mod reference;
 pub mod simulation;
 pub mod starting_area;
+pub mod survival;
 pub mod vehicle;
 pub mod world;
 
