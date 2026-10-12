@@ -23,7 +23,8 @@ use bevy::render::{
 use bevy::shader::Shader;
 use std::sync::{Arc, Mutex};
 
-pub const MAX_LIGHTS: usize = 32;
+// Both source vehicles and the full streamed road lamp window fit the 16 KiB uniform limit.
+pub const MAX_LIGHTS: usize = 40;
 pub const SHADOW_SLOTS: usize = 100;
 pub const ATLAS_SIZE: u32 = 4000;
 pub const TILE_SIZE: u32 = 400;

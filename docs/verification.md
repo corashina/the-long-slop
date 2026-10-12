@@ -1132,10 +1132,10 @@ Each vehicle has one save record for its body, engine, gear, handbrake, trip dis
 Vehicle and seat records use source instance identities. The selected vehicle returns after an on-foot save.
 Load checks assets for both dashboards. New game and Load reset the mirror capture epoch.
 
-The merged checks passed: 55 web tests, 269 native tests, formatting, and the release WASM build.
+The merged checks passed: 55 web tests, 270 native tests, formatting, and the release WASM build.
 The normal native run skipped 54 installed-source checks.
 Twelve Python mirror recovery and export staging tests passed.
-Logs: `.cache/save-merge/check-final.log` and `.cache/save-merge/export-tests.log`.
+Logs: `.cache/save-merge/check-capacity-final.log` and `.cache/save-merge/export-tests.log`.
 
 The driven/rebase test found a false changed-body record for source `level1:1`.
 Changing the origin during load added `5.96e-8` metres to its recovered absolute Y coordinate.
@@ -1162,3 +1162,8 @@ It hibernates source bodies before moving the origin to that destination.
 The fleet check recovers the Skoda from coordinates of ten billion metres and preserves the dormant Lada record.
 The browser fixture adds `Both cars, save, reload` for distinct engine, trip, brake, and headlight states.
 These controlled fixtures do not establish uninterrupted trusted mouse capture or source appearance parity.
+
+The merged source needs 25 fixed lights and 15 streamed road lamp slots.
+The CPU and shader arrays now hold 40 lights. The 100 shadow slots remain sufficient.
+A focused check confirms matching array counts and a 16,080-byte uniform within the 16,384-byte WebGL2 limit.
+Log: `.cache/save-merge/lighting-capacity-test.log`.

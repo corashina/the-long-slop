@@ -684,3 +684,56 @@ fn night_late_loading_uses_current_enable_state() {
     reference.road_lamp.global_enabled = false;
     assert!(!state.road_lamp_output(&reference).enabled);
 }
+
+#[test]
+fn fleet_lighting_uniform_fits_webgl2() {
+    let rust = include_str!("../src/presentation/lighting.rs");
+    let shader = include_str!("../web/assets/shaders/source_surface.wgsl");
+    let constant = |name: &str| -> usize {
+        rust.split(&format!("pub const {name}: usize = "))
+            .nth(1)
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let lights = constant("MAX_LIGHTS");
+    let shadows = constant("SHADOW_SLOTS");
+    assert_eq!(lights, 40);
+    assert_eq!(shadows, 100);
+    assert!(shader.contains(&format!("lights: array<SourceLight,{lights}>")));
+    assert!(shader.contains(&format!("shadows: array<SourceShadow,{shadows}>")));
+    let fields = |name: &str| {
+        rust.split(&format!("pub struct {name} {{"))
+            .nth(1)
+            .unwrap()
+            .split('}')
+            .next()
+            .unwrap()
+    };
+    let vector_bytes = |name: &str| -> usize {
+        fields(name)
+            .lines()
+            .filter_map(|line| line.split(": ").nth(1))
+            .map(|kind| match kind.trim_end_matches(',') {
+                "Mat4" => 64,
+                "Vec4" | "UVec4" => 16,
+                other => panic!("Unmeasured GPU field {other}"),
+            })
+            .sum()
+    };
+    let bytes = fields("LightingUniform")
+        .lines()
+        .filter_map(|line| line.split(": ").nth(1))
+        .map(|kind| match kind.trim_end_matches(',') {
+            "[GpuLight; MAX_LIGHTS]" => lights * vector_bytes("GpuLight"),
+            "[GpuShadow; SHADOW_SLOTS]" => shadows * vector_bytes("GpuShadow"),
+            "Vec4" | "UVec4" => 16,
+            other => panic!("Unmeasured uniform field {other}"),
+        })
+        .sum::<usize>();
+    assert_eq!(bytes, 16_080);
+    assert!(bytes <= 16_384);
+}
