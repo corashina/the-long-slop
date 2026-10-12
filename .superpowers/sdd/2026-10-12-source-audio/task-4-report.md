@@ -192,3 +192,63 @@ I claim no audible device output from counters or automated tests.
 Movement playback still requires matched timing and random-distribution acceptance in the assembled runtime.
 The runtime samples source pitch and chance ranges; it does not reproduce Unity's random sequence.
 Inherited failure tests print expected audio diagnostics. Git reports existing LF-to-CRLF notices.
+
+
+## Review fix round 1
+
+Fix base: 63d1253.
+Commit subject: Reset stopped movement audio and test runtime attachment.
+Status: DONE_WITH_CONCERNS. Task 6 retains the existing acceptance gaps.
+
+I fixed both Important findings from task-4-review.md.
+A stationary movement update now clears the retained playback timer.
+Resume now samples a fresh pitch and the source chance gate.
+I traced SlideMoveSound at 66359-66374 and RotMoveSound at 66759-66783 again.
+Both methods test isPlaying before starting. Both stop a stationary source.
+
+I added three move, stop, and resume tests through MechanismState and AudioState::fixed_step.
+The X test requires a fresh pitch inside [0.95, 1.05].
+The slide and Y tests use chance thresholds zero and one.
+They reject a restart when its threshold rejects the source sample.
+They permit a later restart when its threshold permits the source sample.
+
+I replaced the disconnected attachment test.
+The fixture now aims the runtime player at a real wheel slot sensor.
+GarageRuntime::step removes the wheel through a grab gesture.
+I drain that runtime's removal event before testing installation.
+I then release acquisition and perform a distinct mount gesture.
+Rejected installation retains the held rim and leaves that runtime's audio queue empty.
+Successful installation reaches WheelSlot and queues one crafted event at gain 0.25.
+The test uses the completed-action hook and the runtime audio drain.
+It injects no InteractionAction or AudioEvent.
+
+RED command, existing pinned Docker toolchain:
+
+```text
+cargo fmt --all && cargo test --locked --test audio
+```
+
+Result: 26 passed, three failed, two installed tests require explicit execution.
+X reused pitch 0.9816408 after stop and resume.
+Slide and Y resumed despite a chance threshold of one.
+The new attachment integration passed against the existing correct success hook.
+Log: task-4-fix-round-1-red.log.
+
+GREEN command used the same toolchain and the resolved records mount:
+
+```text
+cargo fmt --all && cargo test --locked --test audio -- --include-ignored && cargo fmt --all -- --check
+```
+
+Result: 31 passed, zero failed, zero ignored. Formatting exited 0.
+Log: task-4-fix-round-1-green.log.
+I kept the read-only records mount from the original Task 4 command.
+I changed no attachment success path, so I did not repeat unrelated gameplay targets.
+I changed no browser code. I left the warning Minor and browser route unchanged.
+
+I reviewed the diff and checked the source stop and restart paths.
+The code change clears one stale timer. The tests use current public runtime paths.
+Files: src/audio.rs, tests/audio.rs, and this report.
+Release build: ./scripts/build.ps1 exited 0 after the focused checks.
+Release WASM and wasm-bindgen passed. Log: task-4-fix-round-1-build.log.
+git diff --check exited 0.

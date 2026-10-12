@@ -511,26 +511,146 @@ fn interaction_audio() -> (ReferenceManifest, my_summer_slop::audio::AudioState)
 }
 #[test]
 fn failed_attachment_is_silent() {
-    use my_summer_slop::interaction::InteractionAction;
-    let (game, mut state) = interaction_audio();
-    let run = my_summer_slop::starting_area::GarageRuntime::new(&game).unwrap();
-    // A failed operation is never submitted as a completed action.
-    assert!(
+    use my_summer_slop::{
+        interaction::items::ItemLocation,
+        player::PlayerState,
+        simulation::{FrameInput, keys},
+        starting_area::GarageRuntime,
+        vehicle::VehiclePose,
+    };
+    use rapier3d::math::{Rotation, Vector};
+    for compatible in [false, true] {
+        let mut game = common::reference();
+        game.area.player_spawn.translation = [20., 1., 20.];
+        game.nodes
+            .iter_mut()
+            .find(|n| n.id == game.vehicle.root)
+            .unwrap()
+            .transform
+            .translation[1] = 1.1;
+        let slot = game.vehicle.wheel_slots[0];
+        let rim = game.wheel_slots[0].rim;
+        let source = AudioReference::from_value(&game.audio, &game)
+            .unwrap()
+            .bindings
+            .iter()
+            .find(|b| b.trigger == "crafted")
+            .unwrap()
+            .source
+            .clone();
+        game.items
+            .iter_mut()
+            .find(|i| i.id == rim)
+            .unwrap()
+            .pickup
+            .as_mut()
+            .unwrap()
+            .source = source;
+        if !compatible {
+            game.wheel_slots[0].rim_types = vec!["incompatible".into()];
+        }
+        let mut run = GarageRuntime::new(&game).unwrap();
+        let center = run.physics.rapier().colliders[run.wheels.sensor(slot).unwrap()].translation();
+        let chassis = run.physics.rapier().bodies[run.physics.chassis_handle()].translation();
+        let outward = Vector::new((center - chassis).x, 0., (center - chassis).z).normalize();
+        let old = run.area.player.body_handle();
+        run.physics.rapier_mut().bodies[old].set_enabled(false);
+        run.area.player = PlayerState::new(
+            &game.player,
+            VehiclePose {
+                position: (center + outward * 0.6
+                    - Vector::Y * (game.player.standing_height * 0.5))
+                    .to_array(),
+                rotation: Rotation::from_rotation_arc(-Vector::Z, -outward).to_array(),
+            },
+            &mut run.physics,
+        );
         run.area
             .interaction
-            .parts
-            .can_install(
-                game.items[0].id,
-                my_summer_slop::reference::PartSlotId(999),
-                &run.area.items
-            )
-            .is_err()
-    );
-    assert_eq!(state.event_count(), 0);
-    state.action(InteractionAction::PartInstall(game.items[0].id), 1.);
-    let e = state.pop_event().unwrap();
-    assert_eq!(e.gain * state.binding(e.binding).unwrap().gain, 0.25);
-    assert!((0.85..=1.15).contains(&e.pitch));
+            .bind_player_body(run.area.player.body_handle());
+        run.physics.refresh_queries();
+        run.started = true;
+        run.step(
+            &game,
+            FrameInput {
+                held: keys::GRAB,
+                pressed: keys::GRAB,
+                ..Default::default()
+            },
+        );
+        assert_eq!(run.area.interaction.held(), Some(rim));
+        assert!(!run.wheels.installed(slot));
+        let removal = run
+            .audio
+            .as_mut()
+            .unwrap()
+            .pop_event()
+            .expect("source wheel UnCraft");
+        assert_eq!(
+            run.audio
+                .as_ref()
+                .unwrap()
+                .binding(removal.binding)
+                .unwrap()
+                .trigger,
+            "crafted"
+        );
+        assert!(run.audio.as_mut().unwrap().pop_event().is_none());
+        // Release the acquisition gesture. Then perform a distinct mount gesture.
+        run.step(
+            &game,
+            FrameInput {
+                released: keys::GRAB,
+                ..Default::default()
+            },
+        );
+        assert_eq!(run.area.interaction.held(), Some(rim));
+        assert_eq!(
+            run.wheels.can_install(rim, slot, &run.area.items).is_ok(),
+            compatible
+        );
+        assert_eq!(run.audio.as_ref().unwrap().event_count(), 0);
+        run.step(
+            &game,
+            FrameInput {
+                held: keys::GRAB,
+                pressed: keys::GRAB,
+                ..Default::default()
+            },
+        );
+        run.step(
+            &game,
+            FrameInput {
+                released: keys::GRAB,
+                ..Default::default()
+            },
+        );
+        assert_eq!(run.wheels.installed(slot), compatible);
+        if compatible {
+            assert_eq!(run.area.interaction.held(), None);
+            assert_eq!(
+                run.area.items.get(rim).unwrap().location,
+                ItemLocation::WheelSlot(slot)
+            );
+            let state = run.audio.as_mut().unwrap();
+            let event = state
+                .pop_event()
+                .expect("completed runtime wheel installation");
+            let binding = state.binding(event.binding).unwrap();
+            assert_eq!(binding.trigger, "crafted");
+            assert_eq!(event.gain * binding.gain, 0.25);
+            assert!((0.85..=1.15).contains(&event.pitch));
+            assert!(state.pop_event().is_none());
+        } else {
+            assert_eq!(run.notice, "This part does not fit.");
+            assert_eq!(run.area.interaction.held(), Some(rim));
+            assert_eq!(
+                run.area.items.get(rim).unwrap().location,
+                ItemLocation::Held
+            );
+            assert_eq!(run.audio.as_ref().unwrap().event_count(), 0);
+        }
+    }
 }
 #[test]
 fn silent_pickup_has_no_substitute() {
@@ -1027,4 +1147,175 @@ fn movement_reset_starts_at_source_zero_gain() {
     let signal = state.signals.iter().find(|s| s.id == id).unwrap();
     assert!(!signal.playing);
     assert_eq!(signal.gain, 0.);
+}
+
+fn movement_runtime(
+    axis: &str,
+) -> (
+    ReferenceManifest,
+    my_summer_slop::starting_area::GarageRuntime,
+    my_summer_slop::reference::ItemId,
+) {
+    use my_summer_slop::{reference::*, starting_area::GarageRuntime};
+    let mut game = common::reference();
+    let body = game.bodies[1].id.0;
+    common::add_rotation(&mut game, 1, body, [0., 10.]);
+    let source = AudioReference::from_value(&game.audio, &game)
+        .unwrap()
+        .mechanisms[0]
+        .source
+        .clone();
+    let mechanism = &mut game.mechanisms[0];
+    mechanism.source = source;
+    if axis == "slide" {
+        mechanism.rotation = None;
+        mechanism.slide = Some(SlideReference {
+            initial_value: 0.,
+            speed: 1.,
+            sensitivity: 1.,
+            axes: [true, false, false, false, false, false],
+            multiplier: [1.; 3],
+            scroll_without_use: false,
+            animation_source: None,
+            paths: vec![],
+            rotations: vec![],
+        });
+    } else if axis == "y" {
+        let r = mechanism.rotation.as_mut().unwrap();
+        r.limits_degrees = [[0., 0.], [0., 10.]];
+        r.targets[0].mapping = [[false; 3], [true, false, false]];
+    }
+    let item = mechanism.item;
+    let mut run = GarageRuntime::new(&game).unwrap();
+    run.audio.as_mut().unwrap().reference.mechanisms[0].squeak_chance = 0.;
+    (game, run, item)
+}
+fn movement_step(
+    run: &mut my_summer_slop::starting_area::GarageRuntime,
+    item: my_summer_slop::reference::ItemId,
+    mouse: [f32; 2],
+) {
+    use my_summer_slop::{
+        simulation::{FrameInput, keys},
+        vehicle::VehiclePose,
+    };
+    run.area.interaction.mechanisms.begin_audio_step();
+    run.area.interaction.mechanisms.step(
+        item,
+        FrameInput {
+            held: keys::USE,
+            mouse,
+            ..Default::default()
+        },
+        VehiclePose {
+            position: [0.; 3],
+            rotation: [0., 0., 0., 1.],
+        },
+        1. / 60.,
+    );
+    run.audio
+        .as_mut()
+        .unwrap()
+        .fixed_step(&run.area, &run.physics, 1. / 60.);
+}
+#[test]
+fn rotation_stop_resume_samples_fresh_pitch() {
+    let (_, mut run, item) = movement_runtime("x");
+    let voice = run.audio.as_ref().unwrap().reference.mechanisms[0]
+        .movement_voice
+        .unwrap();
+    movement_step(&mut run, item, [-1., 0.]);
+    let first = *run
+        .audio
+        .as_ref()
+        .unwrap()
+        .signals
+        .iter()
+        .find(|s| s.id == voice)
+        .unwrap();
+    assert!(first.playing);
+    movement_step(&mut run, item, [0., 0.]);
+    assert!(
+        !run.audio
+            .as_ref()
+            .unwrap()
+            .signals
+            .iter()
+            .find(|s| s.id == voice)
+            .unwrap()
+            .playing
+    );
+    movement_step(&mut run, item, [-1., 0.]);
+    let resumed = run
+        .audio
+        .as_ref()
+        .unwrap()
+        .signals
+        .iter()
+        .find(|s| s.id == voice)
+        .unwrap();
+    assert!(resumed.playing);
+    assert_ne!(resumed.pitch, first.pitch);
+    assert!((0.95..=1.05).contains(&resumed.pitch));
+}
+fn stopped_movement_samples_source_chance(axis: &str, mouse: [f32; 2]) {
+    let (_, mut run, item) = movement_runtime(axis);
+    let voice = run.audio.as_ref().unwrap().reference.mechanisms[0]
+        .movement_voice
+        .unwrap();
+    movement_step(&mut run, item, mouse);
+    assert!(
+        run.audio
+            .as_ref()
+            .unwrap()
+            .signals
+            .iter()
+            .find(|s| s.id == voice)
+            .unwrap()
+            .playing
+    );
+    movement_step(&mut run, item, [0., 0.]);
+    assert!(
+        !run.audio
+            .as_ref()
+            .unwrap()
+            .signals
+            .iter()
+            .find(|s| s.id == voice)
+            .unwrap()
+            .playing
+    );
+    // A stopped source must sample the restart chance. Threshold one rejects each sample.
+    run.audio.as_mut().unwrap().reference.mechanisms[0].squeak_chance = 1.;
+    movement_step(&mut run, item, mouse);
+    assert!(
+        !run.audio
+            .as_ref()
+            .unwrap()
+            .signals
+            .iter()
+            .find(|s| s.id == voice)
+            .unwrap()
+            .playing
+    );
+    run.audio.as_mut().unwrap().reference.mechanisms[0].squeak_chance = 0.;
+    movement_step(&mut run, item, mouse);
+    let restarted = run
+        .audio
+        .as_ref()
+        .unwrap()
+        .signals
+        .iter()
+        .find(|s| s.id == voice)
+        .unwrap();
+    assert!(restarted.playing);
+    assert!((0.95..=1.05).contains(&restarted.pitch));
+}
+#[test]
+fn slide_stop_resume_samples_source_chance() {
+    stopped_movement_samples_source_chance("slide", [0.1, 0.]);
+}
+#[test]
+fn y_rotation_stop_resume_samples_source_chance() {
+    stopped_movement_samples_source_chance("y", [0., -1.]);
 }

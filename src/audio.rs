@@ -615,7 +615,11 @@ impl AudioState {
         let pitch_range = a.pitch_range;
         let voice = self.voice_indices[&id];
         let gain = self.signals[voice].gain + (target - self.signals[voice].gain) * smoothing;
-        self.mechanism_sounds[i].remaining = (self.mechanism_sounds[i].remaining - dt).max(0.);
+        self.mechanism_sounds[i].remaining = if difference == 0. {
+            0.
+        } else {
+            (self.mechanism_sounds[i].remaining - dt).max(0.)
+        };
         let mut playing = difference > 0. && self.mechanism_sounds[i].remaining > 0.;
         let mut pitch = self.signals[voice].pitch;
         if difference > 0. && !playing && ((!slide && delta[0] > 0.) || self.sample() > chance) {
