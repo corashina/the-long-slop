@@ -26,3 +26,6 @@ test('recover_does_not_resume',()=>{
 });
 
 test('audio_unlock_throw_keeps_capture_working',async()=>{const m=new MenuState();m.ready();await m.capture(ACTIONS.START,async()=>{},()=>{throw Error('audio');});assert.equal(m.state,'playing');assert.equal(m.takeActions(),ACTIONS.START);});
+
+test('failed_capture_does_not_commit_restart',async()=>{const m=new MenuState();m.ready();m.started=true;m.pause();m.takeActions();let committed=0;await m.capture(ACTIONS.RESTART,async()=>{throw Error('capture blocked');},()=>{},()=>committed++);assert.equal(committed,0);assert.equal(m.takeActions(),0);await m.capture(ACTIONS.RESTART,async()=>{},()=>{},()=>committed++);assert.equal(committed,1);assert.equal(m.takeActions(),ACTIONS.RESTART);});
+test('failed_restart_capture_can_continue_without_committing_restart',async()=>{const m=new MenuState();m.ready();m.started=true;m.pause();m.takeActions();let committed=0;await m.capture(ACTIONS.RESTART,async()=>{throw Error('capture blocked');},()=>{},()=>committed++);await m.capture(ACTIONS.CONTINUE,async()=>{},()=>{});assert.equal(committed,0);assert.equal(m.takeActions(),ACTIONS.CONTINUE);assert.equal(m.state,'playing');});
