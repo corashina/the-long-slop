@@ -20,7 +20,6 @@ use bevy::render::{
 };
 use bevy::{ecs as bevy_ecs, prelude::*, render as bevy_render};
 use std::{
-    any::TypeId,
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
@@ -107,6 +106,81 @@ struct MirrorSurfaces {
     entries: Arc<Vec<(Entity, AssetId<SourceMaterial>, AssetId<SourceMaterial>)>>,
 }
 
+#[derive(Resource, Clone, Default, ExtractResource)]
+struct MirrorWarmup {
+    instance: u64,
+    pairs: Arc<Vec<(AssetId<Mesh>, UntypedAssetId)>>,
+    owners: [(
+        AssetId<Mesh>,
+        AssetId<SourceMaterial>,
+        AssetId<SourceMaterial>,
+    ); 3],
+}
+
+fn collect_mirror_warmup(world: &mut World) {
+    let Some(mirrors) = world.get_resource::<SourceMirrors>() else {
+        return;
+    };
+    if world
+        .get_resource::<MirrorWarmup>()
+        .is_some_and(|w| w.instance == mirrors.instance && !w.pairs.is_empty())
+    {
+        return;
+    }
+    let lighting = world.resource::<super::lighting::SourceLighting>();
+    if !lighting.materials_prepared
+        || !lighting.sky.bound()
+        || world.resource::<SourceMaterials>().state != super::materials::RenderingState::Ready
+    {
+        return;
+    }
+    let instance = mirrors.instance;
+    let owners = std::array::from_fn(|i| {
+        let b = &mirrors.bindings[i];
+        (
+            world.get::<Mesh3d>(b.screen).unwrap().0.id(),
+            b.live.id(),
+            b.disabled.id(),
+        )
+    });
+    let mut pairs = Vec::new();
+    super::materials::mirror_warmup_pairs(world, &mut pairs);
+    for (mesh, source, standard, sky) in world
+        .query::<(
+            &Mesh3d,
+            Option<&MeshMaterial3d<SourceMaterial>>,
+            Option<&MeshMaterial3d<StandardMaterial>>,
+            Option<&MeshMaterial3d<super::sky::SkyMaterial>>,
+        )>()
+        .iter(world)
+    {
+        if let Some(material) = source {
+            pairs.push((mesh.0.id(), material.id().untyped()));
+        }
+        if let Some(material) = standard {
+            pairs.push((mesh.0.id(), material.id().untyped()));
+        }
+        if let Some(material) = sky {
+            pairs.push((mesh.0.id(), material.id().untyped()));
+            for owner in 0..3 {
+                pairs.push((
+                    mesh.0.id(),
+                    world
+                        .resource::<super::sky::SkyVariants>()
+                        .resolve(MirrorViewRole::Capture(owner), material.id().untyped()),
+                ));
+            }
+        }
+    }
+    let mut seen = HashSet::new();
+    pairs.retain(|pair| seen.insert(*pair));
+    world.insert_resource(MirrorWarmup {
+        instance,
+        pairs: Arc::new(pairs),
+        owners,
+    });
+}
+
 fn resolve_mirror_material(
     role: MirrorViewRole,
     entity: MainEntity,
@@ -191,15 +265,23 @@ impl Plugin for SourceMirrorPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MirrorSurfaces>()
             .init_resource::<MirrorGpuStatus>()
+            .init_resource::<MirrorWarmup>()
             .add_plugins((
                 ExtractComponentPlugin::<MirrorViewRole>::default(),
                 ExtractComponentPlugin::<MirrorInstance>::default(),
                 ExtractResourcePlugin::<MirrorSurfaces>::default(),
+                ExtractResourcePlugin::<MirrorWarmup>::default(),
                 ExtractResourcePlugin::<MirrorGpuStatus>::default(),
             ))
             .add_systems(
                 Update,
                 bind_mirrors.after(super::materials::bind_authored_materials),
+            )
+            .add_systems(
+                Update,
+                collect_mirror_warmup
+                    .after(bind_mirrors)
+                    .after(super::materials::prepare_lamp_materials),
             )
             .add_systems(
                 PostUpdate,
@@ -500,7 +582,7 @@ pub fn sync_mirror_views(world: &mut World, windows: &mut QueryState<&'static Wi
             player_position: player,
             view_head_position: head,
             source_enabled: true,
-            pointer_locked: playing,
+            pointer_locked: playing && ready,
         },
         &mirrors.inputs,
     );
@@ -510,7 +592,7 @@ pub fn sync_mirror_views(world: &mut World, windows: &mut QueryState<&'static Wi
         camera.insert((pose, GlobalTransform::from(pose)));
         let mut settings = camera.get_mut::<Camera>().unwrap();
         let valid_clip = output.has_valid_clip_range();
-        settings.is_active = valid_clip && (output.capture || warming);
+        settings.is_active = output.pose_valid && valid_clip && (output.capture || warming);
         settings.order = if output.capture {
             -3 + output.rank as isize
         } else {
@@ -617,15 +699,117 @@ fn prepare_capture_depths(
 }
 #[derive(Resource, Default)]
 struct CapturePipelines {
+    instance: u64,
+    sealed: bool,
+    sources: HashSet<CachedRenderPipelineId>,
     variants: HashMap<CachedRenderPipelineId, CachedRenderPipelineId>,
     variant_ids: HashSet<CachedRenderPipelineId>,
     owner_sources: HashMap<(usize, CachedRenderPipelineId), CachedRenderPipelineId>,
-    jobs: Vec<(
-        bevy::render::view::RetainedViewEntity,
-        MainEntity,
-        usize,
-        CachedRenderPipelineId,
-    )>,
+}
+
+fn warm_capture_pipelines(
+    world: &mut World,
+    cache: &mut CapturePipelines,
+    surfaces: &MirrorSurfaces,
+) {
+    if cache.sealed {
+        return;
+    }
+    let warmup = world.resource::<MirrorWarmup>().clone();
+    if warmup.instance != surfaces.instance || warmup.pairs.is_empty() {
+        return;
+    }
+    let mut views = world.query::<(&ExtractedView, &MirrorViewRole, Option<&MirrorInstance>)>();
+    let keys = world.resource::<ViewKeyCache>();
+    let mut view_keys = Vec::new();
+    let mut owners = [false; 3];
+    for (view, role, stamp) in views.iter(world) {
+        if let MirrorViewRole::Capture(owner) = role {
+            if stamp.is_none_or(|s| s.0 != surfaces.instance) {
+                continue;
+            }
+            owners[*owner] = true;
+        }
+        let Some(key) = keys.get(&view.retained_view_entity) else {
+            return;
+        };
+        if !view_keys.contains(key) {
+            view_keys.push(*key);
+        }
+    }
+    if !owners.iter().all(|v| *v) {
+        return;
+    }
+    let mut work = Vec::new();
+    for (mesh_id, material_id) in warmup.pairs.iter() {
+        let Some(mesh) = world.resource::<RenderAssets<RenderMesh>>().get(*mesh_id) else {
+            return;
+        };
+        let Some(material) = world
+            .resource::<ErasedRenderAssets<PreparedMaterial>>()
+            .get(*material_id)
+        else {
+            return;
+        };
+        for view_key in &view_keys {
+            let bits: MeshPipelineKey = material.properties.mesh_pipeline_key_bits.downcast();
+            let mesh_key = *view_key
+                | MeshPipelineKey::from_bits_retain(mesh.key_bits.bits())
+                | bits
+                | alpha_mode_pipeline_key(
+                    material.properties.alpha_mode,
+                    &Msaa::from_samples(view_key.msaa_samples()),
+                );
+            work.push((
+                *mesh_id,
+                *material_id,
+                *view_key,
+                ErasedMaterialPipelineKey {
+                    type_id: material_id.type_id(),
+                    mesh_key: ErasedMeshPipelineKey::new(mesh_key),
+                    material_key: material.properties.material_key.clone(),
+                },
+                mesh.layout.clone(),
+                material.properties.clone(),
+            ));
+        }
+    }
+    let mut ids = HashMap::new();
+    for (mesh, material, view, key, layout, properties) in work {
+        match base_specialize(world, key, &layout, &properties) {
+            Ok(id) => {
+                cache.sources.insert(id);
+                ids.insert((mesh, material, view), id);
+            }
+            Err(error) => {
+                world
+                    .resource::<MirrorGpuStatus>()
+                    .0
+                    .lock()
+                    .unwrap()
+                    .failure = Some(format!("Mirror loading specialization: {error}"));
+                return;
+            }
+        }
+    }
+    for (owner, (mesh, live, disabled)) in warmup.owners.iter().enumerate() {
+        for view in &view_keys {
+            let disabled_id = ids[&(*mesh, disabled.untyped(), *view)];
+            for material in [live, disabled] {
+                cache.owner_sources.insert(
+                    (owner, ids[&(*mesh, material.untyped(), *view)]),
+                    disabled_id,
+                );
+            }
+        }
+    }
+    cache.sealed = true;
+    info!(
+        "Mirror loading contract: {} mesh/material pairs, {} view keys, {} source pipelines",
+        warmup.pairs.len(),
+        view_keys.len(),
+        cache.sources.len()
+    );
 }
 
 fn prepare_capture_pipelines(
@@ -637,132 +821,76 @@ fn prepare_capture_pipelines(
     )>,
 ) {
     let mut cache = world.remove_resource::<CapturePipelines>().unwrap();
-    cache.jobs.clear();
     let surfaces = world.resource::<MirrorSurfaces>().clone();
+    if cache.instance != surfaces.instance {
+        cache.instance = surfaces.instance;
+        cache.sealed = false;
+        cache.owner_sources.clear();
+        cache.sources.clear();
+    }
+    warm_capture_pipelines(world, &mut cache, &surfaces);
+    let ready = world.resource::<MirrorGpuStatus>().ready();
+    // Only loading can create descriptors. Restart reuses the same structural variants.
+    if !ready && cache.sealed {
+        for source_id in &cache.sources {
+            if cache.variants.contains_key(source_id) {
+                continue;
+            }
+            let pipelines = world.resource::<PipelineCache>();
+            if pipelines.get_render_pipeline(*source_id).is_none() {
+                continue;
+            }
+            let mut descriptor = pipelines.get_render_pipeline_descriptor(*source_id).clone();
+            if let Some(depth) = &mut descriptor.depth_stencil {
+                depth.format = TextureFormat::Depth24PlusStencil8;
+            }
+            descriptor.label = Some("source mirror loaded capture".into());
+            let id = pipelines.queue_render_pipeline(descriptor);
+            cache.variants.insert(*source_id, id);
+            cache.variant_ids.insert(id);
+        }
+    }
+    let mut capture_views = [None; 3];
     for (view, role, stamp) in views.iter(world) {
         if stamp.0 != surfaces.instance {
             continue;
         }
-        let MirrorViewRole::Capture(index) = role else {
-            continue;
-        };
-        if let Some(pipelines) = world
-            .resource::<SpecializedMaterialPipelineCache>()
-            .get(&view.retained_view_entity)
-        {
-            for (entity, pipeline) in pipelines.iter() {
-                cache
-                    .jobs
-                    .push((view.retained_view_entity, *entity, *index, *pipeline));
-            }
+        if let MirrorViewRole::Capture(owner) = role {
+            capture_views[*owner] = Some(view.retained_view_entity);
         }
     }
-    for (source_id, _) in &world.resource::<super::materials::WarmedPipelines>().ids {
-        if cache.variants.contains_key(source_id) {
-            continue;
-        }
-        let pipelines = world.resource::<PipelineCache>();
-        if pipelines.get_render_pipeline(*source_id).is_none() {
-            continue;
-        }
-        let mut descriptor = pipelines.get_render_pipeline_descriptor(*source_id).clone();
-        if let Some(depth) = &mut descriptor.depth_stencil {
-            depth.format = TextureFormat::Depth24PlusStencil8;
-        }
-        descriptor.label = Some("source mirror warmed capture".into());
-        let id = pipelines.queue_render_pipeline(descriptor);
-        cache.variants.insert(*source_id, id);
-        cache.variant_ids.insert(id);
-    }
-    for job_index in 0..cache.jobs.len() {
-        let (view, entity, owner, original) = cache.jobs[job_index];
-        // Do not patch our retained variants again.
-        if cache.variant_ids.contains(&original) {
-            continue;
-        }
-        let mut source_id = original;
-        if surfaces
-            .entries
-            .get(owner)
-            .is_some_and(|entry| MainEntity::from(entry.0) == entity)
-        {
-            if let Some(id) = cache.owner_sources.get(&(owner, original)) {
-                source_id = *id;
-            } else {
-                let material_id = surfaces.entries[owner].2;
-                let Some(material) = world
-                    .resource::<ErasedRenderAssets<PreparedMaterial>>()
-                    .get(material_id)
-                else {
+    world.resource_scope(|world, mut views: Mut<SpecializedMaterialPipelineCache>| {
+        for (owner, view) in capture_views.into_iter().enumerate() {
+            let Some(pipelines) = view.and_then(|view| views.get_mut(&view)) else {
+                continue;
+            };
+            for (entity, original) in pipelines.iter_mut() {
+                if cache.variant_ids.contains(original) {
                     continue;
+                }
+                let source_id = if surfaces
+                    .entries
+                    .get(owner)
+                    .is_some_and(|entry| MainEntity::from(entry.0) == *entity)
+                {
+                    cache.owner_sources.get(&(owner, *original)).copied()
+                } else {
+                    Some(*original)
                 };
-                let properties = material.properties.clone();
-                let Some(mesh) = world
-                    .resource::<RenderMeshInstances>()
-                    .render_mesh_queue_data(entity)
-                else {
-                    continue;
-                };
-                let Some(mesh) = world
-                    .resource::<RenderAssets<RenderMesh>>()
-                    .get(mesh.mesh_asset_id())
-                else {
-                    continue;
-                };
-                let layout = mesh.layout.clone();
-                let Some(view_key) = world.resource::<ViewKeyCache>().get(&view).copied() else {
-                    continue;
-                };
-                let bits: MeshPipelineKey = properties.mesh_pipeline_key_bits.downcast();
-                let mesh_key = view_key
-                    | MeshPipelineKey::from_bits_retain(mesh.key_bits.bits())
-                    | bits
-                    | alpha_mode_pipeline_key(properties.alpha_mode, &Msaa::Off);
-                let key = ErasedMaterialPipelineKey {
-                    type_id: TypeId::of::<SourceMaterial>(),
-                    mesh_key: ErasedMeshPipelineKey::new(mesh_key),
-                    material_key: properties.material_key.clone(),
-                };
-                match base_specialize(world, key, &layout, &properties) {
-                    Ok(id) => {
-                        cache.owner_sources.insert((owner, original), id);
-                        source_id = id;
-                    }
-                    Err(error) => {
-                        error!("Mirror disabled pipeline: {error}");
-                        continue;
+                if let Some(id) = source_id.and_then(|id| cache.variants.get(&id)) {
+                    *original = *id;
+                } else if cache.sealed && source_id.is_none_or(|id| !cache.sources.contains(&id)) {
+                    let mut status = world.resource::<MirrorGpuStatus>().0.lock().unwrap();
+                    if status.failure.is_none() {
+                        status.failure = Some(format!(
+                            "Mirror pipeline outside loading contract: {original:?}"
+                        ));
+                        status.ready = false;
                     }
                 }
             }
         }
-        let patched = if let Some(id) = cache.variants.get(&source_id) {
-            Some(*id)
-        } else {
-            let pipelines = world.resource::<PipelineCache>();
-            // Descriptor access is unsafe before queue processing.
-            if pipelines.get_render_pipeline(source_id).is_none() {
-                None
-            } else {
-                let mut descriptor = pipelines.get_render_pipeline_descriptor(source_id).clone();
-                if let Some(depth) = &mut descriptor.depth_stencil {
-                    depth.format = TextureFormat::Depth24PlusStencil8;
-                }
-                descriptor.label = Some("source mirror capture".into());
-                let id = pipelines.queue_render_pipeline(descriptor);
-                cache.variants.insert(source_id, id);
-                cache.variant_ids.insert(id);
-                Some(id)
-            }
-        };
-        if let Some(id) = patched {
-            if let Some(pipelines) = world
-                .resource_mut::<SpecializedMaterialPipelineCache>()
-                .get_mut(&view)
-            {
-                pipelines.insert(entity, id);
-            }
-        }
-    }
+    });
     world.insert_resource(cache);
 }
 
@@ -1109,26 +1237,38 @@ fn finish_capture_frame(
     )>,
 ) {
     let mut status = status.0.lock().unwrap();
-    if status.instance != surfaces.instance || status.ready || status.failure.is_some() {
+    if status.instance != surfaces.instance || status.failure.is_some() {
         return;
     }
     if status
         .banks
         .iter()
         .any(|pair| pair.iter().any(Option::is_none))
-        || captures.variants.is_empty()
+        || !captures.sealed
+        || captures.sources.is_empty()
     {
         return;
     }
-    for id in captures.variants.values() {
+    for id in captures.sources.iter().chain(captures.variants.values()) {
         match pipelines.get_render_pipeline_state(*id) {
             CachedPipelineState::Ok(_) => {}
             CachedPipelineState::Err(error) => {
                 status.failure = Some(format!("Mirror capture pipeline: {error}"));
+                status.ready = false;
                 return;
             }
             _ => return,
         }
+    }
+    if captures
+        .sources
+        .iter()
+        .any(|id| !captures.variants.contains_key(id))
+    {
+        return;
+    }
+    if status.ready {
+        return;
     }
     for owner in 0..3 {
         let target = status.banks[owner][1].unwrap().target;

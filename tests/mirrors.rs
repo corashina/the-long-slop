@@ -485,3 +485,58 @@ fn mirror_rebase_keeps_projection() {
         assert!((after.next_far_plane - before.next_far_plane).abs() < 0.02);
     }
 }
+
+#[test]
+fn pose_validity_is_current_and_independent_of_capture_eligibility() {
+    let mut source = fixture();
+    source.mirrors.truncate(1);
+    let mut state = MirrorState::new(&source);
+    let good = input(2.);
+    let mut loading = frame([0., 2., 0.]);
+    loading.pointer_locked = false;
+    state.update(&source.rules, loading, &[good]);
+    assert!(state.outputs()[0].pose_valid);
+    assert!(!state.outputs()[0].capture);
+    assert_eq!(
+        state.outputs()[0].capture_far_plane,
+        source.mirrors[0].initial_far_plane
+    );
+    assert_eq!(
+        state.outputs()[0].next_far_plane,
+        source.mirrors[0].initial_far_plane
+    );
+    let mut hidden = good;
+    hidden.normal_view_visible = false;
+    state.update(&source.rules, frame([0., 2., 0.]), &[hidden]);
+    assert!(state.outputs()[0].pose_valid && !state.outputs()[0].capture);
+    let mut bad = [good; 5];
+    bad[0].camera_position = [0., 2., 4.]; // reflected target equals capture position
+    bad[1].plane_normal = [0.; 3];
+    bad[2].camera_up = [0.; 3];
+    bad[3].camera_position[0] = f32::NAN;
+    bad[4].plane_position[0] = f32::INFINITY;
+    for input in bad {
+        for locked in [true, false] {
+            let mut f = frame([0., 2., 0.]);
+            f.pointer_locked = locked;
+            state.update(&source.rules, f, &[input]);
+            let o = state.outputs()[0];
+            assert!(!o.pose_valid && !o.capture);
+            assert!(
+                o.pose
+                    .position
+                    .iter()
+                    .chain(o.pose.rotation.iter())
+                    .all(|v| v.is_finite())
+            );
+        }
+        state.update(&source.rules, frame([0., 2., 0.]), &[good]);
+        assert!(state.outputs()[0].pose_valid && state.outputs()[0].capture);
+    }
+    let mut nonfinite = frame([f32::NAN, 0., 0.]);
+    nonfinite.pointer_locked = false;
+    state.update(&source.rules, nonfinite, &[good]);
+    assert!(!state.outputs()[0].pose_valid);
+    state.update(&source.rules, loading, &[]);
+    assert!(!state.outputs()[0].pose_valid);
+}

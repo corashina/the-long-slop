@@ -27,6 +27,7 @@ pub struct MirrorFrame {
 #[derive(Clone, Copy, Debug)]
 pub struct MirrorOutput {
     pub capture: bool,
+    pub pose_valid: bool,
     pub rank: usize,
     pub pose: VehiclePose,
     pub fov_degrees: f32,
@@ -76,6 +77,7 @@ impl MirrorState {
         self.outputs
             .extend(reference.mirrors.iter().map(|mirror| MirrorOutput {
                 capture: false,
+                pose_valid: false,
                 rank: usize::MAX,
                 pose: VehiclePose {
                     position: [0.0; 3],
@@ -100,11 +102,10 @@ impl MirrorState {
     ) {
         for output in &mut self.outputs {
             output.capture = false;
+            output.pose_valid = false;
             output.rank = usize::MAX;
         }
-        if !rules.enabled || !frame.source_enabled || !frame.pointer_locked {
-            return;
-        }
+        let scheduling = rules.enabled && frame.source_enabled && frame.pointer_locked;
         let count = self.outputs.len().min(inputs.len());
         self.inputs[..count].copy_from_slice(&inputs[..count]);
         let player = vector(frame.player_position);
@@ -128,7 +129,7 @@ impl MirrorState {
         }
 
         // Source OrderBy is stable over its current list, including prior frame order.
-        for rank in 1..self.candidates.len() {
+        for rank in 1..if scheduling { self.candidates.len() } else { 0 } {
             let index = self.candidates[rank];
             let distance = self.distances[index];
             let mut place = rank;
@@ -142,8 +143,10 @@ impl MirrorState {
         for rank in 0..self.candidates.len() {
             let index = self.candidates[rank];
             let output = &mut self.outputs[index];
-            output.rank = rank;
-            if rank >= rules.count_limit || index >= count || !self.distances[index].is_finite() {
+            if scheduling {
+                output.rank = rank;
+            }
+            if index >= count || !self.distances[index].is_finite() {
                 continue;
             }
             let input = self.inputs[index];
@@ -153,7 +156,11 @@ impl MirrorState {
             let normal = vector(input.plane_normal);
             let up = vector(input.camera_up);
             let normal_length = normal.length();
-            if !finite(&camera) || !finite(&normal) || !finite(&up) || normal_length <= f32::EPSILON
+            if !finite(&camera)
+                || !finite(&normal)
+                || !finite(&up)
+                || !normal_length.is_finite()
+                || normal_length <= f32::EPSILON
             {
                 continue;
             }
@@ -165,6 +172,7 @@ impl MirrorState {
             let direction_length = direction.length();
             let up_length = up.length();
             if !finite(&direction)
+                || !direction_length.is_finite()
                 || direction_length <= f32::EPSILON
                 || !up_length.is_finite()
                 || up_length <= f32::EPSILON
@@ -198,9 +206,15 @@ impl MirrorState {
             if !pose.rotation.iter().all(|value| value.is_finite()) {
                 continue;
             }
+            output.pose_valid = true;
             output.pose = pose;
             output.fov_degrees = fov;
-            if distance_factor > 0.0 && normal.dot(reflected) > 0.0 && input.normal_view_visible {
+            if scheduling
+                && rank < rules.count_limit
+                && distance_factor > 0.0
+                && normal.dot(reflected) > 0.0
+                && input.normal_view_visible
+            {
                 output.capture = true;
                 output.capture_far_plane = output.next_far_plane;
                 output.next_far_plane = rules.draw_distance_meters * distance_factor;

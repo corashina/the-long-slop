@@ -49,8 +49,13 @@ def derive_reference(snapshot: Snapshot, library: LibraryReceipt, output: Path) 
                 RUNTIME_BYTES, retained=tree_bytes(output))
     output.parent.mkdir(parents=True, exist_ok=True)
     staged = Path(tempfile.mkdtemp(prefix='runtime-', dir=target.parent))
-    _export_selected(LibrarySource(reader), staged, reader, snapshot)
-    verify_reference(staged, library)
+    try:
+        _export_selected(LibrarySource(reader), staged, reader, snapshot)
+        verify_reference(staged, library)
+    except BaseException:
+        import shutil
+        shutil.rmtree(staged)
+        raise
     promote_reference(staged, output)
 
 

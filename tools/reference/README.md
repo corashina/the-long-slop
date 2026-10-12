@@ -90,6 +90,8 @@ Category estimates include decoded media, managed analysis, and temporary native
 Before assembly, complete category receipts include shared payloads, indexes, languages, and source text.
 The assembly estimate adds 25 percent and 64 MiB for acceptance metadata and allocation overhead.
 Runtime staging reserves 128 MiB. Existing output remains allocated until promotion succeeds.
+Export or verification failure removes only the new staging directory. Promotion failure retains staging for recovery.
+Existing accepted output and recovery directories remain intact.
 Estimates cover file bytes and headroom; other processes can change available space during export.
 Repeated catalog commands verify accepted records and keep managed analysis. Invalid stages fail without rebuilding accepted data.
 

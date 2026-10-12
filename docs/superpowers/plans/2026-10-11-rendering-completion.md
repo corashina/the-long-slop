@@ -166,6 +166,13 @@ Reset advances the mirror instance ID and releases old cameras, targets, materia
 Queued preparation and completion reject work from an old ID.
 The deferred graph must preserve these roles and reset rules when it later integrates mirror views.
 It must keep its shadow, probe, motion, postprocessing, and GrabPass work inside this plan.
+
+Mirror loading now prepares current source layouts, material choices, owner substitutions, and normal/capture view keys before readiness.
+Normal frames select cached IDs through three fixed view slots. Pipeline errors still reach readiness failure after startup.
+Current pose validity stays separate from eligibility. Loading and started restarts retain source initial far 1500.
+The final mirror lifecycle receipt holds 46 capture variants, 109 total pipeline IDs, and 56 GL programs from first readiness.
+Whole-branch mirror review remains pending. Trusted traversal, sustained powered travel, and matched source appearance remain unproved.
+
 ## Outside this plan
 
 Plate text, audio, survival, other vehicles, saves, multiplayer, and deployment remain excluded.

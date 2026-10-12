@@ -1,7 +1,7 @@
 use crate::reference::{
     self as source, MaterialRecord, RenderingRecord, ShaderFamily, TextureColorSpace, TextureRecord,
 };
-use bevy::asset::{AssetId, LoadState, RenderAssetUsages};
+use bevy::asset::{AssetId, LoadState, RenderAssetUsages, UntypedAssetId};
 use bevy::gltf::GltfMaterialExtras;
 use bevy::image::{
     ImageAddressMode, ImageFilterMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor,
@@ -1642,4 +1642,27 @@ pub(crate) fn release_mirror_warmup(
         .unwrap()
         .requests
         .retain(|request| request.material != live && request.material != disabled);
+}
+
+/// Retain all source choices, including hidden lamps, for capture loading.
+pub(crate) fn mirror_warmup_pairs(world: &World, pairs: &mut Vec<(AssetId<Mesh>, UntypedAssetId)>) {
+    let loading = world.resource::<MaterialLoading>().0.lock().unwrap();
+    pairs.extend(
+        loading
+            .requests
+            .iter()
+            .map(|r| (r.mesh, r.material.untyped())),
+    );
+    for target in &world
+        .resource::<super::lighting::SourceLighting>()
+        .lamp_materials
+    {
+        for choice in &target.choices {
+            for receiver in &choice.receivers {
+                if let Some(mesh) = world.get::<Mesh3d>(receiver.entity) {
+                    pairs.push((mesh.0.id(), receiver.material.id().untyped()));
+                }
+            }
+        }
+    }
 }
