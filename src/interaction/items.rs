@@ -22,6 +22,7 @@ pub enum ItemLocation {
 pub struct ItemState {
     pub id: ItemId,
     pub body: Option<RigidBodyHandle>,
+    pub inactive_pose: Option<crate::save::AbsolutePose>,
     pub location: ItemLocation,
     pub pose: VehiclePose,
     pub local_pose: VehiclePose,
@@ -43,6 +44,32 @@ pub struct ItemStore {
 }
 
 impl ItemStore {
+    pub(crate) fn restore_save(
+        &mut self,
+        ids: &crate::save::IdentityMap,
+        saved: &[crate::save::ItemSnapshot],
+    ) -> Result<(), crate::save::SaveError> {
+        use crate::save::ItemLocationSave;
+        for record in saved {
+            let state = self.get_mut(ids.item(&record.instance)?).unwrap();
+            state.location = match &record.location {
+                ItemLocationSave::World => ItemLocation::World,
+                ItemLocationSave::Held => ItemLocation::Held,
+                ItemLocationSave::Attached { owner } => ItemLocation::Attached(ids.item(owner)?),
+                ItemLocationSave::PartSlot { slot } => ItemLocation::PartSlot(ids.part_slots[slot]),
+                ItemLocationSave::WheelSlot { slot } => {
+                    ItemLocation::WheelSlot(ids.wheel_slots[slot])
+                }
+            };
+            state.local_pose = crate::save::local_pose(&record.local_pose);
+            state.condition = record.condition;
+            state.temperature = record.temperature;
+            if let (Some(fluid), Some(quantities)) = (&mut state.fluid, record.fluids) {
+                fluid.mixture.quantities_liters = quantities;
+            }
+        }
+        Ok(())
+    }
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut states = Vec::with_capacity(reference.items.len());
         let mut indices = HashMap::with_capacity(reference.items.len());
@@ -71,6 +98,7 @@ impl ItemStore {
             states.push(ItemState {
                 id: item.id,
                 body: None,
+                inactive_pose: None,
                 location: item
                     .attached_to
                     .map_or(ItemLocation::World, ItemLocation::Attached),
@@ -167,6 +195,67 @@ impl ItemStore {
         })
     }
 
+    pub fn capture_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+        origin: &crate::world::WorldOrigin,
+        physics: &PhysicsWorld,
+    ) -> Result<Vec<crate::save::ItemSnapshot>, crate::save::SaveError> {
+        use crate::save::{
+            AbsolutePose, ItemLocationSave, ItemSnapshot, LocalPose, identity::source_key,
+        };
+        let mut records = Vec::with_capacity(ids.items.len());
+        for &id in ids.items.values() {
+            let item = self.get(id).ok_or_else(|| {
+                crate::save::SaveError::InvalidLinks("Missing source item".into())
+            })?;
+            let (position, rotation) = if let Some(pose) = item.inactive_pose {
+                (pose.position, pose.rotation)
+            } else if let Some(handle) = item.body {
+                let body = physics.rapier().bodies.get(handle).ok_or_else(|| {
+                    crate::save::SaveError::InvalidLinks("Missing item body".into())
+                })?;
+                let offset =
+                    body.position().rotation * Vector::from_array(item.local_pose.position);
+                // Add local offsets after the absolute conversion to retain their precision.
+                let absolute = origin.absolute(body.position().translation.to_array());
+                (
+                    std::array::from_fn(|axis| absolute[axis] + f64::from(offset[axis])),
+                    (body.position().rotation * Rotation::from_array(item.local_pose.rotation))
+                        .to_array(),
+                )
+            } else {
+                (origin.absolute(item.pose.position), item.pose.rotation)
+            };
+            let location = match item.location {
+                ItemLocation::World => ItemLocationSave::World,
+                ItemLocation::Held => ItemLocationSave::Held,
+                ItemLocation::PartSlot(slot) => ItemLocationSave::PartSlot {
+                    slot: source_key(&ids.part_slots, slot)?,
+                },
+                ItemLocation::WheelSlot(slot) => ItemLocationSave::WheelSlot {
+                    slot: source_key(&ids.wheel_slots, slot)?,
+                },
+                ItemLocation::Attached(owner) => ItemLocationSave::Attached {
+                    owner: ids.item_instance(owner)?,
+                },
+            };
+            records.push(ItemSnapshot {
+                instance: ids.item_instance(id)?,
+                pose: AbsolutePose { position, rotation },
+                local_pose: LocalPose {
+                    position: item.local_pose.position,
+                    rotation: item.local_pose.rotation,
+                },
+                location,
+                condition: item.condition,
+                temperature: item.temperature,
+                fluids: item.fluid.as_ref().map(|f| f.mixture.quantities_liters),
+            });
+        }
+        records.sort_by(|a, b| a.instance.cmp(&b.instance));
+        Ok(records)
+    }
     pub fn mounted(&self, mut id: ItemId) -> bool {
         for _ in 0..self.states.len() {
             if self.vehicle_items.contains(&id) {
@@ -205,6 +294,7 @@ impl ItemStore {
         self.states.push(ItemState {
             id,
             body: None,
+            inactive_pose: None,
             location: ItemLocation::World,
             pose,
             local_pose: VehiclePose {
@@ -281,6 +371,9 @@ impl ItemStore {
 
     pub fn sync_poses(&mut self, physics: &PhysicsWorld) {
         for state in &mut self.states {
+            if state.inactive_pose.is_some() {
+                continue;
+            }
             if let Some(handle) = state.body
                 && let Some(body) = physics.rapier().bodies.get(handle)
             {
@@ -291,6 +384,9 @@ impl ItemStore {
 
     pub fn rebase(&mut self, shift: [f32; 3]) {
         for state in &mut self.states {
+            if state.inactive_pose.is_some() {
+                continue;
+            }
             for (position, shift) in state.pose.position.iter_mut().zip(shift) {
                 *position -= shift;
             }

@@ -1022,7 +1022,7 @@ fn detached_door_children_survive_rebase_and_recovery() {
 
 #[test]
 #[ignore = "requires installed source export"]
-fn restart_clears_constraints_and_restores_source_parts() {
+fn new_game_clears_constraints_and_restores_source_parts() {
     let r = installed();
     let mut g = GarageRuntime::new(&r).unwrap();
     let initial: Vec<_> = g
@@ -1065,7 +1065,8 @@ fn restart_clears_constraints_and_restores_source_parts() {
             g.area.items.get(seat.item).unwrap().pose,
             &mut g.physics
         ));
-        g.restart(&r).unwrap();
+        g = GarageRuntime::new(&r).unwrap();
+        g.started = true;
         assert_eq!(
             (g.physics.rapier().bodies.len(), g.physics.collider_count()),
             counts

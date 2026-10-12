@@ -71,6 +71,83 @@ pub struct PlayerState {
 }
 
 impl PlayerState {
+    pub(crate) fn restore_save(
+        &mut self,
+        saved: &crate::save::PlayerSnapshot,
+        ids: &crate::save::IdentityMap,
+        origin: &crate::world::WorldOrigin,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), crate::save::SaveError> {
+        self.pose = Pose::from_parts(
+            Vector::from_array(origin.local(saved.pose.position)),
+            Rotation::from_array(saved.pose.rotation),
+        );
+        self.yaw = saved.yaw;
+        self.pitch = saved.pitch;
+        self.vertical_velocity = saved.vertical_velocity;
+        self.recoil_velocity = Vector::from_array(saved.recoil_velocity);
+        self.crouched = saved.crouched;
+        self.running = saved.running;
+        self.occupancy = if let Some(record) = &saved.seat {
+            let id = ids.seats[&record.source];
+            let seat = self.seats.iter().find(|s| s.id == id).unwrap();
+            Some(Occupancy {
+                id,
+                vehicle: ids
+                    .vehicles
+                    .iter()
+                    .position(|v| v == &record.vehicle)
+                    .ok_or_else(|| crate::save::SaveError::InvalidLinks("Seat vehicle".into()))?,
+                local_pose: to_rapier(crate::save::local_pose(&record.local_pose)),
+                yaw_limits: seat.yaw_limits_degrees,
+                driver: seat.driver,
+            })
+        } else {
+            None
+        };
+        if let Some(seat) = self.occupancy {
+            self.pose = *physics.rapier().bodies[physics.chassis_handle(seat.vehicle)].position()
+                * seat.local_pose;
+        }
+        self.push_gripping = false;
+        self.collisions.clear();
+        self.grounded = false;
+        self.support_body = None;
+        let body = &mut physics.rapier_mut().bodies[self.body];
+        body.set_position(self.pose, false);
+        body.set_next_kinematic_position(self.pose);
+        let collider = &mut physics.rapier_mut().colliders[self.collider];
+        collider.set_enabled(self.occupancy.is_none());
+        collider.set_shape(if self.crouched {
+            self.crouching.clone()
+        } else {
+            self.standing.clone()
+        });
+        physics.refresh_queries();
+        if self.occupancy.is_none() {
+            let height = if self.crouched {
+                self.reference.crouch_height
+            } else {
+                self.reference.standing_height
+            };
+            let hit = physics
+                .queries(
+                    QueryFilter::default()
+                        .exclude_sensors()
+                        .exclude_rigid_body(self.body),
+                )
+                .cast_ray(
+                    &Ray::new(self.pose.translation, -Vector::Y),
+                    height * 0.5 + 0.1,
+                    true,
+                );
+            self.grounded = hit.is_some() && self.vertical_velocity <= 0.0;
+            if self.grounded {
+                self.support_body = hit.and_then(|(h, _)| physics.rapier().colliders[h].parent());
+            }
+        }
+        Ok(())
+    }
     /// The pose places the capsule center. World up is +Y. View forward is -Z.
     pub fn new(reference: &PlayerReference, pose: VehiclePose, physics: &mut PhysicsWorld) -> Self {
         let standing = SharedShape::capsule_y(
@@ -115,6 +192,49 @@ impl PlayerState {
         }
     }
 
+    pub fn capture_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+        origin: &crate::world::WorldOrigin,
+        physics: &PhysicsWorld,
+        carry: Option<crate::save::CarrySnapshot>,
+    ) -> Result<crate::save::PlayerSnapshot, crate::save::SaveError> {
+        let (position, rotation) = if let Some(seat) = self.occupancy {
+            let chassis = physics.rapier().bodies[physics.chassis_handle(seat.vehicle)].position();
+            let absolute = origin.absolute(chassis.translation.to_array());
+            let offset = chassis.rotation * seat.local_pose.translation;
+            (
+                std::array::from_fn(|axis| absolute[axis] + f64::from(offset[axis])),
+                (chassis.rotation * seat.local_pose.rotation).to_array(),
+            )
+        } else {
+            let pose = self.body_pose(physics);
+            (origin.absolute(pose.position), pose.rotation)
+        };
+        Ok(crate::save::PlayerSnapshot {
+            pose: crate::save::AbsolutePose { position, rotation },
+            yaw: self.yaw,
+            pitch: self.pitch,
+            seat: self
+                .occupancy
+                .map(|seat| {
+                    Ok::<_, crate::save::SaveError>(crate::save::SeatSnapshot {
+                        vehicle: ids.vehicles[seat.vehicle].clone(),
+                        source: crate::save::identity::source_key(&ids.seats, seat.id)?,
+                        local_pose: crate::save::LocalPose {
+                            position: seat.local_pose.translation.to_array(),
+                            rotation: seat.local_pose.rotation.to_array(),
+                        },
+                    })
+                })
+                .transpose()?,
+            crouched: self.crouched,
+            vertical_velocity: self.vertical_velocity,
+            recoil_velocity: self.recoil_velocity.to_array(),
+            running: self.running,
+            carry,
+        })
+    }
     /// Bind seats once at setup. Driver identity comes from the recovered seat record.
     pub fn configure_seats(&mut self, seats: &[SeatReference]) {
         assert!(

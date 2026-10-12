@@ -20,7 +20,7 @@ button:disabled {opacity:.45;cursor:default;}
 button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #game:focus-visible {outline:2px solid #fff;outline-offset:-2px;}
 .menu-actions {position:absolute;inset:0;}
-#session-distance {position:absolute;left:24px;top:35%;font-size:clamp(16px,2.5vw,40px);text-shadow:2px 2px 2px #000;}
+#session-distance {position:absolute;right:24px;bottom:16px;margin:0;font-size:clamp(16px,1.5vw,24px);text-shadow:2px 2px 2px #000;}
 #controls-screen {position:absolute;inset:0;}
 #controls-title {position:absolute;left:24px;top:20px;margin:0;font-size:clamp(24px,3.2vw,60px);font-weight:400;}
 #menu:has(#controls-screen:not([hidden])) h1,#menu:has(#controls-screen:not([hidden])) #status {visibility:hidden;}
@@ -38,12 +38,13 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #carry-help {position:absolute;margin:0;white-space:pre;text-align:right;text-shadow:2px 2px 2px #000;}
 #action-notice {position:absolute;left:0;bottom:20px;margin:0;color:#fff;text-shadow:2px 2px 2px #000;}
 @media(max-width:799px) {
- #menu.narrow .menu-actions {inset:auto 16px 16px;display:grid;gap:12px;}
+ #menu.narrow .menu-actions {inset:auto 16px 16px;display:grid;gap:12px;max-height:calc(100dvh - 210px);overflow:auto;}
  #menu.narrow .menu-actions button {position:relative;}
- #menu.narrow #session-distance {position:static;margin:8px 0;}
+ #menu.narrow #session-distance {position:static;margin:8px 0;font-size:16px;}
  #controls-screen .control-columns {inset:90px 16px 100px;overflow:auto;display:grid;grid-template-columns:1fr;gap:32px;}
  .control-columns dl {font-size:16px;}
- #capture-error {font-size:16px;top:140px;}
+ #menu.narrow #status {top:70px;font-size:18px;}
+ #capture-error {font-size:16px;top:110px;max-height:70px;overflow:auto;}
  #menu.narrow #back {left:16px!important;top:auto!important;bottom:16px;width:150px!important;height:44px!important;font-size:18px!important;}
 }
 

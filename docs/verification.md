@@ -1,6 +1,280 @@
 # Verification record
 
-The checkpoint results below precede this merge. They do not replace merged-tree verification.
+## Save lifecycle review fixes: 2026-10-12
+
+The fix range starts at `028bc222f0609f1e45923b25b3ec2cf0cd92ecd0` on `codex/save-load`.
+The frame reads lifecycle input before save dispatch. Dispatch precedes lighting bindings and fixed simulation steps.
+Capture clears input gestures. Commit clears the sampled frame and replaces the prepared runtime before simulation resumes.
+
+The session calls `commit(token, onDispatch)` after preparation.
+The bridge calls `onDispatch` when Rust takes the queued request for synchronous processing.
+The callback remains outside the serialized request.
+Before dispatch, cancellation removes Commit and puts Discard before later requests.
+After dispatch starts, cancellation preserves pending status and the operation result.
+Pause and Continue clear the engine starter gesture, runtime ignition latch, and cached starter output.
+The native regressions compare Save/Continue against Save/Load/Continue after short and engaged ignition holds.
+They also check that gesture clearing preserves captured engine state, item fluids, progress, and recoil.
+
+The current IndexedDB record contains an object payload and its checksum.
+Storage serializes and detaches the object before hashing or opening a transaction.
+Verification hashes the stored field order and returns that exact checked snapshot.
+String payloads fail validation. The schema remains version 1, with no migration.
+
+Use `Check lifecycle boundaries` in `tests/browser/save-runtime.html` for same-frame pause operations and Commit cancellation.
+This control works with the default build. It uses fixture input and queue gates, without new runtime hooks.
+The storage fixture checks real object payloads, field order, corruption, string rejection, aborts, interruption, and blocked access.
+Earlier artifact hashes and browser results below describe their original runs.
+
+Before the fix, two bridge tests exposed queued Commit dispatch after cancellation and lost pending status after dispatch.
+Two storage tests exposed the old string payload contract. All four passed after the fixes.
+The native short-hold test reproduced a false-to-true ignition change after neutral Continue.
+The engaged-starter test reproduced active cached starter output after input clear.
+Both native tests passed after the narrow gesture clear.
+
+The new lifecycle fixture failed against the old default package with `Pause the game first`.
+Fixed default WASM `3180fb3674e6ae5f638ee406d7bc878fdf0f61603d5bdaf557319691bbf86b36` passed all six lifecycle checks.
+Those checks cover Pause/Save, Pause/New game, Pause/Load, queued cancellation, dispatched completion, and usable Continue.
+The first Continue check used four animation-frame callbacks and failed after the other five checks passed.
+An immediate standalone Continue check passed.
+Continue clears the step clock and skips its first frame's elapsed time.
+The fixture now waits for an actual fixed step, with a ten-second limit and started/paused assertions.
+The complete lifecycle rerun passed after this fixture timing correction. No product change followed that failure.
+
+The fixed default package also passed a real object-slot save and complete page reload.
+Maximum position error was 0.000003337860107421875 m; maximum quaternion component error was 0.0000001199999999368373.
+Continue passed after reload. Feature-only controls stayed disabled.
+Real IndexedDB checks passed object type, property order/checksum, abort preservation, corruption, string rejection, and page interruption.
+The normalization check retained exact absolute coordinates.
+Second-tab blocking, late successful-open closure, and incompatible-database rejection also passed: nine named storage checks in total.
+The parent reset only the fixture origin to database version 1 before further runtime checks.
+
+`scripts/check.ps1` passed formatting, 55 Node tests, 256 native tests, and default release WASM compilation.
+It ignored 46 source-dependent cases. A separate 27-test save selection passed with all four installed-source save cases included.
+`scripts/build.ps1` passed default compilation and binding generation.
+The default WASM has 54504608 bytes.
+Its generated JS remains `8952a24bfbc1aa1218016128df6a00720c61ff8cc793f468e2d2b3f7d8cc33b0`, 104757 bytes.
+The source manifest remains `d62630828b68c154c9351203b11f67427916390bd9a3eac1b911fda8efb5c74e`, 5712654 bytes.
+Pointer-lock play, exact browser version, physical quota exhaustion, and 42 unrelated installed-source cases remain unverified.
+Controlled inputs and fixture gates do not establish unrestricted captured-mouse play or Unity physics parity.
+
+The final-wave feature build and binding generation passed in 1m 40s.
+The feature package and final fixtures have these identities:
+
+| File | Bytes | SHA256 |
+| --- | ---: | --- |
+| Feature WASM | 54542158 | `9c321c663a33a13721e4a493cf116a68c868b552fd68170524c4f2c78d606430` |
+| Feature generated JS | 104757 | `93050b64d3674688e758dd716f334e3b8e8068ae7849148411321c8735f5b796` |
+| `tests/browser/save-runtime.js` | 23107 | `8adc482f3e1ef0ffd29a4b89f45f22e2080ae9329ee2b17f938df963897c0a07` |
+| `tests/browser/save-load.js` | 9544 | `7a0e7c3228e4f17f1a2bbdc38ea2712136366f260d9367e4432e066429396c42` |
+| `tests/browser/save-runtime.html` | 1590 | `43d4e1386ff7a1d2a3cdf47a2dcec350f4e0fce5401219efa59bc0ada96e1872` |
+
+This feature package passed driving, real rebase, object-slot save, full page reload, and resumed collision checks.
+Throttle moved the chassis 42.89838212814972 m. Gasoline fell from 22.5 to 22.48727962 L.
+Trip distance reached 42.91876908789497 m.
+Reload errors were 0.0000016987323760986328 m for positions and 0.0000001299999999870849 for quaternion components.
+The reconstructed runtime had 66 bodies, 481 colliders, four wheel supports, zero bad owners, and zero duplicate bodies.
+Four contacts returned after Continue. Chassis Z moved from -2086.8976287841797 to -2102.4931130111217 m with stable height.
+
+The same final feature package passed parts, fluids, carry, cycle, full reload, resumed interaction, and normal F release.
+Reload errors were 0.000003337860107421875 m and 0.0000001299999999870849 quaternion component error.
+The runtime had 68 bodies, 481 colliders, three supports, one carry joint, zero bad owners, and zero duplicates.
+The fixture checked five rim, two hubcap, and four tire colliders against their current owners.
+Source rim `level1:24797`, hubcap `level1:26305`, and tire `level1:40000` correctly retained their shared former chassis `level1:50613`.
+The first 0.25 L transfer changed totals from [2, 0.5] to [1.75, 0.75] L.
+The resumed transfer changed them to [1.5, 1] L.
+Cycle time wrapped from 1499.95 to 0.1709 seconds. The fixture asserted an actual fade-state change.
+Normal F release cleared carry, throw charge, and throw-active state after reload.
+
+Final feature fault checks passed for aborted writes, corruption, source mismatch, unavailable storage, and missing required metadata.
+Each check retained the exact active normalized state, camera, origin, and required stored record.
+The parent closed the feature page before restoring the verified default package bytes.
+The restored default identity is the 3180fb36 WASM and 8952a24b generated JS recorded above.
+
+The installed-source selection command was:
+`cargo test --locked --test save_roundtrip --test save_capture --test save_schema --test save_world -- --include-ignored`.
+Feature validation used `cargo build --locked --release --features save-fixture --target wasm32-unknown-unknown --lib`, then wasm-bindgen.
+All commands used the existing Docker image, Cargo volume, and worktree-specific target directory.
+
+## Browser saves: 2026-10-12
+
+Save work uses branch `codex/save-load`, based on `be698aaec0b5a203ec94f452485d371b687c2824` for combined acceptance.
+Installed Steam build 11140890 supplies the source assets.
+The runtime manifest SHA256 is `d62630828b68c154c9351203b11f67427916390bd9a3eac1b911fda8efb5c74e`.
+The manifest contains 5712654 bytes. The task reused the checked source export without copying or changing its assets.
+The [approved inventory](superpowers/specs/2026-10-12-save-load-design.md#current-state-inventory) defines persistent and rebuilt state.
+This task adds no survival or weather system.
+
+The fixture serves `tests/browser/` and the worktree's `web/` from loopback port 4180.
+Browser checks use Codex In-app Browser and its real IndexedDB manual slot.
+The browser tool does not expose its version; the version query was unsupported.
+Controlled setup and input use the `save-fixture` build. Default builds exclude its setup, inspection, and asset-fault commands.
+
+The tested feature source is the stated base plus these Task 8 files.
+No other runtime source changed during Task 8.
+Hashes identify the exact pre-commit inputs and generated artifacts.
+
+| File | SHA256 |
+| --- | --- |
+| `src/app.rs` | `2594f8e652b46036728a10fb315a2c8aa7ef3bbcad256ce14cdb721b38393358` |
+| `src/app/save.rs` | `d16b3c12744874a6b56cdb2f48d7dec35acd4562352a119d1aa7a08c89e766ac` |
+| `src/app/save_fixture.rs` | `cc0a89c664d963d8ac185b1287c04e12a832b15274c1f978a797ed80b6c9e3b1` |
+| `tests/browser/save-runtime.js` | `6e96d3c7e9e4d798fcb93009cc6e7cddddb783e58dae181c106a38594c01f5ee` |
+| `tests/browser/save-runtime.html` | `a1b2be24724a89cf5c901cda2fdc306204ad590f9bde5454eadfa6293c28fc23` |
+| Feature `web/pkg/my_summer_slop_bg.wasm` (54,541,711 bytes) | `c8686c077ec7babc67f081194a465da09ecc62ddcec78dbbff0dee8db0ea5f56` |
+| Feature `web/pkg/my_summer_slop.js` (104,757 bytes) | `93050b64d3674688e758dd716f334e3b8e8068ae7849148411321c8735f5b796` |
+| Default `web/pkg/my_summer_slop_bg.wasm` (54,504,161 bytes) | `c5f86f89033c8d6ef584416779fdd128814137c59edc05f39a064ea65dd20228` |
+| Default `web/pkg/my_summer_slop.js` (104,757 bytes) | `8952a24bfbc1aa1218016128df6a00720c61ff8cc793f468e2d2b3f7d8cc33b0` |
+The driving fixture places the car on the source road near the rebase threshold, with zero chassis velocity.
+It enters the source driver seat, then supplies ignition and throttle through the normal runtime input boundary.
+It requires chassis displacement, gasoline consumption, wheel rotation, wheel contact, and an origin change.
+A counter change alone cannot pass this check.
+The interaction fixture removes a source wheel and hubcap, carries the hubcap, and transfers source gasoline through existing APIs.
+It seeds cycle time near wrap and starts an existing lamp fade.
+These controlled setups do not prove mouse aiming or pointer-lock play.
+
+Each scenario uses the production save session and manual slot, then reloads the complete page.
+The fixture loads the stored record and compares normalized snapshots without rounding.
+Pose positions allow at most 0.001 m error. Quaternion components allow at most 0.00001 error.
+All other logical values must match exactly. Failed and canceled operations require exact active-state equality.
+The fixture inspects actual body ownership, collider ownership, wheel support, and carry joints after reconstruction.
+It then checks resumed movement, collision, carry, fluid transfer, cycle wrap, and fade updates.
+
+The final storage rerun passed all eight real IndexedDB checks on the current storage modules.
+These include transaction abort and page interruption while a write remains pending.
+It checks the stored checksum and property order, corrupt records, blocked access, and incompatible database versions.
+It also checks unrounded absolute normalization and closure of a late successful open.
+The runtime fixture checks the stored record and active session after corrupt, source-mismatch, unavailable-storage, and missing-asset failures.
+Missing-asset checks remove actual loaded metadata or material handles before candidate preparation.
+The fixture restores each removed asset after its check.
+Node tests cover quota failure and delayed storage callbacks through injected storage boundaries.
+They do not establish browser quota exhaustion.
+
+Initial live records from Tasks 5 through 7 cover storage faults, candidate cancellation, and menu actions.
+Those records also cover 1280x720 and 640x720 menu layouts.
+The embedded browser rejected the menu's pointer-lock request. The menu retained its actions and showed the capture error.
+Controlled Continue input verifies simulation progress. Continuous captured-mouse play remains unverified.
+Earlier no-URL MutationObserver errors have no identified owned-source match; their cause remains unresolved.
+
+The first feature artifact was `c1592c73f1ecb5e406039037190f16668cd5a691c5a826b8274ac4b72ed8c7c9` (54,531,255 bytes).
+It passed the driving save, full page reload, and resumed physics checks.
+Normal throttle moved the chassis 42.89875220176754 m and triggered the origin shift.
+Total gasoline fell from 22.5 L to 22.48727456 L. Trip distance increased from zero to 42.91913915765759 m.
+The reload's maximum position error was 0.0000015795230865478516 m.
+Its maximum quaternion component error was 0.0000001299999999870849.
+The loaded runtime had 66 bodies, 481 colliders, four wheel supports, and zero duplicate assembly bodies or invalid owners.
+Paused wheel contacts remained empty, as required before the first resumed vehicle query.
+After Continue, all four contacts returned. Chassis Z moved from -2086.8979988098145 m to -2102.4984621703625 m.
+Chassis Y changed from 0.169841 m to 0.154864 m; the car retained road support.
+
+The final c868 feature artifact also passed the complete driving scenario with fixture JS 6e96.
+Displacement was 42.89838212814972 m. Gasoline fell from 22.5 to 22.48727962 L.
+Trip distance increased from zero to 42.91876908789497 m, and real motion triggered the rebase.
+Reload errors were 0.0000016987323760986328 m for positions and 0.0000001299999999870849 for quaternion components.
+The loaded runtime had 66 bodies, 481 colliders, four wheel supports, zero ownership errors, and zero duplicate independent bodies.
+All four contacts returned after Continue.
+Chassis Z moved from -2086.8976287841797 to -2102.4931130111217 m; Y changed from 0.169843 to 0.154869 m.
+
+The earlier c159 artifact passed abort, corrupt-record, source-mismatch, unavailable-storage, and missing-asset checks.
+Each check preserved the required stored record, active snapshot, camera, and origin exactly.
+The missing-asset case removed actual loaded metadata before preparation.
+
+The initial interaction fixture falsely counted the shared chassis as three duplicate bodies after part removal.
+Rim `level1:24797`, hubcap `level1:26305`, and tire `level1:40000` share chassis body `level1:50613` in the source export.
+The corrected fixture retains visible ownership changes and checks each changed item's colliders against its current root.
+It counts obsolete independent bodies separately from the shared chassis. This required no product physics change.
+
+The corrected interaction artifact passed the original carry baseline before Save.
+The fixture places the removed hubcap 0.35 m ahead of the view, then uses the existing pickup API.
+Twelve normal steps must preserve that original joint before the fixture seeds fluids, cycle time, and fade.
+The earlier setup dropped the original item before any save or load; this was a fixture placement error.
+
+After full page reload, the maximum position error was 0.000003337860107421875 m.
+The final run's maximum quaternion component error was 0.00000014000000003733248.
+The runtime retained 68 bodies, 481 colliders, three wheel supports, one carry joint, and item 47 in hand.
+All three former owners were the shared chassis. Five rim, two hubcap, and four tire colliders had correct current owners.
+Invalid owners and duplicate independent bodies both measured zero.
+Twelve resumed steps preserved carry, three wheel contacts, and garage collision.
+Fluid transfer moved 0.25 L before Save and another 0.25 L after Load.
+Source and destination totals changed from [2, 0.5] to [1.75, 0.75], then [1.5, 1] L.
+In the final run, cycle time wrapped from 1499.95 to 0.14279999999999998 seconds.
+The fade check required changed controller energy or switch motion after resumed updates.
+A focused Load then normal F tap released the restored item at total step seven.
+The complete final interaction scenario also passed normal F drop at total step twenty.
+The input fixture waits neutral, held, and released fixed steps before pause, so the acquisition latch clears.
+The final `scripts/check.ps1` run exited 0: 52 Node tests and 254 native tests passed.
+Formatting and default release WASM compilation passed.
+The default native run skips 46 tests that require the installed source export.
+The selected installed-source save run passes all 25 tests in save_capture, save_roundtrip, save_schema, and save_world.
+This includes the four save tests listed below. The other 42 skipped source cases were not rerun for Task 8.
+The production_lighting_records_match_selected_scene case also requires Docker sha256sum.
+
+<details>
+<summary>Default-run source-dependent tests</summary>
+
+```text
+input::exported_brake_lights_sample_pedal_before_physics
+input::exported_driver_lights_use_real_edges
+input::exported_low_startup_keeps_source_outputs_through_pause
+input::exported_reverse_lights_follow_selected_reverse_gear
+interaction::source_push_wakes_car_without_bypassing_handbrake
+lighting_interaction::exported_cabin_and_headlight_controls_work_from_driver_seat
+lighting_interaction::exported_cabin_door_values_keep_all_four_source_mappings
+lighting_interaction::exported_house_controls_use_native_confirmed_poses
+lighting_reference::production_lighting_has_checked_source_links
+lighting_reference::production_lighting_records_match_selected_scene
+parts::covered_loose_wheel_mass_conserves_add_remove_and_transfer
+parts::covered_loose_wheel_resolve_and_f_pick_up_rim_and_tire_surfaces
+parts::detached_door_children_survive_rebase_and_recovery
+parts::detached_lamps_turn_off_and_compatible_remount_restores_pose
+parts::door_detach_resets_its_source_usable_and_keeps_window_state
+parts::engine_and_radiator_removal_preserve_contents_and_change_operation
+parts::failed_carry_acquisition_keeps_part_mounted
+parts::garage_door_use_labels_keep_passive_house_hidden
+parts::hubcap_cover_blocks_wheel_removal_until_removed
+parts::loose_mass_tracks_nested_attachment_and_fluid_changes
+parts::loose_wheel_mass_includes_nested_general_parts
+parts::missing_door_does_not_power_the_cabin_lamp
+parts::nested_part_moves_with_parent
+parts::new_game_clears_constraints_and_restores_source_parts
+parts::occupied_seat_cannot_be_removed
+parts::removable_mechanism_prompt_shows_drag_and_removal
+parts::source_parts_scan_then_f_installs_after_removal
+parts::transferred_hubcap_blocks_only_its_current_wheel
+parts::wrong_or_occupied_slot_keeps_held_part_and_contents
+reference::installed_mechanisms_keep_source_controls_and_window_tracks
+reference::production_export_matches_installed_contract
+rendering::installed_materials_match_gltf_and_mips
+save_capture::installed_source_capture
+save_roundtrip::installed_source_roundtrip
+save_schema::installed_source_identity_and_schema
+save_world::installed_world_hibernation_preserves_source_inventory
+starting_area::production_cap_surface_pickup_uses_source_owner
+starting_area::production_dry_recovery_keeps_source_can_and_cargo
+starting_area::production_fuel_can_lifts_and_follows_after_recenter
+starting_area::production_garage_bindings_fill_start_and_move
+starting_area::production_garage_exits_and_reverse_to_road
+starting_area::production_keyboard_steering_uses_recovered_default
+starting_area::production_mechanism_nodes_share_physics_and_render_pose
+starting_area::production_parked_garage_car_stays_stable
+wheels::production_wheel_bindings_detach_and_restore
+wheels::production_wheel_removal_acquires_the_source_rim
+```
+
+</details>
+
+The final `scripts/build.ps1` run exited 0 and generated the default artifacts listed above.
+The final default package passed the real manual-slot save and complete page reload.
+The record used schema 1 and the current source stamp through the production save session.
+Feature-only fault, setup, and inspection controls were disabled.
+
+| Default browser check | Result |
+| --- | --- |
+| Runtime ready | Passed; fixture commands unavailable |
+| Manual-slot save and full page reload | Passed |
+| Maximum position error | 0.000003337860107421875 m |
+| Maximum quaternion component error | 0.0000001199999999368373 |
+| Paused Load and controlled Continue | Passed |
+The earlier checkpoint results below retain their own revision and scope limits.
 
 ## Earlier material checkpoint, 2026-10-11
 
@@ -849,3 +1123,42 @@ The source and package hashes are in `.cache/equipment-checks/final-package-pair
 The command report is `.superpowers/sdd/2026-10-12-live-mirrors/final-fix-report.md`.
 Controller screenshots are in `C:/Users/Corashina/.codex/visualizations/2026/10/12/01a12ea6-fdca-7740-aa22-558ee084f1ee/`.
 Current lifecycle proof is `mirror-final-lifecycle-pass.jpg`. Earlier checks retain `mirror-gpu-scene.jpg`, `mirror-invalid-clip-pass.jpg`, and `mirror-seated-motion-pass.jpg`.
+
+
+## Save integration with both vehicles
+
+The master merge retains the Lada, Skoda, and three existing Lada mirror captures.
+Each vehicle has one save record for its body, engine, gear, handbrake, trip distance, and headlights.
+Vehicle and seat records use source instance identities. The selected vehicle returns after an on-foot save.
+Load checks assets for both dashboards. New game and Load reset the mirror capture epoch.
+
+The merged checks passed: 55 web tests, 269 native tests, formatting, and the release WASM build.
+The normal native run skipped 54 installed-source checks.
+Twelve Python mirror recovery and export staging tests passed.
+Logs: `.cache/save-merge/check-final.log` and `.cache/save-merge/export-tests.log`.
+
+The driven/rebase test found a false changed-body record for source `level1:1`.
+Changing the origin during load added `5.96e-8` metres to its recovered absolute Y coordinate.
+Capture now compares active source poses in the current local frame. Dormant records keep their absolute positions.
+The existing snapshot comparison passed after this fix.
+
+The new installed-source fleet checks cover distinct vehicle states, reordered records, Skoda selection on foot, seats, dormancy, and recovery.
+Cross-car wheel checks restore each rim under its current vehicle owner.
+The seven installed save checks passed against the merged source export.
+The Skoda driving and recovery check, three mirror checks, and existing dormant cargo recovery check also passed.
+Logs: `.cache/save-merge/final-source-package.log`, `.cache/save-merge/installed-tests.log`, and `.cache/save-merge/recovery-tests.log`.
+
+The accepted export contains both vehicles, 633 colliders, and 223 items.
+Its manifest SHA-256 is `11fcb21d76fba0222a13582996e2eac669a1dfa8e53424e21c367dc6008c5e57`.
+The exporter verified the accepted library and selected inputs before native validation and atomic promotion.
+Both vehicle scenes now use the shared source mirror material mapping.
+
+Skoda source mechanism `level1:71713` starts at 90 degrees outside its drag range.
+Save validation accepts the exact source startup value or a value inside that range.
+A focused check rejects the adjacent value of 89 degrees.
+
+Distant recovery now selects the absolute road destination before waking a dormant vehicle.
+It hibernates source bodies before moving the origin to that destination.
+The fleet check recovers the Skoda from coordinates of ten billion metres and preserves the dormant Lada record.
+The browser fixture adds `Both cars, save, reload` for distinct engine, trip, brake, and headlight states.
+These controlled fixtures do not establish uninterrupted trusted mouse capture or source appearance parity.

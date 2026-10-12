@@ -161,6 +161,63 @@ struct TankRules {
 }
 
 impl InteractionState {
+    pub(crate) fn restore_save(
+        &mut self,
+        saved: &crate::save::MechanismsSnapshot,
+        ids: &crate::save::IdentityMap,
+    ) {
+        self.mechanisms.restore_save(ids, &saved.controls);
+        for record in &saved.openings {
+            self.openings
+                .iter_mut()
+                .find(|o| o.reference.id == ids.openings[&record.source])
+                .unwrap()
+                .valve = record.valve;
+        }
+        self.cancel_input();
+    }
+    pub(crate) fn restore_carry_save(
+        &mut self,
+        saved: &crate::save::CarrySnapshot,
+        ids: &crate::save::IdentityMap,
+        items: &ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), crate::save::SaveError> {
+        self.carry.restore_save(saved, ids, items, physics)
+    }
+    pub fn capture_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+    ) -> Result<crate::save::MechanismsSnapshot, crate::save::SaveError> {
+        let mut openings = ids
+            .openings
+            .iter()
+            .map(|(source, id)| {
+                let opening = self
+                    .openings
+                    .iter()
+                    .find(|o| o.reference.id == *id)
+                    .ok_or_else(|| {
+                        crate::save::SaveError::InvalidLinks("Missing source opening".into())
+                    })?;
+                Ok(crate::save::OpeningSnapshot {
+                    source: source.clone(),
+                    valve: opening.valve,
+                })
+            })
+            .collect::<Result<Vec<_>, crate::save::SaveError>>()?;
+        openings.sort_by(|a, b| a.source.cmp(&b.source));
+        Ok(crate::save::MechanismsSnapshot {
+            controls: self.mechanisms.capture_save(ids)?,
+            openings,
+        })
+    }
+    pub fn capture_carry_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+    ) -> Result<Option<crate::save::CarrySnapshot>, crate::save::SaveError> {
+        self.carry.capture_save(ids)
+    }
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut openings = Vec::with_capacity(reference.openings.len());
         for opening in &reference.openings {
@@ -468,6 +525,15 @@ impl InteractionState {
             valve: 1.0,
         });
         Ok(())
+    }
+    pub(crate) fn restore_pump_valve(&mut self, item: ItemId, valve: f32) {
+        if let Some(opening) = self
+            .openings
+            .iter_mut()
+            .find(|opening| opening.reference.cap == item)
+        {
+            opening.valve = valve;
+        }
     }
     pub fn opening_is_open(&self, id: OpeningId) -> bool {
         self.opening_valve(id) > 0.0
@@ -931,6 +997,9 @@ impl InteractionState {
             let Some(item) = items.get_mut(opening.reference.tank) else {
                 continue;
             };
+            if item.inactive_pose.is_some() {
+                continue;
+            }
             let forward = (to_rapier(item.pose) * opening.local_pose).rotation * opening.tilt_axis;
             let angle = forward.dot(Vector::Y).clamp(-1.0, 1.0).acos().to_degrees();
             if let Some(fluid) = item.fluid.as_mut() {

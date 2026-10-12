@@ -1335,14 +1335,40 @@ pub fn bind_materials(
     }
 }
 
+#[derive(Clone)]
 pub struct LampReceiverChoice {
     entity: Entity,
     material: Handle<SourceMaterial>,
     casters: Vec<(Entity, Handle<StandardMaterial>)>,
 }
+#[derive(Clone)]
 pub struct LampMaterialChoice {
     key: (crate::reference::AssetId, u32),
     receivers: Vec<LampReceiverChoice>,
+}
+
+impl LampMaterialChoice {
+    pub(crate) fn validate_assets(
+        &self,
+        materials: &Assets<SourceMaterial>,
+        casters: &Assets<StandardMaterial>,
+    ) -> Result<(), crate::save::SaveError> {
+        for receiver in &self.receivers {
+            if !materials.contains(receiver.material.id()) {
+                return Err(crate::save::SaveError::MissingAssets(
+                    "lamp material choice".into(),
+                ));
+            }
+            for (_, handle) in &receiver.casters {
+                if !casters.contains(handle.id()) {
+                    return Err(crate::save::SaveError::MissingAssets(
+                        "lamp caster material choice".into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Prepare source selections and actual mesh pipeline variants during loading.

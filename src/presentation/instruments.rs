@@ -65,6 +65,34 @@ pub struct InstrumentVisuals {
     dashboards: Vec<Dashboard>,
 }
 impl InstrumentVisuals {
+    pub(crate) fn validate_assets(
+        &self,
+        materials: &Assets<SourceMaterial>,
+        casters: &Assets<StandardMaterial>,
+    ) -> Result<(), crate::save::SaveError> {
+        for visual in self
+            .dashboards
+            .iter()
+            .flat_map(|dashboard| dashboard.lamps.iter().chain(&dashboard.digit_materials))
+        {
+            for choice in &visual.choices {
+                if !materials.contains(choice.on.id()) || !materials.contains(choice.off.id()) {
+                    return Err(crate::save::SaveError::MissingAssets(
+                        "instrument material choice".into(),
+                    ));
+                }
+                for (_, lit, dark) in &choice.casters {
+                    if !casters.contains(lit.id()) || !casters.contains(dark.id()) {
+                        return Err(crate::save::SaveError::MissingAssets(
+                            "instrument caster material choice".into(),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn bind(
         &mut self,
         reference: &ReferenceManifest,

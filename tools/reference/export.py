@@ -235,23 +235,14 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
             raise ValueError(f'Selected {name} starter link differs from the required car')
     # Every start car shares one garage spot. The project parks the other cars in the yard.
     relocate(source,roots['skoda'][0],SKODA_PARKING,180.)
-    source.live_mirror_sources = []
-    source.live_mirror_renderers = {}
-    main_reader = source.get('level1', 64919)
-    main = source.read(main_reader)
-    mirror_material = source.resolve(main_reader, main['defMirrorMaterial'])
-    mirror_texture = source.resolve(main_reader, main['defMirrorTexture'])
-    from .source import source_id, key
+    from .mirrors import prepare_mirror_materials
+    prepare_mirror_materials(source, roots['lada'][0])
     for node in [n for name in CARS for n in source.hierarchy(roots[name][0], activate_root=True)]:
         for reader in node['components']:
             if reader.type.name == 'MonoBehaviour' and source.class_name(reader) == 'mirrorscript':
                 data = source.read(reader)['M']
                 if data['R']['m_PathID'] and data['C']['m_PathID']:
-                    source.live_mirror_sources.append(source_id(reader))
-                    source.live_mirror_renderers[key(source.resolve(reader, data['R']))] = mirror_material
-    source.live_mirror_sources.append(source_id(mirror_texture))
-    from .mirrors import prepare_mirror_materials
-    prepare_mirror_materials(source, roots['lada'][0])
+                    source.mirror_renderers[key(source.resolve(reader, data['R']))] = source.mirror_live_material
     prepare_conditions(source,[root for readers in roots.values() for root in readers])
     output.mkdir(parents=True, exist_ok=True)
     native_engine = native_engine_evidence(snapshot.root)

@@ -139,6 +139,48 @@ pub struct EngineState {
 }
 
 impl EngineState {
+    pub fn clear_input(&mut self) {
+        self.ignition_hold_seconds = 0.;
+        self.last_ignition_held = false;
+        self.starter = false;
+        self.last_output.starter = false;
+    }
+    pub fn running(&self) -> bool {
+        self.elapsed - self.last_run_time < RUN_GRACE_SECONDS
+    }
+    pub fn capture_save(&self) -> crate::save::EngineSnapshot {
+        crate::save::EngineSnapshot {
+            ignition: self.ignition,
+            rpm: self.rpm,
+            temperature: self.temperature,
+            elapsed: self.elapsed,
+            last_run_time: self.last_run_time,
+            last_start_chance_time: self.last_start_chance_time,
+            random_start: self.random_start,
+            supplied_fuel: self.supplied_fuel,
+            fan_on: self.fan_on,
+        }
+    }
+    pub fn restore_save(&mut self, saved: &crate::save::EngineSnapshot) -> EngineOutput {
+        self.ignition = saved.ignition;
+        self.rpm = saved.rpm;
+        self.temperature = saved.temperature;
+        self.elapsed = saved.elapsed;
+        self.last_run_time = saved.last_run_time;
+        self.last_start_chance_time = saved.last_start_chance_time;
+        self.random_start = saved.random_start;
+        self.supplied_fuel = saved.supplied_fuel;
+        self.fan_on = saved.fan_on;
+        self.clear_input();
+        self.last_output = EngineOutput {
+            ignition: self.ignition,
+            running: self.running(),
+            rpm: self.rpm,
+            temperature: self.temperature,
+            ..Default::default()
+        };
+        self.last_output
+    }
     pub fn new(reference: &EngineReference) -> Self {
         Self {
             ignition: false,
@@ -247,7 +289,7 @@ impl EngineState {
         } else if self.elapsed - self.last_run_time >= RUN_GRACE_SECONDS {
             self.supplied_fuel = 0.0;
         }
-        let running = self.elapsed - self.last_run_time < RUN_GRACE_SECONDS;
+        let running = self.running();
         let consumed_fuel = if running {
             spill(
                 fluids.fuel,

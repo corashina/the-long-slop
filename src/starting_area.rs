@@ -365,6 +365,9 @@ impl StartingArea {
     }
     pub fn sync_portable_mass(&mut self, physics: &mut PhysicsWorld) {
         for (handle, dry, tanks, current) in &mut self.portable_mass {
+            if !physics.body_active(*handle) {
+                continue;
+            }
             let mass = *dry
                 + tanks
                     .iter()
@@ -389,6 +392,12 @@ impl StartingArea {
         for record in &self.compound_colliders {
             if physics.rapier().colliders[record.handle]
                 .parent()
+                .is_some_and(|body| !physics.body_active(body))
+            {
+                continue;
+            }
+            if physics.rapier().colliders[record.handle]
+                .parent()
                 .and_then(|parent| physics.vehicle_of(parent))
                 .is_none()
             {
@@ -403,6 +412,9 @@ impl StartingArea {
     }
     pub fn commit_poses(&mut self, physics: &PhysicsWorld, teleport: bool) {
         for (id, previous, current) in &mut self.render_poses {
+            if !physics.body_active(self.bodies[id]) {
+                continue;
+            }
             *current =
                 crate::vehicle::from_rapier(physics.rapier().bodies[self.bodies[id]].position());
             if teleport {
@@ -410,6 +422,13 @@ impl StartingArea {
             }
         }
         for (id, previous, current) in &mut self.item_render_poses {
+            if self
+                .items
+                .get(*id)
+                .is_some_and(|item| item.inactive_pose.is_some())
+            {
+                continue;
+            }
             *current = self.items.get(*id).expect("bound visual item").pose;
             if teleport {
                 *previous = *current;
@@ -420,6 +439,9 @@ impl StartingArea {
     /// Attached bodies without mechanisms follow the authoritative vehicle pose.
     pub fn sync_attachments(&self, physics: &mut PhysicsWorld, next: bool) {
         for &(handle, parent, local) in &self.attachments {
+            if !physics.body_active(handle) || !physics.body_active(parent) {
+                continue;
+            }
             let parent_pose = if next {
                 *physics.rapier().bodies[parent].next_position()
             } else {
@@ -534,7 +556,10 @@ impl VehicleRuntime {
     }
 }
 
+mod save;
+
 pub struct GarageRuntime {
+    pub persistent_world: crate::save::PersistentWorld,
     pub lighting: crate::lighting::LightingState,
     pub physics: PhysicsWorld,
     pub area: StartingArea,
@@ -556,26 +581,36 @@ pub struct GarageRuntime {
 
 impl GarageRuntime {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
+        Self::new_candidate(reference, true)
+    }
+    fn new_candidate(
+        reference: &ReferenceManifest,
+        stream_world: bool,
+    ) -> Result<Self, ReferenceError> {
         let mut physics = PhysicsWorld::new(reference, &initial_vehicle_poses(reference)?)?;
+
         let mut area = StartingArea::new(reference, &mut physics, [0.0; 3])?;
         let mut stream = WorldStream::new(DEFAULT_SEED);
         stream.configure_starting_area(reference);
-        stream.sync_at(
-            reference.area.player_spawn.translation.map(|v| v as f64),
-            &mut physics,
-        );
-        crate::world::sync_station_supplies(
-            &mut stream,
-            &mut area.items,
-            &mut area.interaction,
-            &mut physics,
-        );
+        if stream_world {
+            stream.sync_at(
+                reference.area.player_spawn.translation.map(|v| v as f64),
+                &mut physics,
+            );
+            crate::world::sync_station_supplies(
+                &mut stream,
+                &mut area.items,
+                &mut area.interaction,
+                &mut physics,
+            );
+        }
         let mut wheels = crate::interaction::wheels::WheelAssemblies::new(reference)?;
         wheels.sync(&mut area.items, &mut physics)?;
         physics.refresh_queries();
         area.items.sync_poses(&physics);
         area.commit_poses(&physics, true);
         Ok(Self {
+            persistent_world: crate::save::PersistentWorld::new(reference),
             physics,
             area,
             stream,
@@ -650,11 +685,13 @@ impl GarageRuntime {
             .interaction
             .finish_cancelled_input(&mut self.area.player, &mut self.physics);
         for (index, vehicle) in self.vehicles.iter_mut().enumerate() {
-            vehicle.previous = self
-                .stream
-                .origin
-                .absolute(self.physics.snapshot(index).pose.position);
+            vehicle.previous = self.persistent_world.absolute_vehicle_position(
+                &self.physics,
+                &self.stream.origin,
+                index,
+            );
         }
+
         self.area.begin_step();
         let aim = self.area.interaction.resolve(
             &self.physics,
@@ -889,20 +926,32 @@ impl GarageRuntime {
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, false);
         for (index, vehicle) in self.vehicles.iter_mut().enumerate() {
-            let current = self
-                .stream
-                .origin
-                .absolute(self.physics.snapshot(index).pose.position);
+            let current = self.persistent_world.absolute_vehicle_position(
+                &self.physics,
+                &self.stream.origin,
+                index,
+            );
             let previous = vehicle.previous;
             vehicle.trip_m +=
                 ((current[0] - previous[0]).powi(2) + (current[2] - previous[2]).powi(2)).sqrt();
         }
+
         let focus = if self.area.player.seat().is_some() {
             self.physics.snapshot(self.vehicle).pose.position
         } else {
             self.area.player.focus_position(&self.physics)
         };
         let absolute = self.stream.origin.absolute(focus);
+        self.stream.focus = absolute;
+        self.persistent_world
+            .sync(
+                reference,
+                &mut self.area,
+                &mut self.wheels,
+                &self.stream,
+                &mut self.physics,
+            )
+            .expect("persistent world bindings");
         if self.stream.rebase(focus, &mut self.physics).is_some() {
             let old_origin = self.area.origin;
             self.area.sync_origin(self.stream.origin.offset);
@@ -912,12 +961,23 @@ impl GarageRuntime {
             self.rebases += 1;
         }
         self.stream.sync_at(absolute, &mut self.physics);
+        self.persistent_world
+            .sync(
+                reference,
+                &mut self.area,
+                &mut self.wheels,
+                &self.stream,
+                &mut self.physics,
+            )
+            .expect("persistent world bindings");
         crate::world::sync_station_supplies(
             &mut self.stream,
             &mut self.area.items,
             &mut self.area.interaction,
             &mut self.physics,
         );
+        self.persistent_world
+            .sync_pumps(&self.stream, &mut self.area.interaction);
     }
 
     /// Steps one engine and applies its forces. Only the driven vehicle reads keys.
@@ -929,6 +989,9 @@ impl GarageRuntime {
         driving: bool,
         steering: f32,
     ) {
+        if !self.physics.body_active(self.physics.chassis_handle(index)) {
+            return;
+        }
         let source = &reference.vehicles[index];
         let engine_reference = &source.engine;
         let snapshot = self.physics.snapshot(index);
@@ -1101,21 +1164,92 @@ impl GarageRuntime {
 
     pub fn clear_input(&mut self) {
         self.steering.clear();
+        for vehicle in &mut self.vehicles {
+            vehicle.ignition_held = false;
+            vehicle.engine.clear_input();
+            vehicle.engine_output.starter = false;
+        }
         self.area.interaction.cancel_input();
-    }
-
-    pub fn restart(&mut self, reference: &ReferenceManifest) -> Result<(), ReferenceError> {
-        self.area
-            .interaction
-            .drop_held(&mut self.area.items, &mut self.physics);
-        *self = Self::new(reference)?;
-        self.started = true;
-        Ok(())
     }
 
     /// Moves the current vehicle, its cargo, and a walking player back to the road.
     pub fn recover(&mut self, reference: &ReferenceManifest) {
         let index = self.vehicle;
+        let dormant = !self.physics.body_active(self.physics.chassis_handle(index));
+        if dormant {
+            let player = self
+                .stream
+                .origin
+                .absolute(self.area.player.focus_position(&self.physics));
+            let empty = self
+                .area
+                .items
+                .get(reference.vehicles[index].engine.fuel_tank)
+                .and_then(|i| i.fluid.as_ref())
+                .is_none_or(|f| f.mixture.total() <= 0.);
+            let (target, _) = self.stream.recovery_destination(-player[2], empty);
+            self.persistent_world.relocate_dormant_vehicle(
+                reference,
+                &mut self.area,
+                &self.physics,
+                index,
+                target,
+                &self.vehicles[index].recovery_bounds,
+                &mut self.recovery_bodies,
+            );
+            self.stream.focus = target;
+            if (0..3).any(|axis| {
+                (target[axis] - self.stream.origin.offset[axis]).abs()
+                    > crate::world::REBASE_LIMIT as f64
+            }) {
+                // Hibernate source bodies before transporting the recovery origin.
+                self.persistent_world
+                    .sync(
+                        reference,
+                        &mut self.area,
+                        &mut self.wheels,
+                        &self.stream,
+                        &mut self.physics,
+                    )
+                    .expect("persistent recovery bindings");
+                let player_pose = self.area.player.body_pose(&self.physics);
+                let held_pose = self
+                    .area
+                    .interaction
+                    .held()
+                    .and_then(|id| self.area.items.get(id))
+                    .and_then(|i| i.body)
+                    .map(|body| (body, *self.physics.rapier().bodies[body].position()));
+                let shift = std::array::from_fn(|axis| {
+                    (target[axis] - self.stream.origin.offset[axis]) as f32
+                });
+                self.physics.rebase(shift);
+                self.stream.origin.offset = target;
+                self.area.sync_origin(target);
+                if let Some((body, pose)) = held_pose {
+                    self.physics.rapier_mut().bodies[body].set_position(pose, false);
+                }
+                let old_player = self.area.player.body_handle();
+                self.physics.rapier_mut().remove_body(old_player);
+                self.area.player =
+                    PlayerState::new(&reference.player, player_pose, &mut self.physics);
+                self.area.player.configure_seats(&reference.seats);
+                self.area
+                    .interaction
+                    .bind_player_body(self.area.player.body_handle());
+                self.area.items.sync_poses(&self.physics);
+                self.rebases += 1;
+            }
+            self.persistent_world
+                .sync(
+                    reference,
+                    &mut self.area,
+                    &mut self.wheels,
+                    &self.stream,
+                    &mut self.physics,
+                )
+                .expect("persistent recovery bindings");
+        }
         self.clear_input();
         self.area
             .interaction
@@ -1131,24 +1265,26 @@ impl GarageRuntime {
         let old_car = to_rapier(self.physics.snapshot(index).pose);
         let inverse = old_car.inverse();
         let bounds = self.vehicles[index].recovery_bounds;
-        self.recovery_bodies.clear();
-        for item in self.area.items.iter() {
-            let Some(handle) = item.body else {
-                continue;
-            };
-            if Some(handle) == held
-                || self.physics.vehicle_of(handle).is_some()
-                || self.recovery_bodies.contains(&handle)
-            {
-                continue;
-            }
-            let body = &self.physics.rapier().bodies[handle];
-            if !body.is_dynamic() || !body.is_enabled() {
-                continue;
-            }
-            let point = inverse * body.position().translation;
-            if (0..3).all(|i| point[i] >= bounds.min[i] && point[i] <= bounds.max[i]) {
-                self.recovery_bodies.push(handle);
+        if !dormant {
+            self.recovery_bodies.clear();
+            for item in self.area.items.iter() {
+                let Some(handle) = item.body else {
+                    continue;
+                };
+                if Some(handle) == held
+                    || self.physics.vehicle_of(handle).is_some()
+                    || self.recovery_bodies.contains(&handle)
+                {
+                    continue;
+                }
+                let body = &self.physics.rapier().bodies[handle];
+                if !body.is_dynamic() || !body.is_enabled() {
+                    continue;
+                }
+                let point = inverse * body.position().translation;
+                if (0..3).all(|i| point[i] >= bounds.min[i] && point[i] <= bounds.max[i]) {
+                    self.recovery_bodies.push(handle);
+                }
             }
         }
         self.area
@@ -1171,7 +1307,12 @@ impl GarageRuntime {
             &mut self.area.interaction,
             &mut self.physics,
         );
-        self.physics.reset(index, pose);
+        if dormant {
+            self.physics.reset_preserving_wheels(index, pose);
+        } else {
+            self.physics.reset(index, pose);
+        }
+
         let cargo_delta = to_rapier(pose) * inverse;
         for &body in &self.recovery_bodies {
             transport_body(&mut self.physics, body, cargo_delta);

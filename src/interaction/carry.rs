@@ -36,6 +36,45 @@ pub struct CarryState {
 }
 
 impl CarryState {
+    pub(crate) fn restore_save(
+        &mut self,
+        saved: &crate::save::CarrySnapshot,
+        ids: &crate::save::IdentityMap,
+        items: &ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), crate::save::SaveError> {
+        let item = ids.item(&saved.item)?;
+        let body = items.get(item).and_then(|i| i.body).ok_or_else(|| {
+            crate::save::SaveError::ReconstructionFailure("Missing held body".into())
+        })?;
+        if !physics.body_active(body) || !physics.rapier().bodies[body].is_dynamic() {
+            return Err(crate::save::SaveError::ReconstructionFailure(
+                "Held body is inactive or fixed".into(),
+            ));
+        }
+        let pose = *physics.rapier().bodies[body].position();
+        let anchor = physics
+            .rapier_mut()
+            .insert_body(RigidBodyBuilder::kinematic_position_based().pose(pose));
+        let joint = physics.rapier_mut().impulse_joints.insert(
+            anchor,
+            body,
+            FixedJointBuilder::new(),
+            false,
+        );
+        self.anchor = Some(anchor);
+        self.held = Some(HeldState {
+            item,
+            body,
+            offset: Vector::from_array(saved.offset),
+            rotation: Rotation::from_array(saved.rotation),
+            joint,
+            local_pose: to_rapier(crate::save::local_pose(&saved.local_grip)),
+        });
+        physics.rapier_mut().bodies[body].enable_ccd(true);
+        self.cancel_input();
+        Ok(())
+    }
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let player = &reference.player;
         if !player.carry_min_weight.is_finite()
@@ -125,6 +164,25 @@ impl CarryState {
         }
         Some(item)
     }
+    pub fn capture_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+    ) -> Result<Option<crate::save::CarrySnapshot>, crate::save::SaveError> {
+        self.held
+            .as_ref()
+            .map(|held| {
+                Ok(crate::save::CarrySnapshot {
+                    item: ids.item_instance(held.item)?,
+                    offset: held.offset.to_array(),
+                    rotation: held.rotation.to_array(),
+                    local_grip: crate::save::LocalPose {
+                        position: held.local_pose.translation.to_array(),
+                        rotation: held.local_pose.rotation.to_array(),
+                    },
+                })
+            })
+            .transpose()
+    }
     pub fn held(&self) -> Option<ItemId> {
         self.held.as_ref().map(|held| held.item)
     }
@@ -169,7 +227,8 @@ impl CarryState {
         body: RigidBodyHandle,
         physics: &PhysicsWorld,
     ) -> Result<(), ReferenceError> {
-        if self.held.is_some()
+        if !physics.body_active(body)
+            || self.held.is_some()
             || !point.iter().all(|v| v.is_finite())
             || !self.allows_pickup(id, player.seat().is_some(), false)
             || physics.vehicle_of(body).is_some()

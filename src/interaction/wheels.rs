@@ -55,6 +55,82 @@ pub struct WheelAssemblies {
 }
 
 impl WheelAssemblies {
+    pub(crate) fn restore_save(
+        &mut self,
+        ids: &crate::save::IdentityMap,
+        saved: &crate::save::AttachmentsSnapshot,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), crate::save::SaveError> {
+        self.bind(items, physics)?;
+        for part in &mut self.parts {
+            if let Some(body) = part.free_body {
+                physics.rapier_mut().bodies[body].set_enabled(false);
+            }
+            part.tire = None;
+        }
+        for record in &saved.tires {
+            let rim = self.indices[&ids.item(&record.rim)?];
+            self.parts[rim].tire = Some(self.indices[&ids.item(&record.tire)?]);
+        }
+        for record in &saved.wheels {
+            let slot = self
+                .slots
+                .iter_mut()
+                .find(|s| s.id == ids.wheel_slots[&record.slot])
+                .unwrap();
+            slot.rim = record
+                .rim
+                .as_ref()
+                .map(|id| ids.item(id).map(|id| self.indices[&id]))
+                .transpose()?;
+        }
+        for i in 0..self.parts.len() {
+            let state = items.get(self.parts[i].item).unwrap();
+            if matches!(state.location, ItemLocation::World | ItemLocation::Held) {
+                let body = self.free_body(i, Pose::IDENTITY, physics);
+                let local = to_rapier(items.get(self.parts[i].item).unwrap().local_pose);
+                self.place_part(i, body, local, true, items, physics)?;
+            } else if let ItemLocation::WheelSlot(slot_id) = state.location {
+                self.place_part(
+                    i,
+                    physics.chassis_handle(
+                        physics
+                            .slot_vehicle(slot_id)
+                            .expect("validated wheel owner"),
+                    ),
+                    to_rapier(state.local_pose),
+                    false,
+                    items,
+                    physics,
+                )?;
+            }
+        }
+        for i in 0..self.parts.len() {
+            if let Some(tire) = self.parts[i].tire {
+                let body = items.get(self.parts[i].item).unwrap().body.unwrap();
+                let local = to_rapier(items.get(self.parts[tire].item).unwrap().local_pose);
+                self.place_part(
+                    tire,
+                    body,
+                    local,
+                    physics.vehicle_of(body).is_none(),
+                    items,
+                    physics,
+                )?;
+            }
+        }
+        self.sync(items, physics)?;
+        for record in &saved.wheels {
+            let slot = self
+                .slots
+                .iter()
+                .find(|s| s.id == ids.wheel_slots[&record.slot])
+                .unwrap();
+            physics.restore_wheel_save(slot.vehicle, slot.index, record);
+        }
+        Ok(())
+    }
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut parts = Vec::with_capacity(reference.wheel_parts.len());
         let mut indices = HashMap::with_capacity(reference.wheel_parts.len());
@@ -297,6 +373,51 @@ impl WheelAssemblies {
         })
     }
 
+    pub fn capture_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+        physics: &PhysicsWorld,
+    ) -> Result<
+        (
+            Vec<crate::save::WheelAttachment>,
+            Vec<crate::save::TireAttachment>,
+        ),
+        crate::save::SaveError,
+    > {
+        let mut slots = self
+            .slots
+            .iter()
+            .map(|slot| {
+                let (rotation, rpm, previous_rotation) =
+                    physics.wheel_save_state(slot.vehicle, slot.index);
+                Ok(crate::save::WheelAttachment {
+                    slot: crate::save::identity::source_key(&ids.wheel_slots, slot.id)?,
+                    rim: slot
+                        .rim
+                        .map(|rim| ids.item_instance(self.parts[rim].item))
+                        .transpose()?,
+                    rotation,
+                    rpm,
+                    previous_rotation,
+                })
+            })
+            .collect::<Result<Vec<_>, crate::save::SaveError>>()?;
+        let mut tires = self
+            .parts
+            .iter()
+            .filter(|part| part.rim)
+            .filter_map(|part| part.tire.map(|tire| (part, tire)))
+            .map(|(part, tire)| {
+                Ok(crate::save::TireAttachment {
+                    rim: ids.item_instance(part.item)?,
+                    tire: ids.item_instance(self.parts[tire].item)?,
+                })
+            })
+            .collect::<Result<Vec<_>, crate::save::SaveError>>()?;
+        slots.sort_by(|a, b| a.slot.cmp(&b.slot));
+        tires.sort_by(|a, b| a.rim.cmp(&b.rim));
+        Ok((slots, tires))
+    }
     pub fn slot_for_item(&self, item: ItemId) -> Option<WheelSlotId> {
         self.slots
             .iter()
@@ -658,12 +779,22 @@ impl WheelAssemblies {
         }
     }
 
+    pub fn sync_activity(&mut self, physics: &mut PhysicsWorld) {
+        for slot in &self.slots {
+            let active = physics.body_active(physics.chassis_handle(slot.vehicle));
+            if let Some(handle) = slot.sensor {
+                physics.rapier_mut().colliders[handle].set_enabled(active);
+            }
+        }
+    }
+
     pub fn sync(
         &mut self,
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
         self.bind(items, physics)?;
+        self.sync_activity(physics);
         for vehicle in 0..self.vehicles.len() {
             self.sync_vehicle(vehicle, items, physics)?;
         }
@@ -671,6 +802,7 @@ impl WheelAssemblies {
             if let Some(item) = items.get(self.parts[index].item)
                 && matches!(item.location, ItemLocation::World | ItemLocation::Held)
                 && let Some(body) = item.body
+                && physics.body_active(body)
             {
                 self.update_body_mass(index, body, items, physics);
             }
@@ -718,8 +850,12 @@ impl WheelAssemblies {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
+        if !physics.body_active(physics.chassis_handle(vehicle)) {
+            return Ok(());
+        }
         let snapshot = physics.snapshot(vehicle);
         let chassis = physics.chassis_handle(vehicle);
+
         let inverse = to_rapier(snapshot.pose).inverse();
         for slot in self.slots.iter_mut().filter(|slot| slot.vehicle == vehicle) {
             let support = if let Some(rim) = slot.rim {
@@ -784,6 +920,7 @@ impl WheelAssemblies {
                 }
             }
         }
+
         Ok(())
     }
 }

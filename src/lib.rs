@@ -12,6 +12,7 @@ pub mod lighting;
 pub mod mirrors;
 pub mod player;
 pub mod reference;
+pub mod save;
 pub mod simulation;
 pub mod starting_area;
 pub mod vehicle;

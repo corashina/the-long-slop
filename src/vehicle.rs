@@ -83,6 +83,7 @@ struct VehicleBody {
 }
 
 pub struct PhysicsWorld {
+    pub(crate) inactive_bodies: std::collections::HashSet<RigidBodyHandle>,
     physics: rapier3d::prelude::PhysicsWorld,
     chassis: Vec<RigidBodyHandle>,
     vehicles: Vec<VehicleBody>,
@@ -127,6 +128,9 @@ impl PhysicsWorld {
             physics,
             chassis,
             vehicles,
+            inactive_bodies: std::collections::HashSet::with_capacity(
+                reference.bodies.len() + reference.parts.len() + reference.wheel_parts.len(),
+            ),
         })
     }
 }
@@ -283,6 +287,7 @@ impl PhysicsWorld {
 
     pub fn apply_vehicle_forces(&mut self, index: usize, input: DriveInput, drive_force: f32) {
         let vehicle = &mut self.vehicles[index];
+
         if input.accelerate
             || input.brake_reverse
             || input.steer != 0.0
@@ -374,8 +379,54 @@ impl PhysicsWorld {
         }
     }
 
+    pub fn body_active(&self, handle: RigidBodyHandle) -> bool {
+        !self.inactive_bodies.contains(&handle)
+    }
+
     pub fn step_physics(&mut self) {
         self.physics.step();
+    }
+
+    pub fn capture_save(
+        &self,
+        vehicle: usize,
+        identity: crate::save::BodyIdentity,
+        origin: &crate::world::WorldOrigin,
+    ) -> crate::save::BodySnapshot {
+        capture_body_save(
+            &self.physics.bodies[self.chassis_handle(vehicle)],
+            identity,
+            origin,
+        )
+    }
+    pub(crate) fn restore_wheel_save(
+        &mut self,
+        vehicle: usize,
+        index: usize,
+        saved: &crate::save::WheelAttachment,
+    ) {
+        let state = &mut self.vehicles[vehicle];
+        state.resting_wheels[index].rotation = saved.rotation;
+        if let Some(active) = state.active_slots.iter().position(|slot| *slot == index) {
+            state.controller.wheels_mut()[active].rotation = saved.rotation;
+        }
+        state.wheel_rpm[index] = saved.rpm;
+        state.wheel_rotations[index] = saved.previous_rotation;
+    }
+    pub(crate) fn wheel_save_state(&self, vehicle: usize, index: usize) -> (f32, f32, f32) {
+        let state = &self.vehicles[vehicle];
+        let wheel = state
+            .active_slots
+            .iter()
+            .position(|slot| *slot == index)
+            .map_or(&state.resting_wheels[index], |active| {
+                &state.controller.wheels()[active]
+            });
+        (
+            wheel.rotation,
+            state.wheel_rpm[index],
+            state.wheel_rotations[index],
+        )
     }
 
     pub fn wheel_support_count(&self, index: usize) -> usize {
@@ -574,9 +625,36 @@ impl PhysicsWorld {
         }
     }
 
+    pub fn reset_preserving_wheels(&mut self, vehicle: usize, pose: VehiclePose) {
+        let rotations =
+            std::array::from_fn::<_, 4, _>(|index| self.wheel_save_state(vehicle, index).0);
+        let previous = self.vehicles[vehicle].wheel_rotations;
+        let rpm = self.vehicles[vehicle].wheel_rpm;
+        self.reset(vehicle, pose);
+        let state = &mut self.vehicles[vehicle];
+        for (wheel, &slot) in state
+            .controller
+            .wheels_mut()
+            .iter_mut()
+            .zip(&state.active_slots)
+        {
+            wheel.rotation = rotations[slot];
+        }
+        for (wheel, rotation) in self.vehicles[vehicle]
+            .resting_wheels
+            .iter_mut()
+            .zip(rotations)
+        {
+            wheel.rotation = rotation;
+        }
+        self.vehicles[vehicle].wheel_rotations = previous;
+        self.vehicles[vehicle].wheel_rpm = rpm;
+    }
+
     pub fn reset(&mut self, index: usize, pose: VehiclePose) {
         let vehicle = &mut self.vehicles[index];
         let body = &mut self.physics.bodies[vehicle.chassis];
+
         body.set_position(to_rapier(pose), true);
         body.set_linvel(Vector::ZERO, true);
         body.set_angvel(Vector::ZERO, true);
@@ -638,7 +716,10 @@ impl PhysicsWorld {
 
     pub fn rebase(&mut self, shift: [f32; 3]) {
         let shift = Vector::from_array(shift);
-        for (_, body) in self.physics.bodies.iter_mut() {
+        for (handle, body) in self.physics.bodies.iter_mut() {
+            if self.inactive_bodies.contains(&handle) {
+                continue;
+            }
             body.set_translation(body.translation() - shift, false);
         }
         for (_, collider) in self.physics.colliders.iter_mut() {
@@ -663,6 +744,24 @@ impl PhysicsWorld {
 
     pub fn collider_count(&self) -> usize {
         self.physics.colliders.len()
+    }
+}
+
+pub(crate) fn capture_body_save(
+    body: &rapier3d::prelude::RigidBody,
+    identity: crate::save::BodyIdentity,
+    origin: &crate::world::WorldOrigin,
+) -> crate::save::BodySnapshot {
+    let pose = from_rapier(body.position());
+    crate::save::BodySnapshot {
+        identity,
+        pose: crate::save::AbsolutePose {
+            position: origin.absolute(pose.position),
+            rotation: pose.rotation,
+        },
+        linear_velocity: body.linvel().to_array(),
+        angular_velocity: body.angvel().to_array(),
+        sleeping: body.is_sleeping(),
     }
 }
 

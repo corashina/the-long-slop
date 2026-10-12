@@ -1,3 +1,8 @@
+import {manifestStamp,createSaveStorage} from './save-storage.js';
+import {createSaveSession} from './save-session.js';
+import {createSaveBridge} from './save-bridge.js';
+export const saveRuntime=createSaveBridge();
+const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime});
 import {createInput} from './input.js';
 import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
@@ -6,6 +11,11 @@ const canvas=document.querySelector('#game'),status=document.querySelector('#sta
 let menu,feedback,failed=false,timeout,actions=0,frame;
 const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',condition:-1,held:'',throwCharge:0,throwActive:false,quantities:[0,0,0,0,0,0]};
 const input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas);
+const settleSave=window.gameSaveResult;
+window.gameSaveResult=(id,kind,payload,error)=>{
+ if(kind==='Commit'&&!error){input.clear();actions=0;}
+ settleSave(id,kind,payload,error);
+};
 window.gameKeys=()=>{frame=input.takeFrame();return frame.held;};
 window.gamePressed=()=>frame.pressed;window.gameReleased=()=>frame.released;
 window.gameMouseX=()=>frame.mouseX;window.gameMouseY=()=>frame.mouseY;window.gameWheel=()=>frame.wheel;
@@ -49,10 +59,11 @@ async function load(){
  graphics.getExtension('WEBGL_lose_context')?.loseContext();
  const response=await fetch('./assets/reference/manifest.json');
  if(!response.ok)throw Error('Cannot load reference manifest (HTTP '+response.status+').');
- const text=await response.text(),manifest=JSON.parse(text);
+ const bytes=await response.arrayBuffer(),text=new TextDecoder().decode(bytes),manifest=JSON.parse(text);
+ const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
  status.textContent='Loading interface assets...';
  await loadUiAssets(manifest.ui);
- menu=createMenu({canvas,ui:manifest.ui,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ menu=createMenu({canvas,ui:manifest.ui,saveSession,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  const switchIconUrl='./assets/'+manifest.lighting.switch_icon.path;
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
  feedback=createFeedback(manifest.ui,switchIconUrl);
@@ -60,6 +71,6 @@ async function load(){
  const {default:init,run}=await import('./pkg/my_summer_slop.js');
  const wasm=await fetch('./pkg/my_summer_slop_bg.wasm');if(!wasm.ok)throw Error('Cannot load game code (HTTP '+wasm.status+').');
  await init({module_or_path:wasm});status.textContent='Loading the garage...';
- timeout=setTimeout(()=>fail('The garage did not load within 120 seconds.'),120000);run(text);
+ timeout=setTimeout(()=>fail('The garage did not load within 120 seconds.'),120000);run(text,manifestHash);
 }
 load().catch(error=>fail(error.message));

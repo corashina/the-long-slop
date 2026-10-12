@@ -16,6 +16,7 @@ struct Frame {
     world_scale: Vector,
     handle: Option<RigidBodyHandle>,
     driven: bool,
+    inactive: bool,
     body: Option<BodyId>,
     root_body: Option<BodyId>,
     relative: Pose,
@@ -41,6 +42,47 @@ pub struct MechanismState {
     order: Vec<usize>,
 }
 impl MechanismState {
+    pub(crate) fn restore_save(
+        &mut self,
+        ids: &crate::save::IdentityMap,
+        saved: &[crate::save::MechanismSnapshot],
+    ) {
+        for record in saved {
+            let control = self
+                .controls
+                .iter_mut()
+                .find(|c| c.reference.id == ids.mechanisms[&record.source])
+                .unwrap();
+            control.degrees = record.degrees;
+            control.slide = record.slide;
+            control.enabled = record.enabled;
+            control.turn_state = record.turn_state;
+        }
+        for index in 0..self.controls.len() {
+            self.apply(index);
+        }
+        self.control_action = None;
+    }
+    pub fn capture_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+    ) -> Result<Vec<crate::save::MechanismSnapshot>, crate::save::SaveError> {
+        let mut records = self
+            .controls
+            .iter()
+            .map(|c| {
+                Ok(crate::save::MechanismSnapshot {
+                    source: crate::save::identity::source_key(&ids.mechanisms, c.reference.id)?,
+                    degrees: c.degrees,
+                    slide: c.slide,
+                    enabled: c.enabled,
+                    turn_state: c.turn_state,
+                })
+            })
+            .collect::<Result<Vec<_>, crate::save::SaveError>>()?;
+        records.sort_by(|a, b| a.source.cmp(&b.source));
+        Ok(records)
+    }
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut needed = HashSet::new();
         needed.extend(reference.items.iter().map(|i| i.node));
@@ -116,6 +158,7 @@ impl MechanismState {
                     world_scale: Vector::ONE,
                     handle: None,
                     driven: driven.contains(&node.id),
+                    inactive: false,
                     body,
                     root_body: None,
                     relative: Pose::IDENTITY,
@@ -266,6 +309,9 @@ impl MechanismState {
     pub fn rebase(&mut self, shift: [f32; 3]) {
         let shift = Vector::from_array(shift);
         for f in &mut self.frames {
+            if f.inactive {
+                continue;
+            }
             if f.parent.is_none() {
                 f.local.translation -= shift;
             }
@@ -443,6 +489,9 @@ impl MechanismState {
     }
     fn propagate(&mut self) {
         for &i in &self.order {
+            if self.frames[i].inactive {
+                continue;
+            }
             let (world, scale) = if let Some(pose) = self.frames[i].external_pose {
                 (pose, self.frames[i].world_scale)
             } else if let Some(parent) = self.frames[i].parent {
@@ -569,14 +618,27 @@ impl MechanismState {
         self.frames[node].world = pose;
     }
     pub fn sync(&mut self, physics: &mut PhysicsWorld, commit: bool) {
+        for &i in &self.order {
+            let f = &self.frames[i];
+            let inactive = f
+                .external
+                .or(f.handle)
+                .map(|h| !physics.body_active(h))
+                .unwrap_or_else(|| f.parent.is_some_and(|p| self.frames[p].inactive));
+            self.frames[i].inactive = inactive;
+        }
         for f in &mut self.frames {
+            if f.inactive {
+                continue;
+            }
             if let Some(handle) = f.external {
                 f.external_pose = Some(*physics.rapier().bodies[handle].position());
             }
         }
         // External body roots supply their current pose. Mechanism bodies use this state.
         for i in 0..self.frames.len() {
-            if self.frames[i].driven || self.frames[i].external.is_some() {
+            if self.frames[i].inactive || self.frames[i].driven || self.frames[i].external.is_some()
+            {
                 continue;
             }
             if let Some(handle) = self.frames[i].handle
@@ -587,7 +649,7 @@ impl MechanismState {
         }
         self.propagate();
         for f in &self.frames {
-            if !f.driven {
+            if f.inactive || !f.driven {
                 continue;
             }
             if let Some(handle) = f.handle

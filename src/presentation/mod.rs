@@ -5,6 +5,7 @@ pub mod materials;
 pub mod mechanisms;
 pub mod mirrors;
 pub mod reference;
+pub mod save;
 mod shadow_cache;
 pub mod shadows;
 pub mod world;

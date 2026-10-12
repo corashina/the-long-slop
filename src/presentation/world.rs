@@ -8,6 +8,7 @@ use crate::world::{ChunkData, ChunkKey, PropKind, WorldStream, road_sample};
 #[derive(Component)]
 pub struct ChunkVisual(pub [f64; 3]);
 
+#[derive(Clone)]
 struct ChunkAssets {
     key: ChunkKey,
     lateral_band: i64,
@@ -15,7 +16,7 @@ struct ChunkAssets {
     terrain: Handle<Mesh>,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct WorldVisuals {
     chunks: Vec<ChunkAssets>,
     cube: Handle<Mesh>,
@@ -30,6 +31,67 @@ pub struct WorldVisuals {
 }
 
 impl WorldVisuals {
+    pub(crate) fn validate_reused_assets(
+        &self,
+        meshes: &Assets<Mesh>,
+        materials: &Assets<StandardMaterial>,
+    ) -> Result<(), crate::save::SaveError> {
+        if !meshes.contains(self.cube.id()) {
+            return Err(crate::save::SaveError::MissingAssets(
+                "generated chunk cube mesh".into(),
+            ));
+        }
+        for (name, handle) in [
+            ("terrain", &self.terrain_material),
+            ("stripe", &self.stripe),
+            ("rock", &self.rock),
+            ("cactus", &self.cactus),
+            ("post", &self.post),
+            ("wall", &self.wall),
+            ("roof", &self.roof),
+            ("pump", &self.pump),
+        ] {
+            if !materials.contains(handle.id()) {
+                return Err(crate::save::SaveError::MissingAssets(format!(
+                    "generated chunk {name} material"
+                )));
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn validate_prepared_terrain(
+        &self,
+        meshes: &Assets<Mesh>,
+    ) -> Result<(), crate::save::SaveError> {
+        for chunk in &self.chunks {
+            if !meshes.contains(chunk.terrain.id()) {
+                return Err(crate::save::SaveError::MissingAssets(format!(
+                    "prepared terrain mesh {}",
+                    chunk.key.0
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "save-fixture")]
+    pub(crate) fn fixture_material(&self) -> bevy::asset::AssetId<StandardMaterial> {
+        self.terrain_material.id()
+    }
+    pub(crate) fn empty_copy(&self) -> Self {
+        let mut copy = self.clone();
+        copy.chunks.clear();
+        copy
+    }
+    pub(crate) fn release(self, world: &mut World) {
+        for chunk in self.chunks {
+            world.despawn(chunk.entity);
+            world
+                .resource_mut::<Assets<Mesh>>()
+                .remove(chunk.terrain.id());
+        }
+    }
+
     pub fn new(meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) -> Self {
         Self {
             chunks: Vec::with_capacity(11),
@@ -223,5 +285,5 @@ fn terrain_mesh(chunk: &ChunkData) -> Mesh {
     mesh
 }
 
-mod lamps;
+pub(crate) mod lamps;
 pub(crate) use lamps::{RoadLamps, finish_road_lamp_warmup, prepare_road_lamp, sync_road_lamps};

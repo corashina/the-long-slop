@@ -39,6 +39,7 @@ pub struct SkyUniform {
     pub star_motion: Vec4,
     pub flares: [Vec4; 3],
 }
+#[derive(Clone)]
 pub struct SkyState {
     pub shader: Handle<Shader>,
     pub uniform: SkyUniform,
