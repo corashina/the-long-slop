@@ -59,6 +59,8 @@ pub struct WeatherState {
     random: StormRandom,
     origin: [f64; 3],
     body_capacity: usize,
+    ambient_modifier: f32,
+    ambient_only_modifier: f32,
 }
 
 impl WeatherState {
@@ -76,9 +78,36 @@ impl WeatherState {
             random,
             origin: [0.; 3],
             body_capacity: 0,
+            ambient_modifier: reference.ambient.modifier,
+            ambient_only_modifier: reference.ambient.only_modifier,
         }
     }
 
+    /// Source desert day/night channels, before the fixed update recovers both modifiers.
+    pub fn ambient_gains(
+        &mut self,
+        reference: &WeatherReference,
+        cycle: &crate::lighting::CycleOutput,
+        dt: f32,
+    ) -> [f32; 2] {
+        use crate::lighting::CyclePhase;
+        let night = match cycle.phase {
+            CyclePhase::Night => 1.,
+            CyclePhase::Day => 0.,
+            CyclePhase::Dawn => 1. - cycle.progress,
+            CyclePhase::Dusk => cycle.progress,
+        };
+        let biome_gain = cycle.biome_color[0] - cycle.biome_color[2];
+        let modifier = self.ambient_modifier * self.ambient_only_modifier * biome_gain;
+        let reduction = reference.storm.ambient_decrease * self.influence.strength.clamp(0., 1.);
+        let gains = [reference.ambient.day_volume, reference.ambient.night_volume]
+            .map(|v| ((v[0] + (v[1] - v[0]) * night) * modifier - reduction).clamp(0., 1.));
+        self.ambient_modifier =
+            (self.ambient_modifier + dt * reference.ambient.recovery_per_second).clamp(0., 1.);
+        self.ambient_only_modifier =
+            (self.ambient_only_modifier + dt * reference.ambient.recovery_per_second).clamp(0., 1.);
+        gains
+    }
     pub fn storms(&self) -> &[Storm] {
         &self.storms
     }

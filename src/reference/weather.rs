@@ -94,12 +94,23 @@ pub struct StormReference {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct WeatherAmbient {
+    pub source: SourceId,
+    pub day_volume: [f32; 2],
+    pub night_volume: [f32; 2],
+    pub modifier: f32,
+    pub only_modifier: f32,
+    pub recovery_per_second: f32,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WeatherReference {
     pub source: SourceId,
     pub min_interval_seconds: f32,
     pub max_interval_seconds: f32,
     pub spawn_radius: f32,
     pub storm: StormReference,
+    pub ambient: WeatherAmbient,
     pub shelters: Vec<ShelterReference>,
     pub particles: Vec<ParticleReference>,
     pub evidence: ManagedEvidence,
@@ -174,6 +185,20 @@ impl WeatherReference {
                 && self.max_interval_seconds >= self.min_interval_seconds
                 && self.spawn_radius > 0.,
             "weather schedule",
+        )?;
+        let ambient = &self.ambient;
+        require(
+            ambient.source.file == "level1"
+                && ambient.source.path_id == 64920
+                && ambient
+                    .day_volume
+                    .iter()
+                    .chain(&ambient.night_volume)
+                    .chain([&ambient.modifier, &ambient.only_modifier])
+                    .all(|v| v.is_finite() && (0. ..=1.).contains(v))
+                && ambient.recovery_per_second.is_finite()
+                && ambient.recovery_per_second > 0.,
+            "weather ambient",
         )?;
         let s = &self.storm;
         require(

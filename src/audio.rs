@@ -13,6 +13,7 @@ pub enum AudioKind {
     AmbientDay = 7,
     AmbientNight = 8,
     Shit = 9,
+    StormInside = 10,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -41,17 +42,17 @@ pub struct AudioState {
     voices: Vec<Voice>,
     voice_capacity: usize,
     durations: Vec<f32>,
-    looped: [bool; 10],
+    looped: [bool; 11],
     events: Vec<AudioEvent>,
-    priorities: [u32; 10],
+    priorities: [u32; 11],
     capacity: usize,
     pub ids: Vec<u32>,
     pub values: Vec<f32>,
 }
 impl AudioState {
     pub fn new(reference: &AudioReference) -> Self {
-        let mut priorities = [256; 10];
-        let mut looped = [false; 10];
+        let mut priorities = [256; 11];
+        let mut looped = [false; 11];
         let playback = reference.playback().ok();
         for b in playback.into_iter().flat_map(|p| &p.bindings) {
             priorities[b.kind as usize] = b.priority;
@@ -177,6 +178,48 @@ impl AudioState {
                 voice.event.position = std::array::from_fn(|i| p[i] as f64 + origin[i]);
                 let mut event = voice.event;
                 event.action = AudioAction::Update;
+                self.emit(event);
+            }
+        }
+    }
+    /// Reconcile one source loop without creating another audio owner.
+    pub fn source_loop(
+        &mut self,
+        kind: AudioKind,
+        emitter: u32,
+        reference: &AudioReference,
+        gain: f32,
+        position: [f64; 3],
+    ) {
+        let Ok(playback) = reference.playback() else {
+            return;
+        };
+        let binding = playback.binding(kind as u32);
+        let action = if self
+            .voices
+            .iter()
+            .any(|v| v.event.kind == kind && v.event.emitter == emitter)
+        {
+            AudioAction::Update
+        } else {
+            AudioAction::Start
+        };
+        self.emit(AudioEvent {
+            session: self.session,
+            emitter,
+            kind,
+            action,
+            clip: binding.clips[0],
+            gain: gain.clamp(0., 1.),
+            pitch: binding.pitch[0],
+            position,
+        });
+    }
+    pub fn remove_storm_loops(&mut self, storms: &[crate::weather::Storm]) {
+        for index in (0..self.voices.len()).rev() {
+            let mut event = self.voices[index].event;
+            if event.kind == AudioKind::Storm && !storms.iter().any(|s| s.id.0 == event.emitter) {
+                event.action = AudioAction::Stop;
                 self.emit(event);
             }
         }

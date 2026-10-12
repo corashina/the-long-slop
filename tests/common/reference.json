@@ -36588,7 +36588,24 @@
           ]
         }
       }
-    ]
+    ],
+    "ambient": {
+      "source": {
+        "file": "level1",
+        "path_id": 64920
+      },
+      "day_volume": [
+        1.0,
+        0.25
+      ],
+      "night_volume": [
+        0.0,
+        0.75
+      ],
+      "modifier": 0.0,
+      "only_modifier": 0.0,
+      "recovery_per_second": 0.1
+    }
   },
   "audio": {
     "doppler": {
@@ -37094,6 +37111,82 @@
         "spatial_blend": 1.0,
         "min_distance": 500.0,
         "max_distance": 2000.0,
+        "rolloff_mode": 0,
+        "rolloff_curve": [
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 0.0,
+            "value": 1.0,
+            "weightedMode": 0
+          },
+          {
+            "inSlope": 0.0,
+            "inWeight": 0.3333333432674408,
+            "outSlope": 0.0,
+            "outWeight": 0.3333333432674408,
+            "time": 1.0,
+            "value": 0.0,
+            "weightedMode": 0
+          }
+        ],
+        "priority": 128,
+        "mixer": {
+          "file": "sharedassets0.assets",
+          "path_id": 815
+        },
+        "mixer_route": [
+          7,
+          6,
+          5,
+          4,
+          3,
+          0
+        ],
+        "mixer_gain": 1.0,
+        "mixer_pitch": 1.0,
+        "clip_length_lifetime": false,
+        "doppler": 1.0,
+        "spread": 0.0,
+        "pan": 0.0
+      },
+      {
+        "role": "storm_inside",
+        "kind": 10,
+        "source": {
+          "file": "level1",
+          "path_id": 56215
+        },
+        "audio_source": {
+          "file": "level1",
+          "path_id": 56215
+        },
+        "transform": {
+          "file": "level1",
+          "path_id": 35353
+        },
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "clips": [
+          13
+        ],
+        "gain": [
+          1.0,
+          1.0
+        ],
+        "pitch": [
+          1.0,
+          1.0
+        ],
+        "looped": true,
+        "spatial_blend": 0.0,
+        "min_distance": 1.0,
+        "max_distance": 500.0,
         "rolloff_mode": 0,
         "rolloff_curve": [
           {

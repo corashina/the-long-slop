@@ -149,12 +149,13 @@ def verify_reference(output: Path, library) -> None:
     validate_runtime_manifest(content)
     validate_runtime_paths(manifest)
     from .survival import validate_survival_export, validate_clock_export
-    from .weather import validate_weather_export
+    from .weather import validate_weather_export, validate_ambient_export
     from .audio import validate_audio_export
     validate_audio_export(manifest['audio'],output,library)
     validate_survival_export(manifest['survival'],manifest)
     validate_clock_export(manifest, library)
     validate_weather_export(manifest['weather'],manifest)
+    validate_ambient_export(manifest['weather'],library)
     names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json'}
     for asset in manifest['assets']:
         for record in [asset, *asset['dependencies']]:

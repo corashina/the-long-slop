@@ -26,7 +26,7 @@ def recover_audio(source: LibrarySource, output: Path) -> dict:
     groups.append(('death',5,main,[md['SdeathBell']],source.resolve(player,pd['SDeathBellSource']),[1.,1.],[.8,1.2]))
     storm=source.get('sharedassets1.assets',158276)
     cycle=source.resolve(main,md['napszak']);cd=source.read(cycle)
-    for role,kind,owner,pointer in [('sleep',4,player,pd['SleepCamSource']),('storm',6,storm,source.read(storm)['source']),('ambient_day',7,cycle,cd['DayAmbientSound'][0]),('ambient_night',8,cycle,cd['NightAmbientSound'][0])]:
+    for role,kind,owner,pointer in [('sleep',4,player,pd['SleepCamSource']),('storm',6,storm,source.read(storm)['source']),('storm_inside',10,cycle,cd['sandStormSource']),('ambient_day',7,cycle,cd['DayAmbientSound'][0]),('ambient_night',8,cycle,cd['NightAmbientSound'][0])]:
         audio=source.resolve(owner,pointer);ad=source.read(audio)
         groups.append((role,kind,audio,[ad['m_audioClip']],audio,[ad['m_Volume']]*2,[ad['m_Pitch']]*2))
     mixer=source.get('sharedassets0.assets',810);mc=source.read(mixer)['m_MixerConstant']

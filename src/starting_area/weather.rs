@@ -168,6 +168,42 @@ impl GarageRuntime {
             &reference.weather,
             self.simulation_seconds,
         );
+        self.lighting
+            .cycle
+            .compose_weather(&reference.weather, self.weather.influence());
+        let gains =
+            self.weather
+                .ambient_gains(&reference.weather, self.lighting.cycle.output(), dt);
+        use crate::audio::AudioKind;
+        self.audio.remove_storm_loops(self.weather.storms());
+        if let Ok(playback) = reference.audio.playback() {
+            let source_gain = playback.binding(AudioKind::Storm as u32).gain[0];
+            for storm in self.weather.storms() {
+                self.audio.source_loop(
+                    AudioKind::Storm,
+                    storm.id.0,
+                    &reference.audio,
+                    source_gain * storm.life_strength,
+                    storm.absolute_position,
+                );
+            }
+        }
+        self.audio.source_loop(
+            AudioKind::StormInside,
+            0,
+            &reference.audio,
+            reference.weather.storm.volume * self.weather.influence().strength,
+            player,
+        );
+        self.audio
+            .source_loop(AudioKind::AmbientDay, 0, &reference.audio, gains[0], player);
+        self.audio.source_loop(
+            AudioKind::AmbientNight,
+            0,
+            &reference.audio,
+            gains[1],
+            player,
+        );
     }
 }
 

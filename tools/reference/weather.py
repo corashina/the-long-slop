@@ -75,6 +75,7 @@ def recover_weather(source, output):
     for role,field in [('urine','ps'),('urine_splash','sps')]:
         reader=source.resolve(outlet,od[field]);rate=od['maxRate'] if field=='ps' else source.read(reader)['EmissionModule']['rateOverTime']['scalar']
         record['particles'].append(particle(source,reader,role,rate,output))
+    record['ambient']=recover_ambient(source)
     source.lighting['textures']=list(source.lighting_textures.values())
     source.weather=record
     return record
@@ -118,3 +119,19 @@ def validate_weather_export(record,manifest):
         if not p['materials'] or 'InitialModule.startLifetime' not in p['curves']:raise ValueError('Missing particle data')
         for material in p['materials']:
             if any(t['texture'] not in textures for t in material['textures']):raise ValueError('Missing particle texture')
+
+def recover_ambient(source):
+    main=source.get('level1',64919)
+    cycle=source.resolve(main,source.read(main)['napszak']);cd=source.read(cycle)
+    managed_evidence(source,['public static float jamDecrease = 0.1f;'])
+    return {'source':source_id(cycle),
+        'day_volume':[cd['dayAmbientSoundVolumeDay'][0],cd['dayAmbientSoundVolumeNight'][0]],
+        'night_volume':[cd['nightAmbientSoundVolumeDay'][0],cd['nightAmbientSoundVolumeNight'][0]],
+        'modifier':cd['ambientSoundModifier'],'only_modifier':cd['onlyAmbientSoundModifier'],'recovery_per_second':0.1}
+
+def validate_ambient_export(record, library):
+    from .library.reader import LibraryReader
+    from .source import LibrarySource
+    source=LibrarySource(LibraryReader(library))
+    if record['ambient'] != recover_ambient(source):
+        raise ValueError('Selected weather ambient differs from source')

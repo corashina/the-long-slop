@@ -109,7 +109,7 @@ impl AudioPlaybackReference {
         )?;
 
         require(
-            self.bindings.len() == 9 && !self.clips.is_empty(),
+            self.bindings.len() == 10 && !self.clips.is_empty(),
             "selected audio bindings",
         )?;
         require(
@@ -155,6 +155,7 @@ impl AudioPlaybackReference {
             (7, "ambient_day"),
             (8, "ambient_night"),
             (9, "shit"),
+            (10, "storm_inside"),
         ] {
             let entries: Vec<_> = self
                 .bindings
@@ -295,7 +296,7 @@ impl AudioReference {
     }
     pub fn validate_gates(&self) -> Result<(), ReferenceError> {
         require(
-            self.bindings.len() == 9 && !self.clips.is_empty(),
+            self.bindings.len() == 10 && !self.clips.is_empty(),
             "audio gate count",
         )?;
         for (index, clip) in self.clips.iter().enumerate() {
@@ -321,6 +322,7 @@ impl AudioReference {
             (7, "ambient_day"),
             (8, "ambient_night"),
             (9, "shit"),
+            (10, "storm_inside"),
         ] {
             require(
                 self.bindings
