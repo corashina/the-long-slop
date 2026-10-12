@@ -744,3 +744,95 @@ Package and export hashes:
 - `web/pkg/my_summer_slop.js`: `23b8f17a3a62954cfe5a59a30450c060c899af451adc51ca815840db57c15abd`; 103747 bytes.
 - `web/pkg/my_summer_slop_bg.wasm`: `02c9c4a33f9f3e2b5c96b22155c4187fef9a3977f8e1f8a98b31408f0fc71451`; 53733353 bytes.
 - `web/assets/reference/manifest.json`: `d62630828b68c154c9351203b11f67427916390bd9a3eac1b911fda8efb5c74e`; 5712654 bytes.
+
+## Live mirror acceptance, 2026-10-12
+
+Status: Equipment branch implementation passed source, native, GPU, lifecycle, and full product checks. Whole-branch review remains pending.
+The user approved the mirror spec and plan and chose subagent execution.
+The selected source is Steam build `11140890`, Unity `2021.3.18f1`.
+The checked managed source hash is `22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee`.
+
+| Source link | Checked ID |
+| --- | --- |
+| Mirror components | `level1:66131`, `level1:67237`, `level1:70638` |
+| Source cameras | `40260`, `40324`, `40222` |
+| Screen renderers | `43665`, `40735`, `44371` |
+| Plane transforms | `28414`, `38060`, `32190` |
+| Camera transforms | `39254`, `31061`, `26965` |
+| Render target | `sharedassets1.assets:4495` |
+| Live and disabled materials | `sharedassets1.assets:624`, `sharedassets0.assets:116` |
+
+The exporter regenerated five selected scenes from the checked accepted library.
+It verified 262,784 library owners against receipt `92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99`.
+The worktree manifest hash is `4ac150e8880ef3cef9f7e7e0ca7e465acac2677ca1ac10215a1d3214c987fe8e`.
+The Lada glTF and binary hashes are `b2e4a65efe377ef85f82cabd45fbe6845fa8f84647266eda1645455c0a3e27d0` and `f79b68feb818e7489f67ec0fa70561f4f2f2338a50ed2391ce3d80bd4beb81e7`.
+The primary source hashes and modification times stayed unchanged.
+The export receipt is `.cache/equipment-checks/task-5-export-receipt.json`.
+
+`MirrorViewRole` distinguishes the normal view from each `Capture(index)` view.
+The runtime reads plane and camera nodes after physics, mechanism updates, and origin transport.
+It updates capture poses after transform propagation and before camera and frustum updates.
+It tests normal-view visibility before scheduling captures by source rank ahead of the normal view.
+The producer uses the player body for rank and the active normal camera for reflection and FOV.
+It retains the source five-mirror cutoff and previous-far capture order.
+
+Each selected instance owns one 256 by 256 linear RGBA8 target, one D24S8 capture depth, and live and disabled materials.
+The source mask is `73113395`; source camera postprocessing, depth effects, and heat haze are empty.
+Sky time and world lighting stay shared. Each view computes its own flare projection and occlusion.
+Normal exposure, jitter, motion history, and completion state stay separate.
+The owner screen uses its disabled source material during its capture.
+Other mirrors can use completed targets. The complete material-bank audit found no writable target in sampled bindings.
+Mirror reset advances the instance ID and releases old cameras, images, materials, and depth storage.
+Preparation and completion reject stale IDs.
+
+| Check | Result and evidence |
+| --- | --- |
+| Recovery | Three Python mirror tests passed; `.cache/equipment-checks/task-5-python.log` |
+| Final suite | Formatting, 22 web tests, 244 native tests, and release WASM passed; `.cache/equipment-checks/task-5-full-check.log` |
+| Installed parts | Nine mirror tests and four installed binding tests passed again; `.cache/equipment-checks/task-5-installed-native.log`. Twenty part tests passed in Task 4 |
+| Finite clip | GPU projection tests covered near, far, and outside bounds; invalid source far suspended capture, with RED 26 and GREEN 0 failures |
+| Feedback | Task 3 drew all nine owner/view pairs; three changing targets had zero GL errors; each owner used its disabled screen |
+| Source scene | Task 4 showed actual Lada mirror captures through part changes, carry/drop, rebase, pause, resize, and restart |
+| Epochs | Task 4 rejected two stale epochs and released prior cameras and images across three lifecycle cycles |
+| Sky | Opposite normal and capture directions changed flare visibility while shared cycle time stayed fixed |
+| Final product startup | `/diagnostic?task=5-final-product` reached ready=true, errors=0, glErrors=0, Start enabled, garage rendered, and 498 warmup capture draws |
+
+The labelled actual-Lada driving scene used the production seat entry pose, vehicle physics, and mirror producer.
+The diagnostic held FORWARD and IGNITION after seating; the normal input sampler still ran each frame.
+At tick 60 it set a post-seat baseline. At tick 300 the car moved 0.549 m, the mounted camera anchor moved 0.491 m, and the capture pose moved 0.491 m.
+Two captures were eligible. Root saw the cabin and mirrors, with zero browser and GL errors.
+The run had a running engine and released handbrake, but did not measure gear or output torque.
+Its near-zero final speed does not prove sustained powered driving. Trusted driving remains unproved.
+
+Task 4 kept three capture cameras, three owned color targets, three depth attachments, six mirror materials, and 32 sky materials.
+Its first full transaction warmed capture pipeline variants from 26 to 28. Counts then stayed at 28 across two restarts.
+Fifty-five settled backend samples kept 149 textures, 46 programs, 7 renderbuffers, and 11 target textures.
+Requested target storage was 82,268,768 bytes. Six 256-square capture and HDR textures used 2,359,296 bytes.
+These are requested GL storage bytes, not measured driver memory.
+No whole-engine allocation trace was run. Retained mirror input and render job capacities stayed at 3 and 2048.
+
+Task 3's isolated scene used a moving red cube and three spaced mirror screens.
+Its target readbacks changed, and the finite projection test clipped outside near and far bounds.
+The native signed-transform test checks capture direction under asymmetric parent and local rotations.
+These checks do not establish a matched source image or every production view orientation.
+
+Controller rulings applied during implementation:
+
+1. Runtime export staging uses the selected output parent. Otherwise export could write into the read-only accepted cache.
+2. Signed scale affects hierarchy positions and meshes. Unity `Transform.up` and `Transform.forward` use rotation alone. A wrong ruling would change camera direction.
+3. Mirror inputs use runtime coordinates. A second source-axis Z conversion could reverse capture orientation.
+4. Invalid source far at or below near suspends capture and selects the disabled material. Clamping would change source clipping.
+5. Individual mirror removal keeps its world plane and resets controls. Door removal retains mirror controls. A wrong ruling would change mounting behavior.
+
+The installed Unity handling of invalid far is unknown.
+The in-app browser refused pointer lock after a trusted Start click. Windows UI control stopped at its URL-confidence limit.
+The visible part and lifecycle scenes used labelled deterministic input. Trusted walk, adjustment, removal, mounting, and driving traversal remains unproved.
+No matched native and target camera images exist, so source appearance parity remains unclaimed.
+The full branch review will also triage ignored failed `runtime-*` staging directories from the earlier export.
+No plate or portable flashlight work belongs to this mirror acceptance.
+
+Final product package: WASM SHA-256 `fe244f0616d86ed5c2ab8c003c7e7bcdd1ae7557012d8753bbcbf904c90edd72`.
+The product JS SHA-256 is `db6d40aec544aad5fe191b1bdae2962b25f691bed2f88eb59be176e6fc750c13`. Fresh release compilation took 1m 39s after source restoration. The WASM contains no diagnostic marker.
+The package and detailed command receipts are in `.superpowers/sdd/2026-10-12-live-mirrors/task-5-report.md`.
+Controller screenshots are in `C:/Users/Corashina/.codex/visualizations/2026/10/12/01a12ea6-fdca-7740-aa22-558ee084f1ee/`.
+The key files are `mirror-gpu-scene.jpg`, `mirror-lada-lifecycle-pass.jpg`, `mirror-invalid-clip-pass.jpg`, `mirror-seated-motion-pass.jpg`, and `mirror-acceptance-product.jpg`.

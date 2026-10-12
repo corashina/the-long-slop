@@ -12,6 +12,8 @@ Reuse source materials, retained targets, and existing interaction poses.
 
 **Spec:** [Approved mirror design](../specs/2026-10-12-live-mirrors-design.md).
 
+**Status:** User approved subagent execution. Tasks 1 through 4 passed implementation review. Task 5 evidence and whole-branch review remain open.
+
 Date: 2026-10-12, Europe/Warsaw.
 Branch: `codex/equipment`; base implementation commit: `058bea6`.
 Status: Written plan review and execution-method selection are pending.
@@ -106,14 +108,14 @@ Modify export, manifest, material recovery, glTF integration, `src/reference.rs`
 - Use existing `ItemId`, `NodeId`, `SourceId`, and `MaterialBindingReference` types for those links.
 - Expose `MirrorRecord::validate(&self, manifest: &ReferenceManifest) -> Result<(), ReferenceError>` and call it from manifest validation.
 
-- [ ] **Step 1: Add the critical failing recovery and validation tests.**
+- [x] **Step 1: Add the critical failing recovery and validation tests.**
   `test_selected_lada_mirrors` must recover components `66131`, `67237`, and `70638` with the spec's exact linked IDs.
   Assert three captures, extent `[256, 256]`, samples `1`, mask `73113395`, near `0.1`, and FOV bounds `[10, 55]`.
   Assert distance bounds `[0, 4]`, limit `5`, null-child exclusion, and the live albedo/emission material links.
   `test_required_link_failure` must fail a partly populated selected record and name its source identity and field.
   `mirror_contract_rejects_bad_inputs` must reject duplicate capture owners, missing nodes, zero extents, and nonfinite projection values.
-- [ ] **Step 2: Run the new Python tests and `./scripts/check.ps1 -Test mirror_reference`; confirm the missing contract fails.**
-- [ ] **Step 3: Implement recovery, typed records, and validation with the interfaces above.**
+- [x] **Step 2: Run the new Python tests and `./scripts/check.ps1 -Test mirror_reference`; confirm the missing contract fails.**
+- [x] **Step 3: Implement recovery, typed records, and validation with the interfaces above.**
   Verify source container, record, and managed-code hashes through existing accepted receipts.
   Trace `mirrorscript.FStart`, `camscript.OnPreRender`, `MirrorsUpdate`, settings initialization, pause, and render-path changes.
   Resolve target format codes `8` and `92` through the installed Unity definitions; record the supported GPU mapping.
@@ -121,9 +123,9 @@ Modify export, manifest, material recovery, glTF integration, `src/reference.rs`
   Export the disabled material through existing material records so later capture bindings can use its checked handle.
   Replace the `live_mirror` omission evidence with explicit runtime bindings; preserve the source live material factors.
   Update the fixture to the current required contract. Remove old-contract acceptance.
-- [ ] **Step 4: Run the targeted tests and derive the installed export through the offline APIs above.**
+- [x] **Step 4: Run the targeted tests and derive the installed export through the offline APIs above.**
   Require hash checks, three complete bindings, native validation, and unchanged primary evidence files.
-- [ ] **Step 5: Commit this contract and its passing checks.**
+- [x] **Step 5: Commit this contract and its passing checks.**
 
 ### Task 2: Compute source view decisions without frame allocations
 
@@ -139,7 +141,7 @@ Modify export, manifest, material recovery, glTF integration, `src/reference.rs`
 - `MirrorOutput` holds capture eligibility, `VehiclePose`, FOV degrees, capture near/far planes, and next far plane.
 - Use array fields and existing Rapier math. Allocate input, candidate, and output storage once for the registered mirror count.
 
-- [ ] **Step 1: Add critical failing projection and scheduling tests.**
+- [x] **Step 1: Add critical failing projection and scheduling tests.**
   `source_projection_and_far_order`: use camera distance `2`, source FOV `[10, 55]`, and range `[0, 4]`; assert FOV `32.5`.
   With initial far `1500`, draw distance `50`, and player distance `2`, assert capture far `1500`, then next far `25`.
   On the following update, assert capture far `25`.
@@ -147,13 +149,13 @@ Modify export, manifest, material recovery, glTF integration, `src/reference.rs`
   Assert stable equal-distance ordering, hidden/back-facing/out-of-range rejection, and no capture after pointer-lock loss.
   `coincident_view_is_safe`: assert disabled output and finite retained projection data for a zero reflected vector.
   `translated_scene_preserves_capture`: translate player, plane, and camera by the same large vector; assert unchanged direction and projection.
-- [ ] **Step 2: Run `./scripts/check.ps1 -Test mirrors`; confirm the missing module fails.**
-- [ ] **Step 3: Implement source reflection, FOV, distance, facing, rank cutoff, and prior-far-plane behavior.**
+- [x] **Step 2: Run `./scripts/check.ps1 -Test mirrors`; confirm the missing module fails.**
+- [x] **Step 3: Implement source reflection, FOV, distance, facing, rank cutoff, and prior-far-plane behavior.**
   Use stable insertion into retained candidate storage. Preserve prior order for equal distances as the source stable sort does.
   Apply the existing Unity-to-runtime coordinate conversion once. Keep the unused oblique helper out of the active path.
   Preserve signed hierarchy scale when forming the source plane vectors.
-- [ ] **Step 4: Run the native tests; confirm finite output, source order, and unchanged retained storage capacity.**
-- [ ] **Step 5: Commit the native view calculation.**
+- [x] **Step 4: Run the native tests; confirm finite output, source order, and unchanged retained storage capacity.**
+- [x] **Step 5: Commit the native view calculation.**
 
 ### Task 3: Render working captures with safe source materials
 
@@ -169,12 +171,12 @@ Add the critical GPU scenario under ignored `.cache/equipment-checks/`; keep it 
 - Expose `mirror_material_for_view(role: MirrorViewRole, owner: usize, live: AssetId<SourceMaterial>, disabled: AssetId<SourceMaterial>) -> AssetId<SourceMaterial>`.
 - Select the disabled material for the matching capture owner; select live material for the normal view and other captures.
 
-- [ ] **Step 1: Add `capture_bindings_never_read_output` to the ignored GPU scenario.**
+- [x] **Step 1: Add `capture_bindings_never_read_output` to the ignored GPU scenario.**
   Draw the mirror that owns the writable target and place a second mirror in that capture's view.
   Inspect complete prepared bindings; assert the owning target appears in no sampled bank of that capture.
   Assert the other mirror's completed target remains available. Require zero GPU attachment and sampler validation errors.
-- [ ] **Step 2: Run the current-renderer scenario; confirm missing captures or unsafe bindings fail.**
-- [ ] **Step 3: Bind source nodes once and create the retained cameras, targets, and materials.**
+- [x] **Step 2: Run the current-renderer scenario; confirm missing captures or unsafe bindings fail.**
+- [x] **Step 3: Bind source nodes once and create the retained cameras, targets, and materials.**
   Use the mapped target format, single sample count, bilinear clamp sampler, and fixed `[256, 256]` extent.
   Use source camera clear/HDR policy and exact source mask. Reuse the existing source mesh and lighting pipelines.
   Route `_MainTex` and `_EmissionMap` to the same retained bank and sampler; preserve UV transforms and material factors.
@@ -183,16 +185,16 @@ Add the critical GPU scenario under ignored `.cache/equipment-checks/`; keep it 
   Keep substitution in the render world. Avoid changing shared main-world material handles between camera renders.
   Include the source disabled surface for the capture owner; preserve other mirrors and unrelated glass.
   Warm capture pipeline variants during loading, including the inactive surface variant.
-- [ ] **Step 4: Register camera order and update scheduling to consume the native outputs.**
+- [x] **Step 4: Register camera order and update scheduling to consume the native outputs.**
   Read bound plane and camera nodes after imported transforms propagate, then synchronize capture Transform and GlobalTransform together.
   Compute normal-view visibility before capture selection. Keep capture views out of recursive mirror scheduling.
   Render capture cameras before the normal camera; honor source nearest order between captures.
   Retain the current target while inactive. Select the disabled display material under source pause/visibility rules.
   Publish readiness after capture pipelines and submitted target contents pass GPU validation.
   Require captures on the first eligible playing view; hidden or paused mirrors must not deadlock Start.
-- [ ] **Step 5: Run `./scripts/build.ps1` and the GPU scenario in a visible browser.**
+- [x] **Step 5: Run `./scripts/build.ps1` and the GPU scenario in a visible browser.**
   Require three usable capture cameras, visible changing mirror contents, correct orientation, and passing complete-binding checks.
-- [ ] **Step 6: Commit the working capture path.**
+- [x] **Step 6: Commit the working capture path.**
 
 ### Task 4: Complete interaction, sky, and resource lifecycle
 
@@ -206,28 +208,30 @@ Extend `tests/mirrors.rs` and the ignored GPU scenario.
 - Keep shared sky time/color state in the existing lighting resource; retain camera-dependent flare data per capture view.
 - Keep the normal view's exposure, jitter, motion history, and completion state independent of mirror captures.
 
-- [ ] **Step 1: Add `mirror_follows_part_transactions` and `mirror_rebase_keeps_projection` to the native tests.**
+- [x] **Step 1: Add `mirror_follows_part_transactions` and `mirror_rebase_keeps_projection` to the native tests.**
   Adjust a real fixture mirror, remove its containing door, detach the mirror, carry/drop it, and install it again.
   Feed current bound poses into the native calculation; assert correct direction and retained adjustment after each transaction.
   Rebase mounted and loose states; assert no stale camera anchor or changed relative projection.
   Reuse the existing part/interaction test helpers; do not duplicate their transaction implementation.
-- [ ] **Step 2: Add critical GPU lifecycle assertions.**
+- [x] **Step 2: Add critical GPU lifecycle assertions.**
   `capture_sky_uses_own_view`: use opposite normal/capture directions; assert camera-correct flares and one shared cycle update.
   `restart_discards_pending_capture`: restart between preparation and submission; assert old instance work cannot publish readiness.
   `resources_stay_bounded`: repeat resize, adjustment, mounting, pause/resume, and restart; assert three current capture targets and cameras.
   Count the fixed source material variants, and assert repeated actions do not add variants or pipeline IDs.
   Record backend target memory and retained intermediate targets; assert stable counts through repeated actions.
-- [ ] **Step 3: Run the targeted native checks and lifecycle scenario; confirm missing lifecycle behavior fails.**
-- [ ] **Step 4: Implement reset, per-view sky data, and capture lifecycle with the interfaces above.**
+- [x] **Step 3: Run the targeted native checks and lifecycle scenario; confirm missing lifecycle behavior fails.**
+- [x] **Step 4: Implement reset, per-view sky data, and capture lifecycle with the interfaces above.**
   Integrate reset with `GarageRuntime::restart` and imported-instance reset in `src/app.rs`.
   Share sky color/time and world lighting; compute flare projection and occlusion using each capture's camera and mask.
   Suspend minimized, missing, or paused views without creating resources or advancing capture completion.
   Restore source pause display and capture eligibility on resume. Report target or pipeline failure through existing readiness errors.
-- [ ] **Step 5: Run the interaction and GPU lifecycle checks, then perform visible movement and adjustment checks.**
+- [x] **Step 5: Run the interaction and GPU lifecycle checks, then perform visible movement and adjustment checks.**
   Require passing part transactions, rebase checks, bounded resources, and camera-correct sky without normal-view regression.
-- [ ] **Step 6: Commit the accepted mirror lifecycle.**
+- [x] **Step 6: Commit the accepted mirror lifecycle.**
 
 ### Task 5: Verify the complete mirror feature and record integration
+
+Status: Export, checks, documentation, and labelled browser runs are complete. Trusted traversal and whole-branch review remain open.
 
 **Files:** Modify `docs/verification.md`, `tools/reference/README.md`, and `docs/superpowers/plans/2026-10-11-rendering-completion.md`.
 Keep test scenarios, captures, packages, and logs ignored.
@@ -237,7 +241,7 @@ Keep test scenarios, captures, packages, and logs ignored.
 - Record the `MirrorViewRole` contract, transform timing, capture order, effect policy, target ownership, and reset boundary.
 - Add a camera-integration section to the rendering plan; keep its deferred effects outside equipment implementation.
 
-- [ ] **Step 1: Regenerate and verify the installed export, then run `./scripts/check.ps1` and `./scripts/build.ps1`.**
+- [x] **Step 1: Regenerate and verify the installed export, then run `./scripts/check.ps1` and `./scripts/build.ps1`.**
   Require Python recovery checks, installed mirror hashes, native interaction checks, formatting, web checks, and release WASM compilation.
 - [ ] **Step 2: Run the matching production package in a visible browser with an isolated server port.**
   Launch `scripts/serve.mjs` from the equipment checkout; select an unused `PORT` and retain the server process identity.
@@ -246,7 +250,7 @@ Keep test scenarios, captures, packages, and logs ignored.
   Use asymmetric scene markers to verify texture orientation and source clipping.
   Record diagnostic rebase/resource scenarios apart from trusted interaction evidence where browser controls impose a limit.
   Require zero GPU validation errors and stable resource counts. Save full diagnostics, not error-level console entries alone.
-- [ ] **Step 3: Write the acceptance record and rendering integration section.**
+- [x] **Step 3: Write the acceptance record and rendering integration section.**
   Link the matching package, source IDs, captures, commands, resource counts, and any exact unproved interaction limits.
   Replace the live-mirror omission statement in the exporter README.
   Keep source appearance parity unclaimed until matched native and target views support it.

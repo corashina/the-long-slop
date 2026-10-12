@@ -144,6 +144,28 @@ Run only critical new checks. Repeat passed checks when inputs change or a fault
 Full 1:1 appearance requires matched native and target views with the same camera and rendering inputs.
 Unmatched screenshots and isolated fixtures do not establish that result.
 
+## Mirror camera integration
+
+The equipment branch owns the three selected Lada mirror cameras, targets, and materials.
+`MirrorViewRole::Normal` and `MirrorViewRole::Capture(index)` are distinct roles.
+Do not map captures to the deferred graph's numeric source view indices 0 through 8.
+Do not advance its main, probe, or publication completion tokens for a mirror capture.
+
+The equipment runtime reads mirror transforms after physics, part updates, and origin transport.
+It updates camera poses after transform propagation and before camera frustum updates.
+It checks normal view visibility first. It submits eligible captures by source rank before the normal view.
+Each capture uses its source mask, clear color, finite projection, and a fixed 256 by 256 linear RGBA8 target.
+Each camera owns one D24S8 capture attachment. Bevy can add HDR and depth intermediates.
+The capture has no source postprocessing, depth effect, or heat haze.
+Sky time and world lighting stay shared. Flare projection and occlusion use the capture camera.
+Normal exposure, jitter, motion history, and completion tokens stay separate.
+
+The owner screen uses its disabled source material while that camera writes its target.
+Other mirror screens keep their completed targets. The material audit checks every sampled bank.
+Reset advances the mirror instance ID and releases old cameras, targets, materials, and depth storage.
+Queued preparation and completion reject work from an old ID.
+The deferred graph must preserve these roles and reset rules when it later integrates mirror views.
+It must keep its shadow, probe, motion, postprocessing, and GrabPass work inside this plan.
 ## Outside this plan
 
-Dynamic mirrors, plate text, audio, survival, other vehicles, saves, multiplayer, and deployment remain excluded.
+Plate text, audio, survival, other vehicles, saves, multiplayer, and deployment remain excluded.
