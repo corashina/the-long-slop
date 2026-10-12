@@ -208,6 +208,7 @@ impl GarageRuntime {
         candidate.area.commit_poses(&candidate.physics, true);
         if let Some(audio) = &mut candidate.audio {
             audio.bind_game(reference, &candidate.area, &candidate.physics);
+            audio.sync_lamps(&reference.lighting, &candidate.lighting);
         }
         candidate.clear_input();
         candidate.paused = true;

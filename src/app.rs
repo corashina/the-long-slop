@@ -139,7 +139,9 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
         )
         .add_systems(
             PostUpdate,
-            publish_audio.after(bevy::transform::TransformSystems::Propagate),
+            publish_audio
+                .after(bevy::transform::TransformSystems::Propagate)
+                .after(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
         )
         .add_systems(
             PostUpdate,
@@ -685,7 +687,7 @@ fn publish_audio(
     time: Res<Time<Real>>,
     mut drive: ResMut<Drive>,
     visuals: Res<ReferenceVisuals>,
-    globals: Query<&GlobalTransform>,
+    globals: Query<(&GlobalTransform, &InheritedVisibility)>,
     camera: Query<&GlobalTransform, With<DriveCamera>>,
 ) {
     let runtime = &mut drive.runtime;
@@ -708,7 +710,6 @@ fn publish_audio(
     }
     for emitter in &audio.reference.emitters {
         let alive = audio.owner_alive(emitter.id)
-            && runtime.area.interaction.mechanisms.node_active(emitter.node)
             && (emitter.id != audio.reference.engine.emitter
                 || runtime
                     .area
@@ -717,13 +718,23 @@ fn publish_audio(
             && emitter.item.is_none_or(|id| {
                 runtime.area.items.get(id).is_some_and(|item| item.inactive_pose.is_none())
             });
-        if let Some(global) = visuals
+        if let Some((global, visibility)) = visuals
             .nodes
             .get(&emitter.node)
             .and_then(|&entity| globals.get(entity).ok())
         {
             let (_, q, p) = global.to_scale_rotation_translation();
-            game_audio_emitter(emitter.id, p.x, p.y, p.z, q.x, q.y, q.z, q.w, alive);
+            game_audio_emitter(
+                emitter.id,
+                p.x,
+                p.y,
+                p.z,
+                q.x,
+                q.y,
+                q.z,
+                q.w,
+                alive && visibility.get(),
+            );
         }
     }
     if runtime.started && !runtime.paused {

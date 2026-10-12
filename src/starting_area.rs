@@ -610,11 +610,13 @@ impl GarageRuntime {
         physics.refresh_queries();
         area.items.sync_poses(&physics);
         area.commit_poses(&physics, true);
+        let lighting = crate::lighting::LightingState::new(&reference.lighting);
         let audio = crate::reference::AudioReference::from_value(&reference.audio, reference)
             .ok()
             .map(|r| {
                 let mut state = crate::audio::AudioState::new(r, 1);
                 state.bind_game(reference, &area, &physics);
+                state.sync_lamps(&reference.lighting, &lighting);
                 state
             });
         Ok(Self {
@@ -623,7 +625,7 @@ impl GarageRuntime {
             physics,
             area,
             stream,
-            lighting: crate::lighting::LightingState::new(&reference.lighting),
+            lighting,
             vehicles: reference
                 .vehicles
                 .iter()

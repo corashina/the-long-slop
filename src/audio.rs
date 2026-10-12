@@ -313,6 +313,7 @@ impl AudioState {
                     .map(|c| (l.control, (index, c.startup_on)))
             })
             .collect();
+        self.lamp_voices.clear();
         for lamp in &self.reference.lamps {
             let c = game
                 .lighting
@@ -436,6 +437,26 @@ impl AudioState {
                         .find(|(_, collider)| ColliderId((collider.user_data >> 64) as u32) == c.id)
                         .map(|(handle, _)| handle)
                 });
+        }
+    }
+    pub fn sync_lamps(
+        &mut self,
+        reference: &crate::reference::LightingRecord,
+        lighting: &crate::lighting::LightingState,
+    ) {
+        for (control, (_, on)) in &mut self.lamp_controls {
+            let index = reference
+                .controllers
+                .iter()
+                .position(|c| c.id == *control)
+                .expect("validated lamp controller");
+            *on = lighting.controllers[index].on;
+        }
+        for &(control, id, enabled) in &self.lamp_voices {
+            let signal = &mut self.signals[self.voice_indices[&id]];
+            signal.playing = self.lamp_controls[&control].1
+                && enabled
+                && !self.removed.contains(&signal.emitter);
         }
     }
     pub fn voice(&mut self, id: u32, playing: bool, gain: f32, pitch: f32) {

@@ -170,8 +170,10 @@ fn process(
                 .as_ref()
                 .map_or(1, |audio| audio.session.wrapping_add(1));
             drive.runtime = candidate.runtime;
-            if let Some(audio) = &mut drive.runtime.audio {
+            let runtime = &mut drive.runtime;
+            if let Some(audio) = &mut runtime.audio {
                 audio.reset(session);
+                audio.sync_lamps(&reference.lighting, &runtime.lighting);
             }
             drive.camera = candidate.camera;
             drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);

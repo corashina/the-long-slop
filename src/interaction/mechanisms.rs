@@ -349,9 +349,6 @@ impl MechanismState {
             .get(&node)
             .map(|i| from_rapier(&self.frames[*i].world))
     }
-    pub fn node_active(&self, node: NodeId) -> bool {
-        self.nodes.get(&node).is_some_and(|i| !self.frames[*i].inactive)
-    }
     pub fn body_pose(&self, body: BodyId) -> Option<Pose> {
         self.bodies
             .get(&body)

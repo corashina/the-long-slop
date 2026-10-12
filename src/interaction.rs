@@ -580,6 +580,7 @@ impl InteractionState {
             .iter()
             .find(|o| o.reference.id == id)
             .map_or((false, false), |o| (o.fill_called, o.empty_pour))
+    }
     pub(crate) fn restore_pump_valve(&mut self, item: ItemId, valve: f32) {
         if let Some(opening) = self
             .openings
