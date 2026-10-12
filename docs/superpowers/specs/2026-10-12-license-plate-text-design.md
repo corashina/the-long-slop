@@ -1,7 +1,7 @@
 # License plate text
 
 Date: 2026-10-12, Europe/Warsaw.
-Status: Written for user review. Product implementation has not started.
+Status: The user approved this spec on 2026-10-12. Product implementation has not started.
 Integration base: local `master`, mirror commit `62393dca1aab66406edb6e446d63708483dc08fa`.
 Reference: installed Steam build `11140890`, Unity `2021.3.18f1`.
 
