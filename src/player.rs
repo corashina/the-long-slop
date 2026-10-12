@@ -114,6 +114,37 @@ impl PlayerState {
         }
     }
 
+    pub fn capture_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+        origin: &crate::world::WorldOrigin,
+        physics: &PhysicsWorld,
+        carry: Option<crate::save::CarrySnapshot>,
+    ) -> Result<crate::save::PlayerSnapshot, crate::save::SaveError> {
+        let pose = self.body_pose(physics);
+        Ok(crate::save::PlayerSnapshot {
+            pose: crate::save::AbsolutePose {
+                position: origin.absolute(pose.position),
+                rotation: pose.rotation,
+            },
+            yaw: self.yaw,
+            pitch: self.pitch,
+            seat: self
+                .occupancy
+                .map(|seat| {
+                    Ok(crate::save::SeatSnapshot {
+                        vehicle: ids.vehicle.clone(),
+                        source: crate::save::identity::source_key(&ids.seats, seat.id)?,
+                    })
+                })
+                .transpose()?,
+            crouched: self.crouched,
+            vertical_velocity: self.vertical_velocity,
+            recoil_velocity: self.recoil_velocity.to_array(),
+            running: self.running,
+            carry,
+        })
+    }
     /// Bind seats once at setup. Driver identity comes from the recovered seat record.
     pub fn configure_seats(&mut self, seats: &[SeatReference]) {
         assert!(

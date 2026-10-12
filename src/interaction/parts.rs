@@ -202,6 +202,26 @@ impl PartAttachments {
                 .collect(),
         })
     }
+    pub fn capture_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+    ) -> Result<Vec<crate::save::PartAttachment>, crate::save::SaveError> {
+        let mut records = self
+            .slots
+            .iter()
+            .map(|slot| {
+                Ok(crate::save::PartAttachment {
+                    slot: crate::save::identity::source_key(&ids.part_slots, slot.reference.id)?,
+                    part: slot
+                        .part
+                        .map(|part| ids.item_instance(self.parts[part].reference.item))
+                        .transpose()?,
+                })
+            })
+            .collect::<Result<Vec<_>, crate::save::SaveError>>()?;
+        records.sort_by(|a, b| a.slot.cmp(&b.slot));
+        Ok(records)
+    }
     pub fn rebase(&mut self, shift: [f32; 3]) {
         let shift = rapier3d::math::Vector::from_array(shift);
         for part in &mut self.parts {

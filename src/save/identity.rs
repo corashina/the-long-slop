@@ -97,6 +97,11 @@ impl IdentityMap {
             vehicle: InstanceId::initial(&reference.vehicle.source),
         })
     }
+    pub fn item_instance(&self, id: ItemId) -> Result<InstanceId, SaveError> {
+        Ok(InstanceId::Initial {
+            source: source_key(&self.items, id)?,
+        })
+    }
     pub fn item(&self, instance: &InstanceId) -> Result<ItemId, SaveError> {
         match instance {
             InstanceId::Initial { source } => self
@@ -109,6 +114,15 @@ impl IdentityMap {
             )),
         }
     }
+}
+pub(crate) fn source_key<T: Copy + Eq>(
+    map: &HashMap<SourceKey, T>,
+    id: T,
+) -> Result<SourceKey, SaveError> {
+    map.iter()
+        .find(|(_, value)| **value == id)
+        .map(|(key, _)| key.clone())
+        .ok_or_else(|| SaveError::InvalidLinks("Missing runtime source identity".into()))
 }
 fn index<'a, T: Copy + Eq + Hash>(
     records: impl Iterator<Item = (&'a SourceId, T)>,

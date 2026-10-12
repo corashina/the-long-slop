@@ -292,6 +292,28 @@ impl PhysicsWorld {
         self.physics.step();
     }
 
+    pub fn capture_save(
+        &self,
+        identity: crate::save::BodyIdentity,
+        origin: &crate::world::WorldOrigin,
+    ) -> crate::save::BodySnapshot {
+        capture_body_save(&self.physics.bodies[self.chassis], identity, origin)
+    }
+    pub(crate) fn wheel_save_state(&self, index: usize) -> (f32, f32, f32) {
+        let wheel = self
+            .active_slots
+            .iter()
+            .position(|slot| *slot == index)
+            .map_or(&self.resting_wheels[index], |active| {
+                &self.controller.wheels()[active]
+            });
+        (
+            wheel.rotation,
+            self.wheel_rpm[index],
+            self.wheel_rotations[index],
+        )
+    }
+
     pub fn wheel_support_count(&self) -> usize {
         self.active_slots.len()
     }
@@ -553,6 +575,24 @@ impl PhysicsWorld {
 
     pub fn collider_count(&self) -> usize {
         self.physics.colliders.len()
+    }
+}
+
+pub(crate) fn capture_body_save(
+    body: &rapier3d::prelude::RigidBody,
+    identity: crate::save::BodyIdentity,
+    origin: &crate::world::WorldOrigin,
+) -> crate::save::BodySnapshot {
+    let pose = from_rapier(body.position());
+    crate::save::BodySnapshot {
+        identity,
+        pose: crate::save::AbsolutePose {
+            position: origin.absolute(pose.position),
+            rotation: pose.rotation,
+        },
+        linear_velocity: body.linvel().to_array(),
+        angular_velocity: body.angvel().to_array(),
+        sleeping: body.is_sleeping(),
     }
 }
 

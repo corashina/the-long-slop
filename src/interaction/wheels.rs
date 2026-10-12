@@ -263,6 +263,50 @@ impl WheelAssemblies {
         })
     }
 
+    pub fn capture_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+        physics: &PhysicsWorld,
+    ) -> Result<
+        (
+            Vec<crate::save::WheelAttachment>,
+            Vec<crate::save::TireAttachment>,
+        ),
+        crate::save::SaveError,
+    > {
+        let mut slots = self
+            .slots
+            .iter()
+            .map(|slot| {
+                let (rotation, rpm, previous_rotation) = physics.wheel_save_state(slot.index);
+                Ok(crate::save::WheelAttachment {
+                    slot: crate::save::identity::source_key(&ids.wheel_slots, slot.id)?,
+                    rim: slot
+                        .rim
+                        .map(|rim| ids.item_instance(self.parts[rim].item))
+                        .transpose()?,
+                    rotation,
+                    rpm,
+                    previous_rotation,
+                })
+            })
+            .collect::<Result<Vec<_>, crate::save::SaveError>>()?;
+        let mut tires = self
+            .parts
+            .iter()
+            .filter(|part| part.rim)
+            .filter_map(|part| part.tire.map(|tire| (part, tire)))
+            .map(|(part, tire)| {
+                Ok(crate::save::TireAttachment {
+                    rim: ids.item_instance(part.item)?,
+                    tire: ids.item_instance(self.parts[tire].item)?,
+                })
+            })
+            .collect::<Result<Vec<_>, crate::save::SaveError>>()?;
+        slots.sort_by(|a, b| a.slot.cmp(&b.slot));
+        tires.sort_by(|a, b| a.rim.cmp(&b.rim));
+        Ok((slots, tires))
+    }
     pub fn slot_for_item(&self, item: ItemId) -> Option<WheelSlotId> {
         self.slots
             .iter()

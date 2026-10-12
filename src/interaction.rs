@@ -160,6 +160,39 @@ struct TankRules {
 }
 
 impl InteractionState {
+    pub fn capture_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+    ) -> Result<crate::save::MechanismsSnapshot, crate::save::SaveError> {
+        let mut openings = ids
+            .openings
+            .iter()
+            .map(|(source, id)| {
+                let opening = self
+                    .openings
+                    .iter()
+                    .find(|o| o.reference.id == *id)
+                    .ok_or_else(|| {
+                        crate::save::SaveError::InvalidLinks("Missing source opening".into())
+                    })?;
+                Ok(crate::save::OpeningSnapshot {
+                    source: source.clone(),
+                    valve: opening.valve,
+                })
+            })
+            .collect::<Result<Vec<_>, crate::save::SaveError>>()?;
+        openings.sort_by(|a, b| a.source.cmp(&b.source));
+        Ok(crate::save::MechanismsSnapshot {
+            controls: self.mechanisms.capture_save(ids)?,
+            openings,
+        })
+    }
+    pub fn capture_carry_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+    ) -> Result<Option<crate::save::CarrySnapshot>, crate::save::SaveError> {
+        self.carry.capture_save(ids)
+    }
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut openings = Vec::with_capacity(reference.openings.len());
         for opening in &reference.openings {

@@ -41,6 +41,26 @@ pub struct MechanismState {
     order: Vec<usize>,
 }
 impl MechanismState {
+    pub fn capture_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+    ) -> Result<Vec<crate::save::MechanismSnapshot>, crate::save::SaveError> {
+        let mut records = self
+            .controls
+            .iter()
+            .map(|c| {
+                Ok(crate::save::MechanismSnapshot {
+                    source: crate::save::identity::source_key(&ids.mechanisms, c.reference.id)?,
+                    degrees: c.degrees,
+                    slide: c.slide,
+                    enabled: c.enabled,
+                    turn_state: c.turn_state,
+                })
+            })
+            .collect::<Result<Vec<_>, crate::save::SaveError>>()?;
+        records.sort_by(|a, b| a.source.cmp(&b.source));
+        Ok(records)
+    }
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut needed = HashSet::new();
         needed.extend(reference.items.iter().map(|i| i.node));

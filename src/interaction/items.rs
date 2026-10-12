@@ -156,6 +156,65 @@ impl ItemStore {
         })
     }
 
+    pub fn capture_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+        origin: &crate::world::WorldOrigin,
+        physics: &PhysicsWorld,
+    ) -> Result<Vec<crate::save::ItemSnapshot>, crate::save::SaveError> {
+        use crate::save::{
+            AbsolutePose, ItemLocationSave, ItemSnapshot, LocalPose, identity::source_key,
+        };
+        let mut records = Vec::with_capacity(ids.items.len());
+        for &id in ids.items.values() {
+            let item = self.get(id).ok_or_else(|| {
+                crate::save::SaveError::InvalidLinks("Missing source item".into())
+            })?;
+            let (position, rotation) = if let Some(handle) = item.body {
+                let body = physics.rapier().bodies.get(handle).ok_or_else(|| {
+                    crate::save::SaveError::InvalidLinks("Missing item body".into())
+                })?;
+                let offset =
+                    body.position().rotation * Vector::from_array(item.local_pose.position);
+                // Add local offsets after the absolute conversion to retain their precision.
+                let absolute = origin.absolute(body.position().translation.to_array());
+                (
+                    std::array::from_fn(|axis| absolute[axis] + f64::from(offset[axis])),
+                    (body.position().rotation * Rotation::from_array(item.local_pose.rotation))
+                        .to_array(),
+                )
+            } else {
+                (origin.absolute(item.pose.position), item.pose.rotation)
+            };
+            let location = match item.location {
+                ItemLocation::World => ItemLocationSave::World,
+                ItemLocation::Held => ItemLocationSave::Held,
+                ItemLocation::PartSlot(slot) => ItemLocationSave::PartSlot {
+                    slot: source_key(&ids.part_slots, slot)?,
+                },
+                ItemLocation::WheelSlot(slot) => ItemLocationSave::WheelSlot {
+                    slot: source_key(&ids.wheel_slots, slot)?,
+                },
+                ItemLocation::Attached(owner) => ItemLocationSave::Attached {
+                    owner: ids.item_instance(owner)?,
+                },
+            };
+            records.push(ItemSnapshot {
+                instance: ids.item_instance(id)?,
+                pose: AbsolutePose { position, rotation },
+                local_pose: LocalPose {
+                    position: item.local_pose.position,
+                    rotation: item.local_pose.rotation,
+                },
+                location,
+                condition: item.condition,
+                temperature: item.temperature,
+                fluids: item.fluid.as_ref().map(|f| f.mixture.quantities_liters),
+            });
+        }
+        records.sort_by(|a, b| a.instance.cmp(&b.instance));
+        Ok(records)
+    }
     pub fn mounted(&self, mut id: ItemId) -> bool {
         for _ in 0..self.states.len() {
             if id == self.vehicle_item {

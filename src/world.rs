@@ -358,6 +358,37 @@ impl WorldStream {
         }
     }
 
+    pub fn capture_save(
+        &self,
+        interaction: &crate::interaction::InteractionState,
+    ) -> crate::save::WorldSnapshot {
+        let mut records = self
+            .station_items
+            .iter()
+            .filter(|(station, _)| {
+                self.chunks
+                    .iter()
+                    .any(|chunk| chunk.pumps.iter().any(|(id, _)| id == station))
+            })
+            .map(|(station, item)| crate::save::WorldRecord::Pump {
+                instance: crate::save::InstanceId::Station {
+                    seed: self.seed.to_string(),
+                    index: station.to_string(),
+                    role: "pump".into(),
+                },
+                valve: interaction.opening_valve(crate::reference::OpeningId(item.0)),
+            })
+            .collect::<Vec<_>>();
+        records.sort_by(|a, b| {
+            let crate::save::WorldRecord::Pump { instance: a, .. } = a;
+            let crate::save::WorldRecord::Pump { instance: b, .. } = b;
+            a.cmp(b)
+        });
+        crate::save::WorldSnapshot {
+            seed: self.seed.to_string(),
+            records,
+        }
+    }
     pub fn configure_starting_area(&mut self, reference: &ReferenceManifest) {
         assert!(
             self.chunks.is_empty(),

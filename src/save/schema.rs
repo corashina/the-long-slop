@@ -166,6 +166,8 @@ pub struct WheelAttachment {
     pub slot: SourceKey,
     pub rim: Option<InstanceId>,
     pub rotation: f32,
+    pub rpm: f32,
+    pub previous_rotation: f32,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -194,10 +196,11 @@ pub struct OpeningSnapshot {
     pub source: SourceKey,
     pub valve: f32,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProgressSnapshot {
     pub trip_m: f64,
+    pub start_attempts: String,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

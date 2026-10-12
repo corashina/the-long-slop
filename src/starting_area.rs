@@ -461,6 +461,8 @@ pub fn initial_vehicle_pose(reference: &ReferenceManifest) -> Result<VehiclePose
     node_pose(reference, reference.vehicle.root)
 }
 
+mod save;
+
 pub struct GarageRuntime {
     pub lighting: crate::lighting::LightingState,
     pub physics: PhysicsWorld,

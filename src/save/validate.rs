@@ -28,6 +28,7 @@ impl SaveSnapshot {
             self.progress.trip_m.is_finite() && self.progress.trip_m >= 0.,
             "Trip distance",
         )?;
+        identity::unsigned(&self.progress.start_attempts)?;
         self.validate_vehicle(reference, &ids)?;
         let mut items = HashMap::new();
         for item in &self.items {
@@ -183,6 +184,11 @@ impl SaveSnapshot {
                 "Duplicate wheel slot",
             )?;
             data(attachment.rotation.is_finite(), "Wheel rotation")?;
+            data(attachment.rpm.is_finite(), "Wheel RPM")?;
+            data(
+                attachment.previous_rotation.is_finite(),
+                "Previous wheel rotation",
+            )?;
             if let Some(instance) = &attachment.rim {
                 let item = ids.item(instance)?;
                 links(linked_parts.insert(item), "Rim has multiple owners")?;

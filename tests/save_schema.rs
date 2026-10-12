@@ -63,7 +63,7 @@ fn snapshot_for(r: ReferenceManifest) -> (ReferenceManifest, SourceStamp, SaveSn
     let wheels: Vec<_> = r
         .wheel_slots
         .iter()
-        .map(|s| json!({"slot": key(&s.source), "rim": item(s.rim), "rotation": 0.}))
+        .map(|s| json!({"slot": key(&s.source), "rim": item(s.rim), "rotation": 0., "rpm": 0., "previous_rotation": 0.}))
         .collect();
     let tires: Vec<_> = r
         .items
@@ -131,7 +131,7 @@ fn snapshot_for(r: ReferenceManifest) -> (ReferenceManifest, SourceStamp, SaveSn
                 "elapsed": 0., "last_run_time": -1., "last_start_chance_time": 0., "random_start": 1.,
                 "supplied_fuel": 0., "fan_on": false}, "auto_gear": 0, "handbrake": true}],
         "bodies": bodies, "items": items, "attachments": {"parts": parts, "wheels": wheels, "tires": tires},
-        "mechanisms": {"controls": controls, "openings": openings}, "progress": {"trip_m": 0.},
+        "mechanisms": {"controls": controls, "openings": openings}, "progress": {"trip_m": 0., "start_attempts": "0"},
         "lighting": {"cycle": {"elapsed_seconds": 0., "cycle_seconds": r.lighting.cycle.startup_offset_seconds,
             "evaluated_cycle_seconds": r.lighting.cycle.startup_offset_seconds, "cloud_coordinate": 0., "star_rotation": 0.},
             "requested_headlights": 0, "controllers": controllers}, "view": {"camera": {"kind": "first_person"}}});
@@ -194,6 +194,23 @@ fn schema_rejects_version_source_and_invalid_links() {
             .validate(&reference, &source)
             .is_err()
     );
+    for attempts in ["01", "-1", "18446744073709551616"] {
+        let mut bad = snapshot.clone();
+        bad.progress.start_attempts = attempts.into();
+        assert!(bad.validate(&reference, &source).is_err());
+    }
+    let mut bad = snapshot.clone();
+    bad.attachments.wheels[0].rpm = f32::NAN;
+    assert!(bad.validate(&reference, &source).is_err());
+    let mut bad = snapshot.clone();
+    bad.attachments.wheels[0].previous_rotation = f32::INFINITY;
+    assert!(bad.validate(&reference, &source).is_err());
+    let mut missing = value.clone();
+    missing["progress"]
+        .as_object_mut()
+        .unwrap()
+        .remove("start_attempts");
+    assert!(SaveSnapshot::from_json(&serde_json::to_vec(&missing).unwrap()).is_err());
     let mut bad = snapshot.clone();
     bad.items[0].pose.position[0] = f64::NAN;
     assert!(bad.validate(&reference, &source).is_err());
