@@ -143,7 +143,7 @@ Docker checks can require sandbox escalation. Preserve diagnostics and use the n
 - `ParticleReference` owns source identity, checked rates, authored capacity, scalar/vector/color curves, shape/material settings, and trigger rules.
 - Add `AssetUsage::FoodPrototype`. Prototype assets load once and create no initial physical instance.
 
-- [ ] **Step 1: Add critical source and validation tests.** Assert these literal values:
+- [x] **Step 1: Add critical source and validation tests.** Assert these literal values:
 
 ```rust
 let r = common::reference();
@@ -166,9 +166,9 @@ Use tests named `recovers_active_player_and_source_values` and `rejects_missing_
 Also test exhausted part indices, duplicate prototype kinds, invalid shelter roots, and invalid particle capacity.
 Removing a required section from the fixture must make `ReferenceManifest::from_json` fail.
 
-- [ ] **Step 2: Run those tests and confirm failure.** Use the two Python modules and Rust target `survival_reference`.
+- [x] **Step 2: Run those tests and confirm failure.** Use the two Python modules and Rust target `survival_reference`.
 Expect missing recovery functions or missing required reference sections.
-- [ ] **Step 3: Implement the interfaces and strict asset export.** Append starter sausage GameObject `level1:3542` to the selected items.
+- [x] **Step 3: Implement the interfaces and strict asset export.** Append starter sausage GameObject `level1:3542` to the selected items.
 Export one `food.gltf` prototype package for the shared sausage and turd through their source pointers.
 Recover startup transforms, source opening/drinking rules, toilet timings, input bindings, need UI records, and particle module flags.
 Derive startup values with the source's float32 operation order; compare rounded report values with explicit float tolerance.
@@ -176,10 +176,10 @@ Resolve source data through `LibrarySource`; reuse accepted images, meshes, and 
 Read source assertions from the managed receipt and audit. Do not select required clips or prototypes by names.
 Extend current runtime path checks for these selected files. Replace fixed five-asset assumptions without accepting the old contract.
 Keep unsupported particle modules in a source-identity limit ledger, including their visible effect.
-- [ ] **Step 4: Run the focused tests, derive the selected runtime, and validate it.** Expect passing tests and a valid current manifest.
+- [x] **Step 4: Run the focused tests, derive the selected runtime, and validate it.** Expect passing tests and a valid current manifest.
 Confirm food prototypes create no extra player, vehicle, or starter scene instance.
 Build the WASM package and check that the existing garage still reaches readiness.
-- [ ] **Step 5: Commit only the exporter, reference, fixture, and test changes.** Message: `Add source survival sleep and weather records`.
+- [x] **Step 5: Commit only the exporter, reference, fixture, and test changes.** Message: `Add source survival sleep and weather records`.
 
 ### Task 2: Implement the native needs, toilet, and death model
 
