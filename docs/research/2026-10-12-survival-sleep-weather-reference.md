@@ -345,7 +345,7 @@ Presentation reads outputs and advances no gameplay clock.
 | Death | Source ragdoll, Unity volume, and menu scene need adapters or explicit limits. |
 | Wounds and hostile damage | Require weapons, enemies, blood leaks, or explosions. Exclude these absent gameplay systems. |
 | Radio during sleep | Source advances stations during sleep. Current runtime has no radio simulation. Report the omission. |
-| Saves and multiplayer | Source saves needs, queues, sleep cooldown, and storms. Current runtime lacks those lifecycle systems. |
+| Saves and multiplayer | Source saves needs, queues, sleep cooldown, and storms. Current saves do not persist these states. Multiplayer respawn is absent. |
 | Weather variety | Rain scheduling and active snow lack source support. Exclude them. |
 | Random draws | Source ranges and draw order exist. Unity's native random sequence remains unrecovered; report that limit. |
 
