@@ -1,11 +1,12 @@
 //! Source sky geometry and persistent GPU values.
+use super::mirrors::MirrorViewRole;
 use super::{lighting::SourceLighting, reference::ReferenceVisuals};
 use crate::{
     app::{Drive, RuntimeReference},
     lighting::source_linear,
     reference::SourceId,
 };
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::{RenderAssetUsages, UntypedAssetId};
 use bevy::ecs::{
     self as bevy_ecs,
     system::{SystemParamItem, lifetimeless::SRes},
@@ -13,6 +14,7 @@ use bevy::ecs::{
 use bevy::mesh::{Indices, MeshVertexBufferLayoutRef};
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
+use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::render::{
     Extract, ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems,
     render_asset::RenderAssets,
@@ -21,7 +23,8 @@ use bevy::render::{
     texture::GpuImage,
 };
 use bevy::shader::{Shader, ShaderRef};
-use bevy::{asset as bevy_asset, reflect as bevy_reflect};
+use bevy::{asset as bevy_asset, reflect as bevy_reflect, render as bevy_render};
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Clone, Copy, ShaderType, Default)]
 pub struct SkyUniform {
@@ -36,14 +39,16 @@ pub struct SkyUniform {
     pub star_motion: Vec4,
     pub flares: [Vec4; 3],
 }
+#[derive(Clone)]
 pub struct SkyState {
     pub shader: Handle<Shader>,
     pub uniform: SkyUniform,
+    pub views: [SkyUniform; 4],
     pub spawned: bool,
     pub clouds_bound: [bool; 2],
     pub materials: Vec<Handle<SkyMaterial>>,
     pub last_active: f64,
-    pub fade: [f32; 3],
+    pub fade: [[f32; 3]; 4],
 }
 impl SkyState {
     pub fn new(server: &AssetServer, lighting: &crate::reference::LightingRecord) -> Self {
@@ -62,18 +67,28 @@ impl SkyState {
             clouds_bound: [false; 2],
             materials: Vec::with_capacity(8),
             last_active: 0.,
-            fade: [0.; 3],
+            fade: [[0.; 3]; 4],
+            views: [SkyUniform::default(); 4],
         }
+    }
+    pub fn reset_views(&mut self) {
+        self.fade = [[0.; 3]; 4];
+        self.last_active = 0.;
+        self.views = [SkyUniform::default(); 4];
+    }
+    pub fn reset_capture_views(&mut self) {
+        self.fade[1..].fill([0.; 3]);
+        self.views[1..].fill(SkyUniform::default());
     }
     pub fn bound(&self) -> bool {
         self.spawned && self.clouds_bound.iter().all(|v| *v)
     }
 }
 #[derive(Resource, Default)]
-struct ExtractedSky(SkyUniform);
+struct ExtractedSky([SkyUniform; 4]);
 #[derive(Resource, Default)]
 pub struct SkyGpu {
-    pub uniform: UniformBuffer<SkyUniform>,
+    pub uniforms: [UniformBuffer<SkyUniform>; 4],
 }
 #[derive(Component)]
 pub struct SkyMesh;
@@ -85,6 +100,7 @@ pub struct SkySettings {
 }
 #[derive(Asset, TypePath, Clone, Debug)]
 pub struct SkyMaterial {
+    pub view: usize,
     pub settings: SkySettings,
     pub textures: [Handle<Image>; 4],
     pub additive: bool,
@@ -160,7 +176,7 @@ impl AsBindGroup for SkyMaterial {
             (
                 0,
                 OwnedBindingResource::Buffer(
-                    gpu.uniform
+                    gpu.uniforms[self.view]
                         .buffer()
                         .ok_or(AsBindGroupError::RetryNextUpdate)?
                         .clone(),
@@ -208,14 +224,46 @@ impl AsBindGroup for SkyMaterial {
         .to_vec()
     }
 }
+
+#[derive(Resource, Clone, Default, ExtractResource)]
+pub(crate) struct SkyVariants(Arc<HashMap<UntypedAssetId, [Handle<SkyMaterial>; 3]>>);
+impl SkyVariants {
+    pub(crate) fn resolve(&self, role: MirrorViewRole, material: UntypedAssetId) -> UntypedAssetId {
+        if let MirrorViewRole::Capture(owner) = role {
+            if let Some(variants) = self.0.get(&material) {
+                return variants[owner].id().untyped();
+            }
+        }
+        material
+    }
+}
+fn add_material(
+    materials: &mut Assets<SkyMaterial>,
+    variants: &mut SkyVariants,
+    material: SkyMaterial,
+) -> Handle<SkyMaterial> {
+    let captures = std::array::from_fn(|index| {
+        let mut capture = material.clone();
+        capture.view = index + 1;
+        materials.add(capture)
+    });
+    let normal = materials.add(material);
+    Arc::make_mut(&mut variants.0).insert(normal.id().untyped(), captures);
+    normal
+}
+
 pub struct SourceSkyPlugin;
 impl Plugin for SourceSkyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(MaterialPlugin::<SkyMaterial>::default())
+        app.init_resource::<SkyVariants>()
+            .add_plugins((
+                MaterialPlugin::<SkyMaterial>::default(),
+                ExtractResourcePlugin::<SkyVariants>::default(),
+            ))
             .add_systems(Update, bind_sky.before(super::materials::bind_materials))
             .add_systems(
                 PostUpdate,
-                sync_sky.after(bevy::transform::TransformSystems::Propagate),
+                sync_sky.after(super::mirrors::sync_mirror_views),
             );
         app.sub_app_mut(RenderApp)
             .init_resource::<ExtractedSky>()
@@ -226,12 +274,14 @@ impl Plugin for SourceSkyPlugin {
 }
 fn init_gpu(mut commands: Commands, device: Res<RenderDevice>, queue: Res<RenderQueue>) {
     let mut gpu = SkyGpu::default();
-    gpu.uniform.write_buffer(&device, &queue);
+    for uniform in &mut gpu.uniforms {
+        uniform.write_buffer(&device, &queue);
+    }
     commands.insert_resource(gpu);
 }
 fn extract_sky(source: Extract<Option<Res<SourceLighting>>>, mut sky: ResMut<ExtractedSky>) {
     if let Some(source) = source.as_ref() {
-        sky.0 = source.sky.uniform;
+        sky.0 = source.sky.views;
     }
 }
 fn upload_sky(
@@ -240,8 +290,10 @@ fn upload_sky(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
 ) {
-    gpu.uniform.set(sky.0);
-    gpu.uniform.write_buffer(&device, &queue);
+    for (uniform, data) in gpu.uniforms.iter_mut().zip(sky.0) {
+        uniform.set(data);
+        uniform.write_buffer(&device, &queue);
+    }
 }
 #[derive(serde::Deserialize)]
 struct Identity {
@@ -255,6 +307,7 @@ fn bind_sky(
     mut source: ResMut<SourceLighting>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<SkyMaterial>>,
+    mut variants: ResMut<SkyVariants>,
     extras: Query<(Entity, &bevy::gltf::GltfExtras)>,
     primitives: Query<(Entity, &ChildOf, &Mesh3d), Without<SkyMesh>>,
 ) {
@@ -273,15 +326,20 @@ fn bind_sky(
                 .clone()
         };
         let dummy = texture(r.star_material.textures[0].texture);
-        let sky = materials.add(SkyMaterial {
-            settings: SkySettings {
-                kind: UVec4::new(0, 0, 0, 0),
-                ..default()
+        let sky = add_material(
+            &mut materials,
+            &mut variants,
+            SkyMaterial {
+                view: 0,
+                settings: SkySettings {
+                    kind: UVec4::new(0, 0, 0, 0),
+                    ..default()
+                },
+                textures: std::array::from_fn(|_| dummy.clone()),
+                additive: false,
+                order: -400000.,
             },
-            textures: std::array::from_fn(|_| dummy.clone()),
-            additive: false,
-            order: -400000.,
-        });
+        );
         let mut dome = Sphere::new(1.).mesh().uv(64, 32);
         complete_attributes(&mut dome);
         spawn_mesh(
@@ -292,16 +350,21 @@ fn bind_sky(
         );
         source.sky.materials.push(sky);
         for (index, star) in r.stars.iter().enumerate() {
-            let material = materials.add(SkyMaterial {
-                settings: SkySettings {
-                    kind: UVec4::new(3, index as u32, 0, 0),
-                    color: Vec4::from_array(star.start_color),
-                    ..default()
+            let material = add_material(
+                &mut materials,
+                &mut variants,
+                SkyMaterial {
+                    view: 0,
+                    settings: SkySettings {
+                        kind: UVec4::new(3, index as u32, 0, 0),
+                        color: Vec4::from_array(star.start_color),
+                        ..default()
+                    },
+                    textures: std::array::from_fn(|_| dummy.clone()),
+                    additive: false,
+                    order: -300000.,
                 },
-                textures: std::array::from_fn(|_| dummy.clone()),
-                additive: false,
-                order: -300000.,
-            });
+            );
             spawn_mesh(
                 &mut commands,
                 meshes.add(star_mesh(star, index as u64 + 1)),
@@ -318,16 +381,21 @@ fn bind_sky(
                 .unwrap()
                 .2
                 .clone();
-            let material = materials.add(SkyMaterial {
-                settings: SkySettings {
-                    kind: UVec4::new(4, index as u32, 0, 0),
-                    color: Vec4::from_array(flare.color),
-                    ..default()
+            let material = add_material(
+                &mut materials,
+                &mut variants,
+                SkyMaterial {
+                    view: 0,
+                    settings: SkySettings {
+                        kind: UVec4::new(4, index as u32, 0, 0),
+                        color: Vec4::from_array(flare.color),
+                        ..default()
+                    },
+                    textures: std::array::from_fn(|_| tex.clone()),
+                    additive: true,
+                    order: 100000.,
                 },
-                textures: std::array::from_fn(|_| tex.clone()),
-                additive: true,
-                order: 100000.,
-            });
+            );
             spawn_mesh(
                 &mut commands,
                 meshes.add(flare_mesh(flare)),
@@ -391,24 +459,30 @@ fn bind_sky(
                     .find(|t| t.property == name)
                     .unwrap()
             });
-            let material = materials.add(SkyMaterial {
-                settings: SkySettings {
-                    kind: UVec4::new(1, index as u32, 0, 0),
-                    st: links.map(|t| Vec4::new(t.scale[0], t.scale[1], t.offset[0], t.offset[1])),
-                    ..default()
+            let material = add_material(
+                &mut materials,
+                &mut variants,
+                SkyMaterial {
+                    view: 0,
+                    settings: SkySettings {
+                        kind: UVec4::new(1, index as u32, 0, 0),
+                        st: links
+                            .map(|t| Vec4::new(t.scale[0], t.scale[1], t.offset[0], t.offset[1])),
+                        ..default()
+                    },
+                    textures: links.map(|link| {
+                        source
+                            .textures
+                            .iter()
+                            .find(|(id, _, _)| *id == link.texture)
+                            .unwrap()
+                            .2
+                            .clone()
+                    }),
+                    additive: false,
+                    order: -100000. * (index + 1) as f32,
                 },
-                textures: links.map(|link| {
-                    source
-                        .textures
-                        .iter()
-                        .find(|(id, _, _)| *id == link.texture)
-                        .unwrap()
-                        .2
-                        .clone()
-                }),
-                additive: false,
-                order: -100000. * (index + 1) as f32,
-            });
+            );
             commands
                 .entity(entity)
                 .remove::<MeshMaterial3d<StandardMaterial>>()
@@ -551,7 +625,7 @@ pub(crate) fn sync_sky(
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
     mut source: ResMut<SourceLighting>,
-    cameras: Query<(&GlobalTransform, &Projection), With<super::camera::DriveCamera>>,
+    cameras: Query<(&GlobalTransform, &Projection, &Camera, &MirrorViewRole)>,
 ) {
     let output = drive.runtime.lighting.cycle.output();
     let r = &reference.0.lighting;
@@ -562,7 +636,7 @@ pub(crate) fn sync_sky(
     let dt = if active >= sky.last_active {
         (active - sky.last_active) as f32
     } else {
-        sky.fade = [0.; 3];
+        sky.fade = [[0.; 3]; 4];
         0.
     };
     sky.last_active = active;
@@ -598,7 +672,18 @@ pub(crate) fn sync_sky(
         0.,
         0.,
     );
-    if let Ok((camera, projection)) = cameras.single() {
+    sky.views.fill(*u);
+    for (camera, projection, settings, role) in &cameras {
+        if !settings.is_active {
+            continue;
+        }
+        let (view, mask) = match role {
+            MirrorViewRole::Normal => (0, reference.0.player.camera_culling_mask),
+            MirrorViewRole::Capture(index) => {
+                (index + 1, reference.0.mirrors.mirrors[*index].culling_mask)
+            }
+        };
+        let u = &mut sky.views[view];
         let view_from_world = camera.to_matrix().inverse();
         for (index, flare) in r.cycle.sun_flares.iter().enumerate() {
             let direction = Quat::from_euler(EulerRot::YXZ, -y, -x, z)
@@ -611,7 +696,7 @@ pub(crate) fn sync_sky(
             let origin = camera.translation();
             let predicate = |_: rapier3d::prelude::ColliderHandle,
                              c: &rapier3d::prelude::Collider| {
-                c.collision_groups().memberships.bits() & !flare.ignore_layers != 0
+                c.collision_groups().memberships.bits() & mask & !flare.ignore_layers != 0
             };
             let ray = rapier3d::prelude::Ray::new(
                 rapier3d::prelude::Vector::new(origin.x, origin.y, origin.z),
@@ -630,13 +715,14 @@ pub(crate) fn sync_sky(
                     .is_none();
             // Native fade-out advances at half speed. Pre-Start uses the current visibility.
             if !drive.runtime.started {
-                sky.fade[index] = if visible { 1. } else { 0. };
+                sky.fade[view][index] = if visible { 1. } else { 0. };
             } else if visible {
-                sky.fade[index] = (sky.fade[index] + dt * flare.fade_speed).min(1.);
+                sky.fade[view][index] = (sky.fade[view][index] + dt * flare.fade_speed).min(1.);
             } else {
-                sky.fade[index] = (sky.fade[index] - dt * flare.fade_speed * 0.5).max(0.);
+                sky.fade[view][index] =
+                    (sky.fade[view][index] - dt * flare.fade_speed * 0.5).max(0.);
             }
-            u.flares[index] = view_sun.extend(output.flare_brightness * sky.fade[index]);
+            u.flares[index] = view_sun.extend(output.flare_brightness * sky.fade[view][index]);
         }
     }
 }

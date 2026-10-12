@@ -352,6 +352,14 @@ impl AudioReference {
                 && method(&self.engine.method),
             "audio engine",
         )?;
+        require(
+            game.vehicles
+                .iter()
+                .filter(|v| v.engine.source == self.engine.source)
+                .count()
+                == 1,
+            "audio engine vehicle",
+        )?;
         for key in [
             "SMinAlapRpm",
             "SMaxAlapRpm",

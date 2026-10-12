@@ -22,7 +22,7 @@ struct SourceLight {
 }
 struct SourceShadow { clip_from_world: mat4x4<f32>, rect: vec4<f32>, bias: vec4<f32> }
 struct SourceLighting {
-    lights: array<SourceLight,32>,
+    lights: array<SourceLight,40>,
     shadows: array<SourceShadow,100>,
     ambient: vec4<f32>,
     fog: vec4<f32>,

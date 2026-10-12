@@ -60,6 +60,12 @@ extern "C" {
     pub fn game_audio_calendar() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioEnd)]
     pub fn game_audio_end();
+    #[wasm_bindgen(js_namespace = window, js_name = gameHasSaveRequest)]
+    pub fn game_has_save_request() -> bool;
+    #[wasm_bindgen(js_namespace = window, js_name = gameSaveRequest)]
+    pub fn game_save_request() -> String;
+    #[wasm_bindgen(js_namespace = window, js_name = gameSaveResult)]
+    pub fn game_save_result(id: u32, kind: &str, payload: &str, error: &str);
 
     #[wasm_bindgen(js_namespace = window, js_name = gameReady)]
     pub fn game_ready();

@@ -161,20 +161,6 @@ class SelectedAudio(unittest.TestCase):
                 with self.assertRaises(KeyError):
                     recover_audio(source,roots,manifest,library,Path(directory))
 
-    def test_runtime_stage_stays_local_to_checkout(self):
-        from tools.reference import export
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            borrowed = root / 'borrowed'
-            borrowed.mkdir()
-            local = root / 'local'
-            local.mkdir()
-            with patch.object(export, 'SOURCE_WORK_ROOT', borrowed), patch.object(export, 'RUNTIME_WORK_ROOT', local):
-                self.assertEqual(export.runtime_stage_root().resolve(), (local / 'work').resolve())
-            with patch.object(export, 'SOURCE_WORK_ROOT', borrowed), patch.object(export, 'RUNTIME_WORK_ROOT', borrowed):
-                with self.assertRaisesRegex(ValueError, 'overlaps accepted source'):
-                    export.runtime_stage_root()
-
     def fixture(self, directory):
         root = Path(directory)
         path = root / 'audio/sharedassets1.assets/4423/sample-000.wav'

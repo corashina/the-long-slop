@@ -188,7 +188,7 @@ impl InteractionState {
                     ItemLocation::World => {
                         self.carry.allows_pickup(target.item, false, false)
                             && item.body.is_some_and(|body| {
-                                body != physics.chassis_handle()
+                                physics.vehicle_of(body).is_none()
                                     && physics
                                         .rapier()
                                         .bodies

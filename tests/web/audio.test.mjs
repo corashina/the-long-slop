@@ -18,7 +18,7 @@ const settle=()=>new Promise(r=>setTimeout(r,30));
 async function loaded(audio){await Promise.all(audio.cache?.pending.values()??[]);await Promise.resolve();await Promise.resolve();}
 async function decoding(ready){for(let i=0;i<100&&!ready();i++)await new Promise(r=>setTimeout(r,10));assert.ok(ready(),'decode started');}
 function event(a,session=1,sequence=1){a.begin(session,true,false,0);a.emitter(binding.emitter,new Float32Array([0,0,0]),new Float32Array([0,0,0,1]),true);a.event(session,sequence,binding.id,binding.emitter,0,0,0,1,1,0);a.finish();}
-test('gesture_precedes_pointer_lock',async()=>{const a=setup();const m=new MenuState();m.ready();await m.capture(ACTIONS.START,()=>{assert.equal(Fake.contexts.length,1);return Promise.resolve();},()=>a.unlock());assert.equal(m.state,'playing');a.dispose();});
+test('gesture_precedes_pointer_lock',async()=>{const a=setup();const m=new MenuState();m.ready();m.started=true;m.pause();m.takeActions();await m.capture(ACTIONS.CONTINUE,()=>{assert.equal(Fake.contexts.length,1);return Promise.resolve();},()=>a.unlock());assert.equal(m.state,'playing');a.dispose();});
 test('audio_failure_keeps_start_working',async()=>{
  const warnings=[],originalWarn=console.warn;
  console.warn=message=>warnings.push(message);
@@ -28,7 +28,7 @@ test('audio_failure_keeps_start_working',async()=>{
    const a=setup(Bad);
    if(mode==='fetch')globalThis.fetch=async()=>{throw Error('fetch');};
    if(mode==='validation')globalThis.fetch=async()=>({ok:true,arrayBuffer:async()=>new ArrayBuffer(2)});
-   const m=new MenuState();m.ready();await m.capture(ACTIONS.START,async()=>{},()=>a.unlock());await settle();event(a);await loaded(a);
+   const m=new MenuState();m.ready();m.started=true;m.pause();m.takeActions();await m.capture(ACTIONS.CONTINUE,async()=>{},()=>a.unlock());await settle();event(a);await loaded(a);
    assert.equal(m.state,'playing');assert.equal(Fake.starts.length,0);
    assert.equal(a.disabled,mode==='resume');
    event(a,1,2);await loaded(a);
@@ -51,13 +51,13 @@ test('native_parameq_uses_proven_mapping',async()=>{const a=setup();a.unlock();a
 test('removed_owner_rejects_pending_decode',async()=>{let complete;class Slow extends Fake {decodeAudioData(){return new Promise(r=>{complete=r;});}}const a=setup(Slow);a.unlock();await settle();event(a);await decoding(()=>complete);a.emitter(binding.emitter,[0,0,0],[0,0,0,1],false);complete({duration:raw.clips.find(c=>c.id===binding.clips[0]).duration_seconds,numberOfChannels:1});await settle();assert.equal(Fake.starts.length,0);a.dispose();});
 
 
-for(const nextAction of [ACTIONS.CONTINUE,ACTIONS.RESTART])test('failed_restart_then_'+(nextAction===ACTIONS.CONTINUE?'continue':'restart')+'_keeps_native_session',async()=>{
+test('failed_continue_keeps_native_session',async()=>{
  const audio=setup(),menu=new MenuState();menu.ready();menu.started=true;menu.pause();menu.takeActions();audio.begin(1,true,true,0);audio.event(1,9,binding.id,binding.emitter,0,0,0,1,1,0);
- assert.equal(await captureWithAudio(menu,ACTIONS.RESTART,async()=>{throw Error('capture blocked');},audio),false);
+ assert.equal(await captureWithAudio(menu,ACTIONS.CONTINUE,async()=>{throw Error('capture blocked');},audio),false);
  assert.equal(menu.takeActions(),0);assert.equal(audio.session,1);assert.equal(audio.sequence,9);
- assert.equal(await captureWithAudio(menu,nextAction,async()=>{if(nextAction===ACTIONS.RESTART){assert.equal(audio.pendingRestart,true);event(audio,1,10);audio.begin(1,true,true,0);await settle();assert.equal(Fake.starts.length,0);}},audio),true);
- const action=menu.takeActions(),nativeSession=action===ACTIONS.RESTART?2:1;await settle();event(audio,nativeSession,nextAction===ACTIONS.RESTART?1:10);await loaded(audio);
- assert.equal(audio.session,nativeSession);assert.equal(audio.accepted,true);assert.equal(Fake.starts.length,1);audio.dispose();
+ assert.equal(await captureWithAudio(menu,ACTIONS.CONTINUE,async()=>{},audio),true);
+ assert.equal(menu.takeActions(),ACTIONS.CONTINUE);await settle();event(audio,1,10);await loaded(audio);
+ assert.equal(audio.session,1);assert.equal(audio.accepted,true);assert.equal(Fake.starts.length,1);audio.dispose();
 });
 
 function vehicleBank(){Fake.starts=[];const context=new Fake(),cache={effect:async id=>({duration:raw.clips.find(c=>c.id===id).duration_seconds})};return new VoiceBank(context,raw,cache,new Map(raw.mixers.map(m=>[m.id,new Node()])),()=>1,()=>true,error=>{throw error;});}

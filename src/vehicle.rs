@@ -18,6 +18,22 @@ pub struct InstalledWheel {
     pub condition: f32,
 }
 pub const VEHICLE_COLLIDER_FLAG: u128 = 1 << 127;
+
+/// Rapier 0.36 CCD sweeps disabled colliders too. A disabled collider below the
+/// ground then clamps its body's motion each step. Empty solver groups stop this.
+pub fn solver_groups(enabled: bool) -> InteractionGroups {
+    if enabled {
+        InteractionGroups::all()
+    } else {
+        InteractionGroups::none()
+    }
+}
+
+/// Enables or disables a collider. See [`solver_groups`].
+pub fn set_collider_enabled(collider: &mut rapier3d::prelude::Collider, enabled: bool) {
+    collider.set_enabled(enabled);
+    collider.set_solver_groups(solver_groups(enabled));
+}
 pub const SLOT_SENSOR_FLAG: u128 = 1 << 126;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -47,8 +63,8 @@ impl VehicleSnapshot {
     }
 }
 
-pub struct PhysicsWorld {
-    physics: rapier3d::prelude::PhysicsWorld,
+/// One rigid chassis with its ray-cast wheels.
+struct VehicleBody {
     chassis: RigidBodyHandle,
     controller: DynamicRayCastVehicleController,
     resting_wheels: [Wheel; 4],
@@ -66,16 +82,71 @@ pub struct PhysicsWorld {
     last_handbrake: bool,
 }
 
+pub struct PhysicsWorld {
+    pub(crate) inactive_bodies: std::collections::HashSet<RigidBodyHandle>,
+    physics: rapier3d::prelude::PhysicsWorld,
+    chassis: Vec<RigidBodyHandle>,
+    vehicles: Vec<VehicleBody>,
+}
+
 impl PhysicsWorld {
-    pub fn new(reference: &ReferenceManifest, pose: VehiclePose) -> Result<Self, ReferenceError> {
-        let vehicle = &reference.vehicle;
+    /// Poses follow the order of `reference.vehicles`.
+    pub fn new(
+        reference: &ReferenceManifest,
+        poses: &[VehiclePose],
+    ) -> Result<Self, ReferenceError> {
+        if poses.len() != reference.vehicles.len() {
+            return Err(ReferenceError("Expected one pose per vehicle".into()));
+        }
+        let mut physics = rapier3d::prelude::PhysicsWorld::new();
+        physics.integration_parameters.dt = FIXED_DT;
+        let mut vehicles = Vec::with_capacity(poses.len());
+        for (vehicle, pose) in reference.vehicles.iter().zip(poses) {
+            vehicles.push(VehicleBody::new(reference, vehicle, *pose, &mut physics)?);
+        }
+        refresh_world_queries(&mut physics);
+        let chassis: Vec<_> = vehicles.iter().map(|v| v.chassis).collect();
+        for vehicle in &mut vehicles {
+            // Reserve Rapier's four-wheel scratch buffers before the frame loop.
+            vehicle.controller.update_vehicle(
+                FIXED_DT,
+                physics.broad_phase.as_query_pipeline_mut(
+                    physics.narrow_phase.query_dispatcher(),
+                    &mut physics.bodies,
+                    &mut physics.colliders,
+                    QueryFilter::default()
+                        .exclude_sensors()
+                        .exclude_rigid_body(vehicle.chassis),
+                ),
+            );
+            vehicle
+                .controller
+                .wheels_mut()
+                .copy_from_slice(&vehicle.resting_wheels);
+        }
+        Ok(Self {
+            physics,
+            chassis,
+            vehicles,
+            inactive_bodies: std::collections::HashSet::with_capacity(
+                reference.bodies.len() + reference.parts.len() + reference.wheel_parts.len(),
+            ),
+        })
+    }
+}
+
+impl VehicleBody {
+    fn new(
+        reference: &ReferenceManifest,
+        vehicle: &VehicleReference,
+        pose: VehiclePose,
+        physics: &mut rapier3d::prelude::PhysicsWorld,
+    ) -> Result<Self, ReferenceError> {
         let source_body = reference
             .bodies
             .iter()
             .find(|body| body.id == vehicle.body)
             .ok_or_else(|| ReferenceError("Missing chassis body".into()))?;
-        let mut physics = rapier3d::prelude::PhysicsWorld::new();
-        physics.integration_parameters.dt = FIXED_DT;
         let chassis = physics.insert_body(
             RigidBodyBuilder::dynamic()
                 .pose(to_rapier(pose))
@@ -94,6 +165,7 @@ impl PhysicsWorld {
                 .restitution(collider.restitution)
                 .sensor(collider.sensor)
                 .enabled(collider.enabled)
+                .solver_groups(solver_groups(collider.enabled))
                 .collision_groups(InteractionGroups::new(
                     Group::from_bits_truncate(collider.membership),
                     Group::from_bits_truncate(collider.filter),
@@ -161,22 +233,7 @@ impl PhysicsWorld {
             wheel_records.push(wheel.clone());
         }
         let resting_wheels = std::array::from_fn(|i| controller.wheels()[i]);
-        refresh_world_queries(&mut physics);
-        // Reserve Rapier's four-wheel scratch buffers before the frame loop.
-        controller.update_vehicle(
-            FIXED_DT,
-            physics.broad_phase.as_query_pipeline_mut(
-                physics.narrow_phase.query_dispatcher(),
-                &mut physics.bodies,
-                &mut physics.colliders,
-                QueryFilter::default()
-                    .exclude_sensors()
-                    .exclude_rigid_body(chassis),
-            ),
-        );
-        controller.wheels_mut().copy_from_slice(&resting_wheels);
         Ok(Self {
-            physics,
             chassis,
             controller,
             resting_wheels,
@@ -206,31 +263,53 @@ impl PhysicsWorld {
             last_handbrake: true,
         })
     }
+}
 
-    pub fn apply_vehicle_forces(&mut self, input: DriveInput, drive_force: f32) {
+impl PhysicsWorld {
+    pub fn vehicle_count(&self) -> usize {
+        self.vehicles.len()
+    }
+
+    /// Returns the vehicle whose chassis is `body`.
+    pub fn vehicle_of(&self, body: RigidBodyHandle) -> Option<usize> {
+        self.chassis.iter().position(|chassis| *chassis == body)
+    }
+
+    /// Returns the vehicle that owns the wheel slot.
+    pub fn slot_vehicle(&self, slot: WheelSlotId) -> Option<usize> {
+        self.vehicles.iter().position(|vehicle| {
+            vehicle
+                .wheel_references
+                .iter()
+                .any(|reference| reference.id == slot)
+        })
+    }
+
+    pub fn apply_vehicle_forces(&mut self, index: usize, input: DriveInput, drive_force: f32) {
+        let vehicle = &mut self.vehicles[index];
+
         if input.accelerate
             || input.brake_reverse
             || input.steer != 0.0
-            || input.handbrake != self.last_handbrake
+            || input.handbrake != vehicle.last_handbrake
         {
-            self.physics.bodies[self.chassis].wake_up(true);
+            self.physics.bodies[vehicle.chassis].wake_up(true);
         }
-        self.last_handbrake = input.handbrake;
-        if self.physics.bodies[self.chassis].is_sleeping() {
+        vehicle.last_handbrake = input.handbrake;
+        if self.physics.bodies[vehicle.chassis].is_sleeping() {
             return;
         }
-        let chassis = &self.physics.bodies[self.chassis];
+        let chassis = &self.physics.bodies[vehicle.chassis];
         let speed = chassis
             .linvel()
             .dot(chassis.position().rotation * -Vector::Z);
-        let steering_limit = self.max_steer;
         let steering = if input.steer.is_finite() {
-            input.steer.clamp(-1.0, 1.0) * steering_limit
+            input.steer.clamp(-1.0, 1.0) * vehicle.max_steer
         } else {
             0.0
         };
         let direction = speed * chassis.linvel().length();
-        let braking = crate::simulation::braking(input, direction, self.auto_move_min);
+        let braking = crate::simulation::braking(input, direction, vehicle.auto_move_min);
         let drive_force = if drive_force.is_finite() {
             drive_force.max(0.0)
         } else {
@@ -245,9 +324,9 @@ impl PhysicsWorld {
         } else {
             0.0
         };
-        for (i, wheel) in self.controller.wheels_mut().iter_mut().enumerate() {
-            let slot = self.active_slots[i];
-            let reference = &self.wheel_references[slot];
+        for (i, wheel) in vehicle.controller.wheels_mut().iter_mut().enumerate() {
+            let slot = vehicle.active_slots[i];
+            let reference = &vehicle.wheel_references[slot];
             wheel.steering = if reference.steer { steering } else { 0.0 };
             wheel.engine_force = if reference.drive {
                 engine_force * reference.radius / wheel.radius
@@ -255,21 +334,27 @@ impl PhysicsWorld {
                 0.0
             };
             wheel.brake = if input.handbrake && reference.handbrake {
-                self.handbrake_torque / wheel.radius * FIXED_DT
+                vehicle.handbrake_torque / wheel.radius * FIXED_DT
             } else if braking && reference.brake {
-                self.brake_torque / wheel.radius * FIXED_DT
+                vehicle.brake_torque / wheel.radius * FIXED_DT
             } else if reference.drive {
-                self.engine_brake_force * reference.radius / wheel.radius * FIXED_DT
+                vehicle.engine_brake_force * reference.radius / wheel.radius * FIXED_DT
             } else {
                 0.0
             };
             wheel.friction_slip =
-                0.75 + 0.5 * self.installed[slot].unwrap().condition.clamp(0.0, 1.0);
+                0.75 + 0.5 * vehicle.installed[slot].unwrap().condition.clamp(0.0, 1.0);
         }
-        let not_vehicle = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
-            collider.user_data & VEHICLE_COLLIDER_FLAG == 0
+        let own = vehicle.chassis;
+        let chassis = &self.chassis;
+        // Wheels hit other vehicles' bodies but never their own vehicle.
+        let not_own = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
+            let parent = collider.parent();
+            parent != Some(own)
+                && (collider.user_data & VEHICLE_COLLIDER_FLAG == 0
+                    || parent.is_some_and(|parent| chassis.contains(&parent)))
         };
-        self.controller.update_vehicle(
+        vehicle.controller.update_vehicle(
             FIXED_DT,
             self.physics.broad_phase.as_query_pipeline_mut(
                 self.physics.narrow_phase.query_dispatcher(),
@@ -277,74 +362,134 @@ impl PhysicsWorld {
                 &mut self.physics.colliders,
                 QueryFilter::default()
                     .exclude_sensors()
-                    .exclude_rigid_body(self.chassis)
-                    .predicate(&not_vehicle),
+                    .exclude_rigid_body(own)
+                    .predicate(&not_own),
             ),
         );
-        for (wheel, &slot) in self.controller.wheels().iter().zip(&self.active_slots) {
-            self.wheel_rpm[slot] = (wheel.rotation - self.wheel_rotations[slot]) / FIXED_DT * 60.0
+        for (wheel, &slot) in vehicle
+            .controller
+            .wheels()
+            .iter()
+            .zip(&vehicle.active_slots)
+        {
+            vehicle.wheel_rpm[slot] = (wheel.rotation - vehicle.wheel_rotations[slot]) / FIXED_DT
+                * 60.0
                 / std::f32::consts::TAU;
-            self.wheel_rotations[slot] = wheel.rotation;
+            vehicle.wheel_rotations[slot] = wheel.rotation;
         }
+    }
+
+    pub fn body_active(&self, handle: RigidBodyHandle) -> bool {
+        !self.inactive_bodies.contains(&handle)
     }
 
     pub fn step_physics(&mut self) {
         self.physics.step();
     }
 
-    pub fn wheel_support_count(&self) -> usize {
-        self.active_slots.len()
+    pub fn capture_save(
+        &self,
+        vehicle: usize,
+        identity: crate::save::BodyIdentity,
+        origin: &crate::world::WorldOrigin,
+    ) -> crate::save::BodySnapshot {
+        capture_body_save(
+            &self.physics.bodies[self.chassis_handle(vehicle)],
+            identity,
+            origin,
+        )
+    }
+    pub(crate) fn restore_wheel_save(
+        &mut self,
+        vehicle: usize,
+        index: usize,
+        saved: &crate::save::WheelAttachment,
+    ) {
+        let state = &mut self.vehicles[vehicle];
+        state.resting_wheels[index].rotation = saved.rotation;
+        if let Some(active) = state.active_slots.iter().position(|slot| *slot == index) {
+            state.controller.wheels_mut()[active].rotation = saved.rotation;
+        }
+        state.wheel_rpm[index] = saved.rpm;
+        state.wheel_rotations[index] = saved.previous_rotation;
+    }
+    pub(crate) fn wheel_save_state(&self, vehicle: usize, index: usize) -> (f32, f32, f32) {
+        let state = &self.vehicles[vehicle];
+        let wheel = state
+            .active_slots
+            .iter()
+            .position(|slot| *slot == index)
+            .map_or(&state.resting_wheels[index], |active| {
+                &state.controller.wheels()[active]
+            });
+        (
+            wheel.rotation,
+            state.wheel_rpm[index],
+            state.wheel_rotations[index],
+        )
     }
 
-    pub fn set_engine_brake(&mut self, force: f32) {
-        self.engine_brake_force = if force.is_finite() {
+    pub fn wheel_support_count(&self, index: usize) -> usize {
+        self.vehicles[index].active_slots.len()
+    }
+
+    pub fn set_engine_brake(&mut self, index: usize, force: f32) {
+        self.vehicles[index].engine_brake_force = if force.is_finite() {
             force.max(0.0)
         } else {
             0.0
         };
     }
 
-    pub fn driven_wheel_rpm(&self) -> f32 {
+    pub fn driven_wheel_rpm(&self, index: usize) -> f32 {
+        let vehicle = &self.vehicles[index];
         let mut sum = 0.0;
         let mut count = 0;
-        for &slot in &self.active_slots {
-            if self.wheel_references[slot].drive {
-                sum += self.wheel_rpm[slot];
+        for &slot in &vehicle.active_slots {
+            if vehicle.wheel_references[slot].drive {
+                sum += vehicle.wheel_rpm[slot];
                 count += 1;
             }
         }
         sum / count.max(1) as f32
     }
 
-    pub fn driven_wheel_count(&self) -> usize {
-        self.active_slots
+    pub fn driven_wheel_count(&self, index: usize) -> usize {
+        let vehicle = &self.vehicles[index];
+        vehicle
+            .active_slots
             .iter()
-            .filter(|&&slot| self.wheel_references[slot].drive)
+            .filter(|&&slot| vehicle.wheel_references[slot].drive)
             .count()
     }
 
-    pub fn set_vehicle_mass(&mut self, mass_kg: f32) {
-        let geometry_mass: f32 = self.physics.bodies[self.chassis]
+    pub fn set_vehicle_mass(&mut self, index: usize, mass_kg: f32) {
+        let vehicle = &mut self.vehicles[index];
+        let geometry_mass: f32 = self.physics.bodies[vehicle.chassis]
             .colliders()
             .iter()
             .map(|handle| self.physics.colliders[*handle].mass())
             .sum();
-        let body = &mut self.physics.bodies[self.chassis];
+        let body = &mut self.physics.bodies[vehicle.chassis];
         body.set_additional_mass((mass_kg - geometry_mass).max(0.0), true);
         body.recompute_mass_properties_from_colliders(&self.physics.colliders);
         let mass = body.mass();
-        for (wheel, reference) in self.resting_wheels.iter_mut().zip(&self.wheel_references) {
+        for (wheel, reference) in vehicle
+            .resting_wheels
+            .iter_mut()
+            .zip(&vehicle.wheel_references)
+        {
             wheel.suspension_stiffness = reference.spring / mass;
             wheel.damping_compression = reference.damper / mass;
             wheel.damping_relaxation = reference.damper / mass;
         }
-        for (wheel, &slot) in self
+        for (wheel, &slot) in vehicle
             .controller
             .wheels_mut()
             .iter_mut()
-            .zip(&self.active_slots)
+            .zip(&vehicle.active_slots)
         {
-            let source = &self.resting_wheels[slot];
+            let source = &vehicle.resting_wheels[slot];
             wheel.suspension_stiffness = source.suspension_stiffness;
             wheel.damping_compression = source.damping_compression;
             wheel.damping_relaxation = source.damping_relaxation;
@@ -356,21 +501,30 @@ impl PhysicsWorld {
         slot: WheelSlotId,
         installed: Option<InstalledWheel>,
     ) -> Result<(), ReferenceError> {
-        let index = self
+        let vehicle = self
+            .slot_vehicle(slot)
+            .map(|index| &mut self.vehicles[index])
+            .ok_or_else(|| ReferenceError("Unknown wheel slot".into()))?;
+        let index = vehicle
             .wheel_references
             .iter()
             .position(|reference| reference.id == slot)
-            .ok_or_else(|| ReferenceError("Unknown wheel slot".into()))?;
-        let mut saved = self.resting_wheels;
-        for (wheel, &slot) in self.controller.wheels().iter().zip(&self.active_slots) {
+            .unwrap();
+        let mut saved = vehicle.resting_wheels;
+        for (wheel, &slot) in vehicle
+            .controller
+            .wheels()
+            .iter()
+            .zip(&vehicle.active_slots)
+        {
             saved[slot] = *wheel;
         }
-        self.installed[index] = installed;
-        self.wheel_rpm[index] = 0.0;
-        let mut controller = DynamicRayCastVehicleController::new(self.chassis);
+        vehicle.installed[index] = installed;
+        vehicle.wheel_rpm[index] = 0.0;
+        let mut controller = DynamicRayCastVehicleController::new(vehicle.chassis);
         controller.index_forward_axis = 2;
-        self.active_slots.clear();
-        for (slot, installed) in self.installed.iter().enumerate() {
+        vehicle.active_slots.clear();
+        for (slot, installed) in vehicle.installed.iter().enumerate() {
             let Some(installed) = installed else { continue };
             let wheel = &saved[slot];
             let added = controller.add_wheel(
@@ -384,10 +538,10 @@ impl PhysicsWorld {
             *added = *wheel;
             added.radius = installed.radius;
             added.friction_slip = 0.75 + 0.5 * installed.condition.clamp(0.0, 1.0);
-            self.active_slots.push(slot);
+            vehicle.active_slots.push(slot);
         }
-        self.controller = controller;
-        self.physics.bodies[self.chassis].wake_up(true);
+        vehicle.controller = controller;
+        self.physics.bodies[vehicle.chassis].wake_up(true);
         Ok(())
     }
 
@@ -399,8 +553,8 @@ impl PhysicsWorld {
         &mut self.physics
     }
 
-    pub fn chassis_handle(&self) -> RigidBodyHandle {
-        self.chassis
+    pub fn chassis_handle(&self, index: usize) -> RigidBodyHandle {
+        self.chassis[index]
     }
 
     pub fn refresh_queries(&mut self) {
@@ -425,21 +579,22 @@ impl PhysicsWorld {
         )
     }
 
-    pub fn snapshot(&self) -> VehicleSnapshot {
-        let body = &self.physics.bodies[self.chassis];
+    pub fn snapshot(&self, index: usize) -> VehicleSnapshot {
+        let vehicle = &self.vehicles[index];
+        let body = &self.physics.bodies[vehicle.chassis];
         let pose = body.position();
         let wheels = std::array::from_fn(|i| {
-            let wheel = self
+            let wheel = vehicle
                 .active_slots
                 .iter()
                 .position(|slot| *slot == i)
-                .map_or(&self.resting_wheels[i], |index| {
-                    &self.controller.wheels()[index]
+                .map_or(&vehicle.resting_wheels[i], |index| {
+                    &vehicle.controller.wheels()[index]
                 });
             let length = if wheel.raycast_info().is_in_contact {
                 wheel.raycast_info().suspension_length
             } else {
-                self.suspension_lengths[i]
+                vehicle.suspension_lengths[i]
             };
             let local = wheel.chassis_connection_point_cs + wheel.direction_cs * length;
             VehiclePose {
@@ -457,37 +612,68 @@ impl PhysicsWorld {
             linear_velocity: body.linvel().to_array(),
             angular_velocity: body.angvel().to_array(),
             wheels_contact: std::array::from_fn(|i| {
-                self.active_slots
+                vehicle
+                    .active_slots
                     .iter()
                     .position(|slot| *slot == i)
                     .is_some_and(|index| {
-                        self.controller.wheels()[index].raycast_info().is_in_contact
+                        vehicle.controller.wheels()[index]
+                            .raycast_info()
+                            .is_in_contact
                     })
             }),
         }
     }
 
-    pub fn reset(&mut self, pose: VehiclePose) {
-        let body = &mut self.physics.bodies[self.chassis];
+    pub fn reset_preserving_wheels(&mut self, vehicle: usize, pose: VehiclePose) {
+        let rotations =
+            std::array::from_fn::<_, 4, _>(|index| self.wheel_save_state(vehicle, index).0);
+        let previous = self.vehicles[vehicle].wheel_rotations;
+        let rpm = self.vehicles[vehicle].wheel_rpm;
+        self.reset(vehicle, pose);
+        let state = &mut self.vehicles[vehicle];
+        for (wheel, &slot) in state
+            .controller
+            .wheels_mut()
+            .iter_mut()
+            .zip(&state.active_slots)
+        {
+            wheel.rotation = rotations[slot];
+        }
+        for (wheel, rotation) in self.vehicles[vehicle]
+            .resting_wheels
+            .iter_mut()
+            .zip(rotations)
+        {
+            wheel.rotation = rotation;
+        }
+        self.vehicles[vehicle].wheel_rotations = previous;
+        self.vehicles[vehicle].wheel_rpm = rpm;
+    }
+
+    pub fn reset(&mut self, index: usize, pose: VehiclePose) {
+        let vehicle = &mut self.vehicles[index];
+        let body = &mut self.physics.bodies[vehicle.chassis];
+
         body.set_position(to_rapier(pose), true);
         body.set_linvel(Vector::ZERO, true);
         body.set_angvel(Vector::ZERO, true);
         body.reset_forces(true);
         body.reset_torques(true);
-        for (wheel, &slot) in self
+        for (wheel, &slot) in vehicle
             .controller
             .wheels_mut()
             .iter_mut()
-            .zip(&self.active_slots)
+            .zip(&vehicle.active_slots)
         {
-            *wheel = self.resting_wheels[slot];
-            if let Some(installed) = self.installed[slot] {
+            *wheel = vehicle.resting_wheels[slot];
+            if let Some(installed) = vehicle.installed[slot] {
                 wheel.radius = installed.radius;
             }
         }
-        self.controller.current_vehicle_speed = 0.0;
-        self.wheel_rotations = [0.0; 4];
-        self.wheel_rpm = [0.0; 4];
+        vehicle.controller.current_vehicle_speed = 0.0;
+        vehicle.wheel_rotations = [0.0; 4];
+        vehicle.wheel_rpm = [0.0; 4];
         self.refresh_queries();
     }
 
@@ -514,13 +700,15 @@ impl PhysicsWorld {
     }
 
     pub fn remove_collider(&mut self, handle: ColliderHandle) {
-        if self
-            .controller
-            .wheels()
-            .iter()
-            .any(|wheel| wheel.raycast_info().ground_object == Some(handle))
-        {
-            self.physics.bodies[self.chassis].wake_up(true);
+        for vehicle in &self.vehicles {
+            if vehicle
+                .controller
+                .wheels()
+                .iter()
+                .any(|wheel| wheel.raycast_info().ground_object == Some(handle))
+            {
+                self.physics.bodies[vehicle.chassis].wake_up(true);
+            }
         }
         self.physics.remove_collider(handle);
         self.refresh_queries();
@@ -528,7 +716,10 @@ impl PhysicsWorld {
 
     pub fn rebase(&mut self, shift: [f32; 3]) {
         let shift = Vector::from_array(shift);
-        for (_, body) in self.physics.bodies.iter_mut() {
+        for (handle, body) in self.physics.bodies.iter_mut() {
+            if self.inactive_bodies.contains(&handle) {
+                continue;
+            }
             body.set_translation(body.translation() - shift, false);
         }
         for (_, collider) in self.physics.colliders.iter_mut() {
@@ -553,6 +744,24 @@ impl PhysicsWorld {
 
     pub fn collider_count(&self) -> usize {
         self.physics.colliders.len()
+    }
+}
+
+pub(crate) fn capture_body_save(
+    body: &rapier3d::prelude::RigidBody,
+    identity: crate::save::BodyIdentity,
+    origin: &crate::world::WorldOrigin,
+) -> crate::save::BodySnapshot {
+    let pose = from_rapier(body.position());
+    crate::save::BodySnapshot {
+        identity,
+        pose: crate::save::AbsolutePose {
+            position: origin.absolute(pose.position),
+            rotation: pose.rotation,
+        },
+        linear_velocity: body.linvel().to_array(),
+        angular_velocity: body.angvel().to_array(),
+        sleeping: body.is_sleeping(),
     }
 }
 

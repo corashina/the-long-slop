@@ -112,6 +112,30 @@ impl CycleState {
         };
     }
 
+    pub fn capture_save(&self) -> crate::save::CycleSnapshot {
+        crate::save::CycleSnapshot {
+            elapsed_seconds: self.elapsed_seconds,
+            cycle_seconds: self.cycle_seconds,
+            evaluated_cycle_seconds: self.output.cycle_seconds,
+            cloud_coordinate: self.cloud_coordinate,
+            star_rotation: self.star_rotation,
+        }
+    }
+    /// Restore validated scalar state without advancing the source cycle.
+    pub fn restore_save(&mut self, reference: &CycleReference, saved: &crate::save::CycleSnapshot) {
+        self.elapsed_seconds = saved.elapsed_seconds;
+        self.cycle_seconds = saved.cycle_seconds;
+        self.cloud_coordinate = saved.cloud_coordinate;
+        self.star_rotation = saved.star_rotation;
+        self.output = evaluate(
+            reference,
+            saved.evaluated_cycle_seconds,
+            saved.elapsed_seconds,
+            saved.cloud_coordinate,
+            saved.star_rotation,
+        );
+    }
+
     pub fn reset(&mut self, reference: &CycleReference) {
         *self = Self::new(reference);
     }
@@ -508,6 +532,28 @@ impl HeadlightState {
             state_count: reference.states.len(),
         }
     }
+    pub fn capture_save(&self, source: crate::save::SourceKey) -> crate::save::ControllerSnapshot {
+        crate::save::ControllerSnapshot {
+            source,
+            current_state: self.current_state,
+            requested_state: self.requested_state,
+            refreshed_state: self.refreshed_state,
+            energy: self.energy,
+            enabled: self.enabled,
+            on: self.on,
+            cabin_mode: None,
+            switch_motion: None,
+            switch_poses: Vec::new(),
+        }
+    }
+    fn restore_save(&mut self, saved: &crate::save::ControllerSnapshot) {
+        self.current_state = saved.current_state;
+        self.requested_state = saved.requested_state;
+        self.refreshed_state = saved.refreshed_state;
+        self.energy = saved.energy;
+        self.enabled = saved.enabled;
+        self.on = saved.on;
+    }
     pub fn request(&mut self, state: u8) {
         let state = usize::from(state);
         if state < self.state_count && state != self.requested_state && state != self.current_state
@@ -562,11 +608,12 @@ enum SwitchMotion {
 }
 pub struct LightingState {
     pub cycle: CycleState,
-    requested_headlights: u8,
+    /// Per-vehicle values follow the order of the manifest vehicles.
+    requested_headlights: Vec<u8>,
     mounted: Vec<bool>,
-    vehicle: VehicleLightSample,
-    high_beam: bool,
-    dashboard_index: usize,
+    vehicles: Vec<VehicleLightSample>,
+    high_beams: Vec<bool>,
+    dashboard_indices: Vec<usize>,
     pub(crate) controllers: Vec<HeadlightState>,
     pub(crate) lights: Vec<LightOutput>,
     pub(crate) materials: Vec<LampMaterialOutput>,
@@ -602,11 +649,11 @@ impl LightingState {
                 .map(|c| c.cabin_input.as_ref().map_or(0, |input| input.startup_mode))
                 .collect(),
             pose_progress: vec![None; reference.controllers.len()],
-            requested_headlights: 0,
+            requested_headlights: vec![0; reference.high_beams.len()],
             mounted: vec![true; reference.controllers.len()],
-            vehicle: VehicleLightSample::default(),
-            high_beam: false,
-            dashboard_index: 0,
+            vehicles: vec![VehicleLightSample::default(); reference.high_beams.len()],
+            high_beams: vec![false; reference.high_beams.len()],
+            dashboard_indices: vec![0; reference.high_beams.len()],
             controllers: reference
                 .controllers
                 .iter()
@@ -628,7 +675,7 @@ impl LightingState {
                     .flat_map(|c| &c.states)
                     .map(|s| s.renderers.len())
                     .sum::<usize>()
-                    + 1,
+                    + reference.high_beams.len(),
             ),
             poses: Vec::with_capacity(
                 reference
@@ -641,6 +688,121 @@ impl LightingState {
         state.reset(reference);
         state
     }
+    pub fn capture_save(
+        &self,
+        reference: &crate::reference::LightingRecord,
+        ids: &crate::save::IdentityMap,
+    ) -> Result<crate::save::LightingSnapshot, crate::save::SaveError> {
+        use crate::save::{LocalPose, SwitchMotionSave, SwitchPoseSnapshot, identity::source_key};
+        let mut controllers = Vec::with_capacity(self.controllers.len());
+        for (index, c) in reference.controllers.iter().enumerate() {
+            let mut saved =
+                self.controllers[index].capture_save(source_key(&ids.controllers, c.id)?);
+            saved.cabin_mode = c.cabin_input.as_ref().map(|_| self.cabin_modes[index]);
+            saved.switch_motion = self.pose_progress[index].map(|m| match m {
+                SwitchMotion::Initial => SwitchMotionSave::Initial,
+                SwitchMotion::Moving(progress) => SwitchMotionSave::Moving { progress },
+            });
+            for pose in &c.animated_poses {
+                let current = self
+                    .poses
+                    .iter()
+                    .find(|p| p.node == pose.node)
+                    .ok_or_else(|| {
+                        crate::save::SaveError::InvalidLinks("Missing switch pose".into())
+                    })?;
+                saved.switch_poses.push(SwitchPoseSnapshot {
+                    node: source_key(&ids.nodes, pose.node)?,
+                    pose: LocalPose {
+                        position: current.local_pose.translation,
+                        rotation: current.local_pose.rotation,
+                    },
+                });
+            }
+            saved.switch_poses.sort_by(|a, b| a.node.cmp(&b.node));
+            controllers.push(saved);
+        }
+        controllers.sort_by(|a, b| a.source.cmp(&b.source));
+        Ok(crate::save::LightingSnapshot {
+            cycle: self.cycle.capture_save(),
+            controllers,
+        })
+    }
+    /// Restore validated state. The caller derives mounting and vehicle signals from restored owners.
+    pub fn restore_save(
+        &mut self,
+        reference: &crate::reference::LightingRecord,
+        ids: &crate::save::IdentityMap,
+        saved: &crate::save::LightingSnapshot,
+        mounted: &[bool],
+        vehicles: &[VehicleLightSample],
+        headlights: &[u8],
+    ) -> Result<(), crate::save::SaveError> {
+        use crate::save::{SaveError, SwitchMotionSave};
+        if mounted.len() != self.mounted.len() || saved.controllers.len() != self.controllers.len()
+        {
+            return Err(SaveError::InvalidLinks(
+                "Missing lamp controller state".into(),
+            ));
+        }
+        self.cycle.restore_save(&reference.cycle, &saved.cycle);
+        if vehicles.len() != self.vehicles.len()
+            || headlights.len() != self.requested_headlights.len()
+        {
+            return Err(SaveError::InvalidLinks("Missing vehicle lamp state".into()));
+        }
+        self.requested_headlights.copy_from_slice(headlights);
+        self.mounted.copy_from_slice(mounted);
+        for record in &saved.controllers {
+            let id = ids
+                .controllers
+                .get(&record.source)
+                .ok_or_else(|| SaveError::InvalidLinks("Unknown lamp controller".into()))?;
+            let index = reference
+                .controllers
+                .iter()
+                .position(|c| c.id == *id)
+                .ok_or_else(|| SaveError::InvalidLinks("Missing lamp controller".into()))?;
+            self.controllers[index].restore_save(record);
+            if let Some(mode) = record.cabin_mode {
+                self.cabin_modes[index] = mode;
+            }
+            self.pose_progress[index] = record.switch_motion.map(|m| match m {
+                SwitchMotionSave::Initial => SwitchMotion::Initial,
+                SwitchMotionSave::Moving { progress } => SwitchMotion::Moving(progress),
+            });
+            for pose in &record.switch_poses {
+                let node = ids
+                    .nodes
+                    .get(&pose.node)
+                    .ok_or_else(|| SaveError::InvalidLinks("Unknown switch node".into()))?;
+                let current = self
+                    .poses
+                    .iter_mut()
+                    .find(|p| p.node == *node)
+                    .ok_or_else(|| SaveError::InvalidLinks("Missing switch pose".into()))?;
+                current.local_pose.translation = pose.pose.position;
+                current.local_pose.rotation = pose.pose.rotation;
+            }
+        }
+        for (index, vehicle) in vehicles.iter().enumerate() {
+            self.update_vehicle(reference, index, *vehicle);
+        }
+        for index in 0..reference.controllers.len() {
+            match reference.controllers[index].kind {
+                crate::reference::LightControllerKind::House => {
+                    self.refresh_house(reference, index)
+                }
+                crate::reference::LightControllerKind::Headlight
+                | crate::reference::LightControllerKind::Cabin => {
+                    self.refresh_fade(reference, index)
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     pub fn reset(&mut self, reference: &crate::reference::LightingRecord) {
         self.cycle.reset(&reference.cycle);
         self.mounted.fill(true);
@@ -702,36 +864,40 @@ impl LightingState {
                 }
             }
         }
-        self.requested_headlights = reference
-            .controllers
-            .iter()
-            .find(|c| c.kind == crate::reference::LightControllerKind::Headlight)
-            .unwrap()
+        for (vehicle, high_beam) in reference.high_beams.iter().enumerate() {
+            self.requested_headlights[vehicle] = vehicle_controller(
+                reference,
+                crate::reference::LightControllerKind::Headlight,
+                vehicle,
+            )
             .requested_state as u8;
-        self.dashboard_index = self.materials.len();
-        self.materials
-            .push(crate::simulation::instruments::update_high_beam(
-                &reference.high_beam,
-                false,
-            ));
-        let electronics_output = reference
-            .controllers
-            .iter()
-            .find(|c| c.kind == crate::reference::LightControllerKind::Rear)
-            .unwrap()
-            .electronics_output;
+            self.dashboard_indices[vehicle] = self.materials.len();
+            self.materials
+                .push(crate::simulation::instruments::update_high_beam(
+                    high_beam, false,
+                ));
+        }
         for index in 0..reference.controllers.len() {
             if reference.controllers[index].kind == crate::reference::LightControllerKind::House {
                 self.refresh_house(reference, index);
             }
         }
-        self.update_vehicle(
-            reference,
-            VehicleLightSample {
-                electronics_output,
-                ..Default::default()
-            },
-        );
+        for vehicle in 0..reference.high_beams.len() {
+            let electronics_output = vehicle_controller(
+                reference,
+                crate::reference::LightControllerKind::Rear,
+                vehicle,
+            )
+            .electronics_output;
+            self.update_vehicle(
+                reference,
+                vehicle,
+                VehicleLightSample {
+                    electronics_output,
+                    ..Default::default()
+                },
+            );
+        }
     }
     pub fn use_control(
         &mut self,
@@ -754,7 +920,9 @@ impl LightingState {
                 let input = c.cabin_input.as_ref().unwrap();
                 self.cabin_modes[index] = (self.cabin_modes[index] + 1) % input.modes.len();
             }
-            crate::reference::LightControllerKind::Headlight => self.cycle_headlights(reference),
+            crate::reference::LightControllerKind::Headlight => {
+                self.cycle_headlights(reference, c.vehicle.unwrap())
+            }
             _ => {}
         }
     }
@@ -785,63 +953,77 @@ impl LightingState {
             }
         }
     }
+    /// Requests the cabin lamp state of one cabin controller from its door values.
     pub fn update_cabin(
         &mut self,
         reference: &crate::reference::LightingRecord,
+        index: usize,
         door_values: [f32; 4],
     ) {
-        for (index, c) in reference.controllers.iter().enumerate() {
-            let Some(input) = &c.cabin_input else {
-                continue;
-            };
-            let on = match input.modes[self.cabin_modes[index]] {
-                1 => true,
-                2 => false,
-                _ => door_values.iter().any(|value| *value > input.threshold),
-            };
-            self.controllers[index].request(u8::from(on));
-        }
+        let Some(input) = &reference.controllers[index].cabin_input else {
+            return;
+        };
+        let on = match input.modes[self.cabin_modes[index]] {
+            1 => true,
+            2 => false,
+            _ => door_values.iter().any(|value| *value > input.threshold),
+        };
+        self.controllers[index].request(u8::from(on));
     }
     pub fn visibility_outputs(&self) -> &[NodeVisibilityOutput] {
         &self.visibility
     }
-    pub fn cycle_headlights(&mut self, reference: &crate::reference::LightingRecord) {
-        self.requested_headlights = (self.requested_headlights + 1) % 3;
+    pub fn cycle_headlights(
+        &mut self,
+        reference: &crate::reference::LightingRecord,
+        vehicle: usize,
+    ) {
+        let requested = (self.requested_headlights[vehicle] + 1) % 3;
+        self.requested_headlights[vehicle] = requested;
         for (state, control) in self.controllers.iter_mut().zip(&reference.controllers) {
-            if control.kind == crate::reference::LightControllerKind::Headlight {
-                state.request(self.requested_headlights);
+            if control.kind == crate::reference::LightControllerKind::Headlight
+                && control.vehicle == Some(vehicle)
+            {
+                state.request(requested);
             }
         }
-        self.update_vehicle(reference, self.vehicle);
+        self.update_vehicle(reference, vehicle, self.vehicles[vehicle]);
     }
     pub fn set_controller_mounted(&mut self, index: usize, mounted: bool) {
         self.mounted[index] = mounted;
     }
-    pub fn headlights(&self) -> u8 {
-        self.requested_headlights
+    pub fn headlights(&self, vehicle: usize) -> u8 {
+        self.requested_headlights[vehicle]
     }
-    pub fn high_beam(&self) -> bool {
-        self.high_beam
+    pub fn high_beam(&self, vehicle: usize) -> bool {
+        self.high_beams[vehicle]
     }
     pub fn update_vehicle(
         &mut self,
         reference: &crate::reference::LightingRecord,
+        vehicle: usize,
         sample: VehicleLightSample,
     ) {
-        self.vehicle = sample;
-        let electronics = reference
-            .controllers
-            .iter()
-            .find(|c| c.kind == crate::reference::LightControllerKind::Rear)
-            .unwrap();
-        self.high_beam = self.requested_headlights == 2
+        self.vehicles[vehicle] = sample;
+        let electronics = vehicle_controller(
+            reference,
+            crate::reference::LightControllerKind::Rear,
+            vehicle,
+        );
+        let requested = self.requested_headlights[vehicle];
+        let high_beam = requested == 2
             && (electronics.electronics_source.is_none()
                 || sample.electronics_output > electronics.electronics_threshold);
-        let output =
-            crate::simulation::instruments::update_high_beam(&reference.high_beam, self.high_beam);
-        self.materials[self.dashboard_index] = output;
+        self.high_beams[vehicle] = high_beam;
+        self.materials[self.dashboard_indices[vehicle]] =
+            crate::simulation::instruments::update_high_beam(
+                &reference.high_beams[vehicle],
+                high_beam,
+            );
         for control in &reference.controllers {
-            if control.kind != crate::reference::LightControllerKind::Rear {
+            if control.kind != crate::reference::LightControllerKind::Rear
+                || control.vehicle != Some(vehicle)
+            {
                 continue;
             }
             let mut lamps = control.states.iter();
@@ -852,7 +1034,7 @@ impl LightingState {
             } {
                 let on = sample.local_ignition
                     && match lamp.signal {
-                        crate::reference::LampSignal::Tail => self.requested_headlights != 0,
+                        crate::reference::LampSignal::Tail => requested != 0,
                         crate::reference::LampSignal::Brake => sample.brake > 0.01,
                         crate::reference::LampSignal::Reverse => sample.gear_ratio < 0.,
                         _ => false,
@@ -921,48 +1103,58 @@ impl LightingState {
                 state.refreshed_state = 0;
                 state.energy = 0.;
                 state.enabled = true;
-                for lamp in &control.states {
-                    for id in &lamp.lights {
-                        let output = self.lights.iter_mut().find(|o| o.id == *id).unwrap();
-                        output.enabled = false;
-                        output.intensity = 0.;
-                    }
-                    select_material(&mut self.materials, lamp, false);
-                }
+                self.refresh_fade(reference, index);
                 continue;
             }
             if control.kind == crate::reference::LightControllerKind::Headlight {
-                state.request(self.requested_headlights);
+                state.request(self.requested_headlights[control.vehicle.unwrap()]);
             }
             state.update(dt);
-            let energy = state.energy
-                * if control.electronics_source.is_some() {
-                    control.electronics_output
-                } else {
-                    1.
-                };
-            // Clear other states first. Shared source renderers then select the current state.
-            for (index, lamp) in control.states.iter().enumerate() {
-                if index == state.refreshed_state {
-                    continue;
-                }
+            self.refresh_fade(reference, index);
+        }
+    }
+    fn refresh_fade(&mut self, reference: &crate::reference::LightingRecord, index: usize) {
+        let control = &reference.controllers[index];
+        let state = &self.controllers[index];
+        if control.kind == crate::reference::LightControllerKind::Headlight && !self.mounted[index]
+        {
+            for lamp in &control.states {
                 for id in &lamp.lights {
-                    self.lights
-                        .iter_mut()
-                        .find(|o| o.id == *id)
-                        .unwrap()
-                        .enabled = false;
+                    let out = self.lights.iter_mut().find(|o| o.id == *id).unwrap();
+                    out.enabled = false;
+                    out.intensity = 0.;
                 }
                 select_material(&mut self.materials, lamp, false);
             }
-            let lamp = &control.states[state.refreshed_state];
-            for id in &lamp.lights {
-                let output = self.lights.iter_mut().find(|o| o.id == *id).unwrap();
-                output.enabled = true;
-                output.intensity = lamp.intensity * energy;
-            }
-            select_material(&mut self.materials, lamp, energy > 0.);
+            return;
         }
+        let energy = state.energy
+            * if control.electronics_source.is_some() {
+                control.electronics_output
+            } else {
+                1.
+            };
+        // Clear other states first. Shared source renderers then select the current state.
+        for (index, lamp) in control.states.iter().enumerate() {
+            if index == state.refreshed_state {
+                continue;
+            }
+            for id in &lamp.lights {
+                self.lights
+                    .iter_mut()
+                    .find(|o| o.id == *id)
+                    .unwrap()
+                    .enabled = false;
+            }
+            select_material(&mut self.materials, lamp, false);
+        }
+        let lamp = &control.states[state.refreshed_state];
+        for id in &lamp.lights {
+            let output = self.lights.iter_mut().find(|o| o.id == *id).unwrap();
+            output.enabled = true;
+            output.intensity = lamp.intensity * energy;
+        }
+        select_material(&mut self.materials, lamp, energy > 0.);
     }
     /// New road instances use the current phase and electronics output.
     pub fn road_lamp_output(&self, reference: &crate::reference::LightingRecord) -> LightOutput {
@@ -989,6 +1181,17 @@ impl LightingState {
     pub fn control_poses(&self) -> &[ControlPoseOutput] {
         &self.poses
     }
+}
+fn vehicle_controller(
+    reference: &crate::reference::LightingRecord,
+    kind: crate::reference::LightControllerKind,
+    vehicle: usize,
+) -> &crate::reference::LightControllerReference {
+    reference
+        .controllers
+        .iter()
+        .find(|c| c.kind == kind && c.vehicle == Some(vehicle))
+        .expect("validated vehicle controller")
 }
 fn select_material(
     outputs: &mut [LampMaterialOutput],

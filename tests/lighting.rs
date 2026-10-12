@@ -385,7 +385,7 @@ fn headlight_fade_uses_source_branch_order() {
     h.update(0.1);
     assert_eq!((h.current_state(), h.energy()), (2, 1.));
     let mut state = LightingState::new(&r);
-    state.cycle_headlights(&r);
+    state.cycle_headlights(&r, 0);
     state.advance_fades(&r, 0.1);
     state.advance_fades(&r, 0.1);
     state.advance_fades(&r, 0.1);
@@ -397,7 +397,7 @@ fn headlight_fade_uses_source_branch_order() {
             .unwrap()
             .enabled
     );
-    state.cycle_headlights(&r);
+    state.cycle_headlights(&r, 0);
     state.advance_fades(&r, 0.1);
     state.advance_fades(&r, 0.1);
     assert!(
@@ -460,9 +460,10 @@ fn rapid_headlight_requests_keep_source_guard() {
 fn headlights_do_not_need_ignition_and_rear_lights_do() {
     let r = lamps();
     let mut state = LightingState::new(&r);
-    state.cycle_headlights(&r);
+    state.cycle_headlights(&r, 0);
     state.update_vehicle(
         &r,
+        0,
         VehicleLightSample {
             local_ignition: false,
             brake: 1.,
@@ -527,16 +528,16 @@ fn headlights_do_not_need_ignition_and_rear_lights_do() {
 fn brake_reverse_and_high_beam_signals_match_source() {
     let r = lamps();
     let mut state = LightingState::new(&r);
-    state.cycle_headlights(&r);
-    state.cycle_headlights(&r);
+    state.cycle_headlights(&r, 0);
+    state.cycle_headlights(&r, 0);
     let mut sample = VehicleLightSample {
         local_ignition: true,
         brake: 0.01,
         gear_ratio: 0.,
         electronics_output: 1.,
     };
-    state.update_vehicle(&r, sample);
-    assert!(state.high_beam());
+    state.update_vehicle(&r, 0, sample);
+    assert!(state.high_beam(0));
     assert!(
         !state
             .light_outputs()
@@ -547,7 +548,7 @@ fn brake_reverse_and_high_beam_signals_match_source() {
     );
     sample.brake = 0.011;
     sample.gear_ratio = -1.;
-    state.update_vehicle(&r, sample);
+    state.update_vehicle(&r, 0, sample);
     for id in 9..=12 {
         assert!(
             state
@@ -559,8 +560,8 @@ fn brake_reverse_and_high_beam_signals_match_source() {
         );
     }
     sample.electronics_output = 0.2;
-    state.update_vehicle(&r, sample);
-    assert!(!state.high_beam());
+    state.update_vehicle(&r, 0, sample);
+    assert!(!state.high_beam(0));
 }
 
 #[test]
@@ -623,14 +624,14 @@ fn rear_shared_material_follows_each_source_ignition_branch() {
         gear_ratio: -1.,
         electronics_output: 1.,
     };
-    state.update_vehicle(&r, sample);
+    state.update_vehicle(&r, 0, sample);
     let reverse_on = reverse.on_material.as_ref().unwrap();
     assert_eq!(
         material(&state),
         (reverse_on.asset, reverse_on.gltf_material)
     );
     sample.local_ignition = false;
-    state.update_vehicle(&r, sample);
+    state.update_vehicle(&r, 0, sample);
     assert_eq!(material(&state), (tail_off.asset, tail_off.gltf_material));
     for id in 9..=12 {
         assert!(
@@ -682,4 +683,57 @@ fn night_late_loading_uses_current_enable_state() {
     close(state.road_lamp_output(&reference).intensity, 1.5);
     reference.road_lamp.global_enabled = false;
     assert!(!state.road_lamp_output(&reference).enabled);
+}
+
+#[test]
+fn fleet_lighting_uniform_fits_webgl2() {
+    let rust = include_str!("../src/presentation/lighting.rs");
+    let shader = include_str!("../web/assets/shaders/source_surface.wgsl");
+    let constant = |name: &str| -> usize {
+        rust.split(&format!("pub const {name}: usize = "))
+            .nth(1)
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let lights = constant("MAX_LIGHTS");
+    let shadows = constant("SHADOW_SLOTS");
+    assert_eq!(lights, 40);
+    assert_eq!(shadows, 100);
+    assert!(shader.contains(&format!("lights: array<SourceLight,{lights}>")));
+    assert!(shader.contains(&format!("shadows: array<SourceShadow,{shadows}>")));
+    let fields = |name: &str| {
+        rust.split(&format!("pub struct {name} {{"))
+            .nth(1)
+            .unwrap()
+            .split('}')
+            .next()
+            .unwrap()
+    };
+    let vector_bytes = |name: &str| -> usize {
+        fields(name)
+            .lines()
+            .filter_map(|line| line.split(": ").nth(1))
+            .map(|kind| match kind.trim_end_matches(',') {
+                "Mat4" => 64,
+                "Vec4" | "UVec4" => 16,
+                other => panic!("Unmeasured GPU field {other}"),
+            })
+            .sum()
+    };
+    let bytes = fields("LightingUniform")
+        .lines()
+        .filter_map(|line| line.split(": ").nth(1))
+        .map(|kind| match kind.trim_end_matches(',') {
+            "[GpuLight; MAX_LIGHTS]" => lights * vector_bytes("GpuLight"),
+            "[GpuShadow; SHADOW_SLOTS]" => shadows * vector_bytes("GpuShadow"),
+            "Vec4" | "UVec4" => 16,
+            other => panic!("Unmeasured uniform field {other}"),
+        })
+        .sum::<usize>();
+    assert_eq!(bytes, 16_080);
+    assert!(bytes <= 16_384);
 }

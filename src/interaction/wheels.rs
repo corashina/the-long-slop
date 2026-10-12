@@ -28,6 +28,7 @@ struct Part {
 }
 struct Slot {
     id: WheelSlotId,
+    vehicle: usize,
     index: usize,
     rim: Option<usize>,
     original_rim: ItemId,
@@ -36,20 +37,100 @@ struct Slot {
     last_support: Option<(f32, f32)>,
     sensor: Option<ColliderHandle>,
 }
+/// Chassis mass terms that this module owns for one vehicle.
+struct VehicleMass {
+    tanks: Vec<ItemId>,
+    base_mass: f32,
+    last_mass: f32,
+}
 pub struct WheelAssemblies {
     parts: Vec<Part>,
     indices: HashMap<ItemId, usize>,
     slots: Vec<Slot>,
     tire_fits: HashSet<(ItemId, ItemId)>,
-    vehicle_tanks: Vec<ItemId>,
-    base_mass: f32,
-    last_mass: f32,
+    vehicles: Vec<VehicleMass>,
     bound: bool,
     general_mass: Vec<(ItemId, f32)>,
     covers: HashMap<ItemId, PartSlotId>,
 }
 
 impl WheelAssemblies {
+    pub(crate) fn restore_save(
+        &mut self,
+        ids: &crate::save::IdentityMap,
+        saved: &crate::save::AttachmentsSnapshot,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), crate::save::SaveError> {
+        self.bind(items, physics)?;
+        for part in &mut self.parts {
+            if let Some(body) = part.free_body {
+                physics.rapier_mut().bodies[body].set_enabled(false);
+            }
+            part.tire = None;
+        }
+        for record in &saved.tires {
+            let rim = self.indices[&ids.item(&record.rim)?];
+            self.parts[rim].tire = Some(self.indices[&ids.item(&record.tire)?]);
+        }
+        for record in &saved.wheels {
+            let slot = self
+                .slots
+                .iter_mut()
+                .find(|s| s.id == ids.wheel_slots[&record.slot])
+                .unwrap();
+            slot.rim = record
+                .rim
+                .as_ref()
+                .map(|id| ids.item(id).map(|id| self.indices[&id]))
+                .transpose()?;
+        }
+        for i in 0..self.parts.len() {
+            let state = items.get(self.parts[i].item).unwrap();
+            if matches!(state.location, ItemLocation::World | ItemLocation::Held) {
+                let body = self.free_body(i, Pose::IDENTITY, physics);
+                let local = to_rapier(items.get(self.parts[i].item).unwrap().local_pose);
+                self.place_part(i, body, local, true, items, physics)?;
+            } else if let ItemLocation::WheelSlot(slot_id) = state.location {
+                self.place_part(
+                    i,
+                    physics.chassis_handle(
+                        physics
+                            .slot_vehicle(slot_id)
+                            .expect("validated wheel owner"),
+                    ),
+                    to_rapier(state.local_pose),
+                    false,
+                    items,
+                    physics,
+                )?;
+            }
+        }
+        for i in 0..self.parts.len() {
+            if let Some(tire) = self.parts[i].tire {
+                let body = items.get(self.parts[i].item).unwrap().body.unwrap();
+                let local = to_rapier(items.get(self.parts[tire].item).unwrap().local_pose);
+                self.place_part(
+                    tire,
+                    body,
+                    local,
+                    physics.vehicle_of(body).is_none(),
+                    items,
+                    physics,
+                )?;
+            }
+        }
+        self.sync(items, physics)?;
+        for record in &saved.wheels {
+            let slot = self
+                .slots
+                .iter()
+                .find(|s| s.id == ids.wheel_slots[&record.slot])
+                .unwrap();
+            physics.restore_wheel_save(slot.vehicle, slot.index, record);
+        }
+        Ok(())
+    }
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut parts = Vec::with_capacity(reference.wheel_parts.len());
         let mut indices = HashMap::with_capacity(reference.wheel_parts.len());
@@ -112,15 +193,20 @@ impl WheelAssemblies {
                 parts[rim].tire = Some(tire);
             }
         }
-        let chassis = reference
-            .bodies
-            .iter()
-            .find(|body| body.id == reference.vehicle.body)
-            .ok_or_else(|| error("Missing chassis source pose"))?;
-        let chassis_pose = pose(&chassis.pose);
-        let mut slots = Vec::with_capacity(4);
-        let mut installed_mass = 0.0;
-        for (index, id) in reference.vehicle.wheel_slots.iter().enumerate() {
+        let mut slots = Vec::with_capacity(reference.wheel_slots.len());
+        let mut installed_mass = vec![0.0; reference.vehicles.len()];
+        for (vehicle, index, id) in reference.vehicles.iter().enumerate().flat_map(|(v, r)| {
+            r.wheel_slots
+                .iter()
+                .enumerate()
+                .map(move |(i, id)| (v, i, id))
+        }) {
+            let chassis = reference
+                .bodies
+                .iter()
+                .find(|body| body.id == reference.vehicles[vehicle].body)
+                .ok_or_else(|| error("Missing chassis source pose"))?;
+            let chassis_pose = pose(&chassis.pose);
             let record = reference
                 .wheel_slots
                 .iter()
@@ -136,7 +222,7 @@ impl WheelAssemblies {
                 .get(&record.tire)
                 .ok_or_else(|| error("Missing installed tire"))?;
             parts[rim].tire = Some(tire);
-            installed_mass += parts[rim].mass + parts[tire].mass;
+            installed_mass[vehicle] += parts[rim].mass + parts[tire].mass;
             let anchor = reference
                 .anchors
                 .iter()
@@ -178,6 +264,7 @@ impl WheelAssemblies {
                 .collect();
             slots.push(Slot {
                 id: *id,
+                vehicle,
                 index,
                 rim: Some(rim),
                 original_rim: record.rim,
@@ -205,18 +292,6 @@ impl WheelAssemblies {
                 }
             }
         }
-        let vehicle_tanks: Vec<_> = reference
-            .tanks
-            .iter()
-            .filter(|tank| tank.role == TankRole::Vehicle)
-            .map(|tank| tank.item)
-            .collect();
-        let initial_fluids: f32 = reference
-            .tanks
-            .iter()
-            .filter(|tank| tank.role == TankRole::Vehicle)
-            .map(|tank| tank.quantities_liters.iter().sum::<f32>())
-            .sum();
         let general_mass: Vec<_> = reference
             .items
             .iter()
@@ -236,21 +311,56 @@ impl WheelAssemblies {
             })
             .map(|i| (i.id, i.mass_kg))
             .collect();
-        let general_dry: f32 = general_mass.iter().map(|(_, mass)| mass).sum();
+        let item_vehicle = |id: ItemId| {
+            reference
+                .items
+                .iter()
+                .find(|item| item.id == id)
+                .and_then(|item| crate::starting_area::body_vehicle(reference, item.body))
+        };
+        let vehicles = reference
+            .vehicles
+            .iter()
+            .enumerate()
+            .map(|(vehicle, record)| {
+                let tanks: Vec<_> = reference
+                    .tanks
+                    .iter()
+                    .filter(|tank| {
+                        tank.role == TankRole::Vehicle && item_vehicle(tank.item) == Some(vehicle)
+                    })
+                    .collect();
+                let initial_fluids: f32 = tanks
+                    .iter()
+                    .map(|tank| tank.quantities_liters.iter().sum::<f32>())
+                    .sum();
+                let general_dry: f32 = general_mass
+                    .iter()
+                    .filter(|(id, _)| item_vehicle(*id) == Some(vehicle))
+                    .map(|(_, mass)| mass)
+                    .sum();
+                VehicleMass {
+                    tanks: tanks.iter().map(|tank| tank.item).collect(),
+                    base_mass: record.mass_kg
+                        - installed_mass[vehicle]
+                        - initial_fluids
+                        - general_dry,
+                    last_mass: f32::NAN,
+                }
+            })
+            .collect();
         Ok(Self {
             parts,
             indices,
             slots,
             tire_fits,
-            vehicle_tanks,
-            base_mass: reference.vehicle.mass_kg - installed_mass - initial_fluids - general_dry,
+            vehicles,
             general_mass,
             covers: reference
                 .wheel_parts
                 .iter()
                 .filter_map(|p| p.cover_slot.map(|slot| (p.item, slot)))
                 .collect(),
-            last_mass: f32::NAN,
             bound: false,
         })
     }
@@ -263,6 +373,51 @@ impl WheelAssemblies {
         })
     }
 
+    pub fn capture_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+        physics: &PhysicsWorld,
+    ) -> Result<
+        (
+            Vec<crate::save::WheelAttachment>,
+            Vec<crate::save::TireAttachment>,
+        ),
+        crate::save::SaveError,
+    > {
+        let mut slots = self
+            .slots
+            .iter()
+            .map(|slot| {
+                let (rotation, rpm, previous_rotation) =
+                    physics.wheel_save_state(slot.vehicle, slot.index);
+                Ok(crate::save::WheelAttachment {
+                    slot: crate::save::identity::source_key(&ids.wheel_slots, slot.id)?,
+                    rim: slot
+                        .rim
+                        .map(|rim| ids.item_instance(self.parts[rim].item))
+                        .transpose()?,
+                    rotation,
+                    rpm,
+                    previous_rotation,
+                })
+            })
+            .collect::<Result<Vec<_>, crate::save::SaveError>>()?;
+        let mut tires = self
+            .parts
+            .iter()
+            .filter(|part| part.rim)
+            .filter_map(|part| part.tire.map(|tire| (part, tire)))
+            .map(|(part, tire)| {
+                Ok(crate::save::TireAttachment {
+                    rim: ids.item_instance(part.item)?,
+                    tire: ids.item_instance(self.parts[tire].item)?,
+                })
+            })
+            .collect::<Result<Vec<_>, crate::save::SaveError>>()?;
+        slots.sort_by(|a, b| a.slot.cmp(&b.slot));
+        tires.sort_by(|a, b| a.rim.cmp(&b.rim));
+        Ok((slots, tires))
+    }
     pub fn slot_for_item(&self, item: ItemId) -> Option<WheelSlotId> {
         self.slots
             .iter()
@@ -362,9 +517,9 @@ impl WheelAssemblies {
         }
         let world = item_pose(items, self.parts[rim].item, physics)?;
         let body = self.free_body(rim, world, physics);
-        let velocity =
-            physics.rapier().bodies[physics.chassis_handle()].velocity_at_point(world.translation);
-        let angular = physics.rapier().bodies[physics.chassis_handle()].angvel();
+        let chassis = physics.chassis_handle(self.slots[slot].vehicle);
+        let velocity = physics.rapier().bodies[chassis].velocity_at_point(world.translation);
+        let angular = physics.rapier().bodies[chassis].angvel();
         physics.rapier_mut().bodies[body].set_linvel(velocity, true);
         physics.rapier_mut().bodies[body].set_angvel(angular, true);
         self.place_part(rim, body, Pose::IDENTITY, true, items, physics)?;
@@ -432,7 +587,7 @@ impl WheelAssemblies {
         }
         let slot = self.slots.iter().position(|slot| slot.id == id).unwrap();
         let rim = self.indices[&item];
-        let chassis = physics.chassis_handle();
+        let chassis = physics.chassis_handle(self.slots[slot].vehicle);
         self.place_part(rim, chassis, Pose::IDENTITY, false, items, physics)?;
         if let Some(tire) = self.parts[rim].tire {
             self.place_part(tire, chassis, Pose::IDENTITY, false, items, physics)?;
@@ -573,7 +728,7 @@ impl WheelAssemblies {
         state.body = Some(body);
         state.local_pose = from_rapier(&local);
         state.pose = from_rapier(&(*physics.rapier().bodies[body].position() * local));
-        let vehicle = body == physics.chassis_handle();
+        let vehicle = physics.vehicle_of(body).is_some();
         for &(handle, pose) in &self.parts[part].colliders {
             let world = physics.rapier_mut();
             world
@@ -581,7 +736,7 @@ impl WheelAssemblies {
                 .set_parent(handle, Some(body), &mut world.bodies);
             let collider = &mut world.colliders[handle];
             collider.set_position_wrt_parent(local * pose);
-            collider.set_enabled(enabled);
+            crate::vehicle::set_collider_enabled(collider, enabled);
             collider.set_density(0.0);
             if vehicle {
                 collider.user_data |= VEHICLE_COLLIDER_FLAG;
@@ -600,7 +755,7 @@ impl WheelAssemblies {
         items: &ItemStore,
         physics: &mut PhysicsWorld,
     ) {
-        if body == physics.chassis_handle() {
+        if physics.vehicle_of(body).is_some() {
             return;
         }
         let mass = self.parts[rim].mass
@@ -624,17 +779,85 @@ impl WheelAssemblies {
         }
     }
 
+    pub fn sync_activity(&mut self, physics: &mut PhysicsWorld) {
+        for slot in &self.slots {
+            let active = physics.body_active(physics.chassis_handle(slot.vehicle));
+            if let Some(handle) = slot.sensor {
+                physics.rapier_mut().colliders[handle].set_enabled(active);
+            }
+        }
+    }
+
     pub fn sync(
         &mut self,
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
         self.bind(items, physics)?;
-        let snapshot = physics.snapshot();
-        let chassis = physics.chassis_handle();
+        self.sync_activity(physics);
+        for vehicle in 0..self.vehicles.len() {
+            self.sync_vehicle(vehicle, items, physics)?;
+        }
+        for index in 0..self.parts.len() {
+            if let Some(item) = items.get(self.parts[index].item)
+                && matches!(item.location, ItemLocation::World | ItemLocation::Held)
+                && let Some(body) = item.body
+                && physics.body_active(body)
+            {
+                self.update_body_mass(index, body, items, physics);
+            }
+        }
+        for vehicle in 0..self.vehicles.len() {
+            let chassis = physics.chassis_handle(vehicle);
+            let state = &self.vehicles[vehicle];
+            let mut mass = state.base_mass;
+            for slot in self.slots.iter().filter(|slot| slot.vehicle == vehicle) {
+                if let Some(rim) = slot.rim {
+                    mass += self.parts[rim].mass
+                        + self.parts[rim]
+                            .tire
+                            .map_or(0.0, |tire| self.parts[tire].mass);
+                }
+            }
+            for &(id, dry) in &self.general_mass {
+                if items.get(id).is_some_and(|i| i.body == Some(chassis)) {
+                    mass += dry;
+                }
+            }
+            for id in &state.tanks {
+                if items.get(*id).is_some_and(|i| i.body != Some(chassis)) {
+                    continue;
+                }
+                mass += items
+                    .get(*id)
+                    .and_then(|item| item.fluid.as_ref())
+                    .ok_or_else(|| error("Missing vehicle tank"))?
+                    .mixture
+                    .total();
+            }
+            if !state.last_mass.is_finite() || (mass - state.last_mass).abs() > 0.0001 {
+                physics.set_vehicle_mass(vehicle, mass);
+                self.vehicles[vehicle].last_mass = mass;
+            }
+        }
+        Ok(())
+    }
+
+    /// Moves mounted wheels with the suspension and updates wheel supports.
+    fn sync_vehicle(
+        &mut self,
+        vehicle: usize,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        if !physics.body_active(physics.chassis_handle(vehicle)) {
+            return Ok(());
+        }
+        let snapshot = physics.snapshot(vehicle);
+        let chassis = physics.chassis_handle(vehicle);
+
         let inverse = to_rapier(snapshot.pose).inverse();
-        let mut mass = self.base_mass;
-        for slot in &mut self.slots {
+        for slot in self.slots.iter_mut().filter(|slot| slot.vehicle == vehicle) {
             let support = if let Some(rim) = slot.rim {
                 let part = &self.parts[rim];
                 let rim_pose = to_rapier(snapshot.wheels[slot.index])
@@ -646,7 +869,6 @@ impl WheelAssemblies {
                 state.body = Some(chassis);
                 state.local_pose = from_rapier(&(inverse * rim_pose));
                 state.pose = from_rapier(&rim_pose);
-                mass += part.mass;
                 let (radius, quality) = if let Some(tire) = part.tire {
                     let tire_part = &self.parts[tire];
                     let tire_pose = rim_pose
@@ -661,7 +883,6 @@ impl WheelAssemblies {
                     tire_state.local_pose = from_rapier(&(inverse * tire_pose));
                     tire_state.pose = from_rapier(&tire_pose);
                     tire_state.location = ItemLocation::Attached(part.item);
-                    mass += tire_part.mass;
                     (tire_part.radius, tire_state.condition)
                 } else {
                     (part.radius, 1.0)
@@ -699,34 +920,7 @@ impl WheelAssemblies {
                 }
             }
         }
-        for index in 0..self.parts.len() {
-            if let Some(item) = items.get(self.parts[index].item)
-                && matches!(item.location, ItemLocation::World | ItemLocation::Held)
-                && let Some(body) = item.body
-            {
-                self.update_body_mass(index, body, items, physics);
-            }
-        }
-        for &(id, dry) in &self.general_mass {
-            if items.get(id).is_some_and(|i| i.body == Some(chassis)) {
-                mass += dry;
-            }
-        }
-        for id in &self.vehicle_tanks {
-            if items.get(*id).is_some_and(|i| i.body != Some(chassis)) {
-                continue;
-            }
-            mass += items
-                .get(*id)
-                .and_then(|item| item.fluid.as_ref())
-                .ok_or_else(|| error("Missing vehicle tank"))?
-                .mixture
-                .total();
-        }
-        if !self.last_mass.is_finite() || (mass - self.last_mass).abs() > 0.0001 {
-            physics.set_vehicle_mass(mass);
-            self.last_mass = mass;
-        }
+
         Ok(())
     }
 }

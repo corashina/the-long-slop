@@ -23,7 +23,8 @@ use bevy::render::{
 use bevy::shader::Shader;
 use std::sync::{Arc, Mutex};
 
-pub const MAX_LIGHTS: usize = 32;
+// Both source vehicles and the full streamed road lamp window fit the 16 KiB uniform limit.
+pub const MAX_LIGHTS: usize = 40;
 pub const SHADOW_SLOTS: usize = 100;
 pub const ATLAS_SIZE: u32 = 4000;
 pub const TILE_SIZE: u32 = 400;
@@ -79,6 +80,7 @@ pub struct SourceLight {
     pub faces: usize,
     pub enabled: bool,
 }
+#[derive(Clone)]
 pub struct BoundLight {
     pub index: usize,
     pub road: bool,
@@ -86,20 +88,24 @@ pub struct BoundLight {
     pub source_index: usize,
     pub entity: Entity,
     pub node: Option<Entity>,
+    pub item: Option<crate::reference::ItemId>,
+    pub body: Option<crate::reference::BodyId>,
     pub pose: Transform,
 }
+#[derive(Clone)]
 pub struct BoundLampMaterial {
     pub output_index: usize,
     pub receivers: Vec<Entity>,
     pub current: Option<(crate::reference::AssetId, u32)>,
     pub choices: Vec<super::materials::LampMaterialChoice>,
 }
+#[derive(Clone)]
 pub struct AuthoredMaterial {
     pub asset: crate::reference::AssetId,
     pub index: u32,
     pub handle: Handle<StandardMaterial>,
 }
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct SourceLighting {
     pub sky: super::sky::SkyState,
     pub(crate) road_lamps: super::world::RoadLamps,
@@ -122,9 +128,22 @@ pub struct SourceLighting {
     pub status: Arc<Mutex<RenderingState>>,
 }
 impl SourceLighting {
+    pub(crate) fn prepare_copy(&self) -> Self {
+        let mut copy = self.clone();
+        copy.road_lamps.clear_owned();
+        copy.lights.retain(|light| !light.road);
+        for light in self.lights.iter().filter(|light| light.road) {
+            copy.uniform.lights[light.index] = GpuLight::default();
+        }
+        copy.uniform.counts.x = copy.road_lamps.fixed_lights as u32;
+        copy.uniform.counts.y = copy.road_lamps.fixed_shadows as u32;
+        copy
+    }
+
     /// Replace owned light instances. Retain loaded scenes and prepared assets.
     pub fn reset_instances(&mut self, commands: &mut Commands) {
         self.road_lamps.reset_instances(commands);
+        self.sky.reset_views();
         for light in self.lights.drain(..) {
             commands.entity(light.entity).despawn();
         }
@@ -524,9 +543,38 @@ pub(crate) fn bind_lighting(
             }
         }
         let entity = entity.id();
+        let mut ancestor = light.node;
+        let mut item = None;
+        let mut body = None;
+        while let Some(id) = ancestor {
+            if item.is_none() {
+                item = reference
+                    .0
+                    .items
+                    .iter()
+                    .find(|item| item.node == id)
+                    .map(|item| item.id);
+            }
+            if body.is_none() {
+                body = reference
+                    .0
+                    .bodies
+                    .iter()
+                    .find(|body| body.node == id)
+                    .map(|body| body.id);
+            }
+            ancestor = reference
+                .0
+                .nodes
+                .iter()
+                .find(|node| node.id == id)
+                .and_then(|node| node.parent);
+        }
         source.lights.push(BoundLight {
             index,
             road: false,
+            item,
+            body,
             id: light.id,
             source_index,
             entity,
@@ -655,6 +703,26 @@ pub(crate) fn sync_lighting(
     for bound_index in 0..source.lights.len() {
         let bound = &source.lights[bound_index];
         let index = bound.index;
+        let active = bound
+            .item
+            .map(|id| {
+                drive
+                    .runtime
+                    .area
+                    .items
+                    .get(id)
+                    .is_some_and(|item| item.inactive_pose.is_none())
+            })
+            .unwrap_or_else(|| {
+                bound.body.is_none_or(|id| {
+                    drive
+                        .runtime
+                        .area
+                        .bodies
+                        .get(&id)
+                        .is_some_and(|handle| drive.runtime.physics.body_active(*handle))
+                })
+            });
         let record = &reference.0.lighting.lights[bound.source_index];
         let output = if bound.road {
             &road_output
@@ -676,7 +744,7 @@ pub(crate) fn sync_lighting(
         }
         pose.set_if_neq(next_pose);
         global.set_if_neq(GlobalTransform::from(next_pose));
-        let enabled = source.warming || output.enabled;
+        let enabled = active && (source.warming || output.enabled);
         if marker.enabled != enabled {
             marker.enabled = enabled;
         }
@@ -696,7 +764,9 @@ pub(crate) fn sync_lighting(
         } else {
             record.color
         };
-        let intensity = if record.kind == LightKind::Directional {
+        let intensity = if !active {
+            0.
+        } else if record.kind == LightKind::Directional {
             cycle.directional_intensity
         } else if output.enabled {
             output.intensity
@@ -1141,6 +1211,8 @@ pub(crate) fn register_road_light(
     source.lights.push(BoundLight {
         index,
         road: true,
+        item: None,
+        body: None,
         id: light.id,
         source_index,
         entity,

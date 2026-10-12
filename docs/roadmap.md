@@ -85,7 +85,7 @@ Reuse retained evidence and passed checks when their inputs remain unchanged.
 - Embedded-browser pointer lock limits continuous gameplay verification.
 - Logical GPU byte counts exclude driver memory and overhead.
 
-Source vehicle, interaction, and Lada radio audio are implemented on the audio branch. Assembled audible acceptance remains incomplete.
-The user stopped further checks. See the [audio verification report](research/2026-10-12-audio-verification.md) for the remaining scenarios.
-
-Dynamic vehicle mirrors, plate text, survival, other vehicles, saves, multiplayer, and deployment remain outside scope.
+Source vehicle, interaction, and Lada radio audio are implemented. Assembled audible acceptance remains incomplete.
+The user stopped further checks. See the [audio verification report](research/2026-10-12-audio-verification.md).
+Master now includes save/load, the source fleet, and live mirrors.
+Survival, multiplayer, and deployment remain outside scope.

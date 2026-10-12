@@ -1,14 +1,16 @@
-"""Resolve only the selected Lada's source instrument components."""
+"""Resolve the source instrument components of one selected car."""
 from .source import key,source_id,vector
 
-def recover_instruments(source,manifest,reports):
+def recover_instruments(source,manifest,reports,name,root):
     nodes={(n['source']['file'],n['source']['path_id']):n['id'] for n in manifest['nodes']}
-    material_indices=reports['lada']['material_indices']
-    root=source.transform_for(source.get('level1',17687))
+    material_indices=reports[name]['material_indices']
+    asset=next(a['id'] for a in manifest['assets'] if a['path']==f'reference/{name}.gltf')
     parts=[c for n in source.hierarchy(root) for c in n['components'] if c.type.name=='MonoBehaviour'
            and source.read(c)['m_Script']['m_PathID']]
     car=next(c for c in parts if source.class_name(c)=='carscript'); cd=source.read(car)
-    meter=source.get('level1',78501);md=source.read(meter)
+    meters=[c for c in parts if source.class_name(c)=='meterscript']
+    if len(meters)!=1:raise ValueError(f'Car needs one meter: {name}')
+    meter=meters[0];md=source.read(meter)
     def node(owner,ptr,renderer=False):
         reader=source.resolve(owner,ptr)
         if renderer:reader=source.transform_for(source.resolve(reader,source.read(reader)['m_GameObject']))
@@ -16,7 +18,7 @@ def recover_instruments(source,manifest,reports):
         return nodes[key(reader)]
     def material(owner,ptr):
         r=source.resolve(owner,ptr);identity=f'{r.assets_file.name}:{r.path_id}'
-        return {'source':source_id(r),'asset':2,'gltf_material':material_indices[identity]}
+        return {'source':source_id(r),'asset':asset,'gltf_material':material_indices[identity]}
     needles=[]
     for entry in md['mutatok']:
         r=source.resolve(meter,entry['mutato']);d=source.read(r)

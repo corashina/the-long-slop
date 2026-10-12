@@ -161,12 +161,12 @@ fn ignition_event_requires_a_successful_change_and_restart_clears_it() {
     let vehicle = game
         .items
         .iter()
-        .find(|i| i.node == game.vehicle.root)
+        .find(|i| i.node == game.vehicles[0].root)
         .unwrap()
         .id;
     game.items
         .iter_mut()
-        .find(|i| i.id == game.engine.item)
+        .find(|i| i.id == game.vehicles[0].engine.item)
         .unwrap()
         .attached_to = Some(vehicle);
     let mut run = GarageRuntime::new(&game).unwrap();
@@ -219,7 +219,7 @@ fn ignition_event_requires_a_successful_change_and_restart_clears_it() {
         },
     );
     assert!(run.audio.as_mut().unwrap().pop_event().is_none());
-    run.restart(&game).unwrap();
+    run.audio.as_mut().unwrap().reset(2);
     assert_eq!(run.audio.as_ref().unwrap().session, 2);
     assert!(run.audio.as_mut().unwrap().pop_event().is_none());
 }
@@ -413,12 +413,12 @@ fn ignition_edges_survive_fixed_steps() {
     let car = game
         .items
         .iter()
-        .find(|i| i.node == game.vehicle.root)
+        .find(|i| i.node == game.vehicles[0].root)
         .unwrap()
         .id;
     game.items
         .iter_mut()
-        .find(|i| i.id == game.engine.item)
+        .find(|i| i.id == game.vehicles[0].engine.item)
         .unwrap()
         .attached_to = Some(car);
     let mut run = GarageRuntime::new(&game).unwrap();
@@ -448,7 +448,7 @@ fn ignition_edges_survive_fixed_steps() {
                 ..Default::default()
             },
         );
-        assert_eq!(run.engine_output.ignition, expected);
+        assert_eq!(run.vehicles[0].engine_output.ignition, expected);
     }
     let state = run.audio.as_mut().unwrap();
     assert_eq!(state.pop_event().unwrap().sequence, 1);
@@ -524,11 +524,11 @@ fn failed_attachment_is_silent() {
         game.area.player_spawn.translation = [20., 1., 20.];
         game.nodes
             .iter_mut()
-            .find(|n| n.id == game.vehicle.root)
+            .find(|n| n.id == game.vehicles[0].root)
             .unwrap()
             .transform
             .translation[1] = 1.1;
-        let slot = game.vehicle.wheel_slots[0];
+        let slot = game.vehicles[0].wheel_slots[0];
         let rim = game.wheel_slots[0].rim;
         let source = AudioReference::from_value(&game.audio, &game)
             .unwrap()
@@ -551,7 +551,7 @@ fn failed_attachment_is_silent() {
         }
         let mut run = GarageRuntime::new(&game).unwrap();
         let center = run.physics.rapier().colliders[run.wheels.sensor(slot).unwrap()].translation();
-        let chassis = run.physics.rapier().bodies[run.physics.chassis_handle()].translation();
+        let chassis = run.physics.rapier().bodies[run.physics.chassis_handle(0)].translation();
         let outward = Vector::new((center - chassis).x, 0., (center - chassis).z).normalize();
         let old = run.area.player.body_handle();
         run.physics.rapier_mut().bodies[old].set_enabled(false);

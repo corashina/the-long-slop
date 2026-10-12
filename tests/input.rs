@@ -99,7 +99,7 @@ fn f_release_edge_runs_once_across_catch_up_steps() {
 fn lifecycle_boundary_discards_the_sampled_frame() {
     let app = include_str!("../src/app.rs");
     let boundary = app
-        .find("if actions & 31 != 0")
+        .find("if actions & 22 != 0")
         .expect("lifecycle actions must discard the frame sampled before input clear");
     let merge = app.find("drive.input.merge(frame)").unwrap();
     assert!(boundary < merge);
@@ -159,7 +159,7 @@ fn one_light_edge_survives_six_steps_hold_and_release() {
             ..Default::default()
         },
     );
-    assert!(!runtime.lighting.high_beam());
+    assert!(!runtime.lighting.high_beam(0));
     let seat = r.seats.iter().find(|s| s.driver).unwrap();
     assert!(runtime.area.player.enter(
         seat.id,
@@ -189,7 +189,7 @@ fn one_light_edge_survives_six_steps_hold_and_release() {
             .unwrap()
             .enabled
     );
-    assert!(!runtime.lighting.high_beam());
+    assert!(!runtime.lighting.high_beam(0));
     input.merge(FrameInput {
         held: keys::LIGHTS,
         ..Default::default()
@@ -200,14 +200,14 @@ fn one_light_edge_survives_six_steps_hold_and_release() {
         ..Default::default()
     });
     runtime.step(&r, input.take_step());
-    assert!(!runtime.lighting.high_beam());
+    assert!(!runtime.lighting.high_beam(0));
     input.merge(FrameInput {
         held: keys::LIGHTS,
         pressed: keys::LIGHTS,
         ..Default::default()
     });
     runtime.step(&r, input.take_step());
-    assert!(runtime.lighting.high_beam());
+    assert!(runtime.lighting.high_beam(0));
 }
 
 #[test]
@@ -221,7 +221,7 @@ fn frame_fade_uses_active_elapsed_once_after_catch_up() {
     }
     let mut runtime = GarageRuntime::new(&r).unwrap();
     runtime.started = true;
-    runtime.lighting.cycle_headlights(&r.lighting);
+    runtime.lighting.cycle_headlights(&r.lighting, 0);
     for _ in 0..6 {
         runtime.step(&r, FrameInput::default());
     }
@@ -308,7 +308,7 @@ fn exported_driver_lights_use_real_edges() {
         }
         runtime.advance_light_fades(&r, 0.1);
     }
-    assert!(runtime.lighting.high_beam());
+    assert!(runtime.lighting.high_beam(0));
     for _ in 0..3 {
         runtime.advance_light_fades(&r, 0.1);
     }
@@ -390,7 +390,7 @@ fn exported_low_startup_keeps_source_outputs_through_pause() {
             );
         }
     }
-    assert!(!runtime.lighting.high_beam());
+    assert!(!runtime.lighting.high_beam(0));
     let lights = runtime
         .lighting
         .light_outputs()
@@ -430,7 +430,7 @@ fn exported_low_startup_keeps_source_outputs_through_pause() {
             .map(|o| (o.renderer, o.asset, o.material_index))
             .collect::<Vec<_>>()
     );
-    assert!(!runtime.lighting.high_beam());
+    assert!(!runtime.lighting.high_beam(0));
 }
 
 #[test]
@@ -451,10 +451,10 @@ fn car_and_headlight_electronics_keep_their_source_owners() {
     }
     let mut runtime = GarageRuntime::new(&r).unwrap();
     runtime.started = true;
-    runtime.engine.ignition = true;
+    runtime.vehicles[0].engine.ignition = true;
     runtime.step(&r, FrameInput::default());
     runtime.advance_light_fades(&r, 0.1);
-    assert!(!runtime.lighting.high_beam());
+    assert!(!runtime.lighting.high_beam(0));
     for c in r
         .lighting
         .controllers
@@ -504,7 +504,7 @@ fn exported_brake_lights_sample_pedal_before_physics() {
     r.area.player_spawn.rotation = [(tilt / 2.).sin(), 0., 0., (tilt / 2.).cos()];
     let mut runtime = GarageRuntime::new(&r).unwrap();
     runtime.started = true;
-    runtime.engine.ignition = true;
+    runtime.vehicles[0].engine.ignition = true;
     runtime.step(
         &r,
         FrameInput {
@@ -514,7 +514,7 @@ fn exported_brake_lights_sample_pedal_before_physics() {
         },
     );
     assert!(runtime.area.player.driving());
-    let chassis = runtime.physics.chassis_handle();
+    let chassis = runtime.physics.chassis_handle(0);
     let velocity = runtime.physics.rapier().bodies[chassis].position().rotation
         * -rapier3d::math::Vector::Z
         * 2.;
@@ -580,7 +580,7 @@ fn exported_reverse_lights_follow_selected_reverse_gear() {
     r.area.player_spawn.rotation = [(tilt / 2.).sin(), 0., 0., (tilt / 2.).cos()];
     let mut runtime = GarageRuntime::new(&r).unwrap();
     runtime.started = true;
-    runtime.engine.ignition = true;
+    runtime.vehicles[0].engine.ignition = true;
     runtime.step(
         &r,
         FrameInput {
@@ -636,12 +636,12 @@ fn driving2_uses_car_controls_without_throttle() {
     let car = game
         .items
         .iter()
-        .find(|i| i.node == game.vehicle.root)
+        .find(|i| i.node == game.vehicles[0].root)
         .unwrap()
         .id;
     game.items
         .iter_mut()
-        .find(|i| i.id == game.engine.item)
+        .find(|i| i.id == game.vehicles[0].engine.item)
         .unwrap()
         .attached_to = Some(car);
     let mut run = GarageRuntime::new(&game).unwrap();
@@ -672,9 +672,9 @@ fn driving2_uses_car_controls_without_throttle() {
             .unwrap()
             .playing
     );
-    assert!(!run.engine_output.starter);
+    assert!(!run.vehicles[0].engine_output.starter);
     assert!(
-        !run.engine_output.ignition,
+        !run.vehicles[0].engine_output.ignition,
         "driving2 forward must not trigger automatic throttle ignition"
     );
     run.step(
@@ -692,7 +692,7 @@ fn driving2_uses_car_controls_without_throttle() {
             ..Default::default()
         },
     );
-    assert!(run.engine_output.ignition, "driving2 must allow ignition");
+    assert!(run.vehicles[0].engine_output.ignition, "driving2 must allow ignition");
 }
 #[test]
 #[ignore = "requires installed source export"]

@@ -12,6 +12,8 @@ use std::{
     fmt,
 };
 
+pub mod mirrors;
+pub use mirrors::*;
 pub mod instruments;
 pub mod ui;
 pub use instruments::*;
@@ -585,6 +587,7 @@ pub struct SeatReference {
     pub source: SourceId,
     pub item: ItemId,
     pub anchor: AnchorId,
+    pub vehicle: usize,
     pub driver: bool,
     pub driving2: bool,
     pub hit_nodes: Vec<NodeId>,
@@ -690,6 +693,8 @@ pub struct WheelPartReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VehicleReference {
+    pub engine: EngineReference,
+    pub instruments: InstrumentReference,
     pub handbrake: bool,
     pub source: SourceId,
     pub body: BodyId,
@@ -747,9 +752,9 @@ pub struct LibraryProvenance {
 pub struct ReferenceManifest {
     pub audio: serde_json::Value,
     pub ui: UiReference,
-    pub instruments: InstrumentReference,
     pub library: LibraryProvenance,
     pub lighting: LightingRecord,
+    pub mirrors: MirrorRecord,
     pub app_id: u32,
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
@@ -771,10 +776,9 @@ pub struct ReferenceManifest {
     pub openings: Vec<OpeningRecord>,
     pub tanks: Vec<TankReference>,
     pub fluid_rules: FluidRulesReference,
-    pub engine: EngineReference,
     pub player: PlayerReference,
     pub seats: Vec<SeatReference>,
-    pub vehicle: VehicleReference,
+    pub vehicles: Vec<VehicleReference>,
     pub area: StartingAreaReference,
 }
 
@@ -846,6 +850,7 @@ impl ReferenceManifest {
             "app/build",
         )?;
         self.lighting.validate(self)?;
+        self.mirrors.validate(self)?;
         require(
             self.bodies.iter().all(|b| {
                 self.nodes.iter().any(|n| {
@@ -863,7 +868,10 @@ impl ReferenceManifest {
         let asset_ids = ids(self.assets.iter().map(|r| r.id), "duplicate asset ID")?;
         let node_ids = ids(self.nodes.iter().map(|r| r.id), "duplicate node ID")?;
         self.ui.validate()?;
-        self.instruments.validate(&node_ids, &self.assets)?;
+        require(!self.vehicles.is_empty(), "vehicles")?;
+        for v in &self.vehicles {
+            v.instruments.validate(&node_ids, &self.assets)?;
+        }
         let body_ids = ids(self.bodies.iter().map(|r| r.id), "duplicate body ID")?;
         let collider_ids = ids(self.colliders.iter().map(|r| r.id), "duplicate collider ID")?;
         let anchor_ids = ids(self.anchors.iter().map(|r| r.id), "duplicate anchor ID")?;
@@ -1407,68 +1415,6 @@ impl ReferenceManifest {
                 "tank quantities",
             )?;
         }
-        let e = &self.engine;
-        require(
-            item_ids.contains(&e.item)
-                && [e.fuel_tank, e.oil_tank, e.coolant_tank]
-                    .iter()
-                    .all(|id| self.tanks.iter().any(|t| t.item == *id)),
-            "engine tank bindings",
-        )?;
-        require(
-            finite(&[
-                e.start_chance,
-                e.starter_delay_seconds,
-                e.starter_rpm,
-                e.starter_rpm_lerp,
-                e.idle_rpm,
-                e.max_rpm,
-                e.shutdown_rpm,
-                e.max_torque_nm,
-                e.starting_push_force,
-                e.consumption_modifier,
-                e.oil_consumption_modifier,
-                e.engine_brake_modifier,
-                e.rpm_change_modifier,
-                e.engine_start_time_modifier,
-                e.heat_gain_min,
-                e.heat_gain_max,
-                e.heat_loss,
-            ]) && finite(&e.optimal_temperature)
-                && finite(&e.fuel_consumption),
-            "engine parameters",
-        )?;
-        require(
-            (0.0..=1.0).contains(&e.start_chance)
-                && e.shutdown_rpm > 0.0
-                && e.max_rpm > e.idle_rpm
-                && e.max_torque_nm > 0.0,
-            "engine limits",
-        )?;
-        require(
-            e.torque_curve.keys.len() >= 2 && e.torque_curve.keys.len() <= 1024,
-            "torque curve",
-        )?;
-        for k in &e.torque_curve.keys {
-            require(
-                finite(&[
-                    k.time,
-                    k.value,
-                    k.in_tangent,
-                    k.out_tangent,
-                    k.in_weight,
-                    k.out_weight,
-                ]) && k.weighted_mode <= 3,
-                "curve key",
-            )?;
-        }
-        require(
-            e.torque_curve
-                .keys
-                .windows(2)
-                .all(|k| k[0].time < k[1].time),
-            "curve key order",
-        )?;
         let p = &self.player;
         require(p.camera_culling_mask != 0, "camera culling mask")?;
         require(
@@ -1500,30 +1446,6 @@ impl ReferenceManifest {
         )?;
         require(
             finite(&[
-                e.auto_shift_clutch_rpm,
-                e.auto_shift_clutch_rpm_range,
-                self.vehicle.auto_shift_stop_speed,
-                self.vehicle.auto_shift_min_rpm,
-                self.vehicle.auto_shift_max_rpm,
-            ]) && self.vehicle.auto_shift_min_rpm < self.vehicle.auto_shift_max_rpm,
-            "automatic shift thresholds",
-        )?;
-        require(
-            e.oil_fluid < 6
-                && finite(&[
-                    e.max_rpm_difference,
-                    e.torque_modifier,
-                    e.start_chance_interval_seconds,
-                    e.globals.min_steam_temperature,
-                ])
-                && e.max_rpm_difference > 0.0
-                && e.start_chance_interval_seconds > 0.0
-                && e.globals.temperature_difference_modifier > 0.0
-                && e.globals.max_car_velocity > 0.0,
-            "engine scalar bounds",
-        )?;
-        require(
-            finite(&[
                 p.standing_radius,
                 p.standing_height,
                 p.crouch_radius,
@@ -1539,33 +1461,121 @@ impl ReferenceManifest {
                 && p.exit_steps_horizontal <= 100,
             "effective player geometry/exit scan",
         )?;
-        require(
-            finite(&[
-                e.initial_temperature,
-                e.heat_loss_speed_modifier,
-                e.globals.fuel_consumption,
-                e.globals.oil_consumption,
-                e.globals.rpm_change,
-                e.globals.coolant_evaporate_rate,
-                e.globals.temperature_difference_modifier,
-                e.globals.temperature_move_modifier,
-                e.globals.max_car_velocity,
-                e.globals.awake_heat_modifier,
-            ]) && finite(&e.globals.car_temperature_bounds),
-            "engine globals",
-        )?;
-        require(
-            finite(&e.radiator.thermostat_range)
-                && finite(&[
-                    e.radiator.fan_temperature_on,
-                    e.radiator.fan_temperature_off,
-                    e.radiator.max_value,
-                    e.radiator.max_fan_value,
-                    e.radiator.max_fan_speed,
-                    e.radiator.max_fluid_loss,
-                ]),
-            "radiator parameters",
-        )?;
+        for v in &self.vehicles {
+            let e = &v.engine;
+            require(
+                item_ids.contains(&e.item)
+                    && [e.fuel_tank, e.oil_tank, e.coolant_tank]
+                        .iter()
+                        .all(|id| self.tanks.iter().any(|t| t.item == *id)),
+                "engine tank bindings",
+            )?;
+            require(
+                finite(&[
+                    e.start_chance,
+                    e.starter_delay_seconds,
+                    e.starter_rpm,
+                    e.starter_rpm_lerp,
+                    e.idle_rpm,
+                    e.max_rpm,
+                    e.shutdown_rpm,
+                    e.max_torque_nm,
+                    e.starting_push_force,
+                    e.consumption_modifier,
+                    e.oil_consumption_modifier,
+                    e.engine_brake_modifier,
+                    e.rpm_change_modifier,
+                    e.engine_start_time_modifier,
+                    e.heat_gain_min,
+                    e.heat_gain_max,
+                    e.heat_loss,
+                ]) && finite(&e.optimal_temperature)
+                    && finite(&e.fuel_consumption),
+                "engine parameters",
+            )?;
+            require(
+                (0.0..=1.0).contains(&e.start_chance)
+                    && e.shutdown_rpm > 0.0
+                    && e.max_rpm > e.idle_rpm
+                    && e.max_torque_nm > 0.0,
+                "engine limits",
+            )?;
+            require(
+                e.torque_curve.keys.len() >= 2 && e.torque_curve.keys.len() <= 1024,
+                "torque curve",
+            )?;
+            for k in &e.torque_curve.keys {
+                require(
+                    finite(&[
+                        k.time,
+                        k.value,
+                        k.in_tangent,
+                        k.out_tangent,
+                        k.in_weight,
+                        k.out_weight,
+                    ]) && k.weighted_mode <= 3,
+                    "curve key",
+                )?;
+            }
+            require(
+                e.torque_curve
+                    .keys
+                    .windows(2)
+                    .all(|k| k[0].time < k[1].time),
+                "curve key order",
+            )?;
+            require(
+                finite(&[
+                    e.auto_shift_clutch_rpm,
+                    e.auto_shift_clutch_rpm_range,
+                    v.auto_shift_stop_speed,
+                    v.auto_shift_min_rpm,
+                    v.auto_shift_max_rpm,
+                ]) && v.auto_shift_min_rpm < v.auto_shift_max_rpm,
+                "automatic shift thresholds",
+            )?;
+            require(
+                e.oil_fluid < 6
+                    && finite(&[
+                        e.max_rpm_difference,
+                        e.torque_modifier,
+                        e.start_chance_interval_seconds,
+                        e.globals.min_steam_temperature,
+                    ])
+                    && e.max_rpm_difference > 0.0
+                    && e.start_chance_interval_seconds > 0.0
+                    && e.globals.temperature_difference_modifier > 0.0
+                    && e.globals.max_car_velocity > 0.0,
+                "engine scalar bounds",
+            )?;
+            require(
+                finite(&[
+                    e.initial_temperature,
+                    e.heat_loss_speed_modifier,
+                    e.globals.fuel_consumption,
+                    e.globals.oil_consumption,
+                    e.globals.rpm_change,
+                    e.globals.coolant_evaporate_rate,
+                    e.globals.temperature_difference_modifier,
+                    e.globals.temperature_move_modifier,
+                    e.globals.max_car_velocity,
+                    e.globals.awake_heat_modifier,
+                ]) && finite(&e.globals.car_temperature_bounds),
+                "engine globals",
+            )?;
+            require(
+                finite(&e.radiator.thermostat_range)
+                    && finite(&[
+                        e.radiator.fan_temperature_on,
+                        e.radiator.fan_temperature_off,
+                        e.radiator.max_value,
+                        e.radiator.max_fan_value,
+                        e.radiator.max_fan_speed,
+                        e.radiator.max_fluid_loss,
+                    ]),
+                "radiator parameters",
+            )?;
+        }
         require(
             finite(&[
                 self.fluid_rules.pour_speed,
@@ -1693,14 +1703,21 @@ impl ReferenceManifest {
                     && finite(&r.yaw_limits_degrees)
                     && r.yaw_limits_degrees[0] <= r.yaw_limits_degrees[1]
                     && r.exit_distance.is_finite()
-                    && r.exit_distance > 0.0,
+                    && r.exit_distance > 0.0
+                    && r.vehicle < self.vehicles.len(),
                 "seat binding/limits",
             )?;
         }
-        require(
-            self.seats.iter().filter(|s| s.driver).count() == 1,
-            "driver seat",
-        )?;
+        for vehicle in 0..self.vehicles.len() {
+            require(
+                self.seats
+                    .iter()
+                    .filter(|s| s.driver && s.vehicle == vehicle)
+                    .count()
+                    == 1,
+                "driver seat",
+            )?;
+        }
         for r in &self.wheel_slots {
             require(
                 anchor_ids.contains(&r.anchor)
@@ -1757,36 +1774,46 @@ impl ReferenceManifest {
             }),
             "wheel mount bindings",
         )?;
-        let v = &self.vehicle;
         require(
-            body_ids.contains(&v.body)
-                && node_ids.contains(&v.root)
-                && v.wheel_slots.iter().all(|id| wheel_ids.contains(id))
-                && v.colliders.iter().all(|id| collider_ids.contains(id)),
-            "vehicle bindings",
+            wheel_ids.len() == 4 * self.vehicles.len()
+                && self
+                    .vehicles
+                    .iter()
+                    .flat_map(|v| v.wheel_slots)
+                    .collect::<HashSet<_>>()
+                    .len()
+                    == wheel_ids.len(),
+            "four road wheels per vehicle",
         )?;
-        require(
-            wheel_ids.len() == 4
-                && v.wheel_slots.iter().collect::<HashSet<_>>().len() == 4
-                && !v.colliders.is_empty(),
-            "four road wheels/colliders",
-        )?;
-        require(
-            finite(&[
-                v.mass_kg,
-                v.serialized_mass_kg,
-                v.final_drive_ratio,
-                v.max_steer_degrees,
-                v.keyboard_steering_rate,
-                v.brake_torque_nm,
-                v.handbrake_torque_nm,
-            ]) && finite(&v.gear_ratios)
-                && v.gear_ratios.iter().any(|ratio| *ratio == 0.0)
-                && v.gear_free_run.len() == v.gear_ratios.len()
-                && v.mass_kg > 0.0
-                && v.keyboard_steering_rate > 0.0,
-            "vehicle parameters",
-        )?;
+        for v in &self.vehicles {
+            require(
+                body_ids.contains(&v.body)
+                    && node_ids.contains(&v.root)
+                    && v.wheel_slots.iter().all(|id| wheel_ids.contains(id))
+                    && v.colliders.iter().all(|id| collider_ids.contains(id)),
+                "vehicle bindings",
+            )?;
+            require(
+                v.wheel_slots.iter().collect::<HashSet<_>>().len() == 4 && !v.colliders.is_empty(),
+                "four road wheels/colliders",
+            )?;
+            require(
+                finite(&[
+                    v.mass_kg,
+                    v.serialized_mass_kg,
+                    v.final_drive_ratio,
+                    v.max_steer_degrees,
+                    v.keyboard_steering_rate,
+                    v.brake_torque_nm,
+                    v.handbrake_torque_nm,
+                ]) && finite(&v.gear_ratios)
+                    && v.gear_ratios.iter().any(|ratio| *ratio == 0.0)
+                    && v.gear_free_run.len() == v.gear_ratios.len()
+                    && v.mass_kg > 0.0
+                    && v.keyboard_steering_rate > 0.0,
+                "vehicle parameters",
+            )?;
+        }
         let a = &self.area;
         require(
             node_ids.contains(&a.home_root)

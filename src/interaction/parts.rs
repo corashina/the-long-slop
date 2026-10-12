@@ -46,6 +46,8 @@ struct Slot {
     compatible: Vec<ItemId>,
     mount_pose: Pose,
     detach_pose: Option<Pose>,
+    /// The vehicle whose hierarchy holds the slot.
+    vehicle: Option<usize>,
 }
 pub struct PartAttachments {
     scan_mask: u32,
@@ -56,10 +58,57 @@ pub struct PartAttachments {
     slot_indices: HashMap<PartSlotId, usize>,
     collider_slots: HashMap<ColliderId, PartSlotId>,
     wheel_covers: HashMap<ItemId, PartSlotId>,
-    chassis: BodyId,
+    /// Chassis body per vehicle.
+    chassis: Vec<BodyId>,
     bound: bool,
 }
 impl PartAttachments {
+    pub(crate) fn restore_save(
+        &mut self,
+        ids: &crate::save::IdentityMap,
+        saved: &[crate::save::PartAttachment],
+        items: &mut ItemStore,
+        mechanisms: &mut MechanismState,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), crate::save::SaveError> {
+        for p in &mut self.parts {
+            p.slot = None;
+        }
+        for record in saved {
+            let slot = self.slot_indices[&ids.part_slots[&record.slot]];
+            let part = record
+                .part
+                .as_ref()
+                .map(|id| ids.item(id).map(|id| self.indices[&id]))
+                .transpose()?;
+            self.slots[slot].part = part;
+            if let Some(part) = part {
+                self.parts[part].slot = Some(slot);
+            }
+        }
+        for p in &self.parts {
+            physics.rapier_mut().bodies[p.body.unwrap()].set_enabled(p.slot.is_none());
+            if let Some(slot) = p.slot {
+                mechanisms.mount_part(
+                    p.reference.node,
+                    self.slots[slot].mount_node,
+                    p.reference.local_rotation_after_mount,
+                );
+            } else {
+                mechanisms.set_part_root(p.reference.node, p.body);
+            }
+        }
+        for i in 0..self.parts.len() {
+            let body = self.physical_body(i, items, physics);
+            for &(id, _, _) in &self.parts[i].members {
+                items.get_mut(id).unwrap().body = Some(body);
+            }
+        }
+        self.cache_assembly_mass(items);
+        mechanisms.sync(physics, true);
+        self.capture_mechanisms(items, mechanisms, physics)?;
+        Ok(())
+    }
     pub fn new(r: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let indices: HashMap<_, _> = r
             .parts
@@ -163,6 +212,18 @@ impl PartAttachments {
                         })
                     })
                     .collect::<Result<_, ReferenceError>>()?,
+                vehicle: {
+                    let mut node = Some(s.node);
+                    let mut vehicle = None;
+                    while let Some(id) = node {
+                        vehicle = r.vehicles.iter().position(|v| v.root == id);
+                        if vehicle.is_some() {
+                            break;
+                        }
+                        node = r.nodes.iter().find(|n| n.id == id).and_then(|n| n.parent);
+                    }
+                    vehicle
+                },
                 reference: s.clone(),
                 part: s
                     .part
@@ -193,7 +254,7 @@ impl PartAttachments {
             slots,
             slot_indices,
             collider_slots,
-            chassis: r.vehicle.body,
+            chassis: r.vehicles.iter().map(|v| v.body).collect(),
             bound: false,
             wheel_covers: r
                 .wheel_parts
@@ -201,6 +262,26 @@ impl PartAttachments {
                 .filter_map(|p| p.cover_slot.map(|s| (p.item, s)))
                 .collect(),
         })
+    }
+    pub fn capture_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+    ) -> Result<Vec<crate::save::PartAttachment>, crate::save::SaveError> {
+        let mut records = self
+            .slots
+            .iter()
+            .map(|slot| {
+                Ok(crate::save::PartAttachment {
+                    slot: crate::save::identity::source_key(&ids.part_slots, slot.reference.id)?,
+                    part: slot
+                        .part
+                        .map(|part| ids.item_instance(self.parts[part].reference.item))
+                        .transpose()?,
+                })
+            })
+            .collect::<Result<Vec<_>, crate::save::SaveError>>()?;
+        records.sort_by(|a, b| a.slot.cmp(&b.slot));
+        Ok(records)
     }
     pub fn rebase(&mut self, shift: [f32; 3]) {
         let shift = rapier3d::math::Vector::from_array(shift);
@@ -566,7 +647,8 @@ impl PartAttachments {
                     .colliders
                     .set_parent(handle, Some(body), &mut world.bodies);
                 world.colliders[handle].set_position_wrt_parent(local);
-                world.colliders[handle].set_enabled(
+                crate::vehicle::set_collider_enabled(
+                    &mut world.colliders[handle],
                     p.slot
                         .is_none_or(|s| !self.slots[s].reference.disable_colliders_on_craft)
                         && shape.enabled,
@@ -604,6 +686,12 @@ impl PartAttachments {
     }
     pub fn prepare_mechanisms(&mut self, items: &ItemStore, m: &mut MechanismState) {
         for p in &self.parts {
+            if items
+                .get(p.reference.item)
+                .is_some_and(|item| item.inactive_pose.is_some())
+            {
+                continue;
+            }
             if p.slot.is_none() {
                 m.set_part_root(p.reference.node, p.body);
             }
@@ -631,6 +719,12 @@ impl PartAttachments {
             slot.detach_pose = slot.detach_node.and_then(|n| m.node_pose(n)).map(to_rapier);
         }
         for p in &mut self.parts {
+            if items
+                .get(p.reference.item)
+                .is_some_and(|item| item.inactive_pose.is_some())
+            {
+                continue;
+            }
             p.pose = to_rapier(
                 m.node_pose(p.reference.node)
                     .ok_or_else(|| error("Missing part transform"))?,
@@ -642,6 +736,12 @@ impl PartAttachments {
             }
         }
         for i in 0..self.parts.len() {
+            if items
+                .get(self.parts[i].reference.item)
+                .is_some_and(|item| item.inactive_pose.is_some())
+            {
+                continue;
+            }
             let body = self.physical_body(i, items, physics);
             let inverse = physics.rapier().bodies[body].position().inverse();
             for &(id, _, _) in &self.parts[i].members {
@@ -650,11 +750,13 @@ impl PartAttachments {
                 state.local_pose = from_rapier(&(inverse * to_rapier(state.pose)));
             }
             for shape in &self.parts[i].shapes {
-                let local = if body == physics.chassis_handle() {
-                    m.body_local_pose(shape.body, self.chassis)
+                let vehicle = physics.vehicle_of(body);
+                let local = if let Some(vehicle) = vehicle {
+                    let chassis = self.chassis[vehicle];
+                    m.body_local_pose(shape.body, chassis)
                         .map(|pose| pose * shape.shape)
                         .unwrap_or_else(|| {
-                            m.node_local_pose(self.parts[i].reference.node, self.chassis)
+                            m.node_local_pose(self.parts[i].reference.node, chassis)
                                 .unwrap()
                                 * shape.part_local
                         })
@@ -664,7 +766,6 @@ impl PartAttachments {
                             .map(|pose| pose * shape.shape)
                             .unwrap_or(self.parts[i].pose * shape.part_local)
                 };
-                let vehicle = body == physics.chassis_handle();
                 let h = shape.handle.unwrap();
                 let world = physics.rapier_mut();
                 if world.colliders[h].parent() != Some(body) {
@@ -679,9 +780,9 @@ impl PartAttachments {
                     .is_none_or(|s| !self.slots[s].reference.disable_colliders_on_craft)
                     && shape.enabled;
                 if c.is_enabled() != enabled {
-                    c.set_enabled(enabled);
+                    crate::vehicle::set_collider_enabled(c, enabled);
                 }
-                if vehicle {
+                if vehicle.is_some() {
                     c.user_data |= VEHICLE_COLLIDER_FLAG;
                 } else {
                     c.user_data &= !VEHICLE_COLLIDER_FLAG;
@@ -702,7 +803,7 @@ impl PartAttachments {
                 return p.body.unwrap();
             };
             let Some(owner) = self.slots[s].reference.owner else {
-                return physics.chassis_handle();
+                return physics.chassis_handle(self.slots[s].vehicle.expect("vehicle slot"));
             };
             if let Some(&parent) = self.indices.get(&owner) {
                 i = parent;
@@ -747,6 +848,12 @@ impl PartAttachments {
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
         for i in 0..self.parts.len() {
+            if items
+                .get(self.parts[i].reference.item)
+                .is_some_and(|item| item.inactive_pose.is_some())
+            {
+                continue;
+            }
             if self.parts[i].slot.is_some() {
                 continue;
             }

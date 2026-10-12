@@ -1,3 +1,6 @@
+mod save;
+#[cfg(feature = "save-fixture")]
+mod save_fixture;
 use crate::browser::*;
 use crate::interaction::labels::display_name;
 use crate::presentation::instruments::InstrumentVisuals;
@@ -25,7 +28,8 @@ pub(crate) struct RuntimeReference(pub Arc<ReferenceManifest>);
 #[derive(Resource)]
 pub(crate) struct Drive {
     pub runtime: GarageRuntime,
-    instruments: InstrumentState,
+    /// Gauge state per vehicle.
+    instruments: Vec<InstrumentState>,
     input: FrameInput,
     clock: StepClock,
     previous: VehiclePose,
@@ -61,7 +65,7 @@ struct FeedbackStamp {
 }
 
 #[wasm_bindgen]
-pub fn run(reference_json: &str) -> Result<(), JsValue> {
+pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
     let reference = Arc::new(
         ReferenceManifest::from_json(reference_json.as_bytes())
@@ -71,8 +75,13 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
     let current = runtime.area.player.view_pose(&runtime.physics);
     App::new()
         .insert_resource(RuntimeReference(reference.clone()))
+        .insert_resource(save::SaveRequests::new(&reference, manifest_sha256))
         .insert_resource(Drive {
-            instruments: InstrumentState::new(&reference.instruments),
+            instruments: reference
+                .vehicles
+                .iter()
+                .map(|vehicle| InstrumentState::new(&vehicle.instruments))
+                .collect(),
             runtime,
             input: FrameInput::default(),
             clock: StepClock::default(),
@@ -107,15 +116,17 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
         .add_plugins((
             presentation::lighting::SourceLightingPlugin,
             presentation::materials::SourceMaterialPlugin,
+            presentation::mirrors::SourceMirrorPlugin,
         ))
         .add_systems(Startup, setup)
         .add_systems(
             Update,
             (
                 check_ready,
+                read_input,
+                save::dispatch,
                 presentation::lighting::bind_lighting,
                 presentation::lighting::lighting_readiness,
-                read_input,
                 advance_physics,
                 sync_world,
                 sync_imported,
@@ -161,6 +172,7 @@ fn setup(
     presentation::reference::load(&mut commands, &server, &reference.0);
     commands.spawn((
         DriveCamera,
+        presentation::mirrors::MirrorViewRole::Normal,
         Camera3d::default(),
         bevy::camera::Hdr,
         (0..32)
@@ -205,7 +217,12 @@ fn check_ready(
     mut frames: Local<u8>,
     lighting: Res<presentation::lighting::SourceLighting>,
     mut materials: ResMut<presentation::materials::SourceMaterials>,
+    mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
 ) {
+    if let Some(error) = mirrors.failure() {
+        game_failure(&error);
+        visuals.failed = true;
+    }
     if visuals.failed {
         return;
     }
@@ -290,6 +307,9 @@ fn check_ready(
             if materials.state != presentation::materials::RenderingState::Ready {
                 return;
             }
+            if !mirrors.ready() {
+                return;
+            }
             *frames += 1;
             if *frames >= 2 {
                 drive.ready = true;
@@ -314,10 +334,9 @@ fn clear_input(drive: &mut Drive) {
     drive.skip_elapsed = true;
 }
 fn read_input(
-    mut commands: Commands,
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
-    mut source: ResMut<presentation::lighting::SourceLighting>,
+    requests: Res<save::SaveRequests>,
 ) {
     let actions = game_actions();
     let frame = FrameInput {
@@ -330,26 +349,19 @@ fn read_input(
         ],
         wheel: game_wheel(),
     };
+    if requests.pending() {
+        return;
+    }
     if actions & 2 != 0 {
         drive.runtime.paused = true;
         clear_input(&mut drive);
     }
-    if actions & 5 != 0 && drive.ready {
+    if actions & 4 != 0 && drive.ready {
         drive.runtime.started = true;
         drive.runtime.paused = false;
         clear_input(&mut drive);
     }
-    if actions & 8 != 0 {
-        if let Err(error) = drive.runtime.restart(&reference.0) {
-            game_failure(&error.to_string());
-            return;
-        }
-        source.reset_instances(&mut commands);
-        drive.instruments.reset(&reference.0.instruments);
-        drive.camera = CameraMode::default();
-        drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
-        clear_input(&mut drive);
-    }
+
     if actions & 16 != 0 {
         drive.runtime.recover(&reference.0);
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
@@ -359,7 +371,7 @@ fn read_input(
         drive.input.clear();
         return;
     }
-    if actions & 31 != 0 {
+    if actions & 22 != 0 {
         return;
     }
     if frame.pressed & keys::CAMERA != 0 && drive.runtime.area.player.seat().is_some() {
@@ -427,10 +439,26 @@ fn sync_world(
 }
 fn sync_imported(
     drive: Res<Drive>,
-    mut query: Query<(&BodyVisual, &mut Transform)>,
-    mut items: Query<(&ItemVisual, &mut Transform), Without<BodyVisual>>,
+    mut query: Query<(
+        &BodyVisual,
+        &mut Transform,
+        &mut Visibility,
+        Option<&ValveVisibility>,
+    )>,
+    mut items: Query<
+        (
+            &ItemVisual,
+            &mut Transform,
+            &mut Visibility,
+            Option<&ValveVisibility>,
+        ),
+        Without<BodyVisual>,
+    >,
     mut caps: Query<(&CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
-    mut visibility: Query<(&ValveVisibility, &mut Visibility)>,
+    mut visibility: Query<
+        (&ValveVisibility, &mut Visibility),
+        (Without<BodyVisual>, Without<ItemVisual>),
+    >,
 ) {
     presentation::reference::sync(
         &drive.runtime.area,
@@ -441,6 +469,33 @@ fn sync_imported(
     presentation::reference::sync_items(&drive.runtime.area, drive.clock.alpha(), &mut items);
     presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
 }
+fn instrument_sample(
+    reference: &ReferenceManifest,
+    run: &GarageRuntime,
+    index: usize,
+) -> InstrumentSample {
+    let amount = |id: ItemId| {
+        run.area
+            .items
+            .get(id)
+            .and_then(|i| i.fluid.as_ref())
+            .map_or(0., |f| f.mixture.total())
+    };
+    let vehicle = &reference.vehicles[index];
+    let state = &run.vehicles[index];
+    let r = &vehicle.instruments;
+    InstrumentSample {
+        speed_kmh: run.physics.snapshot(index).speed_mps * 3.6,
+        fuel_liters: amount(vehicle.engine.fuel_tank),
+        oil_liters: amount(vehicle.engine.oil_tank),
+        temperature: state.engine_output.temperature,
+        rpm: state.engine_output.rpm,
+        headlights: run.lighting.headlights(index),
+        local_ignition: state.engine_output.ignition
+            && r.electronics_output > r.electronics_off_threshold,
+        distance_m: state.trip_m,
+    }
+}
 fn sync_instruments(
     time: Res<Time<Real>>,
     reference: Res<RuntimeReference>,
@@ -450,28 +505,14 @@ fn sync_instruments(
     mut materials: Query<&mut MeshMaterial3d<presentation::materials::SourceMaterial>>,
     mut casters: Query<&mut MeshMaterial3d<StandardMaterial>>,
 ) {
+    let drive = &mut *drive;
     let run = &drive.runtime;
-    let amount = |id: ItemId| {
-        run.area
-            .items
-            .get(id)
-            .and_then(|i| i.fluid.as_ref())
-            .map_or(0., |f| f.mixture.total())
-    };
-    let r = &reference.0.instruments;
-    let sample = InstrumentSample {
-        speed_kmh: run.physics.snapshot().speed_mps * 3.6,
-        fuel_liters: amount(reference.0.engine.fuel_tank),
-        oil_liters: amount(reference.0.engine.oil_tank),
-        temperature: run.engine_output.temperature,
-        rpm: run.engine_output.rpm,
-        headlights: run.lighting.headlights(),
-        local_ignition: run.engine_output.ignition
-            && r.electronics_output > r.electronics_off_threshold,
-        distance_m: run.trip_m,
-    };
-    if run.started && !run.paused {
-        drive.instruments.update(r, sample, time.delta_secs());
+    for (index, vehicle) in reference.0.vehicles.iter().enumerate() {
+        let r = &vehicle.instruments;
+        let sample = instrument_sample(&reference.0, run, index);
+        if run.started && !run.paused {
+            drive.instruments[index].update(r, sample, time.delta_secs());
+        }
     }
     visuals.update(
         &reference.0,
@@ -485,7 +526,10 @@ fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveC
     for mut transform in &mut query {
         *transform =
             if drive.camera == CameraMode::Chase && drive.runtime.area.player.seat().is_some() {
-                presentation::camera::pose(CameraMode::Chase, drive.runtime.physics.snapshot().pose)
+                presentation::camera::pose(
+                    CameraMode::Chase,
+                    drive.runtime.physics.snapshot(drive.runtime.vehicle).pose,
+                )
             } else {
                 presentation::transform(drive.rendered)
             };
@@ -493,7 +537,8 @@ fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveC
 }
 fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let runtime = &drive.runtime;
-    let snapshot = runtime.physics.snapshot();
+    let current = &runtime.vehicles[runtime.vehicle];
+    let snapshot = runtime.physics.snapshot(runtime.vehicle);
     let position = runtime.area.player.focus_position(&runtime.physics);
     let absolute = runtime.stream.origin.absolute(position);
     let origin = runtime.stream.origin.offset;
@@ -505,7 +550,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let fuel = runtime
         .area
         .items
-        .get(reference.0.engine.fuel_tank)
+        .get(reference.0.vehicles[runtime.vehicle].engine.fuel_tank)
         .and_then(|item| item.fluid.as_ref())
         .map_or(0.0, |fluid| fluid.mixture.total());
     game_update(
@@ -525,7 +570,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         origin[1],
         origin[2],
         runtime.rebases,
-        runtime.trip_m,
+        current.trip_m,
         runtime.stream.lateral_band() as f64,
         fuel,
         runtime.paused,
@@ -571,13 +616,13 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         held,
         throw_charge: runtime.area.interaction.throw_charge().to_bits(),
         throw_active: runtime.area.interaction.throw_active(),
-        rpm: runtime.engine_output.rpm.to_bits(),
+        rpm: current.engine_output.rpm.to_bits(),
         engine_flags: [
-            runtime.engine_output.ignition,
-            runtime.engine_output.running,
-            runtime.engine_output.starter,
+            current.engine_output.ignition,
+            current.engine_output.running,
+            current.engine_output.starter,
             runtime.area.player.seat().is_some(),
-            runtime.handbrake,
+            current.handbrake,
         ],
         actions: info.actions.0,
         context: info.context as u32,
@@ -616,12 +661,12 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
                 .unwrap_or(""),
             runtime.area.interaction.throw_charge(),
             runtime.area.interaction.throw_active(),
-            runtime.engine_output.rpm,
-            runtime.engine_output.ignition,
-            runtime.engine_output.running,
-            runtime.engine_output.starter,
+            current.engine_output.rpm,
+            current.engine_output.ignition,
+            current.engine_output.running,
+            current.engine_output.starter,
             runtime.area.player.seat().is_some(),
-            runtime.handbrake,
+            current.handbrake,
             quantities[0],
             quantities[1],
             quantities[2],
@@ -663,11 +708,15 @@ fn publish_audio(
     }
     for emitter in &audio.reference.emitters {
         let alive = audio.owner_alive(emitter.id)
+            && runtime.area.interaction.mechanisms.node_active(emitter.node)
             && (emitter.id != audio.reference.engine.emitter
-                || runtime.area.items.mounted(reference.0.engine.item))
-            && emitter
-                .item
-                .is_none_or(|id| runtime.area.items.get(id).is_some());
+                || runtime
+                    .area
+                    .items
+                    .mounted(reference.0.vehicles[audio.vehicle_index].engine.item))
+            && emitter.item.is_none_or(|id| {
+                runtime.area.items.get(id).is_some_and(|item| item.inactive_pose.is_none())
+            });
         if let Some(global) = visuals
             .nodes
             .get(&emitter.node)

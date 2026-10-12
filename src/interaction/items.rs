@@ -22,6 +22,7 @@ pub enum ItemLocation {
 pub struct ItemState {
     pub id: ItemId,
     pub body: Option<RigidBodyHandle>,
+    pub inactive_pose: Option<crate::save::AbsolutePose>,
     pub location: ItemLocation,
     pub pose: VehiclePose,
     pub local_pose: VehiclePose,
@@ -35,13 +36,40 @@ pub struct ItemStore {
     states: Vec<ItemState>,
     indices: HashMap<ItemId, usize>,
     body_ids: Vec<BodyId>,
-    vehicle_tanks: [usize; 3],
+    /// Fuel, sump, and coolant state indices per vehicle.
+    vehicle_tanks: Vec<[usize; 3]>,
     names: Vec<String>,
-    vehicle_item: ItemId,
+    vehicle_items: Vec<ItemId>,
     slot_owners: HashMap<PartSlotId, Option<ItemId>>,
 }
 
 impl ItemStore {
+    pub(crate) fn restore_save(
+        &mut self,
+        ids: &crate::save::IdentityMap,
+        saved: &[crate::save::ItemSnapshot],
+    ) -> Result<(), crate::save::SaveError> {
+        use crate::save::ItemLocationSave;
+        for record in saved {
+            let state = self.get_mut(ids.item(&record.instance)?).unwrap();
+            state.location = match &record.location {
+                ItemLocationSave::World => ItemLocation::World,
+                ItemLocationSave::Held => ItemLocation::Held,
+                ItemLocationSave::Attached { owner } => ItemLocation::Attached(ids.item(owner)?),
+                ItemLocationSave::PartSlot { slot } => ItemLocation::PartSlot(ids.part_slots[slot]),
+                ItemLocationSave::WheelSlot { slot } => {
+                    ItemLocation::WheelSlot(ids.wheel_slots[slot])
+                }
+            };
+            state.local_pose = crate::save::local_pose(&record.local_pose);
+            state.condition = record.condition;
+            state.temperature = record.temperature;
+            if let (Some(fluid), Some(quantities)) = (&mut state.fluid, record.fluids) {
+                fluid.mixture.quantities_liters = quantities;
+            }
+        }
+        Ok(())
+    }
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut states = Vec::with_capacity(reference.items.len());
         let mut indices = HashMap::with_capacity(reference.items.len());
@@ -70,41 +98,46 @@ impl ItemStore {
             states.push(ItemState {
                 id: item.id,
                 body: None,
+                inactive_pose: None,
                 location: item
                     .attached_to
                     .map_or(ItemLocation::World, ItemLocation::Attached),
                 pose,
                 local_pose,
                 condition: item.condition,
-                temperature: (item.id == reference.engine.item)
-                    .then_some(reference.engine.initial_temperature),
+                temperature: reference
+                    .vehicles
+                    .iter()
+                    .find(|vehicle| vehicle.engine.item == item.id)
+                    .map(|vehicle| vehicle.engine.initial_temperature),
                 fluid,
             });
         }
-        let ids = [
-            reference.engine.fuel_tank,
-            reference.engine.oil_tank,
-            reference.engine.coolant_tank,
-        ];
-        let mut vehicle_tanks = [0; 3];
-        for (index, id) in ids.iter().enumerate() {
-            vehicle_tanks[index] = *indices
-                .get(id)
-                .ok_or_else(|| ReferenceError(format!("Missing engine tank {}", id.0)))?;
-            if states[vehicle_tanks[index]].fluid.is_none() {
-                return Err(ReferenceError(format!(
-                    "Missing engine fluid container {}",
-                    id.0
-                )));
+        let mut vehicle_tanks = Vec::with_capacity(reference.vehicles.len());
+        for vehicle in &reference.vehicles {
+            let ids = [
+                vehicle.engine.fuel_tank,
+                vehicle.engine.oil_tank,
+                vehicle.engine.coolant_tank,
+            ];
+            let mut tanks = [0; 3];
+            for (index, id) in ids.iter().enumerate() {
+                tanks[index] = *indices
+                    .get(id)
+                    .ok_or_else(|| ReferenceError(format!("Missing engine tank {}", id.0)))?;
+                if states[tanks[index]].fluid.is_none() {
+                    return Err(ReferenceError(format!(
+                        "Missing engine fluid container {}",
+                        id.0
+                    )));
+                }
             }
-        }
-        if vehicle_tanks[0] == vehicle_tanks[1]
-            || vehicle_tanks[0] == vehicle_tanks[2]
-            || vehicle_tanks[1] == vehicle_tanks[2]
-        {
-            return Err(ReferenceError(
-                "Engine tanks must have distinct item IDs".into(),
-            ));
+            if tanks[0] == tanks[1] || tanks[0] == tanks[2] || tanks[1] == tanks[2] {
+                return Err(ReferenceError(
+                    "Engine tanks must have distinct item IDs".into(),
+                ));
+            }
+            vehicle_tanks.push(tanks);
         }
         for slot in &reference.wheel_slots {
             for id in [slot.wheel, slot.rim] {
@@ -125,12 +158,18 @@ impl ItemStore {
             }
         }
         Ok(Self {
-            vehicle_item: reference
-                .items
+            vehicle_items: reference
+                .vehicles
                 .iter()
-                .find(|i| i.node == reference.vehicle.root)
-                .expect("vehicle item")
-                .id,
+                .map(|vehicle| {
+                    reference
+                        .items
+                        .iter()
+                        .find(|i| i.node == vehicle.root)
+                        .expect("vehicle item")
+                        .id
+                })
+                .collect(),
             slot_owners: reference
                 .part_slots
                 .iter()
@@ -156,9 +195,70 @@ impl ItemStore {
         })
     }
 
+    pub fn capture_save(
+        &self,
+        ids: &crate::save::IdentityMap,
+        origin: &crate::world::WorldOrigin,
+        physics: &PhysicsWorld,
+    ) -> Result<Vec<crate::save::ItemSnapshot>, crate::save::SaveError> {
+        use crate::save::{
+            AbsolutePose, ItemLocationSave, ItemSnapshot, LocalPose, identity::source_key,
+        };
+        let mut records = Vec::with_capacity(ids.items.len());
+        for &id in ids.items.values() {
+            let item = self.get(id).ok_or_else(|| {
+                crate::save::SaveError::InvalidLinks("Missing source item".into())
+            })?;
+            let (position, rotation) = if let Some(pose) = item.inactive_pose {
+                (pose.position, pose.rotation)
+            } else if let Some(handle) = item.body {
+                let body = physics.rapier().bodies.get(handle).ok_or_else(|| {
+                    crate::save::SaveError::InvalidLinks("Missing item body".into())
+                })?;
+                let offset =
+                    body.position().rotation * Vector::from_array(item.local_pose.position);
+                // Add local offsets after the absolute conversion to retain their precision.
+                let absolute = origin.absolute(body.position().translation.to_array());
+                (
+                    std::array::from_fn(|axis| absolute[axis] + f64::from(offset[axis])),
+                    (body.position().rotation * Rotation::from_array(item.local_pose.rotation))
+                        .to_array(),
+                )
+            } else {
+                (origin.absolute(item.pose.position), item.pose.rotation)
+            };
+            let location = match item.location {
+                ItemLocation::World => ItemLocationSave::World,
+                ItemLocation::Held => ItemLocationSave::Held,
+                ItemLocation::PartSlot(slot) => ItemLocationSave::PartSlot {
+                    slot: source_key(&ids.part_slots, slot)?,
+                },
+                ItemLocation::WheelSlot(slot) => ItemLocationSave::WheelSlot {
+                    slot: source_key(&ids.wheel_slots, slot)?,
+                },
+                ItemLocation::Attached(owner) => ItemLocationSave::Attached {
+                    owner: ids.item_instance(owner)?,
+                },
+            };
+            records.push(ItemSnapshot {
+                instance: ids.item_instance(id)?,
+                pose: AbsolutePose { position, rotation },
+                local_pose: LocalPose {
+                    position: item.local_pose.position,
+                    rotation: item.local_pose.rotation,
+                },
+                location,
+                condition: item.condition,
+                temperature: item.temperature,
+                fluids: item.fluid.as_ref().map(|f| f.mixture.quantities_liters),
+            });
+        }
+        records.sort_by(|a, b| a.instance.cmp(&b.instance));
+        Ok(records)
+    }
     pub fn mounted(&self, mut id: ItemId) -> bool {
         for _ in 0..self.states.len() {
-            if id == self.vehicle_item {
+            if self.vehicle_items.contains(&id) {
                 return true;
             }
             match self.get(id).map(|i| i.location) {
@@ -194,6 +294,7 @@ impl ItemStore {
         self.states.push(ItemState {
             id,
             body: None,
+            inactive_pose: None,
             location: ItemLocation::World,
             pose,
             local_pose: VehiclePose {
@@ -239,10 +340,10 @@ impl ItemStore {
         Some((first, second))
     }
 
-    pub fn vehicle_fluids(&mut self) -> Result<VehicleFluids<'_>, ReferenceError> {
+    pub fn vehicle_fluids(&mut self, vehicle: usize) -> Result<VehicleFluids<'_>, ReferenceError> {
         let [fuel, sump, coolant] = self
             .states
-            .get_disjoint_mut(self.vehicle_tanks)
+            .get_disjoint_mut(self.vehicle_tanks[vehicle])
             .map_err(|_| ReferenceError("Engine tank bindings overlap".into()))?;
         Ok(VehicleFluids {
             fuel: fuel
@@ -270,6 +371,9 @@ impl ItemStore {
 
     pub fn sync_poses(&mut self, physics: &PhysicsWorld) {
         for state in &mut self.states {
+            if state.inactive_pose.is_some() {
+                continue;
+            }
             if let Some(handle) = state.body
                 && let Some(body) = physics.rapier().bodies.get(handle)
             {
@@ -280,6 +384,9 @@ impl ItemStore {
 
     pub fn rebase(&mut self, shift: [f32; 3]) {
         for state in &mut self.states {
+            if state.inactive_pose.is_some() {
+                continue;
+            }
             for (position, shift) in state.pose.position.iter_mut().zip(shift) {
                 *position -= shift;
             }

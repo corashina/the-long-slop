@@ -27,7 +27,7 @@ pub fn reference() -> ReferenceManifest {
         half_extents: [0.65, 0.36, 0.72],
         rotation: [0.0, 0.0, 0.0, 1.0],
     };
-    reference.vehicle.colliders.push(cabin.id);
+    reference.vehicles[0].colliders.push(cabin.id);
     reference
         .action_bindings
         .push(my_summer_slop::reference::ActionBinding {
@@ -44,10 +44,10 @@ pub fn reference() -> ReferenceManifest {
 pub fn world() -> PhysicsWorld {
     PhysicsWorld::new(
         &reference(),
-        VehiclePose {
+        &[VehiclePose {
             position: [0.0, 1.1, 0.0],
             rotation: [0.0, 0.0, 0.0, 1.0],
-        },
+        }],
     )
     .expect("valid fixture physics")
 }
@@ -162,4 +162,29 @@ pub fn add_rotation(reference: &mut ReferenceManifest, item: u32, body: u32, lim
         slide: None,
         turn: None,
     });
+}
+
+pub fn detach(
+    g: &mut my_summer_slop::starting_area::GarageRuntime,
+    item: my_summer_slop::reference::ItemId,
+) {
+    g.area
+        .interaction
+        .parts
+        .can_remove(item, &g.area.player, &g.area.items)
+        .unwrap();
+    g.area
+        .interaction
+        .parts
+        .remove(item, &mut g.area.items, &mut g.physics)
+        .unwrap();
+    g.area.interaction.parts.detach_mechanism(
+        item,
+        &mut g.area.interaction.mechanisms,
+        &mut g.physics,
+    );
+    g.area
+        .interaction
+        .sync_parts(&mut g.area.items, &mut g.physics)
+        .unwrap();
 }

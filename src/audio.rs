@@ -100,6 +100,7 @@ struct FluidSound {
     gain: f32,
 }
 pub struct AudioState {
+    pub vehicle_index: usize,
     pub signals: Vec<AudioSignal>,
     crafted: HashMap<ItemId, u32>,
     lamp_controls: HashMap<crate::reference::LightControlId, (usize, bool)>,
@@ -182,6 +183,7 @@ impl AudioState {
             starter_enabled: false,
             horn_gain: 0.,
             last_running: false,
+            vehicle_index: 0,
             engine_position: [0.; 3],
             origin_shift: [0.; 3],
             engine_formula,
@@ -271,6 +273,11 @@ impl AudioState {
         area: &StartingArea,
         physics: &PhysicsWorld,
     ) {
+        self.vehicle_index = game
+            .vehicles
+            .iter()
+            .position(|v| v.engine.source == self.reference.engine.source)
+            .expect("validated audio vehicle");
         self.head_offset = game.player.camera_height - game.player.standing_height * 0.5;
         for emitter in &self.reference.emitters {
             let world = to_rapier(

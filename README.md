@@ -1,6 +1,7 @@
 # My Summer Slop
 
 Prepare a fixed Lada 2101 in the starting garage. Drive onto the desert road.
+A source Skoda waits in the yard north of the garage. Read [vehicles](docs/vehicles.md).
 The home, car, and supplies come from installed Steam build 11140890.
 Rust, Bevy, and Rapier run the browser game through WebAssembly.
 
@@ -20,7 +21,7 @@ docker build --tag my-summer-slop-toolchain --file tools/Dockerfile .
 node scripts/serve.mjs
 ```
 
-Open [the local game](http://127.0.0.1:4173). Wait for the scene. Select Start to capture the mouse.
+Open [the local game](http://127.0.0.1:4173). Wait for the scene. Select New game, then Continue to capture the mouse.
 Press Ctrl+C in the server terminal to stop it.
 The exporter checks the Steam build and leaves Steam files unchanged.
 Git excludes recovered assets, source analysis, and `web/pkg`.
@@ -47,7 +48,7 @@ Startup requests contain only selected runtime assets.
 Use [export stages and verification commands](tools/reference/README.md) to access the library.
 Read [coverage and support limits](docs/research/2026-10-10-full-asset-audit.md) before using an asset.
 The library includes embedded Liberation Sans. The current shell uses self-hosted Liberation Sans and Arial.
-Development availability does not add vehicles, audio, animation playback, or other gameplay.
+Development availability does not add further vehicles, audio, animation playback, or other gameplay.
 
 ## Controls
 
@@ -84,15 +85,39 @@ Open carried containers before filling them at roadside pumps.
 Open containers spill when tilted. Pumps retain unlimited gasoline stock.
 The Lada starts with 0.5 L gasoline, 2.5 L oil, and 3.6 L water.
 Its capacities are 39 L fuel, 5 L oil, and 5 L coolant.
+The Skoda starts with the same fluids. Its capacities are 32 L fuel, 5 L oil, and 5 L coolant.
 
 Use Recover in the pause menu. Use Controls for bindings and Fullscreen.
 Aim at a tire and press F to dismount it. Release F to mount a held tire or rim.
 Focus loss pauses play and clears input. Continue captures the mouse again.
 Recovery preserves fluids, parts, condition, trip distance, cycle time, and lamp state.
 An empty fuel tank moves recovery to a station.
-Restart restores the garage, supplies, car, origin, trip distance, source cycle time, and lamp state.
+New game restores the garage, supplies, car, origin, trip distance, source cycle time, and lamp state.
 Close the driver door before reversing through the garage exit.
 Keyboard steering reaches full lock in 0.8 seconds. Release the key to return to center.
+
+## Save and load
+
+Use Save in the pause menu. Use Load in the start or pause menu.
+Save replaces one manual slot in this browser and site address.
+The browser stores the slot in IndexedDB. Clearing site data removes it.
+There is no automatic save.
+
+Load restores a paused session. Select Continue to resume play and capture the mouse.
+The slot includes world state, absolute positions, player pose, seat, and held item.
+It also includes bodies, parts, wheels, fluids, condition, temperature, controls, and openings.
+Both vehicles retain engine state, gear, handbrake, trip distance, and headlights.
+The selected vehicle returns, including when the player saves on foot.
+Cycle time, lamp state, fade progress, and camera mode also return.
+Read the [complete saved-state inventory](docs/superpowers/specs/2026-10-12-save-load-design.md#current-state-inventory) for each owner.
+
+Load requires the current save schema and the exact current source export.
+A different Steam build, manifest hash, or source hash causes rejection. There are no save migrations.
+A failed save keeps the previous slot. A failed load keeps the active session.
+The menu shows the error. Continue resumes the active session after a failed load.
+
+New game replaces the active session after preparation succeeds. It keeps the manual slot until you select Save.
+Recover moves the current car to a safe location. It does not load the slot.
 
 ## Scope and evidence
 
@@ -101,12 +126,12 @@ Imported layout and recovered rules do not establish identical Unity physics or 
 Lighting follows the approved [day cycle scope](docs/superpowers/specs/2026-10-10-day-night-lighting-design.md).
 The source cycle controls sun, moon, clouds, stars, fog, headlights, cabin lights, house lamps, and roadside lamps.
 Pause freezes cycle time, lamp fades, and switch movement.
-Restart restores the source startup offset of 240 seconds.
+New game restores the source startup offset of 240 seconds.
 Selected source material behavior is reconstructed. Exact shadows, probe publication, postprocessing, and stained-glass capture remain deferred.
 Live mirror reflections and audio remain outside this stage.
 See [completed work and roadmap](docs/roadmap.md) and [the deferred rendering plan](docs/superpowers/plans/2026-10-11-rendering-completion.md).
 The final browser walking route was skipped at the user's request. It remains unverified.
-The build has no survival system, save system, multiplayer, or public deployment.
+The build has no survival system, multiplayer, or public deployment.
 
 ## Toolchain
 

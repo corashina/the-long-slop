@@ -892,7 +892,7 @@
         "path_id": 37191
       },
       "dependencies": [],
-      "material_count": 65,
+      "material_count": 67,
       "usage": "unique_scene"
     },
     {
@@ -4724,6 +4724,285 @@
           5.0
         ]
       }
+    },
+    {
+      "id": 123,
+      "source": {
+        "file": "level1",
+        "path_id": 28414
+      },
+      "name": "plane_node",
+      "hierarchy_path": "Fixture2/Mirror0/plane_node",
+      "asset": 2,
+      "gltf_node": 59,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 124,
+      "source": {
+        "file": "level1",
+        "path_id": 39254
+      },
+      "name": "camera_node",
+      "hierarchy_path": "Fixture2/Mirror0/camera_node",
+      "asset": 2,
+      "gltf_node": 60,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 125,
+      "source": {
+        "file": "level1",
+        "path_id": 38060
+      },
+      "name": "plane_node",
+      "hierarchy_path": "Fixture2/Mirror1/plane_node",
+      "asset": 2,
+      "gltf_node": 61,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 126,
+      "source": {
+        "file": "level1",
+        "path_id": 31061
+      },
+      "name": "camera_node",
+      "hierarchy_path": "Fixture2/Mirror1/camera_node",
+      "asset": 2,
+      "gltf_node": 62,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 127,
+      "source": {
+        "file": "level1",
+        "path_id": 32190
+      },
+      "name": "plane_node",
+      "hierarchy_path": "Fixture2/Mirror2/plane_node",
+      "asset": 2,
+      "gltf_node": 63,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 128,
+      "source": {
+        "file": "level1",
+        "path_id": 26965
+      },
+      "name": "camera_node",
+      "hierarchy_path": "Fixture2/Mirror2/camera_node",
+      "asset": 2,
+      "gltf_node": 64,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 129,
+      "source": {
+        "file": "level1",
+        "path_id": 31962
+      },
+      "name": "surface_node",
+      "hierarchy_path": "Fixture2/Mirror0/plane_node/surface_node",
+      "asset": 2,
+      "gltf_node": 65,
+      "parent": 123,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 130,
+      "source": {
+        "file": "level1",
+        "path_id": 33202
+      },
+      "name": "surface_node",
+      "hierarchy_path": "Fixture2/Mirror1/plane_node/surface_node",
+      "asset": 2,
+      "gltf_node": 66,
+      "parent": 125,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 131,
+      "source": {
+        "file": "level1",
+        "path_id": 28868
+      },
+      "name": "surface_node",
+      "hierarchy_path": "Fixture2/Mirror2/plane_node/surface_node",
+      "asset": 2,
+      "gltf_node": 67,
+      "parent": 127,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
     }
   ],
   "bodies": [
@@ -6711,218 +6990,6 @@
     "slow_oil_modifier": 0.019999999552965164,
     "fluid_tune_speed": 1.75
   },
-  "engine": {
-    "source": {
-      "file": "level1",
-      "path_id": 136815
-    },
-    "item": 4,
-    "fuel_tank": 1,
-    "oil_tank": 2,
-    "coolant_tank": 3,
-    "start_chance": 1.0,
-    "starter_delay_seconds": 0.20000000298023224,
-    "starter_rpm": 700.0,
-    "starter_rpm_lerp": 5.0,
-    "idle_rpm": 800.0,
-    "max_rpm": 6600.0,
-    "shutdown_rpm": 550.0,
-    "max_torque_nm": 87.0,
-    "starting_push_force": 783.0,
-    "consumption_modifier": 1.0,
-    "oil_consumption_modifier": 1.5,
-    "engine_brake_modifier": 1.0,
-    "rpm_change_modifier": 1.0,
-    "engine_start_time_modifier": 1.0,
-    "heat_gain_min": 50.0,
-    "heat_gain_max": 90.0,
-    "heat_loss": 10.0,
-    "optimal_temperature": [
-      -10.0,
-      10.0,
-      105.0,
-      135.0
-    ],
-    "fuel_consumption": [
-      10,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "two_stroke": false,
-    "electronics_enabled": true,
-    "torque_curve": {
-      "keys": [
-        {
-          "time": 0.0,
-          "value": 0.0,
-          "in_tangent": 0.02573101408779621,
-          "out_tangent": 0.02573101408779621,
-          "in_weight": 0.0,
-          "out_weight": 0.9933658242225647,
-          "weighted_mode": 0
-        },
-        {
-          "time": 1000.0,
-          "value": 25.0,
-          "in_tangent": 0.04381771758198738,
-          "out_tangent": 0.04381771758198738,
-          "in_weight": 0.3333333432674408,
-          "out_weight": 0.9402844309806824,
-          "weighted_mode": 0
-        },
-        {
-          "time": 1500.0,
-          "value": 46.900001525878906,
-          "in_tangent": 0.04019999876618385,
-          "out_tangent": 0.04019999876618385,
-          "in_weight": 0.3333333432674408,
-          "out_weight": 0.3333333432674408,
-          "weighted_mode": 0
-        },
-        {
-          "time": 2000.0,
-          "value": 65.19999694824219,
-          "in_tangent": 0.031099999323487282,
-          "out_tangent": 0.031099999323487282,
-          "in_weight": 0.3333333432674408,
-          "out_weight": 0.3333333432674408,
-          "weighted_mode": 0
-        },
-        {
-          "time": 2500.0,
-          "value": 78.0,
-          "in_tangent": 0.019999999552965164,
-          "out_tangent": 0.019999999552965164,
-          "in_weight": 0.3333333432674408,
-          "out_weight": 0.3333333432674408,
-          "weighted_mode": 0
-        },
-        {
-          "time": 3000.0,
-          "value": 85.19999694824219,
-          "in_tangent": 0.007200011983513832,
-          "out_tangent": 0.007200011983513832,
-          "in_weight": 0.3333333432674408,
-          "out_weight": 0.3333333432674408,
-          "weighted_mode": 0
-        },
-        {
-          "time": 3500.0,
-          "value": 87.0,
-          "in_tangent": 0.00018034249660558999,
-          "out_tangent": 0.00018034249660558999,
-          "in_weight": 0.3333333432674408,
-          "out_weight": 0.7526064515113831,
-          "weighted_mode": 0
-        },
-        {
-          "time": 4000.0,
-          "value": 86.4000015258789,
-          "in_tangent": -0.00026041988166980445,
-          "out_tangent": -0.00026041988166980445,
-          "in_weight": 0.3333333432674408,
-          "out_weight": 0.791943371295929,
-          "weighted_mode": 0
-        },
-        {
-          "time": 4500.0,
-          "value": 84.9000015258789,
-          "in_tangent": -0.0007756342529319227,
-          "out_tangent": -0.0007756342529319227,
-          "in_weight": 0.3333333432674408,
-          "out_weight": 0.7708535194396973,
-          "weighted_mode": 0
-        },
-        {
-          "time": 5000.0,
-          "value": 82.5,
-          "in_tangent": -0.0048134820535779,
-          "out_tangent": -0.0048134820535779,
-          "in_weight": 0.6757150292396545,
-          "out_weight": 0.8222754001617432,
-          "weighted_mode": 0
-        },
-        {
-          "time": 5500.0,
-          "value": 79.19999694824219,
-          "in_tangent": -0.012037266977131367,
-          "out_tangent": -0.012037266977131367,
-          "in_weight": 0.7578203082084656,
-          "out_weight": 0.3333333432674408,
-          "weighted_mode": 0
-        },
-        {
-          "time": 6100.0,
-          "value": 68.5,
-          "in_tangent": -0.01718948781490326,
-          "out_tangent": -0.01718948781490326,
-          "in_weight": 0.7271834015846252,
-          "out_weight": 0.3333333432674408,
-          "weighted_mode": 0
-        },
-        {
-          "time": 6600.0,
-          "value": 0.0,
-          "in_tangent": 0.0,
-          "out_tangent": 0.0,
-          "in_weight": 0.0,
-          "out_weight": 0.0,
-          "weighted_mode": 0
-        }
-      ],
-      "pre_wrap_mode": 2,
-      "post_wrap_mode": 2
-    },
-    "globals": {
-      "source": {
-        "file": "level1",
-        "path_id": 64919
-      },
-      "fuel_consumption": 0.000375000003259629,
-      "oil_consumption": 0.0003000000142492354,
-      "rpm_change": 2000,
-      "car_temperature_bounds": [
-        -30.0,
-        135.0
-      ],
-      "coolant_evaporate_rate": 0.30000001192092896,
-      "temperature_difference_modifier": 40.0,
-      "temperature_move_modifier": 3.0,
-      "max_car_velocity": 200.0,
-      "awake_heat_modifier": 1,
-      "min_steam_temperature": 110.0
-    },
-    "radiator": {
-      "source": {
-        "file": "level1",
-        "path_id": 70849
-      },
-      "thermostat_range": [
-        85,
-        95
-      ],
-      "fan_temperature_on": 102,
-      "fan_temperature_off": 85,
-      "fan_on_when_engine_runs": true,
-      "max_value": 55,
-      "max_fan_value": 100,
-      "max_fan_speed": 300,
-      "max_fluid_loss": 0.10000000149011612
-    },
-    "initial_temperature": 0.0,
-    "heat_loss_speed_modifier": 0.0,
-    "max_rpm_difference": 3000.0,
-    "torque_modifier": 1.0,
-    "oil_fluid": 1,
-    "no_overheat": false,
-    "kickstart": false,
-    "start_chance_interval_seconds": 1,
-    "auto_shift_clutch_rpm": 2500.0,
-    "auto_shift_clutch_rpm_range": 200.0
-  },
   "player": {
     "source": {
       "file": "level1",
@@ -7007,72 +7074,21 @@
       },
       "item": 17,
       "anchor": 5,
+      "vehicle": 0,
       "hit_nodes": [
         1
       ],
       "driver": true,
-      "driving2": true,
       "yaw_limits_degrees": [
         -179,
         179
       ],
       "exit_distance": 1.5,
       "min_exit_angle_degrees": 65,
-      "exit_height": 0.5
+      "exit_height": 0.5,
+      "driving2": true
     }
   ],
-  "vehicle": {
-    "source": {
-      "file": "level1",
-      "path_id": 77839
-    },
-    "body": 2,
-    "root": 2,
-    "mass_kg": 961.6,
-    "serialized_mass_kg": 717,
-    "wheel_slots": [
-      0,
-      1,
-      2,
-      3
-    ],
-    "colliders": [
-      1
-    ],
-    "gear_ratios": [
-      -3.87,
-      0,
-      3.75,
-      2.3,
-      1.49,
-      1
-    ],
-    "final_drive_ratio": 4.300000190734863,
-    "max_steer_degrees": 40,
-    "keyboard_steering_rate": 1.25,
-    "brake_torque_nm": 600,
-    "handbrake_torque_nm": 600,
-    "wheel_slip": [
-      1.25,
-      0.75,
-      1.25,
-      0.75
-    ],
-    "auto_shift_stop_speed": 1,
-    "auto_shift_min_rpm": 2700,
-    "auto_shift_max_rpm": 3700,
-    "gear_free_run": [
-      false,
-      false,
-      false,
-      false,
-      false,
-      false
-    ],
-    "dont_ignite_with_throttle_in_automatic": false,
-    "auto_move_min": 0.3,
-    "handbrake": true
-  },
   "area": {
     "source": {
       "file": "level1",
@@ -10596,341 +10612,6 @@
       1.0
     ]
   },
-  "instruments": {
-    "needles": [
-      {
-        "source": {
-          "file": "level1",
-          "path_id": 71099
-        },
-        "node": 14,
-        "signal": "speed",
-        "min_value": 0.0,
-        "max_value": 160.0,
-        "min_angle": -64.0,
-        "max_angle": 64.0,
-        "axis": 1,
-        "rest": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "offset": 0.0,
-        "inv": false,
-        "value_smoothing": 8,
-        "signal_smoothing": 0,
-        "no_value_lerp": false,
-        "lerp_angle": false
-      },
-      {
-        "source": {
-          "file": "level1",
-          "path_id": 77005
-        },
-        "node": 15,
-        "signal": "temp",
-        "min_value": 10.0,
-        "max_value": 130.0,
-        "min_angle": -30.0,
-        "max_angle": 30.0,
-        "axis": 1,
-        "rest": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "offset": 0.0,
-        "inv": false,
-        "value_smoothing": 8,
-        "signal_smoothing": 5,
-        "no_value_lerp": false,
-        "lerp_angle": false
-      },
-      {
-        "source": {
-          "file": "level1",
-          "path_id": 72439
-        },
-        "node": 16,
-        "signal": "fuel",
-        "min_value": 0.0,
-        "max_value": 39.0,
-        "min_angle": -26.0,
-        "max_angle": 26.0,
-        "axis": 1,
-        "rest": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "offset": 0.0,
-        "inv": false,
-        "value_smoothing": 8,
-        "signal_smoothing": 5,
-        "no_value_lerp": false,
-        "lerp_angle": false
-      }
-    ],
-    "lamps": [
-      {
-        "source": {
-          "file": "level1",
-          "path_id": 75517
-        },
-        "node": 17,
-        "signal": "fuel",
-        "on": {
-          "source": {
-            "file": "sharedassets1.assets",
-            "path_id": 309
-          },
-          "asset": 2,
-          "gltf_material": 57
-        },
-        "off": {
-          "source": {
-            "file": "sharedassets0.assets",
-            "path_id": 36
-          },
-          "asset": 2,
-          "gltf_material": 58
-        },
-        "min_value": 1.0,
-        "max_value": 0.0,
-        "stay_on": true
-      },
-      {
-        "source": {
-          "file": "level1",
-          "path_id": 78122
-        },
-        "node": 18,
-        "signal": "oil",
-        "on": {
-          "source": {
-            "file": "sharedassets1.assets",
-            "path_id": 327
-          },
-          "asset": 2,
-          "gltf_material": 59
-        },
-        "off": {
-          "source": {
-            "file": "sharedassets1.assets",
-            "path_id": 326
-          },
-          "asset": 2,
-          "gltf_material": 60
-        },
-        "min_value": 1.0,
-        "max_value": 0.0,
-        "stay_on": true
-      },
-      {
-        "source": {
-          "file": "level1",
-          "path_id": 65477
-        },
-        "node": 19,
-        "signal": "battery",
-        "on": {
-          "source": {
-            "file": "sharedassets1.assets",
-            "path_id": 323
-          },
-          "asset": 2,
-          "gltf_material": 61
-        },
-        "off": {
-          "source": {
-            "file": "sharedassets1.assets",
-            "path_id": 322
-          },
-          "asset": 2,
-          "gltf_material": 62
-        },
-        "min_value": 1.0,
-        "max_value": 0.0,
-        "stay_on": true
-      },
-      {
-        "source": {
-          "file": "level1",
-          "path_id": 66369
-        },
-        "node": 20,
-        "signal": "headlight2",
-        "on": {
-          "source": {
-            "file": "sharedassets1.assets",
-            "path_id": 325
-          },
-          "asset": 2,
-          "gltf_material": 63
-        },
-        "off": {
-          "source": {
-            "file": "sharedassets1.assets",
-            "path_id": 324
-          },
-          "asset": 2,
-          "gltf_material": 64
-        },
-        "min_value": 1.0,
-        "max_value": 0.0,
-        "stay_on": true
-      }
-    ],
-    "odometer": {
-      "source": {
-        "file": "level1",
-        "path_id": 76207
-      },
-      "initial_value": 0.0,
-      "base": 10,
-      "decimals": 1.0,
-      "use_multiplier": false,
-      "multiplier": 0.0,
-      "digits": [
-        {
-          "node": 21,
-          "place": 0,
-          "axis": 0,
-          "inv": false,
-          "direct": false,
-          "continuous": false,
-          "initial_value": 0.0,
-          "initial_angle": 0.0,
-          "on": {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 283
-            },
-            "asset": 2,
-            "gltf_material": 53
-          },
-          "off": {
-            "source": {
-              "file": "sharedassets0.assets",
-              "path_id": 31
-            },
-            "asset": 2,
-            "gltf_material": 34
-          }
-        },
-        {
-          "node": 22,
-          "place": 1,
-          "axis": 0,
-          "inv": false,
-          "direct": false,
-          "continuous": false,
-          "initial_value": 0.0,
-          "initial_angle": 0.0,
-          "on": {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 285
-            },
-            "asset": 2,
-            "gltf_material": 54
-          },
-          "off": {
-            "source": {
-              "file": "sharedassets0.assets",
-              "path_id": 32
-            },
-            "asset": 2,
-            "gltf_material": 35
-          }
-        },
-        {
-          "node": 23,
-          "place": 2,
-          "axis": 0,
-          "inv": false,
-          "direct": false,
-          "continuous": false,
-          "initial_value": 0.0,
-          "initial_angle": 0.0,
-          "on": {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 285
-            },
-            "asset": 2,
-            "gltf_material": 54
-          },
-          "off": {
-            "source": {
-              "file": "sharedassets0.assets",
-              "path_id": 32
-            },
-            "asset": 2,
-            "gltf_material": 35
-          }
-        },
-        {
-          "node": 24,
-          "place": 3,
-          "axis": 0,
-          "inv": false,
-          "direct": false,
-          "continuous": false,
-          "initial_value": 0.0,
-          "initial_angle": 0.0,
-          "on": {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 285
-            },
-            "asset": 2,
-            "gltf_material": 54
-          },
-          "off": {
-            "source": {
-              "file": "sharedassets0.assets",
-              "path_id": 32
-            },
-            "asset": 2,
-            "gltf_material": 35
-          }
-        },
-        {
-          "node": 25,
-          "place": 4,
-          "axis": 0,
-          "inv": false,
-          "direct": false,
-          "continuous": false,
-          "initial_value": 0.0,
-          "initial_angle": 0.0,
-          "on": {
-            "source": {
-              "file": "sharedassets1.assets",
-              "path_id": 285
-            },
-            "asset": 2,
-            "gltf_material": 54
-          },
-          "off": {
-            "source": {
-              "file": "sharedassets0.assets",
-              "path_id": 32
-            },
-            "asset": 2,
-            "gltf_material": 35
-          }
-        }
-      ]
-    },
-    "low_fuel": 5.0,
-    "low_oil": 2.0,
-    "oil_test_rpm": 300.0,
-    "battery_test_rpm": 800.0,
-    "electronics_output": 1.0,
-    "electronics_off_threshold": 0.2
-  },
   "mechanisms": [],
   "action_bindings": [
     {
@@ -14040,6 +13721,7 @@
           "path_id": 76065
         },
         "kind": "house",
+        "vehicle": null,
         "node": 27,
         "aim_colliders": [
           10
@@ -14147,6 +13829,7 @@
           "path_id": 67484
         },
         "kind": "house",
+        "vehicle": null,
         "node": 35,
         "aim_colliders": [
           11
@@ -14254,6 +13937,7 @@
           "path_id": 68886
         },
         "kind": "house",
+        "vehicle": null,
         "node": 42,
         "aim_colliders": [
           12
@@ -14395,6 +14079,7 @@
           "path_id": 75508
         },
         "kind": "house",
+        "vehicle": null,
         "node": 53,
         "aim_colliders": [
           13
@@ -14502,6 +14187,7 @@
           "path_id": 72019
         },
         "kind": "house",
+        "vehicle": null,
         "node": 61,
         "aim_colliders": [
           14
@@ -14609,6 +14295,7 @@
           "path_id": 73055
         },
         "kind": "rear",
+        "vehicle": 0,
         "node": 2,
         "aim_colliders": [],
         "animated_poses": [],
@@ -14735,6 +14422,7 @@
           "path_id": 70896
         },
         "kind": "cabin",
+        "vehicle": 0,
         "node": 70,
         "aim_colliders": [
           15
@@ -14886,6 +14574,7 @@
           "path_id": 72934
         },
         "kind": "headlight",
+        "vehicle": 0,
         "node": 96,
         "aim_colliders": [
           16
@@ -15018,6 +14707,7 @@
           "path_id": 76810
         },
         "kind": "headlight",
+        "vehicle": 0,
         "node": 101,
         "aim_colliders": [
           16
@@ -15150,6 +14840,7 @@
           "path_id": 144809
         },
         "kind": "road",
+        "vehicle": null,
         "node": 107,
         "aim_colliders": [],
         "animated_poses": [],
@@ -15186,6 +14877,37 @@
         "usable_event": null,
         "cabin_input": null,
         "vehicle_switch": null
+      }
+    ],
+    "high_beams": [
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 66369
+        },
+        "node": 20,
+        "signal": "headlight2",
+        "on": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 325
+          },
+          "asset": 2,
+          "gltf_material": 63,
+          "condition_key": null
+        },
+        "off": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 324
+          },
+          "asset": 2,
+          "gltf_material": 64,
+          "condition_key": null
+        },
+        "min_value": 1.0,
+        "max_value": 0.0,
+        "stay_on": true
       }
     ],
     "road_lamp": {
@@ -15843,35 +15565,6 @@
         "culling_mask": 65536
       }
     ],
-    "high_beam": {
-      "source": {
-        "file": "level1",
-        "path_id": 66369
-      },
-      "node": 20,
-      "signal": "headlight2",
-      "on": {
-        "source": {
-          "file": "sharedassets1.assets",
-          "path_id": 325
-        },
-        "asset": 2,
-        "gltf_material": 63,
-        "condition_key": null
-      },
-      "off": {
-        "source": {
-          "file": "sharedassets1.assets",
-          "path_id": 324
-        },
-        "asset": 2,
-        "gltf_material": 64,
-        "condition_key": null
-      },
-      "min_value": 1.0,
-      "max_value": 0.0,
-      "stay_on": true
-    },
     "switch_icon": {
       "source": {
         "file": "sharedassets1.assets",
@@ -18803,9 +18496,997 @@
           "defaults": {},
           "exclusions": []
         }
+      },
+      {
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 624
+        },
+        "shader_family": "standard",
+        "color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "condition": null,
+        "keywords": [
+          "_EMISSION"
+        ],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {
+            "_Cutoff": 0.5,
+            "_Glossiness": 0.0,
+            "_GlossMapScale": 1.0,
+            "_SmoothnessTextureChannel": 0.0,
+            "_Metallic": 1.0,
+            "_SpecularHighlights": 1.0,
+            "_GlossyReflections": 1.0,
+            "_BumpScale": 1.0,
+            "_Parallax": 0.019999999552965164,
+            "_OcclusionStrength": 1.0,
+            "_DetailNormalMapScale": 1.0,
+            "_UVSec": 0.0,
+            "_Mode": 0.0,
+            "_SrcBlend": 1.0,
+            "_DstBlend": 0.0,
+            "_ZWrite": 1.0
+          },
+          "colors": {
+            "_Color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "_EmissionColor": [
+              0.8942506909370422,
+              0.8900325298309326,
+              0.8900325298309326,
+              1.0
+            ]
+          },
+          "textures": [],
+          "defaults": {
+            "_MainTex": "white",
+            "_OcclusionMap": "white",
+            "_EmissionMap": "white"
+          },
+          "exclusions": []
+        },
+        "asset": 2,
+        "gltf_material": 65
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 116
+        },
+        "shader_family": "standard",
+        "color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {
+            "_Cutoff": 0.5,
+            "_Glossiness": 0.9800000190734863,
+            "_GlossMapScale": 1.0,
+            "_SmoothnessTextureChannel": 0.0,
+            "_Metallic": 0.9800000190734863,
+            "_SpecularHighlights": 1.0,
+            "_GlossyReflections": 1.0,
+            "_BumpScale": 1.0,
+            "_Parallax": 0.019999999552965164,
+            "_OcclusionStrength": 1.0,
+            "_DetailNormalMapScale": 1.0,
+            "_UVSec": 0.0,
+            "_Mode": 0.0,
+            "_SrcBlend": 1.0,
+            "_DstBlend": 0.0,
+            "_ZWrite": 1.0
+          },
+          "colors": {
+            "_Color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "_EmissionColor": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "textures": [],
+          "defaults": {
+            "_MainTex": "white",
+            "_OcclusionMap": "white"
+          },
+          "exclusions": []
+        },
+        "asset": 2,
+        "gltf_material": 66
       }
     ]
   },
+  "mirrors": {
+    "rules": {
+      "source": {
+        "file": "level1",
+        "path_id": 64919
+      },
+      "settings_source": {
+        "file": "level0",
+        "path_id": 16865
+      },
+      "draw_distance_source": {
+        "file": "level0",
+        "path_id": 18331
+      },
+      "enabled_source": {
+        "file": "level0",
+        "path_id": 19029
+      },
+      "enabled": true,
+      "draw_distance_meters": 100.0,
+      "fov_bounds_degrees": [
+        10.0,
+        55.0
+      ],
+      "distance_bounds_meters": [
+        0.0,
+        4.0
+      ],
+      "count_limit": 5
+    },
+    "target": {
+      "source": {
+        "file": "sharedassets1.assets",
+        "path_id": 4495
+      },
+      "extent": [
+        256,
+        256
+      ],
+      "samples": 1,
+      "color_format_code": 8,
+      "depth_stencil_format_code": 92,
+      "linear": true,
+      "filter": 1,
+      "wrap": [
+        1,
+        1,
+        1
+      ],
+      "mip_sampling": false,
+      "generate_mips": true,
+      "mip_count": -1,
+      "dynamic_scale": false
+    },
+    "mirrors": [
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 66131
+        },
+        "owner": 1,
+        "owner_node": 2,
+        "surface_node": 129,
+        "surface_source": {
+          "file": "level1",
+          "path_id": 43665
+        },
+        "plane_node": 123,
+        "camera_node": 124,
+        "camera_source": {
+          "file": "level1",
+          "path_id": 40260
+        },
+        "camera_script_source": {
+          "file": "level1",
+          "path_id": 77725
+        },
+        "near_plane": 0.10000000149011612,
+        "serialized_far_plane": 1500.0,
+        "initial_far_plane": 1500.0,
+        "serialized_fov_degrees": 60.0,
+        "culling_mask": 73113395,
+        "hdr": true,
+        "clear_flags": 1,
+        "clear_color": [
+          0.1921568661928177,
+          0.3019607961177826,
+          0.4745098054409027,
+          0.0
+        ],
+        "occlusion_culling": true,
+        "allow_msaa": true,
+        "serialized_rendering_path": -1,
+        "rendering_path": 1,
+        "orthographic": false,
+        "update_mirrors": false,
+        "postprocessing_sources": [],
+        "depth_source": null,
+        "heat_haze_source": null,
+        "live_material": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 624
+          },
+          "asset": 2,
+          "gltf_material": 65
+        },
+        "disabled_material": {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 116
+          },
+          "asset": 2,
+          "gltf_material": 66
+        },
+        "live_texture_slots": [
+          "_MainTex",
+          "_EmissionMap"
+        ]
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 67237
+        },
+        "owner": 2,
+        "owner_node": 2,
+        "surface_node": 130,
+        "surface_source": {
+          "file": "level1",
+          "path_id": 40735
+        },
+        "plane_node": 125,
+        "camera_node": 126,
+        "camera_source": {
+          "file": "level1",
+          "path_id": 40324
+        },
+        "camera_script_source": {
+          "file": "level1",
+          "path_id": 65584
+        },
+        "near_plane": 0.10000000149011612,
+        "serialized_far_plane": 1500.0,
+        "initial_far_plane": 1500.0,
+        "serialized_fov_degrees": 60.0,
+        "culling_mask": 73113395,
+        "hdr": true,
+        "clear_flags": 1,
+        "clear_color": [
+          0.1921568661928177,
+          0.3019607961177826,
+          0.4745098054409027,
+          0.0
+        ],
+        "occlusion_culling": true,
+        "allow_msaa": true,
+        "serialized_rendering_path": -1,
+        "rendering_path": 1,
+        "orthographic": false,
+        "update_mirrors": false,
+        "postprocessing_sources": [],
+        "depth_source": null,
+        "heat_haze_source": null,
+        "live_material": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 624
+          },
+          "asset": 2,
+          "gltf_material": 65
+        },
+        "disabled_material": {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 116
+          },
+          "asset": 2,
+          "gltf_material": 66
+        },
+        "live_texture_slots": [
+          "_MainTex",
+          "_EmissionMap"
+        ]
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 70638
+        },
+        "owner": 3,
+        "owner_node": 2,
+        "surface_node": 131,
+        "surface_source": {
+          "file": "level1",
+          "path_id": 44371
+        },
+        "plane_node": 127,
+        "camera_node": 128,
+        "camera_source": {
+          "file": "level1",
+          "path_id": 40222
+        },
+        "camera_script_source": {
+          "file": "level1",
+          "path_id": 72547
+        },
+        "near_plane": 0.10000000149011612,
+        "serialized_far_plane": 1500.0,
+        "initial_far_plane": 1500.0,
+        "serialized_fov_degrees": 50.0,
+        "culling_mask": 73113395,
+        "hdr": true,
+        "clear_flags": 1,
+        "clear_color": [
+          0.1921568661928177,
+          0.3019607961177826,
+          0.4745098054409027,
+          0.0
+        ],
+        "occlusion_culling": true,
+        "allow_msaa": true,
+        "serialized_rendering_path": -1,
+        "rendering_path": 1,
+        "orthographic": false,
+        "update_mirrors": false,
+        "postprocessing_sources": [],
+        "depth_source": null,
+        "heat_haze_source": null,
+        "live_material": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 624
+          },
+          "asset": 2,
+          "gltf_material": 65
+        },
+        "disabled_material": {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 116
+          },
+          "asset": 2,
+          "gltf_material": 66
+        },
+        "live_texture_slots": [
+          "_MainTex",
+          "_EmissionMap"
+        ]
+      }
+    ]
+  },
+  "vehicles": [
+    {
+      "engine": {
+        "source": {
+          "file": "level1",
+          "path_id": 136815
+        },
+        "item": 4,
+        "fuel_tank": 1,
+        "oil_tank": 2,
+        "coolant_tank": 3,
+        "start_chance": 1.0,
+        "starter_delay_seconds": 0.20000000298023224,
+        "starter_rpm": 700.0,
+        "starter_rpm_lerp": 5.0,
+        "idle_rpm": 800.0,
+        "max_rpm": 6600.0,
+        "shutdown_rpm": 550.0,
+        "max_torque_nm": 87.0,
+        "starting_push_force": 783.0,
+        "consumption_modifier": 1.0,
+        "oil_consumption_modifier": 1.5,
+        "engine_brake_modifier": 1.0,
+        "rpm_change_modifier": 1.0,
+        "engine_start_time_modifier": 1.0,
+        "heat_gain_min": 50.0,
+        "heat_gain_max": 90.0,
+        "heat_loss": 10.0,
+        "optimal_temperature": [
+          -10.0,
+          10.0,
+          105.0,
+          135.0
+        ],
+        "fuel_consumption": [
+          10,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "two_stroke": false,
+        "electronics_enabled": true,
+        "torque_curve": {
+          "keys": [
+            {
+              "time": 0.0,
+              "value": 0.0,
+              "in_tangent": 0.02573101408779621,
+              "out_tangent": 0.02573101408779621,
+              "in_weight": 0.0,
+              "out_weight": 0.9933658242225647,
+              "weighted_mode": 0
+            },
+            {
+              "time": 1000.0,
+              "value": 25.0,
+              "in_tangent": 0.04381771758198738,
+              "out_tangent": 0.04381771758198738,
+              "in_weight": 0.3333333432674408,
+              "out_weight": 0.9402844309806824,
+              "weighted_mode": 0
+            },
+            {
+              "time": 1500.0,
+              "value": 46.900001525878906,
+              "in_tangent": 0.04019999876618385,
+              "out_tangent": 0.04019999876618385,
+              "in_weight": 0.3333333432674408,
+              "out_weight": 0.3333333432674408,
+              "weighted_mode": 0
+            },
+            {
+              "time": 2000.0,
+              "value": 65.19999694824219,
+              "in_tangent": 0.031099999323487282,
+              "out_tangent": 0.031099999323487282,
+              "in_weight": 0.3333333432674408,
+              "out_weight": 0.3333333432674408,
+              "weighted_mode": 0
+            },
+            {
+              "time": 2500.0,
+              "value": 78.0,
+              "in_tangent": 0.019999999552965164,
+              "out_tangent": 0.019999999552965164,
+              "in_weight": 0.3333333432674408,
+              "out_weight": 0.3333333432674408,
+              "weighted_mode": 0
+            },
+            {
+              "time": 3000.0,
+              "value": 85.19999694824219,
+              "in_tangent": 0.007200011983513832,
+              "out_tangent": 0.007200011983513832,
+              "in_weight": 0.3333333432674408,
+              "out_weight": 0.3333333432674408,
+              "weighted_mode": 0
+            },
+            {
+              "time": 3500.0,
+              "value": 87.0,
+              "in_tangent": 0.00018034249660558999,
+              "out_tangent": 0.00018034249660558999,
+              "in_weight": 0.3333333432674408,
+              "out_weight": 0.7526064515113831,
+              "weighted_mode": 0
+            },
+            {
+              "time": 4000.0,
+              "value": 86.4000015258789,
+              "in_tangent": -0.00026041988166980445,
+              "out_tangent": -0.00026041988166980445,
+              "in_weight": 0.3333333432674408,
+              "out_weight": 0.791943371295929,
+              "weighted_mode": 0
+            },
+            {
+              "time": 4500.0,
+              "value": 84.9000015258789,
+              "in_tangent": -0.0007756342529319227,
+              "out_tangent": -0.0007756342529319227,
+              "in_weight": 0.3333333432674408,
+              "out_weight": 0.7708535194396973,
+              "weighted_mode": 0
+            },
+            {
+              "time": 5000.0,
+              "value": 82.5,
+              "in_tangent": -0.0048134820535779,
+              "out_tangent": -0.0048134820535779,
+              "in_weight": 0.6757150292396545,
+              "out_weight": 0.8222754001617432,
+              "weighted_mode": 0
+            },
+            {
+              "time": 5500.0,
+              "value": 79.19999694824219,
+              "in_tangent": -0.012037266977131367,
+              "out_tangent": -0.012037266977131367,
+              "in_weight": 0.7578203082084656,
+              "out_weight": 0.3333333432674408,
+              "weighted_mode": 0
+            },
+            {
+              "time": 6100.0,
+              "value": 68.5,
+              "in_tangent": -0.01718948781490326,
+              "out_tangent": -0.01718948781490326,
+              "in_weight": 0.7271834015846252,
+              "out_weight": 0.3333333432674408,
+              "weighted_mode": 0
+            },
+            {
+              "time": 6600.0,
+              "value": 0.0,
+              "in_tangent": 0.0,
+              "out_tangent": 0.0,
+              "in_weight": 0.0,
+              "out_weight": 0.0,
+              "weighted_mode": 0
+            }
+          ],
+          "pre_wrap_mode": 2,
+          "post_wrap_mode": 2
+        },
+        "globals": {
+          "source": {
+            "file": "level1",
+            "path_id": 64919
+          },
+          "fuel_consumption": 0.000375000003259629,
+          "oil_consumption": 0.0003000000142492354,
+          "rpm_change": 2000,
+          "car_temperature_bounds": [
+            -30.0,
+            135.0
+          ],
+          "coolant_evaporate_rate": 0.30000001192092896,
+          "temperature_difference_modifier": 40.0,
+          "temperature_move_modifier": 3.0,
+          "max_car_velocity": 200.0,
+          "awake_heat_modifier": 1,
+          "min_steam_temperature": 110.0
+        },
+        "radiator": {
+          "source": {
+            "file": "level1",
+            "path_id": 70849
+          },
+          "thermostat_range": [
+            85,
+            95
+          ],
+          "fan_temperature_on": 102,
+          "fan_temperature_off": 85,
+          "fan_on_when_engine_runs": true,
+          "max_value": 55,
+          "max_fan_value": 100,
+          "max_fan_speed": 300,
+          "max_fluid_loss": 0.10000000149011612
+        },
+        "initial_temperature": 0.0,
+        "heat_loss_speed_modifier": 0.0,
+        "max_rpm_difference": 3000.0,
+        "torque_modifier": 1.0,
+        "oil_fluid": 1,
+        "no_overheat": false,
+        "kickstart": false,
+        "start_chance_interval_seconds": 1,
+        "auto_shift_clutch_rpm": 2500.0,
+        "auto_shift_clutch_rpm_range": 200.0
+      },
+      "instruments": {
+        "needles": [
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 71099
+            },
+            "node": 14,
+            "signal": "speed",
+            "min_value": 0.0,
+            "max_value": 160.0,
+            "min_angle": -64.0,
+            "max_angle": 64.0,
+            "axis": 1,
+            "rest": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "offset": 0.0,
+            "inv": false,
+            "value_smoothing": 8,
+            "signal_smoothing": 0,
+            "no_value_lerp": false,
+            "lerp_angle": false
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 77005
+            },
+            "node": 15,
+            "signal": "temp",
+            "min_value": 10.0,
+            "max_value": 130.0,
+            "min_angle": -30.0,
+            "max_angle": 30.0,
+            "axis": 1,
+            "rest": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "offset": 0.0,
+            "inv": false,
+            "value_smoothing": 8,
+            "signal_smoothing": 5,
+            "no_value_lerp": false,
+            "lerp_angle": false
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 72439
+            },
+            "node": 16,
+            "signal": "fuel",
+            "min_value": 0.0,
+            "max_value": 39.0,
+            "min_angle": -26.0,
+            "max_angle": 26.0,
+            "axis": 1,
+            "rest": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "offset": 0.0,
+            "inv": false,
+            "value_smoothing": 8,
+            "signal_smoothing": 5,
+            "no_value_lerp": false,
+            "lerp_angle": false
+          }
+        ],
+        "lamps": [
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 75517
+            },
+            "node": 17,
+            "signal": "fuel",
+            "on": {
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 309
+              },
+              "asset": 2,
+              "gltf_material": 57
+            },
+            "off": {
+              "source": {
+                "file": "sharedassets0.assets",
+                "path_id": 36
+              },
+              "asset": 2,
+              "gltf_material": 58
+            },
+            "min_value": 1.0,
+            "max_value": 0.0,
+            "stay_on": true
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 78122
+            },
+            "node": 18,
+            "signal": "oil",
+            "on": {
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 327
+              },
+              "asset": 2,
+              "gltf_material": 59
+            },
+            "off": {
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 326
+              },
+              "asset": 2,
+              "gltf_material": 60
+            },
+            "min_value": 1.0,
+            "max_value": 0.0,
+            "stay_on": true
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 65477
+            },
+            "node": 19,
+            "signal": "battery",
+            "on": {
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 323
+              },
+              "asset": 2,
+              "gltf_material": 61
+            },
+            "off": {
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 322
+              },
+              "asset": 2,
+              "gltf_material": 62
+            },
+            "min_value": 1.0,
+            "max_value": 0.0,
+            "stay_on": true
+          },
+          {
+            "source": {
+              "file": "level1",
+              "path_id": 66369
+            },
+            "node": 20,
+            "signal": "headlight2",
+            "on": {
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 325
+              },
+              "asset": 2,
+              "gltf_material": 63
+            },
+            "off": {
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 324
+              },
+              "asset": 2,
+              "gltf_material": 64
+            },
+            "min_value": 1.0,
+            "max_value": 0.0,
+            "stay_on": true
+          }
+        ],
+        "odometer": {
+          "source": {
+            "file": "level1",
+            "path_id": 76207
+          },
+          "initial_value": 0.0,
+          "base": 10,
+          "decimals": 1.0,
+          "use_multiplier": false,
+          "multiplier": 0.0,
+          "digits": [
+            {
+              "node": 21,
+              "place": 0,
+              "axis": 0,
+              "inv": false,
+              "direct": false,
+              "continuous": false,
+              "initial_value": 0.0,
+              "initial_angle": 0.0,
+              "on": {
+                "source": {
+                  "file": "sharedassets1.assets",
+                  "path_id": 283
+                },
+                "asset": 2,
+                "gltf_material": 53
+              },
+              "off": {
+                "source": {
+                  "file": "sharedassets0.assets",
+                  "path_id": 31
+                },
+                "asset": 2,
+                "gltf_material": 34
+              }
+            },
+            {
+              "node": 22,
+              "place": 1,
+              "axis": 0,
+              "inv": false,
+              "direct": false,
+              "continuous": false,
+              "initial_value": 0.0,
+              "initial_angle": 0.0,
+              "on": {
+                "source": {
+                  "file": "sharedassets1.assets",
+                  "path_id": 285
+                },
+                "asset": 2,
+                "gltf_material": 54
+              },
+              "off": {
+                "source": {
+                  "file": "sharedassets0.assets",
+                  "path_id": 32
+                },
+                "asset": 2,
+                "gltf_material": 35
+              }
+            },
+            {
+              "node": 23,
+              "place": 2,
+              "axis": 0,
+              "inv": false,
+              "direct": false,
+              "continuous": false,
+              "initial_value": 0.0,
+              "initial_angle": 0.0,
+              "on": {
+                "source": {
+                  "file": "sharedassets1.assets",
+                  "path_id": 285
+                },
+                "asset": 2,
+                "gltf_material": 54
+              },
+              "off": {
+                "source": {
+                  "file": "sharedassets0.assets",
+                  "path_id": 32
+                },
+                "asset": 2,
+                "gltf_material": 35
+              }
+            },
+            {
+              "node": 24,
+              "place": 3,
+              "axis": 0,
+              "inv": false,
+              "direct": false,
+              "continuous": false,
+              "initial_value": 0.0,
+              "initial_angle": 0.0,
+              "on": {
+                "source": {
+                  "file": "sharedassets1.assets",
+                  "path_id": 285
+                },
+                "asset": 2,
+                "gltf_material": 54
+              },
+              "off": {
+                "source": {
+                  "file": "sharedassets0.assets",
+                  "path_id": 32
+                },
+                "asset": 2,
+                "gltf_material": 35
+              }
+            },
+            {
+              "node": 25,
+              "place": 4,
+              "axis": 0,
+              "inv": false,
+              "direct": false,
+              "continuous": false,
+              "initial_value": 0.0,
+              "initial_angle": 0.0,
+              "on": {
+                "source": {
+                  "file": "sharedassets1.assets",
+                  "path_id": 285
+                },
+                "asset": 2,
+                "gltf_material": 54
+              },
+              "off": {
+                "source": {
+                  "file": "sharedassets0.assets",
+                  "path_id": 32
+                },
+                "asset": 2,
+                "gltf_material": 35
+              }
+            }
+          ]
+        },
+        "low_fuel": 5.0,
+        "low_oil": 2.0,
+        "oil_test_rpm": 300.0,
+        "battery_test_rpm": 800.0,
+        "electronics_output": 1.0,
+        "electronics_off_threshold": 0.2
+      },
+      "source": {
+        "file": "level1",
+        "path_id": 77839
+      },
+      "body": 2,
+      "root": 2,
+      "mass_kg": 961.6,
+      "serialized_mass_kg": 717,
+      "wheel_slots": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "colliders": [
+        1
+      ],
+      "gear_ratios": [
+        -3.87,
+        0,
+        3.75,
+        2.3,
+        1.49,
+        1
+      ],
+      "final_drive_ratio": 4.300000190734863,
+      "max_steer_degrees": 40,
+      "keyboard_steering_rate": 1.25,
+      "brake_torque_nm": 600,
+      "handbrake_torque_nm": 600,
+      "wheel_slip": [
+        1.25,
+        0.75,
+        1.25,
+        0.75
+      ],
+      "auto_shift_stop_speed": 1,
+      "auto_shift_min_rpm": 2700,
+      "auto_shift_max_rpm": 3700,
+      "gear_free_run": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "dont_ignite_with_throttle_in_automatic": false,
+      "auto_move_min": 0.3,
+      "handbrake": true
+    }
+  ],
   "audio": {
     "schema_version": 1,
     "clips": [
@@ -37149,7 +37830,7 @@
     "engine": {
       "source": {
         "file": "level1",
-        "path_id": 68282
+        "path_id": 136815
       },
       "emitter": 42,
       "idle_voice": 43,

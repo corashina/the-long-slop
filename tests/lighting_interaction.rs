@@ -270,14 +270,15 @@ fn house_lamps_materials_visibility_and_current_pose_lerp() {
 #[test]
 fn cabin_modes_override_strict_door_threshold_before_fade() {
     let r = common::reference().lighting;
-    let c = r
+    let cabin = r
         .controllers
         .iter()
-        .find(|c| c.kind == LightControllerKind::Cabin)
+        .position(|c| c.kind == LightControllerKind::Cabin)
         .unwrap();
+    let c = &r.controllers[cabin];
     let threshold = c.cabin_input.as_ref().unwrap().threshold;
     let mut l = LightingState::new(&r);
-    l.update_cabin(&r, [threshold; 4]);
+    l.update_cabin(&r, cabin, [threshold; 4]);
     for _ in 0..3 {
         l.advance_fades(&r, 0.1);
     }
@@ -289,7 +290,7 @@ fn cabin_modes_override_strict_door_threshold_before_fade() {
             .unwrap()
             .enabled
     );
-    l.update_cabin(&r, [threshold + 0.001, 0., 0., 0.]);
+    l.update_cabin(&r, cabin, [threshold + 0.001, 0., 0., 0.]);
     for _ in 0..3 {
         l.advance_fades(&r, 0.1);
     }
@@ -301,7 +302,7 @@ fn cabin_modes_override_strict_door_threshold_before_fade() {
             .enabled
     );
     l.use_control(&r, c.id);
-    l.update_cabin(&r, [0.; 4]);
+    l.update_cabin(&r, cabin, [0.; 4]);
     for _ in 0..3 {
         l.advance_fades(&r, 0.1);
     }
@@ -313,7 +314,7 @@ fn cabin_modes_override_strict_door_threshold_before_fade() {
             .enabled
     );
     l.use_control(&r, c.id);
-    l.update_cabin(&r, [1.; 4]);
+    l.update_cabin(&r, cabin, [1.; 4]);
     for _ in 0..3 {
         l.advance_fades(&r, 0.1);
     }
@@ -627,6 +628,12 @@ fn exported_cabin_door_values_keep_all_four_source_mappings() {
         .iter()
         .find_map(|c| c.cabin_input.as_ref())
         .unwrap();
+    let control = r
+        .lighting
+        .controllers
+        .iter()
+        .position(|c| c.cabin_input.is_some())
+        .unwrap();
     for (index, source) in cabin.door_usable_sources.iter().enumerate() {
         let mechanism = r.mechanisms.iter().find(|m| m.source == *source).unwrap();
         let mut runtime = GarageRuntime::new(&r).unwrap();
@@ -682,11 +689,11 @@ fn exported_cabin_door_values_keep_all_four_source_mappings() {
         let values = runtime
             .area
             .interaction
-            .cabin_door_values(&runtime.area.items);
+            .cabin_door_values(control, &runtime.area.items);
         for n in 0..4 {
             assert!((values[n] - if n == index { value } else { 0. }).abs() < 1e-6);
         }
-        runtime.lighting.update_cabin(&r.lighting, values);
+        runtime.lighting.update_cabin(&r.lighting, control, values);
         for _ in 0..3 {
             runtime.lighting.advance_fades(&r.lighting, 0.1);
         }

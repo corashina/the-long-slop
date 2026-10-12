@@ -5,6 +5,8 @@ mod lamps;
 mod terrain;
 pub use lamps::{RoadLampId, RoadLampPlacement, road_lamp_placement, road_lamp_range};
 
+// At 2^45 meters, f64 spacing is 1/128 meter; chunk and band indices fit i64.
+pub const MAX_ABSOLUTE_COORDINATE: f64 = (1_u64 << 45) as f64;
 pub const CHUNK_LENGTH: f64 = 128.0;
 pub const STATION_SPACING: f64 = 640.0;
 pub const REBASE_LIMIT: f32 = 2048.0;
@@ -338,10 +340,13 @@ pub struct WorldStream {
     pub origin: WorldOrigin,
     chunks: Vec<LoadedChunk>,
     lateral_band: i64,
+    pub focus: [f64; 3],
     starting_area: Option<StartingAreaReference>,
     interiors: Vec<Bounds>,
     station_items: Vec<(i64, crate::reference::ItemId)>,
     vehicle_support: Vec<(ChunkKey, i64, ColliderHandle)>,
+    /// Reused list of the chunk cells that the vehicles need.
+    support_cells: Vec<(ChunkKey, i64)>,
 }
 
 impl WorldStream {
@@ -351,13 +356,66 @@ impl WorldStream {
             origin: WorldOrigin::default(),
             chunks: Vec::with_capacity(11),
             lateral_band: 0,
+            focus: [0.; 3],
             starting_area: None,
             interiors: Vec::new(),
             station_items: Vec::new(),
-            vehicle_support: Vec::with_capacity(3),
+            vehicle_support: Vec::with_capacity(6),
+            support_cells: Vec::with_capacity(6),
         }
     }
 
+    pub fn capture_save(
+        &self,
+        interaction: &crate::interaction::InteractionState,
+    ) -> crate::save::WorldSnapshot {
+        let mut records = self
+            .station_items
+            .iter()
+            .map(|(station, item)| crate::save::WorldRecord::Pump {
+                instance: crate::save::InstanceId::Station {
+                    seed: self.seed.to_string(),
+                    index: station.to_string(),
+                    role: "pump".into(),
+                },
+                valve: interaction.opening_valve(crate::reference::OpeningId(item.0)),
+            })
+            .collect::<Vec<_>>();
+        records.sort_by(|a, b| {
+            let crate::save::WorldRecord::Pump { instance: a, .. } = a;
+            let crate::save::WorldRecord::Pump { instance: b, .. } = b;
+            a.cmp(b)
+        });
+        crate::save::WorldSnapshot {
+            seed: self.seed.to_string(),
+            records,
+        }
+    }
+    pub(crate) fn station_bindings(&self) -> &[(i64, crate::reference::ItemId)] {
+        &self.station_items
+    }
+
+    pub fn station_item(
+        &self,
+        instance: &crate::save::InstanceId,
+    ) -> Result<Option<crate::reference::ItemId>, crate::save::SaveError> {
+        let (seed, station) = instance.station()?;
+        if seed != self.seed {
+            return Err(crate::save::SaveError::InvalidLinks("Station seed".into()));
+        }
+        if !self
+            .chunks
+            .iter()
+            .any(|chunk| chunk.pumps.iter().any(|(id, _)| *id == station))
+        {
+            return Ok(None);
+        }
+        Ok(self
+            .station_items
+            .iter()
+            .find(|(id, _)| *id == station)
+            .map(|(_, item)| *item))
+    }
     pub fn configure_starting_area(&mut self, reference: &ReferenceManifest) {
         assert!(
             self.chunks.is_empty(),
@@ -410,11 +468,25 @@ impl WorldStream {
         self.chunks.iter()
     }
 
+    pub fn contains_active(&self, point: [f64; 3]) -> bool {
+        let lateral = point[0] - road_sample(self.seed, -point[2]).center[0];
+        let key = ChunkKey((-point[2] / CHUNK_LENGTH).floor() as i64);
+        self.chunks.iter().any(|chunk| {
+            chunk.data.key == key
+                && (lateral - chunk.data.lateral_band as f64 * LATERAL_BAND_WIDTH).abs()
+                    <= TERRAIN_HALF_WIDTH
+        }) || self.vehicle_support.iter().any(|(support, band, _)| {
+            *support == key
+                && (lateral - *band as f64 * LATERAL_BAND_WIDTH).abs() <= TERRAIN_HALF_WIDTH
+        })
+    }
+
     pub fn lateral_band(&self) -> i64 {
         self.lateral_band
     }
 
     pub fn sync_at(&mut self, absolute: [f64; 3], physics: &mut PhysicsWorld) {
+        self.focus = absolute;
         let distance = -absolute[2];
         let lateral = absolute[0] - road_sample(self.seed, distance).center[0];
         self.lateral_band = (lateral / LATERAL_BAND_WIDTH).round() as i64;
@@ -471,34 +543,46 @@ impl WorldStream {
         self.sync_vehicle_support(physics);
     }
 
+    /// Keeps terrain under every vehicle, also far from the streamed focus.
     fn sync_vehicle_support(&mut self, physics: &mut PhysicsWorld) {
-        let car = self.origin.absolute(physics.snapshot().pose.position);
-        let distance = -car[2];
-        let lateral = car[0] - road_sample(self.seed, distance).center[0];
-        let band = (lateral / LATERAL_BAND_WIDTH).round() as i64;
-        let center = ChunkKey((distance / CHUNK_LENGTH).floor() as i64);
-        let keys = [ChunkKey(center.0 - 1), center, ChunkKey(center.0 + 1)];
-        // One terrain cell covers the fixed car's full footprint.
-        let covered = |key: ChunkKey| {
-            self.chunks.iter().any(|chunk| {
-                chunk.data.key == key
-                    && (lateral - chunk.data.lateral_band as f64 * LATERAL_BAND_WIDTH).abs()
-                        < TERRAIN_HALF_WIDTH - 8.0
-            })
-        };
-        self.vehicle_support.retain(|&(key, old_band, handle)| {
-            if keys.contains(&key) && old_band == band && !covered(key) {
+        self.support_cells.clear();
+        for vehicle in 0..physics.vehicle_count() {
+            if !physics.body_active(physics.chassis_handle(vehicle)) {
+                continue;
+            }
+            let car = self
+                .origin
+                .absolute(physics.snapshot(vehicle).pose.position);
+            let distance = -car[2];
+            let lateral = car[0] - road_sample(self.seed, distance).center[0];
+            let band = (lateral / LATERAL_BAND_WIDTH).round() as i64;
+            let center = (distance / CHUNK_LENGTH).floor() as i64;
+            for key in [center - 1, center, center + 1] {
+                // One terrain cell covers the fixed car's full footprint.
+                let covered = self.chunks.iter().any(|chunk| {
+                    chunk.data.key == ChunkKey(key)
+                        && (lateral - chunk.data.lateral_band as f64 * LATERAL_BAND_WIDTH).abs()
+                            < TERRAIN_HALF_WIDTH - 8.0
+                });
+                if !covered && !self.support_cells.contains(&(ChunkKey(key), band)) {
+                    self.support_cells.push((ChunkKey(key), band));
+                }
+            }
+        }
+        let cells = &self.support_cells;
+        self.vehicle_support.retain(|&(key, band, handle)| {
+            if cells.contains(&(key, band)) {
                 return true;
             }
             physics.remove_collider(handle);
             false
         });
-        for key in keys {
-            if covered(key)
-                || self
-                    .vehicle_support
-                    .iter()
-                    .any(|&(old_key, old_band, _)| old_key == key && old_band == band)
+        for index in 0..self.support_cells.len() {
+            let (key, band) = self.support_cells[index];
+            if self
+                .vehicle_support
+                .iter()
+                .any(|&(old_key, old_band, _)| old_key == key && old_band == band)
             {
                 continue;
             }
@@ -537,6 +621,15 @@ impl WorldStream {
         at_station: bool,
         physics: &mut PhysicsWorld,
     ) -> VehiclePose {
+        let (point, rotation) = self.recovery_destination(distance, at_station);
+        self.sync_at(point, physics);
+        VehiclePose {
+            position: self.origin.local(point),
+            rotation,
+        }
+    }
+
+    pub fn recovery_destination(&self, distance: f64, at_station: bool) -> ([f64; 3], [f32; 4]) {
         let sample_distance = if at_station {
             nearest_station(self.seed, distance).id as f64 * STATION_SPACING
         } else {
@@ -548,13 +641,9 @@ impl WorldStream {
         } else {
             road.center
         };
-        self.sync_at(point, physics);
         point[1] += 1.1;
         let yaw = (-road.tangent[0]).atan2(-road.tangent[2]);
-        VehiclePose {
-            position: self.origin.local(point),
-            rotation: [0.0, (yaw * 0.5).sin(), 0.0, (yaw * 0.5).cos()],
-        }
+        (point, [0.0, (yaw * 0.5).sin(), 0.0, (yaw * 0.5).cos()])
     }
 }
 

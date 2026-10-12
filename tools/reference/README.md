@@ -90,6 +90,8 @@ Category estimates include decoded media, managed analysis, and temporary native
 Before assembly, complete category receipts include shared payloads, indexes, languages, and source text.
 The assembly estimate adds 25 percent and 64 MiB for acceptance metadata and allocation overhead.
 Runtime staging reserves 128 MiB. Existing output remains allocated until promotion succeeds.
+Export or verification failure removes only the new staging directory. Promotion failure retains staging for recovery.
+Existing accepted output and recovery directories remain intact.
 Estimates cover file bytes and headroom; other processes can change available space during export.
 Repeated catalog commands verify accepted records and keep managed analysis. Invalid stages fail without rebuilding accepted data.
 
@@ -134,7 +136,10 @@ Startup conditions use a fixed build-based seed and original source ranges.
 Rims and tires use the matching source material variants.
 The exporter selects the highest source LOD and retains all transform IDs.
 
-Mirror materials retain their authored factors. Live mirror camera output is omitted.
+Mirror materials retain their authored factors. The selected Lada has three checked live mirror bindings.
+Each binding has a source camera, plane, screen, live material, and disabled material.
+The runtime captures into retained 256 by 256 linear RGBA8 targets with D24S8 depth.
+See [mirror acceptance](../../docs/verification.md#live-mirror-acceptance-2026-10-12) for checks and limits.
 Plate text is omitted because serialized glyphs contain obsolete editor text.
 The exporter maps supported Unity materials to glTF PBR and retains source properties and keywords.
 The source renderer ports the approved lighting, cookie, shadow, sky, cloud, and flare paths.

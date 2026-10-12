@@ -2,7 +2,7 @@
 
 Date: 2026-10-12
 Branch: `codex/save-load`
-Status: Approved design; written specification awaits review.
+Status: Implemented; master integration includes the Lada and Skoda.
 
 ## Purpose
 
@@ -14,9 +14,10 @@ Use one manual save slot and IndexedDB.
 Support only the current schema and current source export.
 Reject incompatible saves. Do not add migrations or compatibility paths.
 
-The current build has one Lada, its parts, home items, roadside pumps, mechanisms, and lamps.
+The current build has a Lada and Skoda, their parts, home items, roadside pumps, mechanisms, and lamps.
 It has no survival or weather system.
 This work adds no survival, weather, vehicles, autosave, export, import, or save-slot management.
+The master integration saves both existing vehicles.
 
 ## Current state inventory
 
@@ -59,12 +60,12 @@ The payload contains the fields below, except `checksum`.
 | `source` | App ID, build ID, exact runtime manifest SHA256, and source-file hashes |
 | `world` | Seed and records for existing world changes |
 | `player` | Player and carry state from the inventory |
-| `vehicles` | The existing vehicle instance, body state, engine state, gear, and handbrake |
+| `vehicles` | Each vehicle instance, body state, engine state, gear, handbrake, trip distance, and requested headlights |
 | `bodies` | Independent changed source bodies and detached assembly bodies |
 | `items` | Current item state, including fluids, condition, temperature, and logical location |
 | `attachments` | Part-slot, wheel-slot, and tire/rim links |
 | `mechanisms` | Mechanism values and opening valves |
-| `progress` | Trip distance |
+| `progress` | Selected vehicle instance and global engine-start attempt count |
 | `lighting` | Cycle state, lamp controller state, and switch movement |
 | `view` | Camera mode |
 | `checksum` | SHA256 of the serialized snapshot payload |
@@ -84,7 +85,7 @@ Rust validates the entire snapshot after the browser checks its envelope and che
 
 Use each source record's file and path ID as its source identity.
 Use an instance identity separate from the source identity.
-The starting car, home, parts, and supplies each have one deterministic initial instance identity.
+The starting cars, home, parts, and supplies each have one deterministic initial instance identity.
 Resolve runtime numeric IDs through the validated manifest; do not use array indices as persisted identities.
 
 Identify each roadside pump by world seed, signed station index, and its role within that station.
@@ -93,6 +94,9 @@ Generated pump bindings can use runtime numeric IDs, but saves must not depend o
 Pumps retain unlimited source stock; regenerate their reservoir instead of saving artificial depletion.
 
 Reference attachment owners, slots, seats, mechanisms, and lamps through stable identities.
+Resolve vehicles through source instance identities, including the selected vehicle while the player is on foot.
+Store trip distance and requested headlights once, in each vehicle record.
+Reject missing or duplicate vehicles. Accept vehicle records in any order.
 Reject duplicate instances, missing references, ownership conflicts, and attachment cycles.
 Validate part compatibility and wheel compatibility against the current manifest.
 
@@ -177,7 +181,7 @@ Use the existing controls, source styling, and responsive menu patterns.
 Provide pending status and operation results through the menu status area.
 
 New game constructs a fresh runtime before replacing the current session.
-It restores garage, supplies, car, origin, trip distance, source cycle offset, and lamp state.
+It restores garage, supplies, both cars, origin, trip distance, source cycle offset, and lamp state.
 It preserves the stored save until the player completes another Save.
 Recover continues to preserve current session progress.
 Storage failure must not disable New game, Recover, or Continue.
@@ -201,7 +205,7 @@ Avoid a generic persistence framework or unrelated runtime refactoring.
 
 | Check | Required evidence |
 | --- | --- |
-| Driven vehicle | Save and load preserve pose, velocity, engine state, seat, fluids, and trip distance |
+| Both vehicles | Save and load preserve both vehicles, selected vehicle, pose, velocity, engine state, seat, fluids, and trip distance |
 | Rebase | Absolute positions survive a rebase before save and a fresh origin during load |
 | Removed part | Detached pose, velocity, condition, slot vacancy, and rebuilt collision behavior match |
 | Split wheel | Rim/tire ownership and wheel support rebuild without duplicate bodies or colliders |

@@ -90,7 +90,7 @@ fn fixture_with(
     items.get_mut(ItemId(1)).unwrap().local_pose = pose([0.0; 3]);
     let mut interaction = InteractionState::new(&reference).unwrap();
     interaction.bind_body(BodyId(90), handle);
-    interaction.bind_body(reference.vehicle.body, physics.chassis_handle());
+    interaction.bind_body(reference.vehicles[0].body, physics.chassis_handle(0));
     let player = PlayerState::new(&reference.player, pose([10.0, 1.0, 0.0]), &mut physics);
     (interaction, items, physics, player)
 }
@@ -820,7 +820,7 @@ fn seated_cap_tuning_keeps_the_player_in_the_seat() {
 #[test]
 fn car_tanks_cannot_pick_up_the_chassis() {
     let (mut interaction, mut items, mut physics, mut player) = fixture();
-    items.bind_body(BodyId(2), physics.chassis_handle());
+    items.bind_body(BodyId(2), physics.chassis_handle(0));
     interaction.step(
         input(keys::GRAB, keys::GRAB),
         common::resolved(target(2)),
@@ -1164,8 +1164,8 @@ fn hinge_clamps_and_moves_its_collider() {
     );
     let mut interaction = InteractionState::new(&reference).unwrap();
     interaction.bind_body(BodyId(90), handle);
-    interaction.bind_body(reference.vehicle.body, physics.chassis_handle());
-    interaction.bind_body(BodyId(2), physics.chassis_handle());
+    interaction.bind_body(reference.vehicles[0].body, physics.chassis_handle(0));
+    interaction.bind_body(BodyId(2), physics.chassis_handle(0));
     let mut items = ItemStore::new(&reference).unwrap();
     let mut player = PlayerState::new(&reference.player, pose([10.0, 1.0, 0.0]), &mut physics);
     let before = *physics.rapier().colliders[collider].position();
@@ -1245,7 +1245,7 @@ fn hinge_clamps_and_moves_its_collider() {
     );
     assert_ne!(*physics.rapier().colliders[collider].position(), before);
     let before_translation = physics.rapier().bodies[handle].translation();
-    let chassis = physics.chassis_handle();
+    let chassis = physics.chassis_handle(0);
     let mut parent = *physics.rapier().bodies[chassis].position();
     parent.translation += Vector::new(5.0, 0.0, 0.0);
     physics.rapier_mut().bodies[chassis].set_position(parent, true);
@@ -2355,7 +2355,7 @@ fn held_f_charges_and_release_throws_once() {
 #[test]
 fn source_push_wakes_and_applies_point_impulse() {
     let (mut interaction, mut items, mut physics, mut player) = fixture();
-    let chassis = physics.chassis_handle();
+    let chassis = physics.chassis_handle(0);
     physics.rapier_mut().bodies[chassis].sleep();
     let aim = my_summer_slop::interaction::ResolvedAim {
         push_target: target(5),
@@ -2495,7 +2495,7 @@ fn grip_fixture() -> (
         physics.step_physics();
     }
     assert!(player.grounded());
-    let chassis = physics.chassis_handle();
+    let chassis = physics.chassis_handle(0);
     let collider = physics.rapier_mut().insert_collider(
         ColliderBuilder::ball(0.1)
             .translation(Vector::new(10.0, 0.0, 0.0))
@@ -2539,14 +2539,22 @@ fn steering_grip_retains_release_and_look_away_then_next_press_releases() {
         1.0 / 60.0,
     );
     assert!(interaction.push_gripping());
-    assert_eq!(interaction.push_steering(), Some(1.0));
+    assert_eq!(
+        interaction.push_steering(),
+        Some((physics.chassis_handle(0), 1.0))
+    );
     assert_eq!(physics.rapier().impulse_joints.len(), 1);
     let joint = physics.rapier().impulse_joints.iter().next().unwrap().1;
     assert_eq!(
         joint.data.locked_axes,
         rapier3d::prelude::JointAxesMask::LIN_X | rapier3d::prelude::JointAxesMask::LIN_Z
     );
-    assert!(physics.rapier().bodies[physics.chassis_handle()].linvel().z < 0.0);
+    assert!(
+        physics.rapier().bodies[physics.chassis_handle(0)]
+            .linvel()
+            .z
+            < 0.0
+    );
     interaction.step(
         FrameInput {
             held: keys::FORWARD,
@@ -2592,7 +2600,7 @@ fn steering_grip_distance_collider_and_capture_cancel() {
         assert!(interaction.push_gripping());
         match cancel {
             0 => {
-                let chassis = physics.chassis_handle();
+                let chassis = physics.chassis_handle(0);
                 let mut pose = *physics.rapier().bodies[chassis].position();
                 pose.translation.x += 2.0;
                 physics.rapier_mut().bodies[chassis].set_position(pose, true);
@@ -2653,9 +2661,9 @@ fn source_push_wakes_car_without_bypassing_handbrake() {
         point,
         slot: None,
     };
-    let chassis = runtime.physics.chassis_handle();
+    let chassis = runtime.physics.chassis_handle(0);
     runtime.physics.rapier_mut().bodies[chassis].sleep();
-    assert!(runtime.handbrake);
+    assert!(runtime.vehicles[0].handbrake);
     runtime.area.interaction.step(
         input(keys::GRAB, keys::GRAB),
         my_summer_slop::interaction::ResolvedAim {
@@ -2668,7 +2676,7 @@ fn source_push_wakes_car_without_bypassing_handbrake() {
         1.0 / 60.0,
     );
     assert!(!runtime.physics.rapier().bodies[chassis].is_sleeping());
-    assert!(runtime.handbrake);
+    assert!(runtime.vehicles[0].handbrake);
 }
 
 #[test]
@@ -2678,7 +2686,7 @@ fn steering_grip_moves_car_and_keeps_player_joint_across_physics_steps() {
         push_target: Some(target),
         ..Default::default()
     };
-    let chassis = physics.chassis_handle();
+    let chassis = physics.chassis_handle(0);
     // The native chassis rests on a box. Real wheel contacts use the vehicle tire solver.
     for (_, collider) in physics.rapier_mut().colliders.iter_mut() {
         if collider.parent() == Some(chassis) {
@@ -2764,8 +2772,8 @@ fn steering_grip_requires_ground_and_ordinary_push_rejects_support_root() {
         player.step(FrameInput::default(), &mut physics, 1.0 / 60.0);
     }
     assert!(player.grounded());
-    assert_eq!(player.support_body(), Some(physics.chassis_handle()));
-    let velocity = physics.rapier().bodies[physics.chassis_handle()].linvel();
+    assert_eq!(player.support_body(), Some(physics.chassis_handle(0)));
+    let velocity = physics.rapier().bodies[physics.chassis_handle(0)].linvel();
     let action = interaction.step(
         input(keys::GRAB, keys::GRAB),
         my_summer_slop::interaction::ResolvedAim {
@@ -2779,7 +2787,7 @@ fn steering_grip_requires_ground_and_ordinary_push_rejects_support_root() {
     );
     assert_eq!(action, None);
     assert_eq!(
-        physics.rapier().bodies[physics.chassis_handle()].linvel(),
+        physics.rapier().bodies[physics.chassis_handle(0)].linvel(),
         velocity
     );
 }
@@ -2828,15 +2836,16 @@ fn grip_forward_force_uses_car_direction_after_look_change() {
         &mut physics,
         1.0 / 60.0,
     );
-    let chassis = physics.chassis_handle();
+    let chassis = physics.chassis_handle(0);
     let r = common::reference();
     for keys in [keys::FORWARD, keys::FORWARD | keys::LEFT, keys::BACK] {
         let before = physics.rapier().bodies[chassis].linvel();
         let steer = if keys & keys::LEFT != 0 { 1.0 } else { 0.0 };
         let sign = if keys & keys::BACK != 0 { -1.0 } else { 1.0 };
-        let direction = Rotation::from_rotation_y(steer * r.vehicle.max_steer_degrees.to_radians())
-            * (physics.rapier().bodies[chassis].position().rotation * -Vector::Z)
-            * sign;
+        let direction =
+            Rotation::from_rotation_y(steer * r.vehicles[0].max_steer_degrees.to_radians())
+                * (physics.rapier().bodies[chassis].position().rotation * -Vector::Z)
+                * sign;
         let up = physics.rapier().bodies[chassis].position().rotation * Vector::Y;
         let expected = (direction - up * direction.dot(up)).normalize_or_zero()
             * r.player.grip_speed
@@ -2862,7 +2871,7 @@ fn grip_forward_force_uses_car_direction_after_look_change() {
 #[test]
 fn grip_steering_without_forward_or_backward_applies_no_push() {
     let (mut interaction, mut items, mut physics, mut player, target) = grip_fixture();
-    let chassis = physics.chassis_handle();
+    let chassis = physics.chassis_handle(0);
     let before = physics.rapier().bodies[chassis].linvel();
     interaction.step(
         input(keys::GRAB | keys::LEFT, keys::GRAB),
@@ -2876,7 +2885,10 @@ fn grip_steering_without_forward_or_backward_applies_no_push() {
         1.0 / 60.0,
     );
     assert!(interaction.push_gripping());
-    assert_eq!(interaction.push_steering(), Some(1.0));
+    assert_eq!(
+        interaction.push_steering(),
+        Some((physics.chassis_handle(0), 1.0))
+    );
     assert_eq!(physics.rapier().bodies[chassis].linvel(), before);
 }
 

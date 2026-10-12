@@ -61,10 +61,23 @@ impl InstrumentState {
     pub fn reset(&mut self, r: &InstrumentReference) {
         *self = Self::new(r);
     }
+    pub fn initialize_from_sample(&mut self, r: &InstrumentReference, s: InstrumentSample) {
+        self.reset(r);
+        self.evaluate(r, s, 0., true);
+    }
     pub fn update(&mut self, r: &InstrumentReference, s: InstrumentSample, dt: f32) {
         if !dt.is_finite() || dt <= 0. {
             return;
         }
+        self.evaluate(r, s, dt, false);
+    }
+    fn evaluate(
+        &mut self,
+        r: &InstrumentReference,
+        s: InstrumentSample,
+        dt: f32,
+        initialize: bool,
+    ) {
         for (i, n) in r.needles.iter().enumerate() {
             let target = match n.signal.as_str() {
                 "speed" => s.speed_kmh.abs(),
@@ -84,13 +97,15 @@ impl InstrumentState {
                 }
                 _ => 0.,
             };
-            self.signals[i] = if n.signal_smoothing > 0. {
+            self.signals[i] = if !initialize && n.signal_smoothing > 0. {
                 lerp(self.signals[i], target, dt * n.signal_smoothing)
             } else {
                 target
             };
             self.values[i] = if n.no_value_lerp {
                 self.signals[i] + n.offset
+            } else if initialize {
+                self.signals[i]
             } else if n.lerp_angle {
                 lerp_angle(self.values[i], self.signals[i], dt * n.value_smoothing)
             } else {
@@ -146,7 +161,11 @@ impl InstrumentState {
             } else {
                 self.digit_values[i].trunc() * 360. / base
             };
-            self.digit_angles[i] = lerp_angle(self.digit_angles[i], angle, dt * 20.);
+            self.digit_angles[i] = if initialize {
+                angle
+            } else {
+                lerp_angle(self.digit_angles[i], angle, dt * 20.)
+            };
         }
     }
 }

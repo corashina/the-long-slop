@@ -82,10 +82,11 @@ class GltfBuilder:
         return accessor
 
 class GltfExporter(GltfBuilder):
-    def __init__(self, source, output, library: "LibraryReader", asset_id=0):
+    def __init__(self, source, output, library: "LibraryReader", asset_id=0, with_materials=True):
         super().__init__(source, output)
         self.library = library
         self.asset_id = asset_id
+        self.with_materials = with_materials
         self.material_indices = {}
 
     def material(self, reader, color_override=None, condition=None):
@@ -193,7 +194,7 @@ class GltfExporter(GltfBuilder):
             submesh = primitive.extras['submesh']
             if submesh >= len(material_readers): raise ValueError('Missing submesh material')
             material = material_readers[submesh]
-            primitive.material = self.material(material,color_override,condition) if material and self.asset_id != 5 else None
+            primitive.material = self.material(material,color_override,condition) if material and self.with_materials else None
             if primitive.indices is not None: primitive.indices = accessor(primitive.indices)
             for name,value in vars(primitive.attributes).items():
                 if isinstance(value,int): setattr(primitive.attributes,name,accessor(value))
@@ -279,7 +280,7 @@ class GltfExporter(GltfBuilder):
                     color=getattr(self.source,'condition_colors',{}).get(key(renderer))
                     condition=getattr(self.source,'condition_renderers',{}).get(key(renderer))
                     if condition:node.extras['condition']=condition
-                    mirror = getattr(self.source, 'live_mirror_renderers', {}).get(key(renderer))
+                    mirror = getattr(self.source, 'mirror_renderers', {}).get(key(renderer))
                     if mirror:
                         materials = [mirror]
                     if not materials or any(r is None for r in materials):
@@ -323,6 +324,9 @@ class GltfExporter(GltfBuilder):
                 else:pointers=[v[k] for v in data['szamok'] for k in ('MOn','MOff')]
                 for ptr in pointers:
                     if ptr['m_PathID']:self.material(self.source.resolve(component,ptr))
+        if self.asset_id == 2:
+            for reader in (self.source.mirror_live_material, self.source.mirror_disabled_material):
+                self.material(reader)
         self.document.scenes.append(gl.Scene(nodes=root_nodes))
         self.document.scene = 0
         self.document.buffers.append(gl.Buffer(uri=self.output.with_suffix('.bin').name,byteLength=len(self.binary)))
@@ -499,10 +503,10 @@ def validate_gltf(path):
     return document
 
 
-def export_gltf(roots, output: Path, library, asset_id: int) -> dict:
-    """Roots are (Source, selected Transform readers)."""
+def export_gltf(roots, output: Path, library, asset_id: int, materials=True) -> dict:
+    """Roots are (Source, selected Transform readers). The sky prototype has no materials."""
     source, readers = roots
-    return GltfExporter(source, output, library, asset_id).export(readers)
+    return GltfExporter(source, output, library, asset_id, materials).export(readers)
 
 
 
