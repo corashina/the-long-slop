@@ -460,21 +460,21 @@ No independent-review Minor findings remain deferred.
 
 Master `5d4cc16` integrates interaction worktree commit `c2d0fe6`.
 The merge keeps source menus, feedback, instruments, mechanisms, parts, carry, push, grip, and throw.
-Source `fpscontroller.MountFunc` lines 5544–5557 install on F release.
+Source `fpscontroller.MountFunc` lines 5544ï¿½5557 install on F release.
 Its callers at lines 3396 and 4325 require charge below the throw minimum.
 Charged release over a valid slot throws. Blocked installation keeps the held part and clears charge.
 Target names and source fluid labels use separate fields.
 Wheel compatibility and occupancy share one rule for selection, feedback, and execution.
 
 Headlight state now drives the high-beam indicator and odometer illumination.
-Source evidence: `carscript.cs` lines 1197–1208, 2437–2445, and 2559–2584, plus `forgoszamlap.TurnOn/TurnOff`.
+Source evidence: `carscript.cs` lines 1197ï¿½1208, 2437ï¿½2445, and 2559ï¿½2584, plus `forgoszamlap.TurnOn/TurnOff`.
 Digit material handles remain cached.
 
 Fresh checks passed: 157 native tests, 31 installed-source tests, 20 browser unit tests, and 19 exporter tests.
 Formatting, the release WASM build, and browser package generation passed.
 The combined export contains 417 colliders and 127 items.
 
-An isolated Linux Chromium 151.0.7922.34 check passed at 960 × 540.
+An isolated Linux Chromium 151.0.7922.34 check passed at 960 ï¿½ 540.
 Start enabled after 6 seconds. A trusted click captured the mouse. Physics advanced at least 12 steps.
 Escape paused play and released capture. The browser and internal server then closed.
 No page errors or gameplay asset HTTP errors occurred. The console recorded one 404 for the excluded favicon request.
@@ -747,7 +747,7 @@ Package and export hashes:
 
 ## Live mirror acceptance, 2026-10-12
 
-Status: Equipment branch implementation passed source, native, GPU, lifecycle, and full product checks. Whole-branch review remains pending.
+Status: Equipment branch implementation passed source, native, GPU, lifecycle, and full product checks. Whole-branch review passed at `9abb5e7`.
 The user approved the mirror spec and plan and chose subagent execution.
 The selected source is Steam build `11140890`, Unity `2021.3.18f1`.
 The checked managed source hash is `22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee`.
@@ -840,7 +840,7 @@ Trusted walk, adjustment, removal, mounting, and driving traversal remain unprov
 No matched native and target camera images exist, so source appearance parity remains unclaimed.
 Export and verification failures now remove only their fresh staging directory.
 Injected checks preserved accepted output, prior recovery folders, and failed-promotion staging. Existing recovery folders were not deleted.
-The final scoped whole-branch review remains pending.
+The final scoped whole-branch review passed at `9abb5e7`.
 No plate or portable flashlight work belongs to this mirror acceptance.
 
 Final product package: WASM SHA-256 `4bfd7937d3eb621e252b72c299b5d06eca7bb6c166ad14a16cee5bfa6d243bf0`.

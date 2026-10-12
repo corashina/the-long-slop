@@ -12,7 +12,7 @@ Reuse source materials, retained targets, and existing interaction poses.
 
 **Spec:** [Approved mirror design](../specs/2026-10-12-live-mirrors-design.md).
 
-**Status:** User approved subagent execution. Tasks 1 through 4 passed implementation review. Task 5 equipment checks passed. Whole-branch review remains open.
+**Status:** User approved subagent execution. Tasks 1 through 4 passed implementation review. Task 5 equipment checks passed. Whole-branch review passed at `9abb5e7`.
 
 Date: 2026-10-12, Europe/Warsaw.
 Branch: `codex/equipment`; base implementation commit: `058bea6`.
@@ -230,7 +230,7 @@ Extend `tests/mirrors.rs` and the ignored GPU scenario.
 
 ### Task 5: Verify the complete mirror feature and record integration
 
-Status: Equipment implementation checks passed through native interactions and labelled actual-Lada browser runs. Trusted traversal and sustained powered travel remain unproved. Whole-branch review remains open.
+Status: Equipment implementation checks passed through native interactions and labelled actual-Lada browser runs. Trusted traversal and sustained powered travel remain unproved. Whole-branch review passed at `9abb5e7`.
 
 **Files:** Modify `docs/verification.md`, `tools/reference/README.md`, and `docs/superpowers/plans/2026-10-11-rendering-completion.md`.
 Keep test scenarios, captures, packages, and logs ignored.
@@ -255,8 +255,8 @@ Keep test scenarios, captures, packages, and logs ignored.
   Link the matching package, source IDs, captures, commands, resource counts, and any exact unproved interaction limits.
   Replace the live-mirror omission statement in the exporter README.
   Keep source appearance parity unclaimed until matched native and target views support it.
-- [ ] **Step 4: Review the whole branch after its required checks pass.**
+- [x] **Step 4: Review the whole branch after its required checks pass.**
   Use the execution method selected by the user. Fix findings and rerun checks for changed inputs.
   Check source control, lifecycle, allocation, feedback, signed transforms, and normal-camera regressions against the approved spec.
-- [ ] **Step 5: Commit the acceptance record and report mirror completion.**
+- [x] **Step 5: Commit the acceptance record and report mirror completion.**
   Advance to license plate source recovery after mirror acceptance. Keep its empty starting slots intact during that recovery.
