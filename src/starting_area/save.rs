@@ -6,6 +6,174 @@ use crate::world::WorldOrigin;
 use std::collections::HashSet;
 
 impl GarageRuntime {
+    pub fn from_save(
+        reference: &ReferenceManifest,
+        expected: &SourceStamp,
+        saved: &SaveSnapshot,
+    ) -> Result<Self, SaveError> {
+        saved.validate(reference, expected)?;
+        let ids = IdentityMap::new(reference)?;
+        let mut candidate = Self::new_candidate(reference, false)?;
+        candidate.area.items.restore_save(&ids, &saved.items)?;
+        candidate.wheels.restore_save(
+            &ids,
+            &saved.attachments,
+            &mut candidate.area.items,
+            &mut candidate.physics,
+        )?;
+        candidate.area.interaction.parts.restore_save(
+            &ids,
+            &saved.attachments.parts,
+            &mut candidate.area.items,
+            &mut candidate.area.interaction.mechanisms,
+            &mut candidate.physics,
+        )?;
+        candidate
+            .area
+            .interaction
+            .restore_save(&saved.mechanisms, &ids);
+        candidate
+            .area
+            .interaction
+            .sync_parts(&mut candidate.area.items, &mut candidate.physics)?;
+        // Assembly setup may change local poses. The snapshot owns their saved frames.
+        candidate.area.items.restore_save(&ids, &saved.items)?;
+        candidate.stream.seed = crate::save::identity::unsigned(&saved.world.seed)?;
+        candidate.stream.origin.offset = saved.player.pose.position;
+        candidate.stream.focus = saved.player.pose.position;
+        candidate.area.origin = candidate.stream.origin.offset;
+        candidate.persistent_world = PersistentWorld::restore(saved, &ids)?;
+        candidate.persistent_world.sync(
+            reference,
+            &mut candidate.area,
+            &mut candidate.wheels,
+            &candidate.stream,
+            &mut candidate.physics,
+        )?;
+        candidate
+            .stream
+            .sync_at(saved.player.pose.position, &mut candidate.physics);
+        crate::world::sync_station_supplies(
+            &mut candidate.stream,
+            &mut candidate.area.items,
+            &mut candidate.area.interaction,
+            &mut candidate.physics,
+        );
+        candidate.persistent_world.sync(
+            reference,
+            &mut candidate.area,
+            &mut candidate.wheels,
+            &candidate.stream,
+            &mut candidate.physics,
+        )?;
+        candidate
+            .persistent_world
+            .sync_pumps(&candidate.stream, &mut candidate.area.interaction);
+        candidate
+            .area
+            .interaction
+            .sync_mechanisms(&mut candidate.physics);
+        candidate
+            .area
+            .sync_attachments(&mut candidate.physics, false);
+        candidate.area.sync_compound(&mut candidate.physics);
+        candidate
+            .area
+            .interaction
+            .sync_parts(&mut candidate.area.items, &mut candidate.physics)?;
+        candidate.area.sync_portable_mass(&mut candidate.physics);
+        candidate
+            .wheels
+            .sync(&mut candidate.area.items, &mut candidate.physics)?;
+        candidate.area.items.restore_save(&ids, &saved.items)?;
+        candidate.area.items.sync_poses(&candidate.physics);
+        // Mass and collider assembly may wake bodies. Restore velocities and sleep last.
+        for record in saved
+            .bodies
+            .iter()
+            .chain(saved.vehicles.iter().map(|v| &v.body))
+        {
+            let handle = match &record.identity {
+                BodyIdentity::Source { source } => candidate.area.bodies[&ids.bodies[source]],
+                BodyIdentity::Assembly { root } => candidate
+                    .area
+                    .items
+                    .get(ids.item(root)?)
+                    .and_then(|i| i.body)
+                    .ok_or_else(|| {
+                        SaveError::ReconstructionFailure("Missing assembly body".into())
+                    })?,
+            };
+            if candidate.physics.body_active(handle) {
+                let body = &mut candidate.physics.rapier_mut().bodies[handle];
+                body.set_linvel(
+                    rapier3d::math::Vector::from_array(record.linear_velocity),
+                    false,
+                );
+                body.set_angvel(
+                    rapier3d::math::Vector::from_array(record.angular_velocity),
+                    false,
+                );
+                if record.sleeping {
+                    body.sleep();
+                } else {
+                    body.wake_up(true);
+                }
+            }
+        }
+        candidate.physics.refresh_queries();
+        candidate.area.player.restore_save(
+            &saved.player,
+            &ids,
+            &candidate.stream.origin,
+            &mut candidate.physics,
+        )?;
+        if let Some(carry) = &saved.player.carry {
+            candidate.area.interaction.restore_carry_save(
+                carry,
+                &ids,
+                &candidate.area.items,
+                &mut candidate.physics,
+            )?;
+        }
+        candidate.engine_output = candidate.engine.restore_save(&saved.vehicles[0].engine);
+        candidate.auto_gear = saved.vehicles[0].auto_gear;
+        candidate.handbrake = saved.vehicles[0].handbrake;
+        candidate.trip_m = saved.progress.trip_m;
+        candidate.attempts = crate::save::identity::unsigned(&saved.progress.start_attempts)?;
+        let mounted: Vec<_> = candidate
+            .light_owners
+            .iter()
+            .map(|owner| owner.is_none_or(|item| candidate.area.items.mounted(item)))
+            .collect();
+        let electronics = reference
+            .lighting
+            .controllers
+            .iter()
+            .find(|c| c.kind == crate::reference::LightControllerKind::Rear)
+            .ok_or_else(|| {
+                SaveError::ReconstructionFailure("Missing vehicle electronics".into())
+            })?;
+        candidate.lighting.restore_save(
+            &reference.lighting,
+            &ids,
+            &saved.lighting,
+            &mounted,
+            crate::lighting::VehicleLightSample {
+                local_ignition: candidate.engine_output.ignition
+                    && (electronics.electronics_source.is_none()
+                        || electronics.electronics_output > electronics.electronics_threshold),
+                brake: 0.,
+                gear_ratio: reference.vehicle.gear_ratios[candidate.auto_gear],
+                electronics_output: electronics.electronics_output,
+            },
+        )?;
+        candidate.area.commit_poses(&candidate.physics, true);
+        candidate.clear_input();
+        candidate.paused = true;
+        candidate.started = true;
+        Ok(candidate)
+    }
     pub fn capture_save(
         &self,
         reference: &ReferenceManifest,

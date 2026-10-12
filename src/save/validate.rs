@@ -33,6 +33,17 @@ impl SaveSnapshot {
             self.progress.trip_m.is_finite() && self.progress.trip_m >= 0.,
             "Trip distance",
         )?;
+        let odometer = &reference.instruments.odometer;
+        let distance = odometer.initial_value + (self.progress.trip_m / 1000.) as f32;
+        let displayed = if odometer.use_multiplier {
+            distance * odometer.multiplier
+        } else {
+            distance
+        };
+        data(
+            distance.is_finite() && displayed.is_finite(),
+            "Instrument distance",
+        )?;
         identity::unsigned(&self.progress.start_attempts)?;
         self.validate_vehicle(reference, &ids)?;
         let mut items = HashMap::new();
@@ -188,6 +199,19 @@ impl SaveSnapshot {
                 wheel_slots.insert(id, attachment.rim.as_ref()).is_none(),
                 "Duplicate wheel slot",
             )?;
+            let delta =
+                (f64::from(attachment.rotation) - f64::from(attachment.previous_rotation)).abs();
+            let largest_ratio = reference
+                .vehicle
+                .gear_ratios
+                .iter()
+                .fold(0_f64, |m, r| m.max(f64::from(r.abs())))
+                * f64::from(reference.vehicle.final_drive_ratio.abs());
+            data(
+                delta * 60. / f64::from(crate::simulation::FIXED_DT) <= f64::from(f32::MAX)
+                    && f64::from(attachment.rpm.abs()) * largest_ratio <= f64::from(f32::MAX),
+                "Wheel derived RPM",
+            )?;
             data(attachment.rotation.is_finite(), "Wheel rotation")?;
             data(attachment.rpm.is_finite(), "Wheel RPM")?;
             data(
@@ -342,10 +366,20 @@ impl SaveSnapshot {
         data(
             finite(&[p.yaw, p.pitch, p.vertical_velocity])
                 && (-89.0..=89.0).contains(&p.pitch)
-                && finite(&p.recoil_velocity),
+                && bounded_local(&p.recoil_velocity)
+                && bounded_local(&[p.vertical_velocity]),
             "Player motion",
         )?;
         if let Some(seat) = &p.seat {
+            local(&seat.local_pose)?;
+            data(
+                p.pose
+                    .position
+                    .iter()
+                    .zip(self.vehicles[0].body.pose.position)
+                    .all(|(a, b)| (*a - b).abs() <= f64::from(crate::world::REBASE_LIMIT)),
+                "Seat relative position",
+            )?;
             links(seat.vehicle == ids.vehicle, "Seat vehicle")?;
             let seat_id = ids
                 .seats
@@ -388,7 +422,38 @@ impl SaveSnapshot {
                     }),
                     "Item cannot be held",
                 )?;
-                data(finite(&carry.offset), "Carry offset")?;
+                data(
+                    items[&id]
+                        .pose
+                        .position
+                        .iter()
+                        .zip(p.pose.position)
+                        .all(|(a, b)| (*a - b).abs() <= f64::from(crate::world::REBASE_LIMIT)),
+                    "Held relative position",
+                )?;
+                let source_item = reference.items.iter().find(|i| i.id == id).unwrap();
+                let assembly = reference.parts.iter().any(|p| p.item == id)
+                    || reference.wheel_parts.iter().any(|p| p.item == id);
+                let body_position = if assembly {
+                    self.bodies.iter().find(|b|matches!(&b.identity,BodyIdentity::Assembly {root} if *root==carry.item)).map(|b|b.pose.position)
+                } else {
+                    let source = reference
+                        .bodies
+                        .iter()
+                        .find(|b| b.id == source_item.body)
+                        .unwrap();
+                    Some(self.bodies.iter().find(|b|matches!(&b.identity,BodyIdentity::Source {source:key} if *key==SourceKey::from(&source.source))).map_or(source.pose.translation.map(f64::from),|b|b.pose.position))
+                };
+                links(body_position.is_some(), "Missing held body")?;
+                data(
+                    body_position
+                        .unwrap()
+                        .iter()
+                        .zip(p.pose.position)
+                        .all(|(a, b)| (*a - b).abs() <= f64::from(crate::world::REBASE_LIMIT)),
+                    "Held body relative position",
+                )?;
+                data(bounded_local(&carry.offset), "Carry offset")?;
                 quaternion(&carry.rotation)?;
                 local(&carry.local_grip)?;
             }
@@ -524,11 +589,13 @@ impl SaveSnapshot {
         );
         data(
             cycle.elapsed_seconds.is_finite()
+                && (cycle.elapsed_seconds as f32).is_finite()
                 && cycle.elapsed_seconds >= 0.
                 && cycle.cycle_seconds.is_finite()
                 && cycle.cycle_seconds >= 0.
                 && cycle.cycle_seconds as f32 <= duration as f32
                 && cycle.evaluated_cycle_seconds.is_finite()
+                && (cycle.evaluated_cycle_seconds as f32).is_finite()
                 && cycle.evaluated_cycle_seconds >= 0.
                 && cycle.cloud_coordinate.is_finite()
                 && (-1.0..=0.0).contains(&cycle.cloud_coordinate)
@@ -663,6 +730,11 @@ fn sha256(value: &str) -> bool {
 fn finite(values: &[f32]) -> bool {
     values.iter().all(|v| v.is_finite())
 }
+fn bounded_local(values: &[f32]) -> bool {
+    values
+        .iter()
+        .all(|v| v.is_finite() && v.abs() <= crate::world::REBASE_LIMIT)
+}
 fn unit(value: f32) -> bool {
     value.is_finite() && (0.0..=1.0).contains(&value)
 }
@@ -683,13 +755,13 @@ fn absolute(pose: &AbsolutePose) -> Result<(), SaveError> {
     quaternion(&pose.rotation)
 }
 fn local(pose: &LocalPose) -> Result<(), SaveError> {
-    data(finite(&pose.position), "Local position")?;
+    data(bounded_local(&pose.position), "Local position")?;
     quaternion(&pose.rotation)
 }
 fn body(body: &BodySnapshot) -> Result<(), SaveError> {
     absolute(&body.pose)?;
     data(
-        finite(&body.linear_velocity) && finite(&body.angular_velocity),
+        bounded_local(&body.linear_velocity) && bounded_local(&body.angular_velocity),
         "Body velocity",
     )
 }

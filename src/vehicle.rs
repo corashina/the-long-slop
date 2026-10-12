@@ -310,6 +310,18 @@ impl PhysicsWorld {
     ) -> crate::save::BodySnapshot {
         capture_body_save(&self.physics.bodies[self.chassis], identity, origin)
     }
+    pub(crate) fn restore_wheel_save(
+        &mut self,
+        index: usize,
+        saved: &crate::save::WheelAttachment,
+    ) {
+        self.resting_wheels[index].rotation = saved.rotation;
+        if let Some(active) = self.active_slots.iter().position(|slot| *slot == index) {
+            self.controller.wheels_mut()[active].rotation = saved.rotation;
+        }
+        self.wheel_rpm[index] = saved.rpm;
+        self.wheel_rotations[index] = saved.previous_rotation;
+    }
     pub(crate) fn wheel_save_state(&self, index: usize) -> (f32, f32, f32) {
         let wheel = self
             .active_slots

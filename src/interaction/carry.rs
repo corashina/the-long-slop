@@ -36,6 +36,45 @@ pub struct CarryState {
 }
 
 impl CarryState {
+    pub(crate) fn restore_save(
+        &mut self,
+        saved: &crate::save::CarrySnapshot,
+        ids: &crate::save::IdentityMap,
+        items: &ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), crate::save::SaveError> {
+        let item = ids.item(&saved.item)?;
+        let body = items.get(item).and_then(|i| i.body).ok_or_else(|| {
+            crate::save::SaveError::ReconstructionFailure("Missing held body".into())
+        })?;
+        if !physics.body_active(body) || !physics.rapier().bodies[body].is_dynamic() {
+            return Err(crate::save::SaveError::ReconstructionFailure(
+                "Held body is inactive or fixed".into(),
+            ));
+        }
+        let pose = *physics.rapier().bodies[body].position();
+        let anchor = physics
+            .rapier_mut()
+            .insert_body(RigidBodyBuilder::kinematic_position_based().pose(pose));
+        let joint = physics.rapier_mut().impulse_joints.insert(
+            anchor,
+            body,
+            FixedJointBuilder::new(),
+            false,
+        );
+        self.anchor = Some(anchor);
+        self.held = Some(HeldState {
+            item,
+            body,
+            offset: Vector::from_array(saved.offset),
+            rotation: Rotation::from_array(saved.rotation),
+            joint,
+            local_pose: to_rapier(crate::save::local_pose(&saved.local_grip)),
+        });
+        physics.rapier_mut().bodies[body].enable_ccd(true);
+        self.cancel_input();
+        Ok(())
+    }
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let player = &reference.player;
         if !player.carry_min_weight.is_finite()

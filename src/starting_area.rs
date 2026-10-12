@@ -509,20 +509,28 @@ pub struct GarageRuntime {
 
 impl GarageRuntime {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
+        Self::new_candidate(reference, true)
+    }
+    fn new_candidate(
+        reference: &ReferenceManifest,
+        stream_world: bool,
+    ) -> Result<Self, ReferenceError> {
         let mut physics = PhysicsWorld::new(reference, initial_vehicle_pose(reference)?)?;
         let mut area = StartingArea::new(reference, &mut physics, [0.0; 3])?;
         let mut stream = WorldStream::new(DEFAULT_SEED);
         stream.configure_starting_area(reference);
-        stream.sync_at(
-            reference.area.player_spawn.translation.map(|v| v as f64),
-            &mut physics,
-        );
-        crate::world::sync_station_supplies(
-            &mut stream,
-            &mut area.items,
-            &mut area.interaction,
-            &mut physics,
-        );
+        if stream_world {
+            stream.sync_at(
+                reference.area.player_spawn.translation.map(|v| v as f64),
+                &mut physics,
+            );
+            crate::world::sync_station_supplies(
+                &mut stream,
+                &mut area.items,
+                &mut area.interaction,
+                &mut physics,
+            );
+        }
         let mut wheels = crate::interaction::wheels::WheelAssemblies::new(reference)?;
         wheels.sync(&mut area.items, &mut physics)?;
         physics.refresh_queries();

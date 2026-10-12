@@ -160,6 +160,30 @@ struct TankRules {
 }
 
 impl InteractionState {
+    pub(crate) fn restore_save(
+        &mut self,
+        saved: &crate::save::MechanismsSnapshot,
+        ids: &crate::save::IdentityMap,
+    ) {
+        self.mechanisms.restore_save(ids, &saved.controls);
+        for record in &saved.openings {
+            self.openings
+                .iter_mut()
+                .find(|o| o.reference.id == ids.openings[&record.source])
+                .unwrap()
+                .valve = record.valve;
+        }
+        self.cancel_input();
+    }
+    pub(crate) fn restore_carry_save(
+        &mut self,
+        saved: &crate::save::CarrySnapshot,
+        ids: &crate::save::IdentityMap,
+        items: &ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), crate::save::SaveError> {
+        self.carry.restore_save(saved, ids, items, physics)
+    }
     pub fn capture_save(
         &self,
         ids: &crate::save::IdentityMap,

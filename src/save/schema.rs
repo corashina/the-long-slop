@@ -95,6 +95,7 @@ pub struct PlayerSnapshot {
 pub struct SeatSnapshot {
     pub vehicle: InstanceId,
     pub source: SourceKey,
+    pub local_pose: LocalPose,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

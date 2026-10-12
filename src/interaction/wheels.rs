@@ -50,6 +50,78 @@ pub struct WheelAssemblies {
 }
 
 impl WheelAssemblies {
+    pub(crate) fn restore_save(
+        &mut self,
+        ids: &crate::save::IdentityMap,
+        saved: &crate::save::AttachmentsSnapshot,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), crate::save::SaveError> {
+        self.bind(items, physics)?;
+        for part in &mut self.parts {
+            if let Some(body) = part.free_body {
+                physics.rapier_mut().bodies[body].set_enabled(false);
+            }
+            part.tire = None;
+        }
+        for record in &saved.tires {
+            let rim = self.indices[&ids.item(&record.rim)?];
+            self.parts[rim].tire = Some(self.indices[&ids.item(&record.tire)?]);
+        }
+        for record in &saved.wheels {
+            let slot = self
+                .slots
+                .iter_mut()
+                .find(|s| s.id == ids.wheel_slots[&record.slot])
+                .unwrap();
+            slot.rim = record
+                .rim
+                .as_ref()
+                .map(|id| ids.item(id).map(|id| self.indices[&id]))
+                .transpose()?;
+        }
+        for i in 0..self.parts.len() {
+            let state = items.get(self.parts[i].item).unwrap();
+            if matches!(state.location, ItemLocation::World | ItemLocation::Held) {
+                let body = self.free_body(i, Pose::IDENTITY, physics);
+                let local = to_rapier(items.get(self.parts[i].item).unwrap().local_pose);
+                self.place_part(i, body, local, true, items, physics)?;
+            } else if matches!(state.location, ItemLocation::WheelSlot(_)) {
+                self.place_part(
+                    i,
+                    physics.chassis_handle(),
+                    to_rapier(state.local_pose),
+                    false,
+                    items,
+                    physics,
+                )?;
+            }
+        }
+        for i in 0..self.parts.len() {
+            if let Some(tire) = self.parts[i].tire {
+                let body = items.get(self.parts[i].item).unwrap().body.unwrap();
+                let local = to_rapier(items.get(self.parts[tire].item).unwrap().local_pose);
+                self.place_part(
+                    tire,
+                    body,
+                    local,
+                    body != physics.chassis_handle(),
+                    items,
+                    physics,
+                )?;
+            }
+        }
+        self.sync(items, physics)?;
+        for record in &saved.wheels {
+            let slot = self
+                .slots
+                .iter()
+                .find(|s| s.id == ids.wheel_slots[&record.slot])
+                .unwrap();
+            physics.restore_wheel_save(slot.index, record);
+        }
+        Ok(())
+    }
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut parts = Vec::with_capacity(reference.wheel_parts.len());
         let mut indices = HashMap::with_capacity(reference.wheel_parts.len());

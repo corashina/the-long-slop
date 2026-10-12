@@ -29,3 +29,14 @@ impl std::fmt::Display for SaveError {
     }
 }
 impl std::error::Error for SaveError {}
+impl From<crate::reference::ReferenceError> for SaveError {
+    fn from(error: crate::reference::ReferenceError) -> Self {
+        Self::ReconstructionFailure(error.to_string())
+    }
+}
+pub(crate) fn local_pose(saved: &LocalPose) -> crate::vehicle::VehiclePose {
+    crate::vehicle::VehiclePose {
+        position: saved.position,
+        rotation: saved.rotation,
+    }
+}

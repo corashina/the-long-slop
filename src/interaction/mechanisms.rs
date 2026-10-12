@@ -42,6 +42,27 @@ pub struct MechanismState {
     order: Vec<usize>,
 }
 impl MechanismState {
+    pub(crate) fn restore_save(
+        &mut self,
+        ids: &crate::save::IdentityMap,
+        saved: &[crate::save::MechanismSnapshot],
+    ) {
+        for record in saved {
+            let control = self
+                .controls
+                .iter_mut()
+                .find(|c| c.reference.id == ids.mechanisms[&record.source])
+                .unwrap();
+            control.degrees = record.degrees;
+            control.slide = record.slide;
+            control.enabled = record.enabled;
+            control.turn_state = record.turn_state;
+        }
+        for index in 0..self.controls.len() {
+            self.apply(index);
+        }
+        self.control_action = None;
+    }
     pub fn capture_save(
         &self,
         ids: &crate::save::IdentityMap,

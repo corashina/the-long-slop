@@ -147,7 +147,7 @@ pub(super) fn signed(value: &str) -> Result<i64, SaveError> {
         .filter(|number| number.to_string() == value)
         .ok_or_else(|| SaveError::InvalidLinks("Invalid signed decimal identity".into()))
 }
-pub(super) fn unsigned(value: &str) -> Result<u64, SaveError> {
+pub(crate) fn unsigned(value: &str) -> Result<u64, SaveError> {
     value
         .parse::<u64>()
         .ok()

@@ -43,6 +43,32 @@ pub struct ItemStore {
 }
 
 impl ItemStore {
+    pub(crate) fn restore_save(
+        &mut self,
+        ids: &crate::save::IdentityMap,
+        saved: &[crate::save::ItemSnapshot],
+    ) -> Result<(), crate::save::SaveError> {
+        use crate::save::ItemLocationSave;
+        for record in saved {
+            let state = self.get_mut(ids.item(&record.instance)?).unwrap();
+            state.location = match &record.location {
+                ItemLocationSave::World => ItemLocation::World,
+                ItemLocationSave::Held => ItemLocation::Held,
+                ItemLocationSave::Attached { owner } => ItemLocation::Attached(ids.item(owner)?),
+                ItemLocationSave::PartSlot { slot } => ItemLocation::PartSlot(ids.part_slots[slot]),
+                ItemLocationSave::WheelSlot { slot } => {
+                    ItemLocation::WheelSlot(ids.wheel_slots[slot])
+                }
+            };
+            state.local_pose = crate::save::local_pose(&record.local_pose);
+            state.condition = record.condition;
+            state.temperature = record.temperature;
+            if let (Some(fluid), Some(quantities)) = (&mut state.fluid, record.fluids) {
+                fluid.mixture.quantities_liters = quantities;
+            }
+        }
+        Ok(())
+    }
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut states = Vec::with_capacity(reference.items.len());
         let mut indices = HashMap::with_capacity(reference.items.len());

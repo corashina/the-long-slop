@@ -319,6 +319,12 @@ impl PersistentWorld {
             self.records
                 .sort_by_key(|r| matches!(r.key, Key::Source(_)));
             for record in &mut self.records {
+                // Attachment owners disable source bodies whose shapes moved to another root.
+                if let Key::Source(id) = record.key {
+                    if let Some(state) = &mut record.state {
+                        state.enabled = physics.rapier().bodies[area.bodies[&id]].is_enabled();
+                    }
+                }
                 if record.state.is_some() {
                     continue;
                 }
@@ -337,7 +343,7 @@ impl PersistentWorld {
                             linear: [0.; 3],
                             angular: [0.; 3],
                             sleeping: false,
-                            enabled: true,
+                            enabled: physics.rapier().bodies[area.bodies[&id]].is_enabled(),
                         });
                     }
                 }
@@ -348,9 +354,9 @@ impl PersistentWorld {
         let mut changed = false;
         self.processed.clear();
         let held = area
-            .interaction
-            .held()
-            .and_then(|id| area.items.get(id))
+            .items
+            .iter()
+            .find(|item| item.location == ItemLocation::Held)
             .and_then(|item| item.body);
         // Independent bodies decide activity first. Source children follow their physical root.
         for children in [false, true] {

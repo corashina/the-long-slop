@@ -60,6 +60,52 @@ pub struct PartAttachments {
     bound: bool,
 }
 impl PartAttachments {
+    pub(crate) fn restore_save(
+        &mut self,
+        ids: &crate::save::IdentityMap,
+        saved: &[crate::save::PartAttachment],
+        items: &mut ItemStore,
+        mechanisms: &mut MechanismState,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), crate::save::SaveError> {
+        for p in &mut self.parts {
+            p.slot = None;
+        }
+        for record in saved {
+            let slot = self.slot_indices[&ids.part_slots[&record.slot]];
+            let part = record
+                .part
+                .as_ref()
+                .map(|id| ids.item(id).map(|id| self.indices[&id]))
+                .transpose()?;
+            self.slots[slot].part = part;
+            if let Some(part) = part {
+                self.parts[part].slot = Some(slot);
+            }
+        }
+        for p in &self.parts {
+            physics.rapier_mut().bodies[p.body.unwrap()].set_enabled(p.slot.is_none());
+            if let Some(slot) = p.slot {
+                mechanisms.mount_part(
+                    p.reference.node,
+                    self.slots[slot].mount_node,
+                    p.reference.local_rotation_after_mount,
+                );
+            } else {
+                mechanisms.set_part_root(p.reference.node, p.body);
+            }
+        }
+        for i in 0..self.parts.len() {
+            let body = self.physical_body(i, items, physics);
+            for &(id, _, _) in &self.parts[i].members {
+                items.get_mut(id).unwrap().body = Some(body);
+            }
+        }
+        self.cache_assembly_mass(items);
+        mechanisms.sync(physics, true);
+        self.capture_mechanisms(items, mechanisms, physics)?;
+        Ok(())
+    }
     pub fn new(r: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let indices: HashMap<_, _> = r
             .parts
