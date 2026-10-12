@@ -9,6 +9,8 @@ pub struct SaveRequests {
     candidate: Option<Candidate>,
     #[cfg(feature = "save-fixture")]
     removed_asset: Option<(bevy::asset::AssetId<bevy::gltf::Gltf>, bevy::gltf::Gltf)>,
+    #[cfg(feature = "save-fixture")]
+    removed_material: Option<(bevy::asset::AssetId<StandardMaterial>, StandardMaterial)>,
 }
 struct Candidate {
     id: u32,
@@ -45,6 +47,8 @@ impl SaveRequests {
             candidate: None,
             #[cfg(feature = "save-fixture")]
             removed_asset: None,
+            #[cfg(feature = "save-fixture")]
+            removed_material: None,
         }
     }
 }
@@ -97,7 +101,26 @@ fn process(
             Ok(serde_json::to_string(&path).unwrap())
         }
         #[cfg(feature = "save-fixture")]
+        "FixtureRemoveMaterial" => {
+            if requests.removed_material.is_some() {
+                return Err(invalid("A fixture material is already removed"));
+            }
+            let id = world.resource::<WorldVisuals>().fixture_material();
+            let material = world
+                .resource_mut::<Assets<StandardMaterial>>()
+                .remove(id)
+                .ok_or_else(|| invalid("Fixture material is missing"))?;
+            requests.removed_material = Some((id, material));
+            Ok(serde_json::to_string("generated chunk terrain material").unwrap())
+        }
+        #[cfg(feature = "save-fixture")]
         "FixtureRestoreAsset" => {
+            if let Some((id, material)) = requests.removed_material.take() {
+                world
+                    .resource_mut::<Assets<StandardMaterial>>()
+                    .insert(id, material)
+                    .map_err(|error| invalid(&error.to_string()))?;
+            }
             if let Some((id, asset)) = requests.removed_asset.take() {
                 world
                     .resource_mut::<Assets<bevy::gltf::Gltf>>()

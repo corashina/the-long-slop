@@ -119,6 +119,14 @@ pub fn prepare_presentation(
         prepared.discard(world);
         return Err(error);
     }
+    // Old terrain meshes may have left MAIN_WORLD. These newly prepared meshes must exist now.
+    if let Err(error) = prepared
+        .chunks
+        .validate_prepared_terrain(world.resource::<Assets<Mesh>>())
+    {
+        prepared.discard(world);
+        return Err(error);
+    }
     Ok(prepared)
 }
 
@@ -193,6 +201,60 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
             .contains(handle.id())
         {
             return Err(fail("Source material handle".into()));
+        }
+    }
+    let meshes = world.resource::<Assets<Mesh>>();
+    let standard = world.resource::<Assets<StandardMaterial>>();
+    let authored = world.resource::<Assets<materials::SourceMaterial>>();
+    world
+        .resource::<WorldVisuals>()
+        .validate_reused_assets(meshes, standard)?;
+    let road_path = &reference
+        .assets
+        .iter()
+        .find(|asset| asset.id == reference.lighting.road_lamp.asset)
+        .ok_or_else(|| fail("Road lamp asset binding".into()))?
+        .path;
+    source
+        .road_lamps
+        .validate_assets(road_path, meshes, authored, standard)?;
+    for lamp in &source.lamp_materials {
+        for choice in &lamp.choices {
+            choice.validate_assets(authored, standard)?;
+        }
+    }
+    instruments.validate_assets(authored, standard)?;
+    for entity in world.iter_entities() {
+        let receiver = entity.get::<MeshMaterial3d<materials::SourceMaterial>>();
+        let sky = entity.get::<MeshMaterial3d<super::sky::SkyMaterial>>();
+        if let Some(material) = entity.get::<MeshMaterial3d<StandardMaterial>>() {
+            if !standard.contains(material.0.id()) {
+                return Err(fail(format!(
+                    "rendered standard material on {:?}",
+                    entity.id()
+                )));
+            }
+        }
+        if receiver.is_some_and(|material| !authored.contains(material.0.id())) {
+            return Err(fail(format!(
+                "rendered source material on {:?}",
+                entity.id()
+            )));
+        }
+        if sky.is_some_and(|material| {
+            !world
+                .resource::<Assets<super::sky::SkyMaterial>>()
+                .contains(material.0.id())
+        }) {
+            return Err(fail("sky material".into()));
+        }
+        // Generated terrain is rebuilt. Imported, caster, and sky meshes are reused.
+        if receiver.is_some() || sky.is_some() || entity.contains::<materials::SourceCaster>() {
+            if let Some(mesh) = entity.get::<Mesh3d>() {
+                if !meshes.contains(mesh.0.id()) {
+                    return Err(fail(format!("reused render mesh on {:?}", entity.id())));
+                }
+            }
         }
     }
     if !world

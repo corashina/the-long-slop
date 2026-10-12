@@ -2,9 +2,9 @@ import {normalizeSnapshot as normalize} from './save-normalize.js';
 import {saveRuntime as runtime} from '../../web/main.js';
 import {createSaveSession} from '../../web/save-session.js';
 const parentDocument=parent.document,output=parentDocument.querySelector('#results');
-const buttons=[parentDocument.querySelector('#runtime'),parentDocument.querySelector('#continue'),parentDocument.querySelector('#roundtrip')];
+const buttons=[parentDocument.querySelector('#runtime'),parentDocument.querySelector('#continue'),parentDocument.querySelector('#roundtrip'),parentDocument.querySelector('#handle')];
 let fixtureEnabled=false;
-function enable(){buttons.forEach(button=>button.disabled=button===buttons[0]&&!fixtureEnabled);}
+function enable(){buttons.forEach(button=>button.disabled=(button===buttons[0]||button===buttons[3])&&!fixtureEnabled);}
 function log(text){output.textContent+='\n'+text;}
 function assert(value,message){if(!value)throw Error(message);}
 function equal(a,b,message){
@@ -79,8 +79,17 @@ async function roundtrip(){
  const error=reconstructed(normalize(await runtime.capture()),normalize(saved));
  assert(window.gameState.paused,'Load resumed simulation.');log('PASS paused_runtime_roundtrip max_position_error_m='+error.positionError+' max_rotation_component_error='+error.rotationError);
 }
+async function missingHandleCheck(){
+ const before=await runtime.capture(),presentation=state(),commits=commitCalls;
+ const label=await fixture('FixtureRemoveMaterial');let candidate;
+ try{await rejects(async()=>{candidate=await runtime.prepare(before);},label);}
+ finally{if(candidate!==undefined)runtime.discard(candidate);await fixture('FixtureRestoreAsset');}
+ equal(normalize(await runtime.capture()),normalize(before),'Missing material changed the runtime.');equal(state(),presentation,'Missing material changed camera or origin.');assert(commitCalls===commits,'Missing material preparation committed.');
+ log('PASS missing_handle_rejects_before_swap '+label);await continueCheck();
+}
 async function checks(){
  await roundtrip();
+ await missingHandleCheck();
  let before=await runtime.capture(),presentation=state(),commits=commitCalls;
  const path=await fixture('FixtureRemoveAsset');
  try{await rejects(()=>runtime.prepare(before),path);}finally{await fixture('FixtureRestoreAsset');}
@@ -100,4 +109,4 @@ async function fixtureReady(){
 }
 const ready=window.gameReady;window.gameReady=()=>{ready();fixtureReady();};
 if(!document.querySelector('#start').disabled)fixtureReady();
-for(const [button,work] of [[buttons[0],checks],[buttons[1],continueCheck],[buttons[2],roundtrip]])button.addEventListener('click',()=>{buttons.forEach(b=>b.disabled=true);work().catch(error=>log('FAIL '+error.stack)).finally(enable);});
+for(const [button,work] of [[buttons[0],checks],[buttons[1],continueCheck],[buttons[2],roundtrip],[buttons[3],async()=>{await roundtrip();await missingHandleCheck();}]])button.addEventListener('click',()=>{buttons.forEach(b=>b.disabled=true);work().catch(error=>log('FAIL '+error.stack)).finally(enable);});

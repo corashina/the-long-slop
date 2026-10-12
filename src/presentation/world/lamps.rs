@@ -63,6 +63,36 @@ pub(crate) struct RoadLamps {
     origin: [f64; 3],
 }
 impl RoadLamps {
+    pub(crate) fn validate_assets(
+        &self,
+        path: &str,
+        meshes: &Assets<Mesh>,
+        materials: &Assets<SourceMaterial>,
+        casters: &Assets<StandardMaterial>,
+    ) -> Result<(), crate::save::SaveError> {
+        let missing =
+            |kind: &str| crate::save::SaveError::MissingAssets(format!("{path}: road lamp {kind}"));
+        let recipe = self.recipe.as_ref().ok_or_else(|| missing("recipe"))?;
+        for node in &recipe.nodes {
+            for mesh in &node.meshes {
+                if !meshes.contains(mesh.mesh.id()) {
+                    return Err(missing("mesh"));
+                }
+                if !materials.contains(mesh.material.id()) {
+                    return Err(missing("material"));
+                }
+                if mesh
+                    .caster
+                    .as_ref()
+                    .is_some_and(|handle| !casters.contains(handle.id()))
+                {
+                    return Err(missing("caster material"));
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn clear_owned(&mut self) {
         self.instances.clear();
         self.keys = None;
