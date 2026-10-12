@@ -107,6 +107,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
         .add_plugins((
             presentation::lighting::SourceLightingPlugin,
             presentation::materials::SourceMaterialPlugin,
+            presentation::mirrors::SourceMirrorPlugin,
         ))
         .add_systems(Startup, setup)
         .add_systems(
@@ -157,6 +158,7 @@ fn setup(
     presentation::reference::load(&mut commands, &server, &reference.0);
     commands.spawn((
         DriveCamera,
+        presentation::mirrors::MirrorViewRole::Normal,
         Camera3d::default(),
         bevy::camera::Hdr,
         (0..32)
@@ -201,7 +203,12 @@ fn check_ready(
     mut frames: Local<u8>,
     lighting: Res<presentation::lighting::SourceLighting>,
     mut materials: ResMut<presentation::materials::SourceMaterials>,
+    mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
 ) {
+    if let Some(error) = mirrors.failure() {
+        game_failure(&error);
+        visuals.failed = true;
+    }
     if visuals.failed {
         return;
     }
@@ -284,6 +291,9 @@ fn check_ready(
                 presentation::lighting::RenderingState::Ready => {}
             }
             if materials.state != presentation::materials::RenderingState::Ready {
+                return;
+            }
+            if !mirrors.ready() {
                 return;
             }
             *frames += 1;

@@ -193,3 +193,67 @@ fn signed_scale_keeps_transform_axes_rotation_only() {
     assert!((camera_rotation * Vector::NEG_Z).dot(expected_forward) > 0.9999);
     assert!((camera_rotation * Vector::Y).dot(expected_up) > 0.9999);
 }
+
+#[test]
+fn invalid_source_clip_range_disables_render_without_changing_state() {
+    let mut source = fixture();
+    source.mirrors.truncate(1);
+    let near = source.mirrors[0].near_plane;
+    for far in [near, near * 0.5] {
+        source.mirrors[0].initial_far_plane = far;
+        let mut state = MirrorState::new(&source);
+        state.update(&source.rules, frame([0.0, 2.0, 0.0]), &[input(2.0)]);
+        let output = state.outputs()[0];
+        assert!(output.capture);
+        assert!(!output.has_valid_clip_range());
+        assert_eq!(output.capture_far_plane, far);
+        assert!(output.next_far_plane > near);
+        state.update(&source.rules, frame([0.0, 2.0, 0.0]), &[input(2.0)]);
+        assert!(state.outputs()[0].has_valid_clip_range());
+        assert_eq!(state.outputs()[0].capture_far_plane, output.next_far_plane);
+    }
+}
+
+#[test]
+fn body_distance_and_active_camera_position_have_separate_roles() {
+    let mut source = fixture();
+    source.mirrors.truncate(2);
+    source.rules.distance_bounds_meters = [0.0, 10.0];
+    source.rules.fov_bounds_degrees = [10.0, 55.0];
+    let inputs = [input(2.0), input(6.0)];
+    let mut state = MirrorState::new(&source);
+    let mut view = frame([0.0, 2.0, 0.0]);
+    state.update(&source.rules, view, &inputs);
+    let original = [state.outputs()[0], state.outputs()[1]];
+
+    // Chase-camera motion changes reflection and FOV, but not body rank or far.
+    view.view_head_position = [0.0, 3.0, 5.0];
+    state.update(&source.rules, view, &inputs);
+    let moved_camera = [state.outputs()[0], state.outputs()[1]];
+    for index in 0..2 {
+        assert_eq!(moved_camera[index].rank, original[index].rank);
+        assert_eq!(
+            moved_camera[index].next_far_plane,
+            original[index].next_far_plane
+        );
+        assert_ne!(moved_camera[index].fov_degrees, original[index].fov_degrees);
+        assert_ne!(
+            moved_camera[index].pose.rotation,
+            original[index].pose.rotation
+        );
+    }
+
+    // Body motion changes rank and far, while the active camera remains fixed.
+    view.player_position = [0.0, 0.0, 7.0];
+    state.update(&source.rules, view, &inputs);
+    for index in 0..2 {
+        let moved_body = state.outputs()[index];
+        assert_ne!(moved_body.rank, moved_camera[index].rank);
+        assert_ne!(
+            moved_body.next_far_plane,
+            moved_camera[index].next_far_plane
+        );
+        assert_eq!(moved_body.fov_degrees, moved_camera[index].fov_degrees);
+        assert_eq!(moved_body.pose.rotation, moved_camera[index].pose.rotation);
+    }
+}

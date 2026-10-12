@@ -35,6 +35,16 @@ pub struct MirrorOutput {
     pub next_far_plane: f32,
 }
 
+impl MirrorOutput {
+    /// Invalid source clipping disables drawing without changing retained source state.
+    pub fn has_valid_clip_range(&self) -> bool {
+        self.capture_near_plane.is_finite()
+            && self.capture_far_plane.is_finite()
+            && self.capture_near_plane > 0.0
+            && self.capture_far_plane > self.capture_near_plane
+    }
+}
+
 pub struct MirrorState {
     inputs: Vec<MirrorInput>,
     candidates: Vec<usize>,

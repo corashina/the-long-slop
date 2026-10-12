@@ -129,8 +129,8 @@ struct LoadingData {
     state: RenderingState,
 }
 #[derive(Resource, Default)]
-struct WarmedPipelines {
-    ids: Vec<(CachedRenderPipelineId, String)>,
+pub(crate) struct WarmedPipelines {
+    pub(crate) ids: Vec<(CachedRenderPipelineId, String)>,
     queued: bool,
 }
 
@@ -429,6 +429,7 @@ fn make_material(
     if record.shader_family == ShaderFamily::AmplifyRope {
         // Retain the master rope surface. Source vertex sway remains deferred.
         return SourceMaterial {
+            mirror: None,
             base: StandardMaterial {
                 base_color: Color::WHITE,
                 metallic: 0.,
@@ -566,6 +567,7 @@ fn make_material(
         .iter()
         .find(|texture| texture.slot == "_MainTex");
     SourceMaterial {
+        mirror: None,
         base: StandardMaterial {
             base_color_channel: main.map_or(bevy::mesh::UvChannel::Uv0, |texture| {
                 if texture.uv_channel == 0 {
@@ -814,6 +816,7 @@ use bevy::ecs::system::SystemParamItem;
 /// Forward source surfaces need the six base maps, not Bevy transmission maps.
 #[derive(Asset, TypePath, Clone, Debug, Default)]
 pub struct SourceMaterial {
+    pub(crate) mirror: Option<(usize, bool)>,
     pub base: StandardMaterial,
     pub extension: SourceExtension,
 }
@@ -825,6 +828,7 @@ impl AsBindGroup for SourceMaterial {
     type Param = (
         <StandardMaterial as AsBindGroup>::Param,
         <SourceExtension as AsBindGroup>::Param,
+        SRes<super::mirrors::MirrorGpuStatus>,
     );
     fn label() -> &'static str {
         "source material"
@@ -850,6 +854,9 @@ impl AsBindGroup for SourceMaterial {
             self.extension
                 .unprepared_bind_group(layout, device, &mut params.1, true)?;
         prepared.bindings.0.extend(extension.bindings.0);
+        if let Some((owner, live)) = self.mirror {
+            params.2.record(owner, live, &prepared.bindings);
+        }
         Ok(prepared)
     }
     fn bind_group_layout_entries(device: &RenderDevice, _: bool) -> Vec<BindGroupLayoutEntry> {
@@ -1311,6 +1318,7 @@ pub fn bind_materials(
                     let mut base = base.clone();
                     base.fog_enabled = false;
                     materials.add(SourceMaterial {
+                        mirror: None,
                         base,
                         extension: SourceExtension {
                             receiver_mask: mask,
@@ -1584,4 +1592,40 @@ pub fn authored_caster_material(
     base.normal_map_texture = None;
     base.depth_map = None;
     base
+}
+
+/// Both source slots use one texture bank and its single sampler.
+pub fn make_mirror_material(
+    record: &MaterialRecord,
+    source: &SourceMaterials,
+    target: Handle<Image>,
+    reflected: bool,
+    mask: u32,
+) -> SourceMaterial {
+    let mut material = make_material(record, reflected, mask, source);
+    let surface = material
+        .extension
+        .surface
+        .as_mut()
+        .expect("source mirror surface");
+    for slot in [0usize, 4] {
+        surface.data.flags.y |= 1 << slot;
+        surface.data.banks[slot / 4][slot % 4] = 0;
+    }
+    material.base.base_color_texture = Some(target);
+    material
+}
+
+pub(crate) fn warm_mirror_material(
+    world: &World,
+    mesh: AssetId<Mesh>,
+    material: AssetId<SourceMaterial>,
+) {
+    let loading = world.resource::<MaterialLoading>();
+    let mut pending = loading.0.lock().unwrap();
+    pending.requests.push(PipelineRequest {
+        mesh,
+        material,
+        label: "source mirror surface".into(),
+    });
 }
