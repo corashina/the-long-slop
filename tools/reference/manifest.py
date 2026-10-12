@@ -369,6 +369,7 @@ def build_manifest(source, roots, reports, hashes, library):
     result['action_bindings']=recover_bindings(source,nodes,components,item_nodes,colliders,mechanisms,openings,seats)
     result['vehicle']['colliders']=[c['id'] for c in colliders if c['body']==car_body and c['enabled']]
     result['lighting']=source.lighting
+    result['render_lighting']=source.render_lighting
     collider_ids={(c['source']['file'],c['source']['path_id']):c['id'] for c in colliders}
     old_colliders={v:k for k,v in source.lighting_collider_ids.items()}
     for controller in result['lighting']['controllers']:

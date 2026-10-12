@@ -362,6 +362,7 @@ pub(crate) fn prepare_instruments(
                     .spawn((
                         mesh.clone(),
                         MeshMaterial3d(material.clone()),
+                        crate::presentation::materials::SourceMaterialWarmup,
                         far,
                         Visibility::Visible,
                         bevy::light::NotShadowCaster,

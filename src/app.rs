@@ -13,7 +13,6 @@ use crate::simulation::{FrameInput, StepClock, keys};
 use crate::starting_area::GarageRuntime;
 use crate::vehicle::VehiclePose;
 use bevy::asset::{AssetMetaCheck, LoadState, RecursiveDependencyLoadState};
-use bevy::camera::visibility::RenderLayers;
 use bevy::ecs as bevy_ecs;
 use bevy::gltf::GltfExtras;
 use bevy::prelude::*;
@@ -107,6 +106,8 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
         .add_plugins((
             presentation::lighting::SourceLightingPlugin,
             presentation::materials::SourceMaterialPlugin,
+            presentation::source_lighting::SourceLightingPlugin,
+            presentation::frame_graph::SourceFramePlugin,
         ))
         .add_systems(Startup, setup)
         .add_systems(
@@ -122,6 +123,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
                 sync_instruments,
                 presentation::lighting::sync_control_visuals,
                 update_camera,
+                presentation::frame_graph::sync_stack_cameras,
                 update_hud,
             )
                 .chain(),
@@ -141,7 +143,8 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<presentation::materials::SourceMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     server: Res<AssetServer>,
     gltf_extensions: Res<bevy::gltf::extensions::GltfExtensionHandlers>,
     reference: Res<RuntimeReference>,
@@ -153,37 +156,19 @@ fn setup(
     commands.insert_resource(InstrumentVisuals::default());
     presentation::materials::load_materials(&mut commands, &server, &reference.0.rendering);
     presentation::lighting::load_lighting(&mut commands, &server, &reference.0.lighting);
+    presentation::lighting_assets::load_lighting(
+        &mut commands,
+        &server,
+        &reference.0.render_lighting,
+    );
     presentation::lighting::load_lamp_materials(&mut commands, &gltf_extensions, &reference.0);
     presentation::reference::load(&mut commands, &server, &reference.0);
-    commands.spawn((
-        DriveCamera,
-        Camera3d::default(),
-        bevy::camera::Hdr,
-        (0..32)
-            .filter(|layer| reference.0.player.camera_culling_mask & (1u32 << layer) != 0)
-            .collect::<RenderLayers>(),
-        Projection::Perspective(PerspectiveProjection {
-            fov: reference.0.player.field_of_view_degrees.to_radians(),
-            near: reference
-                .0
-                .lighting
-                .cameras
-                .iter()
-                .map(|c| c.startup_near_plane)
-                .fold(f32::INFINITY, f32::min),
-            far: reference
-                .0
-                .lighting
-                .cameras
-                .iter()
-                .map(|c| c.startup_far_plane)
-                .fold(0., f32::max),
-            ..default()
-        }),
+    presentation::frame_graph::spawn_cameras(
+        &mut commands,
+        &mut images,
+        &reference.0,
         presentation::transform(drive.current),
-        Msaa::Off,
-        bevy::core_pipeline::tonemapping::Tonemapping::None,
-    ));
+    );
 }
 
 fn check_ready(
@@ -200,8 +185,14 @@ fn check_ready(
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
     mut frames: Local<u8>,
     lighting: Res<presentation::lighting::SourceLighting>,
+    source_lighting: Res<presentation::source_lighting::SourceLighting>,
     mut materials: ResMut<presentation::materials::SourceMaterials>,
 ) {
+    if let presentation::materials::RenderingState::Failed(error) = &source_lighting.state {
+        game_failure(error);
+        visuals.failed = true;
+        return;
+    }
     if visuals.failed {
         return;
     }
@@ -284,6 +275,9 @@ fn check_ready(
                 presentation::lighting::RenderingState::Ready => {}
             }
             if materials.state != presentation::materials::RenderingState::Ready {
+                return;
+            }
+            if source_lighting.state != presentation::materials::RenderingState::Ready {
                 return;
             }
             *frames += 1;

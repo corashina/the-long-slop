@@ -11,7 +11,6 @@ use crate::{
 use bevy::asset::LoadState;
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs as bevy_ecs;
-use bevy::light::{CascadeShadowConfig, DirectionalLightShadowMap};
 use bevy::prelude::*;
 use bevy::render::{
     Extract, ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems,
@@ -56,8 +55,6 @@ pub struct LightingUniform {
     pub ambient: Vec4,
     pub fog: Vec4,
     pub counts: UVec4,
-    pub cascade_bounds: Vec4,
-    pub fog_projection: Vec4,
 }
 impl Default for LightingUniform {
     fn default() -> Self {
@@ -67,8 +64,6 @@ impl Default for LightingUniform {
             ambient: Vec4::ZERO,
             fog: Vec4::ZERO,
             counts: UVec4::ZERO,
-            cascade_bounds: Vec4::ZERO,
-            fog_projection: Vec4::ZERO,
         }
     }
 }
@@ -257,9 +252,6 @@ pub fn load_lighting(commands: &mut Commands, server: &AssetServer, lighting: &L
     commands.insert_resource(bevy::light::PointLightShadowMap {
         size: (TILE_SIZE - 2) as usize,
     });
-    commands.insert_resource(DirectionalLightShadowMap {
-        size: (TILE_SIZE - 2) as usize,
-    });
 }
 struct PendingMaterial {
     asset: crate::reference::AssetId,
@@ -428,12 +420,12 @@ pub(crate) fn bind_lighting(
             continue;
         }
         let index = source.lights.len();
-        let faces = if light.shadows.kind == 0 {
+        let faces = if light.shadows.kind == 0 || light.kind == LightKind::Directional {
             0
         } else {
             match light.kind {
                 LightKind::Point => 6,
-                LightKind::Directional => 4,
+                LightKind::Directional => unreachable!("source sun uses its dedicated atlas"),
                 _ => 1,
             }
         };
@@ -469,28 +461,7 @@ pub(crate) fn bind_lighting(
             entity.insert(bevy::camera::visibility::NoFrustumCulling);
         }
         match light.kind {
-            LightKind::Directional => {
-                entity.insert((
-                    DirectionalLight {
-                        illuminance: 0.,
-                        shadow_maps_enabled: true,
-                        shadow_depth_bias: light.shadows.bias,
-                        shadow_normal_bias: light.shadows.normal_bias,
-                        ..default()
-                    },
-                    CascadeShadowConfig {
-                        bounds: r
-                            .quality
-                            .shadow_cascade_splits
-                            .iter()
-                            .map(|f| f * r.quality.shadow_distance)
-                            .chain(std::iter::once(r.quality.shadow_distance))
-                            .collect(),
-                        overlap_proportion: 0.1,
-                        minimum_distance: 0.,
-                    },
-                ));
-            }
+            LightKind::Directional => {}
             LightKind::Point => {
                 entity.insert(PointLight {
                     intensity: 0.,
@@ -566,21 +537,6 @@ pub(crate) fn bind_lighting(
     }
     source.uniform.counts.x = source.lights.len() as u32;
     source.uniform.counts.y = shadow_start as u32;
-    source.uniform.cascade_bounds = Vec4::from_array([
-        r.quality.shadow_cascade_splits[0] * r.quality.shadow_distance,
-        r.quality.shadow_cascade_splits[1] * r.quality.shadow_distance,
-        r.quality.shadow_cascade_splits[2] * r.quality.shadow_distance,
-        r.quality.shadow_distance,
-    ]);
-    let camera = r.cameras.iter().find(|c| c.role == "Cam").unwrap();
-    let far = r.cameras.iter().find(|c| c.role == "farCamera").unwrap();
-    source.uniform.fog_projection = Vec4::new(
-        camera.startup_near_plane,
-        camera.startup_far_plane,
-        far.startup_near_plane,
-        far.startup_far_plane,
-    );
-    source.uniform.counts.z = far.culling_mask;
     source.road_lamps.fixed_lights = source.lights.len();
     source.road_lamps.fixed_shadows = shadow_start;
     let road = &r.road_lamp;

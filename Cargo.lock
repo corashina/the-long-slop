@@ -2027,18 +2027,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "my-summer-slop"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "console_error_panic_hook",
- "rapier3d",
- "serde",
- "serde_json",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "dispatch"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3091,6 +3079,19 @@ checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
 dependencies = [
  "num-traits",
  "pxfm",
+]
+
+[[package]]
+name = "my-summer-slop"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "console_error_panic_hook",
+ "indexmap",
+ "rapier3d",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]

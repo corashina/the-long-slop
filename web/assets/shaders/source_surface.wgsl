@@ -1,15 +1,13 @@
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
-    pbr_fragment::{pbr_input_from_vertex_output, pbr_input_from_standard_material},
-    pbr_functions::{alpha_discard, main_pass_post_lighting_processing},
-    pbr_types,
-    pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
-    mesh_view_bindings::view,
+    pbr_fragment::pbr_input_from_vertex_output,
     pbr_bindings,
     mesh_view_bindings,
-    mesh_view_types,
-    mesh_types::MESH_FLAGS_SHADOW_RECEIVER_BIT,
 }
+
+#import source_float_store::half4
+
+#import source_view_lighting::{lighting, diffuse_sh, indirect_specular, direct_attenuation, fog_factor, sun_cookie, sun_cookie_sampler}
 
 struct SourceLight {
     cookie_from_world: mat4x4<f32>,
@@ -27,10 +25,8 @@ struct SourceLighting {
     ambient: vec4<f32>,
     fog: vec4<f32>,
     counts: vec4<u32>,
-    cascade_bounds: vec4<f32>,
-    fog_projection: vec4<f32>,
 }
-@group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> lighting: SourceLighting;
+@group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> lamp_lighting: SourceLighting;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var shadow_atlas: texture_depth_2d;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var shadow_sampler: sampler_comparison;
 @group(#{MATERIAL_BIND_GROUP}) @binding(103) var cookies: texture_2d<f32>;
@@ -39,8 +35,6 @@ struct SourceLighting {
 @group(#{MATERIAL_BIND_GROUP}) @binding(106) var<uniform> receiver: vec4<u32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(107) var default_cookie: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(108) var default_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(109) var sun_cookie: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(110) var sun_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(111) var attenuation_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(112) var hard_shadow_sampler: sampler_comparison;
 // The GLSL backend requires one sampler per shader image. Both bindings use the same depth atlas.
@@ -49,16 +43,13 @@ fn power5(v:f32)->f32 { let v2=v*v; return v2*v2*v; }
 fn source_shadow(light:SourceLight,position:vec3<f32>,normal:vec3<f32>,view_depth:f32)->f32 {
     if light.shadow.y == 0.0 { return 1.0; }
     var face=0u;
-    if light.direction_kind.w == 0.0 {
-        if view_depth > lighting.cascade_bounds.w { return 1.0; }
-        face=u32(view_depth>lighting.cascade_bounds.x)+u32(view_depth>lighting.cascade_bounds.y)+u32(view_depth>lighting.cascade_bounds.z);
-    } else if light.direction_kind.w == 1.0 {
+    if light.direction_kind.w == 1.0 {
         let delta=position-light.position_range.xyz; let a=abs(delta);
         if a.x>=a.y && a.x>=a.z { face=select(0u,1u,delta.x<0.0); }
         else if a.y>=a.z { face=select(2u,3u,delta.y<0.0); }
         else { face=select(4u,5u,delta.z<0.0); }
     }
-    let shadow=lighting.shadows[u32(light.shadow.x)+face];
+    let shadow=lamp_lighting.shadows[u32(light.shadow.x)+face];
     var distance=1.;var to_light=-light.direction_kind.xyz;
     if light.direction_kind.w!=0. {
         let delta=light.position_range.xyz-position;to_light=normalize(delta);
@@ -74,70 +65,6 @@ fn source_shadow(light:SourceLight,position:vec3<f32>,normal:vec3<f32>,view_dept
     else { sampled=textureSampleCompareLevel(shadow_atlas,shadow_sampler,uv,ndc.z); }
     return mix(1.0,sampled,light.shadow.z);
 }
-fn direct_brdf(base:vec3<f32>,metal:f32,perceptual:f32,n:vec3<f32>,v:vec3<f32>,l:vec3<f32>)->vec3<f32> {
-    let nl=max(dot(n,l),0.0); let nv=abs(dot(n,v));
-    let h=normalize(l+v); let nh=max(dot(n,h),0.0); let lh=max(dot(l,h),0.0);
-    let rough=max(perceptual*perceptual,0.002);
-    let fd90=0.5+2.0*lh*lh*perceptual;
-    let diffuse=(1.0+(fd90-1.0)*power5(1.0-nl))*(1.0+(fd90-1.0)*power5(1.0-nv))*nl;
-    let lambda_v=nl*(nv*(1.0-rough)+rough);
-    let lambda_l=nv*(nl*(1.0-rough)+rough);
-    let visibility=0.5/(lambda_v+lambda_l+0.00001);
-    let a2=rough*rough; let d=(nh*a2-nh)*nh+1.0;
-    let distribution=a2/(3.14159265*d*d+0.0000001);
-    let specular=visibility*distribution*3.14159265*nl;
-    let f0=mix(vec3<f32>(0.04),base,metal);
-    let fresnel=f0+(vec3<f32>(1.0)-f0)*power5(1.0-lh);
-    return base*(1.0-metal)*0.96*diffuse+fresnel*specular;
-}
-fn source_lit_fragment(in:VertexOutput, front:bool)->FragmentOutput {
-    var p=pbr_input_from_standard_material(in,front);
-    p.material.base_color=alpha_discard(p.material,p.material.base_color);
-    let depth=max(-(view.view_from_world*p.world_position).z,0.0);
-    var rgb=p.material.base_color.rgb*lighting.ambient.rgb*p.diffuse_occlusion+p.material.emissive.rgb;
-    if (p.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT)!=0u { rgb=p.material.base_color.rgb; }
-    else {
-        for (var i=0u;i<lighting.counts.x;i+=1u) {
-            let light=lighting.lights[i];
-            if (receiver.x & light.mask.x)==0u { continue; }
-            if max(light.color.r,max(light.color.g,light.color.b))<=0.0 { continue; }
-            var l=-light.direction_kind.xyz;
-            var weight=1.0;
-            let local=light.cookie_from_world*p.world_position;
-            if light.direction_kind.w!=0.0 {
-                let delta=light.position_range.xyz-p.world_position.xyz;
-                let d2=dot(delta,delta); let range2=light.position_range.w*light.position_range.w;
-                if d2>=range2 { continue; }
-                l=delta*inverseSqrt(max(d2,0.000001));
-                weight=textureSampleLevel(attenuation,attenuation_sampler,vec2<f32>(d2/range2,0.5),0.0).r;
-            }
-            if light.cookie_rect.x>0.0 {
-                var uv=vec2<f32>(0.0);
-                if light.direction_kind.w==0.0 { uv=local.xy/light.shadow.w+light.cookie_rect.yz+0.5; }
-                else {
-                    if local.z<=0.0 { continue; }
-                    uv=local.xy/local.w+0.5;
-                    if any(uv<vec2<f32>(0.0)) || any(uv>vec2<f32>(1.0)) { continue; }
-                }
-                if light.cookie_rect.x==1.0 { weight*=textureSampleGrad(sun_cookie,sun_sampler,uv,dpdx(uv),dpdy(uv)).a; }
-                else if light.cookie_rect.x==2.0 { weight*=textureSampleGrad(default_cookie,default_sampler,uv,dpdx(uv),dpdy(uv)).a; }
-                else { weight*=textureSampleGrad(cookies,cookie_sampler,uv,dpdx(uv),dpdy(uv)).a; }
-            }
-            if (p.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT)!=0u {weight*=source_shadow(light,p.world_position.xyz,p.world_normal,depth);}
-            rgb+=direct_brdf(p.material.base_color.rgb,p.material.metallic,p.material.perceptual_roughness,p.N,p.V,l)*light.color.rgb*weight;
-        }
-    }
-    var planes=lighting.fog_projection.xy;
-    if depth>planes.y && (receiver.x & lighting.counts.z)!=0u {planes=lighting.fog_projection.zw;}
-    // Unity D3D11 UNITY_Z_0_FAR_FROM_CLIPSPACE applied to the authored projection.
-    let fog_depth=max((depth-planes.x)*planes.y/(planes.y-planes.x),0.);
-    let fog=exp2(-1.442695*pow(lighting.ambient.w*fog_depth,2.0));
-    rgb=mix(lighting.fog.rgb,rgb,fog);
-    var out:FragmentOutput;
-    out.color=main_pass_post_lighting_processing(p,vec4<f32>(rgb,p.material.base_color.a));
-    return out;
-}
-
 
 struct SourceUniform {
     color: vec4<f32>,
@@ -207,11 +134,11 @@ fn fragment(
 #ifdef VERTEX_TANGENTS
     @location(8) world_bitangent: vec3<f32>,
 #endif
+    @location(9) @interpolate(flat) source_renderer: vec2<f32>,
+    @location(10) source_fog: f32,
+    @location(11) source_screen: vec4<f32>,
     @builtin(front_facing) is_front: bool,
 ) -> FragmentOutput {
-#ifndef SOURCE_AUTHORED
-    return source_lit_fragment(in, is_front);
-#else
     var pbr = pbr_input_from_vertex_output(in, is_front, false);
     var uv = vec2(0.0);
 #ifdef VERTEX_UVS_A
@@ -234,6 +161,10 @@ fn fragment(
     let main = sample_source(0u, uv, detail_uv, offset);
     var albedo = main.rgb * source.color.rgb;
     var alpha = main.a * source.color.a;
+#ifdef VERTEX_COLORS
+    // Target-generated terrain keeps its linear vertex colors. Authored source materials do not use this bit.
+    if source_flag(11u) { albedo *= in.color.rgb; alpha *= in.color.a; }
+#endif
     if source_flag(5u) { alpha = source.color.a; }
     if source_flag(9u) && alpha < source.factors.w { discard; }
     let mask = sample_source(7u, uv, detail_uv, offset).a;
@@ -267,10 +198,15 @@ fn fragment(
         diffuse *= alpha;
         alpha = 1.0 - one_minus_reflectivity + alpha * one_minus_reflectivity;
     }
-    var light = diffuse * lighting.ambient.rgb * occlusion;
-    let depth = max(-(view.view_from_world * in.world_position).z, 0.0);
-    for (var i = 0u; i < lighting.counts.x; i += 1u) {
-        let lamp = lighting.lights[i];
+    var light: vec3<f32>;
+#ifdef SOURCE_FORWARD_ADD
+    let view_depth = -(mesh_view_bindings::view.view_from_world * in.world_position).z;
+    let receive_shadows = (u32(source_renderer.y) & 2u) != 0u;
+    let sun_attenuation = direct_attenuation(in.world_position.xyz,source_screen.xy/source_screen.w,view_depth,receive_shadows);
+    light = source_brdf(diffuse,specular,smoothness,pbr.N,pbr.V,lighting.direction_to_sun.xyz)*lighting.sun_radiance.xyz*sun_attenuation;
+    for (var i = 0u; i < lamp_lighting.counts.x; i += 1u) {
+        let lamp = lamp_lighting.lights[i];
+        if lamp.direction_kind.w == 0.0 { continue; }
         if (receiver.x & lamp.mask.x) == 0u { continue; }
         if max(lamp.color.r, max(lamp.color.g, lamp.color.b)) <= 0.0 { continue; }
         var direction = -lamp.direction_kind.xyz;
@@ -292,27 +228,39 @@ fn fragment(
                 cookie_uv = local.xy / local.w + 0.5;
                 if any(cookie_uv < vec2(0.0)) || any(cookie_uv > vec2(1.0)) { continue; }
             }
-            if lamp.cookie_rect.x == 1.0 { weight *= textureSampleGrad(sun_cookie, sun_sampler, cookie_uv, dpdx(cookie_uv), dpdy(cookie_uv)).a; }
+            if lamp.cookie_rect.x == 1.0 { weight *= textureSampleGrad(sun_cookie, sun_cookie_sampler, cookie_uv, dpdx(cookie_uv), dpdy(cookie_uv)).a; }
             else if lamp.cookie_rect.x == 2.0 { weight *= textureSampleGrad(default_cookie, default_sampler, cookie_uv, dpdx(cookie_uv), dpdy(cookie_uv)).a; }
             else { weight *= textureSampleGrad(cookies, cookie_sampler, cookie_uv, dpdx(cookie_uv), dpdy(cookie_uv)).a; }
         }
-        if (pbr.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u { weight *= source_shadow(lamp, in.world_position.xyz, pbr.world_normal, depth); }
+        if receive_shadows { weight *= source_shadow(lamp, in.world_position.xyz, pbr.world_normal, view_depth); }
         light += source_brdf(diffuse, specular, smoothness, pbr.N, pbr.V, direction) * lamp.color.rgb * weight;
     }
+
+#else
+    light = diffuse * diffuse_sh(pbr.N) * occlusion;
+    if !source_flag(7u) {
+        light += indirect_specular(specular,one_minus_reflectivity,smoothness,pbr.N,pbr.V,occlusion,source_renderer.x);
+    }
+    // Glossy-off unity_IndirectSpecColor is RGB0 in the fixed source profile.
     if source_flag(3u) { light += sample_source(4u, uv, detail_uv, offset).rgb * source.emission.rgb; }
-    if source.flags.z == 1u { light = source.color.rgb; alpha = source.color.a; }
-    // The separate stained-glass layer supplies grab composition.
-    if source.flags.z == 2u { light = albedo; }
-    // Unity OutputForward forces opaque and cutout Standard alpha to one.
-    if source.flags.z == 0u && !source_flag(8u) && !source_flag(10u) { alpha = 1.0; }
-    var out: FragmentOutput;
-    var planes = lighting.fog_projection.xy;
-    if depth > planes.y && (receiver.x & lighting.counts.z) != 0u { planes = lighting.fog_projection.zw; }
-    let fog_depth = max((depth - planes.x) * planes.y / (planes.y - planes.x), 0.0);
-    let fog = exp2(-1.442695 * pow(lighting.ambient.w * fog_depth, 2.0));
-    light = mix(lighting.fog.rgb, light, fog);
-    pbr.material.flags = 0u;
-    out.color = main_pass_post_lighting_processing(pbr, vec4(light, alpha));
-    return out;
+    if source.flags.z == 1u { light = source.color.rgb; alpha = 1.0; }
 #endif
+    // Preserve source Standard OutputForward alpha, including premultiplied specular.
+    if source.flags.z == 0u && !source_flag(8u) && !source_flag(10u) { alpha = 1.0; }
+#ifdef SOURCE_UNLIT
+    let fog = clamp(source_fog,0.0,1.0);
+#else
+    let fog = fog_factor(source_fog,lighting.near_far.x,lighting.near_far.y);
+#endif
+#ifdef SOURCE_FORWARD_ADD
+    light *= fog;
+#else
+    light = mix(lighting.fog_color_density.xyz,light,fog);
+#endif
+    var out: FragmentOutput;
+    out.color = vec4(light,alpha);
+#ifdef SOURCE_REPLACEMENT
+    out.color = half4(out.color);
+#endif
+    return out;
 }

@@ -15956,7 +15956,8 @@
             "_BumpMap": "bump"
           },
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 1,
@@ -15996,7 +15997,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 1,
@@ -16036,7 +16038,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 1,
@@ -16076,7 +16079,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16116,7 +16120,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16156,7 +16161,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16196,7 +16202,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16236,7 +16243,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16276,7 +16284,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16316,7 +16325,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16356,7 +16366,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16396,7 +16407,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16436,7 +16448,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16476,7 +16489,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16516,7 +16530,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16556,7 +16571,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16596,7 +16612,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16636,7 +16653,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16676,7 +16694,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16716,7 +16735,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16756,7 +16776,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16796,7 +16817,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16836,7 +16858,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16876,7 +16899,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16916,7 +16940,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16956,7 +16981,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -16996,7 +17022,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17036,7 +17063,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17076,7 +17104,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17116,7 +17145,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17156,7 +17186,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17196,7 +17227,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17236,7 +17268,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17276,7 +17309,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17316,7 +17350,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17356,7 +17391,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17396,7 +17432,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17436,7 +17473,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17476,7 +17514,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17516,7 +17555,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17556,7 +17596,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17596,7 +17637,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17636,7 +17678,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17676,7 +17719,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17716,7 +17760,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17756,7 +17801,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17796,7 +17842,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17836,7 +17883,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17876,7 +17924,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17916,7 +17965,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17956,7 +18006,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -17996,7 +18047,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18036,7 +18088,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18076,7 +18129,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18116,7 +18170,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18156,7 +18211,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18196,7 +18252,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18236,7 +18293,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18276,7 +18334,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18316,7 +18375,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18356,7 +18416,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18396,7 +18457,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18436,7 +18498,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18476,7 +18539,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18516,7 +18580,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18556,7 +18621,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18596,7 +18662,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18636,7 +18703,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 2,
@@ -18676,7 +18744,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 3,
@@ -18716,7 +18785,8 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       },
       {
         "asset": 4,
@@ -18756,8 +18826,2991 @@
           "textures": [],
           "defaults": {},
           "exclusions": []
-        }
+        },
+        "enable_instancing": false
       }
     ]
+  },
+  "render_lighting": {
+    "sky": {
+      "source": {
+        "file": "sharedassets1.assets",
+        "path_id": 566
+      },
+      "shader": {
+        "file": "globalgamemanagers.assets",
+        "path_id": 4
+      },
+      "sun_size": 0.05900000035762787,
+      "sun_convergence": 10.0,
+      "sun_disk": 2,
+      "capture_sun_disk": 0,
+      "exposure": 2.0,
+      "atmosphere_thickness": 1.0,
+      "tint": [
+        0.501960813999176,
+        0.501960813999176,
+        0.501960813999176,
+        1.0
+      ],
+      "ground": [
+        0.5414738655090332,
+        0.6440014839172363,
+        0.6792452931404114,
+        1.0
+      ],
+      "cloud_root": {
+        "translation": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "cloud_mesh": {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 508
+        },
+        "file": "reference/source-cloud.gltf",
+        "buffer": "reference/source-cloud.bin",
+        "vertex_count": 829,
+        "index_count": 4596,
+        "bounds_center": [
+          0.0,
+          15.485633850097656,
+          0.0
+        ],
+        "bounds_extents": [
+          49.65875244140625,
+          15.675643920898438,
+          49.65875244140625
+        ]
+      },
+      "clouds": [
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 41968
+          },
+          "material": {
+            "file": "sharedassets1.assets",
+            "path_id": 44
+          },
+          "transform": {
+            "translation": [
+              0.0,
+              0.0,
+              -0.0
+            ],
+            "rotation": [
+              -0.0,
+              -0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              4.0,
+              2.0,
+              4.0
+            ]
+          },
+          "color": [
+            1.0,
+            1.0,
+            1.0,
+            0.6274510025978088
+          ],
+          "speed": -0.07500000298023224,
+          "density": 1.1367088556289673,
+          "textures": [
+            {
+              "slot": "_ScatterMap0",
+              "texture": {
+                "file": "sharedassets0.assets",
+                "path_id": 319
+              },
+              "scale": [
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "slot": "_ScatterMap1",
+              "texture": {
+                "file": "sharedassets0.assets",
+                "path_id": 278
+              },
+              "scale": [
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "slot": "_DensityMap",
+              "texture": {
+                "file": "sharedassets0.assets",
+                "path_id": 257
+              },
+              "scale": [
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "slot": "_TextureMap",
+              "texture": {
+                "file": "sharedassets0.assets",
+                "path_id": 291
+              },
+              "scale": [
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        {
+          "source": {
+            "file": "level1",
+            "path_id": 41967
+          },
+          "material": {
+            "file": "sharedassets1.assets",
+            "path_id": 43
+          },
+          "transform": {
+            "translation": [
+              0.0,
+              0.0,
+              -0.0
+            ],
+            "rotation": [
+              -0.0,
+              -0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              5.0,
+              2.5,
+              5.0
+            ]
+          },
+          "color": [
+            1.0,
+            1.0,
+            1.0,
+            0.3137255012989044
+          ],
+          "speed": 0.07500000298023224,
+          "density": 1.1367088556289673,
+          "textures": [
+            {
+              "slot": "_ScatterMap0",
+              "texture": {
+                "file": "sharedassets0.assets",
+                "path_id": 141
+              },
+              "scale": [
+                0.20000000298023224,
+                0.20000000298023224
+              ],
+              "offset": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "slot": "_ScatterMap1",
+              "texture": {
+                "file": "sharedassets0.assets",
+                "path_id": 194
+              },
+              "scale": [
+                0.20000000298023224,
+                0.20000000298023224
+              ],
+              "offset": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "slot": "_DensityMap",
+              "texture": {
+                "file": "sharedassets0.assets",
+                "path_id": 257
+              },
+              "scale": [
+                0.20000000298023224,
+                0.20000000298023224
+              ],
+              "offset": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "slot": "_TextureMap",
+              "texture": {
+                "file": "sharedassets0.assets",
+                "path_id": 291
+              },
+              "scale": [
+                0.5,
+                0.5
+              ],
+              "offset": [
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "textures": [
+      {
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 735
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 1,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 0,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-0.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 265
+        },
+        "color_space": "srgb",
+        "sampler": {
+          "filter": 1,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-1.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 213
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-2.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 192
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-3.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 301
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-4.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 188
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-5.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 240
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-6.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 298
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-7.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 260
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-8.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 190
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-9.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 328
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-10.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 244
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-11.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 308
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-12.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 256
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-13.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 287
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-14.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 234
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-15.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 361
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-16.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 178
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-17.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 158
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-18.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 321
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-19.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 250
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-20.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 247
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-21.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 239
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-22.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 317
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-23.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 345
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-24.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 324
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-25.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 182
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-26.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 358
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-27.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 143
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-28.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 320
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-29.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 140
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-30.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 303
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-31.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 151
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-32.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 237
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-33.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 275
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-34.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 315
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-35.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 181
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-36.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 144
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-37.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 186
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-38.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 167
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-39.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 285
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-40.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 216
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-41.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 164
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-42.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 332
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-43.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 312
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-44.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 245
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-45.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 159
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-46.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 318
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-47.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 276
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-48.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 157
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-49.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 309
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-50.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 197
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-51.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 341
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-52.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 340
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-53.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 339
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-54.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 330
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-55.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 280
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-56.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 229
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-57.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 242
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-58.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 349
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-59.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 272
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-60.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 342
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-61.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 198
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-62.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 156
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-63.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 296
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-64.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 209
+        },
+        "color_space": "linear",
+        "sampler": {
+          "filter": 0,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-65.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 319
+        },
+        "color_space": "srgb",
+        "sampler": {
+          "filter": 1,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-66.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 278
+        },
+        "color_space": "srgb",
+        "sampler": {
+          "filter": 1,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-67.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 257
+        },
+        "color_space": "srgb",
+        "sampler": {
+          "filter": 1,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-68.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 291
+        },
+        "color_space": "srgb",
+        "sampler": {
+          "filter": 1,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-69.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 141
+        },
+        "color_space": "srgb",
+        "sampler": {
+          "filter": 1,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-70.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 194
+        },
+        "color_space": "srgb",
+        "sampler": {
+          "filter": 1,
+          "wrap_u": 0,
+          "wrap_v": 0,
+          "aniso": 1,
+          "mip_bias": 0.0,
+          "mip_count": 1
+        },
+        "mips": [
+          {
+            "file": "reference/fixture-lighting-71.png",
+            "width": 1,
+            "height": 1
+          }
+        ]
+      }
+    ],
+    "caster_dither": {
+      "file": "reference/source-caster-dither-r8.bin",
+      "extent": [
+        4,
+        4,
+        16
+      ],
+      "source_engine_sha256": "553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86",
+      "source_format": "a8",
+      "target_format": "r8_unorm",
+      "filter": "point",
+      "wrap": "repeat",
+      "mip_count": 1
+    },
+    "postprocessing": {
+      "main_layer": {
+        "file": "level1",
+        "path_id": 68049
+      },
+      "stop_nan": true,
+      "taa": {
+        "jitter_spread": 0.10000000149011612,
+        "stationary_blending": 0.6499999761581421,
+        "motion_blending": 0.8500000238418579,
+        "sharpness": 0.20000000298023224
+      },
+      "exposure": {
+        "filtering_percent": [
+          1.0,
+          99.0
+        ],
+        "luminance_ev": [
+          -2.0,
+          1.0
+        ],
+        "key": 0.800000011920929,
+        "speed_up": 2.0,
+        "speed_down": 1.0
+      },
+      "bloom": {
+        "intensity": 1.0,
+        "threshold": 1.2000000476837158,
+        "soft_knee": 0.5,
+        "clamp": 65472.0,
+        "diffusion": 7.0,
+        "anamorphic_ratio": 0.0,
+        "color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "fast": true,
+        "dirt": {
+          "file": "sharedassets0.assets",
+          "path_id": 265
+        },
+        "dirt_intensity": 2.0
+      },
+      "occlusion": {
+        "intensity": 1.0,
+        "thickness": 1.0,
+        "noise_tolerance": 0.0,
+        "blur_tolerance": -4.599999904632568,
+        "upsample_tolerance": -12.0,
+        "direct_lighting_strength": 0.0
+      },
+      "motion_blur": {
+        "samples": 4,
+        "shutter_range": [
+          5.0,
+          100.0
+        ],
+        "speed_range": [
+          20.0,
+          80.0
+        ],
+        "shutter_lerp": 8.0
+      },
+      "grading": {
+        "lut_size": 33,
+        "curves": "source_default",
+        "temperature": 0.0,
+        "tint": 0.0,
+        "hue_shift": 0.0,
+        "saturation": 20.0,
+        "post_exposure": 0.0,
+        "contrast": 0.0,
+        "color_filter": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "channel_mixer": [
+          [
+            100.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            100.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            100.0
+          ]
+        ],
+        "trackballs": [
+          [
+            1.0,
+            1.0,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            1.0,
+            0.0
+          ]
+        ]
+      },
+      "blue_noise": [
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 213
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 192
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 301
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 188
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 240
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 298
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 260
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 190
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 328
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 244
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 308
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 256
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 287
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 234
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 361
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 178
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 158
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 321
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 250
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 247
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 239
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 317
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 345
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 324
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 182
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 358
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 143
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 320
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 140
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 303
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 151
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 237
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 275
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 315
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 181
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 144
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 186
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 167
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 285
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 216
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 164
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 332
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 312
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 245
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 159
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 318
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 276
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 157
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 309
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 197
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 341
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 340
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 339
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 330
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 280
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 229
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 242
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 349
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 272
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 342
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 198
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 156
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 296
+        },
+        {
+          "file": "sharedassets0.assets",
+          "path_id": 209
+        }
+      ],
+      "heat_haze_weight": 0.0
+    },
+    "dependencies": [
+      {
+        "file": "reference/fixture-lighting-0.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-1.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-2.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-3.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-4.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-5.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-6.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-7.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-8.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-9.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-10.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-11.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-12.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-13.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-14.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-15.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-16.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-17.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-18.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-19.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-20.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-21.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-22.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-23.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-24.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-25.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-26.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-27.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-28.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-29.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-30.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-31.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-32.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-33.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-34.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-35.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-36.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-37.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-38.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-39.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-40.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-41.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-42.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-43.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-44.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-45.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-46.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-47.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-48.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-49.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-50.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-51.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-52.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-53.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-54.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-55.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-56.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-57.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-58.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-59.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-60.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-61.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-62.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-63.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-64.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-65.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-66.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-67.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-68.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-69.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-70.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/fixture-lighting-71.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/source-cloud.gltf",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/source-cloud.bin",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "file": "reference/source-caster-dither-r8.bin",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "project_color_space": "linear",
+    "output_transform": "neutral_lut_srgb_dither",
+    "light_conversion": "legacy_gamma_before_linear",
+    "msaa_samples": 8,
+    "ambient_sh": [
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.03310476243495941
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.03310476243495941
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.03310476243495941
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "global_reflection_intensity": 0.0,
+    "reflection_bounces": 1,
+    "sample": {
+      "elapsed_level_seconds": 0.5,
+      "fixed_updates": 25,
+      "fixed_delta_seconds": 0.019999999552965164,
+      "initial_awake_updates": 1,
+      "cloud_phase": -0.9998494982719421,
+      "cloud_perlin": 0.4651719629764557,
+      "cloud_density": 1.1367088556289673,
+      "shader_time": [
+        0.02500000037252903,
+        0.5,
+        1.0,
+        1.5
+      ],
+      "sun_euler_degrees": [
+        40.06410217285156,
+        60.0,
+        0.0
+      ],
+      "sun_intensity": 1.125,
+      "ambient_gamma": 0.20000000298023224,
+      "temperature": 20.0,
+      "heat_haze_weight": 0.0
+    },
+    "lights": [
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 56812
+        },
+        "node": null,
+        "world_pose": {
+          "translation": [
+            -17.450000762939453,
+            95.4800033569336,
+            -280.1000061035156
+          ],
+          "rotation": [
+            -0.29665332232933483,
+            -0.4697505743657896,
+            -0.17127287550283826,
+            0.8136318616862099
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "kind": "directional",
+        "color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "intensity": 1.125,
+        "radiance": [
+          1.295792818069458,
+          1.295792818069458,
+          1.295792818069458
+        ],
+        "range": 10.0,
+        "spot_angles": [
+          21.802080154418945,
+          30.0
+        ],
+        "mask": 4294967295,
+        "enabled": true,
+        "cookie": {
+          "file": "sharedassets1.assets",
+          "path_id": 735
+        },
+        "cookie_size": 10000.0,
+        "shadows": {
+          "mode": 2,
+          "strength": 0.8999999761581421,
+          "depth_bias": 0.20000000298023224,
+          "normal_bias": 0.4000000059604645,
+          "near": 0.20000000298023224
+        }
+      }
+    ],
+    "probes": [
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 59674
+        },
+        "node": 1,
+        "world_pose": {
+          "translation": [
+            37.80900217251602,
+            2.1530001163482666,
+            -68.96600301208038
+          ],
+          "rotation": [
+            -0.0,
+            -0.7071068286895752,
+            0.0,
+            0.7071068286895752
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "enabled": true,
+        "bounds_size": [
+          6.0,
+          2.5,
+          6.0
+        ],
+        "bounds_offset": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "box_projection": false,
+        "blend_distance": 1.0,
+        "intensity": 1.0,
+        "importance": 1,
+        "near": 0.8399999737739563,
+        "far": 25.0,
+        "shadow_distance": 5.0,
+        "mask": 349345813,
+        "resolution": 64,
+        "refresh": "individual_faces_every_frame",
+        "decode": [
+          1.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "faces": [
+          {
+            "index": 0,
+            "basis": [
+              [
+                0,
+                0,
+                -1
+              ],
+              [
+                0,
+                -1,
+                0
+              ],
+              [
+                -1,
+                0,
+                0
+              ]
+            ]
+          },
+          {
+            "index": 1,
+            "basis": [
+              [
+                0,
+                0,
+                1
+              ],
+              [
+                0,
+                -1,
+                0
+              ],
+              [
+                1,
+                0,
+                0
+              ]
+            ]
+          },
+          {
+            "index": 2,
+            "basis": [
+              [
+                1,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                1
+              ],
+              [
+                0,
+                -1,
+                0
+              ]
+            ]
+          },
+          {
+            "index": 3,
+            "basis": [
+              [
+                1,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                -1
+              ],
+              [
+                0,
+                1,
+                0
+              ]
+            ]
+          },
+          {
+            "index": 4,
+            "basis": [
+              [
+                1,
+                0,
+                0
+              ],
+              [
+                0,
+                -1,
+                0
+              ],
+              [
+                0,
+                0,
+                -1
+              ]
+            ]
+          },
+          {
+            "index": 5,
+            "basis": [
+              [
+                -1,
+                0,
+                0
+              ],
+              [
+                0,
+                -1,
+                0
+              ],
+              [
+                0,
+                0,
+                1
+              ]
+            ]
+          }
+        ],
+        "mip_extents": [
+          64,
+          32,
+          16,
+          8,
+          4,
+          2,
+          1
+        ]
+      }
+    ],
+    "cameras": [
+      {
+        "role": "sky",
+        "source": {
+          "file": "level1",
+          "path_id": 40279
+        },
+        "order": -30.0,
+        "clear": "skybox",
+        "near": 0.05000000074505806,
+        "far": 2000.0,
+        "field_of_view": 65.0,
+        "mask": 65536,
+        "hdr": true,
+        "allow_msaa": true,
+        "postprocessing": null
+      },
+      {
+        "role": "far",
+        "source": {
+          "file": "level1",
+          "path_id": 40303
+        },
+        "order": -10.0,
+        "clear": "depth",
+        "near": 300.0,
+        "far": 15000.0,
+        "field_of_view": 65.0,
+        "mask": 557057,
+        "hdr": true,
+        "allow_msaa": true,
+        "postprocessing": {
+          "source": {
+            "file": "level1",
+            "path_id": 70668
+          },
+          "volume_mask": 0,
+          "scope": "dither_only",
+          "stop_nan": true
+        }
+      },
+      {
+        "role": "main",
+        "source": {
+          "file": "level1",
+          "path_id": 40241
+        },
+        "order": -1.0,
+        "clear": "depth",
+        "near": 0.07500000298023224,
+        "far": 400.0,
+        "field_of_view": 65.0,
+        "mask": 80908083,
+        "hdr": true,
+        "allow_msaa": true,
+        "postprocessing": {
+          "source": {
+            "file": "level1",
+            "path_id": 68049
+          },
+          "volume_mask": 2097408,
+          "scope": "main_stack",
+          "stop_nan": true
+        }
+      },
+      {
+        "role": "foreground",
+        "source": {
+          "file": "level1",
+          "path_id": 40340
+        },
+        "order": 1.0,
+        "clear": "depth",
+        "near": 0.05000000074505806,
+        "far": 100.0,
+        "field_of_view": 65.0,
+        "mask": 268435456,
+        "hdr": true,
+        "allow_msaa": true,
+        "postprocessing": {
+          "source": {
+            "file": "level1",
+            "path_id": 66349
+          },
+          "volume_mask": 32,
+          "scope": "dither_only",
+          "stop_nan": true
+        }
+      }
+    ],
+    "fog": {
+      "mode": "exp_squared",
+      "color_gamma": [
+        0.7877358198165894,
+        0.949346125125885,
+        1.0,
+        1.0
+      ],
+      "color_linear": [
+        0.583248496055603,
+        0.8886164426803589,
+        1.0,
+        1.0
+      ],
+      "density": 1.7500000467407517e-05
+    },
+    "shadows": {
+      "cascades": 4,
+      "projection": "stable_fit",
+      "resolution": 2,
+      "distance": 100.0,
+      "near_offset": 0.0,
+      "split_fractions": [
+        0.0327683761715889,
+        0.08559319376945496,
+        0.33531081676483154
+      ]
+    }
   }
 }

@@ -1,8 +1,11 @@
+mod generated;
+pub use generated::{GeneratedWorldMaterial, generated_mesh};
+
 use crate::reference::{
     self as source, MaterialRecord, RenderingRecord, ShaderFamily, TextureColorSpace, TextureRecord,
 };
 use bevy::asset::{AssetId, LoadState, RenderAssetUsages};
-use bevy::gltf::GltfMaterialExtras;
+use bevy::gltf::{GltfExtras, GltfMaterialExtras};
 use bevy::image::{
     ImageAddressMode, ImageFilterMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor,
 };
@@ -56,7 +59,7 @@ pub struct SourceUniform {
     defaults: [Vec4; 9],
 }
 
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct SurfaceKey {
     cull: u8,
     z_write: bool,
@@ -64,10 +67,15 @@ pub struct SurfaceKey {
     src: u8,
     dst: u8,
     reflected: bool,
+    standard: bool,
+    unlit: bool,
+    transparent: bool,
+    glass: bool,
+    glass_shader: Option<Handle<Shader>>,
 }
 impl From<&SourceSurface> for SurfaceKey {
     fn from(value: &SourceSurface) -> Self {
-        value.state
+        value.state.clone()
     }
 }
 
@@ -110,7 +118,7 @@ pub struct SourceMaterials {
     textures: Vec<SourceTexture>,
     texture_indices: HashMap<String, usize>,
     pub handles: HashMap<(source::AssetId, u32, bool, u32), Handle<SourceMaterial>>,
-    shaders: [Handle<Shader>; 2],
+    shaders: [Handle<Shader>; 3],
     pub state: RenderingState,
     pub bound: bool,
     pub texture_bytes: usize,
@@ -123,10 +131,92 @@ struct PipelineRequest {
 }
 #[derive(Resource, Clone, ExtractResource)]
 pub struct MaterialLoading(Arc<Mutex<LoadingData>>);
+#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
+pub(crate) struct MaterialPrewarmAudit {
+    pub(crate) state: u8,
+    pub(crate) sealed: bool,
+    pub(crate) request_count: u32,
+    pub(crate) missing_mesh_count: u32,
+    pub(crate) missing_material_count: u32,
+    pub(crate) first_missing_mesh_request: Option<u32>,
+    pub(crate) first_missing_material_request: Option<u32>,
+    pub(crate) warmed_queued: bool,
+    pub(crate) warmed_id_count: u32,
+    pub(crate) ready_pipeline_count: u32,
+    pub(crate) view_key_count: u32,
+    pub(crate) cookies_present: bool,
+}
+impl MaterialLoading {
+    pub fn is_ready(&self) -> bool {
+        self.0.lock().unwrap().state == RenderingState::Ready
+    }
+    pub fn source_shadow_capacity(&self) -> Option<usize> {
+        let data = self.0.lock().unwrap();
+        data.sealed.then_some(data.shadow_capacity)
+    }
+    pub fn transparent_pass_capacity(&self) -> Option<usize> {
+        let data = self.0.lock().unwrap();
+        data.sealed.then_some(data.transparent_pass_capacity)
+    }
+
+    /// State: 0=Loading, 1=Ready, 2=Failed. Request indices start at zero.
+    pub(crate) fn prewarm_audit(&self, world: &World) -> MaterialPrewarmAudit {
+        let pending = self.0.lock().unwrap();
+        let meshes = world.get_resource::<RenderAssets<RenderMesh>>();
+        let materials = world.get_resource::<ErasedRenderAssets<PreparedMaterial>>();
+        let warmed = world.get_resource::<WarmedPipelines>();
+        let cache = world.get_resource::<PipelineCache>();
+        let mut audit = MaterialPrewarmAudit {
+            state: match pending.state {
+                RenderingState::Loading => 0,
+                RenderingState::Ready => 1,
+                RenderingState::Failed(_) => 2,
+            },
+            sealed: pending.sealed,
+            request_count: pending.requests.len() as u32,
+            warmed_queued: warmed.is_some_and(|warmed| warmed.queued),
+            warmed_id_count: warmed.map_or(0, |warmed| warmed.ids.len() as u32),
+            ready_pipeline_count: warmed.map_or(0, |warmed| {
+                warmed
+                    .ids
+                    .iter()
+                    .filter(|(id, _)| {
+                        cache.is_some_and(|cache| cache.get_render_pipeline(*id).is_some())
+                    })
+                    .count() as u32
+            }),
+            view_key_count: world
+                .get_resource::<ViewKeyCache>()
+                .map_or(0, |keys| keys.len() as u32),
+            cookies_present: world
+                .get_resource::<LightingGpu>()
+                .is_some_and(|gpu| gpu.cookies.is_some()),
+            ..Default::default()
+        };
+        for (index, request) in pending.requests.iter().enumerate() {
+            if meshes.is_none_or(|meshes| meshes.get(request.mesh).is_none()) {
+                audit.missing_mesh_count += 1;
+                audit.first_missing_mesh_request.get_or_insert(index as u32);
+            }
+            if materials.is_none_or(|materials| materials.get(request.material).is_none()) {
+                audit.missing_material_count += 1;
+                audit
+                    .first_missing_material_request
+                    .get_or_insert(index as u32);
+            }
+        }
+        audit
+    }
+}
+#[derive(Component)]
+pub struct SourceMaterialWarmup;
+
 struct LoadingData {
     requests: Vec<PipelineRequest>,
     sealed: bool,
     state: RenderingState,
+    shadow_capacity: usize,
+    transparent_pass_capacity: usize,
 }
 #[derive(Resource, Default)]
 struct WarmedPipelines {
@@ -137,20 +227,39 @@ struct WarmedPipelines {
 pub struct SourceMaterialPlugin;
 impl Plugin for SourceMaterialPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((ExtractResourcePlugin::<MaterialLoading>::default(),))
-            .insert_resource(MaterialLoading(Arc::new(Mutex::new(LoadingData {
-                requests: Vec::new(),
-                sealed: false,
-                state: RenderingState::Loading,
-            }))))
-            .add_systems(
-                Update,
-                (
-                    material_readiness,
-                    bind_authored_materials.after(bind_materials),
-                )
-                    .chain(),
-            );
+        app.add_plugins((
+            ExtractResourcePlugin::<MaterialLoading>::default(),
+            bevy::render::extract_component::ExtractComponentPlugin::<
+                super::transparent::SourceSortData,
+            >::default(),
+        ))
+        .insert_resource(MaterialLoading(Arc::new(Mutex::new(LoadingData {
+            requests: Vec::new(),
+            sealed: false,
+            state: RenderingState::Loading,
+            shadow_capacity: 0,
+            transparent_pass_capacity: 0,
+        }))))
+        .init_resource::<super::renderers::RendererMeshes>()
+        .init_resource::<generated::GeneratedCasterMaterials>()
+        .add_systems(
+            Update,
+            generated::prepare_local_casters.before(bind_materials),
+        )
+        .add_systems(
+            Update,
+            super::renderers::bind_renderer_meshes
+                .before(bind_materials)
+                .before(bind_authored_materials),
+        )
+        .add_systems(
+            Update,
+            (
+                material_readiness,
+                bind_authored_materials.after(bind_materials),
+            )
+                .chain(),
+        );
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
             render.init_resource::<WarmedPipelines>().add_systems(
                 Render,
@@ -203,6 +312,7 @@ pub fn load_materials(commands: &mut Commands, server: &AssetServer, rendering: 
         shaders: [
             server.load("shaders/source_surface.wgsl"),
             server.load("shaders/source_mesh.wgsl"),
+            server.load("shaders/source_glass.wgsl"),
         ],
         state: RenderingState::Loading,
         bound: false,
@@ -321,6 +431,13 @@ pub fn bind_authored_materials(
     mut source: ResMut<SourceMaterials>,
     mut materials: ResMut<Assets<SourceMaterial>>,
     visuals: Res<super::reference::ReferenceVisuals>,
+    renderer_meshes: Res<super::renderers::RendererMeshes>,
+    generated: Query<(
+        &GeneratedWorldMaterial,
+        &Mesh3d,
+        &MeshMaterial3d<SourceMaterial>,
+    )>,
+    master: Res<super::lighting::SourceLighting>,
     primitives: Query<
         (
             Entity,
@@ -328,14 +445,18 @@ pub fn bind_authored_materials(
             &Mesh3d,
             &GlobalTransform,
             Option<&bevy::camera::visibility::RenderLayers>,
+            &GltfExtras,
+            &super::renderers::SourceRenderer,
         ),
-        Without<super::sky::SkyMesh>,
+        (Without<super::sky::SkyMesh>, Without<SourceMaterialWarmup>),
     >,
     loading: Res<MaterialLoading>,
 ) {
     if source.bound
         || source.state != RenderingState::Loading
         || !visuals.bound
+        || !renderer_meshes.bound
+        || master.road_lamps.recipe.is_none()
         || source
             .textures
             .iter()
@@ -346,7 +467,10 @@ pub fn bind_authored_materials(
     let mut shared = HashMap::<String, Handle<SourceMaterial>>::new();
     let mut requests = Vec::new();
     let mut variants = HashSet::new();
-    for (entity, extras, mesh, transform, layers) in &primitives {
+    let mut transparent_pass_capacity = 0;
+    let mut sort_identities = HashMap::<String, u32>::new();
+    let mut shader_identities = HashMap::<String, i32>::new();
+    for (entity, extras, mesh, transform, layers, primitive, renderer) in &primitives {
         let mask = layers.map_or(1, |layers| {
             layers.iter().fold(0u32, |bits, layer| {
                 bits | 1u32.checked_shl(layer as u32).unwrap_or(0)
@@ -374,6 +498,57 @@ pub fn bind_authored_materials(
             "material {}:{} (asset {}, index {})",
             record.source.file, record.source.path_id, identity.asset.0, identity.gltf_material
         );
+        if matches!(
+            record.state.alpha_mode,
+            source::AlphaMode::Blend | source::AlphaMode::Premultiply | source::AlphaMode::Refract
+        ) {
+            transparent_pass_capacity +=
+                1 + usize::from(record.shader_family == ShaderFamily::Standard);
+            #[derive(serde::Deserialize)]
+            struct PrimitiveIdentity {
+                submesh: u16,
+            }
+            let slot = match serde_json::from_str::<PrimitiveIdentity>(&primitive.value) {
+                Ok(value) if value.submesh <= 0x7fff => value.submesh << 1,
+                _ => {
+                    source.state = RenderingState::Failed(
+                        "Source transparent material slot is invalid".into(),
+                    );
+                    return;
+                }
+            };
+            let mut identity = serde_json::to_value(record).expect("validated material");
+            identity.as_object_mut().unwrap().remove("asset");
+            identity.as_object_mut().unwrap().remove("gltf_material");
+            let next = sort_identities.len() as u32 + 1;
+            let runtime_material = *sort_identities.entry(identity.to_string()).or_insert(next);
+            let next = shader_identities.len() as i32 + 1;
+            let runtime_shader = *shader_identities
+                .entry(format!("{:?}", record.shader_family))
+                .or_insert(next);
+            let layer = u32::from((i32::from(renderer.0.sorting_layer) + 0x8000) as u16);
+            let order = u32::from((i32::from(renderer.0.sorting_order) + 0x8000) as u16);
+            commands.entity(entity).insert((
+                bevy::render::batching::NoAutomaticBatching,
+                super::transparent::SourceSortData {
+                    material_key: crate::reference::sorting::material_sort_key(
+                        runtime_material,
+                        record.enable_instancing,
+                        0,
+                    ),
+                    shader_identity: runtime_shader,
+                    source_material_index: slot,
+                    layer_and_order: (layer << 16) | order,
+                    queue: if record.state.render_queue < 0 {
+                        3000
+                    } else {
+                        record.state.render_queue as i16
+                    },
+                    additive: record.shader_family == ShaderFamily::Standard,
+                    glass: record.shader_family == ShaderFamily::StainedGlass,
+                },
+            ));
+        }
         let handle = if let Some(handle) = source.handles.get(&key) {
             handle.clone()
         } else {
@@ -406,6 +581,15 @@ pub fn bind_authored_materials(
         source.state = RenderingState::Failed("No source material primitives".into());
         return;
     }
+    for (identity, mesh, material) in &generated {
+        if variants.insert((mesh.0.id(), material.0.id())) {
+            requests.push(PipelineRequest {
+                mesh: mesh.0.id(),
+                material: material.0.id(),
+                label: format!("generated world {identity:?}"),
+            });
+        }
+    }
     info!(
         "Source materials: {} records, {} handles, {} textures, {} mip bytes, {} mesh/material pairs",
         source.records.len(),
@@ -417,6 +601,10 @@ pub fn bind_authored_materials(
     source.bound = true;
     let mut pending = loading.0.lock().unwrap();
     pending.requests = requests;
+    pending.shadow_capacity = primitives.iter().count()
+        + super::world::source_shadow_capacity()
+        + master.road_lamps.source_mesh_capacity();
+    pending.transparent_pass_capacity = transparent_pass_capacity;
     pending.sealed = true;
 }
 
@@ -428,19 +616,17 @@ fn make_material(
 ) -> SourceMaterial {
     if record.shader_family == ShaderFamily::AmplifyRope {
         // Retain the master rope surface. Source vertex sway remains deferred.
-        return SourceMaterial {
-            base: StandardMaterial {
+        return generated::from_base(
+            StandardMaterial {
                 base_color: Color::WHITE,
                 metallic: 0.,
                 perceptual_roughness: 0.5,
                 fog_enabled: false,
                 ..default()
             },
-            extension: SourceExtension {
-                receiver_mask: mask,
-                surface: None,
-            },
-        };
+            mask,
+            reflected,
+        );
     }
     let floats = &record.properties.floats;
     let factor = |name: &str, default: f32| floats.get(name).copied().unwrap_or(default);
@@ -485,7 +671,11 @@ fn make_material(
             factor("_Cutoff", 0.5),
         ),
         scales: Vec4::new(
-            factor("_BumpScale", 1.),
+            if record.shader_family == ShaderFamily::StainedGlass {
+                factor("_BumpAmt", 0.)
+            } else {
+                factor("_BumpScale", 1.)
+            },
             factor("_DetailNormalMapScale", 1.),
             factor("_OcclusionStrength", 1.),
             factor("_Parallax", 0.),
@@ -604,7 +794,7 @@ fn make_material(
         },
         extension: SourceExtension {
             receiver_mask: mask,
-            surface: Some(SourceSurface {
+            surface: SourceSurface {
                 data,
                 bank6: textures[6].clone(),
                 state: SurfaceKey {
@@ -614,8 +804,19 @@ fn make_material(
                     src: record.state.src_blend,
                     dst: record.state.dst_blend,
                     reflected,
+                    standard: record.shader_family == ShaderFamily::Standard,
+                    unlit: record.shader_family == ShaderFamily::UnlitColor,
+                    transparent: matches!(
+                        record.state.alpha_mode,
+                        source::AlphaMode::Blend
+                            | source::AlphaMode::Premultiply
+                            | source::AlphaMode::Refract
+                    ),
+                    glass: record.shader_family == ShaderFamily::StainedGlass,
+                    glass_shader: (record.shader_family == ShaderFamily::StainedGlass)
+                        .then(|| source.shaders[2].clone()),
                 },
-            }),
+            },
         },
     }
 }
@@ -697,9 +898,11 @@ fn prewarm_materials(world: &mut World) {
             descriptor
                 .layout
                 .push(properties.material_layout.as_ref().unwrap().clone());
+            descriptor.layout[0] = super::source_lighting::source_camera_layout();
+            descriptor.layout[1] = super::source_lighting::surface_lighting_layout();
             let limits = world.resource::<RenderDevice>().limits();
-            // Source vertex outputs occupy locations 0..8, with conditional gaps.
-            let varying_locations = 9;
+            // Source outputs occupy locations 0..11, with conditional gaps.
+            let varying_locations = 12;
             if varying_locations > limits.max_inter_stage_shader_variables {
                 pending.state = RenderingState::Failed(format!(
                     "{label}: source shader needs {varying_locations} varying locations; device limit is {}",
@@ -802,6 +1005,11 @@ impl Default for SourceSurface {
                 src: 1,
                 dst: 0,
                 reflected: false,
+                standard: true,
+                unlit: false,
+                transparent: false,
+                glass: false,
+                glass_shader: None,
             },
         }
     }
@@ -908,6 +1116,8 @@ impl Material for SourceMaterial {
                 && name != "PBR_MULTI_LAYER_MATERIAL_TEXTURES_SUPPORTED"
                 && name != "PBR_ANISOTROPY_TEXTURE_SUPPORTED"
                 && name != "PBR_SPECULAR_TEXTURES_SUPPORTED"
+                && name != "VISIBILITY_RANGE_DITHER"
+                && name != "LOAD_PREPASS_NORMALS"
         };
         descriptor.vertex.shader_defs.retain(unused);
         if let Some(fragment) = &mut descriptor.fragment {
@@ -930,8 +1140,14 @@ impl Material for SourceMaterial {
 #[derive(Asset, TypePath, Clone, Debug, Default)]
 pub struct SourceExtension {
     pub receiver_mask: u32,
-    pub surface: Option<SourceSurface>,
+    pub surface: SourceSurface,
 }
+impl SourceExtension {
+    pub fn has_caster(&self) -> bool {
+        self.surface.state.standard
+    }
+}
+
 impl MaterialExtension for SourceExtension {
     fn vertex_shader() -> ShaderRef {
         "shaders/source_mesh.wgsl".into()
@@ -948,26 +1164,77 @@ impl MaterialExtension for SourceExtension {
     fn specialize(
         _: &MaterialExtensionPipeline,
         descriptor: &mut RenderPipelineDescriptor,
-        _: &MeshVertexBufferLayoutRef,
+        layout: &MeshVertexBufferLayoutRef,
         key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        let Some(state) = key.bind_group_data else {
-            return Ok(());
+        let state = key.bind_group_data;
+        descriptor.layout[0] = super::source_lighting::source_camera_layout();
+        descriptor.layout[1] = if state.glass {
+            super::stained_glass::glass_view_layout()
+        } else {
+            super::source_lighting::surface_lighting_layout()
         };
-        if let Some(fragment) = &mut descriptor.fragment {
-            fragment
-                .shader_defs
-                .push(ShaderDefVal::Bool("SOURCE_AUTHORED".into(), true));
+        if state.glass {
+            let shader = state
+                .glass_shader
+                .as_ref()
+                .expect("source glass shader handle");
+            descriptor.vertex.shader = shader.clone();
+            if let Some(fragment) = &mut descriptor.fragment {
+                fragment.shader = shader.clone();
+            }
         }
+        let mut attributes = Vec::new();
+        for (location, attribute) in [
+            Mesh::ATTRIBUTE_POSITION,
+            Mesh::ATTRIBUTE_NORMAL,
+            Mesh::ATTRIBUTE_UV_0,
+            Mesh::ATTRIBUTE_UV_1,
+            Mesh::ATTRIBUTE_TANGENT,
+            Mesh::ATTRIBUTE_COLOR,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if layout.0.contains(attribute) {
+                attributes.push(attribute.at_shader_location(location as u32));
+            }
+        }
+        attributes.push(super::renderers::SOURCE_BOUNDS_CENTER.at_shader_location(8));
+        attributes.push(super::renderers::SOURCE_BOUNDS_EXTENTS.at_shader_location(9));
+        descriptor.vertex.buffers = vec![layout.0.get_layout(&attributes)?];
+        for (name, value) in [
+            ("SOURCE_STANDARD", state.standard),
+            ("SOURCE_UNLIT", state.unlit),
+            ("SOURCE_TRANSPARENT", state.transparent),
+            ("SOURCE_OBJECT_REFLECTED", state.reflected),
+        ] {
+            if value || name == "SOURCE_OBJECT_REFLECTED" {
+                descriptor
+                    .vertex
+                    .shader_defs
+                    .push(ShaderDefVal::Bool(name.into(), value));
+                if let Some(fragment) = &mut descriptor.fragment {
+                    fragment
+                        .shader_defs
+                        .push(ShaderDefVal::Bool(name.into(), value));
+                }
+            }
+        }
+
         descriptor.primitive.cull_mode = match state.cull {
             0 => None,
             1 => Some(Face::Front),
             _ => Some(Face::Back),
         };
-        if state.reflected {
-            descriptor.primitive.front_face = FrontFace::Cw;
-        }
+        let view_inverted = key.mesh_key.contains(MeshPipelineKey::INVERT_CULLING);
+        descriptor.primitive.front_face = if state.reflected ^ view_inverted {
+            FrontFace::Cw
+        } else {
+            FrontFace::Ccw
+        };
         if let Some(depth) = &mut descriptor.depth_stencil {
+            depth.format = super::render_targets::DEPTH_FORMAT;
             depth.depth_write_enabled = Some(state.z_write);
             // Source uses conventional depth. Bevy uses reverse depth.
             depth.depth_compare = Some(match state.z_test {
@@ -982,16 +1249,25 @@ impl MaterialExtension for SourceExtension {
             });
         }
         if let Some(fragment) = &mut descriptor.fragment {
+            if state.src == 1 && state.dst == 0 {
+                fragment
+                    .shader_defs
+                    .push(ShaderDefVal::Bool("SOURCE_REPLACEMENT".into(), true));
+            }
             for target in fragment.targets.iter_mut().flatten() {
                 let component = BlendComponent {
                     src_factor: blend_factor(state.src),
                     dst_factor: blend_factor(state.dst),
                     operation: BlendOperation::Add,
                 };
-                target.blend = Some(BlendState {
-                    color: component,
-                    alpha: component,
-                });
+                target.blend = if state.src == 1 && state.dst == 0 {
+                    None
+                } else {
+                    Some(BlendState {
+                        color: component,
+                        alpha: component,
+                    })
+                };
             }
             fragment
                 .shader_defs
@@ -1001,13 +1277,13 @@ impl MaterialExtension for SourceExtension {
     }
 }
 impl AsBindGroup for SourceExtension {
-    type Data = Option<SurfaceKey>;
+    type Data = SurfaceKey;
     type Param = (SRes<LightingGpu>, <SourceSurface as AsBindGroup>::Param);
     fn label() -> &'static str {
         "source lighting"
     }
     fn bind_group_data(&self) -> Self::Data {
-        self.surface.as_ref().map(|s| s.state)
+        self.surface.state.clone()
     }
     fn unprepared_bind_group(
         &self,
@@ -1089,20 +1365,6 @@ impl AsBindGroup for SourceExtension {
                     ),
                 ),
                 (
-                    109,
-                    OwnedBindingResource::TextureView(
-                        TextureViewDimension::D2,
-                        cookies[0].0.clone(),
-                    ),
-                ),
-                (
-                    110,
-                    OwnedBindingResource::Sampler(
-                        SamplerBindingType::Filtering,
-                        cookies[0].1.clone(),
-                    ),
-                ),
-                (
                     111,
                     OwnedBindingResource::Sampler(
                         SamplerBindingType::Filtering,
@@ -1129,7 +1391,7 @@ impl AsBindGroup for SourceExtension {
                 ),
             ]),
         };
-        let surface = self.surface.clone().unwrap_or_default();
+        let surface = &self.surface;
         let extra = surface.unprepared_bind_group(layout, device, &mut params.1, false)?;
         result.bindings.0.extend(extra.bindings.0);
         Ok(result)
@@ -1160,11 +1422,6 @@ impl AsBindGroup for SourceExtension {
                     texture_2d(TextureSampleType::Float { filterable: true }),
                 ),
                 (108, sampler(SamplerBindingType::Filtering)),
-                (
-                    109,
-                    texture_2d(TextureSampleType::Float { filterable: true }),
-                ),
-                (110, sampler(SamplerBindingType::Filtering)),
                 (111, sampler(SamplerBindingType::Filtering)),
                 (112, sampler(SamplerBindingType::Comparison)),
                 (113, texture_2d(TextureSampleType::Depth)),
@@ -1199,6 +1456,7 @@ pub fn bind_materials(
     mut cache: ResMut<MaterialCache>,
     imported_nodes: Query<&bevy::gltf::GltfExtras>,
     authored: Res<SourceMaterials>,
+    renderer_meshes: Res<super::renderers::RendererMeshes>,
     query: Query<
         (
             Entity,
@@ -1213,7 +1471,7 @@ pub fn bind_materials(
         (Without<SourceCaster>, Without<super::sky::SkyMesh>),
     >,
 ) {
-    if !visuals.bound || !authored.textures_ready() {
+    if !visuals.bound || !renderer_meshes.bound || !authored.textures_ready() {
         return;
     }
     for (entity, mesh, handle, layers, shadow_mode, parent, extras, global) in &query {
@@ -1310,13 +1568,11 @@ pub fn bind_materials(
                 } else {
                     let mut base = base.clone();
                     base.fog_enabled = false;
-                    materials.add(SourceMaterial {
+                    materials.add(generated::from_base(
                         base,
-                        extension: SourceExtension {
-                            receiver_mask: mask,
-                            surface: None,
-                        },
-                    })
+                        mask,
+                        global.affine().matrix3.determinant() < 0.,
+                    ))
                 }
             })
             .clone();
@@ -1470,6 +1726,7 @@ pub(crate) fn prepare_lamp_materials(
                     .spawn((
                         mesh.clone(),
                         MeshMaterial3d(material.clone()),
+                        SourceMaterialWarmup,
                         far,
                         Visibility::Visible,
                         bevy::light::NotShadowCaster,

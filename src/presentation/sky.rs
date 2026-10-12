@@ -128,6 +128,7 @@ impl Material for SkyMaterial {
         ])?];
         descriptor.primitive.cull_mode = None;
         if let Some(depth) = descriptor.depth_stencil.as_mut() {
+            depth.format = super::render_targets::DEPTH_FORMAT;
             depth.depth_write_enabled = Some(false);
         }
         Ok(())

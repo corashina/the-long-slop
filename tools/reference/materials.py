@@ -52,7 +52,6 @@ TEXTURE_DEFAULTS = {'_MainTex': 'white', '_BumpMap': 'bump',
     '_MetallicGlossMap': 'white', '_OcclusionMap': 'white', '_EmissionMap': 'white',
     '_ParallaxMap': 'black'}
 NORMAL_SLOTS = {'_BumpMap', '_DetailNormalMap'}
-COLOR_SLOTS = {'_MainTex', '_DetailAlbedoMap', '_EmissionMap'}
 FAMILIES = {'Standard': 'standard', 'Unlit/Color': 'unlit_color',
             'FX/Glass/Stained BumpDistort': 'stained_glass', 'AmplifyRope': 'amplify_rope'}
 KEYWORDS = {'_NORMALMAP', '_DETAIL_MULX2', '_METALLICGLOSSMAP', '_EMISSION',
@@ -133,7 +132,13 @@ def recover_material(source, reader, color_override=None, condition=None):
             raise ValueError(f'{source_id(reader)} {slot}: required Texture2D')
         texture = source.read(texture_reader); settings = texture['m_TextureSettings']
         encoding = normal_encoding(texture, shader, shader_name, source_id(texture_reader)) if slot in NORMAL_SLOTS else None
-        color_space = 'srgb' if slot in COLOR_SLOTS else 'linear'
+        # Native texture upload uses stored TextureColorSpace: Linear=0, SRGB=1.
+        stored_space = texture['m_ColorSpace']
+        if stored_space not in (0, 1):
+            raise ValueError(f'{source_id(texture_reader)} unsupported stored color space')
+        color_space = 'srgb' if stored_space == 1 else 'linear'
+        if encoding and color_space != 'linear':
+            raise ValueError(f'{source_id(texture_reader)} unresolved normal color space')
         uv_env = env if family == 'stained_glass' else environments.get(
             '_DetailAlbedoMap' if slot in {'_DetailAlbedoMap', '_DetailNormalMap'} else '_MainTex', identity_uv)
         uv_channel = int(floats['_UVSec'] != 0) if family == 'standard' and slot in {
@@ -179,6 +184,7 @@ def recover_material(source, reader, color_override=None, condition=None):
                      src_blend=int(value(pass_state['rtBlend0']['srcBlend'])),
                      dst_blend=int(value(pass_state['rtBlend0']['destBlend'])))
     return {'source': source_id(reader), 'shader_family': family, 'color': color,
+        'enable_instancing': bool(data['m_EnableInstancingVariants']),
         'condition': condition, 'keywords': keywords, 'state': state,
         'properties': {'floats': floats, 'colors': colors, 'textures': textures,
                        'defaults': active_defaults, 'exclusions': exclusions}}

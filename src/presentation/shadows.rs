@@ -7,8 +7,8 @@ use bevy::camera::{
 use bevy::core_pipeline::{core_3d::CORE_3D_DEPTH_FORMAT, schedule::RootNonCameraView};
 use bevy::ecs::{self as bevy_ecs, schedule::ScheduleLabel};
 use bevy::pbr::{
-    ExtractedDirectionalLight, ExtractedPointLight, LightEntity, LightKeyCache, MeshPipelineKey,
-    Shadow, SpecializedShadowMaterialPipelineCache, SpecializedShadowMaterialViewPipelineCache,
+    ExtractedPointLight, LightEntity, LightKeyCache, MeshPipelineKey, Shadow,
+    SpecializedShadowMaterialPipelineCache, SpecializedShadowMaterialViewPipelineCache,
     prepare_lights,
 };
 use bevy::prelude::*;
@@ -97,7 +97,6 @@ fn reserve_views(
     mut keys: ResMut<LightKeyCache>,
     mut pipelines: ResMut<SpecializedShadowMaterialPipelineCache>,
     mut points: Query<&mut ExtractedPointLight, With<SourceLight>>,
-    mut suns: Query<&mut ExtractedDirectionalLight, With<SourceLight>>,
 ) {
     for slot in &mut views.slots {
         if let Some(key) = slot.key {
@@ -108,9 +107,6 @@ fn reserve_views(
     }
     // Main-world flags still drive caster visibility. The atlas owns GPU allocation.
     for mut light in &mut points {
-        light.shadow_maps_enabled = false;
-    }
-    for mut light in &mut suns {
         light.shadow_maps_enabled = false;
     }
 }
@@ -129,14 +125,6 @@ fn prepare_views(
         Option<&CubemapFrusta>,
         Option<&Frustum>,
     )>,
-    suns: Query<(
-        Entity,
-        &MainEntity,
-        &SourceLight,
-        &ExtractedDirectionalLight,
-        &RenderLayers,
-    )>,
-    cameras: Query<&MainEntity>,
     mut gpu: ResMut<LightingGpu>,
 ) {
     for slot in &mut views.slots {
@@ -196,39 +184,6 @@ fn prepare_views(
             bias: Vec4::new(normal_bias, depth_bias, 0., 0.),
         };
     };
-    for (entity, main, marker, light, layers) in &suns {
-        if !marker.enabled {
-            continue;
-        }
-        for (camera, cascades) in &light.cascades {
-            let Some(frusta) = light.frusta.get(camera) else {
-                continue;
-            };
-            for (index, (cascade, frustum)) in cascades.iter().zip(frusta).take(4).enumerate() {
-                let key = RetainedViewEntity::new(
-                    *main,
-                    Some(*cameras.get(*camera).expect("extracted camera identity")),
-                    index as u32,
-                );
-                set_view(
-                    marker.shadow_start + index,
-                    key,
-                    LightEntity::Directional {
-                        light_entity: entity,
-                        cascade_index: index,
-                    },
-                    GlobalTransform::from(cascade.world_from_cascade),
-                    cascade.clip_from_cascade,
-                    cascade.clip_from_world,
-                    *frustum,
-                    layers,
-                    cascade.texel_size * light.shadow_normal_bias,
-                    light.shadow_depth_bias,
-                );
-            }
-            break;
-        }
-    }
     for (entity, main, marker, light, layers, cube, frustum) in &points {
         if !marker.enabled || marker.faces == 0 {
             continue;
