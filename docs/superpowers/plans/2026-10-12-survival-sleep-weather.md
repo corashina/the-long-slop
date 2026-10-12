@@ -12,6 +12,7 @@
 **Evidence:** [Source audit](../../research/2026-10-12-survival-sleep-weather-reference.md).
 **Branch:** `codex/survival-weather`, isolated checkout based on `d7995c8`.
 **Execution:** The user selected Subagent-driven execution through the active thread goal. Implementation is in progress.
+**User override:** The user later said 'Skip tests'. Skip further test runs, new behavioral tests, and browser acceptance. Continue implementation, source review, formatting, and build checks. Earlier test results do not certify later changes.
 
 ## Global Constraints
 
