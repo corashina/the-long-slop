@@ -203,7 +203,7 @@ Modify `src/lib.rs` and `src/starting_area.rs`.
 Use quad vertex order bottom-left, bottom-right, top-right, top-left. Set index winding from the converted source normal.
 GlyphMesh vertices are text-local, with local Z zero. Do not bake `layout.transform` into glyph vertices.
 
-- [ ] **Step 1: Add generation, callback-order, and layout tests.**
+- [x] **Step 1: Add generation, callback-order, and layout tests.**
 
 `plate_generation_uses_source_ranges` supplies lower and upper boundary draws.
 Assert `AAA-000` and `ZZZ-999`; assert requested bounds are `(65,91)` and `(48,58)`.
@@ -233,11 +233,11 @@ assert!((mesh.vertices[4].position[0] - mesh.vertices[0].position[0] - 0.0696).a
 ```
 Assert missing glyphs and nonfinite layout values return errors.
 
-- [ ] **Step 2: Run `./scripts/check.ps1 -Test plate_text` and confirm the initial failure.**
+- [x] **Step 2: Run `./scripts/check.ps1 -Test plate_text` and confirm the initial failure.**
 
 Expected: missing state and layout functions.
 
-- [ ] **Step 3: Implement native string state and glyph layout.**
+- [x] **Step 3: Implement native string state and glyph layout.**
 
 Retain strings and revisions by existing item identity.
 Preserve `Set`, `Same`, propagation, and conditional startup generation.
@@ -258,12 +258,12 @@ Expand glyph UVs with the same recovered padding and style values as geometry.
 Build glyph winding, normals, UV0, UV1, and color for the source SDF surface.
 Do not allocate or rebuild glyph geometry during unchanged frame updates.
 
-- [ ] **Step 4: Run `./scripts/check.ps1 -Test plate_text` and confirm all critical assertions pass.**
+- [x] **Step 4: Run `./scripts/check.ps1 -Test plate_text` and confirm all critical assertions pass.**
 
 Also run `./scripts/check.ps1 -Test plate_reference` after fixture changes.
 Expected: both startup orders pass; all generated glyphs resolve; no nonfinite vertices.
 
-- [ ] **Step 5: Commit native generation and layout.**
+- [x] **Step 5: Commit native generation and layout.**
 
 Commit message: `feat: generate source plate labels and glyph meshes`.
 
