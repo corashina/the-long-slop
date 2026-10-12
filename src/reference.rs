@@ -351,12 +351,32 @@ pub struct OpeningRecord {
     pub spill_disabled: bool,
     pub tube_connected: bool,
     pub flow_radius: f32,
+    pub particles: FluidParticleReference,
     pub can_toggle: bool,
     pub valve: f32,
     pub can_tune: bool,
     pub tune_rate: f32,
     pub visuals: CapVisualReference,
     pub presentation: FluidPresentation,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FluidParticleReference {
+    pub source: SourceId,
+    pub local_pose: Transform,
+    pub capacity: u32,
+    pub cone_degrees: f32,
+    pub cone_radius: f32,
+    pub lifetime_seconds: f32,
+    pub radius: f32,
+    pub gravity_multiplier: f32,
+    pub collision_mask: u32,
+    pub bounce: f32,
+    pub dampen: f32,
+    pub max_speed: f32,
+    pub min_rate: f32,
+    pub max_rate: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1395,7 +1415,31 @@ impl ReferenceManifest {
                     && r.flow_liters_per_second > 0.0
                     && finite(&r.tilt_axis)
                     && r.flow_radius.is_finite()
-                    && r.flow_radius > 0.0,
+                    && r.flow_radius > 0.0
+                    && r.particles.capacity > 0
+                    && finite(&[
+                        r.particles.cone_degrees,
+                        r.particles.cone_radius,
+                        r.particles.lifetime_seconds,
+                        r.particles.radius,
+                        r.particles.gravity_multiplier,
+                        r.particles.max_speed,
+                        r.particles.min_rate,
+                        r.particles.max_rate,
+                        r.particles.bounce,
+                        r.particles.dampen,
+                    ])
+                    && transform(&r.particles.local_pose)
+                    && r.particles.cone_degrees >= 0.
+                    && r.particles.cone_radius >= 0.
+                    && r.particles.lifetime_seconds > 0.
+                    && r.particles.radius > 0.
+                    && r.particles.gravity_multiplier >= 0.
+                    && r.particles.max_speed > 0.
+                    && r.particles.max_rate >= r.particles.min_rate
+                    && (0. ..=1.).contains(&r.particles.bounce)
+                    && (0. ..=1.).contains(&r.particles.dampen)
+                    && r.particles.collision_mask != 0,
                 "opening flow",
             )?;
         }

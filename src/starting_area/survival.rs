@@ -1,7 +1,7 @@
 use super::GarageRuntime;
 use crate::fluids::{contact_drink_transfer, drink_transfer};
 use crate::interaction::items::ItemLocation;
-use crate::reference::{ConsumptionEffect, ItemId, ReferenceError, ReferenceManifest};
+use crate::reference::{ConsumptionEffect, ItemId, NodeId, ReferenceError, ReferenceManifest};
 use crate::vehicle::{PhysicsWorld, VehiclePose, collider_builder, to_rapier};
 use rapier3d::prelude::{Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder};
 
@@ -35,7 +35,10 @@ pub(crate) fn spawn_consumable(
         let node = to_rapier(super::node_pose(reference, record.node)?);
         let mut collider = collider_builder(&record.geometry)?
             .sensor(record.sensor)
-            .enabled(record.enabled)
+            .enabled(
+                record.enabled
+                    && active_part(reference, record.node, &prototype.parts, prototype.index),
+            )
             .density(0.)
             .collision_groups(InteractionGroups::new(
                 Group::from_bits_truncate(record.membership),
@@ -59,6 +62,68 @@ pub(crate) fn spawn_consumable(
     area.item_render_poses.push((id, pose, pose));
     physics.refresh_queries();
     Ok(())
+}
+
+pub(crate) fn active_part(
+    reference: &ReferenceManifest,
+    mut node: NodeId,
+    parts: &[Vec<NodeId>],
+    bite: u8,
+) -> bool {
+    loop {
+        if let Some(index) = parts.iter().position(|group| group.contains(&node)) {
+            return index == bite as usize;
+        }
+        let Some(parent) = reference
+            .nodes
+            .iter()
+            .find(|entry| entry.id == node)
+            .and_then(|entry| entry.parent)
+        else {
+            return true;
+        };
+        node = parent;
+    }
+}
+
+pub(crate) fn sync_consumable_colliders(
+    reference: &ReferenceManifest,
+    area: &super::StartingArea,
+    physics: &mut PhysicsWorld,
+    id: ItemId,
+) {
+    let Some(state) = area.items.get(id) else {
+        return;
+    };
+    let Some(food) = state.food else { return };
+    let Some(body) = state.body else { return };
+    let starter = id == reference.survival.starter_food;
+    let parts = if starter {
+        &reference.survival.starter_parts
+    } else {
+        &reference.survival.foods[food.prototype_index].parts
+    };
+    let handles = physics.rapier().bodies[body].colliders().to_vec();
+    for (index, handle) in handles.into_iter().enumerate() {
+        let record = if starter {
+            let collider_id = (physics.rapier().colliders[handle].user_data >> 64) as u32;
+            reference
+                .colliders
+                .iter()
+                .find(|entry| entry.id.0 == collider_id)
+                .map(|entry| (entry.node, entry.enabled))
+        } else {
+            reference.survival.foods[food.prototype_index]
+                .colliders
+                .get(index)
+                .map(|entry| (entry.node, entry.enabled))
+        };
+        if let Some((node, enabled)) = record {
+            physics.rapier_mut().colliders[handle]
+                .set_enabled(enabled && active_part(reference, node, parts, food.bite));
+        }
+    }
+    physics.refresh_queries();
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -130,9 +195,13 @@ impl GarageRuntime {
             hp: prototype.effect.hp / divisor,
         });
         self.survival.show_stats();
-        let state = self.area.items.get_mut(item).unwrap();
-        state.food.as_mut().unwrap().bite += 1;
-        if state.food.unwrap().bite == prototype.bites && prototype.destroy_on_end {
+        let bite = {
+            let state = self.area.items.get_mut(item).unwrap();
+            state.food.as_mut().unwrap().bite += 1;
+            state.food.unwrap().bite
+        };
+        sync_consumable_colliders(reference, &self.area, &mut self.physics, item);
+        if bite == prototype.bites && prototype.destroy_on_end {
             self.remove_consumable(item)?;
         }
         Ok(true)
@@ -184,7 +253,7 @@ impl GarageRuntime {
         if self.survival.bladder.mixture.total() >= self.survival.bladder.capacity_liters {
             return Ok(DrinkResult {
                 requested_liters: poured_liters,
-                debited_liters: poured_liters,
+                debited_liters: 0.,
                 effect: ConsumptionEffect::default(),
             });
         }
@@ -205,7 +274,7 @@ impl GarageRuntime {
         );
         Ok(DrinkResult {
             requested_liters: poured_liters,
-            debited_liters: poured_liters,
+            debited_liters: 0.,
             effect: ConsumptionEffect {
                 food: after.food - before.food,
                 water: after.water - before.water,

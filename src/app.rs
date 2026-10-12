@@ -316,6 +316,7 @@ fn read_input(
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
     mut source: ResMut<presentation::lighting::SourceLighting>,
+    mut consumables: ResMut<presentation::consumables::ConsumableVisuals>,
 ) {
     let actions = game_actions();
     let frame = FrameInput {
@@ -343,6 +344,7 @@ fn read_input(
             return;
         }
         source.reset_instances(&mut commands);
+        consumables.reset(&mut commands);
         drive.instruments.reset(&reference.0.instruments);
         drive.camera = CameraMode::default();
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);

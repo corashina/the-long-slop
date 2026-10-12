@@ -22,6 +22,16 @@ struct FoodInstance {
 #[derive(Resource, Default)]
 pub struct ConsumableVisuals {
     instances: HashMap<ItemId, FoodInstance>,
+    generation: u64,
+}
+
+impl ConsumableVisuals {
+    pub(crate) fn reset(&mut self, commands: &mut Commands) {
+        self.generation = self.generation.wrapping_add(1);
+        for (_, instance) in self.instances.drain() {
+            commands.entity(instance.root).despawn();
+        }
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -106,6 +116,7 @@ pub(crate) fn sync(
                 continue;
             };
             let id = item.id;
+            let generation = food.generation;
             let root = commands
                 .spawn((
                     ConsumableScene,
@@ -114,8 +125,13 @@ pub(crate) fn sync(
                     Visibility::Hidden,
                 ))
                 .observe(
-                    move |_: On<WorldInstanceReady>, mut food: ResMut<ConsumableVisuals>| {
-                        if let Some(instance) = food.instances.get_mut(&id) {
+                    move |event: On<WorldInstanceReady>, mut food: ResMut<ConsumableVisuals>| {
+                        if food.generation != generation {
+                            return;
+                        }
+                        if let Some(instance) = food.instances.get_mut(&id)
+                            && instance.root == event.entity
+                        {
                             instance.ready = true;
                         }
                     },

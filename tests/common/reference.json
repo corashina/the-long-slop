@@ -9898,6 +9898,26 @@
       "spill_disabled": false,
       "tube_connected": false,
       "flow_radius": 3.0,
+      "particles": {
+        "source": { "file": "level1", "path_id": 64724 },
+        "local_pose": {
+          "translation": [0.0, 0.0, 0.025],
+          "rotation": [0.0, 0.0, 0.0, 1.0],
+          "scale": [1.0, 1.0, 1.0]
+        },
+        "capacity": 10000,
+        "cone_degrees": 6.0,
+        "cone_radius": 0.0001,
+        "lifetime_seconds": 5.0,
+        "radius": 0.02,
+        "gravity_multiplier": 0.25,
+        "collision_mask": 10127377,
+        "bounce": 0.4,
+        "dampen": 0.3,
+        "max_speed": 0.5,
+        "min_rate": 0.0,
+        "max_rate": 500.0
+      },
       "can_toggle": false,
       "valve": 0.0,
       "can_tune": true,

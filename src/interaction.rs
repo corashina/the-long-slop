@@ -1,6 +1,7 @@
 pub mod carry;
 pub mod consumption;
 pub mod feedback;
+mod fluid_contact;
 pub mod items;
 pub mod labels;
 pub mod mechanisms;
@@ -14,9 +15,9 @@ pub use targets::{InteractionBlock, LightAim, ResolvedAim};
 use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
 use crate::reference::{
-    ActionBinding, ActionMasks, BodyId, ColliderId, ItemId, ItemKind, LightControlId,
-    LightControllerKind, NodeId, OpeningId, OpeningRecord, PartSlotId, ReferenceError,
-    ReferenceManifest, SeatId, TankRole, WheelSlotId,
+    ActionBinding, ActionMasks, BodyId, ColliderGeometry, ColliderId, FluidParticleReference,
+    ItemId, ItemKind, LightControlId, LightControllerKind, NodeId, OpeningId, OpeningRecord,
+    PartSlotId, ReferenceError, ReferenceManifest, SeatId, TankRole, WheelSlotId,
 };
 use crate::simulation::{FrameInput, keys};
 use crate::survival::NeedsOutput;
@@ -87,6 +88,8 @@ struct OpeningState {
     local_pose: Pose,
     tilt_axis: Vector,
     valve: f32,
+    particles: Option<FluidParticleReference>,
+    contact: Option<fluid_contact::FluidContact>,
 }
 struct OpeningRules {
     id: OpeningId,
@@ -159,6 +162,9 @@ pub struct InteractionState {
     slow_oil_modifier: f32,
     drink_flow_liters_per_second: f32,
     drink_contact_radius: f32,
+    drink_collider_radius: f32,
+    drink_collider_center: Vector,
+    pending_drink_contacts: Vec<(ItemId, f32, [f32; 6])>,
     latched_mechanism: Option<(ItemId, BodyId, Vector, ColliderHandle)>,
     use_consumed: bool,
     mechanism_release_distance_squared: f32,
@@ -201,6 +207,11 @@ impl InteractionState {
                 local_pose,
                 tilt_axis: Vector::from_array(opening.tilt_axis),
                 valve: opening.valve,
+                particles: Some(opening.particles.clone()),
+                contact: Some(fluid_contact::FluidContact::new(
+                    &opening.particles,
+                    opening.id.0,
+                )),
             });
         }
         let mut seats = Vec::with_capacity(reference.seats.len());
@@ -424,6 +435,18 @@ impl InteractionState {
                     .survival
                     .drinking
                     .particle_contact_radius_multiplier,
+            drink_collider_radius: match &reference.survival.drinking.geometry {
+                ColliderGeometry::Sphere { radius, .. } => *radius,
+                _ => return Err(ReferenceError("Drink collider is not a sphere".into())),
+            },
+            drink_collider_center: match &reference.survival.drinking.geometry {
+                ColliderGeometry::Sphere { center, .. } => {
+                    Vector::from_array(reference.survival.drinking.local_position)
+                        + Vector::from_array(*center)
+                }
+                _ => unreachable!(),
+            },
+            pending_drink_contacts: Vec::with_capacity(reference.openings.len()),
             latched_mechanism: None,
             use_consumed: false,
             mechanism_release_distance_squared: (reference.player.aim_reach * 1.5).powi(2),
@@ -488,6 +511,8 @@ impl InteractionState {
             local_pose: Pose::IDENTITY,
             tilt_axis: Vector::Y,
             valve: 1.0,
+            particles: None,
+            contact: None,
         });
         Ok(())
     }
@@ -560,6 +585,15 @@ impl InteractionState {
     pub fn rebase(&mut self, shift: [f32; 3]) {
         self.mechanisms.rebase(shift);
         self.parts.rebase(shift);
+        for opening in &mut self.openings {
+            if let Some(contact) = opening.contact.as_mut() {
+                contact.rebase(Vector::from_array(shift));
+            }
+        }
+    }
+
+    pub fn take_drink_contact(&mut self) -> Option<(ItemId, f32, [f32; 6])> {
+        self.pending_drink_contacts.pop()
     }
 
     pub fn step(
@@ -576,6 +610,7 @@ impl InteractionState {
         if !dt.is_finite() || dt <= 0.0 {
             return None;
         }
+        self.pending_drink_contacts.clear();
         let acquisition_release = self.carry.acquisition_held();
         self.carry.release_acquisition(input);
         let reach = self.reach;
@@ -942,19 +977,21 @@ impl InteractionState {
                 }
             }
         }
-        for opening in &self.openings {
-            if opening.valve <= 0.0
-                || opening.reference.spill_disabled
-                || opening.reference.tube_connected
-                || filling == Some(opening.reference.tank)
-            {
+        for opening in &mut self.openings {
+            let Some(particles) = opening.particles.as_ref() else {
                 continue;
-            }
+            };
+            let contact = opening.contact.as_mut().unwrap();
             let Some(item) = items.get_mut(opening.reference.tank) else {
                 continue;
             };
-            let forward = (to_rapier(item.pose) * opening.local_pose).rotation * opening.tilt_axis;
+            let cap_pose = to_rapier(item.pose) * opening.local_pose;
+            let forward = cap_pose.rotation * opening.tilt_axis;
             let angle = forward.dot(Vector::Y).clamp(-1.0, 1.0).acos().to_degrees();
+            let mut emission_rate = 0.;
+            let mut emission_speed = 0.;
+            let mut poured = None;
+            let mut fractions = [0.; 6];
             if let Some(fluid) = item.fluid.as_mut() {
                 let fill = (fluid.mixture.total() / fluid.capacity_liters).clamp(0.0, 1.0);
                 let threshold = 100.0 + (opening.reference.tilt_degrees - 100.0) * fill;
@@ -964,30 +1001,64 @@ impl InteractionState {
                     inverse_lerp(threshold, opening.reference.tilt_degrees + 90.0, angle)
                         .max(inverse_lerp(90.0, 180.0, angle))
                 };
-                if !opening.reference.angle_disabled && angle <= threshold {
-                    continue;
-                }
-                let requested_liters =
-                    factor * opening.valve * opening.reference.flow_liters_per_second * dt;
-                let outlet = (to_rapier(item.pose) * opening.local_pose).translation;
-                let mouth = Vector::from_array(player.view_pose(physics).position);
-                if action.is_none()
-                    && requested_liters > 0.
-                    && (outlet - mouth).length() < self.drink_contact_radius
-                {
+                let emitting = opening.valve > 0.
+                    && !opening.reference.spill_disabled
+                    && !opening.reference.tube_connected
+                    && filling != Some(opening.reference.tank)
+                    && (opening.reference.angle_disabled || angle > threshold)
+                    && fluid.mixture.total() > 0.;
+                if emitting {
+                    let speed = factor * opening.valve * opening.reference.flow_liters_per_second;
+                    let requested_liters = speed * dt;
                     let total = fluid.mixture.total();
-                    if total > 0. {
-                        let fractions =
-                            fluid.mixture.quantities_liters.map(|amount| amount / total);
-                        let poured_liters = spill(fluid, requested_liters);
-                        action = Some(InteractionAction::DrinkContact {
-                            source: opening.reference.tank,
-                            poured_liters,
-                            fractions,
-                        });
-                    }
-                } else {
+                    fractions = fluid.mixture.quantities_liters.map(|amount| amount / total);
                     spill(fluid, requested_liters);
+                    poured = Some(requested_liters);
+                    emission_rate = particles.min_rate
+                        + (particles.max_rate - particles.min_rate) * speed.clamp(0., 1.);
+                    emission_speed = particles.max_speed * fill * factor;
+                }
+            }
+            let view = to_rapier(player.view_pose(physics));
+            let cap_center = view.translation + view.rotation * self.drink_collider_center;
+            let hit = contact.advance(
+                particles,
+                cap_pose,
+                opening.tilt_axis,
+                item.body,
+                self.player_body,
+                cap_center,
+                self.drink_collider_radius,
+                self.drink_contact_radius,
+                physics,
+                dt,
+                emission_rate,
+                emission_speed,
+                poured,
+            );
+            if hit && contact.last_poured > 0. {
+                if poured.is_none() {
+                    let Some(fluid) = item.fluid.as_ref() else {
+                        continue;
+                    };
+                    let total = fluid.mixture.total();
+                    if total <= 0. {
+                        continue;
+                    }
+                    fractions = fluid.mixture.quantities_liters.map(|amount| amount / total);
+                }
+                if action.is_none() {
+                    action = Some(InteractionAction::DrinkContact {
+                        source: opening.reference.tank,
+                        poured_liters: contact.last_poured,
+                        fractions,
+                    });
+                } else {
+                    self.pending_drink_contacts.push((
+                        opening.reference.tank,
+                        contact.last_poured,
+                        fractions,
+                    ));
                 }
             }
         }

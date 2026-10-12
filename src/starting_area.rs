@@ -219,6 +219,30 @@ impl StartingArea {
         }
         interaction.parts.bind(&mut items, physics)?;
         interaction.sync_parts(&mut items, physics)?;
+        let starter = reference.survival.starter_food;
+        if let Some(food) = items.get(starter).and_then(|item| item.food) {
+            let body = items
+                .get(starter)
+                .and_then(|item| item.body)
+                .ok_or_else(|| ReferenceError("Starter food body missing".into()))?;
+            for &handle in physics.rapier().bodies[body].colliders().to_vec().iter() {
+                let collider_id = (physics.rapier().colliders[handle].user_data >> 64) as u32;
+                if let Some(record) = reference
+                    .colliders
+                    .iter()
+                    .find(|entry| entry.id.0 == collider_id)
+                {
+                    let enabled = record.enabled
+                        && survival::active_part(
+                            reference,
+                            record.node,
+                            &reference.survival.starter_parts,
+                            food.bite,
+                        );
+                    physics.rapier_mut().colliders[handle].set_enabled(enabled);
+                }
+            }
+        }
         physics.refresh_queries();
         items.sync_poses(physics);
         let spawn = &reference.area.player_spawn;
@@ -781,6 +805,16 @@ impl GarageRuntime {
                 };
             }
             _ => {}
+        }
+        while let Some((source, poured_liters, fractions)) =
+            self.area.interaction.take_drink_contact()
+        {
+            if self
+                .drink_contact(reference, source, poured_liters, fractions)
+                .is_err()
+            {
+                self.notice = "Cannot drink this fluid.";
+            }
         }
         if let Some(action) = self.area.interaction.mechanisms.take_control_action() {
             if matches!(

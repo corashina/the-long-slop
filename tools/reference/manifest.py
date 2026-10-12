@@ -139,7 +139,8 @@ def build_manifest(source, roots, reports, hashes, library):
             identities.append(key(collider));detachable_colliders.add(key(collider))
         if 'wheelscript' in group or 'gumiscript' in group:wheel_parts_source.append((node,part,part_data,identities))
     for node,group in components.items():
-        if not nodes[node-1]['active'] and not any(key(reader) in detachable_colliders for readers in group.values() for reader in readers):continue
+        food_geometry=key(node_readers[node]) in source.food_geometry_nodes
+        if not nodes[node-1]['active'] and not food_geometry and not any(key(reader) in detachable_colliders for readers in group.values() for reader in readers):continue
         layer=source.read(objects[node]['game_object'])['m_Layer']
         for class_name in ('BoxCollider','SphereCollider','CapsuleCollider','MeshCollider'):
             for reader in group.get(class_name,[]):
@@ -150,7 +151,7 @@ def build_manifest(source, roots, reports, hashes, library):
                     properties=source.read(material);friction=properties['m_DynamicFriction'];restitution=properties['m_Bounciness']
                 body_id=body_for(node);owner=bodies[body_id-1]
                 colliders.append({'id':len(colliders)+1,'source':source_id(reader),'node':node,'body':body_id,
-                    'sensor':value['m_IsTrigger'],'enabled':bool(value['m_Enabled']) and nodes[node-1]['active'],'membership':1<<layer,'filter':matrix[layer],
+                    'sensor':value['m_IsTrigger'],'enabled':bool(value['m_Enabled']) and (nodes[node-1]['active'] or food_geometry),'membership':1<<layer,'filter':matrix[layer],
                     'friction':friction,'restitution':restitution,'geometry':geometry(source,exporter,reader,node_readers[node],owner['pose'],owner['dynamic'])})
     tanks=[];openings=[]
     for node,group in components.items():
@@ -167,10 +168,28 @@ def build_manifest(source, roots, reports, hashes, library):
         for reader in group.get('tankcapscript',[]):
             value=source.read(reader);tank=source.resolve(reader,value['Tank'])
             if tank is None or key(tank) not in item_components:raise ValueError(f'Cap tank outside selected roots: {key(reader)}')
+            particle=source.resolve(reader,value['ps'])
+            if particle is None or particle.type.name!='ParticleSystem':raise ValueError(f'Missing fluid emitter: {key(reader)}')
+            emitted=source.read(particle);emitter=source.transform_for(source.resolve(particle,emitted['m_GameObject']))
+            cap_pose=world_pose(source,node_readers[node]);emitter_pose=world_pose(source,emitter)
+            rotation=cap_pose['rotation'];inverse=(-rotation[0],-rotation[1],-rotation[2],rotation[3])
+            delta=[emitter_pose['translation'][axis]-cap_pose['translation'][axis] for axis in range(3)]
+            particle_pose={'translation':list(transform_point(delta,(0.,0.,0.),inverse,(1.,1.,1.))),
+                'rotation':list(quaternion_product(inverse,emitter_pose['rotation'])),
+                'scale':[emitter_pose['scale'][axis]/cap_pose['scale'][axis] for axis in range(3)]}
+            shape=emitted['ShapeModule'];collision=emitted['CollisionModule'];initial=emitted['InitialModule']
+            if shape['type']!=4 or collision['type']!=1 or not collision['enabled'] or emitted['moveWithTransform']!=2:
+                raise ValueError(f'Fluid particle motion differs: {key(reader)}')
             opening={'id':len(openings)+1,'source':source_id(reader),'tank':item_components[key(tank)],'cap':item_nodes[node],
                 'anchor':anchor(node),'flow_liters_per_second':value['radius']**2*math.pi*0.025*main['pourSpeed'],'tilt_degrees':value['defPourAngle'],
                 'tilt_axis':[0.,0.,-1.],'angle_disabled':bool(value['noAngle']),'spill_disabled':bool(value['noPour']),
-                'tube_connected':bool(value['tube']),'flow_radius':value['radius']}
+                'tube_connected':bool(value['tube']),'flow_radius':value['radius'],
+                'particles':{'source':source_id(particle),'local_pose':particle_pose,
+                    'capacity':initial['maxNumParticles'],'cone_degrees':shape['angle'],'cone_radius':shape['radius']['value'],
+                    'lifetime_seconds':initial['startLifetime']['scalar'],'radius':initial['startSize']['scalar']*0.5*collision['radiusScale'],
+                    'gravity_multiplier':initial['gravityModifier']['scalar'],'collision_mask':collision['collidesWith']['m_Bits'],
+                    'bounce':value['bounce'],'dampen':value['dampen'],
+                    'max_speed':value['maxSpeed'],'min_rate':value['minRate'],'max_rate':value['maxRate']}}
             opening['can_toggle']=bool(value['canToggle'])
             opening.update(opening_metadata(source,reader,by_source,main['fluidTuneSpeed']))
             openings.append(opening)

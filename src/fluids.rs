@@ -129,6 +129,8 @@ pub fn transfer(source: &mut FluidContainer, destination: &mut FluidContainer, l
         let index = source.order[position] as usize;
         destination.record_type(index);
     }
+    source.cleanup_one();
+    destination.cleanup_one();
     accepted
 }
 
@@ -142,6 +144,7 @@ pub fn spill(container: &mut FluidContainer, liters: f32) -> f32 {
     for amount in &mut container.mixture.quantities_liters {
         *amount -= *amount * ratio;
     }
+    container.cleanup_one();
     removed
 }
 
