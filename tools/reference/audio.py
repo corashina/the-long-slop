@@ -405,3 +405,17 @@ def validate_audio_export(audio: dict, output: Path) -> None:
     for b in audio['bindings']:
         if not b['clips'] or any(c not in ids for c in b['clips']):raise ValueError('Unresolved event clip')
         if b['emitter'] not in emitters or b['mixer'] not in mixers:raise ValueError('Unresolved event owner or mixer')
+    settings=audio['shared']['settings']
+    if (not all(math.isfinite(settings[k]) for k in ('gain','pitch','min_distance','max_distance','spatial_blend'))
+            or settings['gain']<0 or settings['pitch']<=0
+            or not 0<settings['min_distance']<=settings['max_distance']
+            or not 0<=settings['spatial_blend']<=1
+            or not 0<=settings['rolloff_mode']<=2):
+        raise ValueError('Invalid shared audio source settings')
+    for name in ('rolloff_curve','spatial_blend_curve'):
+        keys=settings[name]['keys']
+        if (not keys or any(not all(math.isfinite(key[field]) for field in
+                ('time','value','in_tangent','out_tangent','in_weight','out_weight'))
+                or not 0<=key['weighted_mode']<=3 for key in keys)
+                or any(a['time']>=b['time'] for a,b in zip(keys,keys[1:]))):
+            raise ValueError(f'Invalid shared audio curve: {name}')

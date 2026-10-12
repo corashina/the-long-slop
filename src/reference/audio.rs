@@ -188,6 +188,8 @@ impl AudioReference {
             require(!set.contains(&0), "audio zero ID")?;
         }
         for c in &self.clips {
+            let block_align = c.channels.checked_mul(c.bits_per_sample / 8);
+            let data_bytes = c.frames.checked_mul(u64::from(c.block_align));
             require(
                 !c.usages.is_empty() && c.usages.iter().all(|u| u == "effect" || u == "radio"),
                 "audio clip usage",
@@ -202,8 +204,9 @@ impl AudioReference {
                     && c.frequency > 0
                     && c.frames > 0
                     && c.bits_per_sample > 0
-                    && c.block_align == c.channels * (c.bits_per_sample / 8)
-                    && c.data_bytes == c.frames * u64::from(c.block_align)
+                    && c.bits_per_sample % 8 == 0
+                    && block_align == Some(c.block_align)
+                    && data_bytes == Some(c.data_bytes)
                     && c.bytes > c.data_bytes
                     && [
                         c.duration_seconds,
@@ -228,6 +231,20 @@ impl AudioReference {
                 "audio emitter owner",
             )?;
         }
+        let valid_curve = |curve: &AudioCurve| {
+            !curve.keys.is_empty()
+                && curve.keys.iter().all(|k| {
+                    values([
+                        k.time,
+                        k.value,
+                        k.in_tangent,
+                        k.out_tangent,
+                        k.in_weight,
+                        k.out_weight,
+                    ]) && k.weighted_mode <= 3
+                })
+                && curve.keys.windows(2).all(|ks| ks[0].time < ks[1].time)
+        };
         for v in &self.voices {
             require(
                 emitters.contains(&v.emitter)
@@ -257,21 +274,7 @@ impl AudioReference {
                     .curves
                     .get(name)
                     .ok_or_else(|| ReferenceError("Missing audio curve".into()))?;
-                require(
-                    !curve.keys.is_empty()
-                        && curve.keys.iter().all(|k| {
-                            values([
-                                k.time,
-                                k.value,
-                                k.in_tangent,
-                                k.out_tangent,
-                                k.in_weight,
-                                k.out_weight,
-                            ]) && k.weighted_mode <= 3
-                        })
-                        && curve.keys.windows(2).all(|ks| ks[0].time < ks[1].time),
-                    "audio curve",
-                )?;
+                require(valid_curve(curve), "audio curve")?;
             }
         }
         for m in &self.mixers {
@@ -286,7 +289,11 @@ impl AudioReference {
             while let Some(id) = current.parent {
                 count += 1;
                 require(count <= self.mixers.len(), "audio mixer cycle")?;
-                current = self.mixers.iter().find(|m| m.id == id).unwrap();
+                current = self
+                    .mixers
+                    .iter()
+                    .find(|m| m.id == id)
+                    .ok_or_else(|| ReferenceError("Missing audio mixer ancestor".into()))?;
             }
             for effect in &m.effects {
                 require(
@@ -575,6 +582,24 @@ impl AudioReference {
                 ])
                 && outside.methods.iter().all(method),
             "audio outside mixer",
+        )?;
+        let settings = &self.shared.settings;
+        require(
+            values([
+                settings.gain,
+                settings.pitch,
+                settings.spatial_blend,
+                settings.min_distance,
+                settings.max_distance,
+            ]) && settings.gain >= 0.0
+                && settings.pitch > 0.0
+                && (0.0..=1.0).contains(&settings.spatial_blend)
+                && settings.min_distance > 0.0
+                && settings.max_distance >= settings.min_distance
+                && settings.rolloff_mode <= 2
+                && valid_curve(&settings.spatial_blend_curve)
+                && valid_curve(&settings.rolloff_curve),
+            "audio shared source settings",
         )?;
         require(
             hash(&self.managed.sha256)
