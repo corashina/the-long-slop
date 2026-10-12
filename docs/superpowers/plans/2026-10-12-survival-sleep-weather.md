@@ -565,7 +565,7 @@ Keep weather advancement disconnected from normal play until Task 8 provides its
 - Select the source desert day/night ambient bindings for weather's ambient-volume reduction, using the same shared owner.
 
 - [ ] **Step 1: Write `weather_composition_preserves_phase_rules` and `particle_capacity_and_origin_are_stable`.**
-At the native fixture's noon, full storm influence gives intensity `0.72`, ambient `0.15`, and source storm fog density `0.001`.
+At the native fixture's noon, full storm influence gives intensity `0.72`, ambient `0.15`, and source storm fog parameter `0.001`. Final fog density multiplies that parameter by the cycle fog modifier.
 At night it gives intensity `0.135` and ambient `0.015`; night-specific ground/cloud/atmosphere rules remain source-defined.
 Test dawn/dusk boundary expressions and daytime atmosphere's cubic influence.
 Compose twice from the same clear output and assert identical results.
@@ -577,7 +577,7 @@ let influence = StormInfluence { id: Some(StormId(1)), strength: 1. };
 cycle.compose_weather(&r.weather, influence);
 close(cycle.output().directional_intensity, 0.72);
 close(cycle.output().ambient, 0.15);
-close(cycle.output().fog_density, 0.001);
+close(cycle.output().fog_density, 0.001 * r.cycle.fog_modifier);
 let first = cycle.output().clone();
 cycle.compose_weather(&r.weather, influence);
 assert_eq!(cycle.output(), &first);
