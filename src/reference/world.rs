@@ -1029,6 +1029,34 @@ impl WorldReference {
                 )?;
             }
         }
+        // Every source component needs type and owner evidence before selecting a body.
+        let mut source_bodies = HashMap::new();
+        for (index, object) in objects.iter().enumerate() {
+            for link in object
+                .links
+                .iter()
+                .filter(|link| link.field.starts_with("m_Component["))
+            {
+                let component = records.get(&link.target).ok_or_else(|| {
+                    ReferenceError(field(
+                        &link.target,
+                        "missing source component type/owner record",
+                    ))
+                })?;
+                require(
+                    record_link(component, "m_GameObject") == Some(&object.source),
+                    &field(&link.target, "source component GameObject ownership"),
+                )?;
+                if component.class_name == "Rigidbody" {
+                    require(
+                        source_bodies
+                            .insert(index as u32, &component.source)
+                            .is_none(),
+                        &field(&object.source, "unique source Rigidbody"),
+                    )?;
+                }
+            }
+        }
         require(
             p.controls.iter().all(|i| (*i as usize) < p.nodes.len())
                 && p.controls.iter().collect::<HashSet<_>>().len() == p.controls.len(),
@@ -1130,24 +1158,17 @@ impl WorldReference {
                 &field(&b.source, "source Rigidbody ownership"),
             )?;
         }
-        for (index, object) in objects.iter().enumerate() {
-            for component in object
-                .links
-                .iter()
-                .filter(|link| link.field.starts_with("m_Component["))
-            {
-                if records
-                    .get(&component.target)
-                    .is_some_and(|r| r.class_name == "Rigidbody")
-                {
-                    require(
-                        body_nodes.get(&(index as u32)).is_some_and(|body| {
-                            p.bodies[*body as usize].source == component.target
-                        }),
-                        &field(&component.target, "required local Rigidbody"),
-                    )?;
-                }
-            }
+        require(
+            source_bodies.len() == p.bodies.len(),
+            &field(&p.source, "complete source Rigidbody bindings"),
+        )?;
+        for (node, source) in &source_bodies {
+            require(
+                body_nodes
+                    .get(node)
+                    .is_some_and(|body| &p.bodies[*body as usize].source == *source),
+                &field(source, "required local Rigidbody"),
+            )?;
         }
         let mut collider_sources = HashSet::new();
         for c in &p.colliders {
@@ -1184,14 +1205,14 @@ impl WorldReference {
             let mut ancestor = Some(c.node);
             let mut nearest_body = None;
             while let Some(node) = ancestor {
-                if let Some(body) = body_nodes.get(&node) {
-                    nearest_body = Some(*body);
+                if let Some(source) = source_bodies.get(&node) {
+                    nearest_body = Some(*source);
                     break;
                 }
                 ancestor = p.nodes[node as usize].parent;
             }
             require(
-                c.body == nearest_body,
+                c.body.map(|index| &p.bodies[index as usize].source) == nearest_body,
                 &field(&c.source, "nearest source Rigidbody"),
             )?;
             if let Some(skin) = c.deformed_skin {

@@ -68,6 +68,21 @@ class Selection:
             self.receipts[identity]={'source':source_id(owner),'sha256':record['sha256']}
         return source_id(owner)
 
+    def component_record(self, owner):
+        """Retain type and owner evidence without expanding unselected component rules."""
+        identity=key(owner)
+        if identity in self.records:return self.records[identity]
+        data=required_record(self.source,owner,('m_GameObject',))
+        game_object=self.source.resolve(owner,data['m_GameObject'])
+        if game_object is None:raise ValueError(f'{identity} m_GameObject: missing component owner')
+        target=self.receipt(game_object)
+        result={'source':self.receipt(owner),
+                'class_name':self.source.class_name(owner) if owner.type.name=='MonoBehaviour' else owner.type.name,
+                'fields':{'m_GameObject':{'kind':'link','value':target}},
+                'links':[{'field':'m_GameObject','target':target}]}
+        self.records[identity]=result
+        return result
+
     def record(self, owner):
         identity=key(owner)
         if identity in self.records:return self.records[identity]
@@ -388,6 +403,8 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) ->
                     shape=None if skin_collider or empty_mesh else geometry(local,exporter,component,n['reader'],bodies[body]['pose'] if body is not None else IDENTITY,body is not None and not bodies[body]['kinematic'])
                     colliders.append({'source':source_id(component),'node':mapping[key(n['reader'])],'enabled':bool(data['m_Enabled']),
                         'body':body,'trigger':bool(data['m_IsTrigger']),'material':selected.receipt(physical_material) if physical_material else None,'deformed_skin':0 if skin_collider else None,'source_empty_mesh':empty_mesh,'geometry':shape})
+        for node in hierarchy:
+            for component in node['components']:selected.component_record(component)
         prototypes.append({'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,
             'deferred_materials':report['deferred_materials'],'excluded_actions':scope_cache.get(identity,('',[]))[1],'skins':skins,'bodies':bodies,'colliders':colliders,'prefab_pose':converted_transform(source.read(root)),
             'asset_record':{'id':index,'material_count':report['material_count'],'usage':'world_prototype','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(root),'dependencies':report['dependencies']},
