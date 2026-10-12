@@ -12,11 +12,10 @@ Reuse source materials, retained targets, and existing interaction poses.
 
 **Spec:** [Approved mirror design](../specs/2026-10-12-live-mirrors-design.md).
 
-**Status:** User approved subagent execution. Tasks 1 through 4 passed implementation review. Task 5 evidence and whole-branch review remain open.
+**Status:** User approved subagent execution. Tasks 1 through 4 passed implementation review. Task 5 equipment checks passed. Whole-branch review remains open.
 
 Date: 2026-10-12, Europe/Warsaw.
 Branch: `codex/equipment`; base implementation commit: `058bea6`.
-Status: Written plan review and execution-method selection are pending.
 
 ## Global Constraints
 
