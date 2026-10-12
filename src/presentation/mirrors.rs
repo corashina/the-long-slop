@@ -510,7 +510,7 @@ pub fn sync_mirror_views(world: &mut World, windows: &mut QueryState<&'static Wi
         camera.insert((pose, GlobalTransform::from(pose)));
         let mut settings = camera.get_mut::<Camera>().unwrap();
         let valid_clip = output.has_valid_clip_range();
-        settings.is_active = (output.capture && valid_clip) || warming;
+        settings.is_active = valid_clip && (output.capture || warming);
         settings.order = if output.capture {
             -3 + output.rank as isize
         } else {
