@@ -26,6 +26,8 @@ struct Control {
     reference: MechanismReference,
     degrees: [f32; 2],
     slide: f32,
+    audio_active: bool,
+    audio_delta: [f32; 2],
     enabled: bool,
     turn_state: u8,
 }
@@ -137,6 +139,8 @@ impl MechanismState {
             .iter()
             .map(|m| Control {
                 reference: m.clone(),
+                audio_active: false,
+                audio_delta: [0.; 2],
                 degrees: m.rotation.as_ref().map_or([0.0; 2], |r| r.initial_degrees),
                 slide: m.slide.as_ref().map_or(0.0, |s| s.initial_value),
                 enabled: m.enabled,
@@ -182,6 +186,28 @@ impl MechanismState {
         self.items
             .get(&item)
             .is_some_and(|i| self.controls[*i].enabled)
+    }
+    pub fn begin_audio_step(&mut self) {
+        for c in &mut self.controls {
+            c.audio_active = false;
+            c.audio_delta = [0.; 2];
+        }
+    }
+    pub fn audio_input(&self, item: ItemId) -> (bool, [f32; 2]) {
+        self.items.get(&item).map_or((false, [0.; 2]), |&i| {
+            (self.controls[i].audio_active, self.controls[i].audio_delta)
+        })
+    }
+    pub fn audio_values(&self, item: ItemId) -> Option<([f32; 2], u8)> {
+        let c = &self.controls[*self.items.get(&item)?];
+        Some((
+            if c.reference.slide.is_some() {
+                [c.slide, 0.]
+            } else {
+                c.degrees
+            },
+            c.turn_state,
+        ))
     }
     pub fn rotation_degrees(&self, item: ItemId) -> Option<[f32; 2]> {
         let c = &self.controls[*self.items.get(&item)?];
@@ -415,6 +441,8 @@ impl MechanismState {
             }
         };
         let c = &mut self.controls[index];
+        c.audio_active = true;
+        c.audio_delta = [x, y];
         if held && let Some(r) = &c.reference.rotation {
             for (i, delta) in [x, y].into_iter().enumerate() {
                 let sign = if r.inverted[i] == (i == 0) { 1.0 } else { -1.0 };
@@ -423,6 +451,7 @@ impl MechanismState {
             }
         }
         if let Some(s) = &c.reference.slide {
+            let previous = c.slide;
             let values = [x, y, input.wheel * self.scroll_sensitivity];
             let mut sum = 0.0;
             for i in 0..6 {
@@ -436,6 +465,7 @@ impl MechanismState {
                     c.slide += sum;
                 }
             }
+            c.audio_delta = [c.slide - previous, 0.];
             c.slide = c.slide.clamp(0.0, 1.0);
         }
         self.apply(index);

@@ -146,7 +146,9 @@ Slide audio stops after `0.2` seconds without a movement update.
 Endpoint gain uses `abs(movement_delta * audioM) / deltaTime * 0.01`.
 Endpoint and switch bindings retain their exact source clip choices and method evidence.
 `pickupable.Crafted` uses its collision clip at gain `0.25`, with pitch `[0.85, 1.15]`.
-Pickup and detach do not call that method. We added no generic pickup or detach sound.
+Slot Craft and UnCraft call Crafted after success at managed lines 47847 and 47953.
+Plain pickup and tube Detach do not call Crafted. Tube Detach appears at lines 65485-65499.
+We added no generic pickup, drop, or tube detach sound.
 `carscript.InteractHandbrake` changes state without playing a sound.
 Cap USE uses authored open and close clips and gains.
 Cap TUNE gain uses `abs(input * mainscript.fluidTuneSpeed * tuneSpeed)`.

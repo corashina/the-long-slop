@@ -9,7 +9,7 @@ const raw=JSON.parse(readFileSync(new URL('../../web/assets/reference/manifest.j
 const binding=raw.bindings.find(b=>b.trigger==='ignition');
 const samples=readFileSync(new URL('../../web/assets/'+raw.clips.find(c=>c.id===binding.clips[0]).path,import.meta.url));
 const param=()=>({value:0,setValueAtTime(v){this.value=v;}});
-class Node {constructor(){this.gain=param();this.pan=param();this.frequency=param();this.Q=param();this.playbackRate=param();for(const n of ['positionX','positionY','positionZ','orientationX','orientationY','orientationZ'])this[n]=param();}connect(){}disconnect(){}start(t,o=0){this.offset=o;Fake.starts.push(this);}stop(){this.stopped=true;}}
+class Node {constructor(){this.gain=param();this.pan=param();this.frequency=param();this.Q=param();this.playbackRate=param();for(const n of ['positionX','positionY','positionZ','orientationX','orientationY','orientationZ'])this[n]=param();}connect(){}disconnect(){}start(t,o=0){this.offset=o;Fake.starts.push(this);}stop(time){if(time>0)this.stopTime=time;else this.stopped=true;}}
 class Fake {static starts=[];static contexts=[];constructor(){this.currentTime=0;this.destination=new Node();this.filters=[];this.state='suspended';Fake.contexts.push(this);}createGain(){return new Node();}createPanner(){return new Node();}createStereoPanner(){return new Node();}createBiquadFilter(){const n=new Node();this.filters.push(n);return n;}createBufferSource(){return new Node();}resume(){this.state='running';return Promise.resolve();}suspend(){this.state='suspended';return Promise.resolve();}close(){return Promise.resolve();}decodeAudioData(){return Promise.resolve({duration:raw.clips.find(c=>c.id===binding.clips[0]).duration_seconds,numberOfChannels:1});}}
 function setup(Context=Fake){Fake.starts=[];Fake.contexts=[];globalThis.AudioContext=Context;globalThis.fetch=async()=>({ok:true,arrayBuffer:async()=>samples.buffer.slice(samples.byteOffset,samples.byteOffset+samples.byteLength)});return createAudio(raw);}
 const settle=()=>new Promise(r=>setTimeout(r,30));
@@ -21,7 +21,7 @@ test('audio_failure_keeps_start_working',async()=>{for(const mode of ['fetch','d
 test('restart_rejects_pending_decode',async()=>{let complete;class Slow extends Fake {decodeAudioData(){return new Promise(r=>{complete=r;});}}const a=setup(Slow);a.unlock();await settle();event(a);await decoding(()=>complete);assert.ok(complete);a.restart(2);complete({duration:1});await settle();assert.equal(Fake.starts.length,0);a.dispose();});
 test('restarted_session_can_unlock',async()=>{let attempts=0;class Fail extends Fake {resume(){attempts++;return Promise.reject(Error('resume'));}}const a=setup(Fail);a.unlock();await settle();a.restart(2);a.unlock();await settle();assert.equal(attempts,2);a.dispose();});
 test('rebase_preserves_distance',()=>{const v=raw.voices.find(v=>v.id===binding.voice),out=new Float32Array(6);spatialValues(v,[10,3,20],[1,2,3],[0,0,0,1],out);assert.ok(Array.from(out).every(Number.isFinite));assert.ok(Math.abs(out[0]-1/Math.sqrt(371))<1e-7);const before=Array.from(out);spatialValues(v,[-90,3,-80],[-99,2,-97],[0,0,0,1],out);assert.ok(Array.from(out).every(Number.isFinite));assert.deepEqual(Array.from(out),before);});
-test('pause_requires_continue',async()=>{const copy=structuredClone(raw);const voice=copy.voices.find(v=>v.id===binding.voice);voice.loop=true;voice.clip=binding.clips[0];const a=setup();a.dispose();const c=createAudio(copy);c.unlock();await settle();c.begin(1,true,false,0);c.emitter(voice.emitter,[0,0,0],[0,0,0,1],true);c.voice(voice.id,true,1,1);c.finish();await loaded(c);assert.equal(Fake.starts.length,1);Fake.contexts.at(-1).currentTime=.25;c.pause();c.begin(1,true,false,1);c.emitter(voice.emitter,[0,0,0],[0,0,0,1],true);c.voice(voice.id,true,1,1);c.finish();await settle();assert.equal(Fake.contexts.at(-1).state,'suspended');assert.equal(Fake.starts.length,1);c.unlock();await settle();assert.equal(Fake.starts.length,2);assert.equal(Fake.starts[1].offset,.25);c.dispose();});
+test('pause_requires_continue',async()=>{const copy=structuredClone(raw);const voice=copy.voices.find(v=>v.id===binding.voice);voice.loop=true;voice.clip=binding.clips[0];const a=setup();a.dispose();const c=createAudio(copy);c.unlock();await settle();c.begin(1,true,false,0);c.emitter(voice.emitter,[0,0,0],[0,0,0,1],true);c.voice(voice.id,true,1,1,true);c.finish();await loaded(c);assert.equal(Fake.starts.length,1);Fake.contexts.at(-1).currentTime=.25;c.pause();c.begin(1,true,false,1);c.emitter(voice.emitter,[0,0,0],[0,0,0,1],true);c.voice(voice.id,true,1,1,true);c.finish();await settle();assert.equal(Fake.contexts.at(-1).state,'suspended');assert.equal(Fake.starts.length,1);c.unlock();await settle();assert.equal(Fake.starts.length,2);assert.equal(Fake.starts[1].offset,.25);c.dispose();});
 test('actual_source_effect_and_restart_cleanup',async()=>{const a=setup();a.unlock();await settle();event(a);await loaded(a);assert.equal(Fake.starts.length,1);a.restart(2);assert.equal(Fake.starts[0].stopped,true);a.dispose();});
 test('gesture_survives_old_native_frame',async()=>{const a=setup();a.restart(2);a.unlock();a.begin(1,true,true,0);a.begin(2,true,true,0);await settle();a.begin(2,true,false,0);event(a,2);await loaded(a);assert.equal(Fake.starts.length,1);a.dispose();});
 test('native_parameq_uses_proven_mapping',async()=>{const a=setup();a.unlock();await settle();assert.equal(a.context.filters[0].type,'peaking');assert.equal(a.context.filters[0].Q.value,1/raw.mixers.find(m=>m.name==='Radio').effects[1].parameters[1]);assert.equal(a.context.filters[0].gain.value,40*Math.log10(raw.mixers.find(m=>m.name==='Radio').effects[1].parameters[2]));a.dispose();});
@@ -39,7 +39,7 @@ for(const nextAction of [ACTIONS.CONTINUE,ACTIONS.RESTART])test('failed_restart_
 });
 
 function vehicleBank(){Fake.starts=[];const context=new Fake(),cache={effect:async id=>({duration:raw.clips.find(c=>c.id===id).duration_seconds})};return new VoiceBank(context,raw,cache,new Map(raw.mixers.map(m=>[m.id,new Node()])),()=>1,()=>true,error=>{throw error;});}
-function vehicleFrame(bank,t=1){bank.begin();for(const id of [raw.engine.emitter,raw.voices.find(v=>v.id===raw.horn.voice).emitter])bank.emitter(id,[0,0,0],[0,0,0,1],true);for(const id of [raw.engine.idle_voice,raw.engine.motor_voice,raw.horn.voice])bank.update(id,true,.7,1);bank.finish();}
+function vehicleFrame(bank,t=1){bank.begin();for(const id of [raw.engine.emitter,raw.voices.find(v=>v.id===raw.horn.voice).emitter])bank.emitter(id,[0,0,0],[0,0,0,1],true);for(const id of [raw.engine.idle_voice,raw.engine.motor_voice,raw.horn.voice])bank.update(id,true,.7,1,true);bank.finish();}
 test('vehicle_updates_retain_voices',async()=>{const bank=vehicleBank();vehicleFrame(bank);await Promise.resolve();for(let i=0;i<600;i++)vehicleFrame(bank);assert.equal(Fake.starts.length,3);bank.dispose();});
 test('starter_uses_source_interval',async()=>{const bank=vehicleBank(),id=raw.engine.emitter,b=raw.bindings.find(b=>b.id===raw.engine.starter_binding),duration=raw.clips.find(c=>c.id===b.clips[0]).source_duration_seconds,interval=duration*raw.engine.constants.engineStartTimeModifier;bank.begin();bank.emitter(id,[0,0,0],[0,0,0,1],true);bank.starter(id,true,interval);await Promise.resolve();assert.equal(Fake.starts.length,0);bank.starter(id,true,interval+.125);await Promise.resolve();assert.equal(Fake.starts.length,1);bank.starter(id,true,2*interval+.125);await Promise.resolve();assert.equal(Fake.starts.length,1);bank.starter(id,true,2*interval+.25);await Promise.resolve();assert.equal(Fake.starts.length,2);bank.starter(id,false,10);assert.ok(Fake.starts.every(s=>!s.stopped),'release preserves started tails');bank.remove(id);assert.ok(Fake.starts.every(s=>s.stopped));bank.dispose();});
 test('starter_release_cancels_decode',async()=>{const bank=vehicleBank();let complete;bank.cache.effect=()=>new Promise(r=>complete=r);bank.begin();bank.emitter(raw.engine.emitter,[0,0,0],[0,0,0,1],true);bank.starter(raw.engine.emitter,true,10);bank.starter(raw.engine.emitter,false,10);complete({duration:1});await Promise.resolve();assert.equal(Fake.starts.length,0);bank.dispose();});
@@ -61,4 +61,49 @@ test('fresh_effects_start_at_zero_after_natural_completion',async()=>{
  assert.equal(bank.effects.find(s=>s.playing),slot,'reuse the completed slot for the stop effect');
  assert.deepEqual(Fake.starts.map(s=>s.offset),[0,0,0]);
  bank.dispose();
+});
+
+ test('crafted_effect_follows_owner',async()=>{
+ const bank=vehicleBank(),b=raw.bindings.find(b=>b.trigger==='crafted');
+ bank.begin();bank.emitter(b.emitter,[1,2,3],[0,0,0,1],true);
+ bank.event(b,b.emitter,1,2,3,1,1);await Promise.resolve();
+ const s=bank.effects.find(s=>s.playing);
+ bank.emitter(b.emitter,[4,5,6],[0,0,0,1],true);bank.finish();
+ assert.equal(s.spatialEmitter,b.emitter);
+ assert.deepEqual([s.panner.positionX.value,s.panner.positionY.value,s.panner.positionZ.value],[4,5,6]);
+ bank.dispose();
+ });
+ test('removal_rejects_late_load',async()=>{
+ const bank=vehicleBank(),b=raw.bindings.find(b=>b.trigger==='crafted');let complete;
+ bank.cache.effect=()=>new Promise(r=>complete=r);
+ bank.begin();bank.emitter(b.emitter,[0,0,0],[0,0,0,1],true);bank.event(b,b.emitter,0,0,0,1,1);
+ bank.remove(b.emitter);complete({duration:1});await Promise.resolve();assert.equal(Fake.starts.length,0);bank.dispose();
+ });
+ test('endpoint_gain_above_one_scales_source_distances',async()=>{
+ const bank=vehicleBank(),b=raw.bindings.find(b=>b.trigger==='startPosEnd');
+ bank.begin();bank.emitter(b.emitter,[0,0,0],[0,0,0,1],true);bank.event(b,b.emitter,0,0,0,3/b.gain,1);await Promise.resolve();
+ const s=bank.effects.find(s=>s.playing);
+ assert.equal(s.volume,1);assert.equal(s.distanceScale,2);bank.dispose();
+ });
+
+test('shared_effect_lifetime_uses_unpitched_source_length',async()=>{
+ const bank=vehicleBank(),b=raw.bindings.find(b=>b.trigger==='crafted');
+ bank.context.currentTime=10;bank.begin();bank.emitter(b.emitter,[0,0,0],[0,0,0,1],true);bank.event(b,b.emitter,0,0,0,1,.85);await Promise.resolve();
+ assert.equal(Fake.starts[0].stopTime,10+raw.clips.find(c=>c.id===b.clips[0]).source_duration_seconds);
+ bank.dispose();
+});
+
+test('cap_fill_loop_change_keeps_source_and_survives_pause',async()=>{
+ const bank=vehicleBank(),rule=raw.fluids[0],id=rule.fill_voice,record=raw.voices.find(v=>v.id===id);
+ bank.begin();bank.emitter(record.emitter,[0,0,0],[0,0,0,1],true);bank.update(id,true,.5,1,true);await Promise.resolve();
+ const source=bank.voices.get(id).source;assert.equal(source.loop,true);
+ bank.update(id,true,.7,1,false);assert.equal(bank.voices.get(id).source,source);assert.equal(source.loop,false);
+ bank.pause();bank.resume();bank.update(id,true,.7,1,false);await Promise.resolve();assert.equal(bank.voices.get(id).source.loop,false);assert.equal(bank.voices.get(id).source.offset,0);bank.dispose();
+});
+
+test('non_loop_fluid_completion_restarts_at_zero',async()=>{
+ const bank=vehicleBank(),id=raw.fluids[0].fill_voice,record=raw.voices.find(v=>v.id===id);
+ bank.begin();bank.emitter(record.emitter,[0,0,0],[0,0,0,1],true);bank.update(id,true,.5,1,false);await Promise.resolve();
+ const slot=bank.voices.get(id);bank.context.currentTime=.5;bank.parameters(slot);slot.source.onended();bank.update(id,true,.5,1,false);
+ assert.deepEqual(Fake.starts.map(s=>s.offset),[0,0]);bank.dispose();
 });

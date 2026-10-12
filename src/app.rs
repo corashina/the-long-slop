@@ -652,8 +652,9 @@ fn publish_audio(
         game_audio_listener(p.x, p.y, p.z, q.x, q.y, q.z, q.w);
     }
     for emitter in &audio.reference.emitters {
-        let alive = (emitter.id != audio.reference.engine.emitter
-            || runtime.area.items.mounted(reference.0.engine.item))
+        let alive = audio.owner_alive(emitter.id)
+            && (emitter.id != audio.reference.engine.emitter
+                || runtime.area.items.mounted(reference.0.engine.item))
             && emitter
                 .item
                 .is_none_or(|id| runtime.area.items.get(id).is_some());
@@ -678,7 +679,13 @@ fn publish_audio(
         }
     }
     for signal in &audio.signals {
-        game_audio_voice(signal.id, signal.playing, signal.gain, signal.pitch);
+        game_audio_voice(
+            signal.id,
+            signal.playing,
+            signal.gain,
+            signal.pitch,
+            signal.looping,
+        );
     }
     game_audio_starter(
         audio.reference.engine.emitter,

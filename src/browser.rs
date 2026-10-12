@@ -18,7 +18,7 @@ extern "C" {
         alive: bool,
     );
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioVoice)]
-    pub fn game_audio_voice(id: u32, playing: bool, gain: f32, pitch: f32);
+    pub fn game_audio_voice(id: u32, playing: bool, gain: f32, pitch: f32, looping: bool);
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioStarter)]
     pub fn game_audio_starter(emitter: u32, enabled: bool, time: f64);
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioEvent)]

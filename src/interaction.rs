@@ -70,7 +70,21 @@ pub enum InteractionAction {
     },
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum InteractionSound {
+    Action(InteractionAction),
+    Cap {
+        id: OpeningId,
+        previous: f32,
+        current: f32,
+        tune: Option<f32>,
+    },
+}
+
 struct OpeningState {
+    flow: Option<(bool, f32)>,
+    fill_called: bool,
+    empty_pour: bool,
     reference: OpeningRules,
     local_pose: Pose,
     tilt_axis: Vector,
@@ -114,6 +128,8 @@ struct SeatState {
 }
 
 pub struct InteractionState {
+    sounds: [Option<InteractionSound>; 64],
+    sound_count: usize,
     light_controls: HashMap<ColliderId, LightControlId>,
     light_nodes: HashMap<ColliderId, NodeId>,
     cabin_doors: [Option<(ItemId, ItemId)>; 4],
@@ -187,6 +203,9 @@ impl InteractionState {
                 local_pose,
                 tilt_axis: Vector::from_array(opening.tilt_axis),
                 valve: opening.valve,
+                flow: None,
+                fill_called: false,
+                empty_pour: false,
             });
         }
         let mut seats = Vec::with_capacity(reference.seats.len());
@@ -370,6 +389,8 @@ impl InteractionState {
             parts: parts::PartAttachments::new(reference)?,
             mechanism_bodies: reference.items.iter().map(|i| (i.id, i.body)).collect(),
             openings,
+            sounds: [None; 64],
+            sound_count: 0,
             seats,
             carry: carry::CarryState::new(reference)?,
             push: push::PushState::new(reference),
@@ -463,8 +484,42 @@ impl InteractionState {
             local_pose: Pose::IDENTITY,
             tilt_axis: Vector::Y,
             valve: 1.0,
+            flow: None,
+            fill_called: false,
+            empty_pour: false,
         });
         Ok(())
+    }
+    pub fn pop_sound(&mut self) -> Option<InteractionSound> {
+        if self.sound_count == 0 {
+            return None;
+        }
+        let sound = self.sounds[0];
+        self.sound_count -= 1;
+        self.sounds.copy_within(1..=self.sound_count, 0);
+        self.sounds[self.sound_count] = None;
+        sound
+    }
+    pub fn completed_action(&mut self, action: InteractionAction) {
+        self.sound(InteractionSound::Action(action));
+    }
+    fn sound(&mut self, sound: InteractionSound) {
+        if self.sound_count < self.sounds.len() {
+            self.sounds[self.sound_count] = Some(sound);
+            self.sound_count += 1;
+        }
+    }
+    pub fn opening_flow(&self, id: OpeningId) -> Option<(bool, f32)> {
+        self.openings
+            .iter()
+            .find(|o| o.reference.id == id)
+            .and_then(|o| o.flow)
+    }
+    pub fn opening_audio_flags(&self, id: OpeningId) -> (bool, bool) {
+        self.openings
+            .iter()
+            .find(|o| o.reference.id == id)
+            .map_or((false, false), |o| (o.fill_called, o.empty_pour))
     }
     pub fn opening_is_open(&self, id: OpeningId) -> bool {
         self.opening_valve(id) > 0.0
@@ -550,6 +605,13 @@ impl InteractionState {
         if !dt.is_finite() || dt <= 0.0 {
             return None;
         }
+        for opening in &mut self.openings {
+            opening.flow = None;
+            opening.fill_called = false;
+            opening.empty_pour = false;
+        }
+        self.mechanisms.begin_audio_step();
+        let mut cap_sounds = [None; 2];
         let acquisition_release = self.carry.acquisition_held();
         self.carry.release_acquisition(input);
         let reach = self.reach;
@@ -648,7 +710,14 @@ impl InteractionState {
             {
                 for opening in &mut self.openings {
                     if opening.reference.cap == target.item && opening.reference.can_toggle {
+                        let previous = opening.valve;
                         opening.valve = if opening.valve > 0.0 { 0.0 } else { 1.0 };
+                        cap_sounds[0] = Some(InteractionSound::Cap {
+                            id: opening.reference.id,
+                            previous,
+                            current: opening.valve,
+                            tune: None,
+                        });
                         action = Some(InteractionAction::Cap(opening.reference.id));
                         break;
                     }
@@ -671,8 +740,15 @@ impl InteractionState {
                     self.tuning_opening = Some(opening.reference.id);
                 }
                 if delta.is_finite() && delta != 0.0 {
-                    opening.valve =
-                        (opening.valve + delta * dt * opening.reference.tune_rate).clamp(0.0, 1.0);
+                    let previous = opening.valve;
+                    let requested = delta * dt * opening.reference.tune_rate;
+                    opening.valve = (opening.valve + requested).clamp(0.0, 1.0);
+                    cap_sounds[1] = Some(InteractionSound::Cap {
+                        id: opening.reference.id,
+                        previous,
+                        current: opening.valve,
+                        tune: Some(requested),
+                    });
                     if opening.valve < 1e-6 {
                         opening.valve = 0.0;
                     }
@@ -702,6 +778,9 @@ impl InteractionState {
             }
         }
 
+        for sound in cap_sounds.into_iter().flatten() {
+            self.sound(sound);
+        }
         let available = self.available_actions(&aim, player, items, physics);
         if input.pressed & keys::GRAB != 0 {
             self.f_gesture_consumed = false;
@@ -738,6 +817,9 @@ impl InteractionState {
                         self.parts.mount_mechanism(held, &mut self.mechanisms);
                         self.sync_parts(items, physics).expect("bound parts");
                         action = Some(InteractionAction::PartInstall(held));
+                        self.sound(InteractionSound::Action(InteractionAction::PartInstall(
+                            held,
+                        )));
                     }
                 }
             } else if let (Some(rim), Some(tire)) = (available.rim, available.tire) {
@@ -766,6 +848,7 @@ impl InteractionState {
                             .pickup(target.item, target.point, player, items, physics)
                             .expect("validated carry acquisition");
                         action = Some(InteractionAction::PartRemove(target.item));
+                        self.completed_action(InteractionAction::PartRemove(target.item));
                     } else {
                         action = Some(InteractionAction::WheelRemove(target.item));
                     }
@@ -848,6 +931,7 @@ impl InteractionState {
         self.mechanisms.sync(physics, false);
         items.sync_poses(physics);
         let mut filling = None;
+        let mut filled_destination = None;
         if input.held & keys::FILL != 0
             && available.actions.0 & ActionMask::FILL != 0
             && let Some(held) = self.held()
@@ -858,24 +942,26 @@ impl InteractionState {
                 .iter()
                 .find(|opening| opening.reference.cap == target.item && opening.valve > 0.0)
             {
-                let (source_id, destination, flow) =
+                let (source_id, destination, flow, destination_opening) =
                     if self.supplies.contains(&opening.reference.tank) {
-                        if !self.openings.iter().any(|destination| {
+                        if let Some(destination) = self.openings.iter().find(|destination| {
                             destination.reference.tank == held && destination.valve > 0.0
                         }) {
-                            (held, held, 0.0)
-                        } else {
                             (
                                 opening.reference.tank,
                                 held,
                                 opening.reference.flow_liters_per_second * opening.valve,
+                                destination.reference.id,
                             )
+                        } else {
+                            (held, held, 0.0, opening.reference.id)
                         }
                     } else {
                         (
                             held,
                             opening.reference.tank,
                             opening.reference.flow_liters_per_second * opening.valve,
+                            opening.reference.id,
                         )
                     };
                 let source_allowed = self
@@ -907,6 +993,7 @@ impl InteractionState {
                     let liters = transfer(source, destination_state, amount);
                     if liters > 0.0 {
                         filling = Some(source_id);
+                        filled_destination = Some(destination_opening);
                         action = Some(InteractionAction::Fill {
                             source: source_id,
                             destination,
@@ -916,7 +1003,11 @@ impl InteractionState {
                 }
             }
         }
-        for opening in &self.openings {
+        for opening in &mut self.openings {
+            if filled_destination == Some(opening.reference.id) {
+                opening.flow = Some((true, 1.));
+                opening.fill_called = true;
+            }
             if opening.valve <= 0.0
                 || opening.reference.spill_disabled
                 || opening.reference.tube_connected
@@ -941,10 +1032,11 @@ impl InteractionState {
                 if !opening.reference.angle_disabled && angle <= threshold {
                     continue;
                 }
-                spill(
-                    fluid,
-                    factor * opening.valve * opening.reference.flow_liters_per_second * dt,
-                );
+                opening.empty_pour = fluid.mixture.total() <= 0.;
+                let speed = factor * opening.valve * opening.reference.flow_liters_per_second;
+                if spill(fluid, speed * dt) > 0. {
+                    opening.flow = Some((false, speed));
+                }
             }
         }
         if input.released & keys::GRAB != 0 {

@@ -648,6 +648,16 @@ impl GarageRuntime {
         match action {
             Some(InteractionAction::LightControl(control)) => {
                 self.lighting.use_control(&reference.lighting, control);
+                self.area
+                    .interaction
+                    .completed_action(InteractionAction::LightControl(control));
+                if reference.lighting.controllers.iter().any(|c| {
+                    c.id == control && c.kind == crate::reference::LightControllerKind::Headlight
+                }) {
+                    if let Some(audio) = &mut self.audio {
+                        audio.light_switch();
+                    }
+                }
                 self.notice = "";
             }
             Some(InteractionAction::WheelRemove(item)) => {
@@ -658,6 +668,9 @@ impl GarageRuntime {
                             .remove(slot, &mut self.area.items, &mut self.physics)
                         {
                             Ok(rim) => {
+                                self.area
+                                    .interaction
+                                    .completed_action(InteractionAction::WheelRemove(rim));
                                 let point = aim.grab_target.map_or(
                                     self.area.items.get(rim).unwrap().pose.position,
                                     |target| target.point,
@@ -693,6 +706,9 @@ impl GarageRuntime {
                         .install(item, target, &mut self.area.items, &mut self.physics)
                         .is_ok()
                     {
+                        self.area
+                            .interaction
+                            .completed_action(InteractionAction::WheelInstall { item, target });
                         if let Some(sensor) = self.wheels.sensor(target) {
                             self.area.interaction.bind_wheel_sensor(
                                 sensor,
@@ -714,6 +730,9 @@ impl GarageRuntime {
                     self.wheels
                         .split(rim, &mut self.area.items, &mut self.physics)
                 {
+                    self.area
+                        .interaction
+                        .completed_action(InteractionAction::PartRemove(tire));
                     self.notice = "";
                     if input.pressed & keys::GRAB != 0 {
                         let point =
@@ -749,6 +768,9 @@ impl GarageRuntime {
                     .assemble(rim, tire, &mut self.area.items, &mut self.physics)
                     .is_ok()
                 {
+                    self.area
+                        .interaction
+                        .completed_action(InteractionAction::WheelJoin { rim, tire });
                     ""
                 } else {
                     "This tire does not fit the rim."
@@ -810,6 +832,9 @@ impl GarageRuntime {
             input.held,
         );
         if driving && input.pressed & keys::LIGHTS != 0 {
+            if let Some(audio) = &mut self.audio {
+                audio.light_switch();
+            }
             self.lighting.cycle_headlights(&reference.lighting);
         }
         if driving && input.pressed & keys::SPACE != 0 {
@@ -992,6 +1017,19 @@ impl GarageRuntime {
         self.area.commit_poses(&self.physics, false);
         if let Some(audio) = &mut self.audio {
             audio.fixed_step(&self.area, &self.physics, FIXED_DT);
+            while let Some(sound) = self.area.interaction.pop_sound() {
+                match sound {
+                    crate::interaction::InteractionSound::Action(action) => {
+                        audio.action(action, audio.game_seconds)
+                    }
+                    crate::interaction::InteractionSound::Cap {
+                        id,
+                        previous,
+                        current,
+                        tune,
+                    } => audio.cap(id, previous, current, tune),
+                }
+            }
             audio.vehicle(
                 crate::audio::VehicleAudioInput {
                     rpm: self.engine_output.rpm,

@@ -123,7 +123,7 @@ unlock(): void
 begin(session: number, started: boolean, paused: boolean, gameSeconds: number): void
 listener(position: Float32Array, rotation: Float32Array): void
 emitter(id: number, position: Float32Array, rotation: Float32Array, alive: boolean): void
-voice(id: number, playing: boolean, gain: number, pitch: number): void
+voice(id: number, playing: boolean, gain: number, pitch: number, looping: boolean): void
 event(session: number, sequence: number, binding: number, emitter: number,
       x: number, y: number, z: number, gain: number, pitch: number, timeSeconds: number): void
 radio(frame: RadioFrame): void

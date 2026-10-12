@@ -1,4 +1,5 @@
 //! Source audio signals and bounded completed-action events.
+use crate::interaction::InteractionAction;
 use crate::reference::{AudioReference, ColliderId, ItemId, NodeId, ReferenceManifest};
 use crate::starting_area::StartingArea;
 use crate::vehicle::{PhysicsWorld, to_rapier};
@@ -66,6 +67,7 @@ pub struct AudioSignal {
     pub playing: bool,
     pub gain: f32,
     pub pitch: f32,
+    pub looping: bool,
 }
 #[derive(Clone, Copy, Debug, Default)]
 pub struct VehicleAudioInput {
@@ -81,8 +83,34 @@ pub struct VehicleAudioInput {
 fn inverse_lerp(a: f32, b: f32, value: f32) -> f32 {
     ((value - a) / (b - a)).clamp(0., 1.)
 }
+struct MechanismSound {
+    item: ItemId,
+    index: usize,
+    previous: [f32; 2],
+    turn: u8,
+    limits: [[f32; 2]; 2],
+    slide: bool,
+    remaining: f32,
+    last_slide_time: f64,
+}
+struct FluidSound {
+    opening: crate::reference::OpeningId,
+    index: usize,
+    latch: u32,
+    gain: f32,
+}
 pub struct AudioState {
     pub signals: Vec<AudioSignal>,
+    crafted: HashMap<ItemId, u32>,
+    lamp_controls: HashMap<crate::reference::LightControlId, (usize, bool)>,
+    lamp_voices: Vec<(crate::reference::LightControlId, u32, bool)>,
+    mechanism_sounds: Vec<MechanismSound>,
+    mechanism_items: HashMap<ItemId, usize>,
+    fluid_sounds: Vec<FluidSound>,
+    fluid_openings: HashMap<crate::reference::OpeningId, usize>,
+    positions: HashMap<u32, [f32; 3]>,
+    removed: std::collections::HashSet<u32>,
+    random: u32,
     pub starter_enabled: bool,
     horn_gain: f32,
     last_running: bool,
@@ -139,6 +167,16 @@ impl AudioState {
             c["maxRpm"],
         ];
         Self {
+            crafted: HashMap::new(),
+            lamp_controls: HashMap::new(),
+            lamp_voices: Vec::new(),
+            mechanism_sounds: Vec::new(),
+            mechanism_items: HashMap::new(),
+            fluid_sounds: Vec::new(),
+            fluid_openings: HashMap::new(),
+            positions: reference.emitters.iter().map(|e| (e.id, [0.; 3])).collect(),
+            removed: std::collections::HashSet::with_capacity(reference.emitters.len()),
+            random: session.wrapping_add(0x9e3779b9),
             starter_enabled: false,
             horn_gain: 0.,
             last_running: false,
@@ -153,6 +191,7 @@ impl AudioState {
                     playing: false,
                     gain: v.gain,
                     pitch: v.pitch,
+                    looping: v.r#loop,
                 })
                 .collect(),
             voice_indices: reference
@@ -246,6 +285,121 @@ impl AudioState {
             });
             self.emitter_anchors.insert(emitter.id, (node, local));
         }
+        self.lamp_controls = self
+            .reference
+            .lamps
+            .iter()
+            .enumerate()
+            .filter_map(|(index, l)| {
+                game.lighting
+                    .controllers
+                    .iter()
+                    .find(|c| c.id == l.control)
+                    .map(|c| (l.control, (index, c.startup_on)))
+            })
+            .collect();
+        for lamp in &self.reference.lamps {
+            let c = game
+                .lighting
+                .controllers
+                .iter()
+                .find(|c| c.id == lamp.control)
+                .unwrap();
+            for &id in &lamp.voices {
+                let voice = &self.reference.voices[self.voice_indices[&id]];
+                let node = self
+                    .reference
+                    .emitters
+                    .iter()
+                    .find(|e| e.id == voice.emitter)
+                    .unwrap()
+                    .node;
+                let state = c.states.iter().find(|s| {
+                    s.renderers.iter().any(|&renderer| {
+                        let mut cursor = Some(renderer);
+                        while let Some(n) = cursor {
+                            if n == node {
+                                return true;
+                            }
+                            cursor = game.nodes.iter().find(|v| v.id == n).and_then(|v| v.parent);
+                        }
+                        false
+                    })
+                });
+                let enabled = state.is_some_and(|s| !s.broken)
+                    && (c.electronics_source.is_none()
+                        || c.electronics_output > c.electronics_threshold);
+                self.lamp_voices.push((lamp.control, id, enabled));
+                self.signals[self.voice_indices[&id]].playing = c.startup_on && enabled;
+            }
+        }
+        self.crafted = self
+            .reference
+            .bindings
+            .iter()
+            .filter(|b| b.trigger == "crafted")
+            .filter_map(|b| {
+                game.items
+                    .iter()
+                    .find(|i| i.pickup.as_ref().is_some_and(|p| p.source == b.source))
+                    .map(|i| (i.id, b.id))
+            })
+            .collect();
+        self.mechanism_sounds = self
+            .reference
+            .mechanisms
+            .iter()
+            .enumerate()
+            .filter_map(|(index, a)| {
+                let m = game.mechanisms.iter().find(|m| m.source == a.source)?;
+                let (previous, turn) = area.interaction.mechanisms.audio_values(m.item)?;
+                Some(MechanismSound {
+                    item: m.item,
+                    index,
+                    previous,
+                    turn,
+                    limits: m
+                        .rotation
+                        .as_ref()
+                        .map_or([[0., 1.], [0., 0.]], |r| r.limits_degrees),
+                    slide: m.slide.is_some(),
+                    remaining: 0.,
+                    last_slide_time: 0.,
+                })
+            })
+            .collect();
+        for a in &self.reference.mechanisms {
+            if let Some(id) = a.movement_voice {
+                self.signals[self.voice_indices[&id]].gain = 0.;
+            }
+        }
+        self.mechanism_items = self
+            .mechanism_sounds
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.item, i))
+            .collect();
+        self.fluid_sounds = self
+            .reference
+            .fluids
+            .iter()
+            .enumerate()
+            .filter_map(|(index, a)| {
+                let o = game.openings.iter().find(|o| o.source == a.source)?;
+                Some(FluidSound {
+                    opening: o.id,
+                    index,
+                    latch: 0,
+                    gain: 0.,
+                })
+            })
+            .collect();
+        self.fluid_openings = self
+            .fluid_sounds
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (f.opening, i))
+            .collect();
         self.part_usables = game
             .parts
             .iter()
@@ -272,10 +426,262 @@ impl AudioState {
     pub fn voice(&mut self, id: u32, playing: bool, gain: f32, pitch: f32) {
         if let Some(&index) = self.voice_indices.get(&id) {
             let signal = &mut self.signals[index];
-            signal.playing = playing;
+            signal.playing = playing && !self.removed.contains(&signal.emitter);
             signal.gain = gain;
             signal.pitch = pitch;
         }
+    }
+    fn sample(&mut self) -> f32 {
+        self.random ^= self.random << 13;
+        self.random ^= self.random >> 17;
+        self.random ^= self.random << 5;
+        self.random as f32 / u32::MAX as f32
+    }
+    fn emit(&mut self, id: u32, gain: f32, simulation_seconds: f64) {
+        let Some(&index) = self.bindings.get(&id) else {
+            return;
+        };
+        let range = self.reference.bindings[index].pitch_range;
+        let pitch = range[0] + (range[1] - range[0]) * self.sample();
+        let b = &self.reference.bindings[index];
+        if self.removed.contains(&b.emitter) {
+            return;
+        }
+        self.sequence = self.sequence.wrapping_add(1);
+        self.push_event(AudioEvent {
+            session: self.session,
+            sequence: self.sequence,
+            binding: id,
+            emitter: b.emitter,
+            position: self.positions.get(&b.emitter).copied().unwrap_or([0.; 3]),
+            gain,
+            pitch,
+            time_seconds: simulation_seconds,
+            priority: b.priority,
+        });
+    }
+    /// Submit only completed operations. Detachment does not remove an owner.
+    pub fn action(&mut self, action: InteractionAction, simulation_seconds: f64) {
+        let item = match action {
+            InteractionAction::LightControl(control) => {
+                if let Some((index, on)) = self.lamp_controls.get_mut(&control) {
+                    *on = !*on;
+                    let lamp = &self.reference.lamps[*index];
+                    for &(owner, id, enabled) in &self.lamp_voices {
+                        if owner == control {
+                            self.signals[self.voice_indices[&id]].playing = *on
+                                && enabled
+                                && !self
+                                    .removed
+                                    .contains(&self.signals[self.voice_indices[&id]].emitter);
+                        }
+                    }
+                    let binding = if *on {
+                        lamp.on_binding
+                    } else {
+                        lamp.off_binding
+                    };
+                    if let Some(id) = binding {
+                        self.emit(id, 1., simulation_seconds);
+                    }
+                }
+                None
+            }
+            InteractionAction::PartInstall(item)
+            | InteractionAction::PartRemove(item)
+            | InteractionAction::WheelRemove(item)
+            | InteractionAction::WheelInstall { item, .. } => Some(item),
+            InteractionAction::WheelJoin { tire, .. } => Some(tire),
+            _ => None,
+        };
+        if let Some(id) = item.and_then(|item| self.crafted.get(&item)).copied() {
+            self.emit(id, 1., simulation_seconds);
+        }
+    }
+    pub fn light_switch(&mut self) {
+        if let Some(b) = self
+            .reference
+            .bindings
+            .iter()
+            .find(|b| b.trigger == "light_switch")
+            .map(|b| b.id)
+        {
+            self.emit(b, 1., self.game_seconds);
+        }
+    }
+    pub fn cap(
+        &mut self,
+        id: crate::reference::OpeningId,
+        previous: f32,
+        current: f32,
+        tune: Option<f32>,
+    ) {
+        let Some(&i) = self.fluid_openings.get(&id) else {
+            return;
+        };
+        let a = &self.reference.fluids[self.fluid_sounds[i].index];
+        let (binding, gain) = if let Some(delta) = tune {
+            if previous <= 0. || previous >= 1. || delta == 0. {
+                return;
+            }
+            (a.tune_binding, delta.abs())
+        } else if previous != current {
+            (
+                if current > 0. {
+                    a.open_binding
+                } else {
+                    a.close_binding
+                },
+                1.,
+            )
+        } else {
+            return;
+        };
+        if let Some(b) = binding {
+            self.emit(b, gain, self.game_seconds);
+        }
+    }
+    pub fn mechanism(&mut self, item: ItemId, previous: f32, current: f32, dt: f32) {
+        self.mechanism_channels(
+            item,
+            [previous, 0.],
+            [current, 0.],
+            [(current - previous).abs(), 0.],
+            dt,
+        );
+    }
+    fn mechanism_channels(
+        &mut self,
+        item: ItemId,
+        previous: [f32; 2],
+        current: [f32; 2],
+        requested: [f32; 2],
+        dt: f32,
+    ) {
+        if !dt.is_finite() || dt <= 0. {
+            return;
+        }
+        let Some(&i) = self.mechanism_items.get(&item) else {
+            return;
+        };
+        let index = self.mechanism_sounds[i].index;
+        let slide = self.mechanism_sounds[i].slide;
+        let limits = self.mechanism_sounds[i].limits;
+        let delta = [
+            (current[0] - previous[0]).abs(),
+            (current[1] - previous[1]).abs(),
+        ];
+        for axis in 0..if slide { 1 } else { 2 } {
+            if delta[axis] == 0. {
+                continue;
+            }
+            let [min, max] = limits[axis];
+            for kind in 0..4 {
+                let trigger = ["startPosEnd", "endPosEnd", "startPosStart", "endPosStart"][kind];
+                let edge = [
+                    current[axis] == min && previous[axis] != min,
+                    current[axis] == max && previous[axis] != max,
+                    current[axis] != min && previous[axis] == min,
+                    current[axis] != max && previous[axis] == max,
+                ][kind];
+                if !edge {
+                    continue;
+                }
+                for n in 0..self.reference.mechanisms[index].endpoints.len() {
+                    let id = self.reference.mechanisms[index].endpoints[n];
+                    if self.binding(id).is_some_and(|b| b.trigger == trigger) {
+                        self.emit(id, requested[axis].abs() / dt * 0.01, self.game_seconds);
+                    }
+                }
+            }
+        }
+        let a = &self.reference.mechanisms[index];
+        let Some(id) = a.movement_voice else {
+            return;
+        };
+        let difference = delta[0] + delta[1];
+        if slide {
+            self.mechanism_sounds[i].last_slide_time = self.game_seconds;
+        }
+        let target = a.audio_multiplier
+            * difference
+            * if slide {
+                a.slide_multiplier * a.slide_gain
+            } else {
+                a.rotation_gain
+            };
+        let smoothing = (dt * a.gain_smoothing).clamp(0., 1.);
+        let chance = a.squeak_chance;
+        let pitch_range = a.pitch_range;
+        let voice = self.voice_indices[&id];
+        let gain = self.signals[voice].gain + (target - self.signals[voice].gain) * smoothing;
+        self.mechanism_sounds[i].remaining = (self.mechanism_sounds[i].remaining - dt).max(0.);
+        let mut playing = difference > 0. && self.mechanism_sounds[i].remaining > 0.;
+        let mut pitch = self.signals[voice].pitch;
+        if difference > 0. && !playing && ((!slide && delta[0] > 0.) || self.sample() > chance) {
+            playing = true;
+            pitch = pitch_range[0] + (pitch_range[1] - pitch_range[0]) * self.sample();
+            let clip = self.reference.voices[voice].clip.unwrap();
+            let duration = self
+                .reference
+                .clips
+                .iter()
+                .find(|c| c.id == clip)
+                .unwrap()
+                .source_duration_seconds as f32;
+            self.mechanism_sounds[i].remaining = duration / pitch;
+        }
+        self.voice(id, playing, gain.clamp(0., 1.), pitch);
+    }
+    fn fluid(&mut self, i: usize, flow: Option<(bool, f32)>, fill_called: bool, empty_pour: bool) {
+        let a = &self.reference.fluids[self.fluid_sounds[i].index];
+        let Some(id) = a.fill_voice else {
+            return;
+        };
+        if fill_called {
+            self.signals[self.voice_indices[&id]].looping = a.fill_loop;
+        }
+        if let Some((fill, value)) = flow {
+            if fill {
+                self.signals[self.voice_indices[&id]].looping = a.fill_loop;
+            }
+            self.fluid_sounds[i].gain = if fill {
+                a.max_gain * value
+            } else {
+                inverse_lerp(a.pour_speed_min, a.pour_speed_max, value)
+            };
+            if fill_called || fill {
+                self.fluid_sounds[i].latch = a.fill_latch_steps;
+            }
+        }
+        if empty_pour {
+            self.fluid_sounds[i].latch = 0;
+        }
+        let playing = !empty_pour && (flow.is_some() || self.fluid_sounds[i].latch > 0);
+        if !fill_called && self.fluid_sounds[i].latch > 0 {
+            self.fluid_sounds[i].latch -= 1;
+        }
+        self.voice(id, playing, self.fluid_sounds[i].gain, 1.);
+    }
+    pub fn remove_owner(&mut self, emitter: u32) {
+        self.removed.insert(emitter);
+        for signal in &mut self.signals {
+            if signal.emitter == emitter {
+                signal.playing = false;
+            }
+        }
+        let mut count = 0;
+        for i in 0..self.length {
+            if self.queue[i].is_some_and(|e| e.emitter != emitter) {
+                self.queue[count] = self.queue[i];
+                count += 1;
+            }
+        }
+        self.queue[count..self.length].fill(None);
+        self.length = count;
+    }
+    pub fn owner_alive(&self, emitter: u32) -> bool {
+        !self.removed.contains(&emitter)
     }
     pub fn vehicle(&mut self, input: VehicleAudioInput, dt: f32, simulation_seconds: f64) {
         let [
@@ -347,7 +753,7 @@ impl AudioState {
         self.length
     }
     pub fn push_event(&mut self, event: AudioEvent) {
-        if event.session != self.session {
+        if event.session != self.session || self.removed.contains(&event.emitter) {
             return;
         }
         if self.length == 64 {
@@ -383,6 +789,15 @@ impl AudioState {
         self.length = 0;
         self.sequence = 0;
         self.game_seconds = 0.;
+        self.random = session.wrapping_add(0x9e3779b9);
+        self.removed.clear();
+        for m in &mut self.mechanism_sounds {
+            m.remaining = 0.;
+        }
+        for f in &mut self.fluid_sounds {
+            f.latch = 0;
+            f.gain = 0.;
+        }
         self.starter_enabled = false;
         self.horn_gain = 0.;
         self.last_running = false;
@@ -395,6 +810,12 @@ impl AudioState {
             signal.playing = false;
             signal.gain = voice.gain;
             signal.pitch = voice.pitch;
+            signal.looping = voice.r#loop;
+        }
+        for a in &self.reference.mechanisms {
+            if let Some(id) = a.movement_voice {
+                self.signals[self.voice_indices[&id]].gain = 0.;
+            }
         }
         for (_, latch) in &mut self.route_sensors {
             latch.sensed = false;
@@ -403,6 +824,11 @@ impl AudioState {
         }
     }
     pub fn rebase(&mut self, shift: [f32; 3]) {
+        for position in self.positions.values_mut() {
+            for (p, d) in position.iter_mut().zip(shift) {
+                *p -= d;
+            }
+        }
         for (p, d) in self.engine_position.iter_mut().zip(shift) {
             *p -= d;
         }
@@ -463,6 +889,65 @@ impl AudioState {
                     rapier3d::math::Vector::from_array(area.origin.map(|v| v as f32));
             }
             self.engine_position = crate::vehicle::from_rapier(&world).position;
+        }
+        for (&id, &(anchor, local)) in &self.emitter_anchors {
+            let mut world = anchor
+                .and_then(|node| area.interaction.mechanisms.node_pose(node))
+                .map_or(local, |pose| to_rapier(pose) * local);
+            if anchor.is_none() {
+                world.translation -=
+                    rapier3d::math::Vector::from_array(area.origin.map(|v| v as f32));
+            }
+            *self.positions.get_mut(&id).unwrap() = crate::vehicle::from_rapier(&world).position;
+        }
+        for i in 0..self.mechanism_sounds.len() {
+            let item = self.mechanism_sounds[i].item;
+            let Some((current, turn)) = area.interaction.mechanisms.audio_values(item) else {
+                continue;
+            };
+            let (active, requested) = area.interaction.mechanisms.audio_input(item);
+            if active {
+                self.mechanism_channels(
+                    item,
+                    self.mechanism_sounds[i].previous,
+                    current,
+                    requested,
+                    dt,
+                );
+            } else if let Some(id) =
+                self.reference.mechanisms[self.mechanism_sounds[i].index].movement_voice
+            {
+                self.mechanism_sounds[i].remaining =
+                    (self.mechanism_sounds[i].remaining - dt).max(0.);
+                let a = &self.reference.mechanisms[self.mechanism_sounds[i].index];
+                let signal = &mut self.signals[self.voice_indices[&id]];
+                if self.game_seconds - self.mechanism_sounds[i].last_slide_time
+                    > f64::from(a.slide_stop_seconds)
+                {
+                    signal.gain *= 1. - (dt * 5.).clamp(0., 1.);
+                }
+                signal.playing &= self.mechanism_sounds[i].remaining > 0. && signal.gain > 0.;
+            }
+            if turn != self.mechanism_sounds[i].turn {
+                if let Some(id) =
+                    self.reference.mechanisms[self.mechanism_sounds[i].index].turn_binding
+                {
+                    self.emit(id, 1., self.game_seconds);
+                }
+            }
+            self.mechanism_sounds[i].previous = current;
+            self.mechanism_sounds[i].turn = turn;
+        }
+        for i in 0..self.fluid_sounds.len() {
+            let flags = area
+                .interaction
+                .opening_audio_flags(self.fluid_sounds[i].opening);
+            self.fluid(
+                i,
+                area.interaction.opening_flow(self.fluid_sounds[i].opening),
+                flags.0,
+                flags.1,
+            );
         }
         self.sensor.begin_step();
         for (index, (id, latch)) in self.route_sensors.iter_mut().enumerate() {
