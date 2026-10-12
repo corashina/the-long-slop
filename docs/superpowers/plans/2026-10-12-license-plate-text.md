@@ -137,7 +137,7 @@ Modify exporter, manifest, glTF integration, `src/reference.rs`, and the native 
 - Produce: `PlateRecord::validate(&self, manifest: &ReferenceManifest) -> Result<(), ReferenceError>`.
 - Produce: the shared types above, checked image files, and dependency receipts.
 
-- [ ] **Step 1: Add critical recovery and validation tests.**
+- [x] **Step 1: Add critical recovery and validation tests.**
 
 `test_lada_startup_plate_bindings` must assert these exact source values:
 
@@ -155,12 +155,12 @@ Add `plate_contract_rejects_invalid_font_data` in Rust.
 Mutate missing `A`, out-of-atlas glyph bounds, duplicate item ownership, and invalid `same_as` references.
 Assert `manifest.validate().is_err()` for each mutation.
 
-- [ ] **Step 2: Run the new tests and record their expected initial failure.**
+- [x] **Step 2: Run the new tests and record their expected initial failure.**
 
 Run the Python command and `./scripts/check.ps1 -Test plate_reference`.
 Expected: missing recovery function or required contract types.
 
-- [ ] **Step 3: Implement checked source recovery and contract validation.**
+- [x] **Step 3: Implement checked source recovery and contract validation.**
 
 Recover the exact two scripts, their activation chain, pickup links, and attachment targets from the spec.
 Recover `attachablescript.Start`, `Detach`, target eligibility, and pickup body settings.
@@ -177,13 +177,13 @@ Export font material assets independently of unsupported glTF Standard material 
 Preserve staged generation, dependency verification, and atomic promotion.
 Update the required fixture contract and installed manifest together.
 
-- [ ] **Step 4: Run recovery, contract, and staging checks.**
+- [x] **Step 4: Run recovery, contract, and staging checks.**
 
 Run Python plate checks and `tools.reference.tests.test_export_staging`.
 Run `./scripts/check.ps1 -Test plate_reference`, fresh installed export, and installed plate reference checks.
 Expected: two bound source plates; checked font assets; zero failures; previous accepted output retained after failed export.
 
-- [ ] **Step 5: Commit the contract and exporter changes.**
+- [x] **Step 5: Commit the contract and exporter changes.**
 
 Commit message: `feat: recover source Lada plate contracts`.
 
@@ -201,6 +201,7 @@ Modify `src/lib.rs` and `src/starting_area.rs`.
 - Produce: `GlyphMesh { vertices: Vec<GlyphVertex>, indices: Vec<u32> }`.
 - Produce: `GlyphVertex { position: [f32; 3], normal: [f32; 3], uv0: [f32; 2], uv1: [f32; 2], color: [f32; 4] }`.
 Use quad vertex order bottom-left, bottom-right, top-right, top-left. Set index winding from the converted source normal.
+GlyphMesh vertices are text-local, with local Z zero. Do not bake `layout.transform` into glyph vertices.
 
 - [ ] **Step 1: Add generation, callback-order, and layout tests.**
 
@@ -250,7 +251,8 @@ Record that this adapter does not establish Unity global random-sequence parity.
 Do not expose new random settings or regenerate strings during item transitions.
 
 Own `PlateState` in `StartingArea` as `pub plates: PlateState`.
-Use source TMP layout definitions, material-dependent padding, bold spacing, and converted text transforms.
+Use source TMP layout definitions, material-dependent padding, and bold spacing.
+Retain `layout.transform` as binding data. The imported text node applies its converted transform once.
 Read the checked TMP decompile and receipt named in Task 1 report.
 Expand glyph UVs with the same recovered padding and style values as geometry.
 Build glyph winding, normals, UV0, UV1, and color for the source SDF surface.
@@ -309,7 +311,8 @@ Share one font atlas and one authored text material across both labels.
 Reuse existing checked texture sampler preparation through a small shared helper if needed.
 
 Bind generated text children to recovered text nodes and source render layers.
-Keep glyph transforms distinct from item transforms. Apply coordinate conversion once.
+Keep text-local glyph geometry distinct from item transforms. Bind it at the recovered text node.
+Its imported transform applies `layout.transform` once. Do not apply the text offset to vertices again.
 Create meshes only at initial binding or a changed text revision.
 Use identical vertex layouts for all generated strings.
 
