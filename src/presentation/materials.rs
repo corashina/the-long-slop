@@ -161,17 +161,31 @@ impl MaterialLoading {
 
     /// State: 0=Loading, 1=Ready, 2=Failed. Request indices start at zero.
     pub(crate) fn prewarm_audit(&self, world: &World) -> MaterialPrewarmAudit {
-        let pending = self.0.lock().unwrap();
+        let mut pending = self.0.lock().unwrap();
+        let state = match pending.state {
+            RenderingState::Loading => 0,
+            RenderingState::Ready => 1,
+            RenderingState::Failed(_) => 2,
+        };
+        // Requests are assigned as a complete Vec before sealing. Its retained
+        // storage identifies that assignment without scanning request contents.
+        let requests = (pending.requests.as_ptr() as usize, pending.requests.len());
+        if state == 0 {
+            pending.terminal_prewarm_audit = None;
+        } else if let Some((previous_requests, audit)) = pending.terminal_prewarm_audit {
+            if previous_requests == requests
+                && audit.state == state
+                && audit.sealed == pending.sealed
+            {
+                return audit;
+            }
+        }
         let meshes = world.get_resource::<RenderAssets<RenderMesh>>();
         let materials = world.get_resource::<ErasedRenderAssets<PreparedMaterial>>();
         let warmed = world.get_resource::<WarmedPipelines>();
         let cache = world.get_resource::<PipelineCache>();
         let mut audit = MaterialPrewarmAudit {
-            state: match pending.state {
-                RenderingState::Loading => 0,
-                RenderingState::Ready => 1,
-                RenderingState::Failed(_) => 2,
-            },
+            state,
             sealed: pending.sealed,
             request_count: pending.requests.len() as u32,
             warmed_queued: warmed.is_some_and(|warmed| warmed.queued),
@@ -205,6 +219,9 @@ impl MaterialLoading {
                     .get_or_insert(index as u32);
             }
         }
+        if state != 0 {
+            pending.terminal_prewarm_audit = Some((requests, audit));
+        }
         audit
     }
 }
@@ -217,6 +234,8 @@ struct LoadingData {
     state: RenderingState,
     shadow_capacity: usize,
     transparent_pass_capacity: usize,
+    // A terminal prewarm boundary remains fixed until requests, seal, or state change.
+    terminal_prewarm_audit: Option<((usize, usize), MaterialPrewarmAudit)>,
 }
 #[derive(Resource, Default)]
 struct WarmedPipelines {
@@ -239,6 +258,7 @@ impl Plugin for SourceMaterialPlugin {
             state: RenderingState::Loading,
             shadow_capacity: 0,
             transparent_pass_capacity: 0,
+            terminal_prewarm_audit: None,
         }))))
         .init_resource::<super::renderers::RendererMeshes>()
         .init_resource::<generated::GeneratedCasterMaterials>()

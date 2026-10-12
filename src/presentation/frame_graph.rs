@@ -3,12 +3,14 @@ use super::{
     frame_copy::FrameCopy,
     lighting_assets::LightingRenderAssets,
     materials::RenderingState,
+    probes::{ProbeFilter, ProbePublication},
     source_lighting::{SourceExecutionGate, SourceLightingStatus, SourceViewCamera},
     source_sky::SkyPass,
     surface_graph::{SourceSurface, SourceSurfaceStage},
     surface_views::{SourceSurfaceView, SurfaceResources},
     view_frame::{SourceSubmissionAcks, SourceViewFrame},
 };
+use crate::reference::reflections::ProbeJob;
 use bevy::camera::{RenderTarget, visibility::RenderLayers};
 use bevy::core_pipeline::core_3d::Transparent3d;
 use bevy::ecs::schedule::ScheduleLabel;
@@ -71,10 +73,15 @@ struct FrameProgress {
     views: [ViewAudit; 9],
     cpu_boundary: CpuBoundary,
     gpu_boundary: GpuBoundary,
+    probe: ProbeAudit,
 }
 #[derive(Resource, Clone, Default)]
 pub struct SourceGraphProgress(Arc<Mutex<FrameProgress>>);
 impl SourceGraphProgress {
+    pub fn probe_readiness(&self) -> (bool, bool) {
+        let state = self.0.lock().unwrap();
+        (state.probe.pipelines_ready, state.probe.published)
+    }
     pub fn validated(&self) -> bool {
         self.0.lock().unwrap().validated
     }
@@ -86,6 +93,43 @@ pub(crate) struct FrameResources {
     sky_depth: TextureView,
     display: FrameCopy,
     display_format: TextureFormat,
+}
+
+#[derive(Clone, Copy, Default, serde::Serialize)]
+struct ProbeAudit {
+    token: u32,
+    job: u8,
+    face_mask: u8,
+    mip_mask: u8,
+    pipelines_ready: bool,
+    filter_validation: u32,
+    publication_validation: u32,
+    published: bool,
+    generation: u32,
+    submitted_token: u32,
+    published_token: u32,
+}
+#[derive(Resource)]
+pub(crate) struct ProbeFrame {
+    filter: ProbeFilter,
+    publication: ProbePublication,
+    encoded_token: Option<u32>,
+    publication_encoded: Option<u32>,
+    filter_validation: u32,
+    publication_validation: u32,
+    publication_token: u32,
+    submitted_token: u32,
+    published_token: u32,
+    sky_frame: u32,
+    sky_face: u8,
+}
+impl ProbeFrame {
+    fn accepts(&self, token: u32) -> bool {
+        token != 0
+            && token > self.submitted_token
+            && !self.publication.waiting()
+            && self.publication_validation == 0
+    }
 }
 
 pub struct SourceFramePlugin;
@@ -124,7 +168,7 @@ impl Plugin for SourceFramePlugin {
             .add_systems(Render, gpu_boundaries.in_set(RenderSystems::Cleanup))
             .add_systems(
                 Render,
-                (update_sky_extras, prepare_frame, sort_sky)
+                (update_sky_extras, prepare_frame, prepare_probe, sort_sky)
                     .after(RenderSystems::PrepareResources)
                     .before(RenderSystems::Render),
             )
@@ -133,6 +177,14 @@ impl Plugin for SourceFramePlugin {
             .add_systems(
                 SourceSurface,
                 (
+                    clear_probe_face
+                        .before(SourceSurfaceStage::CameraDepth)
+                        .run_if(surface_ready)
+                        .run_if(super::shadow_queue::graph_ready),
+                    render_probe_sky
+                        .in_set(SourceSurfaceStage::AfterOpaque)
+                        .run_if(surface_ready)
+                        .run_if(super::shadow_queue::collector_encoded),
                     super::shadow_atlas::render_atlas
                         .in_set(SourceSurfaceStage::ShadowAtlas)
                         .run_if(surface_ready)
@@ -143,6 +195,12 @@ impl Plugin for SourceFramePlugin {
                 ),
             )
             .add_systems(RenderGraph, begin_frame.in_set(RenderGraphSystems::Begin))
+            .add_systems(
+                RenderGraph,
+                filter_probe
+                    .after(RenderGraphSystems::Render)
+                    .before(RenderGraphSystems::Submit),
+            )
             .add_systems(RenderGraph, submitted.in_set(RenderGraphSystems::Finish));
     }
 }
@@ -342,6 +400,24 @@ fn prepare_frame(
             );
         }
     }
+    if let (Some(sky), Some(ProbeJob::Face(face))) = (sky.as_mut(), frame.probe_job) {
+        if let Some(snapshot) = frame.views[3 + usize::from(face)] {
+            let projection =
+                Mat4::from_cols_array_2d(&crate::reference::sky::source_sky_gpu_projection(
+                    snapshot.implicit_projection.to_cols_array_2d(),
+                    snapshot.near,
+                ));
+            sky.write_live(
+                1 + usize::from(face),
+                &scene,
+                scene.probe_position,
+                snapshot.far,
+                projection * snapshot.view_from_world,
+                &device,
+                &queue,
+            );
+        }
+    }
     if let Some(clouds) = clouds.as_mut() {
         if sky_views.single().is_ok() {
             clouds.write_live(sky_clip, &scene, &device, &queue);
@@ -418,14 +494,20 @@ pub(crate) fn surface_ready(
     progress: Res<SourceGraphProgress>,
     camera: Res<SourceViewCamera>,
     resources: Option<Res<FrameResources>>,
+    probe: Option<Res<ProbeFrame>>,
     cache: Res<PipelineCache>,
 ) -> bool {
     let index = view.into_inner().index;
-    index < 3
+    let state = progress.0.lock().unwrap();
+    index < 9
         && frame.views[index].is_some()
         && camera.ready()
         && resources.is_some_and(|r| r.display.ready(&cache))
-        && progress.0.lock().unwrap().sky
+        && state.sky
+        && (index < 3
+            || (state.presented
+                && frame.probe_job == Some(ProbeJob::Face((index - 3) as u8))
+                && probe.is_some_and(|p| p.accepts(frame.probe_token) && p.filter.ready(&cache))))
 }
 fn begin_frame(frame: Res<SourceViewFrame>, progress: Res<SourceGraphProgress>) {
     let mut state = progress.0.lock().unwrap();
@@ -588,12 +670,14 @@ fn finish_surface(
     frame: Res<SourceViewFrame>,
     progress: Res<SourceGraphProgress>,
     resources: Res<FrameResources>,
+    surfaces: Res<SurfaceResources>,
+    mut probe: Option<ResMut<ProbeFrame>>,
     cache: Res<PipelineCache>,
     status: Res<SourceLightingStatus>,
     mut context: RenderContext,
 ) {
     let (source, target, collector, lighting, shadow, depth, targets) = view.into_inner();
-    if source.index >= 3 || collector.encoded_frame() != frame.frame {
+    if collector.encoded_frame() != frame.frame {
         return;
     }
     if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
@@ -612,6 +696,43 @@ fn finish_surface(
         atlas_size: targets.0.atlas_size,
         physical_extent: [targets.0.colors.width, targets.0.colors.height],
     };
+    if source.index >= 3 {
+        let Some(probe) = probe.as_mut() else { return };
+        let face = (source.index - 3) as u8;
+        if probe.sky_frame != frame.frame || probe.sky_face != face {
+            return;
+        }
+        context.command_encoder().copy_texture_to_texture(
+            TexelCopyTextureInfo {
+                texture: &targets.0.colors.resolved.texture,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            TexelCopyTextureInfo {
+                texture: &surfaces.probe.base.texture,
+                mip_level: 0,
+                origin: Origin3d {
+                    x: 0,
+                    y: 0,
+                    z: u32::from(face),
+                },
+                aspect: TextureAspect::All,
+            },
+            Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
+        );
+        let job = ProbeJob::Face(face);
+        if let Err(error) = probe.publication.encoded(frame.probe_token, job) {
+            *status.0.lock().unwrap() = RenderingState::Failed(error.into());
+            return;
+        }
+        probe.encoded_token = Some(frame.probe_token);
+        return;
+    }
     state.mask |= 1 << source.index;
     if source.index == 2 && state.mask == 7 && state.sky {
         let Some(output) = target.out_texture_color_attachment(None) else {
@@ -628,6 +749,9 @@ fn finish_surface(
 }
 fn submitted(
     progress: Res<SourceGraphProgress>,
+    frame: Res<SourceViewFrame>,
+    mut probe: Option<ResMut<ProbeFrame>>,
+    cache: Res<PipelineCache>,
     acks: Res<SourceSubmissionAcks>,
     gate: Res<SourceExecutionGate>,
     queue: Res<RenderQueue>,
@@ -637,14 +761,60 @@ fn submitted(
         return;
     }
     let mut state = progress.0.lock().unwrap();
-    if !state.presented {
+    if state.presented {
+        acks.main_submitted(state.token);
+        if state.validation == 0 {
+            state.validation = gate.watch_submission(&queue);
+        }
+        state.validated = gate.submission_validated(state.validation);
+    }
+    let Some(probe) = probe.as_mut() else { return };
+    let result = (|| -> Result<(), &'static str> {
+        if let Some(token) = probe.encoded_token.take() {
+            let advance = probe.publication.submitted(token)?;
+            probe.submitted_token = token;
+            if advance {
+                acks.probe_submitted(token);
+            } else {
+                probe.filter_validation = gate.watch_submission(&queue);
+            }
+        }
+        if let Some(token) = probe.publication_encoded.take() {
+            probe.publication_token = token;
+            probe.publication_validation = gate.watch_submission(&queue);
+        }
+        if gate.submission_validated(probe.publication_validation) {
+            let token = probe.publication_token;
+            probe.publication.publication_submitted(token)?;
+            acks.probe_publication_submitted(token);
+            probe.published_token = token;
+            probe.publication_validation = 0;
+            probe.publication_token = 0;
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        *status.0.lock().unwrap() = RenderingState::Failed(error.into());
         return;
     }
-    acks.main_submitted(state.token);
-    if state.validation == 0 {
-        state.validation = gate.watch_submission(&queue);
-    }
-    state.validated = gate.submission_validated(state.validation);
+    state.probe = ProbeAudit {
+        token: frame.probe_token,
+        job: match frame.probe_job {
+            Some(ProbeJob::Face(face)) => face + 1,
+            Some(ProbeJob::FirstMip) => 7,
+            Some(ProbeJob::RemainingMipsAndPublish) => 8,
+            None => 0,
+        },
+        face_mask: probe.publication.face_mask(),
+        mip_mask: probe.publication.mip_mask(),
+        pipelines_ready: probe.filter.ready(&cache),
+        filter_validation: probe.filter_validation,
+        publication_validation: probe.publication_validation,
+        published: probe.publication.published(),
+        generation: probe.publication.generation(),
+        submitted_token: probe.submitted_token,
+        published_token: probe.published_token,
+    };
 }
 
 #[derive(Clone, Copy, Default, serde::Serialize)]
@@ -906,4 +1076,175 @@ fn gpu_boundaries(
         .lock()
         .unwrap()
         .gpu_boundary = boundary;
+}
+
+fn prepare_probe(
+    mut commands: Commands,
+    surfaces: Option<Res<SurfaceResources>>,
+    assets: Option<Res<LightingRenderAssets>>,
+    existing: Option<Res<ProbeFrame>>,
+    device: Res<RenderDevice>,
+    queue: Res<RenderQueue>,
+    cache: Res<PipelineCache>,
+    status: Res<SourceLightingStatus>,
+) {
+    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+        return;
+    }
+    if let Some(existing) = existing {
+        if let Some(error) = existing.filter.failure(&cache) {
+            *status.0.lock().unwrap() = RenderingState::Failed(error);
+        }
+        return;
+    }
+    let (Some(surfaces), Some(assets)) = (surfaces, assets) else {
+        return;
+    };
+    commands.insert_resource(ProbeFrame {
+        filter: ProbeFilter::new(
+            &device,
+            &queue,
+            &cache,
+            assets.shaders.probe.clone(),
+            &surfaces.probe,
+        ),
+        publication: ProbePublication::default(),
+        encoded_token: None,
+        publication_encoded: None,
+        filter_validation: 0,
+        publication_validation: 0,
+        publication_token: 0,
+        submitted_token: 0,
+        published_token: 0,
+        sky_frame: 0,
+        sky_face: 0,
+    });
+}
+fn clear_probe_face(
+    view: ViewQuery<(
+        &SourceSurfaceView,
+        &super::surface_graph::SurfaceViewTargets,
+    )>,
+    mut context: RenderContext,
+) {
+    let (source, targets) = view.into_inner();
+    if source.index < 3 {
+        return;
+    }
+    let colors = [Some(RenderPassColorAttachment {
+        view: targets.0.colors.attachment(),
+        depth_slice: None,
+        resolve_target: None,
+        ops: Operations {
+            load: LoadOp::Clear(LinearRgba::BLACK.into()),
+            store: StoreOp::Store,
+        },
+    })];
+    drop(
+        context
+            .command_encoder()
+            .begin_render_pass(&RenderPassDescriptor {
+                label: Some("source_probe_face_clear"),
+                color_attachments: &colors,
+                ..default()
+            }),
+    );
+}
+fn render_probe_sky(
+    view: ViewQuery<(
+        &SourceSurfaceView,
+        &super::surface_graph::SurfaceViewTargets,
+    )>,
+    sky: Res<SkyPass>,
+    mut probe: Option<ResMut<ProbeFrame>>,
+    frame: Res<SourceViewFrame>,
+    cache: Res<PipelineCache>,
+    status: Res<SourceLightingStatus>,
+    mut context: RenderContext,
+) {
+    let (source, targets) = view.into_inner();
+    if source.index < 3 || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+        return;
+    }
+    let Some(probe) = probe.as_mut() else { return };
+    if sky.encode(
+        source.index - 2,
+        context.command_encoder(),
+        &cache,
+        targets.0.colors.attachment(),
+        None,
+        &targets.0.depth.attachment,
+    ) {
+        probe.sky_frame = frame.frame;
+        probe.sky_face = (source.index - 3) as u8;
+    }
+}
+fn filter_probe(
+    mut probe: Option<ResMut<ProbeFrame>>,
+    surfaces: Option<Res<SurfaceResources>>,
+    frame: Res<SourceViewFrame>,
+    progress: Res<SourceGraphProgress>,
+    gate: Res<SourceExecutionGate>,
+    cache: Res<PipelineCache>,
+    status: Res<SourceLightingStatus>,
+    mut context: RenderContext,
+) {
+    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
+        || !progress.0.lock().unwrap().presented
+    {
+        return;
+    }
+    let (Some(probe), Some(surfaces)) = (probe.as_mut(), surfaces) else {
+        return;
+    };
+    if probe.publication_validation != 0 {
+        return;
+    }
+    if probe.filter_validation != 0 {
+        if !gate.submission_validated(probe.filter_validation) {
+            return;
+        }
+        let Some(token) = probe.publication.validation_token() else {
+            *status.0.lock().unwrap() =
+                RenderingState::Failed("Source probe validation lacks its token".into());
+            return;
+        };
+        let result = probe.publication.validated(token, true).and_then(|()| {
+            probe
+                .publication
+                .encode_publication(context.command_encoder(), &surfaces.probe)
+        });
+        match result {
+            Ok(token) => {
+                probe.filter_validation = 0;
+                probe.publication_encoded = Some(token);
+            }
+            Err(error) => *status.0.lock().unwrap() = RenderingState::Failed(error.into()),
+        }
+        return;
+    }
+    if !probe.accepts(frame.probe_token) || !probe.filter.ready(&cache) {
+        return;
+    }
+    let Some(job) = frame.probe_job else { return };
+    let encoded = match job {
+        ProbeJob::FirstMip => {
+            probe
+                .filter
+                .first_mip(context.command_encoder(), &cache, &surfaces.probe)
+        }
+        ProbeJob::RemainingMipsAndPublish => {
+            probe
+                .filter
+                .remaining_mips(context.command_encoder(), &cache, &surfaces.probe)
+        }
+        ProbeJob::Face(_) => false,
+    };
+    if encoded {
+        if let Err(error) = probe.publication.encoded(frame.probe_token, job) {
+            *status.0.lock().unwrap() = RenderingState::Failed(error.into());
+            return;
+        }
+        probe.encoded_token = Some(frame.probe_token);
+    }
 }

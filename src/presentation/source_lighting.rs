@@ -317,7 +317,9 @@ fn sync_lighting_readiness(
     master: Option<Res<super::lighting::SourceLighting>>,
     status: Res<SourceLightingStatus>,
     gate: Res<SourceExecutionGate>,
+    graph: Option<Res<super::frame_graph::SourceGraphProgress>>,
 ) {
+    let probe_readiness = graph.as_ref().map(|graph| graph.probe_readiness());
     let mut shared = status.0.lock().expect("source lighting status lock");
     if let RenderingState::Failed(error) = &lighting.state {
         if !matches!(*shared, RenderingState::Failed(_)) {
@@ -350,6 +352,10 @@ fn sync_lighting_readiness(
             *shared = lighting.state.clone();
             return;
         }
+    }
+    if let Some((pipelines, published)) = probe_readiness {
+        lighting.probe_pipelines_ready = pipelines;
+        lighting.first_probe_ready = published;
     }
     lighting.first_submission_validated = gate.validated();
     lighting.update_readiness();

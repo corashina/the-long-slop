@@ -142,6 +142,18 @@ impl ProbeFilter {
         cache.get_render_pipeline(self.gaussian).is_some()
             && cache.get_render_pipeline(self.remap).is_some()
     }
+    pub fn failure(&self, cache: &PipelineCache) -> Option<String> {
+        [self.gaussian, self.remap].into_iter().find_map(|id| {
+            match cache.get_render_pipeline_state(id) {
+                CachedPipelineState::Err(
+                    bevy::shader::ShaderCacheError::ShaderNotLoaded(_)
+                    | bevy::shader::ShaderCacheError::ShaderImportNotYetAvailable,
+                ) => None,
+                CachedPipelineState::Err(error) => Some(format!("Source probe pipeline: {error}")),
+                _ => None,
+            }
+        })
+    }
     /// Job seven. Return false without encoding or advancing when either pipeline is pending.
     pub fn first_mip(
         &self,
