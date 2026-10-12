@@ -332,3 +332,22 @@ fn installed_source_identity_and_schema() {
     let (reference, source, snapshot) = snapshot_for(reference);
     snapshot.validate(&reference, &source).unwrap();
 }
+
+#[test]
+fn fixed_source_child_cannot_become_an_independent_item() {
+    let (mut reference, _, _) = fixture();
+    let owner = reference.items[1].id;
+    let child = reference.items[0].id;
+    assert!(!reference.parts.iter().any(|part| part.item == child));
+    assert!(!reference.wheel_parts.iter().any(|part| part.item == child));
+    reference.items[0].attached_to = Some(owner);
+    let (reference, source, mut snapshot) = snapshot_for(reference);
+    snapshot.validate(&reference, &source).unwrap();
+    snapshot.items[0].location = ItemLocationSave::World;
+    assert_eq!(
+        snapshot.validate(&reference, &source),
+        Err(SaveError::InvalidLinks(
+            "Fixed source attachment changed".into()
+        ))
+    );
+}

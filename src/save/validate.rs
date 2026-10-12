@@ -264,6 +264,16 @@ impl SaveSnapshot {
             parents.insert(tire, rim);
         }
         for (&id, item) in items {
+            let source_item = reference.items.iter().find(|i| i.id == id).unwrap();
+            let detachable = reference.parts.iter().any(|part| part.item == id)
+                || reference.wheel_parts.iter().any(|part| part.item == id);
+            if let Some(owner) = source_item.attached_to.filter(|_| !detachable) {
+                links(
+                    matches!(&item.location, ItemLocationSave::Attached { owner: saved_owner }
+                        if ids.item(saved_owner).ok() == Some(owner)),
+                    "Fixed source attachment changed",
+                )?;
+            }
             match &item.location {
                 ItemLocationSave::PartSlot { slot } => links(
                     ids.part_slots
@@ -285,7 +295,6 @@ impl SaveSnapshot {
                 )?,
                 ItemLocationSave::Attached { owner } => {
                     let owner = ids.item(owner)?;
-                    let source_item = reference.items.iter().find(|i| i.id == id).unwrap();
                     if matches!(source_item.kind, r::ItemKind::Tire) {
                         links(tires.get(&owner) == Some(&id), "Unlisted tire attachment")?;
                     } else {
