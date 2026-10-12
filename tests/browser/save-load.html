@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Browser save tests</title>
+<style>body{font:16px sans-serif;margin:2rem;max-width:65rem}button{margin:.3rem;padding:.6rem}pre{white-space:pre-wrap}a{display:inline-block;margin:.5rem}</style>
+<h1>Browser save tests</h1>
+<p>This page uses the save database on this test origin.</p>
+<button id="storage">Run storage checks</button>
+<button id="interrupt">Run interrupted write</button>
+<button id="blocked">Run blocked open</button>
+<a href="?mode=blocker" target="_blank">Open blocker tab</a>
+<a href="?mode=interrupt" target="_blank">Open interruption tab</a>
+<button id="release">Release helper</button>
+<pre id="results" aria-live="polite">Ready.</pre>
+<script type="module" src="./save-load.js"></script>
+</html>
