@@ -6,7 +6,12 @@ use crate::vehicle::{ColliderHandle, PhysicsWorld, VehiclePose};
 
 mod lamps;
 mod noise;
+mod placement;
 mod random;
+pub use placement::{
+    BUILDING_CHECKPOINT_INTERVAL, BuildingCheckpoint, BuildingGroupState, BuildingSequence,
+    FoundationPoint, PlacementIndex, SupplyDefinition, SupplyFluid, SupplyPoint,
+};
 mod road;
 pub use noise::{TerrainEvaluator, source_perlin};
 pub use random::{RandomState, SourceRandom};
