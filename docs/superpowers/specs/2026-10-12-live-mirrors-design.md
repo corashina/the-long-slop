@@ -1,7 +1,7 @@
 # Live mirrors
 
 Date: 2026-10-12, Europe/Warsaw.
-Status: The user approved the chat design. Written spec review is pending.
+Status: The user approved this written spec on 2026-10-12. Implementation plan review is pending.
 Branch: `codex/equipment`.
 Base commit: `dccd516387dff48bf9388ad96ecd52eab3f29c00`.
 Reference: installed Steam build `11140890`, Unity `2021.3.18f1`.
