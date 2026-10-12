@@ -265,8 +265,13 @@ class GltfExporter(GltfBuilder):
                 component_classes={self.source.class_name(r) for r in record['components'] if r.type.name=='MonoBehaviour' and self.source.read(r)['m_Script']['m_PathID']}
                 render_enabled=renderer_visible(bool(renderer_data['m_Enabled']), component_classes) and key(renderer) not in hidden_lods and key(reader) not in inactive_nodes
                 if component_classes.intersection({'TextMeshPro','TMP_SubMesh'}):
+                    selected_text = key(reader) in {('level1',61809),('level1',62878)}
+                    selected_submesh = self.source.read(reader)['m_Father']['m_PathID'] in {61809,62878}
                     self.material_report.append({'source':source_id(renderer),
-                        'adaptation':'Omitted obsolete editor TMP glyphs. Seeded plate text requires glyph regeneration.'})
+                        'adaptation':'Runtime plate glyph binding uses the checked font contract.' if selected_text or selected_submesh else 'Omitted unrelated TMP editor glyphs.'})
+                    if selected_text:
+                        node.extras['plate_text_source'] = source_id(next(r for r in record['components'] if r.type.name=='MonoBehaviour' and self.source.class_name(r)=='TextMeshPro'))
+                        node.extras['runtime_glyph_binding'] = True
                 node.extras['renderer_enabled'] = render_enabled
                 node.extras['cast_shadows'] = renderer_data['m_CastShadows']
                 node.extras['receive_shadows'] = bool(renderer_data['m_ReceiveShadows'])

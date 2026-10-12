@@ -891,7 +891,108 @@
         "file": "level1",
         "path_id": 37191
       },
-      "dependencies": [],
+      "dependencies": [
+        {
+          "file": "reference/plate-sharedassets0.assets-730.shader.json",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-730.shader.bin",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-271.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-271-mip-1.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-271-mip-2.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-271-mip-3.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-271-mip-4.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-271-mip-5.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-271-mip-6.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-271-mip-7.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-271-mip-8.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-271-mip-9.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-271-mip-10.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-252.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-252-mip-1.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-252-mip-2.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-252-mip-3.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-252-mip-4.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-252-mip-5.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-252-mip-6.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-252-mip-7.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-252-mip-8.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-252-mip-9.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-252-mip-10.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "file": "reference/plate-sharedassets0.assets-366.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
       "material_count": 67,
       "usage": "unique_scene"
     },
@@ -5003,6 +5104,223 @@
           1
         ]
       }
+    },
+    {
+      "id": 132,
+      "source": {
+        "file": "level1",
+        "path_id": 26468
+      },
+      "name": "FrontBumper",
+      "hierarchy_path": "Fixture2/bumper",
+      "asset": 2,
+      "gltf_node": 68,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 133,
+      "source": {
+        "file": "level1",
+        "path_id": 28032
+      },
+      "name": "LicenseAttach",
+      "hierarchy_path": "Fixture2/target0",
+      "asset": 2,
+      "gltf_node": 69,
+      "parent": 132,
+      "active": true,
+      "transform": {
+        "translation": [
+          0.0,
+          -0.11949999630451202,
+          -0.0
+        ],
+        "rotation": [
+          -0.0,
+          -1.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 134,
+      "source": {
+        "file": "level1",
+        "path_id": 22542
+      },
+      "name": "plate",
+      "hierarchy_path": "Fixture2/plate0",
+      "asset": 2,
+      "gltf_node": 70,
+      "parent": 133,
+      "active": true,
+      "transform": {
+        "translation": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "rotation": [
+          -0.0,
+          -0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 135,
+      "source": {
+        "file": "level1",
+        "path_id": 61809
+      },
+      "name": "Text (TMP)",
+      "hierarchy_path": "Fixture2/text0",
+      "asset": 2,
+      "gltf_node": 71,
+      "parent": 134,
+      "active": true,
+      "transform": {
+        "translation": [
+          0.0,
+          0.0,
+          -0.0031250000465661287
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 136,
+      "source": {
+        "file": "level1",
+        "path_id": 38387
+      },
+      "name": "LicenseAttach",
+      "hierarchy_path": "Fixture2/target1",
+      "asset": 2,
+      "gltf_node": 72,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0.0,
+          0.1340000033378601,
+          1.930999994277954
+        ],
+        "rotation": [
+          0.07297994196414948,
+          0.0,
+          -0.0,
+          0.9973334074020386
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 137,
+      "source": {
+        "file": "level1",
+        "path_id": 30779
+      },
+      "name": "plate",
+      "hierarchy_path": "Fixture2/plate1",
+      "asset": 2,
+      "gltf_node": 73,
+      "parent": 136,
+      "active": true,
+      "transform": {
+        "translation": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "rotation": [
+          -0.0,
+          -0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 138,
+      "source": {
+        "file": "level1",
+        "path_id": 62878
+      },
+      "name": "Text (TMP)",
+      "hierarchy_path": "Fixture2/text1",
+      "asset": 2,
+      "gltf_node": 74,
+      "parent": 137,
+      "active": true,
+      "transform": {
+        "translation": [
+          0.0,
+          0.0,
+          -0.0031250000465661287
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          -0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
     }
   ],
   "bodies": [
@@ -5665,6 +5983,166 @@
           0.0,
           0.0,
           1.0
+        ]
+      }
+    },
+    {
+      "id": 17,
+      "source": {
+        "file": "level1",
+        "path_id": 51119
+      },
+      "node": 134,
+      "body": 2,
+      "sensor": false,
+      "enabled": false,
+      "membership": 1,
+      "filter": 4294967295,
+      "friction": 0.6,
+      "restitution": 0,
+      "geometry": {
+        "kind": "convex",
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": 18,
+      "source": {
+        "file": "level1",
+        "path_id": 900001
+      },
+      "node": 133,
+      "body": 2,
+      "sensor": false,
+      "enabled": false,
+      "membership": 1,
+      "filter": 4294967295,
+      "friction": 0.6,
+      "restitution": 0,
+      "geometry": {
+        "kind": "convex",
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": 19,
+      "source": {
+        "file": "level1",
+        "path_id": 53336
+      },
+      "node": 137,
+      "body": 2,
+      "sensor": false,
+      "enabled": false,
+      "membership": 1,
+      "filter": 4294967295,
+      "friction": 0.6,
+      "restitution": 0,
+      "geometry": {
+        "kind": "convex",
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": 20,
+      "source": {
+        "file": "level1",
+        "path_id": 900002
+      },
+      "node": 136,
+      "body": 2,
+      "sensor": false,
+      "enabled": false,
+      "membership": 1,
+      "filter": 4294967295,
+      "friction": 0.6,
+      "restitution": 0,
+      "geometry": {
+        "kind": "convex",
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
         ]
       }
     }
@@ -6792,6 +7270,51 @@
         ],
         "recenter_distance": -0.5
       }
+    },
+    {
+      "id": 20,
+      "source": {
+        "file": "level1",
+        "path_id": 26468
+      },
+      "node": 132,
+      "body": 2,
+      "name": "Synthetic bumper",
+      "kind": "decoration",
+      "condition": 1,
+      "mass_kg": 1.0,
+      "attached_to": 1,
+      "pickup": null
+    },
+    {
+      "id": 21,
+      "source": {
+        "file": "level1",
+        "path_id": 22542
+      },
+      "node": 134,
+      "body": 2,
+      "name": "Synthetic plate 0",
+      "kind": "decoration",
+      "condition": 1,
+      "mass_kg": 1.0,
+      "attached_to": 1,
+      "pickup": null
+    },
+    {
+      "id": 22,
+      "source": {
+        "file": "level1",
+        "path_id": 30779
+      },
+      "node": 137,
+      "body": 2,
+      "name": "Synthetic plate 1",
+      "kind": "decoration",
+      "condition": 1,
+      "mass_kg": 1.0,
+      "attached_to": 1,
+      "pickup": null
     }
   ],
   "openings": [
@@ -11273,6 +11796,34 @@
     },
     {
       "collider": 16,
+      "use_owner": null,
+      "pickup_owner": null,
+      "removal_owner": null,
+      "push_owner": null
+    },
+    {
+      "collider": 17,
+      "use_owner": null,
+      "pickup_owner": null,
+      "removal_owner": null,
+      "push_owner": null
+    },
+    {
+      "collider": 18,
+      "use_owner": null,
+      "pickup_owner": null,
+      "removal_owner": null,
+      "push_owner": null
+    },
+    {
+      "collider": 19,
+      "use_owner": null,
+      "pickup_owner": null,
+      "removal_owner": null,
+      "push_owner": null
+    },
+    {
+      "collider": 20,
       "use_owner": null,
       "pickup_owner": null,
       "removal_owner": null,
@@ -19425,5 +19976,1925 @@
         ]
       }
     ]
+  },
+  "plates": {
+    "plates": [
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 78750
+        },
+        "attachment_source": {
+          "file": "level1",
+          "path_id": 66420
+        },
+        "pickup_source": {
+          "file": "level1",
+          "path_id": 65528
+        },
+        "save_source": {
+          "file": "level1",
+          "path_id": 65530
+        },
+        "text_source": {
+          "file": "level1",
+          "path_id": 64254
+        },
+        "font_source": {
+          "file": "sharedassets0.assets",
+          "path_id": 1366
+        },
+        "material_source": {
+          "file": "sharedassets0.assets",
+          "path_id": 18
+        },
+        "mass_source": {
+          "file": "level1",
+          "path_id": 74954
+        },
+        "item": 21,
+        "node": 134,
+        "text_node": 135,
+        "same_as": null,
+        "initial_text": "",
+        "initial_same": false,
+        "startup_target": 66346,
+        "layout": {
+          "bounds": [
+            0.4350000023841858,
+            0.08500000089406967
+          ],
+          "pivot": [
+            0.5,
+            0.5
+          ],
+          "anchor_min": [
+            0.5,
+            0.5
+          ],
+          "anchor_max": [
+            0.5,
+            0.5
+          ],
+          "font_size": 0.800000011920929,
+          "font_size_base": 0.800000011920929,
+          "font_size_min": 18.0,
+          "font_size_max": 72.0,
+          "font_style": 1,
+          "font_weight": 400,
+          "horizontal_alignment": 2,
+          "vertical_alignment": 512,
+          "auto_sizing": false,
+          "kerning": true,
+          "word_wrapping": false,
+          "extra_padding": false,
+          "orthographic": false,
+          "rich_text": true,
+          "overflow_mode": 0,
+          "max_visible_descender": true,
+          "spacing": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "margin": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "color": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "transform": {
+            "translation": [
+              0.0,
+              0.0,
+              -0.0031250000465661287
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              -0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "types": [
+          "licenseplate"
+        ],
+        "colliders": [
+          17
+        ],
+        "parent_at_attach": true,
+        "lock_rotation": true,
+        "target_pos_rot": true,
+        "only_to_point": false,
+        "ignore_points": false,
+        "use_collider_attach_point": false,
+        "snap_y_to_normal": false,
+        "remove_target_pos": [
+          0.0,
+          0.0,
+          0.10000000149011612
+        ],
+        "offset_back": 0.029999999329447746,
+        "mass_kg": 1.0,
+        "body_policy": "unity_add_component",
+        "body_source": null,
+        "pickup_store_damping": [
+          0.0,
+          0.0
+        ],
+        "linear_damping": null,
+        "angular_damping": null
+      },
+      {
+        "source": {
+          "file": "level1",
+          "path_id": 73955
+        },
+        "attachment_source": {
+          "file": "level1",
+          "path_id": 71250
+        },
+        "pickup_source": {
+          "file": "level1",
+          "path_id": 72351
+        },
+        "save_source": {
+          "file": "level1",
+          "path_id": 72350
+        },
+        "text_source": {
+          "file": "level1",
+          "path_id": 64270
+        },
+        "font_source": {
+          "file": "sharedassets0.assets",
+          "path_id": 1366
+        },
+        "material_source": {
+          "file": "sharedassets0.assets",
+          "path_id": 18
+        },
+        "mass_source": {
+          "file": "level1",
+          "path_id": 77830
+        },
+        "item": 22,
+        "node": 137,
+        "text_node": 138,
+        "same_as": 21,
+        "initial_text": "",
+        "initial_same": false,
+        "startup_target": 66601,
+        "layout": {
+          "bounds": [
+            0.4350000023841858,
+            0.08500000089406967
+          ],
+          "pivot": [
+            0.5,
+            0.5
+          ],
+          "anchor_min": [
+            0.5,
+            0.5
+          ],
+          "anchor_max": [
+            0.5,
+            0.5
+          ],
+          "font_size": 0.800000011920929,
+          "font_size_base": 0.800000011920929,
+          "font_size_min": 18.0,
+          "font_size_max": 72.0,
+          "font_style": 1,
+          "font_weight": 400,
+          "horizontal_alignment": 2,
+          "vertical_alignment": 512,
+          "auto_sizing": false,
+          "kerning": true,
+          "word_wrapping": false,
+          "extra_padding": false,
+          "orthographic": false,
+          "rich_text": true,
+          "overflow_mode": 0,
+          "max_visible_descender": true,
+          "spacing": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "margin": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "color": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "transform": {
+            "translation": [
+              0.0,
+              0.0,
+              -0.0031250000465661287
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              -0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "types": [
+          "licenseplate"
+        ],
+        "colliders": [
+          19
+        ],
+        "parent_at_attach": true,
+        "lock_rotation": true,
+        "target_pos_rot": true,
+        "only_to_point": false,
+        "ignore_points": false,
+        "use_collider_attach_point": false,
+        "snap_y_to_normal": false,
+        "remove_target_pos": [
+          0.0,
+          0.0,
+          0.10000000149011612
+        ],
+        "offset_back": 0.029999999329447746,
+        "mass_kg": 1.0,
+        "body_policy": "unity_add_component",
+        "body_source": null,
+        "pickup_store_damping": [
+          0.0,
+          0.0
+        ],
+        "linear_damping": null,
+        "angular_damping": null
+      }
+    ],
+    "targets": [
+      {
+        "id": 66346,
+        "source": {
+          "file": "level1",
+          "path_id": 66346
+        },
+        "node": 133,
+        "owner": 20,
+        "colliders": [
+          18
+        ],
+        "types": [
+          "licenseplate"
+        ],
+        "pose": {
+          "translation": [
+            0.0,
+            -0.11949999630451202,
+            -0.0
+          ],
+          "rotation": [
+            -0.0,
+            -1.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "attached_items": [],
+        "dont_remove_attached_when_looking": false
+      },
+      {
+        "id": 66601,
+        "source": {
+          "file": "level1",
+          "path_id": 66601
+        },
+        "node": 136,
+        "owner": 1,
+        "colliders": [
+          20
+        ],
+        "types": [
+          "licenseplate"
+        ],
+        "pose": {
+          "translation": [
+            0.0,
+            0.1340000033378601,
+            1.930999994277954
+          ],
+          "rotation": [
+            0.07297994196414948,
+            0.0,
+            -0.0,
+            0.9973334074020386
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "attached_items": [],
+        "dont_remove_attached_when_looking": false
+      }
+    ],
+    "font": {
+      "source": {
+        "file": "sharedassets0.assets",
+        "path_id": 1366
+      },
+      "name": "LiberationSans SDF",
+      "version": "1.1.0",
+      "family": "Liberation Sans",
+      "style": "Regular",
+      "face": {
+        "PointSize": 10.0,
+        "Scale": 1.0,
+        "Baseline": 0.0,
+        "AscentLine": 8.0,
+        "DescentLine": -2.0,
+        "CapLine": 7.0,
+        "LineHeight": 10.0
+      },
+      "glyphs": [
+        {
+          "index": 65,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 66,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            2,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 67,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            4,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 68,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            6,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 69,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            8,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 70,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            10,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 71,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            12,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 72,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            14,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 73,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            16,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 74,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            18,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 75,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            20,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 76,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            22,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 77,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            24,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 78,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            26,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 79,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            28,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 80,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            30,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 81,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            32,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 82,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            34,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 83,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            36,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 84,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            38,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 85,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            40,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 86,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            42,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 87,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            44,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 88,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            46,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 89,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            48,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 90,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            50,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 45,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            52,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 48,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            54,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 49,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            56,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 50,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            58,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 51,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            60,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 52,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            62,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 53,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            64,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 54,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            66,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 55,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            68,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 56,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            70,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "index": 57,
+          "atlas_index": 0,
+          "scale": 1.0,
+          "metrics": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "rect": [
+            72,
+            0,
+            1,
+            1
+          ]
+        }
+      ],
+      "characters": [
+        {
+          "unicode": 65,
+          "glyph": 65,
+          "scale": 1.0
+        },
+        {
+          "unicode": 66,
+          "glyph": 66,
+          "scale": 1.0
+        },
+        {
+          "unicode": 67,
+          "glyph": 67,
+          "scale": 1.0
+        },
+        {
+          "unicode": 68,
+          "glyph": 68,
+          "scale": 1.0
+        },
+        {
+          "unicode": 69,
+          "glyph": 69,
+          "scale": 1.0
+        },
+        {
+          "unicode": 70,
+          "glyph": 70,
+          "scale": 1.0
+        },
+        {
+          "unicode": 71,
+          "glyph": 71,
+          "scale": 1.0
+        },
+        {
+          "unicode": 72,
+          "glyph": 72,
+          "scale": 1.0
+        },
+        {
+          "unicode": 73,
+          "glyph": 73,
+          "scale": 1.0
+        },
+        {
+          "unicode": 74,
+          "glyph": 74,
+          "scale": 1.0
+        },
+        {
+          "unicode": 75,
+          "glyph": 75,
+          "scale": 1.0
+        },
+        {
+          "unicode": 76,
+          "glyph": 76,
+          "scale": 1.0
+        },
+        {
+          "unicode": 77,
+          "glyph": 77,
+          "scale": 1.0
+        },
+        {
+          "unicode": 78,
+          "glyph": 78,
+          "scale": 1.0
+        },
+        {
+          "unicode": 79,
+          "glyph": 79,
+          "scale": 1.0
+        },
+        {
+          "unicode": 80,
+          "glyph": 80,
+          "scale": 1.0
+        },
+        {
+          "unicode": 81,
+          "glyph": 81,
+          "scale": 1.0
+        },
+        {
+          "unicode": 82,
+          "glyph": 82,
+          "scale": 1.0
+        },
+        {
+          "unicode": 83,
+          "glyph": 83,
+          "scale": 1.0
+        },
+        {
+          "unicode": 84,
+          "glyph": 84,
+          "scale": 1.0
+        },
+        {
+          "unicode": 85,
+          "glyph": 85,
+          "scale": 1.0
+        },
+        {
+          "unicode": 86,
+          "glyph": 86,
+          "scale": 1.0
+        },
+        {
+          "unicode": 87,
+          "glyph": 87,
+          "scale": 1.0
+        },
+        {
+          "unicode": 88,
+          "glyph": 88,
+          "scale": 1.0
+        },
+        {
+          "unicode": 89,
+          "glyph": 89,
+          "scale": 1.0
+        },
+        {
+          "unicode": 90,
+          "glyph": 90,
+          "scale": 1.0
+        },
+        {
+          "unicode": 45,
+          "glyph": 45,
+          "scale": 1.0
+        },
+        {
+          "unicode": 48,
+          "glyph": 48,
+          "scale": 1.0
+        },
+        {
+          "unicode": 49,
+          "glyph": 49,
+          "scale": 1.0
+        },
+        {
+          "unicode": 50,
+          "glyph": 50,
+          "scale": 1.0
+        },
+        {
+          "unicode": 51,
+          "glyph": 51,
+          "scale": 1.0
+        },
+        {
+          "unicode": 52,
+          "glyph": 52,
+          "scale": 1.0
+        },
+        {
+          "unicode": 53,
+          "glyph": 53,
+          "scale": 1.0
+        },
+        {
+          "unicode": 54,
+          "glyph": 54,
+          "scale": 1.0
+        },
+        {
+          "unicode": 55,
+          "glyph": 55,
+          "scale": 1.0
+        },
+        {
+          "unicode": 56,
+          "glyph": 56,
+          "scale": 1.0
+        },
+        {
+          "unicode": 57,
+          "glyph": 57,
+          "scale": 1.0
+        }
+      ],
+      "pair_adjustments": [],
+      "atlas": {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 366
+        },
+        "path": "reference/plate-sharedassets0.assets-366.png",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "atlas_channel": "alpha",
+      "atlas_extent": [
+        1024,
+        1024
+      ],
+      "padding": 9,
+      "atlas_render_mode": 4169,
+      "normal_style": 0.0,
+      "normal_spacing": 0.0,
+      "bold_style": 0.75,
+      "bold_spacing": 7.0
+    },
+    "material": {
+      "source": {
+        "file": "sharedassets0.assets",
+        "path_id": 18
+      },
+      "shader": {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 730
+        },
+        "path": "reference/plate-sharedassets0.assets-730.shader.json",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "compiled_shader": {
+        "source": {
+          "file": "sharedassets0.assets",
+          "path_id": 730
+        },
+        "path": "reference/plate-sharedassets0.assets-730.shader.bin",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "shader_name": "TextMeshPro/Distance Field (Surface)",
+      "keywords": [],
+      "disabled_passes": [],
+      "state": {
+        "alpha_mode": "blend",
+        "cull": 0,
+        "z_write": false,
+        "z_test": 4,
+        "src_blend": 5,
+        "dst_blend": 10,
+        "render_queue": -1
+      },
+      "floats": {
+        "_FaceUVSpeedX": 0.0,
+        "_FaceUVSpeedY": 0.0,
+        "_FaceDilate": 0.10000000149011612,
+        "_OutlineUVSpeedX": 0.0,
+        "_OutlineUVSpeedY": 0.0,
+        "_OutlineWidth": 0.10000000149011612,
+        "_OutlineSoftness": 0.20000000298023224,
+        "_Bevel": 0.5,
+        "_BevelOffset": 0.0,
+        "_BevelWidth": 0.20000000298023224,
+        "_BevelClamp": 0.0,
+        "_BevelRoundness": 0.0,
+        "_BumpOutline": 0.30000001192092896,
+        "_BumpFace": 0.30000001192092896,
+        "_FaceShininess": 1.0,
+        "_OutlineShininess": 1.0,
+        "_GlowOffset": 0.0,
+        "_GlowInner": 0.05000000074505806,
+        "_GlowOuter": 0.05000000074505806,
+        "_GlowPower": 0.75,
+        "_WeightNormal": 0.0,
+        "_WeightBold": 0.75,
+        "_ShaderFlags": 0.0,
+        "_ScaleRatioA": 0.8999999761581421,
+        "_ScaleRatioB": 0.6412500143051147,
+        "_ScaleRatioC": 0.731249988079071,
+        "_TextureWidth": 1024.0,
+        "_TextureHeight": 1024.0,
+        "_GradientScale": 10.0,
+        "_ScaleX": 1.0,
+        "_ScaleY": 1.0,
+        "_PerspectiveFilter": 0.875,
+        "_Sharpness": 0.0,
+        "_VertexOffsetX": 0.0,
+        "_VertexOffsetY": 0.0,
+        "_ColorMask": 15.0,
+        "_MaskSoftnessX": 0.0,
+        "_MaskSoftnessY": 0.0,
+        "_Stencil": 0.0,
+        "_StencilComp": 8.0,
+        "_StencilOp": 0.0,
+        "_StencilReadMask": 255.0,
+        "_StencilWriteMask": 255.0,
+        "_UnderlayDilate": 0.0,
+        "_UnderlayOffsetX": 0.0,
+        "_UnderlayOffsetY": 0.0,
+        "_UnderlaySoftness": 0.0
+      },
+      "colors": {
+        "_Color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "_FaceColor": [
+          0.062745101749897,
+          0.062745101749897,
+          0.062745101749897,
+          1.0
+        ],
+        "_OutlineColor": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "_ReflectFaceColor": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "_ReflectOutlineColor": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "_EnvMatrixRotation": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "_SpecColor": [
+          0.250980406999588,
+          0.250980406999588,
+          0.250980406999588,
+          1.0
+        ],
+        "_GlowColor": [
+          0.0,
+          1.0,
+          0.0,
+          0.5
+        ],
+        "_ClipRect": [
+          -32767.0,
+          -32767.0,
+          32767.0,
+          32767.0
+        ],
+        "_UnderlayColor": [
+          0.0,
+          0.0,
+          0.0,
+          0.5
+        ]
+      },
+      "textures": [
+        {
+          "slot": "_BumpMap",
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 271
+          },
+          "file": "reference/plate-sharedassets0.assets-271.png",
+          "color_space": "linear",
+          "encoding": "rgb",
+          "source_encoding": "ag",
+          "uv_channel": 0,
+          "scale": [
+            1.0,
+            1.0
+          ],
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "sampler": {
+            "filter": 1,
+            "wrap_u": 0,
+            "wrap_v": 0,
+            "aniso": 1,
+            "mip_bias": 0.0,
+            "mip_count": 11
+          },
+          "mips": [
+            {
+              "file": "reference/plate-sharedassets0.assets-271.png",
+              "width": 1024,
+              "height": 1024
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-271-mip-1.png",
+              "width": 512,
+              "height": 512
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-271-mip-2.png",
+              "width": 256,
+              "height": 256
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-271-mip-3.png",
+              "width": 128,
+              "height": 128
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-271-mip-4.png",
+              "width": 64,
+              "height": 64
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-271-mip-5.png",
+              "width": 32,
+              "height": 32
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-271-mip-6.png",
+              "width": 16,
+              "height": 16
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-271-mip-7.png",
+              "width": 8,
+              "height": 8
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-271-mip-8.png",
+              "width": 4,
+              "height": 4
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-271-mip-9.png",
+              "width": 2,
+              "height": 2
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-271-mip-10.png",
+              "width": 1,
+              "height": 1
+            }
+          ]
+        },
+        {
+          "slot": "_FaceTex",
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 252
+          },
+          "file": "reference/plate-sharedassets0.assets-252.png",
+          "color_space": "srgb",
+          "encoding": "rgba",
+          "source_encoding": "rgba",
+          "uv_channel": 0,
+          "scale": [
+            1.0,
+            1.0
+          ],
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "sampler": {
+            "filter": 1,
+            "wrap_u": 0,
+            "wrap_v": 0,
+            "aniso": 1,
+            "mip_bias": 0.0,
+            "mip_count": 11
+          },
+          "mips": [
+            {
+              "file": "reference/plate-sharedassets0.assets-252.png",
+              "width": 1024,
+              "height": 512
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-1.png",
+              "width": 512,
+              "height": 256
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-2.png",
+              "width": 256,
+              "height": 128
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-3.png",
+              "width": 128,
+              "height": 64
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-4.png",
+              "width": 64,
+              "height": 32
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-5.png",
+              "width": 32,
+              "height": 16
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-6.png",
+              "width": 16,
+              "height": 8
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-7.png",
+              "width": 8,
+              "height": 4
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-8.png",
+              "width": 4,
+              "height": 2
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-9.png",
+              "width": 2,
+              "height": 1
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-10.png",
+              "width": 1,
+              "height": 1
+            }
+          ]
+        },
+        {
+          "slot": "_MainTex",
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 366
+          },
+          "file": "reference/plate-sharedassets0.assets-366.png",
+          "color_space": "linear",
+          "encoding": "rgba",
+          "source_encoding": "rgba",
+          "uv_channel": 0,
+          "scale": [
+            1.0,
+            1.0
+          ],
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "sampler": {
+            "filter": 1,
+            "wrap_u": 0,
+            "wrap_v": 0,
+            "aniso": 1,
+            "mip_bias": 0.0,
+            "mip_count": 1
+          },
+          "mips": [
+            {
+              "file": "reference/plate-sharedassets0.assets-366.png",
+              "width": 1024,
+              "height": 1024
+            }
+          ]
+        },
+        {
+          "slot": "_OutlineTex",
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 252
+          },
+          "file": "reference/plate-sharedassets0.assets-252.png",
+          "color_space": "srgb",
+          "encoding": "rgba",
+          "source_encoding": "rgba",
+          "uv_channel": 0,
+          "scale": [
+            1.0,
+            1.0
+          ],
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "sampler": {
+            "filter": 1,
+            "wrap_u": 0,
+            "wrap_v": 0,
+            "aniso": 1,
+            "mip_bias": 0.0,
+            "mip_count": 11
+          },
+          "mips": [
+            {
+              "file": "reference/plate-sharedassets0.assets-252.png",
+              "width": 1024,
+              "height": 512
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-1.png",
+              "width": 512,
+              "height": 256
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-2.png",
+              "width": 256,
+              "height": 128
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-3.png",
+              "width": 128,
+              "height": 64
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-4.png",
+              "width": 64,
+              "height": 32
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-5.png",
+              "width": 32,
+              "height": 16
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-6.png",
+              "width": 16,
+              "height": 8
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-7.png",
+              "width": 8,
+              "height": 4
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-8.png",
+              "width": 4,
+              "height": 2
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-9.png",
+              "width": 2,
+              "height": 1
+            },
+            {
+              "file": "reference/plate-sharedassets0.assets-252-mip-10.png",
+              "width": 1,
+              "height": 1
+            }
+          ]
+        }
+      ],
+      "resources": [
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 271
+          },
+          "path": "reference/plate-sharedassets0.assets-271.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 271
+          },
+          "path": "reference/plate-sharedassets0.assets-271-mip-1.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 271
+          },
+          "path": "reference/plate-sharedassets0.assets-271-mip-2.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 271
+          },
+          "path": "reference/plate-sharedassets0.assets-271-mip-3.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 271
+          },
+          "path": "reference/plate-sharedassets0.assets-271-mip-4.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 271
+          },
+          "path": "reference/plate-sharedassets0.assets-271-mip-5.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 271
+          },
+          "path": "reference/plate-sharedassets0.assets-271-mip-6.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 271
+          },
+          "path": "reference/plate-sharedassets0.assets-271-mip-7.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 271
+          },
+          "path": "reference/plate-sharedassets0.assets-271-mip-8.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 271
+          },
+          "path": "reference/plate-sharedassets0.assets-271-mip-9.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 271
+          },
+          "path": "reference/plate-sharedassets0.assets-271-mip-10.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 252
+          },
+          "path": "reference/plate-sharedassets0.assets-252.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 252
+          },
+          "path": "reference/plate-sharedassets0.assets-252-mip-1.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 252
+          },
+          "path": "reference/plate-sharedassets0.assets-252-mip-2.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 252
+          },
+          "path": "reference/plate-sharedassets0.assets-252-mip-3.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 252
+          },
+          "path": "reference/plate-sharedassets0.assets-252-mip-4.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 252
+          },
+          "path": "reference/plate-sharedassets0.assets-252-mip-5.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 252
+          },
+          "path": "reference/plate-sharedassets0.assets-252-mip-6.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 252
+          },
+          "path": "reference/plate-sharedassets0.assets-252-mip-7.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 252
+          },
+          "path": "reference/plate-sharedassets0.assets-252-mip-8.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 252
+          },
+          "path": "reference/plate-sharedassets0.assets-252-mip-9.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 252
+          },
+          "path": "reference/plate-sharedassets0.assets-252-mip-10.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "source": {
+            "file": "sharedassets0.assets",
+            "path_id": 366
+          },
+          "path": "reference/plate-sharedassets0.assets-366.png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "passes": [
+        "FORWARDBASE",
+        "FORWARDADD",
+        "SHADOWCASTER"
+      ],
+      "pass_states": [
+        {
+          "name": "FORWARD",
+          "light_mode": "FORWARDBASE",
+          "color_mask": 14,
+          "state": {
+            "alpha_mode": "blend",
+            "cull": 0,
+            "z_write": false,
+            "z_test": 4,
+            "src_blend": 5,
+            "dst_blend": 10,
+            "render_queue": -1
+          }
+        },
+        {
+          "name": "FORWARD",
+          "light_mode": "FORWARDADD",
+          "color_mask": 14,
+          "state": {
+            "alpha_mode": "blend",
+            "cull": 0,
+            "z_write": false,
+            "z_test": 4,
+            "src_blend": 5,
+            "dst_blend": 1,
+            "render_queue": -1
+          }
+        },
+        {
+          "name": "Caster",
+          "light_mode": "SHADOWCASTER",
+          "color_mask": 14,
+          "state": {
+            "alpha_mode": "blend",
+            "cull": 0,
+            "z_write": true,
+            "z_test": 4,
+            "src_blend": 1,
+            "dst_blend": 0,
+            "render_queue": -1
+          }
+        }
+      ]
+    }
   }
 }

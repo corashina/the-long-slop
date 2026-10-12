@@ -10,7 +10,7 @@ from .visibility import recover_camera_visibility
 from .parts import recover_parts
 
 
-def build_manifest(source, roots, reports, hashes, library):
+def build_manifest(source, roots, reports, hashes, library, output):
     nodes=[]; by_source={}; objects={}; components={}; node_readers={}
     assets=[]
     for asset_id,(name,readers) in enumerate(roots.items(),1):
@@ -38,7 +38,7 @@ def build_manifest(source, roots, reports, hashes, library):
         return by_source[key(source.transform_for(go))]
     def pointer_node(owner,pointer):
         reader=source.resolve(owner,pointer)
-        return by_source[key(reader)] if reader.type.name=='Transform' else by_source[key(source.transform_for(reader))] if reader.type.name=='GameObject' else node_of(reader)
+        return by_source[key(reader)] if reader.type.name in ('Transform','RectTransform') else by_source[key(source.transform_for(reader))] if reader.type.name=='GameObject' else node_of(reader)
     def descendants(node):
         result={node}
         for entry in nodes:
@@ -370,6 +370,9 @@ def build_manifest(source, roots, reports, hashes, library):
     result['vehicle']['colliders']=[c['id'] for c in colliders if c['body']==car_body and c['enabled']]
     from .mirrors import recover_mirrors
     result['mirrors']=recover_mirrors(source,nodes,components,pointer_node,item_nodes,reports)
+    from .plates import recover_plates, plate_resources
+    result['plates']=recover_plates(source,nodes,components,pointer_node,item_nodes,colliders,output)
+    assets[1]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in plate_resources(result['plates']))
     result['lighting']=source.lighting
     collider_ids={(c['source']['file'],c['source']['path_id']):c['id'] for c in colliders}
     old_colliders={v:k for k,v in source.lighting_collider_ids.items()}

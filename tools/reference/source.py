@@ -111,7 +111,7 @@ class Source:
     def transform_for(self, game_object):
         for part in self.read(game_object)['m_Component']:
             reader = self.resolve(game_object,part['component'])
-            if reader.type.name == 'Transform':
+            if reader.type.name in ('Transform','RectTransform'):
                 return reader
         raise ValueError(f'GameObject has no Transform: {key(game_object)}')
 

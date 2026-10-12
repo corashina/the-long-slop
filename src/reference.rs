@@ -9,6 +9,8 @@ use std::{
     fmt,
 };
 
+pub mod plates;
+pub use plates::*;
 pub mod mirrors;
 pub use mirrors::*;
 pub mod instruments;
@@ -39,6 +41,7 @@ id!(SeatId, u32);
 id!(OpeningId, u32);
 id!(WheelSlotId, u8);
 id!(PartSlotId, u32);
+id!(AttachmentTargetId, u32);
 id!(LightId, u32);
 id!(LightControlId, u32);
 
@@ -748,6 +751,7 @@ pub struct ReferenceManifest {
     pub library: LibraryProvenance,
     pub lighting: LightingRecord,
     pub mirrors: MirrorRecord,
+    pub plates: PlateRecord,
     pub app_id: u32,
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
@@ -845,6 +849,7 @@ impl ReferenceManifest {
         )?;
         self.lighting.validate(self)?;
         self.mirrors.validate(self)?;
+        self.plates.validate(self)?;
         require(
             self.bodies.iter().all(|b| {
                 self.nodes.iter().any(|n| {

@@ -89,13 +89,14 @@ def validate_runtime_paths(manifest):
     assets = manifest.get('assets', [])
     if {a['path'] for a in assets} != {'reference/home.gltf','reference/lada.gltf','reference/items.gltf','reference/road_lamp.gltf','reference/sky.gltf'} or len(assets) != 5:
         raise ValueError('Runtime must contain only the selected scenes')
-    resources = {item['path']:item['sha256'] for item in lighting_resources(manifest)}
+    from .plates import plate_resources
+    resources = {item['path']:item['sha256'] for item in [*lighting_resources(manifest), *plate_resources(manifest['plates'])]}
     for asset in assets:
         for item in [asset, *asset['dependencies']]:
             name = item.get('file', item.get('path'))
             if name in resources:
                 if item['sha256'] != resources[name]:
-                    raise ValueError('Lighting dependency hash differs from typed resource')
+                    raise ValueError('Runtime dependency hash differs from typed resource')
                 continue
             if not name.startswith('reference/') or len(Path(name).parts) != 2 or Path(name).suffix not in ('.gltf','.bin','.png'):
                 raise ValueError('Invalid selected runtime dependency')
@@ -103,6 +104,10 @@ def validate_runtime_paths(manifest):
         name = item['path']
         if not name.startswith('reference/lighting-') or len(Path(name).parts) != 2 or Path(name).suffix not in ('.bin','.png','.smip','.txt','.json'):
             raise ValueError('Invalid selected runtime lighting resource')
+    for item in plate_resources(manifest['plates']):
+        name=item['path']
+        if not name.startswith('reference/plate-') or len(Path(name).parts)!=2 or Path(name).suffix not in ('.bin','.png','.json'):
+            raise ValueError('Invalid selected runtime plate resource')
     sprites = manifest.get('ui', {}).get('sprites', [])
     paths = set()
     for sprite in sprites:
@@ -144,7 +149,7 @@ def verify_reference(output: Path, library) -> None:
         raise ValueError('Unsupported runtime provenance')
     validate_runtime_manifest(content)
     validate_runtime_paths(manifest)
-    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json'}
+    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json','plate-evidence.json'}
     for asset in manifest['assets']:
         for record in [asset, *asset['dependencies']]:
             name = record.get('file', record.get('path')).removeprefix('reference/')
@@ -154,7 +159,8 @@ def verify_reference(output: Path, library) -> None:
         scene = output / asset['path'].removeprefix('reference/')
         document = json.loads(scene.read_bytes())
         uris = {entry['uri'] for entry in [*document.get('buffers', []), *document.get('images', [])]}
-        resources = {item['path'] for item in lighting_resources(manifest)}
+        from .plates import plate_resources
+        resources = {item['path'] for item in [*lighting_resources(manifest), *plate_resources(manifest['plates'])]}
         declared = {entry['file'].removeprefix('reference/') for entry in asset['dependencies'] if entry['file'] not in resources}
         material_mips = {Path(mip['file']).name for material in manifest['rendering']['materials']
             if material['asset'] == asset['id'] for texture in material['properties']['textures'] for mip in texture['mips']}
@@ -230,7 +236,9 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
         raise ValueError(f'Incomplete parameter recovery: {parameters["errors"]}')
     hashes=[{'file':record.file.removeprefix('TheLongDrive_Data/'),'sha256':record.sha256}
             for record in snapshot.files if record.file.startswith('TheLongDrive_Data/')]
-    manifest=build_manifest(source,roots,report,hashes,library)
+    manifest=build_manifest(source,roots,report,hashes,library,output)
+    from .plates import plate_source_evidence
+    (output/'plate-evidence.json').write_text(json.dumps(plate_source_evidence(source,manifest['plates']),indent=2,allow_nan=False),encoding='utf-8')
     from .mirrors import mirror_source_evidence
     (output/'mirror-evidence.json').write_text(json.dumps(mirror_source_evidence(source,manifest['mirrors']),indent=2,allow_nan=False),encoding='utf-8')
     manifest['library']=provenance(library.receipt)
