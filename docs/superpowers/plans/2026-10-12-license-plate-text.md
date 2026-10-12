@@ -348,7 +348,7 @@ Modify interaction dispatch, aim targets, item ownership, labels, `StartingArea`
 - Produce: `PlateAttachments::sync(&mut self, items: &mut ItemStore, physics: &mut PhysicsWorld) -> Result<(), ReferenceError>` and `rebase(&mut self, shift: [f32; 3])`.
 - Own this state as `InteractionState.attachments`. Add `SlotTarget::Attachment(AttachmentTargetId)`.
 
-- [ ] **Step 1: Add critical transaction tests with source-backed plate fixtures.**
+- [x] **Step 1: Add critical transaction tests with source-backed plate fixtures.**
 
 `plate_remove_carry_drop_remount_keeps_identity_and_text` checks one item across the full sequence.
 Assert the string and revision stay fixed, while pose, body, and target ownership change correctly.
@@ -370,11 +370,11 @@ Assert both items remain separate target members, with unchanged strings and uni
 Assert plate and text follow the bumper; plate-only removal uses the converted source offset.
 Assert world pose continuity after origin rebasing.
 
-- [ ] **Step 2: Run `./scripts/check.ps1 -Test plate_interaction` and confirm the initial failure.**
+- [x] **Step 2: Run `./scripts/check.ps1 -Test plate_interaction` and confirm the initial failure.**
 
 Expected: missing attachment state and dispatch.
 
-- [ ] **Step 3: Implement plate attachment and existing control dispatch.**
+- [x] **Step 3: Implement plate attachment and existing control dispatch.**
 
 Retain each source plate as one existing item. Do not create `PartReference` or `PartSlotReference` entries for plates.
 Use `ItemLocation::Attached(owner)` for mounted ownership and retain target membership in `PlateAttachments`.
@@ -395,14 +395,14 @@ Include plate colliders in containing-bumper transitions without duplicate colli
 Update target poses and retained loose bodies during rebase.
 Keep text state independent of attachment state.
 
-- [ ] **Step 4: Run native interaction checks and visible carry/drop/remount checks.**
+- [x] **Step 4: Run native interaction checks and visible carry/drop/remount checks.**
 
 Run `plate_interaction`, existing `items`, `parts`, and `interaction` test targets.
 Run installed plate interaction checks after fresh export.
 Build and verify actual imported front and rear plate movement in the browser.
 Expected: all critical transactions pass; labels keep their text and orientation; existing part behavior remains working.
 
-- [ ] **Step 5: Commit attachment and interaction integration.**
+- [x] **Step 5: Commit attachment and interaction integration.**
 
 Commit message: `feat: support source plate removal and mounting`.
 
