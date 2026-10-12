@@ -408,6 +408,32 @@ fn capture_is_absolute_after_rebase() {
     }
     assert_eq!(before.vehicles[0].body.pose, after.vehicles[0].body.pose);
     assert_eq!(before.bodies, after.bodies);
+
+    let mut seated = GarageRuntime::new(&r).unwrap();
+    assert!(seated.area.player.enter(
+        r.seats[0].id,
+        VehiclePose {
+            position: [0.03, 1., 0.],
+            rotation: [0., 0., 0., 1.]
+        },
+        &mut seated.physics,
+    ));
+    let seated_before = seated
+        .capture_save(&r, &source, CameraSave::FirstPerson, "2026-10-12T10:00:00Z")
+        .unwrap();
+    assert_eq!(seated_before.player.pose.position[0], f64::from(0.03_f32));
+    let seated_shift = [2048., 0., 0.];
+    seated.physics.rebase(seated_shift);
+    seated.stream.origin.shift(seated_shift);
+    seated.area.sync_origin(seated.stream.origin.offset);
+    let seated_after = seated
+        .capture_save(&r, &source, CameraSave::FirstPerson, "2026-10-12T10:00:00Z")
+        .unwrap();
+    assert_eq!(
+        seated_before.vehicles[0].body.pose,
+        seated_after.vehicles[0].body.pose
+    );
+    assert_eq!(seated_before.player.pose, seated_after.player.pose);
 }
 #[test]
 fn cycle_wrap_and_fade_capture_preserve_next_update() {

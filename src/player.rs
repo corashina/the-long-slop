@@ -121,12 +121,20 @@ impl PlayerState {
         physics: &PhysicsWorld,
         carry: Option<crate::save::CarrySnapshot>,
     ) -> Result<crate::save::PlayerSnapshot, crate::save::SaveError> {
-        let pose = self.body_pose(physics);
+        let (position, rotation) = if let Some(seat) = self.occupancy {
+            let chassis = physics.rapier().bodies[physics.chassis_handle()].position();
+            let absolute = origin.absolute(chassis.translation.to_array());
+            let offset = chassis.rotation * seat.local_pose.translation;
+            (
+                std::array::from_fn(|axis| absolute[axis] + f64::from(offset[axis])),
+                (chassis.rotation * seat.local_pose.rotation).to_array(),
+            )
+        } else {
+            let pose = self.body_pose(physics);
+            (origin.absolute(pose.position), pose.rotation)
+        };
         Ok(crate::save::PlayerSnapshot {
-            pose: crate::save::AbsolutePose {
-                position: origin.absolute(pose.position),
-                rotation: pose.rotation,
-            },
+            pose: crate::save::AbsolutePose { position, rotation },
             yaw: self.yaw,
             pitch: self.pitch,
             seat: self
