@@ -1167,3 +1167,11 @@ The merged source needs 25 fixed lights and 15 streamed road lamp slots.
 The CPU and shader arrays now hold 40 lights. The 100 shadow slots remain sufficient.
 A focused check confirms matching array counts and a 16,080-byte uniform within the 16,384-byte WebGL2 limit.
 Log: `.cache/save-merge/lighting-capacity-test.log`.
+
+The production package passed startup and six browser session checks with both source vehicles.
+The WASM SHA-256 was `06ef87e571bfbc7e0564d20f518767eaf19faa1dc271d0ba46e5e391bd56ee0c`.
+Repeated session replacement reset mirrors and still allowed Continue.
+A manual save survived a full page reload. Continue resumed that restored session.
+The snapshot comparison measured maximum position error of `3.33786e-6` metres and quaternion component error of `3e-7`.
+The visible Load action returned to pause with `Game loaded`. Save returned `Save complete`, with actions enabled.
+No GPU error appeared during these checks. The default package had no fixture hooks.
