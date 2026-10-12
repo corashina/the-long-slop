@@ -27,6 +27,14 @@ class SurvivalTests(unittest.TestCase):
         record=copy.deepcopy(self.manifest['survival']);record['foods'][1]['kind']='sausage'
         with self.assertRaises(ValueError): validate_survival_export(record,self.manifest)
 
+    def test_rejects_rebound_starter_links(self):
+        other=next(i for i in self.manifest['items'] if i['id']!=self.manifest['survival']['starter_food'])
+        other['kind']='food'
+        record=copy.deepcopy(self.manifest['survival']);record['starter_food']=other['id']
+        with self.assertRaises(ValueError):validate_survival_export(record,self.manifest)
+        record=copy.deepcopy(self.manifest['survival']);record['starter_parts'][0][0]=record['foods'][0]['root']
+        with self.assertRaises(ValueError):validate_survival_export(record,self.manifest)
+
 
 class SourceRecoveryTests(unittest.TestCase):
     def test_recovers_active_player_and_source_values(self):

@@ -19,3 +19,11 @@ class WeatherTests(unittest.TestCase):
         for mutate in [lambda r:r['shelters'][0].update(root=999999),lambda r:r['particles'][0].update(capacity=0),lambda r:r['particles'][0]['materials'][0]['textures'][0].update(texture=999999),lambda r:r['particles'][0].update(rate_over_time=float('inf'))]:
             r=copy.deepcopy(self.manifest['weather']); mutate(r)
             with self.assertRaises(ValueError):validate_weather_export(r,self.manifest)
+
+    def test_rejects_rebound_shelter_links(self):
+        starter=next(i for i in self.manifest['items'] if i['id']==self.manifest['survival']['starter_food'])
+        for owner in [starter['body'],self.manifest['weather']['shelters'][4]['root']]:
+            record=copy.deepcopy(self.manifest['weather']);record['shelters'][0]['root']=owner
+            with self.assertRaises(ValueError):validate_weather_export(record,self.manifest)
+        record=copy.deepcopy(self.manifest['weather']);record['shelters'][0]['source']['path_id']=24573
+        with self.assertRaises(ValueError):validate_weather_export(record,self.manifest)

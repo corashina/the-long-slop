@@ -100,3 +100,37 @@ fn rejects_missing_links_and_nonfinite_rates() {
         assert!(ReferenceManifest::from_json(&serde_json::to_vec(&value).unwrap()).is_err());
     }
 }
+
+#[test]
+fn rejects_rebound_starter_and_shelter_links() {
+    let mut r = common::reference();
+    let other = r
+        .items
+        .iter_mut()
+        .find(|i| i.id != r.survival.starter_food)
+        .unwrap();
+    other.kind = my_summer_slop::reference::ItemKind::Food;
+    r.survival.starter_food = other.id;
+    assert!(r.survival.validate(&r).is_err());
+
+    let mut r = common::reference();
+    r.survival.starter_parts[0][0] = r.survival.foods[0].root;
+    assert!(r.survival.validate(&r).is_err());
+
+    let mut r = common::reference();
+    r.weather.shelters[0].root = r
+        .items
+        .iter()
+        .find(|i| i.id == r.survival.starter_food)
+        .unwrap()
+        .body;
+    assert!(r.weather.validate(&r).is_err());
+
+    let mut r = common::reference();
+    r.weather.shelters[0].root = r.weather.shelters[4].root;
+    assert!(r.weather.validate(&r).is_err());
+
+    let mut r = common::reference();
+    r.weather.shelters[0].source.path_id = 24573;
+    assert!(r.weather.validate(&r).is_err());
+}

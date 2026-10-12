@@ -222,12 +222,21 @@ impl WeatherReference {
                 && gradient_valid(&s.day_color2),
             "storm curves",
         )?;
-        require(!self.shelters.is_empty(), "shelters")?;
+        require(self.shelters.len() == 6, "selected shelters")?;
         ids(self.shelters.iter().map(|s| &s.source), "duplicate shelter")?;
         for s in &self.shelters {
+            let owner = match (s.source.file.as_str(), s.source.path_id) {
+                ("level1", 73428 | 79089 | 72174 | 71312) => 21400,
+                ("level1", 76881 | 68729) => 37191,
+                _ => return Err(ReferenceError("Invalid selected shelter source".into())),
+            };
             require(
-                m.bodies.iter().any(|b| b.id == s.root)
-                    && valid_geometry(&s.geometry)
+                m.bodies.iter().find(|b| b.id == s.root).is_some_and(|b| {
+                    b.parent_body.is_none()
+                        && m.nodes.iter().any(|n| {
+                            n.id == b.node && n.source.file == "level1" && n.source.path_id == owner
+                        })
+                }) && valid_geometry(&s.geometry)
                     && transform(&s.local_pose),
                 "shelter root and geometry",
             )?;

@@ -165,9 +165,13 @@ def finite_record(value):
 
 def validate_survival_export(record: dict, manifest: dict) -> None:
     finite_record(record);finite_record(manifest['sleep'])
-    if not any(i['id']==record['starter_food'] and i['kind']=='food' for i in manifest['items']):raise ValueError('Missing starter food')
+    nodes={n['id']:n for n in manifest['nodes']}
+    item=next((i for i in manifest['items'] if i['id']==record['starter_food'] and i['kind']=='food'),None)
+    starter=nodes.get(item['node']) if item else None
+    if not starter or starter['source']!=item['source'] or starter['source']!={'file':'level1','path_id':24573}:raise ValueError('Invalid starter food source')
+    if len(record['starter_parts'])!=6 or any(not group or any(nodes.get(n,{}).get('asset')!=starter['asset'] for n in group) for group in record['starter_parts']):raise ValueError('Invalid starter parts')
     if {f['kind'] for f in record['foods']}!={'sausage','turd'} or len(record['foods'])!=2:raise ValueError('Duplicate or missing prototype kind')
-    nodes={n['id']:n for n in manifest['nodes']};assets={a['id']:a for a in manifest['assets']}
+    assets={a['id']:a for a in manifest['assets']}
     for food in record['foods']:
         if not 0<=food['index']<food['bites'] or food['bites']!=len(food['parts']):raise ValueError('Exhausted food index')
         if assets.get(food['asset'],{}).get('usage')!='food_prototype' or nodes.get(food['root'],{}).get('asset')!=food['asset']:raise ValueError('Missing food prototype')

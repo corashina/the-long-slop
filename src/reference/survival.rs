@@ -208,13 +208,19 @@ impl SurvivalReference {
                 && self.initial_queue.valid(),
             "initial bladder and queue",
         )?;
-        require(
-            m.items
-                .iter()
-                .any(|i| i.id == self.starter_food && matches!(i.kind, ItemKind::Food))
-                && transform(&self.starter_pose),
-            "starter food",
-        )?;
+        let starter = m
+            .items
+            .iter()
+            .find(|i| i.id == self.starter_food)
+            .filter(|i| matches!(i.kind, ItemKind::Food))
+            .and_then(|i| {
+                m.nodes
+                    .iter()
+                    .find(|n| n.id == i.node && n.source == i.source)
+            })
+            .filter(|n| n.source.file == "level1" && n.source.path_id == 24573)
+            .ok_or_else(|| ReferenceError("Invalid starter food source".into()))?;
+        require(transform(&self.starter_pose), "starter pose")?;
         require(
             self.foods.len() == 2
                 && ids(self.foods.iter().map(|f| f.kind), "food kinds")?.len() == 2,
@@ -265,7 +271,12 @@ impl SurvivalReference {
         require(
             self.starter_parts.len() == 6
                 && self.starter_parts.iter().all(|g| {
-                    !g.is_empty() && g.iter().all(|id| m.nodes.iter().any(|n| n.id == *id))
+                    !g.is_empty()
+                        && g.iter().all(|id| {
+                            m.nodes
+                                .iter()
+                                .any(|n| n.id == *id && n.asset == starter.asset)
+                        })
                 }),
             "starter parts",
         )?;

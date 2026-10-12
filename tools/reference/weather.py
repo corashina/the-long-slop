@@ -102,8 +102,13 @@ def bind_weather(source,manifest):
 def validate_weather_export(record,manifest):
     finite_record(record)
     if not 0<record['min_interval_seconds']<=record['max_interval_seconds'] or record['spawn_radius']<=0:raise ValueError('Invalid storm schedule')
-    bodies={b['id'] for b in manifest['bodies']}
-    if not record['shelters'] or any(s['root'] not in bodies for s in record['shelters']):raise ValueError('Invalid shelter root')
+    bodies={b['id']:b for b in manifest['bodies']};nodes={n['id']:n for n in manifest['nodes']}
+    owners={73428:21400,79089:21400,72174:21400,71312:21400,76881:37191,68729:37191}
+    if len(record['shelters'])!=6 or len({(s['source']['file'],s['source']['path_id']) for s in record['shelters']})!=6:raise ValueError('Invalid selected shelters')
+    for shelter in record['shelters']:
+        identity=shelter['source'];owner=owners.get(identity['path_id']) if identity['file']=='level1' else None
+        body=bodies.get(shelter['root']);node=nodes.get(body['node']) if body else None
+        if owner is None or not node or body['parent_body'] is not None or node['source']!={'file':'level1','path_id':owner}:raise ValueError('Invalid shelter owner')
     if len(record['particles'])!=4 or len({p['role'] for p in record['particles']})!=4:raise ValueError('Missing selected particles')
     textures={t['id'] for t in manifest['lighting']['textures']}
     for p in record['particles']:
