@@ -441,6 +441,8 @@ Use fixed-step tolerance for endpoint frames; do not widen tolerance to conceal 
 
 ### Task 6: Connect sleep input, camera, feedback, and lifecycle
 
+Completed after source review, compilation, and strict validation. Tests and browser acceptance were skipped at the user's request.
+
 **Files:** Modify `src/starting_area/survival.rs`, `src/starting_area.rs`, `src/app.rs`, `src/browser.rs`.
 - Modify: `src/presentation/camera.rs`, `web/input.js`, `web/survival.js`, `web/main.js`, `web/menu.js`, and control help.
 - Extend shared audio bindings for sleep. Test `tests/sleep_lifecycle.rs`, `tests/web/survival.test.mjs`, `tests/web/menu.test.mjs`.
@@ -453,7 +455,7 @@ Use fixed-step tolerance for endpoint frames; do not widen tolerance to conceal 
 - `createSurvival(ui).updateSleep(output)` displays recovered hold and cooldown UI.
 - Existing `clear_input`, `recover`, `restart`, and camera update use the sleep state; add no parallel lifecycle owner.
 
-- [ ] **Step 1: Write `pause_suspends_sleep_and_recovery_retains_cooldown`, `sleep_camera_rebases_without_jump`, and `moving_vehicle_sleep_keeps_ignition`.**
+- [x] **Step 1: Write `pause_suspends_sleep_and_recovery_retains_cooldown`, `sleep_camera_rebases_without_jump`, and `moving_vehicle_sleep_keeps_ignition`.**
 Pause halfway through sleep; resume after an arbitrary hidden interval. Assert unchanged remaining time and needs while hidden.
 Recovery ends sleep and retains scheduled wake endpoint, cooldown, needs, queues, consumed items, and engine ignition.
 Releasing sleep input after entry does not wake. Death ends sleep once.
@@ -471,17 +473,17 @@ assert_eq!(runtime.sleep.output(), before);
 assert_eq!(runtime.needs_output().needs, needs);
 ```
 
-- [ ] **Step 2: Run target `sleep_lifecycle` and affected web tests.** Expect missing input/camera/lifecycle integration.
-- [ ] **Step 3: Implement source input and camera behavior.** Use existing physics queries for the source ground ray.
+- [x] **Step 2: Run target `sleep_lifecycle` and affected web tests.** Expect missing input/camera/lifecycle integration.
+- [x] **Step 3: Implement source input and camera behavior.** Use existing physics queries for the source ground ray.
 Store camera position in absolute coordinates; convert through `WorldOrigin` for rendering and audio listener placement.
 Restore the active gameplay camera on wake, death, recovery, and restart.
 Suppress player interactions and drive commands during sleep; retain seat, ignition, gear, latched handbrake, and automatic simulation.
 Pause cancels charge but retains entered sleep. Recovery calls `interrupt` and retains the scheduled cooldown endpoint.
 Connect source sleep audio through the shared owner. Report radio station advancement as unsupported in this scope.
-- [ ] **Step 4: Run focused tests and release build.** Check hold, cooldown, sleep, pause/focus loss, moving-vehicle sleep, recovery, death, and restart in the browser.
+- [x] **Step 4: Run focused tests and release build.** Check hold, cooldown, sleep, pause/focus loss, moving-vehicle sleep, recovery, death, and restart in the browser.
 Capture the second working layer and clock traces under `.cache/survival-weather/layer-2/`.
 Confirm physics and camera remain finite after a stall and an origin shift.
-- [ ] **Step 5: Commit the sleep layer.** Message: `Connect sleep camera feedback and lifecycle`.
+- [x] **Step 5: Commit the sleep layer.** Message: `Connect sleep camera feedback and lifecycle`.
 
 ## Layer 3: Weather
 
