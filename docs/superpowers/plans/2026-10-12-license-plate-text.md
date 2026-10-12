@@ -197,7 +197,7 @@ Modify `src/lib.rs` and `src/starting_area.rs`.
 - Produce: `PlateState::new(record: &PlateRecord, draw: &mut dyn FnMut(i32, i32) -> i32) -> Result<Self, ReferenceError>`.
 - Produce: `PlateState::text(&self, item: ItemId) -> Option<&str>` and `PlateState::revision(&self, item: ItemId) -> Option<u64>`.
 - Produce: `PlateState::set(&mut self, item: ItemId, text: &str) -> Result<(), ReferenceError>`.
-- Produce: `layout_text(font: &PlateFontReference, layout: &PlateLayoutReference, text: &str) -> Result<GlyphMesh, ReferenceError>`.
+- Produce: `layout_text(font: &PlateFontReference, layout: &PlateLayoutReference, material: &PlateMaterialReference, text: &str) -> Result<GlyphMesh, ReferenceError>`.
 - Produce: `GlyphMesh { vertices: Vec<GlyphVertex>, indices: Vec<u32> }`.
 - Produce: `GlyphVertex { position: [f32; 3], normal: [f32; 3], uv0: [f32; 2], uv1: [f32; 2], color: [f32; 4] }`.
 Use quad vertex order bottom-left, bottom-right, top-right, top-left. Set index winding from the converted source normal.
@@ -217,14 +217,18 @@ assert_eq!(upper_boundary.text(rear), Some("ZZZ-999"));
 ```
 `plate_layout_uses_source_metrics` checks bearings, baseline, advances, kerning, bounds, and signed bold scale in UV1.
 Use a small font fixture with point size `10`, font size `0.8`, and glyph `A` advance `10`.
-Set its bearing to `(1,8)`, width to `6`, height to `8`, and `AA` advance adjustment to `-2`.
+Set its bearing to `(1,8)`, width to `6`, height to `8`, and first `AA` advance adjustment to `-2`.
+Set all other pair adjustments to zero; set character and glyph scales to one.
+Use source bold style `0.75`, bold spacing `7`, zero normal spacing, and the source material parameters.
 Use the source `orthographic=false` flag and TMP world scale factor `0.1`.
-For `AA`, assert quad width `0.048` and left-edge distance `0.064`, within `0.00001`.
+Recover `ShaderUtilities.GetPadding` and bold style expansion before positioning quads.
+Source material padding is `4.85`; bold style expansion is `1.6875` in font units.
+For `AA`, assert quad width `0.1526` and left-edge distance `0.0696`, within `0.00001`.
 Keep the source alignment codes and validate their common translation independently.
 
 ```rust
-assert!((mesh.vertices[1].position[0] - mesh.vertices[0].position[0] - 0.048).abs() < 0.00001);
-assert!((mesh.vertices[4].position[0] - mesh.vertices[0].position[0] - 0.064).abs() < 0.00001);
+assert!((mesh.vertices[1].position[0] - mesh.vertices[0].position[0] - 0.1526).abs() < 0.00001);
+assert!((mesh.vertices[4].position[0] - mesh.vertices[0].position[0] - 0.0696).abs() < 0.00001);
 ```
 Assert missing glyphs and nonfinite layout values return errors.
 
@@ -246,7 +250,9 @@ Record that this adapter does not establish Unity global random-sequence parity.
 Do not expose new random settings or regenerate strings during item transitions.
 
 Own `PlateState` in `StartingArea` as `pub plates: PlateState`.
-Use source TMP layout definitions and converted text transforms.
+Use source TMP layout definitions, material-dependent padding, bold spacing, and converted text transforms.
+Read the checked TMP decompile and receipt named in Task 1 report.
+Expand glyph UVs with the same recovered padding and style values as geometry.
 Build glyph winding, normals, UV0, UV1, and color for the source SDF surface.
 Do not allocate or rebuild glyph geometry during unchanged frame updates.
 
