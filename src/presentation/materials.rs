@@ -1327,11 +1327,13 @@ pub fn bind_materials(
     }
 }
 
+#[derive(Clone)]
 pub struct LampReceiverChoice {
     entity: Entity,
     material: Handle<SourceMaterial>,
     casters: Vec<(Entity, Handle<StandardMaterial>)>,
 }
+#[derive(Clone)]
 pub struct LampMaterialChoice {
     key: (crate::reference::AssetId, u32),
     receivers: Vec<LampReceiverChoice>,

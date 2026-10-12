@@ -1,3 +1,5 @@
+import {normalizeSnapshot} from './save-normalize.js';
+export {normalizeSnapshot} from './save-normalize.js';
 import {createSaveStorage,verifyRecord} from '../../web/save-storage.js';
 const DATABASE='tld-browser-save',STORE='saves',KEY='manual';
 const channel=new BroadcastChannel('tld-save-fixture');
@@ -13,17 +15,6 @@ function replace(db,record,abort=false){return new Promise((resolve,reject)=>{co
 function source(path_id){return {file:'fixture.assets',path_id};}
 function instance(path_id){return {kind:'initial',source:source(path_id)};}
 const snapshotA={schema_version:1,saved_at:'A',source:{app_id:1017180,build_id:11140890,manifest_sha256:'a'.repeat(64),source_hashes:[]},world:{seed:'42',records:[{kind:'pump',instance:{kind:'station',seed:'42',index:'1',role:'pump'},valve:0}]},player:{pose:{position:[1048577.25,-4,2048.5],rotation:[0,0,0,1]},yaw:0,pitch:0,seat:null,crouched:false,vertical_velocity:0,recoil_velocity:[0,0,0],running:false,carry:null},vehicles:[],bodies:[],items:[],attachments:{parts:[],wheels:[],tires:[]},mechanisms:{controls:[],openings:[]},progress:{trip_m:0,start_attempts:'0'},lighting:{cycle:{elapsed_seconds:0,cycle_seconds:1800,evaluated_cycle_seconds:1800,cloud_coordinate:0,star_rotation:0},requested_headlights:0,controllers:[]},view:{camera:{kind:'first_person'}}};
-export function normalizeSnapshot(snapshot){
- const normalized=structuredClone(snapshot);delete normalized.saved_at;
- function sort(records,key){records?.sort((a,b)=>{const left=JSON.stringify(key(a)),right=JSON.stringify(key(b));return left<right?-1:left>right?1:0;});}
- sort(normalized.world?.records,record=>record.instance);
- sort(normalized.vehicles,record=>record.instance);sort(normalized.bodies,record=>record.identity);sort(normalized.items,record=>record.instance);
- sort(normalized.attachments?.parts,record=>record.slot);sort(normalized.attachments?.wheels,record=>record.slot);sort(normalized.attachments?.tires,record=>record.rim);
- sort(normalized.mechanisms?.controls,record=>record.source);sort(normalized.mechanisms?.openings,record=>record.source);
- sort(normalized.lighting?.controllers,record=>record.source);
- for(const controller of normalized.lighting?.controllers??[])sort(controller.switch_poses,record=>record.node);
- return normalized;
-}
 async function storageChecks(){
  await removeDatabase();const storage=createSaveStorage({indexedDB,crypto});let db;
  try{

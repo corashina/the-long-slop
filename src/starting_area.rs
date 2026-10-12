@@ -1061,10 +1061,8 @@ impl GarageRuntime {
     }
 
     pub fn restart(&mut self, reference: &ReferenceManifest) -> Result<(), ReferenceError> {
-        self.area
-            .interaction
-            .drop_held(&mut self.area.items, &mut self.physics);
-        *self = Self::new(reference)?;
+        let candidate = Self::new(reference)?;
+        *self = candidate;
         self.started = true;
         Ok(())
     }

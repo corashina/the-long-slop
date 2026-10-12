@@ -12,7 +12,7 @@ function fixture(){
  const ui={layouts:Object.fromEntries(['reticle','use','pickup','mount','fill','carry','fluid'].map(role=>[role,layout])),urls:['icon'],icons:Object.fromEntries(['default','pickup','dismount','carrying','cap','mount','fill','enter','exit','door'].map(role=>[role,0]))};
  const source=path=>readFileSync(new URL(path,import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/export /g,'');
  const main=source('../web/main.js').replace('load().catch(error=>fail(error.message));','');
- runInNewContext(source('../web/ui-layout.js')+'\n'+source('../web/input.js')+'\n'+source('../web/feedback.js')+'\n'+main+'\nfeedback=createFeedback(ui);feedback.setVisible(true);',{document,window,innerWidth:1280,innerHeight:720,ui});
+ runInNewContext(source('../web/save-bridge.js')+'\n'+source('../web/ui-layout.js')+'\n'+source('../web/input.js')+'\n'+source('../web/feedback.js')+'\n'+main+'\nfeedback=createFeedback(ui);feedback.setVisible(true);',{document,window,innerWidth:1280,innerHeight:720,ui});
  const update=(held,charge,active,mask=8192)=>window.gameFeedback(mask,8,'Rim','',Boolean(held),0,0,false,true,'',.7,held,charge,active,800,true,true,false,false,true,.5,0,0,0,0,0);
  return {elements,window,update};
 }

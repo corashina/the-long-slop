@@ -13,6 +13,7 @@ use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::gltf::GltfExtras;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 
+#[derive(Clone)]
 struct RoadMeshRecipe {
     mesh: Handle<Mesh>,
     material: Handle<SourceMaterial>,
@@ -23,6 +24,7 @@ struct RoadMeshRecipe {
     receive_shadows: bool,
     caster: Option<Handle<StandardMaterial>>,
 }
+#[derive(Clone)]
 struct RoadNodeRecipe {
     id: crate::reference::NodeId,
     parent: Option<usize>,
@@ -30,10 +32,12 @@ struct RoadNodeRecipe {
     visibility: Visibility,
     meshes: Vec<RoadMeshRecipe>,
 }
+#[derive(Clone)]
 pub(crate) struct RoadLampRecipe {
     nodes: Vec<RoadNodeRecipe>,
     light_node: usize,
 }
+#[derive(Clone)]
 struct RoadLampInstance {
     placement: RoadLampPlacement,
     root: Entity,
@@ -42,6 +46,7 @@ struct RoadLampInstance {
     // Repeated source identities belong only to this instance.
     _nodes: Vec<(crate::reference::NodeId, Entity)>,
 }
+#[derive(Clone)]
 pub(crate) struct RoadLamps {
     pub capacity: usize,
     pub fixed_lights: usize,
@@ -58,6 +63,18 @@ pub(crate) struct RoadLamps {
     origin: [f64; 3],
 }
 impl RoadLamps {
+    pub(crate) fn clear_owned(&mut self) {
+        self.instances.clear();
+        self.keys = None;
+        self.origin = [f64::INFINITY; 3];
+    }
+    pub(crate) fn release(&self, world: &mut World) {
+        for instance in &self.instances {
+            world.despawn(instance.root);
+            world.despawn(instance.light);
+        }
+    }
+
     pub fn reset_instances(&mut self, commands: &mut Commands) {
         for instance in self.instances.drain(..) {
             commands.entity(instance.root).despawn();
@@ -376,7 +393,14 @@ pub(crate) fn sync_road_lamps(
     reference: Res<crate::app::RuntimeReference>,
     drive: Res<crate::app::Drive>,
     mut source: ResMut<SourceLighting>,
-    mut roots: Query<&mut Transform>,
+) {
+    sync_instances(&mut commands, &reference.0, &drive.runtime, &mut source);
+}
+pub(crate) fn sync_instances(
+    commands: &mut Commands,
+    reference: &crate::reference::ReferenceManifest,
+    runtime: &crate::starting_area::GarageRuntime,
+    source: &mut SourceLighting,
 ) {
     if !source.bound
         || source.warming
@@ -385,7 +409,7 @@ pub(crate) fn sync_road_lamps(
     {
         return;
     }
-    let stream = &drive.runtime.stream;
+    let stream = &runtime.stream;
     let Some(first) = stream.chunks().map(|c| c.data.key.0).min() else {
         return;
     };
@@ -408,7 +432,7 @@ pub(crate) fn sync_road_lamps(
         );
         return;
     }
-    let road = &reference.0.lighting.road_lamp;
+    let road = &reference.lighting.road_lamp;
     let range = if band.abs() <= 1 {
         road_lamp_range(
             first as f64 * CHUNK_LENGTH,
@@ -430,13 +454,10 @@ pub(crate) fn sync_road_lamps(
                 continue;
             }
             let instance = source.road_lamps.instances.swap_remove(index);
-            remove_road_light(&mut source, &mut commands, instance.light);
+            remove_road_light(source, commands, instance.light);
             commands.entity(instance.root).despawn();
         }
-        let output = drive
-            .runtime
-            .lighting
-            .road_lamp_output(&reference.0.lighting);
+        let output = runtime.lighting.road_lamp_output(&reference.lighting);
         for id in range {
             if source
                 .road_lamps
@@ -504,9 +525,9 @@ pub(crate) fn sync_road_lamps(
             }
             let light_node = nodes[recipe.light_node].1;
             let light = register_road_light(
-                &mut source,
-                &mut commands,
-                &reference.0.lighting,
+                source,
+                commands,
+                &reference.lighting,
                 slot,
                 light_node,
                 output.enabled,
@@ -522,10 +543,13 @@ pub(crate) fn sync_road_lamps(
     }
     if shifted {
         for instance in &source.road_lamps.instances {
-            if let Ok(mut pose) = roots.get_mut(instance.root) {
-                pose.translation =
-                    Vec3::from_array(stream.origin.local(instance.placement.absolute_point));
-            }
+            commands.entity(instance.root).insert(
+                Transform::from_translation(Vec3::from_array(
+                    stream.origin.local(instance.placement.absolute_point),
+                ))
+                .with_rotation(Quat::from_array(instance.placement.rotation))
+                .with_scale(Vec3::from_array(road.road_pose.scale)),
+            );
         }
     }
     if changed {

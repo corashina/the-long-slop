@@ -8,6 +8,7 @@ use crate::world::{ChunkData, ChunkKey, PropKind, WorldStream, road_sample};
 #[derive(Component)]
 pub struct ChunkVisual(pub [f64; 3]);
 
+#[derive(Clone)]
 struct ChunkAssets {
     key: ChunkKey,
     lateral_band: i64,
@@ -15,7 +16,7 @@ struct ChunkAssets {
     terrain: Handle<Mesh>,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct WorldVisuals {
     chunks: Vec<ChunkAssets>,
     cube: Handle<Mesh>,
@@ -30,6 +31,20 @@ pub struct WorldVisuals {
 }
 
 impl WorldVisuals {
+    pub(crate) fn empty_copy(&self) -> Self {
+        let mut copy = self.clone();
+        copy.chunks.clear();
+        copy
+    }
+    pub(crate) fn release(self, world: &mut World) {
+        for chunk in self.chunks {
+            world.despawn(chunk.entity);
+            world
+                .resource_mut::<Assets<Mesh>>()
+                .remove(chunk.terrain.id());
+        }
+    }
+
     pub fn new(meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) -> Self {
         Self {
             chunks: Vec::with_capacity(11),
@@ -223,5 +238,5 @@ fn terrain_mesh(chunk: &ChunkData) -> Mesh {
     mesh
 }
 
-mod lamps;
+pub(crate) mod lamps;
 pub(crate) use lamps::{RoadLamps, finish_road_lamp_warmup, prepare_road_lamp, sync_road_lamps};

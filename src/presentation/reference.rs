@@ -26,17 +26,17 @@ pub struct ItemVisual {
 
 #[derive(Component)]
 pub struct ValveVisibility {
-    opening: OpeningId,
-    open: bool,
+    pub(crate) opening: OpeningId,
+    pub(crate) open: bool,
 }
 #[derive(Component)]
 pub struct CapVisual {
-    opening: OpeningId,
-    closed: Transform,
-    opened: Transform,
-    euler: bool,
-    closed_euler: Vec3,
-    open_euler: Vec3,
+    pub(crate) opening: OpeningId,
+    pub(crate) closed: Transform,
+    pub(crate) opened: Transform,
+    pub(crate) euler: bool,
+    pub(crate) closed_euler: Vec3,
+    pub(crate) open_euler: Vec3,
 }
 
 #[derive(Resource, Default)]

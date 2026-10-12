@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Runtime save tests</title>
+<style>body{margin:0;font:14px sans-serif}header{padding:8px}iframe{width:100%;height:72vh;border:0}pre{max-height:18vh;overflow:auto;margin:8px;white-space:pre-wrap}</style>
+<header><button id="roundtrip" disabled>Run paused round trip</button><button id="runtime" disabled>Run runtime checks</button><button id="continue" disabled>Check Continue</button><span id="state">Loading runtime...</span></header>
+<iframe id="runtime-frame" src="/web/index.html" allow="fullscreen"></iframe><pre id="results">Ready.</pre>
+<script type="module">
+const frame=document.querySelector('iframe');
+frame.addEventListener('load',()=>{const script=frame.contentDocument.createElement('script');script.type='module';script.src='/tests/browser/save-runtime.js';frame.contentDocument.body.append(script);});
+</script></html>

@@ -79,6 +79,7 @@ pub struct SourceLight {
     pub faces: usize,
     pub enabled: bool,
 }
+#[derive(Clone)]
 pub struct BoundLight {
     pub index: usize,
     pub road: bool,
@@ -90,18 +91,20 @@ pub struct BoundLight {
     pub body: Option<crate::reference::BodyId>,
     pub pose: Transform,
 }
+#[derive(Clone)]
 pub struct BoundLampMaterial {
     pub output_index: usize,
     pub receivers: Vec<Entity>,
     pub current: Option<(crate::reference::AssetId, u32)>,
     pub choices: Vec<super::materials::LampMaterialChoice>,
 }
+#[derive(Clone)]
 pub struct AuthoredMaterial {
     pub asset: crate::reference::AssetId,
     pub index: u32,
     pub handle: Handle<StandardMaterial>,
 }
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct SourceLighting {
     pub sky: super::sky::SkyState,
     pub(crate) road_lamps: super::world::RoadLamps,
@@ -124,6 +127,18 @@ pub struct SourceLighting {
     pub status: Arc<Mutex<RenderingState>>,
 }
 impl SourceLighting {
+    pub(crate) fn prepare_copy(&self) -> Self {
+        let mut copy = self.clone();
+        copy.road_lamps.clear_owned();
+        copy.lights.retain(|light| !light.road);
+        for light in self.lights.iter().filter(|light| light.road) {
+            copy.uniform.lights[light.index] = GpuLight::default();
+        }
+        copy.uniform.counts.x = copy.road_lamps.fixed_lights as u32;
+        copy.uniform.counts.y = copy.road_lamps.fixed_shadows as u32;
+        copy
+    }
+
     /// Replace owned light instances. Retain loaded scenes and prepared assets.
     pub fn reset_instances(&mut self, commands: &mut Commands) {
         self.road_lamps.reset_instances(commands);

@@ -1,3 +1,4 @@
+mod save;
 use crate::browser::*;
 use crate::interaction::labels::display_name;
 use crate::presentation::instruments::InstrumentVisuals;
@@ -61,7 +62,7 @@ struct FeedbackStamp {
 }
 
 #[wasm_bindgen]
-pub fn run(reference_json: &str) -> Result<(), JsValue> {
+pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
     let reference = Arc::new(
         ReferenceManifest::from_json(reference_json.as_bytes())
@@ -71,6 +72,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
     let current = runtime.area.player.view_pose(&runtime.physics);
     App::new()
         .insert_resource(RuntimeReference(reference.clone()))
+        .insert_resource(save::SaveRequests::new(&reference, manifest_sha256))
         .insert_resource(Drive {
             instruments: InstrumentState::new(&reference.instruments),
             runtime,
@@ -115,6 +117,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
                 check_ready,
                 presentation::lighting::bind_lighting,
                 presentation::lighting::lighting_readiness,
+                save::dispatch,
                 read_input,
                 advance_physics,
                 sync_world,
@@ -310,10 +313,9 @@ fn clear_input(drive: &mut Drive) {
     drive.skip_elapsed = true;
 }
 fn read_input(
-    mut commands: Commands,
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
-    mut source: ResMut<presentation::lighting::SourceLighting>,
+    requests: Res<save::SaveRequests>,
 ) {
     let actions = game_actions();
     let frame = FrameInput {
@@ -326,6 +328,9 @@ fn read_input(
         ],
         wheel: game_wheel(),
     };
+    if requests.pending() {
+        return;
+    }
     if actions & 2 != 0 {
         drive.runtime.paused = true;
         clear_input(&mut drive);
@@ -333,17 +338,6 @@ fn read_input(
     if actions & 5 != 0 && drive.ready {
         drive.runtime.started = true;
         drive.runtime.paused = false;
-        clear_input(&mut drive);
-    }
-    if actions & 8 != 0 {
-        if let Err(error) = drive.runtime.restart(&reference.0) {
-            game_failure(&error.to_string());
-            return;
-        }
-        source.reset_instances(&mut commands);
-        drive.instruments.reset(&reference.0.instruments);
-        drive.camera = CameraMode::default();
-        drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
         clear_input(&mut drive);
     }
     if actions & 16 != 0 {
@@ -447,6 +441,27 @@ fn sync_imported(
     presentation::reference::sync_items(&drive.runtime.area, drive.clock.alpha(), &mut items);
     presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
 }
+fn instrument_sample(reference: &ReferenceManifest, run: &GarageRuntime) -> InstrumentSample {
+    let amount = |id: ItemId| {
+        run.area
+            .items
+            .get(id)
+            .and_then(|i| i.fluid.as_ref())
+            .map_or(0., |f| f.mixture.total())
+    };
+    let r = &reference.instruments;
+    InstrumentSample {
+        speed_kmh: run.physics.snapshot().speed_mps * 3.6,
+        fuel_liters: amount(reference.engine.fuel_tank),
+        oil_liters: amount(reference.engine.oil_tank),
+        temperature: run.engine_output.temperature,
+        rpm: run.engine_output.rpm,
+        headlights: run.lighting.headlights(),
+        local_ignition: run.engine_output.ignition
+            && r.electronics_output > r.electronics_off_threshold,
+        distance_m: run.trip_m,
+    }
+}
 fn sync_instruments(
     time: Res<Time<Real>>,
     reference: Res<RuntimeReference>,
@@ -457,25 +472,8 @@ fn sync_instruments(
     mut casters: Query<&mut MeshMaterial3d<StandardMaterial>>,
 ) {
     let run = &drive.runtime;
-    let amount = |id: ItemId| {
-        run.area
-            .items
-            .get(id)
-            .and_then(|i| i.fluid.as_ref())
-            .map_or(0., |f| f.mixture.total())
-    };
+    let sample = instrument_sample(&reference.0, run);
     let r = &reference.0.instruments;
-    let sample = InstrumentSample {
-        speed_kmh: run.physics.snapshot().speed_mps * 3.6,
-        fuel_liters: amount(reference.0.engine.fuel_tank),
-        oil_liters: amount(reference.0.engine.oil_tank),
-        temperature: run.engine_output.temperature,
-        rpm: run.engine_output.rpm,
-        headlights: run.lighting.headlights(),
-        local_ignition: run.engine_output.ignition
-            && r.electronics_output > r.electronics_off_threshold,
-        distance_m: run.trip_m,
-    };
     if run.started && !run.paused {
         drive.instruments.update(r, sample, time.delta_secs());
     }
