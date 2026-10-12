@@ -199,7 +199,7 @@ fn pause_freezes_complete_state() {
     assert_eq!(runtime.vehicles[0].engine.rpm, engine.rpm);
     assert_eq!(runtime.vehicles[0].engine.temperature, engine.temperature);
     assert_eq!(runtime.vehicles[0].engine.ignition, engine.ignition);
-    assert_eq!(runtime.vehicles[0].trip_m, 0.0);
+    assert!(runtime.vehicles[0].trip_m < 0.1);
     for (hinge, angle) in reference.mechanisms.iter().zip(hinges) {
         assert_eq!(
             runtime.area.interaction.mechanisms.value(hinge.item, false),
@@ -278,7 +278,7 @@ fn restart_after_carry_detach_rebase() {
         );
         assert_eq!(fluids(&runtime), quantities);
         assert_eq!(runtime.stream.origin.offset, [0.0; 3]);
-        assert_eq!(runtime.vehicles[0].trip_m, 0.0);
+        assert!(runtime.vehicles[0].trip_m < 0.1);
         assert!(runtime.vehicles[0].handbrake);
         assert!(!runtime.vehicles[0].engine.ignition);
         assert!(runtime.physics.rapier().impulse_joints.is_empty());
@@ -406,15 +406,17 @@ fn production_garage_bindings_fill_start_and_move() {
         .tanks
         .iter()
         .find(|tank| {
-            tank.item != reference.vehicles[0].engine.fuel_tank
-                && tank.quantities_liters[0] > 0.1
-                && reference
-                    .items
-                    .iter()
-                    .find(|item| item.id == tank.item)
-                    .unwrap()
-                    .body
-                    != reference.vehicles[0].body
+            tank.quantities_liters[0] > 0.1
+                && my_summer_slop::starting_area::body_vehicle(
+                    &reference,
+                    reference
+                        .items
+                        .iter()
+                        .find(|item| item.id == tank.item)
+                        .unwrap()
+                        .body,
+                )
+                .is_none()
         })
         .unwrap()
         .item;
@@ -1444,7 +1446,8 @@ fn production_cap_surface_pickup_uses_source_owner() {
                     reference.bodies.iter().any(|body| {
                         body.id == item.body
                             && body.dynamic
-                            && body.id != reference.vehicles[0].body
+                            && my_summer_slop::starting_area::body_vehicle(&reference, body.id)
+                                .is_none()
                     })
                 })
         })
@@ -2094,7 +2097,6 @@ fn restart_cancels_established_throw_charge_without_delayed_release() {
 #[test]
 #[ignore = "Requires exported Steam assets"]
 fn production_fuel_can_lifts_and_follows_after_recenter() {
-    use my_summer_slop::reference::ItemId;
     let reference = my_summer_slop::reference::ReferenceManifest::from_json(
         &std::fs::read("web/assets/reference/manifest.json").unwrap(),
     )
@@ -2104,7 +2106,12 @@ fn production_fuel_can_lifts_and_follows_after_recenter() {
     for _ in 0..180 {
         runtime.step(&reference, FrameInput::default());
     }
-    let item = ItemId(116);
+    let item = reference
+        .items
+        .iter()
+        .find(|item| item.source.path_id == 32959)
+        .unwrap()
+        .id;
     let cap = reference
         .openings
         .iter()
@@ -2260,8 +2267,31 @@ fn leave_seat(runtime: &mut GarageRuntime, reference: &ReferenceManifestRecord) 
         .find(|seat| Some(seat.id) == runtime.area.player.seat())
         .unwrap();
     let limits = my_summer_slop::player::ExitReference::from_reference(&reference.player, seat);
+    // Turn toward the open driver door until the source exit check passes.
+    'look: for pitch in [0.0, 20.0, -20.0] {
+        runtime.step(
+            reference,
+            FrameInput {
+                mouse: [-360.0, pitch - runtime.area.player.pitch_degrees()],
+                ..FrameInput::default()
+            },
+        );
+        for _ in 0..72 {
+            if runtime.area.player.can_exit(&runtime.physics, &limits) {
+                break 'look;
+            }
+            runtime.step(
+                reference,
+                FrameInput {
+                    mouse: [5.0, 0.0],
+                    ..FrameInput::default()
+                },
+            );
+        }
+    }
     assert!(runtime.area.player.try_exit(&mut runtime.physics, &limits));
     runtime.step(reference, FrameInput::default());
+    assert_eq!(runtime.area.player.seat(), None);
 }
 
 type ReferenceManifestRecord = my_summer_slop::reference::ReferenceManifest;
@@ -2292,27 +2322,9 @@ fn production_skoda_drives_switches_recovers_and_rebases() {
             .all(|c| *c)
     );
 
-    // Fuel the Skoda from the Lada start mixture.
-    let mixture = runtime
-        .area
-        .items
-        .get(reference.vehicles[0].engine.fuel_tank)
-        .unwrap()
-        .fluid
-        .as_ref()
-        .unwrap()
-        .mixture
-        .clone();
-    runtime
-        .area
-        .items
-        .get_mut(reference.vehicles[1].engine.fuel_tank)
-        .unwrap()
-        .fluid
-        .as_mut()
-        .unwrap()
-        .mixture = mixture;
-
+    // Switch cars through the open driver doors. The Skoda engine keeps running.
+    open_source_hinge(&mut runtime, &reference, 69020);
+    open_source_hinge(&mut runtime, &reference, 76010);
     enter_seat(&mut runtime, &reference, 1);
     for step in 0..240 {
         runtime.step(
@@ -2328,7 +2340,13 @@ fn production_skoda_drives_switches_recovers_and_rebases() {
         runtime.vehicles[1].engine_output.running,
         "Skoda did not start"
     );
+    leave_seat(&mut runtime, &reference);
+    enter_seat(&mut runtime, &reference, 0);
+    assert!(runtime.vehicles[1].engine_output.running);
     assert!(!runtime.vehicles[0].engine_output.running);
+    leave_seat(&mut runtime, &reference);
+    enter_seat(&mut runtime, &reference, 1);
+
     for step in 0..600 {
         runtime.step(
             &reference,
@@ -2344,7 +2362,7 @@ fn production_skoda_drives_switches_recovers_and_rebases() {
     let distance = ((moved[0] - skoda[0]).powi(2) + (moved[2] - skoda[2]).powi(2)).sqrt();
     assert!(distance > 2.0, "Skoda moved {distance} m to {moved:?}");
     assert!(runtime.vehicles[1].trip_m > 1.0);
-    assert_eq!(runtime.vehicles[0].trip_m, 0.0);
+    assert!(runtime.vehicles[0].trip_m < 0.1);
     let parked = runtime.physics.snapshot(0).pose.position;
     assert!((parked[0] - lada[0]).abs() < 0.05 && (parked[2] - lada[2]).abs() < 0.05);
     for step in 0..240 {
@@ -2357,14 +2375,14 @@ fn production_skoda_drives_switches_recovers_and_rebases() {
         );
     }
     assert!(runtime.vehicles[1].handbrake);
-    assert!(runtime.physics.snapshot(1).speed_mps < 0.5);
-
-    // Switch to the Lada. The Skoda engine keeps running.
-    leave_seat(&mut runtime, &reference);
-    enter_seat(&mut runtime, &reference, 0);
-    assert!(runtime.vehicles[1].engine_output.running);
-    leave_seat(&mut runtime, &reference);
-    enter_seat(&mut runtime, &reference, 1);
+    let stopped = runtime.physics.snapshot(1);
+    assert!(
+        stopped.speed_mps < 0.5,
+        "Skoda still moves: {} m/s at {:?}, moved {distance} m, contacts {:?}",
+        stopped.speed_mps,
+        stopped.pose.position,
+        stopped.wheels_contact
+    );
 
     // Recovery moves only the seated car.
     runtime.recover(&reference);

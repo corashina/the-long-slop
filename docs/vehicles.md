@@ -37,6 +37,19 @@ This spot is clear of home colliders and faces the road.
 - Every engine steps each frame. Only the seated driver's car reads keys.
 - Parts fit only slots with a matching source part type. The source rules decide cross-car fit.
 
+## Physics fix
+
+Rapier 0.36 CCD sweeps disabled colliders. The Skoda has disabled source colliders below the ground.
+CCD then clamped the chassis each step. The car moved at a fraction of its speed. The Lada lost half its motion.
+Disabled colliders now have empty solver groups. CCD ignores them.
+
+## Verification
+
+- `production_skoda_drives_switches_recovers_and_rebases` starts the Skoda and switches cars with its engine running.
+  It drives, brakes, recovers, shifts the floating origin, and restarts.
+- `lada_hood_fits_skoda_by_source_part_types` fits a Lada hood to the Skoda. Both cars use the source `mediumcar` type.
+- No browser check covers the Skoda.
+
 ## Add the next car
 
 1. Add the car to `CARS` in `tools/reference/export.py`: root GameObject, start-car name, and starter link.

@@ -114,7 +114,7 @@ def relocate(source, transform, position, yaw_degrees):
 
 def validate_runtime_paths(manifest):
     assets = manifest.get('assets', [])
-    if {a['path'] for a in assets} != {f'reference/{name}.gltf' for name in ('home',*CARS,'items','road_lamp','sky')} or len(assets) != 3+len(CARS):
+    if {a['path'] for a in assets} != {f'reference/{name}.gltf' for name in ('home',*CARS,'items','road_lamp','sky')} or len(assets) != 4+len(CARS):
         raise ValueError('Runtime must contain only the selected scenes')
     resources = {item['path']:item['sha256'] for item in lighting_resources(manifest)}
     for asset in assets:

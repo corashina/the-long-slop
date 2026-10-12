@@ -18,6 +18,22 @@ pub struct InstalledWheel {
     pub condition: f32,
 }
 pub const VEHICLE_COLLIDER_FLAG: u128 = 1 << 127;
+
+/// Rapier 0.36 CCD sweeps disabled colliders too. A disabled collider below the
+/// ground then clamps its body's motion each step. Empty solver groups stop this.
+pub fn solver_groups(enabled: bool) -> InteractionGroups {
+    if enabled {
+        InteractionGroups::all()
+    } else {
+        InteractionGroups::none()
+    }
+}
+
+/// Enables or disables a collider. See [`solver_groups`].
+pub fn set_collider_enabled(collider: &mut rapier3d::prelude::Collider, enabled: bool) {
+    collider.set_enabled(enabled);
+    collider.set_solver_groups(solver_groups(enabled));
+}
 pub const SLOT_SENSOR_FLAG: u128 = 1 << 126;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -145,6 +161,7 @@ impl VehicleBody {
                 .restitution(collider.restitution)
                 .sensor(collider.sensor)
                 .enabled(collider.enabled)
+                .solver_groups(solver_groups(collider.enabled))
                 .collision_groups(InteractionGroups::new(
                     Group::from_bits_truncate(collider.membership),
                     Group::from_bits_truncate(collider.filter),

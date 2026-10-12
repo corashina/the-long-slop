@@ -615,7 +615,7 @@ impl WheelAssemblies {
                 .set_parent(handle, Some(body), &mut world.bodies);
             let collider = &mut world.colliders[handle];
             collider.set_position_wrt_parent(local * pose);
-            collider.set_enabled(enabled);
+            crate::vehicle::set_collider_enabled(collider, enabled);
             collider.set_density(0.0);
             if vehicle {
                 collider.user_data |= VEHICLE_COLLIDER_FLAG;

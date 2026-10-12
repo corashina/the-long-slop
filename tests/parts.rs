@@ -9,6 +9,14 @@ fn installed() -> ReferenceManifest {
     ReferenceManifest::from_json(&std::fs::read("web/assets/reference/manifest.json").unwrap())
         .unwrap()
 }
+/// The loose spare rim in the garage.
+fn spare_rim(r: &ReferenceManifest) -> ItemId {
+    r.items
+        .iter()
+        .find(|i| i.source.path_id == 34665)
+        .unwrap()
+        .id
+}
 fn part(r: &ReferenceManifest, tag: &str) -> ItemId {
     r.parts
         .iter()
@@ -1230,7 +1238,7 @@ fn source_parts_scan_then_f_installs_after_removal() {
 }
 
 fn fit_spare_hubcap(g: &mut GarageRuntime, r: &ReferenceManifest) -> (ItemId, ItemId, ItemId) {
-    let rim = ItemId(126);
+    let rim = spare_rim(r);
     let cap = ItemId(44);
     let tire = r
         .items
@@ -1276,7 +1284,7 @@ fn body_mass(g: &mut GarageRuntime, item: ItemId) -> f32 {
 fn covered_loose_wheel_mass_conserves_add_remove_and_transfer() {
     let r = installed();
     let mut g = GarageRuntime::new(&r).unwrap();
-    let rim = ItemId(126);
+    let rim = spare_rim(&r);
     let before = body_mass(&mut g, rim);
     let (_, _, cap) = fit_spare_hubcap(&mut g, &r);
     let cap_mass = r.items.iter().find(|i| i.id == cap).unwrap().mass_kg;
@@ -1506,7 +1514,7 @@ fn loose_wheel_mass_includes_nested_general_parts() {
         .unwrap()
         .owner = Some(cap);
     let mut g = GarageRuntime::new(&r).unwrap();
-    let before = body_mass(&mut g, ItemId(126));
+    let before = body_mass(&mut g, spare_rim(&r));
     let (rim, _, _) = fit_spare_hubcap(&mut g, &r);
     let extra: f32 = r
         .items
@@ -1523,4 +1531,52 @@ fn loose_wheel_mass_includes_nested_general_parts() {
     g.wheels.sync(&mut g.area.items, &mut g.physics).unwrap();
     let detached = body_mass(&mut g, mirror);
     assert!((body_mass(&mut g, rim) + detached - before - extra).abs() < 1e-4);
+}
+
+/// Both start cars use the source `mediumcar` type. A Lada hood fits the Skoda hood slot.
+#[test]
+#[ignore = "requires installed source export"]
+fn lada_hood_fits_skoda_by_source_part_types() {
+    let r = installed();
+    let mut g = GarageRuntime::new(&r).unwrap();
+    let vehicle = |item: ItemId| {
+        let body = r.items.iter().find(|i| i.id == item).unwrap().body;
+        my_summer_slop::starting_area::body_vehicle(&r, body)
+    };
+    let car_part = |tag: &str, car: usize| {
+        r.parts
+            .iter()
+            .find(|p| p.part_types.iter().any(|t| t == tag) && vehicle(p.item) == Some(car))
+            .unwrap()
+            .item
+    };
+    let slot_of = |item: ItemId| {
+        r.part_slots
+            .iter()
+            .find(|s| s.part == Some(item))
+            .unwrap()
+            .id
+    };
+    let (lada_hood, skoda_hood) = (car_part("hood", 0), car_part("hood", 1));
+    let (lada_slot, skoda_slot) = (slot_of(lada_hood), slot_of(skoda_hood));
+    detach(&mut g, lada_hood);
+    detach(&mut g, skoda_hood);
+    g.area
+        .interaction
+        .parts
+        .install(lada_hood, skoda_slot, &mut g.area.items, &mut g.physics)
+        .unwrap();
+    assert!(g.area.interaction.parts.installed(lada_hood));
+    assert_eq!(
+        g.area.interaction.parts.slot_item(skoda_slot),
+        Some(lada_hood)
+    );
+    // Source part types still separate unrelated slots across cars.
+    assert_eq!(
+        g.area
+            .interaction
+            .parts
+            .can_install(car_part("engine", 1), lada_slot, &g.area.items),
+        Err(InteractionBlock::Incompatible)
+    );
 }

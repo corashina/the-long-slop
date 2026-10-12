@@ -85,6 +85,7 @@ Open carried containers before filling them at roadside pumps.
 Open containers spill when tilted. Pumps retain unlimited gasoline stock.
 The Lada starts with 0.5 L gasoline, 2.5 L oil, and 3.6 L water.
 Its capacities are 39 L fuel, 5 L oil, and 5 L coolant.
+The Skoda starts with the same fluids. Its capacities are 32 L fuel, 5 L oil, and 5 L coolant.
 
 Use Recover in the pause menu. Use Controls for bindings and Fullscreen.
 Aim at a tire and press F to dismount it. Release F to mount a held tire or rim.

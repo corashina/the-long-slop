@@ -54,9 +54,9 @@ fn rejects_missing_cookie_and_invalid_controller_links() {
 fn production_lighting_has_checked_source_links() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let manifest = ReferenceManifest::from_json(&bytes).unwrap();
-    assert_eq!(manifest.expected_instances(), 3);
-    assert_eq!(manifest.lighting.controllers.len(), 10);
-    assert_eq!(manifest.lighting.lights.len(), 17);
+    assert_eq!(manifest.expected_instances(), 4);
+    assert_eq!(manifest.lighting.controllers.len(), 14);
+    assert_eq!(manifest.lighting.lights.len(), 26);
     assert_eq!(manifest.lighting.cycle.startup_offset_seconds, 240.);
 }
 
@@ -365,16 +365,17 @@ fn production_lighting_records_match_selected_scene() {
     ] {
         assert_eq!(a["cycle"][field], b["cycle"][field], "cycle {field}");
     }
-    assert_eq!(manifest.lighting.controllers.len(), 10);
-    assert_eq!(manifest.lighting.lights.len(), 17);
-    for (light, checked) in a["lights"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .zip(b["lights"].as_array().unwrap())
-    {
+    assert_eq!(manifest.lighting.controllers.len(), 14);
+    assert_eq!(manifest.lighting.lights.len(), 26);
+    // Match by source. Skoda records shift the ids.
+    for checked in b["lights"].as_array().unwrap() {
+        let light = a["lights"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|actual| actual["source"] == checked["source"])
+            .unwrap();
         for field in [
-            "id",
             "source",
             "kind",
             "pose",
@@ -392,14 +393,15 @@ fn production_lighting_records_match_selected_scene() {
             );
         }
     }
-    for (control, checked) in a["controllers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .zip(b["controllers"].as_array().unwrap())
-    {
+    // Match by source. Skoda records shift the ids.
+    for checked in b["controllers"].as_array().unwrap() {
+        let control = a["controllers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|actual| actual["source"] == checked["source"])
+            .unwrap();
         for field in [
-            "id",
             "source",
             "kind",
             "startup_on",
@@ -474,14 +476,14 @@ fn production_lighting_records_match_selected_scene() {
         b["cycle"]["cloud_shadow_cookie"]
     );
     assert_eq!(manifest.lighting.textures.len(), 11);
-    for (texture, expected) in a["textures"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .zip(b["textures"].as_array().unwrap())
-    {
+    for expected in b["textures"].as_array().unwrap() {
+        let texture = a["textures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|actual| actual["source"] == expected["source"])
+            .unwrap();
         for field in [
-            "id",
             "source",
             "sha256",
             "source_data",

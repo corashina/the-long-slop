@@ -204,7 +204,14 @@ fn production_export_matches_installed_contract() {
         manifest.nodes.iter().filter(|n| n.asset.0 == 2).count(),
         697
     );
+    assert_eq!(
+        manifest.nodes.iter().filter(|n| n.asset.0 == 3).count(),
+        730
+    );
     assert!((manifest.vehicles[0].mass_kg - 961.6).abs() < 0.01);
+    assert!((manifest.vehicles[1].mass_kg - 811.6).abs() < 0.01);
+    assert!((manifest.vehicles[1].engine.max_torque_nm - 70.3).abs() < 0.001);
+    assert_eq!(manifest.vehicles[1].final_drive_ratio, 4.44);
     for (source, mass, linear, angular) in [
         (50613, 961.6, 0.005, 0.05),
         (50394, 7.0, 0.0, 0.05),
@@ -224,14 +231,11 @@ fn production_export_matches_installed_contract() {
         assert_eq!(body.linear_damping, linear);
         assert_eq!(body.angular_damping, angular);
     }
-    let spare = &manifest.bodies[7];
-    assert_eq!(spare.id.0, 8);
-    assert_eq!(spare.source.path_id, 50540);
     for body in manifest.bodies.iter().filter(|body| !body.dynamic) {
         assert_eq!(body.linear_damping, 0.0);
         assert_eq!(body.angular_damping, 0.0);
     }
-    assert_eq!(manifest.wheel_slots.len(), 4);
+    assert_eq!(manifest.wheel_slots.len(), 8);
     for (usable, pivot, collider_node) in [(64783, 21482, 21566), (64777, 21464, 21548)] {
         let hinge = manifest
             .mechanisms
@@ -289,7 +293,7 @@ fn production_export_matches_installed_contract() {
             .iter()
             .find(|body| body.id == tank.body)
             .unwrap();
-        if !body.dynamic || body.id == manifest.vehicles[0].body {
+        if !body.dynamic || manifest.vehicles.iter().any(|v| v.body == body.id) {
             continue;
         }
         let bindings: Vec<_> = manifest

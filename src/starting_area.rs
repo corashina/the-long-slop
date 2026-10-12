@@ -112,6 +112,7 @@ impl StartingArea {
                 .restitution(record.restitution)
                 .sensor(record.sensor)
                 .enabled(record.enabled)
+                .solver_groups(crate::vehicle::solver_groups(record.enabled))
                 .density(0.0)
                 .collision_groups(InteractionGroups::new(
                     Group::from_bits_truncate(record.membership),

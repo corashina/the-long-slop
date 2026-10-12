@@ -581,7 +581,8 @@ impl PartAttachments {
                     .colliders
                     .set_parent(handle, Some(body), &mut world.bodies);
                 world.colliders[handle].set_position_wrt_parent(local);
-                world.colliders[handle].set_enabled(
+                crate::vehicle::set_collider_enabled(
+                    &mut world.colliders[handle],
                     p.slot
                         .is_none_or(|s| !self.slots[s].reference.disable_colliders_on_craft)
                         && shape.enabled,
@@ -695,7 +696,7 @@ impl PartAttachments {
                     .is_none_or(|s| !self.slots[s].reference.disable_colliders_on_craft)
                     && shape.enabled;
                 if c.is_enabled() != enabled {
-                    c.set_enabled(enabled);
+                    crate::vehicle::set_collider_enabled(c, enabled);
                 }
                 if vehicle.is_some() {
                     c.user_data |= VEHICLE_COLLIDER_FLAG;
