@@ -354,3 +354,22 @@ Test floating origin for storms, particle space, and the sleep camera.
 Check restart resets and define recovery behavior without an implicit health refill.
 Run browser acceptance for food, drinking, sleep, weather, feedback, pause, focus loss, recovery, and restart.
 No product tests or runtime acceptance checks have run for this proposed feature.
+
+
+## Implemented clock fields
+
+`SleepReference.need_modifier` owns `survivalscript.sleepModifier` from `level1:73239`: 0.75.
+`SurvivalReference` no longer stores that field. Needs receive the sampled combined factor, 23.4375 during sleep.
+`EngineGlobals.outside_temperature_modifier` owns `mainscript.outsideTempM` from `level1:64919`: 10.
+The engine uses `10 * inverse_lerp(tempNights[0], tempDays[0] + tempAddNoons[0], current_temperature)` for outside heat.
+The cycle output supplies current temperature to needs and engine heat.
+Fuel, oil, coolant, transfers, emission quantities, and thermal loss use the sampled fluid factor once.
+Engine RPM, starter deadlines, torque, and heat gain use fixed simulation seconds.
+The cycle retains the previous step's extra span for star rotation. Cloud speed uses the source `Felho` curve.
+The runtime accepts at most 0.1 real seconds per frame and discards excess stall time.
+
+Instrument smoothing uses accepted normal simulation slices, including the twofold sleep rate.
+`carscript` smooths fuel and temperature at source lines 8823 and 8828 with `Time.deltaTime * 5`.
+`mutatoscript` uses `Time.deltaTime * 8 * lerpSpeedMultiplier` at lines 35619 and 35631.
+The odometer uses `Time.deltaTime * 20` at line 13307. Cycle acceleration does not enter these paths.
+The fixed-step frame sum quantizes smoothing at the existing physics interval.

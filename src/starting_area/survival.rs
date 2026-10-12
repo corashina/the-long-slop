@@ -411,7 +411,7 @@ impl GarageRuntime {
         self.survival.advance(
             &reference.survival,
             dt,
-            self.lighting.cycle.output().visual_temperature,
+            self.lighting.cycle.output().ambient_temperature,
             need_scale,
         );
         self.announce_death(reference);
@@ -520,6 +520,7 @@ impl GarageRuntime {
         reference: &ReferenceManifest,
         input: crate::simulation::FrameInput,
         dt: f32,
+        fluid_scale: f32,
     ) {
         if self.needs_output().dead {
             return;
@@ -559,6 +560,7 @@ impl GarageRuntime {
             dt,
             draws,
             selection.3,
+            fluid_scale,
         );
         if output.burp || output.fart || output.defecated {
             self.emit_selected_audio(reference, kind, selection);

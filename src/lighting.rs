@@ -35,8 +35,8 @@ pub struct CycleOutput {
     pub fog_color: [f32; 4],
     pub roadside_enabled: bool,
     pub biome_color: [f32; 4],
-    /// This visual input controls cloud density. It does not control engine heat.
-    pub visual_temperature: f32,
+    /// Source temperature controls cloud density, needs, and engine heat.
+    pub ambient_temperature: f32,
     /// Source order: low layer, high layer.
     pub clouds: [CloudOutput; 2],
     pub cloud_noise_coordinate: f32,
@@ -50,12 +50,21 @@ pub struct CycleOutput {
     pub shader_time_seconds: f64,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct CycleAdvance {
+    pub simulation_delta: f32,
+    pub cycle_extra: f32,
+    pub cloud_scale: f32,
+    pub sleep_progress: Option<f32>,
+}
+
 #[derive(Clone, Debug)]
 pub struct CycleState {
     elapsed_seconds: f64,
     cycle_seconds: f64,
     cloud_coordinate: f32,
     star_rotation: f32,
+    previous_cycle_extra: f32,
     output: CycleOutput,
 }
 
@@ -68,31 +77,36 @@ impl CycleState {
             cycle_seconds,
             cloud_coordinate: 0.,
             star_rotation: 0.,
+            previous_cycle_extra: 0.,
             output: evaluate(reference, cycle_seconds, 0., 0., 0.),
         }
     }
 
-    /// Advance by active play time. Reject invalid or unrepresentable source intervals.
-    pub fn advance(&mut self, reference: &CycleReference, elapsed_seconds: f64) {
-        let dt = elapsed_seconds as f32;
-        let active = self.elapsed_seconds + elapsed_seconds;
-        let cycle = self.cycle_seconds + elapsed_seconds;
-        let cloud_step = dt * reference.cloud_perlin_speed;
-        let star_step = reference.star_speed * dt;
-        if elapsed_seconds < 0.
-            || !elapsed_seconds.is_finite()
+    /// Advance one accepted simulation slice with its sampled sleep factors.
+    pub fn advance(&mut self, reference: &CycleReference, advance: CycleAdvance) {
+        let dt = advance.simulation_delta;
+        let active = self.elapsed_seconds + f64::from(dt);
+        let cycle = self.cycle_seconds + f64::from(dt) + f64::from(advance.cycle_extra);
+        let cloud_step = dt * reference.cloud_perlin_speed * advance.cloud_scale;
+        let star_step = reference.star_speed * dt + self.previous_cycle_extra;
+        if dt < 0.
+            || advance.cycle_extra < 0.
+            || advance.cloud_scale < 0.
             || !dt.is_finite()
+            || !advance.cycle_extra.is_finite()
+            || !advance.cloud_scale.is_finite()
             || !active.is_finite()
             || !cycle.is_finite()
             || !cloud_step.is_finite()
             || !star_step.is_finite()
+            || advance.sleep_progress.is_some_and(|p| !p.is_finite())
         {
             return;
         }
-        // FixedUpdate rotates stars before it evaluates the cycle.
+        // Source rotates stars before replacing tekerve for this fixed update.
         self.star_rotation = (self.star_rotation + star_step) % 360.;
+        self.previous_cycle_extra = advance.cycle_extra;
         self.cloud_coordinate += cloud_step;
-        // Source repeatedly subtracts one while the coordinate exceeds zero.
         if self.cloud_coordinate > 0. {
             self.cloud_coordinate -= self.cloud_coordinate.ceil();
         }
@@ -104,12 +118,24 @@ impl CycleState {
             self.cloud_coordinate,
             self.star_rotation,
         );
-        // The source changes startTime, then evaluates the old t in this update.
+        self.set_sleep_progress(reference, advance.sleep_progress);
         self.cycle_seconds = if cycle as f32 > reference.day_seconds + reference.night_seconds {
             0.
         } else {
             cycle
         };
+    }
+
+    /// Felho changes material speed at sleep endpoints without advancing time.
+    pub fn set_sleep_progress(&mut self, r: &CycleReference, progress: Option<f32>) {
+        let p = progress.unwrap_or(1.);
+        for (cloud, source) in self.output.clouds.iter_mut().zip(&r.clouds) {
+            cloud.speed = if p < 0.5 {
+                lerp(source.mid_speed, source.max_speed, inverse_lerp(0., 0.5, p))
+            } else {
+                lerp(source.min_speed, source.mid_speed, inverse_lerp(0.5, 1., p))
+            };
+        }
     }
 
     pub fn reset(&mut self, reference: &CycleReference) {
@@ -338,7 +364,7 @@ fn evaluate(
             CyclePhase::Night => true,
         },
         biome_color: biome,
-        visual_temperature: temp,
+        ambient_temperature: temp,
         clouds,
         cloud_noise_coordinate: cloud_x,
         cloud_noise,

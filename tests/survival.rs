@@ -81,19 +81,31 @@ fn toilet_fullness_and_gate() {
         burp_pressed: true,
         ..Default::default()
     };
-    let first = state.toilet_step(&r, input, 0.1, [0.1, 0.9], 4.0);
+    let first = state.toilet_step(&r, input, 0.1, [0.1, 0.9], 4.0, 1.);
     assert!(first.defecated);
     close(state.output().needs.bowel, 1.4);
     assert!(state.output().can_eat);
-    assert!(!state.toilet_step(&r, input, 0.1, [0.1, 0.9], 4.0).defecated);
-    assert!(!state.toilet_step(&r, input, 3.8, [0.1, 0.9], 4.0).defecated);
-    assert!(state.toilet_step(&r, input, 0.2, [0.1, 0.9], 4.0).defecated);
+    assert!(
+        !state
+            .toilet_step(&r, input, 0.1, [0.1, 0.9], 4.0, 1.)
+            .defecated
+    );
+    assert!(
+        !state
+            .toilet_step(&r, input, 3.8, [0.1, 0.9], 4.0, 1.)
+            .defecated
+    );
+    assert!(
+        state
+            .toilet_step(&r, input, 0.2, [0.1, 0.9], 4.0, 1.)
+            .defecated
+    );
 
     let mut state = SurvivalState::new(&r);
-    assert!(state.toilet_step(&r, input, 0.1, [0.1, 0.5], 1.0).fart);
-    assert!(state.toilet_step(&r, input, 0.1, [0.9, 0.9], 1.0).burp);
-    assert!(!state.toilet_step(&r, input, 0.1, [0.9, 0.9], 1.0).burp);
-    assert!(state.toilet_step(&r, input, 1., [0.9, 0.9], 1.0).burp);
+    assert!(state.toilet_step(&r, input, 0.1, [0.1, 0.5], 1.0, 1.).fart);
+    assert!(state.toilet_step(&r, input, 0.1, [0.9, 0.9], 1.0, 1.).burp);
+    assert!(!state.toilet_step(&r, input, 0.1, [0.9, 0.9], 1.0, 1.).burp);
+    assert!(state.toilet_step(&r, input, 1., [0.9, 0.9], 1.0, 1.).burp);
 
     r.initial_bladder = [0., 0., 0., 0.01, 0., 0.];
     let mut state = SurvivalState::new(&r);
@@ -102,16 +114,21 @@ fn toilet_fullness_and_gate() {
         ..Default::default()
     };
     let first_pour = state
-        .toilet_step(&r, held, 1. / 60., [0.; 2], 0.)
+        .toilet_step(&r, held, 1. / 60., [0.; 2], 0., 1.)
         .poured_liters;
     assert!(first_pour > 0.);
     state.apply_drink(&r, [0., 0., 1., 0., 0., 0.], 0.1);
     let latched_pour = state
-        .toilet_step(&r, held, 1. / 60., [0.; 2], 0.)
+        .toilet_step(&r, held, 1. / 60., [0.; 2], 0., 1.)
         .poured_liters;
     assert!(latched_pour < first_pour);
-    state.toilet_step(&r, ToiletInput::default(), 1., [0.; 2], 0.);
-    assert!(state.toilet_step(&r, held, 1., [0.; 2], 0.).poured_liters > 0.);
+    state.toilet_step(&r, ToiletInput::default(), 1., [0.; 2], 0., 1.);
+    assert!(
+        state
+            .toilet_step(&r, held, 1., [0.; 2], 0., 1.)
+            .poured_liters
+            > 0.
+    );
 }
 
 #[test]
@@ -188,7 +205,8 @@ fn invalid_deltas_leave_state_unchanged() {
                 },
                 f32::NAN,
                 [0.; 2],
-                0.
+                0.,
+                1.
             )
             .poured_liters,
         0.

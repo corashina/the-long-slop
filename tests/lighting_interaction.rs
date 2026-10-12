@@ -79,6 +79,7 @@ fn step(
         w,
         0.016,
         Default::default(),
+        1.,
     )
 }
 #[test]
@@ -157,6 +158,7 @@ fn use_and_click_toggle_once() {
             &mut w,
             0.016,
             Default::default(),
+            1.
         ),
         None
     );
@@ -668,6 +670,7 @@ fn exported_cabin_door_values_keep_all_four_source_mappings() {
                 &mut runtime.physics,
                 0.016,
                 Default::default(),
+                1.,
             );
             if runtime
                 .area

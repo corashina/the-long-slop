@@ -491,6 +491,7 @@ pub fn initial_vehicle_pose(reference: &ReferenceManifest) -> Result<VehiclePose
 
 pub struct GarageRuntime {
     pub survival: crate::survival::SurvivalState,
+    pub sleep: crate::sleep::SleepState,
     pub simulation_seconds: f64,
     pub audio: crate::audio::AudioState,
     pub audio_session: u32,
@@ -564,6 +565,7 @@ impl GarageRuntime {
         }
         Ok(Self {
             survival: crate::survival::SurvivalState::new(&reference.survival),
+            sleep: crate::sleep::SleepState::new(&reference.sleep),
             simulation_seconds: 0.,
             audio: crate::audio::AudioState::new(&reference.audio),
             audio_session: 1,
@@ -621,25 +623,18 @@ impl GarageRuntime {
         })
     }
 
-    pub fn advance_lighting(&mut self, reference: &ReferenceManifest, elapsed_seconds: f64) {
-        if self.started && !self.paused {
-            self.lighting
-                .cycle
-                .advance(&reference.lighting.cycle, elapsed_seconds);
-        }
+    pub fn clock_factors(&self, reference: &ReferenceManifest) -> crate::sleep::ClockFactors {
+        self.sleep.clock_factors(&reference.sleep)
     }
 
-    pub fn advance_light_fades(&mut self, reference: &ReferenceManifest, elapsed_seconds: f64) {
-        if self.started && !self.paused {
-            for (index, owner) in self.light_owners.iter().enumerate() {
-                self.lighting.set_controller_mounted(
-                    index,
-                    owner.is_none_or(|item| self.area.items.mounted(item)),
-                );
-            }
-            self.lighting
-                .advance_fades(&reference.lighting, elapsed_seconds as f32);
+    fn advance_light_fades(&mut self, reference: &ReferenceManifest, dt: f32) {
+        for (index, owner) in self.light_owners.iter().enumerate() {
+            self.lighting.set_controller_mounted(
+                index,
+                owner.is_none_or(|item| self.area.items.mounted(item)),
+            );
         }
+        self.lighting.advance_fades(&reference.lighting, dt);
     }
 
     pub fn step(&mut self, reference: &ReferenceManifest, mut input: FrameInput) {
@@ -647,11 +642,19 @@ impl GarageRuntime {
             self.clear_input();
             return;
         }
-        self.advance_needs(reference, FIXED_DT, 1.);
-        if self.paused {
-            return;
-        }
-        self.process_toilet(reference, input, FIXED_DT);
+        let factors = self.clock_factors(reference);
+        let sleep = self.sleep.output();
+        self.lighting.cycle.advance(
+            &reference.lighting.cycle,
+            crate::lighting::CycleAdvance {
+                simulation_delta: FIXED_DT,
+                cycle_extra: FIXED_DT * factors.cycle_extra_per_sim_second,
+                cloud_scale: factors.cloud_scale,
+                sleep_progress: (sleep.phase == crate::sleep::SleepPhase::Sleeping)
+                    .then_some(sleep.progress),
+            },
+        );
+        self.process_toilet(reference, input, FIXED_DT, factors.fluid_scale);
         let needs = self.needs_output();
         if needs.dead {
             input = FrameInput {
@@ -688,6 +691,7 @@ impl GarageRuntime {
             &mut self.physics,
             FIXED_DT,
             self.survival.output(),
+            factors.fluid_scale,
         );
         if action.is_none()
             && (input.pressed | input.released) & keys::GRAB != 0
@@ -970,8 +974,15 @@ impl GarageRuntime {
                 wheel_rpm,
                 free_run: reference.vehicle.gear_free_run[gear],
                 speed_kmh: speed * 3.6,
-                ambient_temperature: reference.engine.initial_temperature,
-                ambient_heat_modifier: reference.engine.globals.awake_heat_modifier,
+                ambient_temperature: self.lighting.cycle.output().ambient_temperature,
+                ambient_heat_modifier: reference.engine.globals.outside_temperature_modifier
+                    * ((self.lighting.cycle.output().ambient_temperature
+                        - reference.lighting.cycle.temp_nights[0])
+                        / (reference.lighting.cycle.temp_days[0]
+                            + reference.lighting.cycle.temp_add_noons[0]
+                            - reference.lighting.cycle.temp_nights[0]))
+                        .clamp(0., 1.),
+                sleep_modifier: factors.fluid_scale,
                 radiator_condition,
             },
             self.area.items.vehicle_fluids().expect("bound fluids"),
@@ -1109,6 +1120,24 @@ impl GarageRuntime {
             &mut self.physics,
         )
         .expect("valid station food");
+        self.advance_light_fades(reference, FIXED_DT);
+        self.advance_needs(reference, FIXED_DT, factors.need_scale);
+        // Task 6 supplies held sleep input and the active camera eligibility here.
+        let output = self.sleep.step(
+            &reference.sleep,
+            crate::sleep::SleepInput {
+                held: false,
+                active: !self.paused,
+                camera_allowed: true,
+                dead: self.needs_output().dead,
+            },
+            self.simulation_seconds,
+            FIXED_DT,
+        );
+        self.lighting.cycle.set_sleep_progress(
+            &reference.lighting.cycle,
+            (output.phase == crate::sleep::SleepPhase::Sleeping).then_some(output.progress),
+        );
     }
 
     pub fn clear_input(&mut self) {

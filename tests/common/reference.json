@@ -10245,8 +10245,8 @@
       "temperature_difference_modifier": 40.0,
       "temperature_move_modifier": 3.0,
       "max_car_velocity": 200.0,
-      "awake_heat_modifier": 1,
-      "min_steam_temperature": 110.0
+      "min_steam_temperature": 110.0,
+      "outside_temperature_modifier": 10.0
     },
     "radiator": {
       "source": {
@@ -31375,7 +31375,6 @@
     "hot_water_loss_modifier": 3.0,
     "run_food_loss_modifier": 3.0,
     "run_water_loss_modifier": 3.0,
-    "sleep_modifier": 0.75,
     "delay_speed": 2.0,
     "evidence": {
       "assembly_sha256": "9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e",
@@ -32074,11 +32073,13 @@
     "evidence": {
       "assembly_sha256": "9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e",
       "methods": [
+        "sleep *= sleepModifier;",
         "sleepModifierDef = sleepTimeInGame / sleepRealTime * 0.5f;",
         "Vector3 vector2 = new Vector3(vector.x, 10000f, vector.y);",
         "player.MoveCamParent(position + Vector3.up * 50f);"
       ]
-    }
+    },
+    "need_modifier": 0.75
   },
   "weather": {
     "source": {

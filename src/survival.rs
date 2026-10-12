@@ -247,9 +247,12 @@ impl SurvivalState {
         dt: f32,
         draws: [f32; 2],
         gate_seconds: f32,
+        fluid_scale: f32,
     ) -> ToiletOutput {
         if !dt.is_finite()
             || dt < 0.
+            || !fluid_scale.is_finite()
+            || fluid_scale < 0.
             || !gate_seconds.is_finite()
             || gate_seconds < 0.
             || !draws.iter().all(|v| v.is_finite() && *v >= 0. && *v <= 1.)
@@ -280,7 +283,7 @@ impl SurvivalState {
         if self.valve > 0. && self.bladder.mixture.total() > 0. {
             let area =
                 reference.toilet.radius * reference.toilet.radius * std::f32::consts::PI * 0.025;
-            let poured = area * self.valve * 2. * dt;
+            let poured = area * self.valve * 2. * dt * fluid_scale;
             self.change_without_mix(-poured);
             result.poured_liters = poured;
         }

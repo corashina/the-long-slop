@@ -26,9 +26,9 @@ All selected source GameObjects lack a local Rigidbody. Strict export checks thi
 Unity therefore derives their velocity from transform displacement and frame delta.
 The listener uses the same displacement rule. See [Unity velocity update mode](https://docs.unity3d.com/2021.3/Documentation/ScriptReference/AudioSource-velocityUpdateMode.html).
 
-The browser uses native frame seconds from `Time<Real>`, plus absolute source and listener positions.
+The browser uses accepted simulation seconds plus the fixed-step interpolation fraction and absolute source and listener positions.
 The native bridge appends seconds to `gameAudioListener`. It publishes the listener before events.
-At the current time scale of one, this matches the active frame-time basis. Task 5 must route its accepted time scale here.
+The clock uses the sampled sleep scale and excludes dropped stall time. Pause and resume reset the fractional carry.
 Position histories use the same axes as published positions. Origin changes do not change absolute history.
 Pause, capture cancellation, inactive gameplay, and session reset clear velocity history.
 Recovery runs from the paused menu, so its teleport cannot enter an active velocity sample.

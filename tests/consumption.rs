@@ -322,6 +322,7 @@ fn open_particle_contact_emits_once_and_reaches_bladder() {
         &mut runtime.physics,
         1. / 60.,
         runtime.survival.output(),
+        1.,
     );
     let my_summer_slop::interaction::InteractionAction::DrinkContact {
         source: contacted,
@@ -393,6 +394,7 @@ fn defecation_spawns_one_three_group_turd_with_harmful_bites() {
         },
         1. / 60.,
         [0., 1.],
+        1.,
         1.,
     );
     assert!(output.defecated);

@@ -203,7 +203,13 @@ pub(crate) fn sync(
             .iter()
             .find(|(id, _, _)| *id == item.id)
             .map_or(item.pose, |(_, previous, current)| {
-                super::interpolate(*previous, *current, drive.clock.alpha())
+                super::interpolate(
+                    *previous,
+                    *current,
+                    drive
+                        .clock
+                        .alpha(drive.runtime.clock_factors(manifest).time_scale),
+                )
             });
         if let Ok(mut transform) = transforms.get_mut(instance.root) {
             transform.set_if_neq(super::transform(from_rapier(

@@ -13,6 +13,7 @@ pub mod lighting;
 pub mod player;
 pub mod reference;
 pub mod simulation;
+pub mod sleep;
 pub mod starting_area;
 pub mod survival;
 pub mod vehicle;

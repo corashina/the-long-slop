@@ -186,6 +186,7 @@ fn fill_requires_destination_open() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     let before = items
         .get(ItemId(2))
@@ -203,6 +204,7 @@ fn fill_requires_destination_open() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     assert_eq!(
         items
@@ -223,6 +225,7 @@ fn fill_requires_destination_open() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     let total = items
         .get(ItemId(1))
@@ -241,6 +244,7 @@ fn fill_requires_destination_open() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     let destination = items
         .get(ItemId(2))
@@ -278,6 +282,7 @@ fn fill_requires_destination_open() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     assert_eq!(
         items
@@ -309,6 +314,7 @@ fn fill_requires_destination_open() {
             &mut physics,
             0.1,
             Default::default(),
+            1.,
         );
         assert_eq!(
             items
@@ -330,6 +336,7 @@ fn fill_requires_destination_open() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     let source_before = items
         .get(ItemId(1))
@@ -347,6 +354,7 @@ fn fill_requires_destination_open() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     assert_eq!(
         items
@@ -369,6 +377,7 @@ fn fill_requires_destination_open() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     let full = items
         .get(ItemId(2))
@@ -386,6 +395,7 @@ fn fill_requires_destination_open() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     assert_eq!(
         items
@@ -427,6 +437,7 @@ fn spill_requires_open_tilted_source() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     assert_eq!(
         items
@@ -447,6 +458,7 @@ fn spill_requires_open_tilted_source() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     let after = items
         .get(ItemId(1))
@@ -465,6 +477,7 @@ fn spill_requires_open_tilted_source() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     assert_eq!(
         items
@@ -487,6 +500,7 @@ fn spill_requires_open_tilted_source() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     interaction.step(
         FrameInput::default(),
@@ -496,6 +510,7 @@ fn spill_requires_open_tilted_source() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     assert_eq!(
         items
@@ -523,6 +538,7 @@ fn pickup_drop_preserves_identity_and_collision() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(interaction.held(), Some(ItemId(1)));
     assert_eq!(items.get(ItemId(1)).unwrap().location, ItemLocation::Held);
@@ -542,6 +558,7 @@ fn pickup_drop_preserves_identity_and_collision() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     interaction.step(
         input(keys::GRAB, keys::GRAB),
@@ -551,6 +568,7 @@ fn pickup_drop_preserves_identity_and_collision() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     interaction.step(
         FrameInput {
@@ -563,6 +581,7 @@ fn pickup_drop_preserves_identity_and_collision() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(interaction.held(), None);
     assert_eq!(items.len(), count);
@@ -577,6 +596,7 @@ fn pickup_drop_preserves_identity_and_collision() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(physics.rapier().bodies.len(), bodies);
     interaction.drop_held(&mut items, &mut physics);
@@ -599,6 +619,7 @@ fn carry_stops_at_a_solid_wall() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     for _ in 0..120 {
         interaction.step(
@@ -612,6 +633,7 @@ fn carry_stops_at_a_solid_wall() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.,
         );
         physics.step_physics();
     }
@@ -632,6 +654,7 @@ fn seat_enters_on_release_and_exits_on_press() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(player.seat().is_none());
     interaction.step(
@@ -645,6 +668,7 @@ fn seat_enters_on_release_and_exits_on_press() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(player.driving());
     player.step(
@@ -663,6 +687,7 @@ fn seat_enters_on_release_and_exits_on_press() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(player.seat().is_none());
 }
@@ -684,6 +709,7 @@ fn door_release_over_a_seat_does_not_enter() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(interaction.dragging_mechanism(), Some(ItemId(1)));
     let action = interaction.step(
@@ -697,6 +723,7 @@ fn door_release_over_a_seat_does_not_enter() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(action, None);
     assert!(player.seat().is_none());
@@ -715,6 +742,7 @@ fn bare_seat_release_can_enter_after_an_empty_target_press() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     interaction.step(
         FrameInput {
@@ -727,6 +755,7 @@ fn bare_seat_release_can_enter_after_an_empty_target_press() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(player.driving());
 }
@@ -758,6 +787,7 @@ fn seated_door_drag_keeps_the_player_in_the_seat() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(action, Some(InteractionAction::Mechanism(ItemId(1))));
     assert_eq!(player.seat(), Some(reference.seats[0].id));
@@ -781,6 +811,7 @@ fn seated_door_drag_keeps_the_player_in_the_seat() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(
         interaction
@@ -801,6 +832,7 @@ fn seated_door_drag_keeps_the_player_in_the_seat() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     interaction.step(
         input(keys::USE, keys::USE),
@@ -810,6 +842,7 @@ fn seated_door_drag_keeps_the_player_in_the_seat() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(player.seat().is_none());
 }
@@ -845,6 +878,7 @@ fn seated_cap_tuning_keeps_the_player_in_the_seat() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(action, Some(InteractionAction::Cap(OpeningId(100))));
     assert_eq!(player.seat(), Some(reference.seats[0].id));
@@ -863,6 +897,7 @@ fn car_tanks_cannot_pick_up_the_chassis() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(interaction.held().is_none());
     assert!(physics.rapier().impulse_joints.is_empty());
@@ -929,6 +964,7 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(action, Some(InteractionAction::WheelRemove(wheel_id)));
     assert_eq!(
@@ -948,6 +984,7 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     interaction.step(
         FrameInput {
@@ -960,6 +997,7 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     let slot = AimTarget {
         slot: Some(my_summer_slop::interaction::SlotTarget::Wheel(WheelSlotId(
@@ -979,6 +1017,7 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     let action = interaction.step(
         FrameInput {
@@ -991,6 +1030,7 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(
         action,
@@ -1008,6 +1048,7 @@ fn wheel_intents_preserve_state_for_the_wheel_owner() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(action, Some(InteractionAction::WheelSplit(wheel_id)));
     assert_eq!(interaction.held(), Some(wheel_id));
@@ -1031,6 +1072,7 @@ fn supply_fills_only_an_open_held_container() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     interaction.step(
         input(keys::GRAB, keys::GRAB),
@@ -1040,6 +1082,7 @@ fn supply_fills_only_an_open_held_container() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     let before = items
         .get(ItemId(2))
@@ -1057,6 +1100,7 @@ fn supply_fills_only_an_open_held_container() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     assert_eq!(
         items
@@ -1077,6 +1121,7 @@ fn supply_fills_only_an_open_held_container() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     interaction.step(
         input(keys::PRIMARY, 0),
@@ -1086,6 +1131,7 @@ fn supply_fills_only_an_open_held_container() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     assert!(
         items
@@ -1115,6 +1161,7 @@ fn fill_applies_source_blocks_and_slow_oil() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.,
         );
         interaction.step(
             input(keys::USE, keys::USE),
@@ -1124,6 +1171,7 @@ fn fill_applies_source_blocks_and_slow_oil() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.,
         );
         let before = items
             .get(ItemId(2))
@@ -1141,6 +1189,7 @@ fn fill_applies_source_blocks_and_slow_oil() {
             &mut physics,
             0.1,
             Default::default(),
+            1.,
         );
         assert_eq!(
             items
@@ -1167,6 +1216,7 @@ fn fill_applies_source_blocks_and_slow_oil() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     interaction.step(
         input(keys::USE, keys::USE),
@@ -1176,6 +1226,7 @@ fn fill_applies_source_blocks_and_slow_oil() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     interaction.step(
         input(keys::PRIMARY, 0),
@@ -1185,6 +1236,7 @@ fn fill_applies_source_blocks_and_slow_oil() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     assert!(
         (items
@@ -1233,6 +1285,7 @@ fn hinge_clamps_and_moves_its_collider() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(interaction.dragging_mechanism(), Some(ItemId(4)));
     let first = interaction
@@ -1252,6 +1305,7 @@ fn hinge_clamps_and_moves_its_collider() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(
         interaction
@@ -1272,6 +1326,7 @@ fn hinge_clamps_and_moves_its_collider() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(interaction.dragging_mechanism(), None);
     for _ in 0..120 {
@@ -1287,6 +1342,7 @@ fn hinge_clamps_and_moves_its_collider() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.,
         );
         physics.step_physics();
         interaction.sync_mechanisms(&mut physics);
@@ -1351,6 +1407,7 @@ fn empty_slot_does_not_pick_up_a_remote_rim_and_tire_targets_its_assembly() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(interaction.held(), None);
     let (_, collider) = physics.rapier_mut().insert(
@@ -1380,6 +1437,7 @@ fn empty_slot_does_not_pick_up_a_remote_rim_and_tire_targets_its_assembly() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(interaction.held(), None);
 }
@@ -1398,6 +1456,7 @@ fn runtime_pump_stays_open_and_fills_the_held_container() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     interaction.step(
         input(keys::USE, keys::USE),
@@ -1407,6 +1466,7 @@ fn runtime_pump_stays_open_and_fills_the_held_container() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     interaction.step(
         input(keys::USE, keys::USE),
@@ -1416,6 +1476,7 @@ fn runtime_pump_stays_open_and_fills_the_held_container() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(interaction.opening_is_open(OpeningId(pump.0)));
     let before = items
@@ -1434,6 +1495,7 @@ fn runtime_pump_stays_open_and_fills_the_held_container() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     assert!(
         (items
@@ -1483,6 +1545,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     interaction.step(
         input(keys::USE, keys::USE),
@@ -1492,6 +1555,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     interaction.step(
         input(keys::USE, keys::USE),
@@ -1501,6 +1565,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(interaction.opening_valve(OpeningId(100)), 0.0);
     let before = items
@@ -1519,6 +1584,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     assert_eq!(
         items
@@ -1543,6 +1609,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     assert!((interaction.opening_valve(OpeningId(100)) - 0.2625).abs() < 1e-6);
     assert_eq!(interaction.tuning_opening(), Some(OpeningId(100)));
@@ -1557,6 +1624,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
         &mut physics,
         0.01,
         Default::default(),
+        1.,
     );
     let valve = interaction.opening_valve(OpeningId(100));
     assert!((valve - 0.3675).abs() < 1e-6);
@@ -1568,6 +1636,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
         &mut physics,
         0.1,
         Default::default(),
+        1.,
     );
     let accepted = items
         .get(ItemId(2))
@@ -1591,6 +1660,7 @@ fn faucet_tuning_controls_fractional_fill_and_clamps() {
             &mut physics,
             0.01,
             Default::default(),
+            1.,
         );
         assert_eq!(interaction.opening_valve(OpeningId(100)), expected);
     }
@@ -1612,6 +1682,7 @@ fn one_f_gesture_does_not_remount_pickup() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(action, Some(InteractionAction::Pickup(ItemId(1))));
     assert_eq!(interaction.held(), Some(ItemId(1)));
@@ -1638,6 +1709,7 @@ fn source_mount_occurs_on_release() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     interaction.step(
         FrameInput {
@@ -1650,6 +1722,7 @@ fn source_mount_occurs_on_release() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     let at = Some(AimTarget {
         slot: Some(my_summer_slop::interaction::SlotTarget::Wheel(
@@ -1669,6 +1742,7 @@ fn source_mount_occurs_on_release() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(pressed, None);
     let released = interaction.step(
@@ -1682,6 +1756,7 @@ fn source_mount_occurs_on_release() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(
         released,
@@ -1748,6 +1823,7 @@ fn cap_surface_resolves_use_and_carry_owner() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.
         ),
         Some(InteractionAction::Cap(reference.openings[0].id))
     );
@@ -1760,6 +1836,7 @@ fn cap_surface_resolves_use_and_carry_owner() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.
         ),
         Some(InteractionAction::Pickup(can))
     );
@@ -1821,6 +1898,7 @@ fn held_container_at_wheel_slot_shows_incompatibility_and_stays_held() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.
         ),
         Some(InteractionAction::Pickup(can))
     );
@@ -1848,6 +1926,7 @@ fn held_container_at_wheel_slot_shows_incompatibility_and_stays_held() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.
         ),
         None
     );
@@ -1870,6 +1949,7 @@ fn carry_translation_roll_and_recenter_respect_collision() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     let anchor = physics
         .rapier()
@@ -1891,6 +1971,7 @@ fn carry_translation_roll_and_recenter_respect_collision() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     let translated = *physics.rapier().bodies[anchor].next_position();
     assert!(translated.translation.x > before.translation.x);
@@ -1907,6 +1988,7 @@ fn carry_translation_roll_and_recenter_respect_collision() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     let rolled = *physics.rapier().bodies[anchor].next_position();
     assert_eq!(rolled.translation, translated.translation);
@@ -1925,6 +2007,7 @@ fn carry_translation_roll_and_recenter_respect_collision() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     let pitched = *physics.rapier().bodies[anchor].next_position();
     assert_eq!(pitched.translation, rolled.translation);
@@ -1940,6 +2023,7 @@ fn carry_translation_roll_and_recenter_respect_collision() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     let centered = *physics.rapier().bodies[anchor].next_position();
     assert!((centered.translation.x - 10.0).abs() < 0.001);
@@ -1956,6 +2040,7 @@ fn carry_translation_roll_and_recenter_respect_collision() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     let yawed = *physics.rapier().bodies[anchor].next_position();
     assert_eq!(yawed.translation, centered.translation);
@@ -2010,6 +2095,7 @@ fn carry_translation_roll_and_recenter_respect_collision() {
                 &mut physics,
                 1.0 / 60.0,
                 Default::default(),
+                1.,
             );
             let anchor = physics
                 .rapier()
@@ -2061,6 +2147,7 @@ fn carry_translation_roll_and_recenter_respect_collision() {
                     &mut physics,
                     1.0 / 60.0,
                     Default::default(),
+                    1.,
                 );
                 physics.step_physics();
                 if blocked {
@@ -2137,6 +2224,7 @@ fn carry_uses_item_recenter_pose_and_source_pickup_restrictions() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     interaction.step(
         FrameInput {
@@ -2149,6 +2237,7 @@ fn carry_uses_item_recenter_pose_and_source_pickup_restrictions() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     let anchor = physics
         .rapier()
@@ -2180,6 +2269,7 @@ fn carry_uses_item_recenter_pose_and_source_pickup_restrictions() {
                 &mut physics,
                 1.0 / 60.0,
                 Default::default(),
+                1.
             ),
             None
         );
@@ -2208,6 +2298,7 @@ fn carry_force_cap_uses_the_source_mass_gain() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.,
         );
         interaction.step(
             FrameInput {
@@ -2220,6 +2311,7 @@ fn carry_force_cap_uses_the_source_mass_gain() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.,
         );
         let anchor = physics
             .rapier()
@@ -2255,6 +2347,7 @@ fn combined_carry_buttons_apply_source_pitch_exception() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.,
         );
         interaction.step(
             FrameInput {
@@ -2268,6 +2361,7 @@ fn combined_carry_buttons_apply_source_pitch_exception() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.,
         );
         let anchor = physics
             .rapier()
@@ -2341,6 +2435,7 @@ fn seated_window_drag_preserves_seat_and_driver_state() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!((interaction.mechanisms.value(ItemId(1), false).unwrap() - 0.5).abs() < 1e-6);
     // Cross a seat on release. It must not consume the mechanism's release.
@@ -2355,6 +2450,7 @@ fn seated_window_drag_preserves_seat_and_driver_state() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(player.seat(), seat_before);
     assert_eq!(player.driving(), driving_before);
@@ -2380,6 +2476,7 @@ fn pickup_release_does_not_drop_or_throw_acquired_item() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.,
         );
         assert_eq!(interaction.held(), Some(ItemId(1)));
         assert_eq!(interaction.throw_charge(), 0.0);
@@ -2397,6 +2494,7 @@ fn held_f_charges_and_release_throws_once() {
         &mut physics,
         0.01,
         Default::default(),
+        1.,
     );
     interaction.step(
         FrameInput {
@@ -2409,6 +2507,7 @@ fn held_f_charges_and_release_throws_once() {
         &mut physics,
         0.01,
         Default::default(),
+        1.,
     );
     let body = items.get(ItemId(1)).unwrap().body.unwrap();
     physics.rapier_mut().bodies[body].set_linvel(Vector::new(2.0, 0.0, 1.0), true);
@@ -2420,6 +2519,7 @@ fn held_f_charges_and_release_throws_once() {
         &mut physics,
         0.2,
         Default::default(),
+        1.,
     );
     assert_eq!(interaction.held(), Some(ItemId(1)));
     interaction.step(
@@ -2433,6 +2533,7 @@ fn held_f_charges_and_release_throws_once() {
         &mut physics,
         0.01,
         Default::default(),
+        1.,
     );
     assert_eq!(interaction.held(), None);
     let velocity = physics.rapier().bodies[body].linvel();
@@ -2450,6 +2551,7 @@ fn held_f_charges_and_release_throws_once() {
         &mut physics,
         0.01,
         Default::default(),
+        1.,
     );
     assert_eq!(physics.rapier().bodies[body].linvel(), velocity);
 }
@@ -2471,6 +2573,7 @@ fn source_push_wakes_and_applies_point_impulse() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(!physics.rapier().bodies[chassis].is_sleeping());
     assert!((physics.rapier().bodies[chassis].linvel().z + 500.0 / 60.0 * 0.02).abs() < 1e-5);
@@ -2500,6 +2603,7 @@ fn throw_charge_rises_falls_stops_and_capture_cancels_release() {
         &mut physics,
         0.02,
         Default::default(),
+        1.,
     );
     interaction.step(
         input(keys::GRAB, keys::GRAB),
@@ -2509,6 +2613,7 @@ fn throw_charge_rises_falls_stops_and_capture_cancels_release() {
         &mut physics,
         0.02,
         Default::default(),
+        1.,
     );
     assert!((interaction.throw_charge() - 0.03).abs() < 1e-6);
     for _ in 0..33 {
@@ -2520,6 +2625,7 @@ fn throw_charge_rises_falls_stops_and_capture_cancels_release() {
             &mut physics,
             0.02,
             Default::default(),
+            1.,
         );
     }
     let maximum = interaction.throw_charge();
@@ -2532,6 +2638,7 @@ fn throw_charge_rises_falls_stops_and_capture_cancels_release() {
         &mut physics,
         0.02,
         Default::default(),
+        1.,
     );
     assert!((interaction.throw_charge() - (maximum - 0.03)).abs() < 1e-6);
     for _ in 0..40 {
@@ -2543,6 +2650,7 @@ fn throw_charge_rises_falls_stops_and_capture_cancels_release() {
             &mut physics,
             0.02,
             Default::default(),
+            1.,
         );
     }
     let minimum = interaction.throw_charge();
@@ -2555,6 +2663,7 @@ fn throw_charge_rises_falls_stops_and_capture_cancels_release() {
         &mut physics,
         0.02,
         Default::default(),
+        1.,
     );
     assert_eq!(interaction.throw_charge(), minimum);
     interaction.cancel_input();
@@ -2571,6 +2680,7 @@ fn throw_charge_rises_falls_stops_and_capture_cancels_release() {
         &mut physics,
         0.02,
         Default::default(),
+        1.,
     );
     assert_eq!(interaction.held(), Some(ItemId(1)));
     assert_eq!(interaction.throw_charge(), 0.0);
@@ -2648,6 +2758,7 @@ fn steering_grip_retains_release_and_look_away_then_next_press_releases() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(interaction.push_gripping());
     assert_eq!(interaction.push_steering(), Some(1.0));
@@ -2670,6 +2781,7 @@ fn steering_grip_retains_release_and_look_away_then_next_press_releases() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(interaction.push_gripping());
     assert!(interaction.prompt(&aim, &items).contains("release grip"));
@@ -2681,6 +2793,7 @@ fn steering_grip_retains_release_and_look_away_then_next_press_releases() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(!interaction.push_gripping());
     assert!(physics.rapier().impulse_joints.is_empty());
@@ -2702,6 +2815,7 @@ fn steering_grip_distance_collider_and_capture_cancel() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.,
         );
         assert!(interaction.push_gripping());
         match cancel {
@@ -2722,6 +2836,7 @@ fn steering_grip_distance_collider_and_capture_cancel() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.,
         );
         assert!(!interaction.push_gripping());
         assert!(physics.rapier().impulse_joints.is_empty());
@@ -2782,6 +2897,7 @@ fn source_push_wakes_car_without_bypassing_handbrake() {
         &mut runtime.physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(!runtime.physics.rapier().bodies[chassis].is_sleeping());
     assert!(runtime.handbrake);
@@ -2812,6 +2928,7 @@ fn steering_grip_moves_car_and_keeps_player_joint_across_physics_steps() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(physics.rapier().bodies[player.body_handle()].is_dynamic());
     for _ in 0..60 {
@@ -2824,6 +2941,7 @@ fn steering_grip_moves_car_and_keeps_player_joint_across_physics_steps() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.,
         );
         player.step(input, &mut physics, 1.0 / 60.0);
         physics.step_physics();
@@ -2843,6 +2961,7 @@ fn steering_grip_moves_car_and_keeps_player_joint_across_physics_steps() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(!interaction.push_gripping());
     assert!(physics.rapier().bodies[player.body_handle()].is_kinematic());
@@ -2870,6 +2989,7 @@ fn steering_grip_requires_ground_and_ordinary_push_rejects_support_root() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(!interaction.push_gripping());
     assert!(physics.rapier().impulse_joints.is_empty());
@@ -2897,6 +3017,7 @@ fn steering_grip_requires_ground_and_ordinary_push_rejects_support_root() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert_eq!(action, None);
     assert_eq!(
@@ -2941,6 +3062,7 @@ fn grip_forward_force_uses_car_direction_after_look_change() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     player.step(
         FrameInput {
@@ -2973,6 +3095,7 @@ fn grip_forward_force_uses_car_direction_after_look_change() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.,
         );
         let delta = physics.rapier().bodies[chassis].linvel() - before;
         assert!(
@@ -2998,6 +3121,7 @@ fn grip_steering_without_forward_or_backward_applies_no_push() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(interaction.push_gripping());
     assert_eq!(interaction.push_steering(), Some(1.0));
@@ -3018,6 +3142,7 @@ fn grip_jump_retains_joint_and_dynamic_body() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     player.step(input(keys::SPACE, keys::SPACE), &mut physics, 1.0 / 60.0);
     assert!(!player.grounded());
@@ -3030,6 +3155,7 @@ fn grip_jump_retains_joint_and_dynamic_body() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(interaction.push_gripping());
     assert_eq!(physics.rapier().impulse_joints.len(), 1);
@@ -3043,6 +3169,7 @@ fn grip_jump_retains_joint_and_dynamic_body() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     assert!(interaction.push_gripping());
 }
@@ -3065,6 +3192,7 @@ fn carry_lifts_a_grounded_item_out_of_contact() {
         &mut physics,
         1.0 / 60.0,
         Default::default(),
+        1.,
     );
     for _ in 0..60 {
         interaction.step(
@@ -3079,6 +3207,7 @@ fn carry_lifts_a_grounded_item_out_of_contact() {
             &mut physics,
             1.0 / 60.0,
             Default::default(),
+            1.,
         );
         physics.step_physics();
     }
@@ -3106,6 +3235,7 @@ fn throw_hud_state_tracks_release_block_cancel_and_lost_hand() {
             &mut physics,
             0.02,
             Default::default(),
+            1.,
         );
         assert!(!interaction.throw_active());
         interaction.step(
@@ -3116,6 +3246,7 @@ fn throw_hud_state_tracks_release_block_cancel_and_lost_hand() {
             &mut physics,
             0.02,
             Default::default(),
+            1.,
         );
         assert!(interaction.throw_active());
         assert!((interaction.throw_charge() - 0.03).abs() < 1e-6);
@@ -3149,6 +3280,7 @@ fn throw_hud_state_tracks_release_block_cancel_and_lost_hand() {
                     &mut physics,
                     0.02,
                     Default::default(),
+                    1.,
                 );
             }
             1 => {
@@ -3163,6 +3295,7 @@ fn throw_hud_state_tracks_release_block_cancel_and_lost_hand() {
                     &mut physics,
                     0.02,
                     Default::default(),
+                    1.,
                 );
             }
             2 => interaction.cancel_input(),
@@ -3181,6 +3314,7 @@ fn throw_hud_state_tracks_release_block_cancel_and_lost_hand() {
                     &mut physics,
                     0.02,
                     Default::default(),
+                    1.,
                 );
             }
             _ => {

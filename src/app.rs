@@ -308,7 +308,7 @@ fn check_ready(
 fn clear_input(drive: &mut Drive) {
     drive.input.clear();
     drive.runtime.clear_input();
-    drive.clock = StepClock::default();
+    drive.clock.reset();
     drive.previous = drive.current;
     drive.rendered = drive.current;
     drive.runtime.area.begin_step();
@@ -389,12 +389,13 @@ fn advance_physics(
         drive.skip_elapsed = false;
         return;
     }
-    drive
-        .runtime
-        .advance_lighting(&reference.0, time.delta_secs_f64());
-    let steps = drive.clock.advance(time.delta_secs_f64());
-    drive.frame_steps = steps as u32;
-    for _ in 0..steps {
+    drive.clock.accept_frame(time.delta_secs_f64());
+    loop {
+        let scale = drive.runtime.clock_factors(&reference.0).time_scale;
+        if !drive.clock.take_step(scale) {
+            break;
+        }
+        drive.frame_steps += 1;
         drive.previous = drive.current;
         let old_origin = drive.runtime.stream.origin.offset;
         let input = drive.input.take_step();
@@ -404,11 +405,14 @@ fn advance_physics(
             drive.previous.position[i] -= (new_origin[i] - old_origin[i]) as f32;
         }
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
+        if drive.runtime.paused {
+            drive.clock.reset();
+            break;
+        }
     }
-    drive
-        .runtime
-        .advance_light_fades(&reference.0, time.delta_secs_f64());
-    drive.rendered = presentation::interpolate(drive.previous, drive.current, drive.clock.alpha());
+    let scale = drive.runtime.clock_factors(&reference.0).time_scale;
+    drive.rendered =
+        presentation::interpolate(drive.previous, drive.current, drive.clock.alpha(scale));
 }
 fn sync_world(
     drive: Res<Drive>,
@@ -427,6 +431,7 @@ fn sync_world(
 }
 fn sync_imported(
     drive: Res<Drive>,
+    reference: Res<RuntimeReference>,
     mut query: Query<(&BodyVisual, &mut Transform)>,
     mut items: Query<(&ItemVisual, &mut Transform), Without<BodyVisual>>,
     mut caps: Query<(&CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
@@ -435,14 +440,21 @@ fn sync_imported(
     presentation::reference::sync(
         &drive.runtime.area,
         &drive.runtime.physics,
-        drive.clock.alpha(),
+        drive
+            .clock
+            .alpha(drive.runtime.clock_factors(&reference.0).time_scale),
         &mut query,
     );
-    presentation::reference::sync_items(&drive.runtime.area, drive.clock.alpha(), &mut items);
+    presentation::reference::sync_items(
+        &drive.runtime.area,
+        drive
+            .clock
+            .alpha(drive.runtime.clock_factors(&reference.0).time_scale),
+        &mut items,
+    );
     presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
 }
 fn sync_instruments(
-    time: Res<Time<Real>>,
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
     mut visuals: ResMut<InstrumentVisuals>,
@@ -471,7 +483,8 @@ fn sync_instruments(
         distance_m: run.trip_m,
     };
     if run.started && !run.paused {
-        drive.instruments.update(r, sample, time.delta_secs());
+        let dt = drive.frame_steps as f32 * crate::simulation::FIXED_DT;
+        drive.instruments.update(r, sample, dt);
     }
     visuals.update(
         &reference.0,
@@ -491,7 +504,7 @@ fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveC
             };
     }
 }
-fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>, time: Res<Time<Real>>) {
+fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let needs = drive.runtime.needs_output();
     game_survival(
         needs.needs.hp,
@@ -530,7 +543,13 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>, time: 
         origin[0],
         origin[1],
         origin[2],
-        time.elapsed_secs_f64(),
+        drive.runtime.simulation_seconds
+            + f64::from(crate::simulation::FIXED_DT)
+                * f64::from(
+                    drive
+                        .clock
+                        .alpha(drive.runtime.clock_factors(&reference.0).time_scale),
+                ),
     );
     drive.runtime.audio.pack(origin);
     game_audio(&drive.runtime.audio.ids, &drive.runtime.audio.values);

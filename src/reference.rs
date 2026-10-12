@@ -495,7 +495,7 @@ pub struct EngineGlobals {
     pub temperature_difference_modifier: f32,
     pub temperature_move_modifier: f32,
     pub max_car_velocity: f32,
-    pub awake_heat_modifier: f32,
+    pub outside_temperature_modifier: f32,
     pub min_steam_temperature: f32,
 }
 
@@ -1618,7 +1618,7 @@ impl ReferenceManifest {
                 e.globals.temperature_difference_modifier,
                 e.globals.temperature_move_modifier,
                 e.globals.max_car_velocity,
-                e.globals.awake_heat_modifier,
+                e.globals.outside_temperature_modifier,
             ]) && finite(&e.globals.car_temperature_bounds),
             "engine globals",
         )?;

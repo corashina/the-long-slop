@@ -64,7 +64,7 @@ fn temperature_change(
                 * inverse_lerp(0.0, globals.max_car_velocity, speed))
         * (transfer / 60.0)
         * difference
-        * globals.awake_heat_modifier
+        * input.sleep_modifier
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -82,6 +82,7 @@ pub struct EngineInput {
     pub speed_kmh: f32,
     pub ambient_temperature: f32,
     pub ambient_heat_modifier: f32,
+    pub sleep_modifier: f32,
     pub radiator_condition: u8,
 }
 
@@ -100,6 +101,7 @@ impl Default for EngineInput {
             speed_kmh: 0.,
             ambient_temperature: 0.,
             ambient_heat_modifier: 0.,
+            sleep_modifier: 1.,
             radiator_condition: 0,
         }
     }
@@ -253,6 +255,7 @@ impl EngineState {
                 fluids.fuel,
                 self.supplied_fuel
                     * dt
+                    * input.sleep_modifier
                     * reference.globals.fuel_consumption
                     * lerp(
                         required.total() * 0.2,
@@ -337,7 +340,8 @@ impl EngineState {
                 reference.globals.oil_consumption
                     * reference.oil_consumption_modifier
                     * inverse_lerp(0.0, reference.max_rpm, self.rpm)
-                    * dt,
+                    * dt
+                    * input.sleep_modifier,
             );
         }
         if input.radiator_present && self.temperature > reference.globals.min_steam_temperature {
@@ -345,6 +349,7 @@ impl EngineState {
                 fluids.coolant,
                 reference.globals.coolant_evaporate_rate / 60.0
                     * dt
+                    * input.sleep_modifier
                     * inverse_lerp(
                         reference.globals.min_steam_temperature,
                         bounds[1],
@@ -388,7 +393,10 @@ impl EngineState {
                 * water_blood.clamp(0.5, 1.0);
             self.temperature +=
                 temperature_change(self.temperature, speed, cooling, input, reference, dt);
-            spill(fluids.coolant, leak / 60.0 * dt * thermostat);
+            spill(
+                fluids.coolant,
+                leak / 60.0 * dt * thermostat * input.sleep_modifier,
+            );
         }
         self.last_output = EngineOutput {
             ignition: self.ignition,

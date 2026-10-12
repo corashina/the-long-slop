@@ -605,6 +605,7 @@ impl InteractionState {
         physics: &mut PhysicsWorld,
         dt: f32,
         needs: NeedsOutput,
+        fluid_scale: f32,
     ) -> Option<InteractionAction> {
         self.finish_cancelled_input(player, physics);
         if !dt.is_finite() || dt <= 0.0 {
@@ -965,7 +966,7 @@ impl InteractionState {
                             .max(0.0001)
                             .min(amount);
                     }
-                    let liters = transfer(source, destination_state, amount);
+                    let liters = transfer(source, destination_state, amount * fluid_scale);
                     if liters > 0.0 {
                         filling = Some(source_id);
                         action = Some(InteractionAction::Fill {
@@ -1009,7 +1010,7 @@ impl InteractionState {
                     && fluid.mixture.total() > 0.;
                 if emitting {
                     let speed = factor * opening.valve * opening.reference.flow_liters_per_second;
-                    let requested_liters = speed * dt;
+                    let requested_liters = speed * dt * fluid_scale;
                     let total = fluid.mixture.total();
                     fractions = fluid.mixture.quantities_liters.map(|amount| amount / total);
                     spill(fluid, requested_liters);
@@ -1079,7 +1080,7 @@ impl InteractionState {
         {
             action = Some(InteractionAction::Drink {
                 source,
-                requested_liters: self.drink_flow_liters_per_second * dt,
+                requested_liters: self.drink_flow_liters_per_second * dt * fluid_scale,
             });
         }
         self.fill_opening = availability.fill_reservation;

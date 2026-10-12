@@ -78,23 +78,47 @@ pub fn braking(input: DriveInput, direction: f32, auto_move_min: f32) -> bool {
         || (input.accelerate && direction < -auto_move_min)
 }
 
-/// Retains only the fraction after at most six fixed steps per frame.
+/// Stores accepted real time. Each step spends its sampled scale once.
 #[derive(Default)]
 pub struct StepClock {
     accumulator: f64,
+    steps: usize,
+    touched_sleep: bool,
 }
 
 impl StepClock {
-    pub fn advance(&mut self, elapsed_seconds: f64) -> usize {
-        if elapsed_seconds.is_finite() {
-            self.accumulator += elapsed_seconds.clamp(0.0, MAX_FRAME_SECONDS);
+    pub fn accept_frame(&mut self, elapsed_seconds: f64) {
+        self.steps = 0;
+        self.touched_sleep = false;
+        if elapsed_seconds.is_finite() && elapsed_seconds >= 0. {
+            self.accumulator += elapsed_seconds.min(MAX_FRAME_SECONDS);
         }
-        let steps = ((self.accumulator + 1.0e-12) / STEP_SECONDS).floor() as usize;
-        self.accumulator = (self.accumulator - steps as f64 * STEP_SECONDS).max(0.0);
-        steps.min(6)
     }
 
-    pub fn alpha(&self) -> f32 {
-        (self.accumulator / STEP_SECONDS) as f32
+    pub fn take_step(&mut self, time_scale: f32) -> bool {
+        if !time_scale.is_finite() || time_scale <= 0. {
+            return false;
+        }
+        self.touched_sleep |= time_scale > 1.;
+        let cost = STEP_SECONDS / f64::from(time_scale);
+        let budget = if self.touched_sleep { 12 } else { 6 };
+        if self.steps >= budget {
+            self.accumulator %= cost;
+            return false;
+        }
+        if self.accumulator + 1.0e-12 < cost {
+            return false;
+        }
+        self.accumulator = (self.accumulator - cost).max(0.);
+        self.steps += 1;
+        true
+    }
+
+    pub fn alpha(&self, time_scale: f32) -> f32 {
+        (self.accumulator * f64::from(time_scale) / STEP_SECONDS).clamp(0., 1.) as f32
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::default();
     }
 }

@@ -163,6 +163,7 @@ fn wrong_or_occupied_slot_keeps_held_part_and_contents() {
         &mut g.physics,
         0.02,
         Default::default(),
+        1.,
     );
     g.area.interaction.step(
         FrameInput {
@@ -187,6 +188,7 @@ fn wrong_or_occupied_slot_keeps_held_part_and_contents() {
         &mut g.physics,
         0.02,
         Default::default(),
+        1.,
     );
     for input in [
         FrameInput {
@@ -206,6 +208,7 @@ fn wrong_or_occupied_slot_keeps_held_part_and_contents() {
             &mut g.physics,
             0.2,
             Default::default(),
+            1.,
         );
         assert_eq!(g.area.interaction.throw_charge(), 0.0);
         assert_eq!(g.area.interaction.held(), Some(engine));
@@ -641,6 +644,7 @@ fn failed_carry_acquisition_keeps_part_mounted() {
         &mut g.physics,
         0.02,
         Default::default(),
+        1.,
     );
     let after = g.area.items.get(item).unwrap();
     assert!(action.is_none());
@@ -1173,6 +1177,7 @@ fn source_parts_scan_then_f_installs_after_removal() {
             &mut g.physics,
             0.02,
             Default::default(),
+            1.,
         );
         let pressed = g.area.interaction.step(
             FrameInput {
@@ -1186,6 +1191,7 @@ fn source_parts_scan_then_f_installs_after_removal() {
             &mut g.physics,
             0.02,
             Default::default(),
+            1.,
         );
         assert!(pressed.is_none(), "{tag}: mount waits for release");
         assert_eq!(g.area.interaction.held(), Some(item), "{tag}");
@@ -1200,6 +1206,7 @@ fn source_parts_scan_then_f_installs_after_removal() {
             &mut g.physics,
             0.02,
             Default::default(),
+            1.,
         );
         assert!(outcome.is_some(), "{tag}");
         assert_eq!(g.area.interaction.held(), None, "{tag}");
@@ -1375,6 +1382,7 @@ fn covered_loose_wheel_resolve_and_f_pick_up_rim_and_tire_surfaces() {
             &mut g.physics,
             0.02,
             Default::default(),
+            1.,
         );
         assert_eq!(g.area.interaction.held(), Some(rim));
         let body = g.area.items.get(rim).unwrap().body;

@@ -142,13 +142,14 @@ pub struct SurvivalReference {
     pub hot_water_loss_modifier: f32,
     pub run_food_loss_modifier: f32,
     pub run_water_loss_modifier: f32,
-    pub sleep_modifier: f32,
     pub delay_speed: f32,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SleepReference {
     pub source: SourceId,
+    /// survivalscript.sleepModifier, source level1:73239.
+    pub need_modifier: f32,
     pub hold_gain: f32,
     pub sleep_real_seconds: f32,
     pub sleep_cycle_seconds: f32,
@@ -287,7 +288,6 @@ impl SurvivalReference {
                 self.water_damage,
                 self.max_healing_speed,
                 self.delay_speed,
-                self.sleep_modifier,
                 self.drink_modifier,
                 self.death_velocity_change,
                 self.water_to_piss_ratio,
@@ -377,6 +377,7 @@ impl SleepReference {
         require(
             self.evidence.valid()
                 && finite(&[
+                    self.need_modifier,
                     self.hold_gain,
                     self.sleep_real_seconds,
                     self.sleep_cycle_seconds,
@@ -392,6 +393,7 @@ impl SleepReference {
                     self.cloud_high_mid_speed,
                     self.cloud_high_max_speed,
                 ])
+                && self.need_modifier > 0.
                 && self.hold_gain > 0.
                 && self.sleep_real_seconds > 0.
                 && self.sleep_cycle_seconds > 0.

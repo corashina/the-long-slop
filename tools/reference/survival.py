@@ -10,7 +10,7 @@ from .collision import world_pose, geometry
 from .gltf import GltfExporter
 from .actions import recover_pickup
 
-SURVIVAL_FIELDS = 'waterToPissRatio foodToShitRatio bloodToHpRatio alcoholHeal alcoholConvertToPiss carFluidsDamage maxHealingSpeed healingToiletFullModfiier waterDamage foodDamage defTemp coldTemp hotTemp foodLoss coldFoodLossModifier hotFoodLossModifier waterLoss coldWaterLossModifier hotWaterLossModifier runFoodLossModifier runWaterLossModifier sleepModifier delaySpeed'.split()
+SURVIVAL_FIELDS = 'waterToPissRatio foodToShitRatio bloodToHpRatio alcoholHeal alcoholConvertToPiss carFluidsDamage maxHealingSpeed healingToiletFullModfiier waterDamage foodDamage defTemp coldTemp hotTemp foodLoss coldFoodLossModifier hotFoodLossModifier waterLoss coldWaterLossModifier hotWaterLossModifier runFoodLossModifier runWaterLossModifier delaySpeed'.split()
 
 def snake(name):
     return re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
@@ -117,12 +117,12 @@ def recover_survival(source: LibrarySource, roots: dict, output: Path) -> dict:
         'mode_source':source_id(source.get('level0',17179)),'mode':source.read(source.get('level0',17179))['defS']['survival'],
         'death_seconds':14.,'drinking':recover_drinking(source,player)}
     cycle=source.read(source.resolve(main,md['napszak']))
-    sleep={'source':source_id(main),'hold_gain':md['sleepGain'],'sleep_real_seconds':md['sleepRealTime'],
+    sleep={'source':source_id(main),'need_modifier':d['sleepModifier'],'hold_gain':md['sleepGain'],'sleep_real_seconds':md['sleepRealTime'],
         'sleep_cycle_seconds':md['sleepTimeInGame'],'cooldown_seconds':md['minTimeBeforeSleep'],
         'sleep_cam_ring_min':md['sleepCamRingMin'],'sleep_cam_ring_max':md['sleepCamRingMax'],
         'sleep_cam_height_min':md['sleepCamHeightMin'],'sleep_cam_height_max':md['sleepCamHeightMax'],'sleep_layer_mask':md['sleepLayerMask']['m_Bits'],
         **{snake(k):cycle[k] for k in ['CloudLowMinSpeed','CloudLowMidSpeed','CloudLowMaxSpeed','CloudHighMinSpeed','CloudHighMidSpeed','CloudHighMaxSpeed']},
-        'evidence':managed_evidence(source,['sleepModifierDef = sleepTimeInGame / sleepRealTime * 0.5f;', 'Vector3 vector2 = new Vector3(vector.x, 10000f, vector.y);','player.MoveCamParent(position + Vector3.up * 50f);'])}
+        'evidence':managed_evidence(source,['sleep *= sleepModifier;', 'sleepModifierDef = sleepTimeInGame / sleepRealTime * 0.5f;', 'Vector3 vector2 = new Vector3(vector.x, 10000f, vector.y);','player.MoveCamParent(position + Vector3.up * 50f);'])}
     from .audio import recover_audio
     source.audio=recover_audio(source,output)
     source.survival=result; source.sleep=sleep;source.survival_roots=roots
@@ -196,3 +196,22 @@ def recover_drinking(source,player):
         'local_position':list(source.read(root)['m_LocalPosition'][axis] for axis in 'xyz'),
         'radius':d['radius'],'valve':d['valve'],'no_angle':bool(d['noAngle']),'no_pour':bool(d['noPour']),
         'is_drink_cap':bool(d['isDrinkCap']),'particle_contact_radius_multiplier':.1,'evidence':evidence}
+
+
+def validate_clock_export(manifest: dict, library) -> None:
+    """Check clock fields against the accepted installed records."""
+    from .library.reader import LibraryReader
+    source = LibrarySource(LibraryReader(library))
+    main = source.read(source.get('level1', 64919))
+    survival = source.read(source.get('level1', 73239))
+    if manifest['engine']['globals']['outside_temperature_modifier'] != main['outsideTempM']:
+        raise ValueError('Outside temperature modifier differs from mainscript.outsideTempM')
+    if manifest['sleep']['need_modifier'] != survival['sleepModifier']:
+        raise ValueError('Sleep need modifier differs from survivalscript.sleepModifier')
+    managed_evidence(source, [
+        'sleepModifierDef = sleepTimeInGame / sleepRealTime * 0.5f;',
+        'sleep *= sleepModifier;',
+        'sleepEndTime = Time.time + sleepRealTime * 2f;',
+        'starSpeed * Time.fixedDeltaTime + tekerve',
+        'currentTempM = Mathf.Lerp(0f, outsideTempM, Mathf.InverseLerp(napszak.tempNights[0], napszak.tempDays[0] + napszak.tempAddNoons[0], napszak.temp));',
+    ])
