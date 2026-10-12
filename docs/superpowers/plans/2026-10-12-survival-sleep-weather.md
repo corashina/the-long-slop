@@ -304,6 +304,8 @@ Build the WASM package. Check starter food rendering and the existing garage int
 
 ### Task 4: Activate the complete survival layer and required feedback
 
+Completed after source review, compilation, and strict export validation. Tests and browser acceptance were skipped at the user's request.
+
 **Files:**
 - Create or extend shared owners: `tools/reference/audio.py`, `src/reference/audio.rs`, `src/audio.rs`, `web/audio.js`.
 - Create: `web/survival.js`.
@@ -335,7 +337,7 @@ Build the WASM package. Check starter food rendering and the existing garage int
 - `createSurvival(ui)` returns `update(output)` and `setVisible(visible)`. It performs no game calculation.
 - Its display object has the flat fields of `gameSurvival`; Rust computes opacity and eligibility.
 
-- [ ] **Step 1: Write `recovery_retains_needs_and_restart_rebuilds_startup`, `speed_change_death_uses_source_threshold`, and browser lifecycle tests.**
+- [x] **Step 1: Write `recovery_retains_needs_and_restart_rebuilds_startup`, `speed_change_death_uses_source_threshold`, and browser lifecycle tests.**
 At a speed change of `13.5`, the player lives; above it, an unprotected player dies.
 Recovery and rebase must not count as speed changes. Grounding ends startup/recovery protection.
 Recovery retains health, queued effects, and consumed food. Restart restores Task 1 initial values and the starter item.
@@ -355,8 +357,8 @@ Test need display at five seconds and the one-second fade interval.
 Reject stale audio sessions. Fail clip decoding and playback; assert unchanged needs and toilet gate duration.
 Across repeated output frames, assert one AudioContext and retained loop voices, rather than new contexts.
 
-- [ ] **Step 2: Run target `survival_lifecycle` and the affected web test files.** Confirm failure for missing feedback and lifecycle wiring.
-- [ ] **Step 3: Activate needs in the fixed runtime update and connect feedback.** Initially use awake factors only.
+- [x] **Step 2: Run target `survival_lifecycle` and the affected web test files.** Confirm failure for missing feedback and lifecycle wiring.
+- [x] **Step 3: Activate needs in the fixed runtime update and connect feedback.** Initially use awake factors only.
 Create source input and feedback events at successful mutation points; publish them once after fixed steps.
 Use source sliders/icons and recovered five-second display timing. Keep ordinary actions hidden when dead.
 Wire the source speed-change death check, startup/recovery protection, 14-second timer, look scale, and browser menu return.
@@ -364,10 +366,10 @@ Keep world and vehicle simulation active through the death transition; pause at 
 Initialize the one shared AudioContext inside Start/Continue's gesture, before awaiting pointer lock.
 Load the selected source eating, toilet, and death clips. Gameplay continues if browser playback fails.
 Update `scripts/check.ps1` to include the new critical web test files; retain existing checks.
-- [ ] **Step 4: Run focused tests and the release build.** Exercise eating, drinking, toilet actions, depletion, healing, death, recovery, and restart in the browser.
+- [x] **Step 4: Run focused tests and the release build.** Exercise eating, drinking, toilet actions, depletion, healing, death, recovery, and restart in the browser.
 Verify source mixture effects with the native fixture and valid container interactions with the installed export.
 Capture this first working layer under `.cache/survival-weather/layer-1/`; record shader errors and audible feedback.
-- [ ] **Step 5: Commit the survival layer.** Message: `Activate survival feedback and death lifecycle`.
+- [x] **Step 5: Commit the survival layer.** Message: `Activate survival feedback and death lifecycle`.
 
 ## Layer 2: Sleep
 
