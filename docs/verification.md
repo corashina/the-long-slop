@@ -744,3 +744,20 @@ Package and export hashes:
 - `web/pkg/my_summer_slop.js`: `23b8f17a3a62954cfe5a59a30450c060c899af451adc51ca815840db57c15abd`; 103747 bytes.
 - `web/pkg/my_summer_slop_bg.wasm`: `02c9c4a33f9f3e2b5c96b22155c4187fef9a3977f8e1f8a98b31408f0fc71451`; 53733353 bytes.
 - `web/assets/reference/manifest.json`: `d62630828b68c154c9351203b11f67427916390bd9a3eac1b911fda8efb5c74e`; 5712654 bytes.
+
+## Source audio checkpoint: 2026-10-12
+
+The audio branch implements source vehicle sounds, interaction sounds, and the Lada radio.
+The assembled browser produced a captured door effect after trusted Start.
+Device listening and the ten full acceptance scenarios remain incomplete.
+The user requested "skip tests" during the listening check. Further checks stopped; no missing result counts as passed.
+
+The Python audio suite passed seven cases. The corrected browser audio suite passed 29 cases with zero skipped.
+The earlier full check and release build passed. That default native check excluded 46 installed cases.
+A later run included installed cases: all 31 audio and 11 radio cases passed.
+The user stopped that run during reference validation, after 226 tests passed in completed targets.
+Normal runtime verification stopped at 260,000 of 262,784 records without a final receipt.
+Whole-branch review remains with the controller.
+
+The [audio verification report](research/2026-10-12-audio-verification.md) lists evidence and each remaining scenario.
+Earlier verification entries retain their historical scope and results.

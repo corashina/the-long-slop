@@ -730,7 +730,7 @@ fn fluid_events_require_actual_flow() {
         audio::AudioState, interaction::InteractionAction, reference::*,
         starting_area::GarageRuntime,
     };
-    let mut game = common::reference();
+    let game = common::reference();
     let audio = AudioReference::from_value(&game.audio, &game).unwrap();
     let opening = game.openings[0].clone();
     let run = GarageRuntime::new(&game).unwrap();

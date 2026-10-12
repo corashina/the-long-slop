@@ -1,6 +1,6 @@
 // Accepted WAV bytes are checked before browser decoding.
 export class ClipCache {
- constructor(context,raw,current,fail){this.context=context;this.clips=new Map(raw.clips.map(c=>[c.id,c]));this.current=current;this.fail=fail;this.buffers=new Map();this.pending=new Map();this.controllers=new Set();this.generation=0;this.radioBuffers=new Map();this.radioPending=new Map();this.radioWanted=new Set();}
+ constructor(context,raw,current,fail){this.context=context;this.clips=new Map(raw.clips.map(c=>[c.id,c]));this.current=current;this.fail=fail;this.buffers=new Map();this.pending=new Map();this.controllers=new Set();this.generation=0;this.radioBuffers=new Map();this.radioPending=new Map();this.radioWanted=new Set();this.radioDemand=[null,null,null,null];this.radioDirty=true;}
  async effect(id,session){
   if(this.buffers.has(id))return this.buffers.get(id);
   if(this.pending.has(id))return this.pending.get(id);
@@ -29,19 +29,21 @@ export class ClipCache {
  }
  radio(current,next,session){
   if(session!==this.current())return;
-  this.radioWanted.clear();for(const id of current)if(id!==null)this.radioWanted.add(id);for(const id of next)if(id!==null)this.radioWanted.add(id);
+  const demand=this.radioDemand;const changed=demand[0]!==current[0]||demand[1]!==current[1]||demand[2]!==next[0]||demand[3]!==next[1];
+  if(!changed&&!this.radioDirty)return;this.radioDirty=false;
+  if(changed){demand[0]=current[0];demand[1]=current[1];demand[2]=next[0];demand[3]=next[1];this.radioWanted.clear();for(const id of current)if(id!==null)this.radioWanted.add(id);for(const id of next)if(id!==null)this.radioWanted.add(id);}
   for(const id of this.radioBuffers.keys())if(!this.radioWanted.has(id))this.radioBuffers.delete(id);
-  for(const [id,entry] of this.radioPending)if(!this.radioWanted.has(id)){entry.stale=true;entry.abort.abort();}
+  for(const entry of this.radioPending.values())if(!this.radioWanted.has(entry.id)){entry.stale=true;entry.abort.abort();}
   for(const id of this.radioWanted){
    if(this.radioBuffers.has(id)||this.radioPending.has(id))continue;
    if(this.radioBuffers.size+this.radioPending.size>=4)break;
-   const generation=this.generation,abort=new AbortController(),entry={abort,stale:false,task:null};
+   const generation=this.generation,abort=new AbortController(),entry={id,abort,stale:false,task:null};
    this.radioPending.set(id,entry);
    entry.task=this.decode(id,session,'radio',generation,abort).then(buffer=>{
     if(buffer&&!entry.stale&&generation===this.generation&&session===this.current()&&this.radioWanted.has(id)){this.radioPending.delete(id);this.radioBuffers.set(id,buffer);}
-   }).catch(error=>{if(!entry.stale&&generation===this.generation&&session===this.current()&&error.name!=='AbortError')this.fail(error);}).finally(()=>{if(this.radioPending.get(id)===entry)this.radioPending.delete(id);});
+   }).catch(error=>{if(!entry.stale&&generation===this.generation&&session===this.current()&&error.name!=='AbortError')this.fail(error);}).finally(()=>{if(this.radioPending.get(id)===entry)this.radioPending.delete(id);this.radioDirty=true;});
   }
  }
- reset(){this.generation++;for(const controller of this.controllers)controller.abort();this.controllers.clear();this.pending.clear();this.radioWanted.clear();this.radioBuffers.clear();for(const entry of this.radioPending.values()){entry.stale=true;entry.abort.abort();}}
+ reset(){this.generation++;for(const controller of this.controllers)controller.abort();this.controllers.clear();this.pending.clear();this.radioWanted.clear();this.radioDemand.fill(null);this.radioDirty=true;this.radioBuffers.clear();for(const entry of this.radioPending.values()){entry.stale=true;entry.abort.abort();}}
  dispose(){this.reset();this.buffers.clear();}
 }

@@ -158,3 +158,15 @@ test('radio_pause_mutes_and_resume_joins_retained_clock',async()=>{
  a.pause();assert.equal(first.stopped,true);radioFrame(a,3);assert.equal(a.bank.voices.get(raw.radio.voices[1]).source,null);
  a.unlock();await settle();a.cache.radioBuffers.set(recording,buffer);radioFrame(a,3);const resumed=a.bank.voices.get(raw.radio.voices[1]).source;assert.ok(resumed);assert.equal(resumed.offset,3);a.dispose();
 });
+test('radio_cache_retains_unchanged_demand_until_pending_settles',async()=>{
+ const cache=new ClipCache({},raw,()=>1,error=>{throw error;}),waiting=[];
+ cache.decode=(id)=>new Promise(resolve=>waiting.push({id,resolve}));
+ let clears=0;const clear=cache.radioWanted.clear.bind(cache.radioWanted);cache.radioWanted.clear=()=>{clears++;clear();};
+ cache.radio([1,2],[3,4],1);
+ for(let frame=0;frame<60;frame++)cache.radio([1,2],[3,4],1);
+ assert.equal(clears,1,'unchanged demand must retain its set');
+ cache.radio([5,6],[7,8],1);assert.equal(waiting.length,4,'pending cancellations retain the four-slot budget');
+ for(const task of waiting)task.resolve({duration:1});await Promise.all(Array.from(cache.radioPending.values(),entry=>entry.task));
+ cache.radio([5,6],[7,8],1);assert.equal(waiting.length,8,'completion makes room for unchanged deferred demand');
+ cache.dispose();for(const task of waiting.slice(4))task.resolve({duration:1});await Promise.all(Array.from(cache.radioPending.values(),entry=>entry.task));
+});
