@@ -823,10 +823,12 @@ Controller rulings applied during implementation:
 3. Mirror inputs use runtime coordinates. A second source-axis Z conversion could reverse capture orientation.
 4. Invalid source far at or below near suspends capture and selects the disabled material. Clamping would change source clipping.
 5. Individual mirror removal keeps its world plane and resets controls. Door removal retains mirror controls. A wrong ruling would change mounting behavior.
+6. Native critical interaction tests and labelled actual-Lada browser checks satisfy equipment implementation acceptance. Trusted input, sustained powered travel, and matched appearance remain unproved. A real-input or integrated driving defect may need follow-up.
 
 The installed Unity handling of invalid far is unknown.
 The in-app browser refused pointer lock after a trusted Start click. Windows UI control stopped at its URL-confidence limit.
-The visible part and lifecycle scenes used labelled deterministic input. Trusted walk, adjustment, removal, mounting, and driving traversal remains unproved.
+The visible part, lifecycle, and seated-motion scenes used labelled deterministic input. Native critical interaction tests passed. These checks satisfy equipment implementation acceptance.
+Trusted walk, adjustment, removal, mounting, and driving traversal remain unproved. Sustained powered road travel also remains unproved.
 No matched native and target camera images exist, so source appearance parity remains unclaimed.
 The full branch review will also triage ignored failed `runtime-*` staging directories from the earlier export.
 No plate or portable flashlight work belongs to this mirror acceptance.

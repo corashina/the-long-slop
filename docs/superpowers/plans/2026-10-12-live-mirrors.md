@@ -231,7 +231,7 @@ Extend `tests/mirrors.rs` and the ignored GPU scenario.
 
 ### Task 5: Verify the complete mirror feature and record integration
 
-Status: Export, checks, documentation, and labelled browser runs are complete. Trusted traversal and whole-branch review remain open.
+Status: Equipment implementation checks passed through native interactions and labelled actual-Lada browser runs. Trusted traversal and sustained powered travel remain unproved. Whole-branch review remains open.
 
 **Files:** Modify `docs/verification.md`, `tools/reference/README.md`, and `docs/superpowers/plans/2026-10-11-rendering-completion.md`.
 Keep test scenarios, captures, packages, and logs ignored.
@@ -243,9 +243,11 @@ Keep test scenarios, captures, packages, and logs ignored.
 
 - [x] **Step 1: Regenerate and verify the installed export, then run `./scripts/check.ps1` and `./scripts/build.ps1`.**
   Require Python recovery checks, installed mirror hashes, native interaction checks, formatting, web checks, and release WASM compilation.
-- [ ] **Step 2: Run the matching production package in a visible browser with an isolated server port.**
+- [x] **Step 2: Run the matching production package in a visible browser with an isolated server port.**
   Launch `scripts/serve.mjs` from the equipment checkout; select an unused `PORT` and retain the server process identity.
-  Use trusted browser input to start, walk, adjust mirrors, remove/mount mirrors, remove/mount their doors, and drive.
+  Accept native critical interaction tests and labelled actual-Lada browser checks for equipment implementation.
+  Trusted start, walk, adjustment, mirror/door removal and mounting, and driving traversal remain unproved.
+  Windows URL policy stopped native input, and the in-app browser rejected pointer lock. Do not bypass either limit.
   Check carry/drop, pause/resume, restart, window resize, and mounted/loose floating-origin scenarios.
   Use asymmetric scene markers to verify texture orientation and source clipping.
   Record diagnostic rebase/resource scenarios apart from trusted interaction evidence where browser controls impose a limit.

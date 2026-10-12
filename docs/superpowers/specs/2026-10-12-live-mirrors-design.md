@@ -1,7 +1,7 @@
 # Live mirrors
 
 Date: 2026-10-12, Europe/Warsaw.
-Status: The user approved this spec and plan on 2026-10-12 and chose subagent execution. Tasks 1 through 4 passed review. Task 5 acceptance and whole-branch review remain open.
+Status: The user approved this spec and plan on 2026-10-12 and chose subagent execution. Tasks 1 through 4 passed review. Task 5 equipment checks passed with labelled input limits. Whole-branch review remains open. Trusted traversal, sustained powered travel, and matched appearance remain unproved.
 Branch: `codex/equipment`.
 Base commit: `dccd516387dff48bf9388ad96ecd52eab3f29c00`.
 Reference: installed Steam build `11140890`, Unity `2021.3.18f1`.
