@@ -516,3 +516,83 @@ fn installed_world_hibernation_preserves_source_inventory() {
     assert_eq!(before.items, returned.items);
     assert_eq!(before.bodies, returned.bodies);
 }
+
+#[test]
+fn rotated_body_stays_inactive_until_its_geometry_fits() {
+    use my_summer_slop::reference::BodyId;
+    use rapier3d::math::{Pose, Rotation, Vector};
+    use rapier3d::prelude::SharedShape;
+    let reference = common::reference();
+    let mut game = GarageRuntime::new(&reference).unwrap();
+    let handle = game.area.bodies[&BodyId(1)];
+    let colliders = game.physics.rapier().bodies[handle].colliders().to_vec();
+    assert!(!colliders.is_empty());
+    for collider in colliders {
+        let collider = &mut game.physics.rapier_mut().colliders[collider];
+        collider.set_shape(SharedShape::cuboid(1., 1., 1.));
+        collider.set_position_wrt_parent(Pose::IDENTITY);
+    }
+    let position = [2046.8, 5., 0.];
+    game.physics.rapier_mut().bodies[handle]
+        .set_position(Pose::from_translation(Vector::from_array(position)), false);
+    game.stream
+        .sync_at(position.map(f64::from), &mut game.physics);
+    game.persistent_world
+        .sync(
+            &reference,
+            &mut game.area,
+            &mut game.wheels,
+            &game.stream,
+            &mut game.physics,
+        )
+        .unwrap();
+    assert!(game.physics.body_active(handle), "axis-aligned cube fits");
+    game.physics.rapier_mut().bodies[handle].set_rotation(
+        Rotation::from_rotation_y(std::f32::consts::FRAC_PI_4),
+        false,
+    );
+    game.persistent_world
+        .sync(
+            &reference,
+            &mut game.area,
+            &mut game.wheels,
+            &game.stream,
+            &mut game.physics,
+        )
+        .unwrap();
+    assert!(
+        !game.physics.body_active(handle),
+        "rotated cube crosses origin bound"
+    );
+    // Dormant bounds must use the saved rotation, not the parked body's rotation.
+    game.physics.rapier_mut().bodies[handle].set_rotation(Rotation::IDENTITY, false);
+    game.persistent_world
+        .sync(
+            &reference,
+            &mut game.area,
+            &mut game.wheels,
+            &game.stream,
+            &mut game.physics,
+        )
+        .unwrap();
+    assert!(
+        !game.physics.body_active(handle),
+        "saved rotation still crosses bound"
+    );
+    game.stream.origin.shift([2., 0., 0.]);
+    game.stream
+        .sync_at(position.map(f64::from), &mut game.physics);
+    game.persistent_world
+        .sync(
+            &reference,
+            &mut game.area,
+            &mut game.wheels,
+            &game.stream,
+            &mut game.physics,
+        )
+        .unwrap();
+    assert!(
+        game.physics.body_active(handle),
+        "rotated cube fits after origin shift"
+    );
+}

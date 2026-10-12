@@ -4,7 +4,7 @@ use crate::reference::{BodyId, ItemId, ReferenceManifest};
 use crate::starting_area::StartingArea;
 use crate::vehicle::{PhysicsWorld, VehiclePose, from_rapier, to_rapier};
 use crate::world::{REBASE_LIMIT, WorldOrigin, WorldStream};
-use rapier3d::math::{Rotation, Vector};
+use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::RigidBodyHandle;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -401,12 +401,18 @@ impl PersistentWorld {
                     || stream.origin.absolute(body.translation().to_array()),
                     |state| state.pose.position,
                 );
+                let rotation = self.records[index].state.map_or_else(
+                    || *body.rotation(),
+                    |state| Rotation::from_array(state.pose.rotation),
+                );
+                let body_rotation = Pose::from_parts(Vector::ZERO, rotation);
                 let extent = body
                     .colliders()
                     .iter()
                     .map(|h| {
                         let collider = &physics.rapier().colliders[*h];
-                        let pose = *collider.position_wrt_parent().expect("body collider");
+                        let pose =
+                            body_rotation * *collider.position_wrt_parent().expect("body collider");
                         let bounds = collider.shape().compute_aabb(&pose);
                         bounds.mins.abs().max(bounds.maxs.abs()).max_element()
                     })
