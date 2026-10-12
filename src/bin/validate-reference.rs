@@ -1,5 +1,5 @@
 //! Validate runtime manifests with the same contract as the game.
-use my_summer_slop::reference::ReferenceManifest;
+use my_summer_slop::reference::{AudioReference, ReferenceManifest};
 use std::io::{self, Read};
 
 fn validate() -> Result<(), Box<dyn std::error::Error>> {
@@ -7,7 +7,8 @@ fn validate() -> Result<(), Box<dyn std::error::Error>> {
     io::stdin()
         .take(64 * 1024 * 1024 + 1)
         .read_to_end(&mut content)?;
-    ReferenceManifest::from_json(&content)?;
+    let game = ReferenceManifest::from_json(&content)?;
+    AudioReference::from_value(&game.audio, &game)?;
     Ok(())
 }
 

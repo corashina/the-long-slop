@@ -120,7 +120,7 @@ Use these controller methods:
 
 ```text
 unlock(): void
-begin(session: number, started: boolean, paused: boolean, unscaledSeconds: number): void
+begin(session: number, started: boolean, paused: boolean, gameSeconds: number): void
 listener(position: Float32Array, rotation: Float32Array): void
 emitter(id: number, position: Float32Array, rotation: Float32Array, alive: boolean): void
 voice(id: number, playing: boolean, gain: number, pitch: number): void
@@ -286,7 +286,7 @@ Extend `tests/web/audio.test.mjs` and the source audio research document.
 **Interfaces:**
 Produce `RadioState::new(reference: &RadioReference) -> Self`.
 Produce `RadioState::control(control: RadioControl)` where the enum contains `VolumeUp`, `VolumeDown`, `TuneUp`, `TuneDown`, and `Band`.
-Produce `RadioState::advance(unscaled_seconds: f64, electronics_output: f32) -> RadioFrame`.
+Produce `RadioState::advance(game_seconds: f64, electronics_output: f32) -> RadioFrame`.
 `RadioFrame` contains power, band, frequency, volume, static gain, and primary/secondary station playback fields.
 Each playback field contains clip ID, offset seconds, gain, and next clip ID; absent recordings have no clip ID.
 Produce `ClipCache.radio(current: [number|null, number|null], next: [number|null, number|null], session: number) -> void`.
@@ -298,15 +298,15 @@ Reuse `AudioController.radio(frame)`. Keep the browser frame object and playback
   `secondary_station_preserves_source_order`: a non-sorted frequency fixture follows the decompiled selection algorithm.
   `radio_signal_uses_electronics`: gains match source tolerances `0.4000000059604645` for FM and `20` for AM.
   `custom_1080_has_no_recording`: the external station keeps source static behavior and has no invented clip.
-  `unscaled_schedule_continues_while_muted`: power-off and pause do not reset the source broadcast clock.
+  `scaled_schedule_follows_game_time`: power-off does not stop broadcasts; pause and focus loss freeze the single-player clock.
   `late_radio_decode_joins_broadcast`: late playback starts at the current offset, within the source `0.5`-second correction rule.
   `radio_cache_is_bounded`: rapid tuning retains at most four unique decoded radio buffers and rejects stale requests.
 - [ ] Run `./scripts/check.ps1 -Test radio` and browser audio tests. Confirm absent controls or playback cause failures.
 - [ ] Connect source control pointers to existing mechanism tuning and feedback.
   Include band switching only if `BChangeAMFM` exists on the selected Lada.
   Preserve source music/talk transitions, gains, random-selection rules, and clocks without claiming the native random sequence.
-  Advance the station clock from unscaled app time even when gameplay is paused.
-  Mute browser output during pause and focus loss. Resume at the current broadcast offset.
+  Advance the station clock from scaled game time, matching single-player `mainscript.RADIO`.
+  Freeze that clock and mute output during pause and focus loss. Resume at the retained broadcast offset.
   Load only current and upcoming recordings. Share duplicate buffers and count pending decodes against the four-slot budget.
   Keep short-effect buffers separate. If a load is slow, defer it rather than evict a live engine buffer.
   Record missing external custom content in research. Add no file scanner or import controls.

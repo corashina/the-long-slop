@@ -197,8 +197,10 @@ Preserve its source static behavior and silence its missing recording voice.
 
 Use source music/talk selection rules and source clip durations for station schedules.
 Keep station timing independent of whether the player has powered the radio on.
-Use an unscaled station clock, as source `mainscript` does.
-Mute radio output during pause and focus loss; resume at the current broadcast position.
+Use the scaled station clock from single-player `mainscript.RADIO`.
+Its music and talk selection methods also use `Time.time`.
+Only multiplayer client `RADIO2` uses unscaled time; multiplayer remains outside scope.
+Freeze station schedules during pause and focus loss. Resume at the retained broadcast position.
 Preserve the source time-correction threshold of `0.5` seconds.
 Do not claim the same native random sequence without matching runtime evidence.
 

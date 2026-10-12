@@ -1,4 +1,4 @@
-import unittest, tempfile, json
+import unittest, tempfile, json, hashlib, wave
 from pathlib import Path
 from unittest.mock import patch
 from tools.reference.export import verify_reference, promote_reference
@@ -226,11 +226,29 @@ class LibraryInputTests(unittest.TestCase):
 
 class RuntimeContractTests(unittest.TestCase):
     def runtime(self, root):
-        import hashlib
         from types import SimpleNamespace as NS
         from tools.reference.export import provenance
         receipt=NS(manifest_sha256='a'*64,catalog_sha256='b'*64,source_manifest_sha256='c'*64)
         manifest=json.loads((Path(__file__).resolve().parents[3]/'tests/common/reference.json').read_bytes())
+        audio=manifest['audio']
+        clip=audio['clips'][0]
+        clip['usages']=['effect','radio']
+        path=root/Path(clip['path']).name
+        with wave.open(str(path),'wb') as stream:
+            stream.setparams((1,2,8000,80,'NONE','not compressed'))
+            stream.writeframes(b'\0'*160)
+        from tools.reference.library.audio import validate_wav
+        clip.update(validate_wav(path,{'m_Channels':1,'m_Frequency':8000,'m_BitsPerSample':16,'m_Length':0.01}))
+        clip['bytes']=path.stat().st_size
+        clip['sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+        audio['clips']=[clip]
+        for voice in audio['voices']:
+            for field in ('clip','authored_clip'):
+                if voice[field] is not None:voice[field]=clip['id']
+        for binding in audio['bindings']:binding['clips']=[clip['id']]
+        for station in audio['radio']['stations']:
+            for field in ('music','talk'):
+                station[field]=[clip['id']]*len(station[field])
         manifest['library']=provenance(receipt)
         manifest['assets'].append({'id':5,'usage':'unique_scene','material_count':1,'path':'reference/items.gltf','sha256':'a'*64,'root':{'file':'fixture','path_id':999},'dependencies':[]})
         manifest['rendering']['materials'].append({
@@ -333,11 +351,11 @@ class RuntimeContractTests(unittest.TestCase):
             before=(accepted/'manifest.json').read_bytes(),(accepted/'manifest.json').stat().st_mtime_ns
             _,receipt=self.runtime(root)
             snapshot=NS(manifest_sha256=receipt.source_manifest_sha256,files=(),root=root/'cache/source',manifest_path=root/'cache/source-manifest.json')
-            reader=NS(snapshot=snapshot,root=root/'library',records_root=root/'cache/records')
+            reader=NS(snapshot=snapshot,root=root/'library',records_root=root/'cache/records',exports={})
             (root/'cache/work').mkdir(parents=True)
             def export(source,staged,library,snapshot):
                 manifest,_=self.runtime(staged);self.save(staged,manifest)
-            with patch('tools.reference.library.reader.LibraryReader',return_value=reader),patch('tools.reference.source.LibrarySource'),patch('tools.reference.export._export_selected',side_effect=export),patch('tools.reference.export.subprocess.run',side_effect=FileNotFoundError('docker')),patch('tools.reference.export.promote_reference') as promote:
+            with patch('tools.reference.library.reader.LibraryReader',return_value=reader),patch('tools.reference.source.LibrarySource'),patch('tools.reference.export._export_selected',side_effect=export),patch('tools.reference.export.RUNTIME_WORK_ROOT',root/'cache'),patch('tools.reference.export.subprocess.run',side_effect=FileNotFoundError('docker')),patch('tools.reference.export.promote_reference') as promote:
                 with self.assertRaisesRegex(ValueError,'needs Docker'):derive_reference(snapshot,receipt,accepted)
                 promote.assert_not_called()
             self.assertEqual(before,((accepted/'manifest.json').read_bytes(),(accepted/'manifest.json').stat().st_mtime_ns))

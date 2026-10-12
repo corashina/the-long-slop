@@ -1,5 +1,8 @@
 //! Validated installed-build data. Geometry uses converted body-local meters.
 
+pub mod audio;
+pub use audio::*;
+
 pub mod rendering;
 pub use rendering::*;
 
@@ -741,6 +744,7 @@ pub struct LibraryProvenance {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
+    pub audio: serde_json::Value,
     pub ui: UiReference,
     pub instruments: InstrumentReference,
     pub library: LibraryProvenance,

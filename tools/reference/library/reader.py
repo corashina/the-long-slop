@@ -49,7 +49,7 @@ class LibraryReader:
         self.exports = {}
         for item in manifest['category_indexes']:
             content = checked(self.root, item)
-            if item['file'] not in ('images/index.json','models/index.json'):
+            if item['file'] not in ('images/index.json','models/index.json','audio/index.json'):
                 continue
             data = json.loads(content)
             for value in data if isinstance(data,list) else data['exports']:
@@ -63,6 +63,7 @@ class LibraryReader:
         self.selected_meshes = set()
         self.selected_textures = set()
         self.selected_sprites = set()
+        self.selected_audio = set()
 
     def record(self, source: ObjectId) -> dict:
         name = f'{source.file}/{source.path_id}.json'
@@ -114,6 +115,25 @@ class LibraryReader:
         checked(self.root, record)
         self.selected_sprites.add(source)
         return self.root / record['file']
+
+    def audio(self, source: ObjectId) -> tuple[Path, dict]:
+        from .audio import validate_wav
+        entry = self.exports.get(source)
+        if entry is None or entry['status'] != 'converted' or entry['details']['type'] != 'AudioClip':
+            raise ValueError(f'Selected audio is not converted: {source}')
+        samples = entry['details']['samples']
+        if len(samples) != 1 or len(entry['files']) != 1:
+            raise ValueError(f'Selected clip must have one WAV receipt: {source}')
+        receipt = entry['files'][0]
+        if receipt['file'] != samples[0]['file']:
+            raise ValueError('Selected WAV receipt differs from sample')
+        checked(self.root, receipt)
+        path = self.root / receipt['file']
+        metadata = validate_wav(path, self.record(source))
+        if any(samples[0].get(k) != v for k, v in metadata.items()):
+            raise ValueError('Selected WAV metadata differs from accepted samples')
+        self.selected_audio.add(source)
+        return path, {**metadata, 'sha256': receipt['sha256'], 'bytes': receipt['bytes']}
 
     def source_range(self, name, offset, size):
         from .archive import sha256

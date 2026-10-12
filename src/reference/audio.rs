@@ -1,0 +1,593 @@
+//! Selected source audio. Validation has a separate gameplay failure boundary.
+use super::{
+    ColliderId, CurveKey, ItemId, LightControlId, MechanismId, NodeId, PartSlotId, ReferenceError,
+    ReferenceManifest, SourceId, hash, ids, require,
+};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+macro_rules! record {
+    ($name:ident { $($field:ident: $ty:ty),* $(,)? }) => {
+        #[derive(Clone, Debug, Serialize, Deserialize)]
+        #[serde(deny_unknown_fields)]
+        pub struct $name { $(pub $field: $ty),* }
+    };
+}
+record!(AudioMethod {
+    class: String,
+    method: String,
+    file: String,
+    line_start: u32,
+    line_end: u32,
+    sha256: String
+});
+record!(AudioClipReference {
+    id: u32, source: SourceId, usages: Vec<String>, path: String, sha256: String, bytes: u64,
+    format: String, format_tag: u16, channels: u16, frequency: u32, bits_per_sample: u16,
+    block_align: u16, data_bytes: u64, frames: u64, duration_seconds: f64,
+    source_duration_seconds: f64, duration_delta_seconds: f64, duration_delta_frames: f64,
+    duration_tolerance_frames: f64, duration_status: String
+});
+record!(AudioEmitterReference { id: u32, source: SourceId, node: NodeId, item: Option<ItemId> });
+record!(AudioCurve { keys: Vec<CurveKey>, pre_wrap_mode: i32, post_wrap_mode: i32, rotation_order: i32 });
+record!(AudioVoiceReference {
+    id: u32, source: SourceId, emitter: u32, clip: Option<u32>,
+    authored_clip: Option<u32>, authored_priority: u8, authored_loop: bool, mixer: u32, priority: u8,
+    r#loop: bool, gain: f32, pitch: f32, spatial_blend: f32, pan: f32,
+    min_distance: f32, max_distance: f32, rolloff_mode: u8, doppler: f32,
+    play_on_awake: bool, mute: bool, enabled: bool,
+    curves: BTreeMap<String, AudioCurve>, methods: Vec<AudioMethod>
+});
+record!(AudioMixerEffect {
+    r#type: i32, name: String, bypass: bool, parameter_indices: Vec<u32>, parameters: Vec<f32>,
+    previous_effect: u32, send_target: u32, wet_mix_index: u32
+});
+record!(AudioMixerReference {
+    id: u32, source: SourceId, controller: SourceId, snapshot: SourceId, name: String,
+    parent: Option<u32>, gain_db: f32, pitch: f32, mute: bool, solo: bool,
+    bypass_effects: bool, effects: Vec<AudioMixerEffect>
+});
+record!(AudioEventBinding {
+    id: u32, source: SourceId, trigger: String, emitter: u32, clips: Vec<u32>, gain: f32,
+    pitch_range: [f32; 2], priority: u8, mixer: u32, voice: Option<u32>, method: AudioMethod
+});
+record!(EngineAudioReference {
+    source: SourceId, emitter: u32, idle_voice: u32, motor_voice: u32,
+    starter_binding: Option<u32>, stop_binding: Option<u32>,
+    constants: BTreeMap<String, f32>, method: AudioMethod
+});
+record!(HornAudioReference {
+    source: SourceId, voice: u32, attack_release_rate: f32, pitch_min: f32, pitch_max: f32,
+    temperature_min: f32, temperature_max: f32, switches: Vec<SourceId>, method: AudioMethod
+});
+record!(AudioControlReference { source: SourceId, node: NodeId, mechanism: Option<MechanismId> });
+record!(RadioControls { volume: Option<AudioControlReference>, tuning: Option<AudioControlReference>, band: Option<AudioControlReference> });
+record!(RadioStationReference {
+    id: u32, band: String, frequency: f32, name: String, custom: bool, content: String,
+    initial_music: bool, start_time: f32, initial_time: f32, initial_max_time: f32, initial_gain: f32,
+    music: Vec<u32>, talk: Vec<u32>, music_gains: Vec<f32>, talk_gains: Vec<f32>,
+    music_holidays: Vec<u8>, talk_holidays: Vec<u8>
+});
+record!(RadioClockReference {
+    kind: String,
+    selected: AudioMethod,
+    music_start: AudioMethod,
+    talk_start: AudioMethod,
+    multiplayer: AudioMethod
+});
+record!(RadioAudioReference {
+    source: SourceId, emitter: u32, voices: [u32; 3], controls: RadioControls,
+    constants: BTreeMap<String, f32>, initial_on: bool, initial_am: bool,
+    initial_tuning: f32, initial_volume: f32, fm_tolerance: f32, am_tolerance: f32,
+    electronics_cutoff: f32, time_correction_seconds: f32, late_seek_margin_seconds: f32,
+    custom_gain: f32, clock: RadioClockReference, click_binding: Option<u32>, stations: Vec<RadioStationReference>, methods: Vec<AudioMethod>
+});
+record!(MechanismAudioReference {
+    source: SourceId, emitter: u32, movement_voice: Option<u32>, audio_multiplier: f32,
+    slide_multiplier: f32, rotation_gain: f32, slide_gain: f32, gain_smoothing: f32,
+    slide_stop_seconds: f32, squeak_chance: f32, pitch_range: [f32; 2],
+    endpoints: Vec<u32>, turn_binding: Option<u32>
+});
+record!(FluidAudioReference {
+    source: SourceId, emitter: u32, fill_voice: Option<u32>, max_gain: f32, tune_speed: f32, fluid_tune_speed: f32,
+    pour_speed_min: f32, pour_speed_max: f32, fill_loop: bool, fill_latch_steps: u32,
+    open_binding: Option<u32>, close_binding: Option<u32>, tune_binding: Option<u32>, method: AudioMethod
+});
+record!(LampAudioReference { source: SourceId, control: LightControlId, voices: Vec<u32>, on_binding: Option<u32>, off_binding: Option<u32>, method: AudioMethod });
+record!(AudioManagedEvidence {
+    file: String,
+    sha256: String,
+    decompiled_sha256: String
+});
+record!(AudioNativeEvidence {
+    file: String, sha256: String, effect_type: i32, registration_va: String,
+    type_write_va: String, coefficient_va: String, parameter_names: Vec<String>,
+    browser_q_rule: String, browser_gain_db_rule: String
+});
+record!(AudioManagerReference {
+    source: SourceId,
+    real_voices: u32,
+    virtual_voices: u32,
+    virtualize_effects: bool,
+    doppler_factor: f32,
+    rolloff_scale: f32
+});
+record!(AudioSourceSettings {
+    priority: u8,
+    r#loop: bool,
+    gain: f32,
+    pitch: f32,
+    min_distance: f32,
+    max_distance: f32,
+    rolloff_mode: u8,
+    spatial_blend: f32,
+    spatial_blend_curve: AudioCurve,
+    rolloff_curve: AudioCurve
+});
+record!(AudioSensorReference { source: SourceId, transform_source: SourceId, node: Option<NodeId>,
+    player: bool, initial_sensed: bool, initial_count: u32, radius: Option<f32>, mask: Option<u32>,
+    method: AudioMethod, local_position: Option<[f32; 3]>, parent_source: Option<SourceId> });
+record!(AudioInteriorReference { id: u32, source: SourceId, node: NodeId, collider: ColliderId,
+    parent: Option<u32>, invert: bool, minimum_doors_to_max: u32, maximum_transmission: f32,
+    removable_doors: bool, use_value: bool, value: f32, doors: Vec<AudioControlReference>,
+    door_slots: Vec<PartSlotId>, invert_doors: Vec<bool>, invert_slots: Vec<bool>,
+    parent_door: Option<AudioControlReference>, parent_slot: Option<PartSlotId>, method: AudioMethod });
+record!(AudioRouteReference { source: SourceId, voices: Vec<u32>, interiors: Vec<u32>, has_car: bool,
+    sensor: AudioSensorReference, main_mixer: u32, outside_mixer: u32, car_mixer: Option<u32>,
+    initial_outside: bool, initial_player_inside: bool, methods: Vec<AudioMethod> });
+record!(AudioSharedReference {
+    audio_manager: AudioManagerReference,
+    priorities: Vec<u8>, random_pitch: [f32; 2], declared_max_audio_count: u32,
+    enforced_voice_limit: Option<u32>, gain_above_one: String, destroy_after_source_duration: bool,
+    method: AudioMethod, source: SourceId, settings: AudioSourceSettings, mixer: u32
+});
+record!(AudioOutsideReference { default_interior_gain: f32, gain_smoothing: f32, car_sound_multiplier: f32, initial_gain: f32, sensor: AudioSensorReference, methods: Vec<AudioMethod> });
+record!(AudioMixerControls { outside: AudioOutsideReference, source: SourceId, parameter_indices: Vec<u32>, parameter_name_hashes: Vec<u32>, parameter_names: Vec<String>, methods: Vec<AudioMethod> });
+record!(AudioReference {
+    schema_version: u32, clips: Vec<AudioClipReference>, emitters: Vec<AudioEmitterReference>,
+    voices: Vec<AudioVoiceReference>, mixers: Vec<AudioMixerReference>, bindings: Vec<AudioEventBinding>,
+    engine: EngineAudioReference, horn: HornAudioReference, radio: RadioAudioReference,
+    mechanisms: Vec<MechanismAudioReference>, fluids: Vec<FluidAudioReference>,
+    interiors: Vec<AudioInteriorReference>, routes: Vec<AudioRouteReference>, lamps: Vec<LampAudioReference>,
+    silent_actions: Vec<String>, managed: AudioManagedEvidence, native: AudioNativeEvidence,
+    shared: AudioSharedReference, mixer_controls: AudioMixerControls
+});
+
+fn values(v: impl IntoIterator<Item = f32>) -> bool {
+    v.into_iter().all(f32::is_finite)
+}
+fn method(m: &AudioMethod) -> bool {
+    !m.class.is_empty()
+        && !m.method.is_empty()
+        && m.file == "managed/Assembly-CSharp.cs"
+        && m.line_start > 0
+        && m.line_end >= m.line_start
+        && hash(&m.sha256)
+}
+impl AudioReference {
+    pub fn from_value(
+        raw: &serde_json::Value,
+        game: &ReferenceManifest,
+    ) -> Result<Self, ReferenceError> {
+        let audio: Self = serde_json::from_value(raw.clone())
+            .map_err(|e| ReferenceError(format!("Audio: {e}")))?;
+        audio.validate(game)?;
+        Ok(audio)
+    }
+    fn validate(&self, game: &ReferenceManifest) -> Result<(), ReferenceError> {
+        require(
+            self.schema_version == 1 && !self.clips.is_empty(),
+            "audio schema",
+        )?;
+        let clips = ids(self.clips.iter().map(|v| v.id), "audio clip IDs")?;
+        let emitters = ids(self.emitters.iter().map(|v| v.id), "audio emitter IDs")?;
+        let voices = ids(self.voices.iter().map(|v| v.id), "audio voice IDs")?;
+        let mixers = ids(self.mixers.iter().map(|v| v.id), "audio mixer IDs")?;
+        let bindings = ids(self.bindings.iter().map(|v| v.id), "audio binding IDs")?;
+        for set in [&clips, &emitters, &voices, &mixers, &bindings] {
+            require(!set.contains(&0), "audio zero ID")?;
+        }
+        for c in &self.clips {
+            require(
+                !c.usages.is_empty() && c.usages.iter().all(|u| u == "effect" || u == "radio"),
+                "audio clip usage",
+            )?;
+            require(
+                hash(&c.sha256)
+                    && c.source.path_id != 0
+                    && c.path
+                        == format!("reference/audio-{}-{}.wav", c.source.file, c.source.path_id)
+                    && !c.source.file.contains(['/', '\\', ':'])
+                    && c.channels > 0
+                    && c.frequency > 0
+                    && c.frames > 0
+                    && c.bits_per_sample > 0
+                    && c.block_align == c.channels * (c.bits_per_sample / 8)
+                    && c.data_bytes == c.frames * u64::from(c.block_align)
+                    && c.bytes > c.data_bytes
+                    && [
+                        c.duration_seconds,
+                        c.source_duration_seconds,
+                        c.duration_delta_seconds,
+                        c.duration_delta_frames,
+                        c.duration_tolerance_frames,
+                    ]
+                    .iter()
+                    .all(|v| v.is_finite())
+                    && c.duration_seconds > 0.0
+                    && c.source_duration_seconds > 0.0
+                    && (c.duration_seconds - c.frames as f64 / f64::from(c.frequency)).abs() < 1e-9
+                    && c.duration_delta_frames.abs() <= c.duration_tolerance_frames,
+                "audio clip samples",
+            )?;
+        }
+        for e in &self.emitters {
+            require(
+                game.nodes.iter().any(|n| n.id == e.node)
+                    && e.item.is_none_or(|i| game.items.iter().any(|v| v.id == i)),
+                "audio emitter owner",
+            )?;
+        }
+        for v in &self.voices {
+            require(
+                emitters.contains(&v.emitter)
+                    && mixers.contains(&v.mixer)
+                    && v.clip.is_none_or(|c| clips.contains(&c))
+                    && values([
+                        v.gain,
+                        v.pitch,
+                        v.spatial_blend,
+                        v.min_distance,
+                        v.max_distance,
+                        v.pan,
+                        v.doppler,
+                    ])
+                    && v.gain >= 0.0
+                    && v.pitch > 0.0
+                    && (0.0..=1.0).contains(&v.spatial_blend)
+                    && v.min_distance > 0.0
+                    && v.max_distance >= v.min_distance
+                    && v.rolloff_mode <= 2
+                    && !v.methods.is_empty()
+                    && v.methods.iter().all(method),
+                "audio voice",
+            )?;
+            for name in ["rolloff", "spatial_blend", "spread", "reverb_mix"] {
+                let curve = v
+                    .curves
+                    .get(name)
+                    .ok_or_else(|| ReferenceError("Missing audio curve".into()))?;
+                require(
+                    !curve.keys.is_empty()
+                        && curve.keys.iter().all(|k| {
+                            values([
+                                k.time,
+                                k.value,
+                                k.in_tangent,
+                                k.out_tangent,
+                                k.in_weight,
+                                k.out_weight,
+                            ]) && k.weighted_mode <= 3
+                        })
+                        && curve.keys.windows(2).all(|ks| ks[0].time < ks[1].time),
+                    "audio curve",
+                )?;
+            }
+        }
+        for m in &self.mixers {
+            require(
+                m.parent.is_none_or(|p| mixers.contains(&p) && p != m.id)
+                    && values([m.gain_db, m.pitch])
+                    && m.pitch > 0.0,
+                "audio mixer",
+            )?;
+            let mut current = m;
+            let mut count = 0;
+            while let Some(id) = current.parent {
+                count += 1;
+                require(count <= self.mixers.len(), "audio mixer cycle")?;
+                current = self.mixers.iter().find(|m| m.id == id).unwrap();
+            }
+            for effect in &m.effects {
+                require(
+                    effect.r#type == -2 || effect.r#type == 10,
+                    "unsupported audio mixer effect",
+                )?;
+                require(
+                    values(effect.parameters.iter().copied())
+                        && effect.parameter_indices.len() == effect.parameters.len(),
+                    "audio effect parameters",
+                )?;
+                if effect.r#type == 10 {
+                    require(
+                        effect.parameters.len() == 3 && effect.parameters.iter().all(|v| *v > 0.0),
+                        "audio ParamEQ",
+                    )?;
+                }
+            }
+        }
+        for b in &self.bindings {
+            require(
+                emitters.contains(&b.emitter)
+                    && mixers.contains(&b.mixer)
+                    && b.voice.is_none_or(|v| voices.contains(&v))
+                    && !b.clips.is_empty()
+                    && b.clips.iter().all(|c| clips.contains(c))
+                    && method(&b.method)
+                    && values([b.gain, b.pitch_range[0], b.pitch_range[1]])
+                    && b.gain >= 0.0
+                    && b.pitch_range[0] > 0.0
+                    && b.pitch_range[1] >= b.pitch_range[0],
+                "audio event binding",
+            )?;
+        }
+        require(
+            emitters.contains(&self.engine.emitter)
+                && voices.contains(&self.engine.idle_voice)
+                && voices.contains(&self.engine.motor_voice)
+                && self
+                    .engine
+                    .starter_binding
+                    .is_none_or(|id| bindings.contains(&id))
+                && self
+                    .engine
+                    .stop_binding
+                    .is_none_or(|id| bindings.contains(&id))
+                && method(&self.engine.method),
+            "audio engine",
+        )?;
+        for key in [
+            "SMinAlapRpm",
+            "SMaxAlapRpm",
+            "SMinMotorRpm",
+            "SMaxMotorRpm",
+            "SMaxAlapSound",
+            "SMaxMotorSound",
+            "minAlapPitch",
+            "maxAlapPitch",
+            "minMotorPitch",
+            "maxMotorPitch",
+            "maxRpm",
+            "engineStartTimeModifier",
+            "SStartVolume",
+            "SStopVolume",
+        ] {
+            require(
+                self.engine
+                    .constants
+                    .get(key)
+                    .is_some_and(|v| v.is_finite() && *v >= 0.0),
+                "audio engine constants",
+            )?;
+        }
+        require(
+            voices.contains(&self.horn.voice)
+                && values([
+                    self.horn.attack_release_rate,
+                    self.horn.pitch_min,
+                    self.horn.pitch_max,
+                    self.horn.temperature_min,
+                    self.horn.temperature_max,
+                ])
+                && self.horn.attack_release_rate > 0.0
+                && self.horn.pitch_min > 0.0
+                && self.horn.pitch_max >= self.horn.pitch_min
+                && self.horn.temperature_max > self.horn.temperature_min
+                && method(&self.horn.method),
+            "audio horn",
+        )?;
+        let r = &self.radio;
+        require(
+            r.clock.kind == "scaled"
+                && r.clock.selected.class == "mainscript"
+                && r.clock.selected.method == "RADIO"
+                && r.clock.music_start.class == "radioCH"
+                && r.clock.music_start.method == "SelectRandomMusic"
+                && r.clock.talk_start.class == "radioCH"
+                && r.clock.talk_start.method == "SelectRandomTalk"
+                && r.clock.multiplayer.class == "mainscript"
+                && r.clock.multiplayer.method == "RADIO2"
+                && [
+                    &r.clock.selected,
+                    &r.clock.music_start,
+                    &r.clock.talk_start,
+                    &r.clock.multiplayer,
+                ]
+                .iter()
+                .all(|m| method(m)),
+            "audio radio clock",
+        )?;
+        require(
+            emitters.contains(&r.emitter)
+                && r.voices.iter().all(|v| voices.contains(v))
+                && r.controls.volume.is_some()
+                && r.controls.tuning.is_some()
+                && values([
+                    r.initial_tuning,
+                    r.initial_volume,
+                    r.fm_tolerance,
+                    r.am_tolerance,
+                    r.electronics_cutoff,
+                    r.time_correction_seconds,
+                    r.late_seek_margin_seconds,
+                    r.custom_gain,
+                ])
+                && (0.0..=1.0).contains(&r.initial_tuning)
+                && (0.0..=1.0).contains(&r.initial_volume)
+                && r.fm_tolerance > 0.0
+                && r.am_tolerance > 0.0
+                && r.click_binding.is_none_or(|b| bindings.contains(&b))
+                && r.methods.iter().all(method),
+            "audio radio",
+        )?;
+        for key in [
+            "AMmin",
+            "AMmax",
+            "FMmin",
+            "FMmax",
+            "AMStep",
+            "FMStep",
+            "vSpeed",
+            "turnVolume",
+        ] {
+            require(
+                r.constants
+                    .get(key)
+                    .is_some_and(|v| v.is_finite() && *v > 0.0),
+                "audio radio constants",
+            )?;
+        }
+        require(
+            r.constants["AMmax"] > r.constants["AMmin"]
+                && r.constants["FMmax"] > r.constants["FMmin"],
+            "audio tuning ranges",
+        )?;
+        ids(r.stations.iter().map(|s| s.id), "audio station IDs")?;
+        for s in &r.stations {
+            require(
+                (s.band == "am" || s.band == "fm")
+                    && values([
+                        s.frequency,
+                        s.start_time,
+                        s.initial_time,
+                        s.initial_max_time,
+                        s.initial_gain,
+                    ])
+                    && s.frequency > 0.0
+                    && s.music
+                        .iter()
+                        .chain(s.talk.iter())
+                        .all(|c| clips.contains(c))
+                    && values(s.music_gains.iter().chain(s.talk_gains.iter()).copied())
+                    && s.music_holidays.len() == s.music.len()
+                    && s.talk_holidays.len() == s.talk.len()
+                    && if s.custom {
+                        s.content == "external" && s.music.is_empty() && s.talk.is_empty()
+                    } else {
+                        s.content == "embedded" && (!s.music.is_empty() || !s.talk.is_empty())
+                    },
+                "audio station",
+            )?;
+        }
+        for m in &self.mechanisms {
+            require(
+                emitters.contains(&m.emitter)
+                    && m.movement_voice.is_none_or(|v| voices.contains(&v))
+                    && m.endpoints.iter().all(|b| bindings.contains(b))
+                    && m.turn_binding.is_none_or(|b| bindings.contains(&b))
+                    && values([
+                        m.audio_multiplier,
+                        m.slide_multiplier,
+                        m.rotation_gain,
+                        m.slide_gain,
+                        m.gain_smoothing,
+                        m.slide_stop_seconds,
+                        m.squeak_chance,
+                        m.pitch_range[0],
+                        m.pitch_range[1],
+                    ]),
+                "audio mechanism",
+            )?;
+        }
+        for f in &self.fluids {
+            require(
+                emitters.contains(&f.emitter)
+                    && f.fill_voice.is_none_or(|v| voices.contains(&v))
+                    && [f.open_binding, f.close_binding, f.tune_binding]
+                        .iter()
+                        .flatten()
+                        .all(|b| bindings.contains(b))
+                    && f.max_gain.is_finite()
+                    && f.max_gain >= 0.0
+                    && method(&f.method),
+                "audio fluid",
+            )?;
+        }
+        let interiors = ids(self.interiors.iter().map(|i| i.id), "audio interior IDs")?;
+        let control = |c: &AudioControlReference| {
+            game.nodes.iter().any(|n| n.id == c.node)
+                && c.mechanism
+                    .is_none_or(|id| game.mechanisms.iter().any(|m| m.id == id))
+        };
+        let sensor = |s: &AudioSensorReference| {
+            s.node.is_none_or(|n| game.nodes.iter().any(|v| v.id == n))
+                && method(&s.method)
+                && s.radius.is_none_or(|r| r.is_finite() && r > 0.0)
+                && s.local_position.is_none_or(|p| values(p))
+        };
+        for c in [&r.controls.volume, &r.controls.tuning, &r.controls.band]
+            .into_iter()
+            .flatten()
+        {
+            require(control(c), "audio radio control")?;
+        }
+        for i in &self.interiors {
+            require(
+                game.nodes.iter().any(|n| n.id == i.node)
+                    && game.colliders.iter().any(|c| c.id == i.collider)
+                    && i.parent.is_none_or(|p| interiors.contains(&p))
+                    && i.doors.iter().all(control)
+                    && i.door_slots
+                        .iter()
+                        .all(|s| game.part_slots.iter().any(|p| p.id == *s))
+                    && i.parent_door.as_ref().is_none_or(control)
+                    && i.parent_slot
+                        .is_none_or(|s| game.part_slots.iter().any(|p| p.id == s))
+                    && i.invert_doors.len() == i.doors.len()
+                    && i.invert_slots.len() == i.door_slots.len()
+                    && values([i.maximum_transmission, i.value])
+                    && method(&i.method),
+                "audio interior",
+            )?;
+        }
+        for r in &self.routes {
+            require(
+                r.voices.iter().all(|v| voices.contains(v))
+                    && r.interiors.iter().all(|i| interiors.contains(i))
+                    && mixers.contains(&r.main_mixer)
+                    && mixers.contains(&r.outside_mixer)
+                    && r.car_mixer.is_none_or(|m| mixers.contains(&m))
+                    && sensor(&r.sensor)
+                    && r.methods.iter().all(method),
+                "audio mixer route",
+            )?;
+        }
+        for l in &self.lamps {
+            require(
+                game.lighting.controllers.iter().any(|c| c.id == l.control)
+                    && l.voices.iter().all(|v| voices.contains(v))
+                    && [l.on_binding, l.off_binding]
+                        .iter()
+                        .flatten()
+                        .all(|b| bindings.contains(b))
+                    && method(&l.method),
+                "audio lamp",
+            )?;
+        }
+        let outside = &self.mixer_controls.outside;
+        require(
+            sensor(&outside.sensor)
+                && values([
+                    outside.default_interior_gain,
+                    outside.gain_smoothing,
+                    outside.car_sound_multiplier,
+                    outside.initial_gain,
+                ])
+                && outside.methods.iter().all(method),
+            "audio outside mixer",
+        )?;
+        require(
+            hash(&self.managed.sha256)
+                && hash(&self.managed.decompiled_sha256)
+                && hash(&self.native.sha256)
+                && self.native.effect_type == 10
+                && self.shared.priorities == [10, 25, 40, 55, 70, 80, 85, 100]
+                && self.shared.enforced_voice_limit.is_none()
+                && mixers.contains(&self.shared.mixer)
+                && method(&self.shared.method)
+                && self.mixer_controls.methods.iter().all(method),
+            "audio evidence",
+        )?;
+        Ok(())
+    }
+}

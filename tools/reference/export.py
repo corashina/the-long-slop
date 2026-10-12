@@ -10,6 +10,7 @@ from .library.types import Snapshot, LibraryReceipt
 APP_ID = 1017180
 BUILD_ID = 11140890
 SOURCE_WORK_ROOT = Path('.cache/reference-library')
+RUNTIME_WORK_ROOT = Path('.cache/runtime-stage')
 NATIVE_ENGINE_SHA256 = '553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86'
 
 
@@ -31,6 +32,13 @@ def validate_build(steam_root: Path):
     return values
 
 
+def runtime_stage_root() -> Path:
+    work = RUNTIME_WORK_ROOT / 'work'
+    if work.resolve().is_relative_to(SOURCE_WORK_ROOT.resolve()):
+        raise ValueError('Runtime staging overlaps accepted source storage')
+    return work
+
+
 def derive_reference(snapshot: Snapshot, library: LibraryReceipt, output: Path) -> None:
     import tempfile
     from .library.reader import LibraryReader
@@ -45,10 +53,14 @@ def derive_reference(snapshot: Snapshot, library: LibraryReceipt, output: Path) 
         if target.is_relative_to(protected) or protected.is_relative_to(target):
             raise ValueError('Runtime output overlaps accepted library storage')
     from .library.storage import RUNTIME_BYTES, check_space, tree_bytes
-    check_space('runtime: selected scene staging', reader.records_root.parent,
-                RUNTIME_BYTES, retained=tree_bytes(output))
+    audio_bound = sum(f['bytes'] for entry in reader.exports.values()
+        if entry['details']['type'] == 'AudioClip' for f in entry['files'])
+    work = runtime_stage_root()
+    work.mkdir(parents=True, exist_ok=True)
+    check_space('runtime: selected scene and audio staging', work,
+                RUNTIME_BYTES + audio_bound, retained=tree_bytes(output))
     output.parent.mkdir(parents=True, exist_ok=True)
-    staged = Path(tempfile.mkdtemp(prefix='runtime-', dir=reader.records_root.parent / 'work'))
+    staged = Path(tempfile.mkdtemp(prefix='runtime-', dir=work))
     _export_selected(LibrarySource(reader), staged, reader, snapshot)
     verify_reference(staged, library)
     promote_reference(staged, output)
@@ -161,6 +173,9 @@ def verify_reference(output: Path, library) -> None:
         path = output / name
         checked(output, {'file':name, 'bytes':path.stat().st_size, 'sha256':sprite['sha256']})
         names.add(name)
+    from .audio import validate_audio_export
+    validate_audio_export(manifest['audio'], output)
+    names.update(c['path'].removeprefix('reference/') for c in manifest['audio']['clips'])
     from .lighting import validate_lighting_export
     validate_lighting_export(manifest, output)
     names.update(Path(item['path']).name for item in lighting_resources(manifest))
@@ -178,6 +193,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from .visibility import recover_camera_visibility
     from .ui import export_ui
     from .instruments import recover_instruments
+    from .audio import recover_audio
     if output.resolve().is_relative_to(source.root.resolve()):
         raise ValueError('Keep generated files outside the source installation')
     def transform(go):return source.transform_for(source.get('level1',go))
@@ -242,6 +258,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     manifest['library']=provenance(library.receipt)
     manifest['ui']=export_ui(source,output,library)
     manifest['instruments']=recover_instruments(source,manifest,report)
+    manifest['audio']=recover_audio(source,roots,manifest,library,output)
     validate_lighting_export(manifest,output)
     (output/'lighting-evidence.json').write_text(json.dumps({'lighting':manifest['lighting'],'byte_checks':source.evidence,'native_engine':native_engine,'fog_setting':source.lighting_fog_evidence,'library':manifest['library']},indent=2,allow_nan=False),encoding='utf-8')
     parameters['controls']={
@@ -259,7 +276,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from dataclasses import asdict
     selection = {name:[asdict(v) for v in sorted(values)] for name,values in (
         ('records',library.selected_records),('meshes',library.selected_meshes),
-        ('textures',library.selected_textures),('sprites',library.selected_sprites))}
+        ('textures',library.selected_textures),('sprites',library.selected_sprites),('audio',library.selected_audio))}
     (output/'library-selection.json').write_text(json.dumps(selection,indent=2),encoding='utf-8')
     print(f'Exported manifest: {len(manifest["colliders"])} colliders, {len(manifest["items"])} items',flush=True)
 
