@@ -2,7 +2,7 @@
 
 Date: 2026-10-12
 Branch: `codex/save-load`
-Status: Approved design; written specification awaits review.
+Status: Approved specification; implementation plan awaits review.
 
 ## Purpose
 
