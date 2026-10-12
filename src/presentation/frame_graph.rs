@@ -3,6 +3,8 @@ use super::{
     frame_copy::FrameCopy,
     lighting_assets::LightingRenderAssets,
     materials::RenderingState,
+    motion_draw::{MotionDrawView, MotionObjects, MotionPipelines},
+    motion_vectors::SourceMotionPass,
     probes::{ProbeFilter, ProbePublication},
     source_lighting::{SourceExecutionGate, SourceLightingStatus, SourceViewCamera},
     source_sky::SkyPass,
@@ -74,6 +76,7 @@ struct FrameProgress {
     cpu_boundary: CpuBoundary,
     gpu_boundary: GpuBoundary,
     probe: ProbeAudit,
+    motion: MotionAudit,
 }
 #[derive(Resource, Clone, Default)]
 pub struct SourceGraphProgress(Arc<Mutex<FrameProgress>>);
@@ -132,6 +135,35 @@ impl ProbeFrame {
     }
 }
 
+#[derive(Clone, Copy, Default, serde::Serialize)]
+struct MotionAudit {
+    pipelines_ready: bool,
+    objects_ready: bool,
+    frame: u32,
+    camera_token: u32,
+    object_token: u32,
+    submitted_token: u32,
+    registered_objects: u32,
+    draws: [u32; 3],
+    extent: [u32; 2],
+    validation: u32,
+    validated: bool,
+    resize_count: u32,
+    rebase_count: u32,
+}
+#[derive(Resource)]
+struct MotionFrame {
+    pass: Option<SourceMotionPass>,
+    targets: Arc<super::render_targets::SourceViewTargets>,
+    origin: [f64; 3],
+    camera_frame: u32,
+    camera_token: u32,
+    submitted_token: u32,
+    validation: u32,
+    resize_count: u32,
+    rebase_count: u32,
+}
+
 pub struct SourceFramePlugin;
 impl Plugin for SourceFramePlugin {
     fn build(&self, app: &mut App) {
@@ -161,6 +193,7 @@ impl Plugin for SourceFramePlugin {
         super::view_frame::install(app);
         super::shadow_queue::install(app);
         super::shadow_collector::install(app);
+        super::motion_draw::install(app);
         let render = app.sub_app_mut(RenderApp);
         render
             .insert_resource(progress)
@@ -168,7 +201,13 @@ impl Plugin for SourceFramePlugin {
             .add_systems(Render, gpu_boundaries.in_set(RenderSystems::Cleanup))
             .add_systems(
                 Render,
-                (update_sky_extras, prepare_frame, prepare_probe, sort_sky)
+                (
+                    update_sky_extras,
+                    prepare_frame,
+                    prepare_probe,
+                    prepare_motion,
+                    sort_sky,
+                )
                     .after(RenderSystems::PrepareResources)
                     .before(RenderSystems::Render),
             )
@@ -189,6 +228,11 @@ impl Plugin for SourceFramePlugin {
                         .in_set(SourceSurfaceStage::ShadowAtlas)
                         .run_if(surface_ready)
                         .run_if(super::shadow_queue::graph_ready),
+                    (encode_motion_camera, encode_motion_objects)
+                        .chain()
+                        .in_set(SourceSurfaceStage::Motion)
+                        .run_if(surface_ready)
+                        .run_if(super::shadow_queue::collector_encoded),
                     finish_surface
                         .in_set(SourceSurfaceStage::AfterTransparent)
                         .run_if(surface_ready),
@@ -201,7 +245,12 @@ impl Plugin for SourceFramePlugin {
                     .after(RenderGraphSystems::Render)
                     .before(RenderGraphSystems::Submit),
             )
-            .add_systems(RenderGraph, submitted.in_set(RenderGraphSystems::Finish));
+            .add_systems(
+                RenderGraph,
+                (submitted, submit_motion)
+                    .chain()
+                    .in_set(RenderGraphSystems::Finish),
+            );
     }
 }
 
@@ -1247,4 +1296,241 @@ fn filter_probe(
         }
         probe.encoded_token = Some(frame.probe_token);
     }
+}
+
+fn prepare_motion(
+    mut commands: Commands,
+    mut existing: Option<ResMut<MotionFrame>>,
+    views: Query<(
+        Entity,
+        &SourceSurfaceView,
+        &super::surface_graph::SurfaceViewTargets,
+        Option<&MotionDrawView>,
+    )>,
+    frame: Res<SourceViewFrame>,
+    objects: Res<MotionObjects>,
+    assets: Option<Res<LightingRenderAssets>>,
+    device: Res<RenderDevice>,
+    queue: Res<RenderQueue>,
+    cache: Res<PipelineCache>,
+    status: Res<SourceLightingStatus>,
+) {
+    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
+        || !objects.matches(frame.frame, frame.main_token)
+    {
+        return;
+    }
+    let (Some(snapshot), Some(assets), Some(origin)) =
+        (frame.views[1].as_ref(), assets, objects.origin())
+    else {
+        return;
+    };
+    let Some((entity, _, targets, draw)) = views.iter().find(|(_, view, _, _)| view.index == 1)
+    else {
+        return;
+    };
+    let result = (|| -> Result<(), String> {
+        if let Some(existing) = existing.as_mut() {
+            let delta = Vec3::from_array(std::array::from_fn(|i| {
+                (origin[i] - existing.origin[i]) as f32
+            }));
+            if !delta.is_finite() {
+                return Err("Source motion origin is invalid".into());
+            }
+            if delta != Vec3::ZERO {
+                existing.pass.as_mut().unwrap().rebase(delta);
+                existing.origin = origin;
+                existing.rebase_count += 1;
+            }
+            if !Arc::ptr_eq(&existing.targets, &targets.0) {
+                let previous = existing.pass.take();
+                existing.pass = Some(SourceMotionPass::new(
+                    &device,
+                    &queue,
+                    &cache,
+                    assets.shaders.motion_camera.clone(),
+                    targets.0.depth.sampled.as_ref().unwrap(),
+                    snapshot,
+                    previous,
+                )?);
+                existing.targets = targets.0.clone();
+                existing.camera_frame = 0;
+                existing.camera_token = 0;
+                existing.validation = 0;
+                existing.resize_count += 1;
+                let pass = existing.pass.as_ref().unwrap();
+                commands.entity(entity).insert(MotionDrawView::new(
+                    pass.binding().clone(),
+                    pass.copied_depth.clone(),
+                ));
+            } else if draw.is_none() {
+                let pass = existing.pass.as_ref().unwrap();
+                commands.entity(entity).insert(MotionDrawView::new(
+                    pass.binding().clone(),
+                    pass.copied_depth.clone(),
+                ));
+            }
+            if let Some(error) = existing.pass.as_ref().unwrap().failure(&cache) {
+                return Err(error);
+            }
+        } else {
+            let pass = SourceMotionPass::new(
+                &device,
+                &queue,
+                &cache,
+                assets.shaders.motion_camera.clone(),
+                targets.0.depth.sampled.as_ref().unwrap(),
+                snapshot,
+                None,
+            )?;
+            commands.entity(entity).insert(MotionDrawView::new(
+                pass.binding().clone(),
+                pass.copied_depth.clone(),
+            ));
+            commands.insert_resource(MotionFrame {
+                pass: Some(pass),
+                targets: targets.0.clone(),
+                origin,
+                camera_frame: 0,
+                camera_token: 0,
+                submitted_token: 0,
+                validation: 0,
+                resize_count: 0,
+                rebase_count: 0,
+            });
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        *status.0.lock().unwrap() = RenderingState::Failed(error);
+    }
+}
+
+fn encode_motion_camera(
+    view: ViewQuery<(
+        &SourceSurfaceView,
+        &super::surface_graph::SurfaceViewTargets,
+    )>,
+    mut motion: Option<ResMut<MotionFrame>>,
+    frame: Res<SourceViewFrame>,
+    objects: Res<MotionObjects>,
+    pipelines: Res<MotionPipelines>,
+    device: Res<RenderDevice>,
+    queue: Res<RenderQueue>,
+    cache: Res<PipelineCache>,
+    status: Res<SourceLightingStatus>,
+    mut context: RenderContext,
+) {
+    let (source, targets) = view.into_inner();
+    if source.index != 1
+        || !objects.matches(frame.frame, frame.main_token)
+        || !pipelines.ready(&cache)
+        || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
+    {
+        return;
+    }
+    let (Some(motion), Some(snapshot)) = (motion.as_mut(), frame.views[1].as_ref()) else {
+        return;
+    };
+    match motion.pass.as_mut().unwrap().encode_camera(
+        context.command_encoder(),
+        &device,
+        &queue,
+        &cache,
+        &targets.0.motion.attachment,
+        snapshot,
+        frame.main_token,
+    ) {
+        Ok(true) => {
+            motion.camera_frame = frame.frame;
+            motion.camera_token = frame.main_token;
+        }
+        Ok(false) => {}
+        Err(error) => *status.0.lock().unwrap() = RenderingState::Failed(error),
+    }
+}
+
+fn encode_motion_objects(
+    world: &World,
+    view: ViewQuery<&SourceSurfaceView>,
+    motion: Option<Res<MotionFrame>>,
+    frame: Res<SourceViewFrame>,
+    status: Res<SourceLightingStatus>,
+    mut context: RenderContext,
+) {
+    let entity = view.entity();
+    if view.into_inner().index != 1
+        || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
+    {
+        return;
+    }
+    let Some(motion) = motion else { return };
+    if motion.camera_frame != frame.frame || motion.camera_token != frame.main_token {
+        return;
+    }
+    if let Err(error) =
+        super::motion_draw::render_objects(world, entity, frame.main_token, &mut context)
+    {
+        *status.0.lock().unwrap() = RenderingState::Failed(error);
+    }
+}
+
+fn submit_motion(
+    mut motion: Option<ResMut<MotionFrame>>,
+    views: Query<(&SourceSurfaceView, &MotionDrawView)>,
+    objects: Res<MotionObjects>,
+    pipelines: Res<MotionPipelines>,
+    frame: Res<SourceViewFrame>,
+    progress: Res<SourceGraphProgress>,
+    cache: Res<PipelineCache>,
+    gate: Res<SourceExecutionGate>,
+    queue: Res<RenderQueue>,
+    status: Res<SourceLightingStatus>,
+) {
+    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+        return;
+    }
+    let Some(motion) = motion.as_mut() else {
+        return;
+    };
+    let Some((_, draw)) = views.iter().find(|(view, _)| view.index == 1) else {
+        return;
+    };
+    let mut state = progress.0.lock().unwrap();
+    let token = frame.main_token;
+    if state.presented
+        && state.frame == frame.frame
+        && state.token == token
+        && motion.camera_frame == frame.frame
+        && motion.camera_token == token
+        && draw.encoded_token() == token
+        && objects.matches(frame.frame, token)
+        && token > motion.submitted_token
+        && objects.can_complete(token)
+    {
+        if !motion.pass.as_mut().unwrap().completed(token) || !objects.completed(token) {
+            *status.0.lock().unwrap() =
+                RenderingState::Failed("Source motion history submission did not match".into());
+            return;
+        }
+        motion.submitted_token = token;
+        if motion.validation == 0 {
+            motion.validation = gate.watch_submission(&queue);
+        }
+    }
+    state.motion = MotionAudit {
+        pipelines_ready: pipelines.ready(&cache) && motion.pass.as_ref().unwrap().ready(&cache),
+        objects_ready: objects.matches(frame.frame, token),
+        frame: motion.camera_frame,
+        camera_token: motion.camera_token,
+        object_token: draw.encoded_token(),
+        submitted_token: motion.submitted_token,
+        registered_objects: objects.count() as u32,
+        draws: draw.counts(),
+        extent: motion.pass.as_ref().unwrap().extent.to_array(),
+        validation: motion.validation,
+        validated: gate.submission_validated(motion.validation),
+        resize_count: motion.resize_count,
+        rebase_count: motion.rebase_count,
+    };
 }

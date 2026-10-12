@@ -127,6 +127,8 @@ pub fn load_lighting(commands: &mut Commands, server: &AssetServer, record: &Lig
             taa: server.load("shaders/source_taa.wgsl"),
             caster: server.load("shaders/source_caster.wgsl"),
             caster_math: server.load("shaders/source_caster_math.wgsl"),
+            motion_camera: server.load("shaders/source_motion_vectors.wgsl"),
+            motion_objects: server.load("shaders/source_motion_objects.wgsl"),
         },
         loaded: false,
         texture_bytes: 0,
@@ -316,9 +318,11 @@ pub struct LightingShaders {
     pub taa: Handle<Shader>,
     pub caster: Handle<Shader>,
     pub caster_math: Handle<Shader>,
+    pub motion_camera: Handle<Shader>,
+    pub motion_objects: Handle<Shader>,
 }
 impl LightingShaders {
-    fn handles(&self) -> [&Handle<Shader>; 12] {
+    fn handles(&self) -> [&Handle<Shader>; 14] {
         [
             &self.lighting,
             &self.cloud,
@@ -332,6 +336,8 @@ impl LightingShaders {
             &self.taa,
             &self.caster,
             &self.caster_math,
+            &self.motion_camera,
+            &self.motion_objects,
         ]
     }
 }

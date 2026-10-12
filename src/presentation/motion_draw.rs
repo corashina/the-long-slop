@@ -128,6 +128,15 @@ pub struct MotionObjects {
     completed: AtomicU32,
 }
 impl MotionObjects {
+    pub fn matches(&self, frame: u32, token: u32) -> bool {
+        frame != 0 && token != 0 && self.frame == frame && self.token == token
+    }
+    pub fn can_complete(&self, token: u32) -> bool {
+        token != 0 && token == self.token && token > self.completed.load(Ordering::Acquire)
+    }
+    pub fn origin(&self) -> Option<[f64; 3]> {
+        self.origin
+    }
     pub fn completed(&self, token: u32) -> bool {
         let old = self.completed.load(Ordering::Acquire);
         if token == 0 || token != self.token || token <= old {

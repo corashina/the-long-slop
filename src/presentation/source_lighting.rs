@@ -498,6 +498,9 @@ fn prepare_source_draws(
     transmissive: Res<DrawFunctions<Transmissive3d>>,
     transparent: Res<DrawFunctions<Transparent3d>>,
 ) {
+    if !materials.is_changed() {
+        return;
+    }
     let draws = [
         (
             MainPassOpaqueDrawFunction.intern(),
