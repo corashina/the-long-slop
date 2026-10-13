@@ -160,6 +160,7 @@ pub struct ViewSnapshot {
 }
 #[derive(Resource, Clone, Default, ExtractResource)]
 pub struct SourceViewFrame {
+    pub motion_revision: u32,
     pub scene: u32,
     pub probe_enabled: [bool; PROBE_COUNT],
     pub probe_checks: u32,
@@ -204,6 +205,7 @@ pub fn gpu_projection(source: Mat4) -> Mat4 {
 }
 /// Runs after current physical extents and transforms, before source frustum publication.
 pub(crate) fn snapshot(
+    drive: Res<crate::app::Drive>,
     reference: Res<crate::app::RuntimeReference>,
     assets: Option<Res<LightingAssets>>,
     scene: Res<SourceSceneLighting>,
@@ -405,6 +407,7 @@ pub(crate) fn snapshot(
     });
     *frame = SourceViewFrame {
         scene: epoch.0,
+        motion_revision: drive.runtime.audio_motion_revision,
         probe_enabled: activation.enabled,
         probe_checks: activation.checks,
         probe_index: clock.probe_index,

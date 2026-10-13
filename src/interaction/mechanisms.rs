@@ -464,13 +464,13 @@ impl MechanismState {
             if !c.enabled {
                 return;
             }
-            if c.turnable && input.pressed & (keys::USE | keys::FILL) != 0 {
+            if c.turnable && input.pressed & (keys::USE | keys::PRIMARY) != 0 {
                 self.control_action = Some(ControlAction::Radio(RadioControl::Band));
             } else if c.tune {
                 let look_y = -input.mouse[1];
                 let direction = if input.wheel != 0. {
                     input.wheel
-                } else if input.held & (keys::USE | keys::FILL) != 0
+                } else if input.held & (keys::USE | keys::PRIMARY) != 0
                     && look_y != 0.
                     && self.radio_seconds - self.last_radio_tune
                         >= self.radio_repeat * (1. - look_y.abs().clamp(0., 1.))
@@ -499,7 +499,7 @@ impl MechanismState {
             return;
         }
         if input.pressed & keys::USE != 0
-            || (input.pressed & keys::FILL != 0 && self.primary_switch(item))
+            || (input.pressed & keys::PRIMARY != 0 && self.primary_switch(item))
         {
             let c = &mut self.controls[index];
             if let Some(turn) = &c.reference.turn {

@@ -210,6 +210,13 @@ impl GarageRuntime {
             audio.bind_game(reference, &candidate.area, &candidate.physics);
             audio.sync_lamps(&reference.lighting, &candidate.lighting);
         }
+        crate::world::sync_station_food(
+            &mut candidate.stream,
+            reference,
+            &mut candidate.area,
+            &mut candidate.physics,
+        )?;
+        candidate.sync_weather_bindings(reference);
         candidate.clear_input();
         candidate.paused = true;
         candidate.started = true;
@@ -256,7 +263,16 @@ impl GarageRuntime {
                 &ids,
                 origin,
                 &self.physics,
-                self.area.interaction.capture_carry_save(&ids)?,
+                if self
+                    .area
+                    .interaction
+                    .held()
+                    .is_some_and(|id| !reference.items.iter().any(|r| r.id == id))
+                {
+                    None
+                } else {
+                    self.area.interaction.capture_carry_save(&ids)?
+                },
             )?,
             vehicles: self
                 .vehicles
@@ -371,6 +387,17 @@ impl StartingArea {
         }
         for record in &reference.bodies {
             if record.parent_body.is_some() {
+                continue;
+            }
+            if reference
+                .items
+                .iter()
+                .any(|i| i.body == record.id && i.id == reference.survival.starter_food)
+                && self
+                    .items
+                    .get(reference.survival.starter_food)
+                    .is_some_and(|i| i.removed)
+            {
                 continue;
             }
             let handle = *self

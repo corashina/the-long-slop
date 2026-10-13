@@ -86,6 +86,7 @@ def lighting_resources(manifest):
         elif isinstance(value, list):
             for child in value: collect(child)
     collect(manifest.get('lighting', {}))
+    collect(manifest.get('weather', {}))
     for item in manifest.get('render_lighting', {}).get('dependencies', []):
         collect({'path':item['file'],'sha256':item['sha256']})
     return list(resources.values())
@@ -124,7 +125,7 @@ def relocate(source, transform, position, yaw_degrees):
 
 def validate_runtime_paths(manifest):
     assets = manifest.get('assets', [])
-    if {a['path'] for a in assets} != {f'reference/{name}.gltf' for name in ('home',*CARS,'items','road_lamp','sky')} or len(assets) != 4+len(CARS):
+    if {a['path'] for a in assets} != {f'reference/{name}.gltf' for name in ('home',*CARS,'items','road_lamp','sky','food')} or len(assets) != 5+len(CARS):
         raise ValueError('Runtime must contain only the selected scenes')
     resources = {item['path']:item['sha256'] for item in lighting_resources(manifest)}
     for asset in assets:
@@ -138,7 +139,7 @@ def validate_runtime_paths(manifest):
                 raise ValueError('Invalid selected runtime dependency')
     for item in lighting_resources(manifest):
         name = item['path']
-        valid_prefix=name.startswith(('reference/lighting-','reference/texture-','reference/source-cloud.','reference/source-caster-dither-'))
+        valid_prefix=name.startswith(('reference/lighting-','reference/texture-','reference/source-cloud.','reference/source-caster-dither-','reference/weather-' ))
         if not valid_prefix or len(Path(name).parts) != 2 or Path(name).suffix not in ('.gltf','.bin','.png','.smip','.txt','.json'):
             raise ValueError('Invalid selected runtime lighting resource')
     sprites = manifest.get('ui', {}).get('sprites', [])
@@ -160,6 +161,7 @@ def validate_runtime_manifest(content: bytes) -> None:
         '--mount', 'type=volume,source=tld-wasm-cargo,target=/cargo',
         '--mount', 'type=volume,source=tld-wasm-target,target=/target',
         '--env', f'CARGO_TARGET_DIR=/target/{namespace}',
+        '--env', 'CARGO_BUILD_JOBS=2',
         'my-summer-slop-toolchain', 'cargo', 'run', '--quiet', '--locked',
         '--bin', 'validate-reference']
     try:
@@ -199,7 +201,7 @@ def verify_reference(output: Path, library) -> None:
         if uris | material_mips != declared:
             raise ValueError('Runtime scene dependencies differ from selected receipts')
         validate_gltf(scene)
-    for sprite in manifest.get('ui', {}).get('sprites', []):
+    for sprite in [*manifest.get('ui', {}).get('sprites', []), *manifest.get('audio', {}).get('clips', [])]:
         name = sprite['path'].removeprefix('reference/')
         path = output / name
         checked(output, {'file':name, 'bytes':path.stat().st_size, 'sha256':sprite['sha256']})
@@ -233,6 +235,11 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
         'items':[transform(go) for go in (13023,13027,18878,13019,15637)]}
     spare=source.get('level1',71403)
     roots['items'].append(source.transform_for(source.resolve(spare,source.read(spare)['m_GameObject'])))
+    roots['items'].append(transform(3542))
+    from .survival import prepare_food, recover_survival, bind_survival
+    from .weather import recover_weather, bind_weather
+    prepare_food(source, roots)
+    food_roots=roots.pop('food')
     prefab=source.get('sharedassets1.assets',82556)
     scene_paths=[n['path'] for n in source.hierarchy(roots['lada'][0])]
     prefab_paths=[n['path'] for n in source.hierarchy(prefab)]
@@ -270,6 +277,10 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     source.render_lighting=recover_render_lighting(source,[root for readers in roots.values() for root in readers],output)
     roots['road_lamp']=[pole]
     roots['sky']=[clouds]
+    roots['food']=food_roots
+    source.lighting_prototype_roots.update(key(root) for root in food_roots)
+    recover_survival(source,roots,output)
+    recover_weather(source,output)
     report = {}
     for name, readers in roots.items():
         report[name] = export_gltf((source,readers),output/f'{name}.gltf',library,list(roots).index(name)+1,name!='sky')
@@ -290,6 +301,10 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from .mirrors import mirror_source_evidence
     (output/'mirror-evidence.json').write_text(json.dumps(mirror_source_evidence(source,manifest['mirrors']),indent=2,allow_nan=False),encoding='utf-8')
     manifest['library']=provenance(library.receipt)
+    bind_survival(source,manifest)
+    bind_weather(source,manifest)
+    resources={entry['file'] for entry in manifest['assets'][0]['dependencies']}
+    manifest['assets'][0]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in lighting_resources(manifest) if r['path'] not in resources)
     manifest['ui']=export_ui(source,output,library)
     for index,name in enumerate(CARS):
         manifest['vehicles'][index]['instruments']=recover_instruments(source,manifest,report,name,roots[name][0])

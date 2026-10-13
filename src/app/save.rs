@@ -178,6 +178,11 @@ fn process_request(
             }
             let candidate = requests.candidate.take().unwrap();
             // The prepared commands and stable bindings make this boundary infallible.
+            world.resource_scope(
+                |world, mut food: Mut<crate::presentation::consumables::ConsumableVisuals>| {
+                    food.reset(world)
+                },
+            );
             candidate.presentation.commit(world);
             let mut drive = world.resource_mut::<Drive>();
             let session = drive

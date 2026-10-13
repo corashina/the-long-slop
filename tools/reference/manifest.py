@@ -16,7 +16,7 @@ def build_manifest(source, roots, reports, hashes, library, cars):
     assets=[]
     for asset_id,(name,readers) in enumerate(roots.items(),1):
         report=reports[name]
-        assets.append({'id':asset_id,'material_count':report['material_count'],'usage':'road_lamp_prototype' if name=='road_lamp' else 'sky_prototype' if name=='sky' else 'unique_scene','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
+        assets.append({'id':asset_id,'material_count':report['material_count'],'usage':'food_prototype' if name=='food' else 'road_lamp_prototype' if name=='road_lamp' else 'sky_prototype' if name=='sky' else 'unique_scene','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
         records=[]
         for root in readers:records.extend(source.hierarchy(root,activate_root=True))
         for entry,record in zip(report['nodes'],records):
@@ -104,7 +104,7 @@ def build_manifest(source, roots, reports, hashes, library, cars):
         if key(node_readers[node])==('level1',21482):name='Garage door right'
         elif key(node_readers[node])==('level1',21464):name='Garage door left'
         elif key(node_readers[node])==('level1',21450):name='Door'
-        for class_name,kind_name in [('tankscript','container'),('enginescript','engine'),('coolantTankscript','radiator'),('gumiscript','tire'),('wheelscript','rim'),('seatscript','seat'),('tankcapscript','cap')]:
+        for class_name,kind_name in [('tankscript','container'),('enginescript','engine'),('coolantTankscript','radiator'),('gumiscript','tire'),('wheelscript','rim'),('seatscript','seat'),('tankcapscript','cap'),('ediblescript','food')]:
             if class_name in group:kind=kind_name
         if node in mechanism_nodes:kind='hood' if 'Hood' in nodes[node-1]['hierarchy_path'] else 'trunk' if 'Trunk' in nodes[node-1]['hierarchy_path'] else 'door'
         condition=data(node,'partconditionscript')
@@ -149,7 +149,8 @@ def build_manifest(source, roots, reports, hashes, library, cars):
             identities.append(key(collider));detachable_colliders.add(key(collider))
         if 'wheelscript' in group or 'gumiscript' in group:wheel_parts_source.append((node,part,part_data,identities))
     for node,group in components.items():
-        if not nodes[node-1]['active'] and not any(key(reader) in detachable_colliders for readers in group.values() for reader in readers):continue
+        food_geometry=key(node_readers[node]) in source.food_geometry_nodes
+        if not nodes[node-1]['active'] and not food_geometry and not any(key(reader) in detachable_colliders for readers in group.values() for reader in readers):continue
         layer=source.read(objects[node]['game_object'])['m_Layer']
         for class_name in ('BoxCollider','SphereCollider','CapsuleCollider','MeshCollider'):
             for reader in group.get(class_name,[]):
@@ -160,7 +161,7 @@ def build_manifest(source, roots, reports, hashes, library, cars):
                     properties=source.read(material);friction=properties['m_DynamicFriction'];restitution=properties['m_Bounciness']
                 body_id=body_for(node);owner=bodies[body_id-1]
                 colliders.append({'id':len(colliders)+1,'source':source_id(reader),'node':node,'body':body_id,
-                    'sensor':value['m_IsTrigger'],'enabled':bool(value['m_Enabled']) and nodes[node-1]['active'],'membership':1<<layer,'filter':matrix[layer],
+                    'sensor':value['m_IsTrigger'],'enabled':bool(value['m_Enabled']) and (nodes[node-1]['active'] or food_geometry),'membership':1<<layer,'filter':matrix[layer],
                     'friction':friction,'restitution':restitution,'geometry':geometry(source,exporter,reader,node_readers[node],owner['pose'],owner['dynamic'])})
     tanks=[];openings=[]
     for node,group in components.items():
@@ -177,10 +178,28 @@ def build_manifest(source, roots, reports, hashes, library, cars):
         for reader in group.get('tankcapscript',[]):
             value=source.read(reader);tank=source.resolve(reader,value['Tank'])
             if tank is None or key(tank) not in item_components:raise ValueError(f'Cap tank outside selected roots: {key(reader)}')
+            particle=source.resolve(reader,value['ps'])
+            if particle is None or particle.type.name!='ParticleSystem':raise ValueError(f'Missing fluid emitter: {key(reader)}')
+            emitted=source.read(particle);emitter=source.transform_for(source.resolve(particle,emitted['m_GameObject']))
+            cap_pose=world_pose(source,node_readers[node]);emitter_pose=world_pose(source,emitter)
+            rotation=cap_pose['rotation'];inverse=(-rotation[0],-rotation[1],-rotation[2],rotation[3])
+            delta=[emitter_pose['translation'][axis]-cap_pose['translation'][axis] for axis in range(3)]
+            particle_pose={'translation':list(transform_point(delta,(0.,0.,0.),inverse,(1.,1.,1.))),
+                'rotation':list(quaternion_product(inverse,emitter_pose['rotation'])),
+                'scale':[emitter_pose['scale'][axis]/cap_pose['scale'][axis] for axis in range(3)]}
+            shape=emitted['ShapeModule'];collision=emitted['CollisionModule'];initial=emitted['InitialModule']
+            if shape['type']!=4 or collision['type']!=1 or not collision['enabled'] or emitted['moveWithTransform']!=2:
+                raise ValueError(f'Fluid particle motion differs: {key(reader)}')
             opening={'id':len(openings)+1,'source':source_id(reader),'tank':item_components[key(tank)],'cap':item_nodes[node],
                 'anchor':anchor(node),'flow_liters_per_second':value['radius']**2*math.pi*0.025*main['pourSpeed'],'tilt_degrees':value['defPourAngle'],
                 'tilt_axis':[0.,0.,-1.],'angle_disabled':bool(value['noAngle']),'spill_disabled':bool(value['noPour']),
-                'tube_connected':bool(value['tube']),'flow_radius':value['radius']}
+                'tube_connected':bool(value['tube']),'flow_radius':value['radius'],
+                'particles':{'source':source_id(particle),'local_pose':particle_pose,
+                    'capacity':initial['maxNumParticles'],'cone_degrees':shape['angle'],'cone_radius':shape['radius']['value'],
+                    'lifetime_seconds':initial['startLifetime']['scalar'],'radius':initial['startSize']['scalar']*0.5*collision['radiusScale'],
+                    'gravity_multiplier':initial['gravityModifier']['scalar'],'collision_mask':collision['collidesWith']['m_Bits'],
+                    'bounce':value['bounce'],'dampen':value['dampen'],
+                    'max_speed':value['maxSpeed'],'min_rate':value['minRate'],'max_rate':value['maxRate']}}
             opening['can_toggle']=bool(value['canToggle'])
             opening.update(opening_metadata(source,reader,by_source,main['fluidTuneSpeed']))
             openings.append(opening)
@@ -291,7 +310,7 @@ def build_manifest(source, roots, reports, hashes, library, cars):
             no_overheat=bool(engine['noOverHeat']),kickstart=bool(engine['kickstart']),start_chance_interval_seconds=1.)
         engine_record.update(auto_shift_clutch_rpm=engine['autoShiftClutchRpm'],auto_shift_clutch_rpm_range=engine['autoShiftClutchRpmRange'])
         curve=engine['torqueCurve'];engine_record['torque_curve']={'keys':[{'time':k['time'],'value':k['value'],'in_tangent':k['inSlope'],'out_tangent':k['outSlope'],'in_weight':k['inWeight'],'out_weight':k['outWeight'],'weighted_mode':k['weightedMode']} for k in curve['m_Curve']],'pre_wrap_mode':curve['m_PreInfinity'],'post_wrap_mode':curve['m_PostInfinity']}
-        engine_record['globals']={'source':source_id(main_reader),'fuel_consumption':main['defConsumption'],'oil_consumption':main['defOilConsumption'],'rpm_change':2000.,'car_temperature_bounds':[main['minCarTemp'],main['maxCarTemp']],'coolant_evaporate_rate':main['coolantEvaporateRate'],'temperature_difference_modifier':main['tempDifferenceModifier'],'temperature_move_modifier':main['tempChangeMoveModifier'],'max_car_velocity':main['maxCarVelocity'],'awake_heat_modifier':1.}
+        engine_record['globals']={'source':source_id(main_reader),'fuel_consumption':main['defConsumption'],'oil_consumption':main['defOilConsumption'],'rpm_change':2000.,'car_temperature_bounds':[main['minCarTemp'],main['maxCarTemp']],'coolant_evaporate_rate':main['coolantEvaporateRate'],'temperature_difference_modifier':main['tempDifferenceModifier'],'temperature_move_modifier':main['tempChangeMoveModifier'],'max_car_velocity':main['maxCarVelocity'],'outside_temperature_modifier':main['outsideTempM']}
         engine_record['globals']['min_steam_temperature']=main['minSteamTemp']
         engine_record['radiator']={'source':source_id(radiator_reader),'thermostat_range':[radiator['minThermostatTemp'],radiator['maxThermostatTemp']],'fan_temperature_on':radiator['fanOnTemp'],'fan_temperature_off':radiator['fanOffTemp'],'fan_on_when_engine_runs':bool(radiator['fanOnWhenEngineRuns']),'max_value':radiator['maxValue'],'max_fan_value':radiator['maxFanValue'],'max_fan_speed':radiator['maxFanSpeed'],'max_fluid_loss':radiator['maxFluidLoss']}
         return engine_record

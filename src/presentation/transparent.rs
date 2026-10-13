@@ -144,7 +144,7 @@ impl SourceTransparentPasses {
         Ok(())
     }
 }
-pub fn prepare_pass_order(
+pub(crate) fn prepare_pass_order(
     mut views: Query<(&ExtractedView, &mut SourceTransparentPasses)>,
     phases: Res<ViewSortedRenderPhases<Transparent3d>>,
     metadata: Res<SourceSortIndex>,
@@ -152,6 +152,7 @@ pub fn prepare_pass_order(
     loading: Res<MaterialLoading>,
     functions: Res<DrawFunctions<Transparent3d>>,
     status: Res<SourceLightingStatus>,
+    particles: Res<super::weather::ExtractedParticles>,
 ) {
     if !loading.is_ready() || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
         for (_, mut order) in &mut views {
@@ -165,6 +166,10 @@ pub fn prepare_pass_order(
     let glass = functions.id::<DrawSourceGlass>();
     for (view, mut order) in &mut views {
         order.entries.clear();
+        let capacity = loading.transparent_pass_capacity().unwrap_or(0) + particles.uniforms.len();
+        if order.entries.capacity() < capacity {
+            order.entries.reserve_exact(capacity);
+        }
         let Some(phase) = phases.get(&view.retained_view_entity) else {
             continue;
         };
@@ -187,12 +192,25 @@ pub fn prepare_pass_order(
             if item.batch_range().is_empty() {
                 continue;
             }
-            let TransparentSortingInfo3d::Sorted { mesh_center, .. } = item.sorting_info else {
+            let TransparentSortingInfo3d::Sorted {
+                mesh_center,
+                depth_bias,
+            } = item.sorting_info
+            else {
                 *status.0.lock().unwrap() =
                     RenderingState::Failed("Source transparent distance mode is invalid".into());
                 return;
             };
-            let distance = perspective_distance(mesh_center.to_array(), camera);
+            let particle = materials
+                .instances
+                .get(&item.main_entity())
+                .is_some_and(|m| {
+                    m.asset_id.type_id()
+                        == std::any::TypeId::of::<super::weather::ParticleMaterial>()
+                });
+            // Retain the particle adapter's bias in the current squared-distance order.
+            let distance = perspective_distance(mesh_center.to_array(), camera)
+                - if particle { depth_bias } else { 0. };
             if !distance.is_finite() || index > i32::MAX as usize {
                 *status.0.lock().unwrap() = RenderingState::Failed(
                     "Source transparent distance or gather index is invalid".into(),
@@ -257,7 +275,22 @@ pub fn prepare_pass_order(
                     key
                 },
                 item: index,
-                draw: Some(if data.glass { glass } else { base }),
+                draw: Some(
+                    if materials
+                        .instances
+                        .get(&item.main_entity())
+                        .is_some_and(|m| {
+                            m.asset_id.type_id()
+                                == std::any::TypeId::of::<super::weather::ParticleMaterial>()
+                        })
+                    {
+                        item.draw_function()
+                    } else if data.glass {
+                        glass
+                    } else {
+                        base
+                    },
+                ),
                 cache_key: super::stained_glass::GrabPassKey {
                     pass: pass_identity + u64::from(data.glass),
                     ..cache_key

@@ -30,6 +30,7 @@ fn closed_destination_has_no_fill_action() {
         &run.area.player,
         &run.area.items,
         &run.physics,
+        Default::default(),
     );
     assert_eq!(a.actions.0 & ActionMask::FILL, 0);
 }
@@ -78,6 +79,8 @@ fn occupied_slot_has_no_mount_action() {
         &mut run.area.items,
         &mut run.physics,
         1. / 60.,
+        Default::default(),
+        1.,
     );
     assert_eq!(run.area.interaction.held(), Some(spare));
     let a = run.area.interaction.available_actions(
@@ -94,6 +97,7 @@ fn occupied_slot_has_no_mount_action() {
         &run.area.player,
         &run.area.items,
         &run.physics,
+        Default::default(),
     );
     assert_eq!(a.actions.0 & ActionMask::MOUNT, 0);
 }
@@ -117,6 +121,7 @@ fn attached_tire_selects_tire_dismount() {
         &run.area.player,
         &run.area.items,
         &run.physics,
+        Default::default(),
     );
     assert_ne!(a.actions.0 & ActionMask::DISMOUNT, 0);
     assert_eq!(a.part, Some(tire));
@@ -140,6 +145,7 @@ fn blocked_exit_has_no_exit_action() {
         &run.area.player,
         &run.area.items,
         &run.physics,
+        Default::default(),
     );
     assert_eq!(a.actions.0 & ActionMask::EXIT, 0);
     assert_eq!(run.area.player.seat(), Some(seat));
@@ -186,6 +192,8 @@ fn mount_action_hides_drop_until_target_changes() {
         &mut run.area.items,
         &mut run.physics,
         1. / 60.,
+        Default::default(),
+        1.,
     );
     assert_eq!(run.area.interaction.held(), Some(spare));
     let a = run.area.interaction.available_actions(
@@ -202,6 +210,7 @@ fn mount_action_hides_drop_until_target_changes() {
         &run.area.player,
         &run.area.items,
         &run.physics,
+        Default::default(),
     );
     assert_ne!(a.actions.0 & ActionMask::MOUNT, 0);
     assert_eq!(a.actions.0 & ActionMask::DROP, 0);
@@ -265,6 +274,8 @@ fn charged_throw_over_valid_slot_does_not_mount() {
         &mut run.area.items,
         &mut run.physics,
         0.02,
+        Default::default(),
+        1.,
     );
     run.area.interaction.step(
         FrameInput {
@@ -277,6 +288,8 @@ fn charged_throw_over_valid_slot_does_not_mount() {
         &mut run.area.items,
         &mut run.physics,
         0.2,
+        Default::default(),
+        1.,
     );
     assert!(run.area.interaction.throw_charge() > r.player.throw_minimum);
     let aim = ResolvedAim {
@@ -294,6 +307,7 @@ fn charged_throw_over_valid_slot_does_not_mount() {
         &run.area.player,
         &run.area.items,
         &run.physics,
+        Default::default(),
     );
     assert_eq!(available.slot, Some(SlotTarget::Wheel(slot.id)));
     assert_eq!(available.actions.0 & ActionMask::MOUNT, 0);
@@ -307,6 +321,8 @@ fn charged_throw_over_valid_slot_does_not_mount() {
         &mut run.area.items,
         &mut run.physics,
         0.02,
+        Default::default(),
+        1.,
     );
     assert_eq!(action, Some(InteractionAction::Throw(rim)));
     assert_eq!(run.area.interaction.held(), None);

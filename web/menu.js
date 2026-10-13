@@ -9,14 +9,14 @@ function operationError(error){
  return message;
 }
 export class MenuState {
- constructor(){this.state='loading';this.readyFlag=false;this.started=false;this.actions=0;this.error='';this.status='';this.generation=0;this.pending=false;this.operation='';this.origin='start-menu';}
+ constructor(){this.state='loading';this.readyFlag=false;this.started=false;this.actions=0;this.error='';this.status='';this.generation=0;this.pending=false;this.operation='';this.origin='start-menu';this.dead=false;this.deathComplete=false;}
  ready(){if(this.state==='error')return;this.readyFlag=true;this.state=this.started?'pause-menu':'start-menu';if(!this.status||this.status==='Loading the garage...')this.status='The garage is ready.';}
  loading(){if(this.state==='error')return;if(!this.operation)this.generation++;this.pending=Boolean(this.operation);this.readyFlag=false;this.actions=0;this.state='loading';this.error='';this.status=this.operation?pendingText[this.operation]:'Loading the garage...';}
  fail(message){this.generation++;this.pending=false;this.operation='';this.readyFlag=false;this.state='error';this.error=message;this.status='';this.actions=this.started?ACTIONS.PAUSE:0;}
  pause(){if(!this.operation)this.generation++;this.pending=Boolean(this.operation);this.actions=this.started?ACTIONS.PAUSE:0;if(this.state==='error')return;if(this.state==='controls'){this.origin=this.started?'pause-menu':'start-menu';return;}this.state=this.readyFlag?(this.started?'pause-menu':'start-menu'):'loading';}
  controls(){if(this.pending)return;if(this.state!=='start-menu' && this.state!=='pause-menu')return;this.origin=this.state;this.state='controls';}
  back(){if(this.state==='controls')this.state=this.origin;}
- recover(){if(this.state==='pause-menu'&&!this.pending)this.actions=ACTIONS.RECOVER;}
+ recover(){if(this.state==='pause-menu'&&!this.pending&&!this.dead)this.actions=ACTIONS.RECOVER;}
  takeActions(){const a=this.actions;this.actions=0;return a;}
  async run(operation,saveSession){
   if(!this.readyFlag||this.pending||!['start-menu','pause-menu'].includes(this.state)||(operation==='save'&&!this.started))return;
@@ -24,12 +24,13 @@ export class MenuState {
   try {
    await saveSession[operation]();if(token!==this.generation)return;
    if(operation!=='save'){this.started=true;this.state=this.readyFlag?'pause-menu':'loading';}
+   if(operation!=='save'){this.dead=false;this.deathComplete=false;}
    this.status=resultText[operation];
   } catch(error){if(token===this.generation){this.error=operationError(error);this.status='';}}
   finally {if(token===this.generation){this.pending=false;this.operation='';}}
  }
  async capture(action,request,unlock){
-  if(!this.readyFlag || !this.started || this.pending || this.state!=='pause-menu')return false;
+  if(this.deathComplete || !this.readyFlag || !this.started || this.pending || this.state!=='pause-menu')return false;
   const token=++this.generation;this.pending=true;this.error='';
   try {try{unlock?.();}catch{}await request();if(token!==this.generation)return false;this.actions=action;this.state='playing';return true;}
   catch(error){if(token===this.generation){this.error='Mouse capture failed. '+error.message+' Select Continue to try again.';this.state='pause-menu';}return false;}
@@ -65,6 +66,8 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,audio})
   const state=model.state;menu.hidden=state==='playing';controls.hidden=state!=='controls';initial.hidden=!['loading','start-menu','error'].includes(state);paused.hidden=state!=='pause-menu';
   if(hud&&state!=='playing')hud.hidden=true;
   for(const [selector] of actionNodes)document.querySelector(selector).disabled=!model.readyFlag||model.pending;
+  document.querySelector('#recover').disabled ||= model.dead;
+  document.querySelector('#resume').disabled ||= model.deathComplete;
   error.hidden=!model.error;if(lastError!==model.error){error.textContent=model.error;lastError=model.error;}
   if(lastStatus!==model.status){status.textContent=model.status;lastStatus=model.status;}
   if(state!==lastState){
@@ -94,5 +97,5 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,audio})
  document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==canvas && model.state==='playing')pause();});
  window.addEventListener('blur',pause);document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});
  window.addEventListener('resize',resize);resize();paint();
- return {model,loading(){audio?.pause();clearInput();model.loading();if(document.pointerLockElement===canvas)document.exitPointerLock();paint();},ready(){model.ready();paint();},sync(started,stopped,travelM){model.started=started;if(stopped && started && model.state==='playing'){model.pause();paint();}const km=Math.round(travelM/10)/100;if(lastTravel!==km){document.querySelector('#session-distance').textContent='Session distance: '+km.toFixed(2)+' km';lastTravel=km;}},fail(message){saveSession.cancel();clearInput();model.fail(message);if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();},dispose(){window.removeEventListener('resize',resize);}};
+ return {model,survival(dead,due){if(dead===model.dead&&due===model.deathComplete)return;model.dead=dead;model.deathComplete=due;if(due){pause();model.status='You died. Select New game or Load.';queueMicrotask(()=>document.querySelector('#pause-new-game').focus({preventScroll:true}));}paint();},loading(){audio?.pause();clearInput();model.loading();if(document.pointerLockElement===canvas)document.exitPointerLock();paint();},ready(){model.ready();paint();},sync(started,stopped,travelM){model.started=started;if(stopped && started && model.state==='playing'){model.pause();paint();}const km=Math.round(travelM/10)/100;if(lastTravel!==km){document.querySelector('#session-distance').textContent='Session distance: '+km.toFixed(2)+' km';lastTravel=km;}},fail(message){saveSession.cancel();clearInput();model.fail(message);if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();},dispose(){window.removeEventListener('resize',resize);}};
 }

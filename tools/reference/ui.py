@@ -74,12 +74,12 @@ def export_ui(source, output, library):
         color=textdata.get('m_fontColor',textdata.get('m_Color',{'r':1.,'g':1.,'b':1.,'a':1.}))
         font=textdata.get('m_FontData',{})
         layouts[role]={'source':source_id(reader),'rect':list(screen),'ancestry':list(reversed(ancestry)),'canvas':canvas,
-            'color':list(color.values()),'font_size':textdata.get('m_fontSize',font.get('m_FontSize',40)),
+            'color':[color[channel] for channel in 'rgba'],'font_size':textdata.get('m_fontSize',font.get('m_FontSize',40)),
             'font':'Liberation Sans' if 'm_fontSize' in textdata else 'Arial',
             'alignment':textdata.get('m_textAlignment',font.get('m_Alignment',0)),
             'text':textdata.get('m_text',textdata.get('m_Text','')),
             'sprite':sprite(source.resolve(image,im['m_Sprite']),role) if im and im['m_Sprite']['m_PathID'] else None,
-            'image_color':list(im['m_Color'].values()) if im else [1.,1.,1.,1.]}
+            'image_color':[im['m_Color'][channel] for channel in 'rgba'] if im else [1.,1.,1.,1.]}
     menu=source.get('level1',74691);md=source.read(menu)
     main=source.get('level0',16795);main_data=source.read(main)
     def label_of(go):
@@ -116,8 +116,37 @@ def export_ui(source, output, library):
         icons[role]=sprite(source.resolve(menu,md[field]),role)
     for role,field in [('default','GCDef'),('pickup','GCCanPickup'),('dismount','GCDismount'),('carrying','GCPickup')]:
         image=source.resolve(menu,md[field]);icons[role]=sprite(source.resolve(image,source.read(image)['m_Sprite']),role)
+    need_sliders={}
+    for role,field in [('food','SFood'),('water','SWater'),('hp','SHp'),('bladder','SPiss'),('bowel','SShit'),('sleep','SSleepValue')]:
+        slider=source.resolve(menu,md[field]);d=source.read(slider)
+        layout(slider,'need-'+role)
+        need_sliders[role]={'source':source_id(slider),'minimum':d['m_MinValue'],'maximum':d['m_MaxValue'],
+            'direction':d['m_Direction'],'whole_numbers':bool(d['m_WholeNumbers'])}
+    for role,field in [('food','Food'),('water','Water'),('hp','HP'),('bladder','Piss'),('bowel','Shit')]:
+        for suffix,label in [('', 'fill'),('BG','background'),('Icon','icon')]:
+            layout(source.resolve(menu,md['survivalSlider'+field+suffix]),'need-'+role+'-'+label)
+    sleep_slider=source.resolve(menu,md['SSleepValue'])
+    sleep_data=source.read(sleep_slider)
+    fill_rect=source.resolve(sleep_slider,sleep_data['m_FillRect'])
+    fill_go=source.resolve(fill_rect,source.read(fill_rect)['m_GameObject'])
+    fill_image=next(c for c in components(fill_go) if c.type.name=='MonoBehaviour' and source.class_name(c)=='Image')
+    layout(fill_image,'need-sleep-fill')
+    slider_go=source.resolve(sleep_slider,sleep_data['m_GameObject'])
+    background=[]
+    for node in source.hierarchy(rect_for(slider_go),activate_root=True):
+        for component in node['components']:
+            if component.type.name=='MonoBehaviour' and source.class_name(component)=='Image':
+                data=source.read(component)
+                if data['m_Enabled'] and key(component)!=key(fill_image):background.append(component)
+    if len(background)!=1:raise ValueError('Sleep slider must have one active background')
+    layout(background[0],'need-sleep-background')
+    for role,field in [('can-sleep','GCanSleep'),('cannot-sleep','GCantSleep')]:
+        go=source.resolve(menu,md[field])
+        for c in components(go):
+            if c.type.name=='MonoBehaviour' and source.class_name(c) in ('Text','TextMeshProUGUI','Image'):
+                layout(c,role);break
     pairs=[{'background':sprite(source.resolve(menu,a),'menu-background'),'frame':sprite(source.resolve(menu,b),'menu-frame')}
            for a,b in zip(md['menuOverlayBGs'],md['menuOverlayBGsKeret'],strict=True)]
     if not pairs:raise ValueError('Missing source menu frames')
-    return {'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
+    return {'need_sliders':need_sliders,'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
             'overlay_color':[180/255,128/255,70/255,64/255],'frame_color':[180/255,128/255,70/255,1.]}

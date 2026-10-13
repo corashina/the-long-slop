@@ -27,6 +27,10 @@ use std::{
 
 pub mod mirrors;
 pub use mirrors::*;
+pub mod survival;
+pub mod weather;
+pub use survival::*;
+pub use weather::*;
 pub mod instruments;
 pub mod ui;
 pub use instruments::*;
@@ -86,6 +90,7 @@ pub enum AssetUsage {
     UniqueScene,
     RoadLampPrototype,
     SkyPrototype,
+    FoodPrototype,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -303,6 +308,7 @@ pub struct SlideRotation {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemKind {
+    Food,
     Decoration,
     Door,
     Hood,
@@ -363,12 +369,32 @@ pub struct OpeningRecord {
     pub spill_disabled: bool,
     pub tube_connected: bool,
     pub flow_radius: f32,
+    pub particles: FluidParticleReference,
     pub can_toggle: bool,
     pub valve: f32,
     pub can_tune: bool,
     pub tune_rate: f32,
     pub visuals: CapVisualReference,
     pub presentation: FluidPresentation,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FluidParticleReference {
+    pub source: SourceId,
+    pub local_pose: Transform,
+    pub capacity: u32,
+    pub cone_degrees: f32,
+    pub cone_radius: f32,
+    pub lifetime_seconds: f32,
+    pub radius: f32,
+    pub gravity_multiplier: f32,
+    pub collision_mask: u32,
+    pub bounce: f32,
+    pub dampen: f32,
+    pub max_speed: f32,
+    pub min_rate: f32,
+    pub max_rate: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -485,7 +511,7 @@ pub struct EngineGlobals {
     pub temperature_difference_modifier: f32,
     pub temperature_move_modifier: f32,
     pub max_car_velocity: f32,
-    pub awake_heat_modifier: f32,
+    pub outside_temperature_modifier: f32,
     pub min_steam_temperature: f32,
 }
 
@@ -764,6 +790,9 @@ pub struct LibraryProvenance {
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
     pub audio: serde_json::Value,
+    pub survival: SurvivalReference,
+    pub sleep: SleepReference,
+    pub weather: WeatherReference,
     pub ui: UiReference,
     pub library: LibraryProvenance,
     pub lighting: LightingRecord,
@@ -851,7 +880,20 @@ impl ReferenceManifest {
         Ok(manifest)
     }
 
+    pub fn from_runtime_json(bytes: &[u8]) -> Result<Self, ReferenceError> {
+        require(bytes.len() <= 64 * 1024 * 1024, "manifest size")?;
+        let manifest: Self =
+            serde_json::from_slice(bytes).map_err(|e| ReferenceError(e.to_string()))?;
+        manifest.validate_gameplay()?;
+        Ok(manifest)
+    }
+
     pub fn validate(&self) -> Result<(), ReferenceError> {
+        AudioReference::from_value(&self.audio, self)?;
+        self.validate_gameplay()
+    }
+
+    fn validate_gameplay(&self) -> Result<(), ReferenceError> {
         require(
             self.library.schema_version == 1
                 && hash(&self.library.manifest_sha256)
@@ -866,6 +908,10 @@ impl ReferenceManifest {
         self.lighting.validate(self)?;
         self.mirrors.validate(self)?;
         self.render_lighting.validate(&self.nodes)?;
+        self.survival.validate(self)?;
+        AudioGameplayReference::from_value(&self.audio)?;
+        self.sleep.validate(self)?;
+        self.weather.validate(self)?;
         require(
             self.bodies.iter().all(|b| {
                 self.nodes.iter().any(|n| {
@@ -1411,7 +1457,31 @@ impl ReferenceManifest {
                     && r.flow_liters_per_second > 0.0
                     && finite(&r.tilt_axis)
                     && r.flow_radius.is_finite()
-                    && r.flow_radius > 0.0,
+                    && r.flow_radius > 0.0
+                    && r.particles.capacity > 0
+                    && finite(&[
+                        r.particles.cone_degrees,
+                        r.particles.cone_radius,
+                        r.particles.lifetime_seconds,
+                        r.particles.radius,
+                        r.particles.gravity_multiplier,
+                        r.particles.max_speed,
+                        r.particles.min_rate,
+                        r.particles.max_rate,
+                        r.particles.bounce,
+                        r.particles.dampen,
+                    ])
+                    && transform(&r.particles.local_pose)
+                    && r.particles.cone_degrees >= 0.
+                    && r.particles.cone_radius >= 0.
+                    && r.particles.lifetime_seconds > 0.
+                    && r.particles.radius > 0.
+                    && r.particles.gravity_multiplier >= 0.
+                    && r.particles.max_speed > 0.
+                    && r.particles.max_rate >= r.particles.min_rate
+                    && (0. ..=1.).contains(&r.particles.bounce)
+                    && (0. ..=1.).contains(&r.particles.dampen)
+                    && r.particles.collision_mask != 0,
                 "opening flow",
             )?;
         }
@@ -1574,7 +1644,7 @@ impl ReferenceManifest {
                     e.globals.temperature_difference_modifier,
                     e.globals.temperature_move_modifier,
                     e.globals.max_car_velocity,
-                    e.globals.awake_heat_modifier,
+                    e.globals.outside_temperature_modifier,
                 ]) && finite(&e.globals.car_temperature_bounds),
                 "engine globals",
             )?;

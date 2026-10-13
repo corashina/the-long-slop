@@ -100,6 +100,9 @@ struct FluidSound {
     gain: f32,
 }
 pub struct AudioState {
+    pub survival_events: Vec<SurvivalAudioEvent>,
+    pub survival_loops: Vec<SurvivalAudioEvent>,
+    pub sleep_radio_advanced: bool,
     pub vehicle_index: usize,
     pub signals: Vec<AudioSignal>,
     crafted: HashMap<ItemId, u32>,
@@ -170,6 +173,9 @@ impl AudioState {
             c["maxRpm"],
         ];
         Self {
+            survival_events: Vec::with_capacity(512),
+            survival_loops: Vec::with_capacity(64),
+            sleep_radio_advanced: false,
             crafted: HashMap::new(),
             lamp_controls: HashMap::new(),
             lamp_voices: Vec::new(),
@@ -833,6 +839,9 @@ impl AudioState {
         event
     }
     pub fn reset(&mut self, session: u32) {
+        self.survival_events.clear();
+        self.survival_loops.clear();
+        self.sleep_radio_advanced = false;
         self.radio = crate::simulation::radio::RadioState::new(
             &self.reference.radio,
             &self.reference.clips,
@@ -1262,5 +1271,83 @@ impl AudioState {
                 ),
             ),
         ]
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum AudioKind {
+    Eat = 0,
+    Burp = 1,
+    Fart = 2,
+    Urinate = 3,
+    Sleep = 4,
+    Death = 5,
+    Storm = 6,
+    AmbientDay = 7,
+    AmbientNight = 8,
+    Shit = 9,
+    StormInside = 10,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum AudioAction {
+    Start = 0,
+    Update = 1,
+    Stop = 2,
+}
+#[derive(Clone, Copy, Debug)]
+pub struct SurvivalAudioEvent {
+    pub session: u32,
+    pub emitter: u32,
+    pub kind: AudioKind,
+    pub action: AudioAction,
+    pub clip: u32,
+    pub gain: f32,
+    pub pitch: f32,
+    pub position: [f64; 3],
+}
+
+impl AudioState {
+    pub fn survival_event(&mut self, mut event: SurvivalAudioEvent) {
+        event.session = self.session;
+        if self.survival_events.len() < self.survival_events.capacity() {
+            self.survival_events.push(event);
+        }
+    }
+    pub fn source_loop(&mut self, kind: AudioKind, emitter: u32, gain: f32, position: [f64; 3]) {
+        let b = self
+            .reference
+            .survival
+            .iter()
+            .find(|b| b.kind == kind as u32)
+            .expect("validated survival playback");
+        let event = SurvivalAudioEvent {
+            session: self.session,
+            emitter,
+            kind,
+            action: AudioAction::Update,
+            clip: b.clips[0],
+            gain,
+            pitch: b.pitch[0],
+            position,
+        };
+        if let Some(old) = self
+            .survival_loops
+            .iter_mut()
+            .find(|v| v.kind == kind && v.emitter == emitter)
+        {
+            *old = event;
+        } else if self.survival_loops.len() < self.survival_loops.capacity() {
+            self.survival_loops.push(event);
+        }
+    }
+    pub fn stop_survival_loop(&mut self, kind: AudioKind, emitter: u32) {
+        self.survival_loops
+            .retain(|v| v.kind != kind || v.emitter != emitter);
+    }
+    pub fn remove_storm_loops(&mut self, storms: &[crate::weather::Storm]) {
+        self.survival_loops
+            .retain(|v| v.kind != AudioKind::Storm || storms.iter().any(|s| s.id.0 == v.emitter));
     }
 }

@@ -19,6 +19,11 @@ use rapier3d::prelude::{
 };
 use std::collections::HashMap;
 
+mod survival;
+mod weather;
+pub use survival::DrinkResult;
+pub(crate) use survival::spawn_consumable;
+
 struct CompoundCollider {
     handle: crate::vehicle::ColliderHandle,
     body: BodyId,
@@ -227,6 +232,30 @@ impl StartingArea {
         }
         interaction.parts.bind(&mut items, physics)?;
         interaction.sync_parts(&mut items, physics)?;
+        let starter = reference.survival.starter_food;
+        if let Some(food) = items.get(starter).and_then(|item| item.food) {
+            let body = items
+                .get(starter)
+                .and_then(|item| item.body)
+                .ok_or_else(|| ReferenceError("Starter food body missing".into()))?;
+            for &handle in physics.rapier().bodies[body].colliders().to_vec().iter() {
+                let collider_id = (physics.rapier().colliders[handle].user_data >> 64) as u32;
+                if let Some(record) = reference
+                    .colliders
+                    .iter()
+                    .find(|entry| entry.id.0 == collider_id)
+                {
+                    let enabled = record.enabled
+                        && survival::active_part(
+                            reference,
+                            record.node,
+                            &reference.survival.starter_parts,
+                            food.bite,
+                        );
+                    physics.rapier_mut().colliders[handle].set_enabled(enabled);
+                }
+            }
+        }
         physics.refresh_queries();
         items.sync_poses(physics);
         let spawn = &reference.area.player_spawn;
@@ -559,6 +588,23 @@ impl VehicleRuntime {
 mod save;
 
 pub struct GarageRuntime {
+    pub survival: crate::survival::SurvivalState,
+    pub sleep: crate::sleep::SleepState,
+    pub weather: crate::weather::WeatherState,
+    pub urine: crate::interaction::fluid_contact::FluidContact,
+    urine_reference: crate::reference::FluidParticleReference,
+    urine_emission: [f32; 2],
+    weather_bindings: weather::WeatherBindings,
+    sleep_camera: Option<crate::sleep::SleepCamera>,
+    pub sleep_camera_allowed: bool,
+    pub audio_motion_revision: u32,
+    pub simulation_seconds: f64,
+    survival_draw: u64,
+    previous_speed: Option<f32>,
+    death_protected: bool,
+    death_announced: bool,
+    pub audio_gameplay: crate::reference::AudioGameplayReference,
+
     pub audio: Option<crate::audio::AudioState>,
     pub persistent_world: crate::save::PersistentWorld,
     pub lighting: crate::lighting::LightingState,
@@ -598,6 +644,7 @@ impl GarageRuntime {
                 reference.area.player_spawn.translation.map(|v| v as f64),
                 &mut physics,
             );
+            crate::world::sync_station_food(&mut stream, reference, &mut area, &mut physics)?;
             crate::world::sync_station_supplies(
                 &mut stream,
                 &mut area.items,
@@ -619,7 +666,43 @@ impl GarageRuntime {
                 state.sync_lamps(&reference.lighting, &lighting);
                 state
             });
-        Ok(Self {
+        let weather_bindings = weather::WeatherBindings::new(reference, &area.bodies)?;
+        let urine_visual = reference
+            .weather
+            .particles
+            .iter()
+            .find(|p| p.role == "urine")
+            .unwrap();
+        let urine_splash = reference
+            .weather
+            .particles
+            .iter()
+            .find(|p| p.role == "urine_splash")
+            .unwrap();
+        let urine_reference = crate::weather::fluid_reference(urine_visual);
+        let urine = crate::interaction::fluid_contact::FluidContact::new(
+            &urine_reference,
+            urine_visual,
+            urine_splash,
+            0x70697373,
+        );
+        let mut runtime = Self {
+            urine,
+            urine_reference,
+            urine_emission: [0.; 2],
+            weather: crate::weather::WeatherState::new(&reference.weather, DEFAULT_SEED),
+            weather_bindings,
+            survival: crate::survival::SurvivalState::new(&reference.survival),
+            sleep: crate::sleep::SleepState::new(&reference.sleep),
+            sleep_camera: None,
+            sleep_camera_allowed: true,
+            audio_motion_revision: 0,
+            simulation_seconds: 0.,
+            survival_draw: 0,
+            previous_speed: None,
+            death_protected: true,
+            death_announced: false,
+            audio_gameplay: crate::reference::AudioGameplayReference::from_value(&reference.audio)?,
             audio,
             persistent_world: crate::save::PersistentWorld::new(reference),
             physics,
@@ -663,34 +746,56 @@ impl GarageRuntime {
                     None
                 })
                 .collect(),
-        })
+        };
+        runtime.sync_weather_bindings(reference);
+        Ok(runtime)
     }
 
-    pub fn advance_lighting(&mut self, reference: &ReferenceManifest, elapsed_seconds: f64) {
-        if self.started && !self.paused {
-            self.lighting
-                .cycle
-                .advance(&reference.lighting.cycle, elapsed_seconds);
+    pub fn clock_factors(&self, reference: &ReferenceManifest) -> crate::sleep::ClockFactors {
+        self.sleep.clock_factors(&reference.sleep)
+    }
+
+    fn advance_light_fades(&mut self, reference: &ReferenceManifest, dt: f32) {
+        for (index, owner) in self.light_owners.iter().enumerate() {
+            self.lighting.set_controller_mounted(
+                index,
+                owner.is_none_or(|item| self.area.items.mounted(item)),
+            );
         }
+        self.lighting.advance_fades(&reference.lighting, dt);
     }
 
-    pub fn advance_light_fades(&mut self, reference: &ReferenceManifest, elapsed_seconds: f64) {
-        if self.started && !self.paused {
-            for (index, owner) in self.light_owners.iter().enumerate() {
-                self.lighting.set_controller_mounted(
-                    index,
-                    owner.is_none_or(|item| self.area.items.mounted(item)),
-                );
-            }
-            self.lighting
-                .advance_fades(&reference.lighting, elapsed_seconds as f32);
-        }
-    }
-
-    pub fn step(&mut self, reference: &ReferenceManifest, input: FrameInput) {
+    pub fn step(&mut self, reference: &ReferenceManifest, mut input: FrameInput) {
         if !self.started || self.paused {
             self.clear_input();
             return;
+        }
+        let factors = self.clock_factors(reference);
+        let sleep = self.sleep.output();
+        self.lighting.cycle.advance(
+            &reference.lighting.cycle,
+            crate::lighting::CycleAdvance {
+                simulation_delta: FIXED_DT,
+                cycle_extra: FIXED_DT * factors.cycle_extra_per_sim_second,
+                cloud_scale: factors.cloud_scale,
+                sleep_progress: (sleep.phase == crate::sleep::SleepPhase::Sleeping)
+                    .then_some(sleep.progress),
+            },
+        );
+        self.urine_emission = [0.; 2];
+        let sleep_held = input.held & keys::SLEEP != 0;
+        if self.sleeping() {
+            input = FrameInput::default();
+        } else {
+            self.process_toilet(reference, input, FIXED_DT, factors.fluid_scale);
+        }
+        let needs = self.needs_output();
+        if needs.dead {
+            input = FrameInput {
+                mouse: input.mouse.map(|v| v * needs.look_scale),
+                ..FrameInput::default()
+            };
+            self.clear_input();
         }
         self.area
             .interaction
@@ -704,11 +809,15 @@ impl GarageRuntime {
         }
 
         self.area.begin_step();
-        let aim = self.area.interaction.resolve(
-            &self.physics,
-            self.area.player.view_pose(&self.physics),
-            &self.area.items,
-        );
+        let aim = if self.sleeping() {
+            ResolvedAim::default()
+        } else {
+            self.area.interaction.resolve(
+                &self.physics,
+                self.area.player.view_pose(&self.physics),
+                &self.area.items,
+            )
+        };
         if !self.aim.same_actions(&aim)
             || input.pressed & (keys::GRAB | keys::USE | keys::ASSEMBLE) != 0
         {
@@ -721,6 +830,7 @@ impl GarageRuntime {
             &self.area.player,
             &self.area.items,
             &self.physics,
+            self.survival.output(),
         );
         let action = self.area.interaction.step(
             input,
@@ -729,6 +839,8 @@ impl GarageRuntime {
             &mut self.area.items,
             &mut self.physics,
             FIXED_DT,
+            self.survival.output(),
+            factors.fluid_scale,
         );
         if action.is_none()
             && (input.pressed | input.released) & keys::GRAB != 0
@@ -737,6 +849,31 @@ impl GarageRuntime {
             self.notice = block.notice();
         }
         match action {
+            Some(InteractionAction::Consume(item)) => {
+                if self.consume(reference, item).is_err() {
+                    self.notice = "Cannot eat this item.";
+                }
+            }
+            Some(InteractionAction::Drink {
+                source,
+                requested_liters,
+            }) => {
+                if self.drink(reference, source, requested_liters).is_err() {
+                    self.notice = "Cannot drink from this item.";
+                }
+            }
+            Some(InteractionAction::DrinkContact {
+                source,
+                poured_liters,
+                fractions,
+            }) => {
+                if self
+                    .drink_contact(reference, source, poured_liters, fractions)
+                    .is_err()
+                {
+                    self.notice = "Cannot drink this fluid.";
+                }
+            }
             Some(InteractionAction::LightControl(control)) => {
                 self.lighting.use_control(&reference.lighting, control);
                 self.area
@@ -871,6 +1008,16 @@ impl GarageRuntime {
             }
             _ => {}
         }
+        while let Some((source, poured_liters, fractions)) =
+            self.area.interaction.take_drink_contact()
+        {
+            if self
+                .drink_contact(reference, source, poured_liters, fractions)
+                .is_err()
+            {
+                self.notice = "Cannot drink this fluid.";
+            }
+        }
         if let Some(action) = self.area.interaction.mechanisms.take_control_action() {
             match action {
                 crate::interaction::mechanisms::ControlAction::ToggleHandbrake(lever) => {
@@ -919,7 +1066,7 @@ impl GarageRuntime {
         let mut walking_input = input;
         if (input.held & keys::USE != 0 && self.area.interaction.dragging_mechanism().is_some())
             || (input.held & keys::USE != 0 && self.area.interaction.tuning_opening().is_some())
-            || (input.held & keys::FILL != 0
+            || (input.held & keys::PRIMARY != 0
                 && availability.lmb_use
                 && availability
                     .item
@@ -972,7 +1119,10 @@ impl GarageRuntime {
                 steering,
             );
         }
+        self.advance_urine(reference, FIXED_DT);
+        self.advance_weather(reference, FIXED_DT);
         self.physics.step_physics();
+        self.sample_survival_speed(reference);
         self.area.interaction.sync_mechanisms(&mut self.physics);
         self.area.sync_attachments(&mut self.physics, false);
         self.area.sync_compound(&mut self.physics);
@@ -1013,7 +1163,7 @@ impl GarageRuntime {
                     running: active && output.running,
                     starter: active && output.starter,
                     horn: active && car_controls && input.held & keys::HORN != 0,
-                    ambient_temperature: self.lighting.cycle.output().visual_temperature,
+                    ambient_temperature: self.lighting.cycle.output().ambient_temperature,
                     electronics_output: audio.reference.radio.electronics_output,
                     engine_present: active
                         && self
@@ -1055,6 +1205,10 @@ impl GarageRuntime {
         if self.stream.rebase(focus, &mut self.physics).is_some() {
             let old_origin = self.area.origin;
             self.area.sync_origin(self.stream.origin.offset);
+            self.urine
+                .rebase(rapier3d::math::Vector::from_array(std::array::from_fn(
+                    |i| (self.area.origin[i] - old_origin[i]) as f32,
+                )));
             if let Some(audio) = &mut self.audio {
                 audio.rebase(std::array::from_fn(|i| {
                     (self.area.origin[i] - old_origin[i]) as f32
@@ -1083,6 +1237,33 @@ impl GarageRuntime {
         );
         self.persistent_world
             .sync_pumps(&self.stream, &mut self.area.interaction);
+        crate::world::sync_station_food(
+            &mut self.stream,
+            reference,
+            &mut self.area,
+            &mut self.physics,
+        )
+        .expect("valid station food");
+        self.sync_weather_bindings(reference);
+        self.advance_light_fades(reference, FIXED_DT);
+        self.advance_needs(reference, FIXED_DT, factors.need_scale);
+        let was_sleeping = self.sleeping();
+        let output = self.sleep.step(
+            &reference.sleep,
+            crate::sleep::SleepInput {
+                held: sleep_held,
+                active: !self.paused,
+                camera_allowed: self.sleep_camera_allowed || self.area.player.seat().is_none(),
+                dead: self.needs_output().dead,
+            },
+            self.simulation_seconds,
+            FIXED_DT,
+        );
+        self.sync_sleep_transition(reference, was_sleeping);
+        self.lighting.cycle.set_sleep_progress(
+            &reference.lighting.cycle,
+            (output.phase == crate::sleep::SleepPhase::Sleeping).then_some(output.progress),
+        );
     }
 
     /// Steps one engine and applies its forces. Only the driven vehicle reads keys.
@@ -1097,6 +1278,7 @@ impl GarageRuntime {
         if !self.physics.body_active(self.physics.chassis_handle(index)) {
             return;
         }
+        let sleep_modifier = self.clock_factors(reference).fluid_scale;
         let source = &reference.vehicles[index];
         let engine_reference = &source.engine;
         let snapshot = self.physics.snapshot(index);
@@ -1178,8 +1360,15 @@ impl GarageRuntime {
                 wheel_rpm,
                 free_run: source.gear_free_run[gear],
                 speed_kmh: speed * 3.6,
-                ambient_temperature: engine_reference.initial_temperature,
-                ambient_heat_modifier: engine_reference.globals.awake_heat_modifier,
+                ambient_temperature: self.lighting.cycle.output().ambient_temperature,
+                ambient_heat_modifier: engine_reference.globals.outside_temperature_modifier
+                    * ((self.lighting.cycle.output().ambient_temperature
+                        - reference.lighting.cycle.temp_nights[0])
+                        / (reference.lighting.cycle.temp_days[0]
+                            + reference.lighting.cycle.temp_add_noons[0]
+                            - reference.lighting.cycle.temp_nights[0]))
+                        .clamp(0., 1.),
+                sleep_modifier,
                 radiator_condition,
             },
             self.area.items.vehicle_fluids(index).expect("bound fluids"),
@@ -1277,6 +1466,7 @@ impl GarageRuntime {
     }
 
     pub fn clear_input(&mut self) {
+        self.sleep.cancel_charge();
         self.steering.clear();
         for vehicle in &mut self.vehicles {
             vehicle.ignition_held = false;
@@ -1288,6 +1478,13 @@ impl GarageRuntime {
 
     /// Moves the current vehicle, its cargo, and a walking player back to the road.
     pub fn recover(&mut self, reference: &ReferenceManifest) {
+        if self.needs_output().dead {
+            return;
+        }
+        self.interrupt_sleep(reference);
+        self.audio_motion_revision = self.audio_motion_revision.wrapping_add(1);
+        self.previous_speed = None;
+        self.death_protected = true;
         let index = self.vehicle;
         let dormant = !self.physics.body_active(self.physics.chassis_handle(index));
         if dormant {
@@ -1338,6 +1535,7 @@ impl GarageRuntime {
                     (target[axis] - self.stream.origin.offset[axis]) as f32
                 });
                 self.physics.rebase(shift);
+                self.urine.rebase(rapier3d::math::Vector::from_array(shift));
                 self.stream.origin.offset = target;
                 self.area.sync_origin(target);
                 if let Some(audio) = &mut self.audio {
@@ -1424,6 +1622,13 @@ impl GarageRuntime {
             &mut self.area.interaction,
             &mut self.physics,
         );
+        crate::world::sync_station_food(
+            &mut self.stream,
+            reference,
+            &mut self.area,
+            &mut self.physics,
+        )
+        .expect("valid station food");
         if dormant {
             self.physics.reset_preserving_wheels(index, pose);
         } else {
@@ -1502,6 +1707,7 @@ impl GarageRuntime {
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, true);
+        self.sync_weather_bindings(reference);
     }
 }
 

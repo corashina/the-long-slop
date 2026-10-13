@@ -133,6 +133,7 @@ struct EffectTargets {
 }
 #[derive(Resource, Default)]
 pub(crate) struct SourceEffects {
+    motion_revision: u32,
     targets: Option<EffectTargets>,
     audit: EffectsAudit,
 }
@@ -232,6 +233,14 @@ fn prepare(
 ) {
     if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
         return;
+    }
+    if effects.motion_revision != frame.motion_revision {
+        effects.motion_revision = frame.motion_revision;
+        if let Some(targets) = effects.targets.as_mut() {
+            for chain in &mut targets.chains {
+                chain.as_mut().unwrap().reset_history();
+            }
+        }
     }
     if effects.audit.scene != frame.scene {
         if let Some(targets) = effects.targets.as_mut() {

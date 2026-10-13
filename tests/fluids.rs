@@ -1,12 +1,12 @@
 use my_summer_slop::fluids::{FluidContainer, FluidMixture, spill, suitability, transfer};
 
 fn container(capacity: f32, quantities: [f32; 6]) -> FluidContainer {
-    FluidContainer {
-        capacity_liters: capacity,
-        mixture: FluidMixture {
+    FluidContainer::new(
+        capacity,
+        FluidMixture {
             quantities_liters: quantities,
         },
-    }
+    )
 }
 
 #[test]

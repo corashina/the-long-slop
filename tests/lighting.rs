@@ -1,4 +1,4 @@
-use my_summer_slop::lighting::{CyclePhase, CycleState};
+use my_summer_slop::lighting::{CycleAdvance, CyclePhase, CycleState};
 use my_summer_slop::reference::{CycleReference, ReferenceManifest};
 
 fn reference() -> CycleReference {
@@ -11,7 +11,15 @@ fn sample(seconds: f64) -> CycleState {
     let mut reference = reference();
     reference.startup_offset_seconds = 0.;
     let mut state = CycleState::new(&reference);
-    state.advance(&reference, seconds);
+    state.advance(
+        &reference,
+        CycleAdvance {
+            simulation_delta: (seconds) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     state
 }
 fn close(actual: f32, expected: f32) {
@@ -59,18 +67,42 @@ fn cycle_wrap_retains_source_update_order() {
     let mut reference = reference();
     reference.startup_offset_seconds = 0.;
     let mut state = CycleState::new(&reference);
-    state.advance(&reference, 1500.);
+    state.advance(
+        &reference,
+        CycleAdvance {
+            simulation_delta: (1500.) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     assert_eq!(state.output().phase, CyclePhase::Night);
     assert_eq!(state.elapsed_seconds(), 1500.);
     assert_eq!(state.output().cycle_seconds, 1500.);
-    state.advance(&reference, 0.02);
+    state.advance(
+        &reference,
+        CycleAdvance {
+            simulation_delta: (0.02) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     assert_eq!(state.output().phase, CyclePhase::Night);
     close(state.output().progress, 1.);
     assert_eq!(state.elapsed_seconds(), 1500.02);
     assert_eq!(state.output().cycle_seconds, 1500.02);
     let stars = state.output().star_rotation_degrees;
     let shader_time = state.output().shader_time_seconds;
-    state.advance(&reference, 0.02);
+    state.advance(
+        &reference,
+        CycleAdvance {
+            simulation_delta: (0.02) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     assert_eq!(state.output().phase, CyclePhase::Dawn);
     assert_eq!(state.elapsed_seconds(), 1500.04);
     assert_eq!(state.output().cycle_seconds, 0.02);
@@ -81,11 +113,27 @@ fn cycle_wrap_retains_source_update_order() {
 fn invalid_elapsed_does_not_corrupt_state() {
     let reference = reference();
     let mut state = CycleState::new(&reference);
-    state.advance(&reference, 3.);
+    state.advance(
+        &reference,
+        CycleAdvance {
+            simulation_delta: (3.) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     let previous = state.output().clone();
     let clock = state.elapsed_seconds();
     for invalid in [-1., f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        state.advance(&reference, invalid);
+        state.advance(
+            &reference,
+            CycleAdvance {
+                simulation_delta: (invalid) as f32,
+                cycle_extra: 0.,
+                cloud_scale: 1.,
+                sleep_progress: None,
+            },
+        );
         assert_eq!(*state.output(), previous);
         assert_eq!(state.elapsed_seconds(), clock);
     }
@@ -98,11 +146,35 @@ fn startup_reset_and_biome_refresh_match_source() {
     assert_eq!(state.output().cycle_seconds, 240.);
     assert_eq!(state.output().phase, CyclePhase::Dawn);
     assert_eq!(state.output().biome_color, [0.; 4]);
-    state.advance(&reference, 0.99);
+    state.advance(
+        &reference,
+        CycleAdvance {
+            simulation_delta: (0.99) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     assert_eq!(state.output().biome_color, [0.; 4]);
-    state.advance(&reference, 0.01);
+    state.advance(
+        &reference,
+        CycleAdvance {
+            simulation_delta: (0.01) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     assert_eq!(state.output().biome_color, reference.desert_color);
-    state.advance(&reference, 1500.);
+    state.advance(
+        &reference,
+        CycleAdvance {
+            simulation_delta: (1500.) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     state.reset(&reference);
     assert_eq!(state.elapsed_seconds(), 0.);
     assert_eq!(state.output().cycle_seconds, 240.);
@@ -122,8 +194,8 @@ fn fog_clouds_stars_and_flare_keep_source_branches() {
     assert_eq!(dawn.output().fog_color, r.night_fog_colors[0]);
     close(dawn.output().flare_brightness, r.flare_dawn[0]);
     close(dawn.output().star_color[3], 0.5);
-    close(sample(630.).output().visual_temperature, 47.);
-    close(sample(1020.).output().visual_temperature, 49.457832);
+    close(sample(630.).output().ambient_temperature, 47.);
+    close(sample(1020.).output().ambient_temperature, 49.457832);
     close(
         sample(1110.).output().fog_density,
         r.day_fog_densities[0] * r.fog_modifier,
@@ -161,26 +233,58 @@ fn cloud_noise_motion_and_density_match_source() {
     r.startup_offset_seconds = 0.;
     r.cloud_perlin_speed = 1.;
     let mut state = CycleState::new(&r);
-    state.advance(&r, 0.25);
+    state.advance(
+        &r,
+        CycleAdvance {
+            simulation_delta: (0.25) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     assert_eq!(state.output().cloud_noise_coordinate, -0.75);
     let native_noise = f32::from_bits(0x3ebba58b);
     let perturbation = (native_noise - 0.5) * 2.;
     assert_eq!(state.output().cloud_noise.to_bits(), perturbation.to_bits());
-    state.advance(&r, 0.75);
+    state.advance(
+        &r,
+        CycleAdvance {
+            simulation_delta: (0.75) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     assert_eq!(state.output().cloud_noise_coordinate, 0.);
     assert_eq!(state.output().shader_time_seconds, 1.);
     close(state.output().star_rotation_degrees, 0.1);
     r.cloud_perlin_speed = 0.;
     r.cloud_perlin_spread = 0.;
     let mut state = CycleState::new(&r);
-    state.advance(&r, 1350.);
+    state.advance(
+        &r,
+        CycleAdvance {
+            simulation_delta: (1350.) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     for (cloud, reference) in state.output().clouds.iter().zip(&r.clouds) {
         close(cloud.density, reference.max_density);
         assert_eq!(cloud.color, reference.night_color);
     }
     let mut state = CycleState::new(&r);
-    state.advance(&r, 669.); // Day progress 0.55 reaches the full noon temperature.
-    close(state.output().visual_temperature, 50.);
+    state.advance(
+        &r,
+        CycleAdvance {
+            simulation_delta: (669.) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    ); // Day progress 0.55 reaches the full noon temperature.
+    close(state.output().ambient_temperature, 50.);
     for (cloud, reference) in state.output().clouds.iter().zip(&r.clouds) {
         close(cloud.density, reference.min_density);
     }
@@ -659,14 +763,38 @@ fn night_late_loading_uses_current_enable_state() {
         .unwrap();
     controller.electronics_output = 0.3;
     let mut state = LightingState::new(&reference);
-    state.cycle.advance(&reference.cycle, 1350.);
+    state.cycle.advance(
+        &reference.cycle,
+        CycleAdvance {
+            simulation_delta: (1350.) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     let night = state.road_lamp_output(&reference);
     assert!(night.enabled);
     close(night.intensity, 0.3);
     state.cycle.reset(&reference.cycle);
-    state.cycle.advance(&reference.cycle, 120.);
+    state.cycle.advance(
+        &reference.cycle,
+        CycleAdvance {
+            simulation_delta: (120.) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     assert!(!state.road_lamp_output(&reference).enabled);
-    state.cycle.advance(&reference.cycle, 1230.);
+    state.cycle.advance(
+        &reference.cycle,
+        CycleAdvance {
+            simulation_delta: (1230.) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     reference
         .controllers
         .iter_mut()

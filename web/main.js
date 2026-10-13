@@ -1,3 +1,4 @@
+import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
 import {manifestStamp,createSaveStorage} from './save-storage.js';
 import {createSaveSession} from './save-session.js';
@@ -9,7 +10,7 @@ import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
 import {loadUiAssets} from './ui-layout.js';
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
-let audio,menu,feedback,failed=false,timeout,actions=0,frame,renderFailure;
+let survival,dead=false,sleeping=false,audio,menu,feedback,failed=false,timeout,actions=0,frame,renderFailure;
 const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',condition:-1,held:'',throwCharge:0,throwActive:false,radioVolume:undefined,radioFrequency:undefined,radioAm:false,quantities:[0,0,0,0,0,0]};
 const input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas);
 const settleSave=window.gameSaveResult;
@@ -37,7 +38,8 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, chunks, colliders, abs
   state.fuelLiters = fuelLiters; state.paused = paused; state.started = started;
   menu?.sync(started,paused,travelM);
   if(record.context===11||record.context===12){const radio=audio?.radioFrame;record.radioVolume=radio?.volume;record.radioFrequency=radio?.frequency;record.radioAm=radio?.am;feedback?.update(record);}
-  feedback?.setVisible(started&&!paused&&Boolean(mode)&&menu?.model.state==='playing');
+  feedback?.setVisible(started&&!paused&&!dead&&!sleeping&&Boolean(mode)&&menu?.model.state==='playing');
+  survival?.setVisible(started&&!paused&&!sleeping&&menu?.model.state==='playing');
 };
 window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,noText,fluidName,condition,held,charge,throwing,rpm,ignition,running,starter,seated,handbrake,gas,oil,alcohol,water,blood,diesel,control,lmbUse)=>{
  record.actions=mask;record.context=context;record.lmbUse=lmbUse;record.name=name;record.notice=notice;record.carrying=carrying;record.amount=amount;record.capacity=capacity;record.hasName=hasName;record.noText=noText;record.fluidName=fluidName;
@@ -48,6 +50,14 @@ window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,n
  state.target=name;state.targetAction=mask;state.carrying=carrying;state.heldItem=held;state.throwCharge=charge;state.throwActive=throwing;
  state.rpm=rpm;state.ignition=ignition;state.running=running;state.starter=starter;state.seated=seated;state.handbrake=handbrake;
  feedback?.update(record);
+};
+const needs={hp:0,food:0,water:0,bowel:0,bladder:0,opacity:0,dead:false,lookScale:1,menuDue:false};
+window.gameSurvival=(hp,food,water,bowel,bladder,opacity,isDead,lookScale,menuDue)=>{
+ needs.hp=hp;needs.food=food;needs.water=water;needs.bowel=bowel;needs.bladder=bladder;needs.opacity=opacity;needs.dead=isDead;needs.lookScale=lookScale;needs.menuDue=menuDue;dead=isDead;survival?.update(needs);menu?.survival(isDead,menuDue);
+};
+const sleep={phase:0,eligible:false,charge:0,cooldownRemaining:0,progress:0,held:false,dead:false};
+window.gameSleep=(phase,eligible,charge,cooldownRemaining,progress)=>{
+ sleep.phase=phase;sleep.eligible=eligible;sleep.charge=charge;sleep.cooldownRemaining=cooldownRemaining;sleep.progress=progress;sleep.held=(input.state.held&262144)!==0;sleep.dead=dead;sleeping=phase===2;survival?.updateSleep(sleep,feedback?.state.enabled);
 };
 function fail(message,notifyRenderer=true){if(failed)return;failed=true;clearTimeout(timeout);const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
 window.gameFailure=message=>fail(message,false);
@@ -66,6 +76,7 @@ async function load(){
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
  status.textContent='Loading interface assets...';
  await loadUiAssets(manifest.ui);
+ survival=createSurvival(manifest.ui,manifest.sleep.cooldown_seconds);
  audio=createAudio(manifest.audio);installAudioBridge(window,audio);
  window.addEventListener('pagehide',()=>audio.dispose());
  menu=createMenu({canvas,ui:manifest.ui,saveSession,audio,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});

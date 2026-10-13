@@ -1,6 +1,25 @@
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(js_name = gameAudioError)]
+    pub fn game_audio_error(message: &str);
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioSurvival)]
+    pub fn game_audio_survival(
+        kind: u32,
+        emitter: u32,
+        action: u32,
+        clip: u32,
+        gain: f32,
+        pitch: f32,
+        x: f32,
+        y: f32,
+        z: f32,
+    );
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioSurvivalEmitter)]
+    pub fn game_audio_survival_emitter(kind: u32, x: f32, y: f32, z: f32);
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioSurvivalMaster)]
+    pub fn game_audio_survival_master(gain: f32, revision: u32, seconds: f64);
+
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioBegin)]
     pub fn game_audio_begin(session: u32, started: bool, paused: bool, time: f64);
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioOriginShift)]
@@ -69,6 +88,26 @@ extern "C" {
 
     #[wasm_bindgen(js_namespace = window, js_name = gameLoading)]
     pub fn game_loading();
+    #[wasm_bindgen(js_namespace=window,js_name=gameSurvival)]
+    pub fn game_survival(
+        hp: f32,
+        food: f32,
+        water: f32,
+        bowel: f32,
+        bladder: f32,
+        opacity: f32,
+        dead: bool,
+        look_scale: f32,
+        menu_due: bool,
+    );
+    #[wasm_bindgen(js_namespace=window,js_name=gameSleep)]
+    pub fn game_sleep(
+        phase: u32,
+        eligible: bool,
+        charge: f32,
+        cooldown_remaining: f64,
+        progress: f32,
+    );
     #[wasm_bindgen(js_namespace = window, js_name = gameReady)]
     pub fn game_ready();
     #[wasm_bindgen(js_namespace = window, js_name = gameFailure)]

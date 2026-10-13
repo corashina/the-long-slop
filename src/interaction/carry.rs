@@ -75,6 +75,17 @@ impl CarryState {
         self.cancel_input();
         Ok(())
     }
+    pub(super) fn register_food(
+        &mut self,
+        id: ItemId,
+        reference: &crate::reference::FoodReference,
+    ) {
+        self.rules.insert(id, reference.pickup.clone());
+    }
+
+    pub(super) fn forget_food(&mut self, id: ItemId) {
+        self.rules.remove(&id);
+    }
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let player = &reference.player;
         if !player.carry_min_weight.is_finite()

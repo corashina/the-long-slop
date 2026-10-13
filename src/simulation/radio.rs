@@ -309,3 +309,39 @@ impl RadioState {
         }
     }
 }
+
+impl RadioState {
+    /// mainscript.Update advances FM stations while the sleep loop gain exceeds 0.5.
+    pub fn advance_sleep(&mut self, seconds: f64) {
+        let mut iteration = 0;
+        loop {
+            // Unity redraws Random.Range(1, 6) at each loop condition.
+            let Some(first) = self.stations.first_mut() else {
+                return;
+            };
+            first.random ^= first.random << 13;
+            first.random ^= first.random >> 17;
+            first.random ^= first.random << 5;
+            let limit = 1 + ((u64::from(first.random) * 5) >> 32) as usize;
+            if iteration >= limit {
+                break;
+            }
+            for station in &mut self.stations {
+                if station.source.band != "fm" || station.source.custom {
+                    continue;
+                }
+                let music = station
+                    .current
+                    .map_or(station.source.initial_music, |s| s.music);
+                station.current = station.next.or_else(|| {
+                    station.select(music, self.calendar, &self.rules.holiday_ranges, true)
+                });
+                station.start = seconds;
+                station.next = station.current.and_then(|s| {
+                    station.select(s.music, self.calendar, &self.rules.holiday_ranges, false)
+                });
+            }
+            iteration += 1;
+        }
+    }
+}

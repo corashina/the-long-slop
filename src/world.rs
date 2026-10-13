@@ -126,6 +126,16 @@ fn height(seed: u64, distance: f64, lateral: f64) -> f64 {
                 + 1.2 * (distance / 41.0 - lateral / 24.0).sin())
 }
 
+/// Current desert ground height in absolute coordinates, using the terrain generator's rule.
+pub fn terrain_height(seed: u64, absolute: [f64; 3]) -> f32 {
+    let distance = -absolute[2];
+    height(
+        seed,
+        distance,
+        absolute[0] - road_sample(seed, distance).center[0],
+    ) as f32
+}
+
 pub fn generate_chunk(seed: u64, key: ChunkKey) -> ChunkData {
     generate_chunk_in_band(seed, key, 0)
 }
@@ -344,6 +354,8 @@ pub struct WorldStream {
     starting_area: Option<StartingAreaReference>,
     interiors: Vec<Bounds>,
     station_items: Vec<(i64, crate::reference::ItemId)>,
+    station_foods: Vec<(i64, crate::reference::ItemId)>,
+    next_dynamic_item: u32,
     vehicle_support: Vec<(ChunkKey, i64, ColliderHandle)>,
     /// Reused list of the chunk cells that the vehicles need.
     support_cells: Vec<(ChunkKey, i64)>,
@@ -362,6 +374,8 @@ impl WorldStream {
             station_items: Vec::new(),
             vehicle_support: Vec::with_capacity(6),
             support_cells: Vec::with_capacity(6),
+            station_foods: Vec::new(),
+            next_dynamic_item: 0x8000_0000,
         }
     }
 
@@ -483,6 +497,22 @@ impl WorldStream {
 
     pub fn lateral_band(&self) -> i64 {
         self.lateral_band
+    }
+
+    pub fn allocate_consumable_id(
+        &mut self,
+        items: &crate::interaction::items::ItemStore,
+    ) -> crate::reference::ItemId {
+        loop {
+            let id = crate::reference::ItemId(self.next_dynamic_item);
+            self.next_dynamic_item = self
+                .next_dynamic_item
+                .checked_add(1)
+                .expect("Dynamic item ID space exhausted");
+            if items.get(id).is_none() {
+                return id;
+            }
+        }
     }
 
     pub fn sync_at(&mut self, absolute: [f64; 3], physics: &mut PhysicsWorld) {
@@ -653,15 +683,15 @@ pub fn sync_station_supplies(
     interaction: &mut crate::interaction::InteractionState,
     physics: &mut PhysicsWorld,
 ) {
-    for chunk in &stream.chunks {
-        for &(station, handle) in &chunk.pumps {
+    for chunk_index in 0..stream.chunks.len() {
+        for pump_index in 0..stream.chunks[chunk_index].pumps.len() {
+            let (station, handle) = stream.chunks[chunk_index].pumps[pump_index];
             let item = if let Some((_, item)) =
                 stream.station_items.iter().find(|(id, _)| *id == station)
             {
                 *item
             } else {
-                let item =
-                    crate::reference::ItemId(0x8000_0000 + stream.station_items.len() as u32);
+                let item = stream.allocate_consumable_id(items);
                 let pose =
                     crate::vehicle::from_rapier(physics.rapier().colliders[handle].position());
                 items.insert_supply(item, pose);
@@ -693,4 +723,37 @@ pub fn sync_station_supplies(
                 .quantities_liters = [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         }
     }
+}
+
+pub fn sync_station_food(
+    stream: &mut WorldStream,
+    reference: &crate::reference::ReferenceManifest,
+    area: &mut crate::starting_area::StartingArea,
+    physics: &mut PhysicsWorld,
+) -> Result<(), crate::reference::ReferenceError> {
+    let sausage = reference
+        .survival
+        .foods
+        .iter()
+        .position(|food| food.kind == crate::reference::FoodKind::Sausage)
+        .ok_or_else(|| crate::reference::ReferenceError("Missing sausage prototype".into()))?;
+    for chunk_index in 0..stream.chunks.len() {
+        for station_index in 0..stream.chunks[chunk_index].data.stations.len() {
+            let station = &stream.chunks[chunk_index].data.stations[station_index];
+            let station_id = station.id;
+            let point = station.absolute_point;
+            if stream.station_foods.iter().any(|(id, _)| *id == station_id) {
+                continue;
+            }
+            let id = stream.allocate_consumable_id(&area.items);
+            let absolute = [point[0] + 1., point[1] + 0.5, point[2] - 2.];
+            let pose = crate::vehicle::VehiclePose {
+                position: stream.origin.local(absolute),
+                rotation: [0., 0., 0., 1.],
+            };
+            crate::starting_area::spawn_consumable(reference, area, physics, id, sausage, pose)?;
+            stream.station_foods.push((station_id, id));
+        }
+    }
+    Ok(())
 }

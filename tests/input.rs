@@ -135,7 +135,8 @@ fn steering_is_equal_at_different_render_rates() {
         let mut value = 0.0;
         let mut steps = 0;
         for _ in 0..fps / 2 {
-            for _ in 0..clock.advance(1.0 / fps as f64) {
+            clock.accept_frame(1.0 / fps as f64);
+            while clock.take_step(1.) {
                 value = steering.step(Some(SeatId(1)), keys::LEFT);
                 steps += 1;
             }

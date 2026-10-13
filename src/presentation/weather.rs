@@ -1,0 +1,495 @@
+//! Retained particle uniform buffers. Simulation remains in the runtime owners.
+use super::lighting::SourceLighting;
+use crate::{
+    app::{Drive, RuntimeReference},
+    reference::ParticleReference,
+};
+use bevy::mesh::{Indices, MeshVertexBufferLayoutRef};
+use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
+use bevy::render::{
+    Extract, ExtractSchedule, Render, RenderApp, RenderSystems,
+    render_asset::RenderAssets,
+    render_resource::*,
+    renderer::{RenderDevice, RenderQueue},
+    texture::GpuImage,
+};
+use bevy::shader::ShaderRef;
+use bevy::{
+    asset::{self as bevy_asset, RenderAssetUsages},
+    ecs::{
+        self as bevy_ecs,
+        system::{SystemParamItem, lifetimeless::SRes},
+    },
+    prelude::*,
+    reflect as bevy_reflect,
+};
+const BATCH: usize = 128;
+#[derive(Clone, Copy, ShaderType)]
+pub struct ParticleUniform {
+    positions: [Vec4; BATCH],
+    colors: [Vec4; BATCH],
+    angles: [Vec4; BATCH],
+    tint: Vec4,
+    st: Vec4,
+    fog: Vec4,
+    settings: Vec4,
+}
+impl Default for ParticleUniform {
+    fn default() -> Self {
+        Self {
+            positions: [Vec4::ZERO; BATCH],
+            colors: [Vec4::ZERO; BATCH],
+            angles: [Vec4::ZERO; BATCH],
+            tint: Vec4::ONE,
+            st: Vec4::new(1., 1., 0., 0.),
+            fog: Vec4::ZERO,
+            settings: Vec4::ZERO,
+        }
+    }
+}
+#[derive(Asset, TypePath, Clone, Debug)]
+pub struct ParticleMaterial {
+    batch: usize,
+    texture: Handle<Image>,
+    order: f32,
+}
+impl Material for ParticleMaterial {
+    fn vertex_shader() -> ShaderRef {
+        "shaders/source_particles.wgsl".into()
+    }
+    fn fragment_shader() -> ShaderRef {
+        "shaders/source_particles.wgsl".into()
+    }
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Blend
+    }
+    fn depth_bias(&self) -> f32 {
+        self.order
+    }
+    fn enable_prepass() -> bool {
+        false
+    }
+    fn enable_shadows() -> bool {
+        false
+    }
+    fn specialize(
+        _: &MaterialPipeline,
+        d: &mut RenderPipelineDescriptor,
+        l: &MeshVertexBufferLayoutRef,
+        _: MaterialPipelineKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        d.vertex.buffers = vec![l.0.get_layout(&[
+            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+            Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
+        ])?];
+        d.primitive.cull_mode = None;
+        if let Some(depth) = d.depth_stencil.as_mut() {
+            depth.depth_write_enabled = Some(false);
+        }
+        Ok(())
+    }
+}
+#[derive(Resource, Default)]
+pub struct ParticleGpu {
+    buffers: Vec<UniformBuffer<ParticleUniform>>,
+}
+impl AsBindGroup for ParticleMaterial {
+    type Data = ();
+    type Param = (SRes<ParticleGpu>, SRes<RenderAssets<GpuImage>>);
+    fn label() -> &'static str {
+        "source particles"
+    }
+    fn bind_group_data(&self) {}
+    fn unprepared_bind_group(
+        &self,
+        _: &BindGroupLayout,
+        _: &RenderDevice,
+        p: &mut SystemParamItem<Self::Param>,
+        _: bool,
+    ) -> Result<UnpreparedBindGroup, AsBindGroupError> {
+        let buffer =
+            p.0.buffers
+                .get(self.batch)
+                .and_then(|b| b.buffer())
+                .ok_or(AsBindGroupError::RetryNextUpdate)?;
+        let image =
+            p.1.get(self.texture.id())
+                .ok_or(AsBindGroupError::RetryNextUpdate)?;
+        Ok(UnpreparedBindGroup {
+            bindings: BindingResources(vec![
+                (0, OwnedBindingResource::Buffer(buffer.clone())),
+                (
+                    1,
+                    OwnedBindingResource::TextureView(
+                        TextureViewDimension::D2,
+                        image.texture_view.clone(),
+                    ),
+                ),
+                (
+                    2,
+                    OwnedBindingResource::Sampler(
+                        SamplerBindingType::Filtering,
+                        image.sampler.clone(),
+                    ),
+                ),
+            ]),
+        })
+    }
+    fn bind_group_layout_entries(_: &RenderDevice, _: bool) -> Vec<BindGroupLayoutEntry> {
+        use binding_types::*;
+        BindGroupLayoutEntries::sequential(
+            ShaderStages::VERTEX_FRAGMENT,
+            (
+                uniform_buffer::<ParticleUniform>(false),
+                texture_2d(TextureSampleType::Float { filterable: true }),
+                sampler(SamplerBindingType::Filtering),
+            ),
+        )
+        .to_vec()
+    }
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Owner {
+    Urine,
+    Outlet(u32),
+    Storm(crate::weather::StormId),
+}
+struct Group {
+    owner: Owner,
+    source: usize,
+    start: usize,
+    count: usize,
+    order: Vec<usize>,
+    entities: Vec<Entity>,
+    active: bool,
+}
+#[derive(Resource, Default)]
+struct WeatherRender {
+    mesh: Option<Handle<Mesh>>,
+    groups: Vec<Group>,
+    uniforms: Vec<ParticleUniform>,
+}
+#[derive(Resource, Default)]
+pub(crate) struct ExtractedParticles {
+    pub(crate) uniforms: Vec<ParticleUniform>,
+}
+pub struct SourceWeatherPlugin;
+impl Plugin for SourceWeatherPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<WeatherRender>()
+            .add_plugins(MaterialPlugin::<ParticleMaterial>::default())
+            .add_systems(
+                PostUpdate,
+                sync_weather
+                    .after(bevy::transform::TransformSystems::Propagate)
+                    .after(super::lighting::sync_lighting)
+                    .before(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
+            );
+        app.sub_app_mut(RenderApp)
+            .init_resource::<ParticleGpu>()
+            .init_resource::<ExtractedParticles>()
+            .add_systems(ExtractSchedule, extract)
+            .add_systems(Render, upload.in_set(RenderSystems::PrepareResources));
+    }
+}
+fn extract(state: Extract<Res<WeatherRender>>, mut extracted: ResMut<ExtractedParticles>) {
+    extracted
+        .uniforms
+        .resize(state.uniforms.len(), ParticleUniform::default());
+    extracted.uniforms.copy_from_slice(&state.uniforms);
+}
+fn upload(
+    extracted: Res<ExtractedParticles>,
+    mut gpu: ResMut<ParticleGpu>,
+    device: Res<RenderDevice>,
+    queue: Res<RenderQueue>,
+) {
+    while gpu.buffers.len() < extracted.uniforms.len() {
+        gpu.buffers.push(UniformBuffer::default());
+    }
+    for (i, value) in extracted.uniforms.iter().enumerate() {
+        // Hidden empty batches need no upload after their initial buffer creation.
+        if value.settings.w == 0. && gpu.buffers[i].buffer().is_some() {
+            continue;
+        }
+        gpu.buffers[i].set(*value);
+        gpu.buffers[i].write_buffer(&device, &queue);
+    }
+}
+fn mesh() -> Mesh {
+    let mut positions = Vec::with_capacity(BATCH * 4);
+    let mut uv = Vec::with_capacity(BATCH * 4);
+    let mut indices = Vec::with_capacity(BATCH * 6);
+    for i in 0..BATCH {
+        positions.extend([
+            [-0.5, -0.5, i as f32],
+            [0.5, -0.5, i as f32],
+            [0.5, 0.5, i as f32],
+            [-0.5, 0.5, i as f32],
+        ]);
+        uv.extend([[0., 1.], [1., 1.], [1., 0.], [0., 0.]]);
+        let k = i as u32 * 4;
+        indices.extend([k, k + 1, k + 2, k, k + 2, k + 3]);
+    }
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
+    .with_inserted_indices(Indices::U32(indices))
+}
+fn add_group(
+    state: &mut WeatherRender,
+    owner: Owner,
+    index: usize,
+    r: &ParticleReference,
+    lighting: &SourceLighting,
+    commands: &mut Commands,
+    materials: &mut Assets<ParticleMaterial>,
+) {
+    // A destroyed storm's retained slots can serve the next storm of this source.
+    if let Some(g) = state
+        .groups
+        .iter_mut()
+        .find(|g| !g.active && g.source == index)
+    {
+        g.owner = owner;
+        g.active = true;
+        return;
+    }
+    let start = state.uniforms.len();
+    let count = (r.capacity as usize).div_ceil(BATCH);
+    let m = &r.materials[0];
+    let t = m
+        .textures
+        .iter()
+        .find(|t| t.property == "_MainTex")
+        .unwrap();
+    let texture = lighting
+        .textures
+        .iter()
+        .find(|(id, _, _)| *id == t.texture)
+        .unwrap()
+        .2
+        .clone();
+    let legacy = m.shader.name == "Legacy Shaders/Particles/Alpha Blended";
+    let tint = m.colors[if legacy { "_TintColor" } else { "_Color" }];
+    let mut uniform = ParticleUniform::default();
+    uniform.tint = Vec4::from_array(linear(tint));
+    uniform.st = Vec4::new(t.scale[0], t.scale[1], t.offset[0], t.offset[1]);
+    uniform.settings = Vec4::new(
+        if legacy { 2. } else { 1. },
+        r.scalars["renderer.m_MinParticleSize"],
+        r.scalars["renderer.m_MaxParticleSize"],
+        0.,
+    );
+    let mut entities = Vec::with_capacity(count);
+    for i in 0..count {
+        state.uniforms.push(uniform);
+        let material = materials.add(ParticleMaterial {
+            batch: start + i,
+            texture: texture.clone(),
+            order: -r.scalars["renderer.m_SortingFudge"],
+        });
+        entities.push(
+            commands
+                .spawn((
+                    super::transparent::SourceSortData {
+                        material_key: (start + i) as u32,
+                        material_identity: (start + i) as u32,
+                        glass_source: 0,
+                        shader_identity: m.shader.source.path_id as i32,
+                        source_material_index: 0,
+                        layer_and_order: 0,
+                        queue: 3000,
+                        additive: false,
+                        glass: false,
+                    },
+                    Mesh3d(state.mesh.as_ref().unwrap().clone()),
+                    MeshMaterial3d(material),
+                    Transform::IDENTITY,
+                    Visibility::Hidden,
+                    bevy::light::NotShadowCaster,
+                    bevy::camera::visibility::NoFrustumCulling,
+                    bevy::camera::primitives::Aabb {
+                        center: bevy::math::Vec3A::ZERO,
+                        half_extents: bevy::math::Vec3A::ZERO,
+                    },
+                    bevy::camera::visibility::RenderLayers::layer(
+                        r.scalars["gameObject.layer"] as usize,
+                    ),
+                ))
+                .id(),
+        );
+    }
+    state.groups.push(Group {
+        owner,
+        source: index,
+        start,
+        count,
+        order: Vec::with_capacity(r.capacity as usize),
+        entities,
+        active: true,
+    });
+}
+#[allow(clippy::too_many_arguments)]
+fn sync_weather(
+    mut commands: Commands,
+    reference: Res<RuntimeReference>,
+    drive: Res<Drive>,
+    lighting: Res<SourceLighting>,
+    mut state: ResMut<WeatherRender>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ParticleMaterial>>,
+    mut visibility: Query<
+        (&mut Visibility, &mut GlobalTransform),
+        Without<super::camera::DriveCamera>,
+    >,
+    camera: Query<&GlobalTransform, With<super::camera::DriveCamera>>,
+) {
+    if !lighting.bound {
+        return;
+    }
+    let r = &reference.0.weather;
+    if state.mesh.is_none() {
+        state.mesh = Some(meshes.add(mesh()));
+        for (i, p) in r.particles.iter().enumerate().skip(2) {
+            let owner = if p.role.starts_with("urine") {
+                Owner::Urine
+            } else {
+                Owner::Outlet(p.role.rsplit('_').next().unwrap().parse().unwrap())
+            };
+            add_group(
+                &mut state,
+                owner,
+                i,
+                p,
+                &lighting,
+                &mut commands,
+                &mut materials,
+            );
+        }
+    }
+    for g in &mut state.groups {
+        if let Owner::Storm(id) = g.owner {
+            g.active = drive.runtime.weather.storms().iter().any(|s| s.id == id);
+        }
+    }
+    for storm in drive.runtime.weather.storms() {
+        for i in 0..2 {
+            if !state
+                .groups
+                .iter()
+                .any(|g| g.active && g.owner == Owner::Storm(storm.id) && g.source == i)
+            {
+                add_group(
+                    &mut state,
+                    Owner::Storm(storm.id),
+                    i,
+                    &r.particles[i],
+                    &lighting,
+                    &mut commands,
+                    &mut materials,
+                );
+            }
+        }
+    }
+    let origin = drive.runtime.stream.origin.offset;
+    let Ok(camera) = camera.single() else {
+        return;
+    };
+    let eye = camera.translation();
+    let cycle = drive.runtime.lighting.cycle.output();
+    let fog = linear(cycle.fog_color);
+    let state = &mut *state;
+    for g in &mut state.groups {
+        let p = &r.particles[g.source];
+        let fluid = match g.owner {
+            Owner::Urine => Some(&drive.runtime.urine),
+            Owner::Outlet(id) => drive
+                .runtime
+                .area
+                .interaction
+                .fluid_particles()
+                .find(|(key, _)| key.0 == id)
+                .map(|(_, p)| p),
+            Owner::Storm(_) => None,
+        };
+        let splash = p.role.starts_with("splash") || p.role == "urine_splash";
+        let particles = if let Owner::Storm(id) = g.owner {
+            drive
+                .runtime
+                .weather
+                .storms()
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| s.particles[g.source].particles())
+        } else if splash {
+            fluid.map(|f| f.splash())
+        } else {
+            None
+        };
+        let count = if !g.active || !p.flags["gameObject.active"] || !p.flags["renderer.enabled"] {
+            0
+        } else {
+            particles.map_or_else(|| fluid.map_or(0, |f| f.particles().len()), |p| p.len())
+        };
+        g.order.clear();
+        g.order.extend(0..count);
+        let position = |i: usize| -> Vec3 {
+            if let Some(p) = particles {
+                Vec3::from_array(std::array::from_fn(|j| {
+                    (p[i].absolute_position[j] - origin[j]) as f32
+                }))
+            } else {
+                Vec3::from_array(fluid.unwrap().particles()[i].position.to_array())
+            }
+        };
+        if p.scalars["renderer.m_SortMode"] == 1. {
+            g.order.sort_unstable_by(|a, b| {
+                position(*b)
+                    .distance_squared(eye)
+                    .total_cmp(&position(*a).distance_squared(eye))
+            });
+        }
+        for batch in 0..g.count {
+            let u = &mut state.uniforms[g.start + batch];
+            u.fog = Vec4::new(fog[0], fog[1], fog[2], cycle.fog_density);
+            let n = count.saturating_sub(batch * BATCH).min(BATCH);
+            u.settings.w = n as f32;
+            if let Ok((mut v, mut transform)) = visibility.get_mut(g.entities[batch]) {
+                if n > 0 {
+                    *transform =
+                        GlobalTransform::from_translation(position(g.order[batch * BATCH + n / 2]));
+                }
+                *v = if n == 0 {
+                    Visibility::Hidden
+                } else {
+                    Visibility::Visible
+                };
+            }
+            for j in 0..n {
+                let index = g.order[batch * BATCH + j];
+                let (size, color, angle) = if let Some(p) = particles {
+                    (p[index].size, p[index].color, p[index].rotation)
+                } else {
+                    let p = &fluid.unwrap().particles()[index];
+                    (p.size, p.color, p.rotation)
+                };
+                u.positions[j] = position(index).extend(size);
+                u.colors[j] = Vec4::from_array(linear(color));
+                u.angles[j] = Vec4::new(angle.cos(), angle.sin(), 0., 0.);
+            }
+        }
+    }
+}
+
+fn linear(c: [f32; 4]) -> [f32; 4] {
+    [
+        crate::lighting::source_linear(c[0]),
+        crate::lighting::source_linear(c[1]),
+        crate::lighting::source_linear(c[2]),
+        c[3],
+    ]
+}

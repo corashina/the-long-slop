@@ -23,6 +23,8 @@ impl ActionMask {
     pub const RELEASE_GRIP: u32 = 65536;
     pub const PRIMARY_SWITCH: u32 = 131072;
     pub const SCROLL: u32 = 262144;
+    pub const CONSUME: u32 = 524288;
+    pub const DRINK: u32 = 1048576;
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[repr(u32)]
@@ -41,6 +43,7 @@ pub enum FeedbackContext {
     LightSwitch = 10,
     RadioVolume = 11,
     RadioTuning = 12,
+    Food = 13,
 }
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ActionAvailability {
@@ -109,7 +112,11 @@ impl InteractionState {
         player: &PlayerState,
         items: &ItemStore,
         physics: &PhysicsWorld,
+        needs: crate::survival::NeedsOutput,
     ) -> ActionAvailability {
+        if needs.dead {
+            return ActionAvailability::default();
+        }
         let valid = |target: Option<AimTarget>| {
             target.filter(|target| {
                 target.distance.is_finite()
@@ -132,6 +139,27 @@ impl InteractionState {
             .map(|t| t.item);
         if let Some(held) = self.held() {
             a.actions.0 |= ActionMask::DROP | ActionMask::THROW;
+            if items
+                .get(held)
+                .is_some_and(|item| item.food.is_some() && !item.removed)
+                && needs.can_eat
+            {
+                a.actions.0 |= ActionMask::CONSUME;
+                a.context = FeedbackContext::Food;
+                a.item = Some(held);
+            } else if self
+                .tank_rules
+                .get(&held)
+                .is_some_and(|tank| !tank.no_drink)
+                && items
+                    .get(held)
+                    .and_then(|item| item.fluid.as_ref())
+                    .is_some_and(|fluid| fluid.mixture.total() > 0.)
+                && a.fill_reservation.is_none()
+            {
+                a.actions.0 |= ActionMask::DRINK;
+                a.item = Some(held);
+            }
             if self.carry.allows_held_rotation() {
                 a.actions.0 |= ActionMask::ROTATE;
             }
@@ -228,6 +256,9 @@ impl InteractionState {
             {
                 a.actions.0 |= ActionMask::FILL;
             }
+        }
+        if a.fill_reservation.is_some() {
+            a.actions.0 &= !ActionMask::DRINK;
         }
         if self.held().is_none() {
             if let Some(t) = focus
@@ -359,7 +390,12 @@ impl InteractionState {
             .fill_opening
             .and_then(|id| self.openings.iter().find(|o| o.reference.id == id))
             .is_some_and(|opening| self.can_reserve_fill(opening, items));
-        a.lmb_use = a.fill_reservation.is_none() && !latched_fill && !drink_guard;
+        let food_guard = self.held().is_some_and(|held| {
+            items
+                .get(held)
+                .is_some_and(|item| item.food.is_some() && !item.removed)
+        });
+        a.lmb_use = a.fill_reservation.is_none() && !latched_fill && !drink_guard && !food_guard;
         if self.latched_mechanism.is_none()
             && let Some(t) = aim.light_target
             && t.distance.is_finite()

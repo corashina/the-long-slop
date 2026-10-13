@@ -30,7 +30,7 @@ pub(crate) struct Drive {
     /// Gauge state per vehicle.
     instruments: Vec<InstrumentState>,
     input: FrameInput,
-    clock: StepClock,
+    pub(crate) clock: StepClock,
     previous: VehiclePose,
     current: VehiclePose,
     rendered: VehiclePose,
@@ -68,9 +68,12 @@ struct FeedbackStamp {
 pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
     let reference = Arc::new(
-        ReferenceManifest::from_json(reference_json.as_bytes())
+        ReferenceManifest::from_runtime_json(reference_json.as_bytes())
             .map_err(|e| JsValue::from_str(&e.to_string()))?,
     );
+    if let Err(error) = crate::reference::AudioReference::from_value(&reference.audio, &reference) {
+        game_audio_error(&error.to_string());
+    }
     let runtime = GarageRuntime::new(&reference).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let current = runtime.area.player.view_pose(&runtime.physics);
     App::new()
@@ -121,6 +124,7 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
             presentation::mirrors::SourceMirrorPlugin,
             presentation::source_lighting::SourceLightingPlugin,
             presentation::frame_graph::SourceFramePlugin,
+            presentation::weather::SourceWeatherPlugin,
         ))
         .add_systems(Startup, setup)
         .add_systems(
@@ -134,6 +138,7 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
                 advance_physics,
                 sync_world,
                 sync_imported,
+                presentation::consumables::sync,
                 sync_instruments,
                 presentation::lighting::sync_control_visuals,
                 update_camera,
@@ -174,6 +179,7 @@ fn setup(
     visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
     commands.insert_resource(visuals);
     commands.insert_resource(InstrumentVisuals::default());
+    commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
     presentation::materials::load_materials(&mut commands, &server, &reference.0.rendering);
     presentation::lighting::load_lighting(&mut commands, &server, &reference.0.lighting);
     presentation::lighting_assets::load_lighting(
@@ -322,7 +328,7 @@ fn check_ready(
 fn clear_input(drive: &mut Drive) {
     drive.input.clear();
     drive.runtime.clear_input();
-    drive.clock = StepClock::default();
+    drive.clock.reset();
     drive.previous = drive.current;
     drive.rendered = drive.current;
     drive.runtime.area.begin_step();
@@ -351,7 +357,7 @@ fn read_input(
         drive.runtime.paused = true;
         clear_input(&mut drive);
     }
-    if actions & 4 != 0 && drive.ready {
+    if actions & 4 != 0 && drive.ready && !drive.runtime.needs_output().menu_due {
         drive.runtime.started = true;
         drive.runtime.paused = false;
         clear_input(&mut drive);
@@ -369,12 +375,18 @@ fn read_input(
     if actions & 22 != 0 {
         return;
     }
-    if frame.pressed & keys::CAMERA != 0 && drive.runtime.area.player.seat().is_some() {
+    if !drive.runtime.needs_output().dead
+        && !drive.runtime.sleeping()
+        && frame.pressed & keys::CAMERA != 0
+        && drive.runtime.area.player.seat().is_some()
+    {
+        drive.runtime.audio_motion_revision = drive.runtime.audio_motion_revision.wrapping_add(1);
         drive.camera = match drive.camera {
             CameraMode::Cockpit => CameraMode::Chase,
             CameraMode::Chase => CameraMode::Cockpit,
         };
     }
+    drive.runtime.sleep_camera_allowed = drive.camera == CameraMode::Cockpit;
     drive.input.merge(frame);
 }
 fn advance_physics(
@@ -397,13 +409,14 @@ fn advance_physics(
             .radio
             .calendar((calendar / 100) as u8, (calendar % 100) as u8);
     }
-    drive.render_delta_seconds = time.delta_secs();
-    drive
-        .runtime
-        .advance_lighting(&reference.0, time.delta_secs_f64());
-    let steps = drive.clock.advance(time.delta_secs_f64());
-    drive.frame_steps = steps as u32;
-    for _ in 0..steps {
+    drive.clock.accept_frame(time.delta_secs_f64());
+    loop {
+        let scale = drive.runtime.clock_factors(&reference.0).time_scale;
+        if !drive.clock.take_step(scale) {
+            break;
+        }
+        drive.frame_steps += 1;
+        drive.render_delta_seconds += crate::simulation::FIXED_DT;
         drive.previous = drive.current;
         let old_origin = drive.runtime.stream.origin.offset;
         let input = drive.input.take_step();
@@ -413,11 +426,14 @@ fn advance_physics(
             drive.previous.position[i] -= (new_origin[i] - old_origin[i]) as f32;
         }
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
+        if drive.runtime.paused {
+            drive.clock.reset();
+            break;
+        }
     }
-    drive
-        .runtime
-        .advance_light_fades(&reference.0, time.delta_secs_f64());
-    drive.rendered = presentation::interpolate(drive.previous, drive.current, drive.clock.alpha());
+    let scale = drive.runtime.clock_factors(&reference.0).time_scale;
+    drive.rendered =
+        presentation::interpolate(drive.previous, drive.current, drive.clock.alpha(scale));
 }
 fn sync_world(
     drive: Res<Drive>,
@@ -435,6 +451,7 @@ fn sync_world(
     }
 }
 fn sync_imported(
+    reference: Res<RuntimeReference>,
     drive: Res<Drive>,
     mut query: Query<(
         &BodyVisual,
@@ -460,10 +477,18 @@ fn sync_imported(
     presentation::reference::sync(
         &drive.runtime.area,
         &drive.runtime.physics,
-        drive.clock.alpha(),
+        drive
+            .clock
+            .alpha(drive.runtime.clock_factors(&reference.0).time_scale),
         &mut query,
     );
-    presentation::reference::sync_items(&drive.runtime.area, drive.clock.alpha(), &mut items);
+    presentation::reference::sync_items(
+        &drive.runtime.area,
+        drive
+            .clock
+            .alpha(drive.runtime.clock_factors(&reference.0).time_scale),
+        &mut items,
+    );
     presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
 }
 fn instrument_sample(
@@ -494,7 +519,6 @@ fn instrument_sample(
     }
 }
 fn sync_instruments(
-    time: Res<Time<Real>>,
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
     mut visuals: ResMut<InstrumentVisuals>,
@@ -508,7 +532,7 @@ fn sync_instruments(
         let r = &vehicle.instruments;
         let sample = instrument_sample(&reference.0, run, index);
         if run.started && !run.paused {
-            drive.instruments[index].update(r, sample, time.delta_secs());
+            drive.instruments[index].update(r, sample, drive.render_delta_seconds);
         }
     }
     visuals.update(
@@ -519,20 +543,44 @@ fn sync_instruments(
         &mut casters,
     );
 }
+fn active_camera(drive: &Drive) -> Transform {
+    if let Some(camera) = drive.runtime.sleep_camera() {
+        presentation::camera::sleep_pose(camera, &drive.runtime.stream.origin)
+    } else if drive.camera == CameraMode::Chase && drive.runtime.area.player.seat().is_some() {
+        presentation::camera::pose(
+            CameraMode::Chase,
+            drive.runtime.physics.snapshot(drive.runtime.vehicle).pose,
+        )
+    } else {
+        presentation::transform(drive.rendered)
+    }
+}
 fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveCamera>>) {
     for mut transform in &mut query {
-        *transform =
-            if drive.camera == CameraMode::Chase && drive.runtime.area.player.seat().is_some() {
-                presentation::camera::pose(
-                    CameraMode::Chase,
-                    drive.runtime.physics.snapshot(drive.runtime.vehicle).pose,
-                )
-            } else {
-                presentation::transform(drive.rendered)
-            };
+        *transform = active_camera(&drive);
     }
 }
 fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
+    let needs = drive.runtime.needs_output();
+    game_survival(
+        needs.needs.hp,
+        needs.needs.food,
+        needs.needs.water,
+        needs.needs.bowel,
+        needs.bladder_liters,
+        needs.opacity,
+        needs.dead,
+        needs.look_scale,
+        needs.menu_due,
+    );
+    let sleep = drive.runtime.sleep.output();
+    game_sleep(
+        sleep.phase as u32,
+        sleep.eligible,
+        sleep.charge,
+        sleep.cooldown_remaining,
+        sleep.progress,
+    );
     let runtime = &drive.runtime;
     let current = &runtime.vehicles[runtime.vehicle];
     let snapshot = runtime.physics.snapshot(runtime.vehicle);
@@ -578,6 +626,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         &runtime.area.player,
         &runtime.area.items,
         &runtime.physics,
+        runtime.survival.output(),
     );
     let info = runtime
         .area
@@ -685,6 +734,9 @@ fn publish_audio(
     globals: Query<(&GlobalTransform, &InheritedVisibility)>,
     camera: Query<&GlobalTransform, With<DriveCamera>>,
 ) {
+    let alpha = drive
+        .clock
+        .alpha(drive.runtime.clock_factors(&reference.0).time_scale);
     let runtime = &mut drive.runtime;
     let Some(audio) = &mut runtime.audio else {
         return;
@@ -695,6 +747,17 @@ fn publish_audio(
         runtime.paused,
         audio.game_seconds,
     );
+    let needs = runtime.survival.output();
+    let level = if needs.dead {
+        (1. - needs.death_seconds as f32 / reference.0.survival.death_seconds).clamp(0.001, 1.)
+    } else {
+        1.
+    };
+    game_audio_survival_master(
+        10_f32.powf(level.ln()),
+        runtime.audio_motion_revision,
+        audio.game_seconds + f64::from(alpha) / 60.,
+    );
     let shift = audio.take_origin_shift();
     if shift != [0.; 3] {
         game_audio_origin_shift(shift[0], shift[1], shift[2]);
@@ -703,6 +766,41 @@ fn publish_audio(
         let (_, q, p) = camera.to_scale_rotation_translation();
         game_audio_listener(p.x, p.y, p.z, q.x, q.y, q.z, q.w);
     }
+    let body = crate::vehicle::to_rapier(runtime.area.player.body_pose(&runtime.physics));
+    for b in &audio.reference.survival {
+        let p = body * rapier3d::math::Vector::from_array(b.offset);
+        game_audio_survival_emitter(b.kind, p.x, p.y, p.z);
+    }
+    let origin = runtime.stream.origin.offset;
+    for e in &audio.survival_loops {
+        let p = std::array::from_fn::<_, 3, _>(|i| (e.position[i] - origin[i]) as f32);
+        game_audio_survival(
+            e.kind as u32,
+            e.emitter,
+            e.action as u32,
+            e.clip,
+            e.gain,
+            e.pitch,
+            p[0],
+            p[1],
+            p[2],
+        );
+    }
+    for e in &audio.survival_events {
+        let p = std::array::from_fn::<_, 3, _>(|i| (e.position[i] - origin[i]) as f32);
+        game_audio_survival(
+            e.kind as u32,
+            e.emitter,
+            e.action as u32,
+            e.clip,
+            e.gain,
+            e.pitch,
+            p[0],
+            p[1],
+            p[2],
+        );
+    }
+    audio.survival_events.clear();
     for emitter in &audio.reference.emitters {
         let alive = audio.owner_alive(emitter.id)
             && (emitter.id != audio.reference.engine.emitter

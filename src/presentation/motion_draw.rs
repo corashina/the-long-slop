@@ -122,6 +122,7 @@ struct MotionObject {
 }
 #[derive(Resource, Default)]
 pub struct MotionObjects {
+    motion_revision: u32,
     scene: u32,
     slots: Vec<MotionObject>,
     lookup: bevy::ecs::entity::EntityHashMap<usize>,
@@ -266,7 +267,8 @@ fn prepare_models(
             });
         }
     }
-    let recreate = objects.scene != frame.scene;
+    let recreate = objects.scene != frame.scene || objects.motion_revision != frame.motion_revision;
+    objects.motion_revision = frame.motion_revision;
     objects.scene = frame.scene;
     if recreate {
         objects.origin = None;

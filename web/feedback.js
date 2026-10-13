@@ -1,5 +1,5 @@
 import {applyLayout} from './ui-layout.js';
-export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,SPLIT:16384,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144};
+export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,SPLIT:16384,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144,CONSUME:524288,DRINK:1048576};
 const FLUIDS=['Gas','Oil','Alcohol','Water','Blood','Diesel'];
 export function formatRadio(r){if(r.context===11&&Number.isFinite(r.radioVolume))return 'Volume: '+Math.round(r.radioVolume*10).toString().padStart(2,'0');if(r.context===12&&Number.isFinite(r.radioFrequency))return (r.radioAm?'AM '+r.radioFrequency.toFixed(0).padStart(3,'0'):'FM '+r.radioFrequency.toFixed(1).padStart(4,'0'));return '';}
 function volume(value){return (Math.round(value*10)/10).toFixed(1).replace(/\.0$/,'');}
@@ -17,6 +17,7 @@ export function selectIcon(mask,context,carrying) {
  if(mask&ACTION.MOUNT)return 'mount';
  if(mask&ACTION.DISMOUNT)return 'dismount';
  if(mask&ACTION.FILL)return 'fill';
+ if(mask&(ACTION.CONSUME|ACTION.DRINK))return 'carrying';
  if(mask&ACTION.EXIT)return 'exit';
  if(mask&ACTION.ENTER)return 'enter';
  if(mask&ACTION.DOOR)return 'door';
@@ -55,6 +56,8 @@ export function createFeedback(ui,switchIconUrl) {
   [ACTION.MOUNT,'mount','[F]: Mount'],
   [ACTION.DISMOUNT,'dismount','[F]: Dismount'],
   [ACTION.FILL,'fill','[LMB]: Fill'],
+  [ACTION.CONSUME,'eat','[LMB]: Eat'],
+  [ACTION.DRINK,'drink','Hold [LMB]: Drink'],
   [ACTION.TUNE,'tune','[E]+[Mouse] / [Scroll]: Open/Close'],
   [ACTION.ENTER,'enter','[E]: Drive'],
   [ACTION.EXIT,'exit','[E]: Get out/stand'],
@@ -71,7 +74,7 @@ export function createFeedback(ui,switchIconUrl) {
  const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance / [Tab]: Center';
  const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance / [Tab]: Center';
  const counts=new Uint8Array(4);
- const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',split:'mount',scroll:'use'};
+ const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',split:'mount',scroll:'use'};
  const families={use:0,pickup:1,mount:2,fill:3};
  function placeRows(){
   counts.fill(0);

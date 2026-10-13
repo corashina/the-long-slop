@@ -216,6 +216,7 @@ struct MotionAudit {
 }
 #[derive(Resource)]
 pub(crate) struct MotionFrame {
+    motion_revision: u32,
     scene: u32,
     first_token: u32,
     first_draws: [u32; 3],
@@ -1687,7 +1688,8 @@ fn prepare_motion(
     };
     let result = (|| -> Result<(), String> {
         if let Some(existing) = existing.as_mut() {
-            if existing.scene != frame.scene {
+            if existing.scene != frame.scene || existing.motion_revision != frame.motion_revision {
+                existing.motion_revision = frame.motion_revision;
                 existing.scene = frame.scene;
                 existing.first_token = 0;
                 existing.first_draws = [0; 3];
@@ -1756,6 +1758,7 @@ fn prepare_motion(
                 pass.copied_depth.clone(),
             ));
             commands.insert_resource(MotionFrame {
+                motion_revision: frame.motion_revision,
                 scene: frame.scene,
                 first_token: 0,
                 first_draws: [0; 3],

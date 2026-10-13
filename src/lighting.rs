@@ -35,8 +35,8 @@ pub struct CycleOutput {
     pub fog_color: [f32; 4],
     pub roadside_enabled: bool,
     pub biome_color: [f32; 4],
-    /// This visual input controls cloud density. It does not control engine heat.
-    pub visual_temperature: f32,
+    /// Source temperature controls cloud density, needs, and engine heat.
+    pub ambient_temperature: f32,
     /// Source order: low layer, high layer.
     pub clouds: [CloudOutput; 2],
     pub cloud_noise_coordinate: f32,
@@ -50,49 +50,72 @@ pub struct CycleOutput {
     pub shader_time_seconds: f64,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct CycleAdvance {
+    pub simulation_delta: f32,
+    pub cycle_extra: f32,
+    pub cloud_scale: f32,
+    pub sleep_progress: Option<f32>,
+}
+
 #[derive(Clone, Debug)]
 pub struct CycleState {
     elapsed_seconds: f64,
     cycle_seconds: f64,
     cloud_coordinate: f32,
     star_rotation: f32,
+    previous_cycle_extra: f32,
     output: CycleOutput,
+    clear_output: CycleOutput,
+    reference: CycleReference,
+    sky_sample_time: f64,
+    sampled_sky: [f32; 4],
 }
 
 impl CycleState {
     /// Initialize from a validated cycle reference.
     pub fn new(reference: &CycleReference) -> Self {
         let cycle_seconds = f64::from(reference.startup_offset_seconds);
+        let output = evaluate(reference, cycle_seconds, 0., 0., 0.);
         Self {
             elapsed_seconds: 0.,
             cycle_seconds,
             cloud_coordinate: 0.,
             star_rotation: 0.,
-            output: evaluate(reference, cycle_seconds, 0., 0., 0.),
+            previous_cycle_extra: 0.,
+            clear_output: output.clone(),
+            sampled_sky: output.sky_tint,
+            output,
+            reference: reference.clone(),
+            sky_sample_time: 0.,
         }
     }
 
-    /// Advance by active play time. Reject invalid or unrepresentable source intervals.
-    pub fn advance(&mut self, reference: &CycleReference, elapsed_seconds: f64) {
-        let dt = elapsed_seconds as f32;
-        let active = self.elapsed_seconds + elapsed_seconds;
-        let cycle = self.cycle_seconds + elapsed_seconds;
-        let cloud_step = dt * reference.cloud_perlin_speed;
-        let star_step = reference.star_speed * dt;
-        if elapsed_seconds < 0.
-            || !elapsed_seconds.is_finite()
+    /// Advance one accepted simulation slice with its sampled sleep factors.
+    pub fn advance(&mut self, reference: &CycleReference, advance: CycleAdvance) {
+        let dt = advance.simulation_delta;
+        let active = self.elapsed_seconds + f64::from(dt);
+        let cycle = self.cycle_seconds + f64::from(dt) + f64::from(advance.cycle_extra);
+        let cloud_step = dt * reference.cloud_perlin_speed * advance.cloud_scale;
+        let star_step = reference.star_speed * dt + self.previous_cycle_extra;
+        if dt < 0.
+            || advance.cycle_extra < 0.
+            || advance.cloud_scale < 0.
             || !dt.is_finite()
+            || !advance.cycle_extra.is_finite()
+            || !advance.cloud_scale.is_finite()
             || !active.is_finite()
             || !cycle.is_finite()
             || !cloud_step.is_finite()
             || !star_step.is_finite()
+            || advance.sleep_progress.is_some_and(|p| !p.is_finite())
         {
             return;
         }
-        // FixedUpdate rotates stars before it evaluates the cycle.
+        // Source rotates stars before replacing tekerve for this fixed update.
         self.star_rotation = (self.star_rotation + star_step) % 360.;
+        self.previous_cycle_extra = advance.cycle_extra;
         self.cloud_coordinate += cloud_step;
-        // Source repeatedly subtracts one while the coordinate exceeds zero.
         if self.cloud_coordinate > 0. {
             self.cloud_coordinate -= self.cloud_coordinate.ceil();
         }
@@ -104,7 +127,8 @@ impl CycleState {
             self.cloud_coordinate,
             self.star_rotation,
         );
-        // The source changes startTime, then evaluates the old t in this update.
+        self.set_sleep_progress(reference, advance.sleep_progress);
+        self.clear_output = self.output.clone();
         self.cycle_seconds = if cycle as f32 > reference.day_seconds + reference.night_seconds {
             0.
         } else {
@@ -134,6 +158,124 @@ impl CycleState {
             saved.cloud_coordinate,
             saved.star_rotation,
         );
+        self.clear_output = self.output.clone();
+        self.sampled_sky = self.output.sky_tint;
+        self.sky_sample_time = self.elapsed_seconds;
+    }
+    /// Felho changes material speed at sleep endpoints without advancing time.
+    pub fn set_sleep_progress(&mut self, r: &CycleReference, progress: Option<f32>) {
+        let p = progress.unwrap_or(1.);
+        for (index, (cloud, source)) in self.output.clouds.iter_mut().zip(&r.clouds).enumerate() {
+            cloud.speed = if p < 0.5 {
+                lerp(source.mid_speed, source.max_speed, inverse_lerp(0., 0.5, p))
+            } else {
+                lerp(source.min_speed, source.mid_speed, inverse_lerp(0.5, 1., p))
+            };
+            self.clear_output.clouds[index].speed = cloud.speed;
+        }
+    }
+
+    /// Compose from retained clear values. SetBiome samples sky tint once per source second.
+    pub fn compose_weather(
+        &mut self,
+        weather: &crate::reference::WeatherReference,
+        influence: crate::weather::StormInfluence,
+    ) {
+        self.output = self.clear_output.clone();
+        let w = influence.strength.clamp(0., 1.);
+        let r = &self.reference;
+        let s = &weather.storm;
+        let o = &mut self.output;
+        if self.elapsed_seconds >= self.sky_sample_time + f64::from(r.biome_refresh_seconds) {
+            self.sky_sample_time = self.elapsed_seconds;
+            self.sampled_sky = color_lerp(self.clear_output.sky_tint, s.sky_color, w);
+        }
+        if influence.id.is_none() || w == 0. {
+            return;
+        }
+        o.sky_tint = self.sampled_sky;
+        o.directional_intensity *= lerp(1., s.intensity_multipler, w);
+        o.ambient *= lerp(1., s.ambient_multipler, w);
+        let p = o.progress;
+        let biome = o.biome_color;
+        let cube = w * w * w;
+        let day_ground = color_lerp(
+            biome_color(&r.day_ground_colors, biome),
+            s.sky_ground_color,
+            w,
+        );
+        let night_ground = biome_color(&r.night_ground_colors, biome);
+        o.ground_color = match o.phase {
+            CyclePhase::Day => day_ground,
+            CyclePhase::Night => night_ground,
+            CyclePhase::Dawn => color_lerp(night_ground, day_ground, p),
+            CyclePhase::Dusk => color_lerp(day_ground, night_ground, p),
+        };
+        o.atmosphere_thickness = match o.phase {
+            CyclePhase::Night => 0.,
+            CyclePhase::Day => lerp(1., s.atmosphere_thickness, cube),
+            _ => lerp(
+                s.atmosphere_thickness,
+                self.clear_output.atmosphere_thickness,
+                (1. - cube).max(p),
+            ),
+        };
+        let day_density = lerp(
+            biome_float(&r.day_fog_densities, biome),
+            s.fog_density,
+            cube,
+        );
+        let night_density = biome_float(&r.night_fog_densities, biome);
+        let day_fog = color_lerp(biome_color(&r.day_fog_colors, biome), s.fog_color, w);
+        let night_fog = biome_color(&r.night_fog_colors, biome);
+        let (density, color) = match o.phase {
+            CyclePhase::Day => (day_density, day_fog),
+            CyclePhase::Night => (night_density, night_fog),
+            CyclePhase::Dawn => (
+                lerp(night_density, day_density, inverse_lerp(0., 0.5, p)),
+                color_lerp(night_fog, day_fog, inverse_lerp(0.5, 1., p)),
+            ),
+            CyclePhase::Dusk => (
+                lerp(day_density, night_density, inverse_lerp(0.5, 1., p)),
+                color_lerp(day_fog, night_fog, inverse_lerp(0., 0.5, p)),
+            ),
+        };
+        o.fog_density = density * r.fog_modifier;
+        o.fog_color = color;
+        for (cloud, source) in o.clouds.iter_mut().zip(&r.clouds) {
+            let day = color_lerp(source.day_color, s.cloud_color, w);
+            let transition = color_lerp(source.transition_color, s.cloud_color, w);
+            cloud.color = match o.phase {
+                CyclePhase::Day => day,
+                CyclePhase::Night => source.night_color,
+                CyclePhase::Dawn if p < 0.5 => {
+                    color_lerp(source.night_color, transition, inverse_lerp(0.3, 0.5, p))
+                }
+                CyclePhase::Dawn => color_lerp(transition, day, (p - 0.5) * 2.),
+                CyclePhase::Dusk if p < 0.5 => color_lerp(day, transition, p * 2.),
+                CyclePhase::Dusk => {
+                    color_lerp(transition, source.night_color, inverse_lerp(0.5, 0.7, p))
+                }
+            };
+        }
+        let day_flare = biome_float(&r.flare_day, biome) * (1. - w);
+        let night_flare = biome_float(&r.flare_night, biome);
+        o.flare_brightness = match o.phase {
+            CyclePhase::Day => day_flare,
+            CyclePhase::Night => night_flare,
+            CyclePhase::Dawn => lerp3(
+                night_flare,
+                biome_float(&r.flare_dawn, biome) * (1. - w),
+                day_flare,
+                o.flare_progress,
+            ),
+            CyclePhase::Dusk => lerp3(
+                day_flare,
+                biome_float(&r.flare_dusk, biome) * (1. - w),
+                night_flare,
+                o.flare_progress,
+            ),
+        };
     }
 
     pub fn reset(&mut self, reference: &CycleReference) {
@@ -362,7 +504,7 @@ fn evaluate(
             CyclePhase::Night => true,
         },
         biome_color: biome,
-        visual_temperature: temp,
+        ambient_temperature: temp,
         clouds,
         cloud_noise_coordinate: cloud_x,
         cloud_noise,
@@ -409,7 +551,7 @@ fn lerp3(a: f32, b: f32, c: f32, t: f32) -> f32 {
         lerp(b, c, inverse_lerp(0.5, 1., t))
     }
 }
-fn gradient(g: &GradientReference, time: f32) -> [f32; 4] {
+pub(crate) fn gradient(g: &GradientReference, time: f32) -> [f32; 4] {
     let time = time.clamp(0., 1.);
     let mut color = g.colors[0].value;
     for keys in g.colors.windows(2) {

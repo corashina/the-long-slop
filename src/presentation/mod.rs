@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod consumables;
 pub mod instruments;
 pub mod lighting;
 pub mod materials;
@@ -61,3 +62,4 @@ pub mod surface_pass;
 pub mod surface_views;
 pub mod transparent;
 pub mod view_frame;
+pub mod weather;

@@ -277,6 +277,42 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
                 'stations':station_records(source,main_r,main,lambda reader:clip(reader,'radio')),'methods':[method(cls,'SetRadio'),method(cls,'Update'),method('mainscript','Update'),
                     method('radioCH','SelectRandomMusic'),method('radioCH','SelectRandomTalk'),method('radioCH','AdvanceRadio'),
                     method('fpscontroller','Update'),method('electronicsscript','Start'),method('electronicsscript','UpdOutPut'),method('mainscript','CheckHoliday')]}
+    main=source.get('level1',64919);md=source.read(main)
+    player=source.get('level1',80125);pd=source.read(player)
+    prefab=next(c for c in source.components(source.transform_for(source.resolve(main,md['Audio'])))[1] if c.type.name=='AudioSource')
+    sounds=source.get('level1',70770)
+    if source.class_name(sounds)!='soundMainScript':raise ValueError('Toilet source differs')
+    survival_groups=[('eat',0,main,md['soundEat'],prefab,[md['eatVolume']]*2,[1.,1.])]
+    for role,kind,field,group in zip(('burp','fart','shit'),(1,2,9),('SBurp','SFart','SFart'),source.read(sounds)['clips'],strict=True):
+        prefix='Burp' if role=='burp' else 'Fart'
+        survival_groups.append((role,kind,sounds,group['clips'],source.resolve(player,pd[field]),[pd['min'+prefix+'Volume'],pd['max'+prefix+'Volume']],[pd['min'+prefix+'Pitch'],pd['max'+prefix+'Pitch']]))
+    survival_groups.append(('death',5,main,[md['SdeathBell']],source.resolve(player,pd['SDeathBellSource']),[1.,1.],[.8,1.2]))
+    storm=source.get('sharedassets1.assets',158276)
+    cycle=source.resolve(main,md['napszak']);cd=source.read(cycle)
+    for role,kind,owner,pointer in [('sleep',4,player,pd['SleepCamSource']),('storm',6,storm,source.read(storm)['source']),('storm_inside',10,cycle,cd['sandStormSource']),('ambient_day',7,cycle,cd['DayAmbientSound'][0]),('ambient_night',8,cycle,cd['NightAmbientSound'][0])]:
+        selected_source=source.resolve(owner,pointer);ad=source.read(selected_source)
+        survival_groups.append((role,kind,selected_source,[ad['m_audioClip']],selected_source,[ad['m_Volume']]*2,[ad['m_Pitch']]*2))
+
+    from .collision import world_pose
+    audio['survival']=[]
+    for role,kind,owner,pointers,reader,gain,pitch in survival_groups:
+        d=source.read(reader)
+        route=source.resolve(player,pd['deathbellGroup']) if role=='death' else source.resolve(reader,d['OutputAudioMixerGroup'])
+        transform=source.transform_for(source.resolve(reader,d['m_GameObject']))
+        if any(c.type.name=='Rigidbody' for c in source.components(transform)[1]):raise ValueError('Selected audio velocity needs a Rigidbody route')
+        pose=world_pose(source,transform)
+        player_pose=world_pose(source,source.transform_for(source.resolve(player,pd['m_GameObject'])))
+        offset=[pose['translation'][i]-player_pose['translation'][i] for i in range(3)] if role in ('burp','fart','shit','death','sleep') else [0.,0.,0.]
+        settings={'priority':70 if role=='eat' else d['Priority'],'loop':bool(d['Loop']) if role!='death' else False,
+            'gain':d['m_Volume'],'pitch':d['m_Pitch'],'min_distance':d['MinDistance'],'max_distance':d['MaxDistance'],
+            'rolloff_mode':d['rolloffMode'],'spatial_blend':1. if role=='eat' else d['panLevelCustomCurve']['m_Curve'][0]['value'],
+            'spatial_blend_curve':curve(d['panLevelCustomCurve']),'rolloff_curve':curve(d['rolloffCustomCurve'])}
+        if role=='eat':
+            for k in settings['spatial_blend_curve']['keys']:k['value']=1.
+        cls,name={'eat':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update'),'storm':('sandstormscript','Update')}.get(role,('napszakvaltakozas','FixedUpdate'))
+        audio['survival'].append({'role':role,'kind':kind,'source':source_id(owner),'audio_source':source_id(reader),
+            'clips':[clip(source.resolve(owner,p)) for p in pointers], 'gain':gain,'pitch':pitch,'offset':offset,
+            'settings':settings,'mixer':mixer(route),'doppler':d['DopplerLevel'],'pan':d['Pan2D'],'method':method(cls,name)})
     def control_reader(reader):
         if reader is None: return None
         eid = emitter(reader); node = audio['emitters'][eid-1]['node']

@@ -1,5 +1,7 @@
 pub mod carry;
+pub mod consumption;
 pub mod feedback;
+pub mod fluid_contact;
 pub mod items;
 pub mod labels;
 pub mod mechanisms;
@@ -13,11 +15,12 @@ pub use targets::{InteractionBlock, LightAim, ResolvedAim};
 use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
 use crate::reference::{
-    ActionBinding, ActionMasks, BodyId, ColliderId, ItemId, ItemKind, LightControlId,
-    LightControllerKind, NodeId, OpeningId, OpeningRecord, PartSlotId, ReferenceError,
-    ReferenceManifest, SeatId, TankRole, WheelSlotId,
+    ActionBinding, ActionMasks, BodyId, ColliderGeometry, ColliderId, FluidParticleReference,
+    ItemId, ItemKind, LightControlId, LightControllerKind, NodeId, OpeningId, OpeningRecord,
+    PartSlotId, ReferenceError, ReferenceManifest, SeatId, TankRole, WheelSlotId,
 };
 use crate::simulation::{FrameInput, keys};
+use crate::survival::NeedsOutput;
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
 use items::{ItemLocation, ItemStore};
 use rapier3d::math::{Pose, Vector};
@@ -56,6 +59,16 @@ pub enum InteractionAction {
         destination: ItemId,
         liters: f32,
     },
+    Consume(ItemId),
+    Drink {
+        source: ItemId,
+        requested_liters: f32,
+    },
+    DrinkContact {
+        source: ItemId,
+        poured_liters: f32,
+        fractions: [f32; 6],
+    },
     WheelRemove(ItemId),
     PartRemove(ItemId),
     PartInstall(ItemId),
@@ -89,6 +102,8 @@ struct OpeningState {
     local_pose: Pose,
     tilt_axis: Vector,
     valve: f32,
+    particles: Option<FluidParticleReference>,
+    contact: Option<fluid_contact::FluidContact>,
 }
 struct OpeningRules {
     id: OpeningId,
@@ -162,6 +177,11 @@ pub struct InteractionState {
     supplies: HashSet<ItemId>,
     tank_rules: HashMap<ItemId, TankRules>,
     slow_oil_modifier: f32,
+    drink_flow_liters_per_second: f32,
+    drink_contact_radius: f32,
+    drink_collider_radius: f32,
+    drink_collider_center: Vector,
+    pending_drink_contacts: Vec<(ItemId, f32, [f32; 6])>,
     latched_mechanism: Option<(ItemId, BodyId, Vector, ColliderHandle)>,
     use_consumed: bool,
     mechanism_release_distance_squared: f32,
@@ -264,6 +284,23 @@ impl InteractionState {
                 flow: None,
                 fill_called: false,
                 empty_pour: false,
+                particles: Some(opening.particles.clone()),
+                contact: Some(fluid_contact::FluidContact::new(
+                    &opening.particles,
+                    reference
+                        .weather
+                        .particles
+                        .iter()
+                        .find(|p| p.role == format!("outlet_{}", opening.id.0))
+                        .unwrap(),
+                    reference
+                        .weather
+                        .particles
+                        .iter()
+                        .find(|p| p.role == format!("splash_{}", opening.id.0))
+                        .unwrap(),
+                    opening.id.0,
+                )),
             });
         }
         let mut seats = Vec::with_capacity(reference.seats.len());
@@ -480,6 +517,29 @@ impl InteractionState {
                 })
                 .collect(),
             slow_oil_modifier: reference.fluid_rules.slow_oil_modifier,
+            drink_flow_liters_per_second: reference.fluid_rules.pour_speed
+                * reference.survival.drinking.valve
+                * reference.survival.drinking.radius.powi(2)
+                * std::f32::consts::PI
+                * 0.025
+                * reference.survival.drink_modifier,
+            drink_contact_radius: reference.survival.drinking.radius
+                * reference
+                    .survival
+                    .drinking
+                    .particle_contact_radius_multiplier,
+            drink_collider_radius: match &reference.survival.drinking.geometry {
+                ColliderGeometry::Sphere { radius, .. } => *radius,
+                _ => return Err(ReferenceError("Drink collider is not a sphere".into())),
+            },
+            drink_collider_center: match &reference.survival.drinking.geometry {
+                ColliderGeometry::Sphere { center, .. } => {
+                    Vector::from_array(reference.survival.drinking.local_position)
+                        + Vector::from_array(*center)
+                }
+                _ => unreachable!(),
+            },
+            pending_drink_contacts: Vec::with_capacity(reference.openings.len()),
             latched_mechanism: None,
             use_consumed: false,
             mechanism_release_distance_squared: (reference.player.aim_reach * 1.5).powi(2),
@@ -547,6 +607,8 @@ impl InteractionState {
             flow: None,
             fill_called: false,
             empty_pour: false,
+            particles: None,
+            contact: None,
         });
         Ok(())
     }
@@ -657,9 +719,25 @@ impl InteractionState {
         self.carry.pickup(item, point, player, items, physics)
     }
 
+    pub fn fluid_particles(
+        &self,
+    ) -> impl Iterator<Item = (OpeningId, &fluid_contact::FluidContact)> {
+        self.openings
+            .iter()
+            .filter_map(|o| o.contact.as_ref().map(|c| (o.reference.id, c)))
+    }
     pub fn rebase(&mut self, shift: [f32; 3]) {
         self.mechanisms.rebase(shift);
         self.parts.rebase(shift);
+        for opening in &mut self.openings {
+            if let Some(contact) = opening.contact.as_mut() {
+                contact.rebase(Vector::from_array(shift));
+            }
+        }
+    }
+
+    pub fn take_drink_contact(&mut self) -> Option<(ItemId, f32, [f32; 6])> {
+        self.pending_drink_contacts.pop()
     }
 
     pub fn step(
@@ -670,6 +748,8 @@ impl InteractionState {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
         dt: f32,
+        needs: NeedsOutput,
+        fluid_scale: f32,
     ) -> Option<InteractionAction> {
         self.finish_cancelled_input(player, physics);
         if !dt.is_finite() || dt <= 0.0 {
@@ -682,6 +762,7 @@ impl InteractionState {
         }
         self.mechanisms.begin_audio_step();
         let mut cap_sounds = [None; 2];
+        self.pending_drink_contacts.clear();
         let acquisition_release = self.carry.acquisition_held();
         self.carry.release_acquisition(input);
         let reach = self.reach;
@@ -691,10 +772,10 @@ impl InteractionState {
         if input.held & keys::USE == 0 {
             self.seat_action_latched = false;
         }
-        let availability = self.available_actions(&aim, player, items, physics);
+        let availability = self.available_actions(&aim, player, items, physics, needs);
         let light_action = availability.light_control.filter(|_| {
             input.pressed & keys::USE != 0
-                || (input.pressed & keys::FILL != 0 && availability.lmb_use)
+                || (input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
         });
         let target = aim
             .use_target
@@ -776,7 +857,7 @@ impl InteractionState {
             }
         } else if let Some(target) = use_target {
             if input.pressed & keys::USE != 0
-                || (input.pressed & keys::FILL != 0 && availability.lmb_use)
+                || (input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
             {
                 for opening in &mut self.openings {
                     if opening.reference.cap == target.item && opening.reference.can_toggle {
@@ -836,19 +917,19 @@ impl InteractionState {
             }
             if self.mechanisms.contains(target.item)
                 && (input.pressed & keys::USE != 0
-                    || (input.pressed & keys::FILL != 0
+                    || (input.pressed & keys::PRIMARY != 0
                         && self.mechanisms.primary_switch(target.item)
                         && availability.lmb_use)
                     || input.held & keys::USE != 0
-                    || (input.held & keys::FILL != 0
+                    || (input.held & keys::PRIMARY != 0
                         && self.mechanisms.radio_tunable(target.item)
                         && availability.lmb_use)
                     || (input.wheel != 0.0 && self.mechanisms.scroll_eligible(target.item)))
             {
                 let mut mechanism_input = input;
                 if !availability.lmb_use {
-                    mechanism_input.held &= !keys::FILL;
-                    mechanism_input.pressed &= !keys::FILL;
+                    mechanism_input.held &= !keys::PRIMARY;
+                    mechanism_input.pressed &= !keys::PRIMARY;
                 }
                 self.mechanisms
                     .step(target.item, mechanism_input, player.view_pose(physics), dt);
@@ -860,7 +941,7 @@ impl InteractionState {
         for sound in cap_sounds.into_iter().flatten() {
             self.sound(sound);
         }
-        let available = self.available_actions(&aim, player, items, physics);
+        let available = self.available_actions(&aim, player, items, physics, needs);
         if input.pressed & keys::GRAB != 0 {
             self.f_gesture_consumed = false;
         }
@@ -1011,7 +1092,7 @@ impl InteractionState {
         items.sync_poses(physics);
         let mut filling = None;
         let mut filled_destination = None;
-        if input.held & keys::FILL != 0
+        if input.held & keys::PRIMARY != 0
             && available.actions.0 & ActionMask::FILL != 0
             && let Some(held) = self.held()
             && let Some(target) = filling_target
@@ -1069,7 +1150,7 @@ impl InteractionState {
                             .max(0.0001)
                             .min(amount);
                     }
-                    let liters = transfer(source, destination_state, amount);
+                    let liters = transfer(source, destination_state, amount * fluid_scale);
                     if liters > 0.0 {
                         filling = Some(source_id);
                         filled_destination = Some(destination_opening);
@@ -1087,21 +1168,23 @@ impl InteractionState {
                 opening.flow = Some((true, 1.));
                 opening.fill_called = true;
             }
-            if opening.valve <= 0.0
-                || opening.reference.spill_disabled
-                || opening.reference.tube_connected
-                || filling == Some(opening.reference.tank)
-            {
+            let Some(particles) = opening.particles.as_ref() else {
                 continue;
-            }
+            };
+            let contact = opening.contact.as_mut().unwrap();
             let Some(item) = items.get_mut(opening.reference.tank) else {
                 continue;
             };
             if item.inactive_pose.is_some() {
                 continue;
             }
-            let forward = (to_rapier(item.pose) * opening.local_pose).rotation * opening.tilt_axis;
+            let cap_pose = to_rapier(item.pose) * opening.local_pose;
+            let forward = cap_pose.rotation * opening.tilt_axis;
             let angle = forward.dot(Vector::Y).clamp(-1.0, 1.0).acos().to_degrees();
+            let mut emission_rate = 0.;
+            let mut emission_speed = 0.;
+            let mut poured = None;
+            let mut fractions = [0.; 6];
             if let Some(fluid) = item.fluid.as_mut() {
                 let fill = (fluid.mixture.total() / fluid.capacity_liters).clamp(0.0, 1.0);
                 let threshold = 100.0 + (opening.reference.tilt_degrees - 100.0) * fill;
@@ -1111,18 +1194,93 @@ impl InteractionState {
                     inverse_lerp(threshold, opening.reference.tilt_degrees + 90.0, angle)
                         .max(inverse_lerp(90.0, 180.0, angle))
                 };
-                if !opening.reference.angle_disabled && angle <= threshold {
-                    continue;
-                }
                 opening.empty_pour = fluid.mixture.total() <= 0.;
-                let speed = factor * opening.valve * opening.reference.flow_liters_per_second;
-                if spill(fluid, speed * dt) > 0. {
-                    opening.flow = Some((false, speed));
+                let emitting = opening.valve > 0.
+                    && !opening.reference.spill_disabled
+                    && !opening.reference.tube_connected
+                    && filling != Some(opening.reference.tank)
+                    && (opening.reference.angle_disabled || angle > threshold)
+                    && fluid.mixture.total() > 0.;
+                if emitting {
+                    let speed = factor * opening.valve * opening.reference.flow_liters_per_second;
+                    let requested_liters = speed * dt * fluid_scale;
+                    let total = fluid.mixture.total();
+                    fractions = fluid.mixture.quantities_liters.map(|amount| amount / total);
+                    let debited = spill(fluid, requested_liters);
+                    if debited > 0. {
+                        opening.flow = Some((false, speed));
+                    }
+                    poured = Some(requested_liters);
+                    emission_rate = particles.min_rate
+                        + (particles.max_rate - particles.min_rate) * speed.clamp(0., 1.);
+                    emission_speed = particles.max_speed * fill * factor;
+                }
+            }
+            let view = to_rapier(player.view_pose(physics));
+            let cap_center = view.translation + view.rotation * self.drink_collider_center;
+            if poured.is_some() {
+                contact.set_color(fractions);
+            }
+            let hit = contact.advance(
+                particles,
+                cap_pose,
+                opening.tilt_axis,
+                item.body,
+                self.player_body,
+                cap_center,
+                self.drink_collider_radius,
+                self.drink_contact_radius,
+                physics,
+                dt,
+                emission_rate,
+                emission_speed,
+                poured,
+            );
+            if hit && contact.last_poured > 0. {
+                if poured.is_none() {
+                    let Some(fluid) = item.fluid.as_ref() else {
+                        continue;
+                    };
+                    let total = fluid.mixture.total();
+                    if total <= 0. {
+                        continue;
+                    }
+                    fractions = fluid.mixture.quantities_liters.map(|amount| amount / total);
+                }
+                if action.is_none() {
+                    action = Some(InteractionAction::DrinkContact {
+                        source: opening.reference.tank,
+                        poured_liters: contact.last_poured,
+                        fractions,
+                    });
+                } else {
+                    self.pending_drink_contacts.push((
+                        opening.reference.tank,
+                        contact.last_poured,
+                        fractions,
+                    ));
                 }
             }
         }
         if input.released & keys::GRAB != 0 {
             self.f_gesture_consumed = false;
+        }
+        if action.is_none()
+            && input.pressed & keys::PRIMARY != 0
+            && available.actions.0 & ActionMask::CONSUME != 0
+            && let Some(item) = self.held()
+        {
+            action = Some(InteractionAction::Consume(item));
+        }
+        if action.is_none()
+            && input.held & keys::PRIMARY != 0
+            && available.actions.0 & ActionMask::DRINK != 0
+            && let Some(source) = self.held()
+        {
+            action = Some(InteractionAction::Drink {
+                source,
+                requested_liters: self.drink_flow_liters_per_second * dt * fluid_scale,
+            });
         }
         self.fill_opening = availability.fill_reservation;
         action

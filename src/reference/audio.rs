@@ -159,7 +159,8 @@ record!(AudioReference {
     mechanisms: Vec<MechanismAudioReference>, fluids: Vec<FluidAudioReference>,
     interiors: Vec<AudioInteriorReference>, routes: Vec<AudioRouteReference>, lamps: Vec<LampAudioReference>,
     silent_actions: Vec<String>, managed: AudioManagedEvidence, native: AudioNativeEvidence,
-    shared: AudioSharedReference, mixer_controls: AudioMixerControls
+    shared: AudioSharedReference, mixer_controls: AudioMixerControls,
+    survival: Vec<SurvivalAudioReference>
 });
 
 fn values(v: impl IntoIterator<Item = f32>) -> bool {
@@ -321,6 +322,36 @@ impl AudioReference {
                     )?;
                 }
             }
+        }
+        AudioGameplayReference::from_value(&game.audio)?;
+        for b in &self.survival {
+            let s = &b.settings;
+            require(
+                mixers.contains(&b.mixer)
+                    && b.source.path_id != 0
+                    && b.audio_source.path_id != 0
+                    && method(&b.method)
+                    && values(b.offset)
+                    && values(b.gain)
+                    && b.gain[0] >= 0.
+                    && b.gain[1] >= b.gain[0]
+                    && values([
+                        s.gain,
+                        s.pitch,
+                        s.min_distance,
+                        s.max_distance,
+                        s.spatial_blend,
+                        b.doppler,
+                        b.pan,
+                    ])
+                    && s.pitch > 0.
+                    && s.min_distance > 0.
+                    && s.max_distance >= s.min_distance
+                    && s.rolloff_mode <= 2
+                    && valid_curve(&s.rolloff_curve)
+                    && valid_curve(&s.spatial_blend_curve),
+                "survival audio playback",
+            )?;
         }
         for b in &self.bindings {
             require(
@@ -660,5 +691,89 @@ impl AudioReference {
             "audio evidence",
         )?;
         Ok(())
+    }
+}
+
+record!(SurvivalAudioReference {
+    role: String, kind: u32, source: SourceId, audio_source: SourceId,
+    clips: Vec<u32>, gain: [f32; 2], pitch: [f32; 2], offset: [f32; 3],
+    settings: AudioSourceSettings, mixer: u32, doppler: f32, pan: f32, method: AudioMethod
+});
+#[derive(Clone, Debug, Deserialize)]
+pub struct AudioGateBinding {
+    pub role: String,
+    pub kind: u32,
+    pub clips: Vec<u32>,
+    pub pitch: [f32; 2],
+}
+#[derive(Clone, Debug, Deserialize)]
+pub struct AudioGateClip {
+    pub id: u32,
+    pub source: SourceId,
+    pub frames: u64,
+    pub frequency: u32,
+    pub duration_seconds: f64,
+}
+#[derive(Clone, Debug, Deserialize)]
+pub struct AudioGameplayReference {
+    #[serde(rename = "survival")]
+    pub bindings: Vec<AudioGateBinding>,
+    pub clips: Vec<AudioGateClip>,
+}
+impl AudioGameplayReference {
+    pub fn from_value(raw: &serde_json::Value) -> Result<Self, ReferenceError> {
+        let r: Self = serde_json::from_value(raw.clone())
+            .map_err(|e| ReferenceError(format!("Required audio timing: {e}")))?;
+        let clips = ids(r.clips.iter().map(|c| c.id), "required audio clip IDs")?;
+        for c in &r.clips {
+            require(
+                c.id > 0
+                    && c.source.path_id != 0
+                    && c.frames > 0
+                    && c.frequency > 0
+                    && c.duration_seconds.is_finite()
+                    && c.duration_seconds > 0.
+                    && (c.duration_seconds - c.frames as f64 / f64::from(c.frequency)).abs() < 1e-6,
+                "required source audio duration",
+            )?;
+        }
+        for (kind, role) in [
+            (0, "eat"),
+            (1, "burp"),
+            (2, "fart"),
+            (4, "sleep"),
+            (5, "death"),
+            (6, "storm"),
+            (7, "ambient_day"),
+            (8, "ambient_night"),
+            (9, "shit"),
+            (10, "storm_inside"),
+        ] {
+            require(
+                r.bindings
+                    .iter()
+                    .filter(|b| b.kind == kind && b.role == role)
+                    .count()
+                    == 1,
+                "required audio role",
+            )?;
+            let b = r.binding(kind);
+            require(
+                !b.clips.is_empty()
+                    && b.clips.iter().all(|id| clips.contains(id))
+                    && values(b.pitch)
+                    && b.pitch[0] > 0.
+                    && b.pitch[1] >= b.pitch[0],
+                "required audio clips and pitch",
+            )?;
+        }
+        require(r.bindings.len() == 10, "required audio roles")?;
+        Ok(r)
+    }
+    pub fn binding(&self, kind: u32) -> &AudioGateBinding {
+        self.bindings
+            .iter()
+            .find(|b| b.kind == kind)
+            .expect("validated audio timing")
     }
 }
