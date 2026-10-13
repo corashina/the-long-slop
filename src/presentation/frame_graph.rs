@@ -349,6 +349,7 @@ pub fn spawn_cameras(
     commands.spawn((
         SourceSkyCamera,
         Camera3d::default(),
+        bevy::light::cluster::ClusterConfig::None,
         bevy::camera::Hdr,
         Camera {
             order: sky.order as isize,
@@ -396,6 +397,7 @@ pub fn spawn_cameras(
         };
         let mut entity = commands.spawn((
             Camera3d::default(),
+            bevy::light::cluster::ClusterConfig::Single,
             bevy::camera::Hdr,
             Camera { order, ..default() },
             CameraRenderGraph::new(SourceSurface),

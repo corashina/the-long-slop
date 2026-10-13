@@ -458,6 +458,7 @@ pub fn bind_mirrors(world: &mut World) {
         let camera = world
             .spawn((
                 Camera3d::default(),
+                bevy::light::cluster::ClusterConfig::Single,
                 bevy::render::camera::CameraRenderGraph::new(super::surface_graph::SourceSurface),
                 super::surface_views::SourceSurfaceView {
                     index: super::surface_views::MIRROR_START + bindings.len(),
