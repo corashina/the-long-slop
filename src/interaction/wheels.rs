@@ -51,6 +51,11 @@ pub struct WheelAssemblies {
 }
 
 impl WheelAssemblies {
+    pub fn has_external_dependents(&self, owns: impl Fn(ItemId) -> bool) -> bool {
+        self.parts.iter().any(|part| {
+            owns(part.item) && part.tire.is_some_and(|tire| !owns(self.parts[tire].item))
+        })
+    }
     pub(crate) fn retained_binding_bytes(&self) -> usize {
         use super::memory::{map, set, strings, vector};
         vector(&self.rules)

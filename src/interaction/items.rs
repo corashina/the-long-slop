@@ -208,6 +208,25 @@ impl ItemStore {
     pub fn remove_generated_slot(&mut self, id: PartSlotId) {
         self.slot_owners.remove(&id);
     }
+    /// Includes imported and generated items. A crossing ownership edge pins its owner.
+    pub fn has_external_dependents(&self, owns: impl Fn(ItemId) -> bool) -> bool {
+        self.states.iter().any(|item| {
+            if owns(item.id) {
+                return false;
+            }
+            match item.location {
+                ItemLocation::Attached(parent) => owns(parent),
+                ItemLocation::PartSlot(slot) => self
+                    .slot_owners
+                    .get(&slot)
+                    .copied()
+                    .flatten()
+                    .is_some_and(&owns),
+                ItemLocation::WheelSlot(_) => owns(self.vehicle_item),
+                _ => false,
+            }
+        })
+    }
     pub fn attached_to(&self, mut id: ItemId, root: ItemId) -> bool {
         for _ in 0..self.states.len() {
             if id == root {

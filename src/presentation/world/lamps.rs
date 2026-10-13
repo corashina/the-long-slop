@@ -11,6 +11,12 @@ use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 
 pub(crate) struct RoadLampRecipe;
 
+#[derive(Clone, Copy)]
+struct ProxyAllocation {
+    slot: usize,
+    shadow_start: usize,
+    faces: usize,
+}
 struct SourceProxy {
     id: crate::world::GeneratedId,
     node: Entity,
@@ -22,6 +28,8 @@ struct SourceProxy {
 pub(crate) struct RoadLamps {
     source_proxies: Vec<SourceProxy>,
     required: Vec<crate::world::GeneratedId>,
+    allocation: [Option<ProxyAllocation>; crate::presentation::lighting::MAX_LIGHTS],
+    preflight_ready: bool,
     pub capacity: usize,
     pub fixed_lights: usize,
     pub fixed_shadows: usize,
@@ -34,12 +42,18 @@ pub(crate) struct RoadLamps {
     origin: [f64; 3],
 }
 impl RoadLamps {
+    pub fn admitted_lights(&self) -> Option<&[crate::world::GeneratedId]> {
+        self.preflight_ready.then_some(self.required.as_slice())
+    }
+
     pub fn reset_instances(&mut self, commands: &mut Commands) {
         for proxy in self.source_proxies.drain(..) {
             commands.entity(proxy.node).despawn();
             commands.entity(proxy.light).despawn();
         }
         self.required.clear();
+        self.allocation.fill(None);
+        self.preflight_ready = false;
         self.origin = [f64::INFINITY; 3];
     }
     pub fn new(_spacing: f64) -> Self {
@@ -47,6 +61,8 @@ impl RoadLamps {
         Self {
             source_proxies: Vec::with_capacity(crate::presentation::lighting::MAX_LIGHTS),
             required: Vec::with_capacity(crate::presentation::lighting::MAX_LIGHTS),
+            allocation: [None; crate::presentation::lighting::MAX_LIGHTS],
+            preflight_ready: false,
             capacity,
             fixed_lights: 0,
             fixed_shadows: 0,
@@ -292,8 +308,6 @@ pub(crate) fn finish_road_lamp_warmup(commands: &mut Commands, source: &mut Sour
 /// The source frame owns pole geometry. Receiver influence owns independent light proxies.
 pub(crate) fn sync_source_lamps(
     frame: &crate::world::WorldFrame<'_>,
-    receivers: &[crate::world::WorldBounds],
-    _reference: &crate::reference::ReferenceManifest,
     enabled: bool,
     source: &mut SourceLighting,
     commands: &mut Commands,
@@ -302,29 +316,22 @@ pub(crate) fn sync_source_lamps(
     if source.road_lamps.recipe.is_none() || source.warming {
         return Ok(());
     }
-    crate::world::required_world_lights(frame, receivers, &mut source.road_lamps.required);
-    let required = source.road_lamps.required.len();
-    let light_capacity = crate::presentation::lighting::MAX_LIGHTS - source.road_lamps.fixed_lights;
-    let shadow_capacity =
-        crate::presentation::lighting::SHADOW_SLOTS - source.road_lamps.fixed_shadows;
-    let shadow_count: usize = frame
-        .lights
-        .iter()
-        .filter(|l| source.road_lamps.required.contains(&l.id))
-        .map(|l| {
-            if l.record.shadows.kind == 0 {
-                0
-            } else if l.record.kind == crate::reference::LightKind::Point {
-                6
-            } else {
-                1
-            }
+    if !source.road_lamps.preflight_ready
+        || source.road_lamps.required.iter().any(|id| {
+            frame
+                .lights
+                .iter()
+                .find(|light| &light.id == id)
+                .is_none_or(|light| {
+                    !frame
+                        .structures
+                        .iter()
+                        .any(|s| light.owned_by(&s.placement.id))
+                })
         })
-        .sum();
-    if required > light_capacity || shadow_count > shadow_capacity {
-        return Err(crate::reference::ReferenceError(format!(
-            "Required source lights exceed renderer capacity: {required}"
-        )));
+    {
+        // Preserve the accepted proxy set until every required owner is published.
+        return Ok(());
     }
     for index in (0..source.road_lamps.source_proxies.len()).rev() {
         if source
@@ -364,38 +371,20 @@ pub(crate) fn sync_source_lamps(
                 transform.set_if_neq(pose);
             }
         } else {
-            let slot = (0..light_capacity)
-                .find(|slot| {
-                    !source
-                        .road_lamps
-                        .source_proxies
-                        .iter()
-                        .any(|proxy| proxy.slot == *slot)
-                })
+            let index = source
+                .road_lamps
+                .required
+                .iter()
+                .position(|id| id == &light.id)
                 .unwrap();
+            let ProxyAllocation {
+                slot,
+                shadow_start,
+                faces,
+            } = source.road_lamps.allocation[index].ok_or_else(|| {
+                crate::reference::ReferenceError("Source lamp has no proxy admission".into())
+            })?;
             let node = commands.spawn((pose, Visibility::Inherited)).id();
-            let faces = if light.record.shadows.kind == 0 {
-                0
-            } else if light.record.kind == crate::reference::LightKind::Point {
-                6
-            } else {
-                1
-            };
-            let shadow_start = (source.road_lamps.fixed_shadows
-                ..=crate::presentation::lighting::SHADOW_SLOTS - faces)
-                .find(|start| {
-                    source.road_lamps.source_proxies.iter().all(|p| {
-                        faces == 0
-                            || p.faces == 0
-                            || *start + faces <= p.shadow_start
-                            || *start >= p.shadow_start + p.faces
-                    })
-                })
-                .ok_or_else(|| {
-                    crate::reference::ReferenceError(
-                        "Source shadow atlas has no complete lamp range".into(),
-                    )
-                })?;
             let entity = register_world_light(
                 source,
                 commands,
@@ -421,10 +410,13 @@ pub(crate) fn sync_source_lamps(
 pub(crate) fn source_lamp_admission(
     frame: &crate::world::WorldFrame<'_>,
     receivers: &[crate::world::WorldBounds],
-    _reference: &crate::reference::ReferenceManifest,
     source: &mut SourceLighting,
-    _pending_road: Option<[i64; 2]>,
 ) -> Result<(usize, usize, usize), crate::reference::ReferenceError> {
+    source.road_lamps.preflight_ready = false;
+    source.road_lamps.allocation.fill(None);
+    if source.warming {
+        return Ok((0, 0, 0));
+    }
     let Some(_recipe) = &source.road_lamps.recipe else {
         return Ok((0, 0, 0));
     };
@@ -452,6 +444,60 @@ pub(crate) fn source_lamp_admission(
             "Required source lights exceed renderer capacity: {required}"
         )));
     }
+    // Simulate exact retained slot ranges before any region publishes.
+    let mut slots = [false; crate::presentation::lighting::MAX_LIGHTS];
+    let mut shadows = [false; crate::presentation::lighting::SHADOW_SLOTS];
+    shadows[..source.road_lamps.fixed_shadows].fill(true);
+    for (index, id) in source.road_lamps.required.iter().enumerate() {
+        if let Some(proxy) = source
+            .road_lamps
+            .source_proxies
+            .iter()
+            .find(|p| &p.id == id)
+        {
+            slots[proxy.slot] = true;
+            shadows[proxy.shadow_start..proxy.shadow_start + proxy.faces].fill(true);
+            source.road_lamps.allocation[index] = Some(ProxyAllocation {
+                slot: proxy.slot,
+                shadow_start: proxy.shadow_start,
+                faces: proxy.faces,
+            });
+        }
+    }
+    for (index, id) in source.road_lamps.required.iter().enumerate() {
+        if source.road_lamps.allocation[index].is_some() {
+            continue;
+        }
+        let light = frame.lights.iter().find(|light| &light.id == id).unwrap();
+        let faces = if light.record.shadows.kind == 0 {
+            0
+        } else if light.record.kind == crate::reference::LightKind::Point {
+            6
+        } else {
+            1
+        };
+        let slot = (0..light_capacity)
+            .find(|slot| !slots[*slot])
+            .ok_or_else(|| {
+                crate::reference::ReferenceError("Source light slot admission failed".into())
+            })?;
+        let shadow_start = (source.road_lamps.fixed_shadows
+            ..=crate::presentation::lighting::SHADOW_SLOTS - faces)
+            .find(|start| shadows[*start..*start + faces].iter().all(|used| !used))
+            .ok_or_else(|| {
+                crate::reference::ReferenceError(
+                    "Source shadow atlas has no complete lamp range".into(),
+                )
+            })?;
+        slots[slot] = true;
+        shadows[shadow_start..shadow_start + faces].fill(true);
+        source.road_lamps.allocation[index] = Some(ProxyAllocation {
+            slot,
+            shadow_start,
+            faces,
+        });
+    }
+    source.road_lamps.preflight_ready = true;
     let proxies = source.road_lamps.source_proxies.len()
         + source
             .road_lamps
@@ -467,5 +513,9 @@ pub(crate) fn source_lamp_admission(
             .count();
     let objects = proxies * 2;
     // ECS and GPU transform reservations include old/new overlap until the next frame.
-    Ok((objects * 2048 + proxies * 1024, objects * 256, objects))
+    Ok((
+        objects * 2048 + proxies * 1024 + std::mem::size_of_val(&source.road_lamps.allocation),
+        objects * 256,
+        objects,
+    ))
 }

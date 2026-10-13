@@ -312,6 +312,16 @@ impl PartAttachments {
             self.parts[*i].reference.usable = Some(usable);
         }
     }
+    pub fn has_external_dependents(&self, owns: impl Fn(ItemId) -> bool) -> bool {
+        self.slots.iter().any(|slot| {
+            slot.reference.owner.is_some_and(&owns)
+                && slot
+                    .part
+                    .is_some_and(|part| !owns(self.parts[part].reference.item))
+        }) || self.parts.iter().any(|part| {
+            owns(part.reference.item) && part.members.iter().any(|(item, _, _)| !owns(*item))
+        })
+    }
     pub fn next_generated_slot(&self) -> Result<PartSlotId, ReferenceError> {
         self.slots
             .iter()

@@ -532,9 +532,7 @@ impl WorldStream {
                     );
                 }
             }
-            protected |= self.contents.active.iter().any(|child| child.item.and_then(|i| items.get(i)).is_some_and(|item| {
-                matches!(item.location, crate::interaction::items::ItemLocation::PartSlot(slot) if content.slots.iter().any(|s| s.slot == slot))
-            }));
+            protected |= content.has_external_dependents(items, &interaction.parts, wheels);
             if distance < remove * remove || protected {
                 if let Some(body) = id.and_then(|id| items.get(id)).and_then(|s| s.body) {
                     if !protected

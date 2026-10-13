@@ -21,6 +21,33 @@ pub struct WorldLight {
     pub intensity: f32,
 }
 impl WorldLight {
+    /// Structure lights append their component identity; road lights share the pole identity.
+    pub fn owned_by(&self, parent: &GeneratedId) -> bool {
+        if self.biome.is_some() {
+            return self.id == *parent;
+        }
+        self.id.layer == parent.layer
+            && self.id.generator == parent.generator
+            && self.id.unit == parent.unit
+            && self.id.ordinal == parent.ordinal
+            && self.id.children.len() == parent.children.len() + 1
+            && self.id.children.starts_with(&parent.children)
+    }
+    pub fn influences(&self, bounds: WorldBounds) -> bool {
+        (0..3)
+            .map(|i| {
+                let d = if self.pose.position[i] < bounds.min[i] {
+                    bounds.min[i] - self.pose.position[i]
+                } else if self.pose.position[i] > bounds.max[i] {
+                    self.pose.position[i] - bounds.max[i]
+                } else {
+                    0.
+                };
+                d * d
+            })
+            .sum::<f64>()
+            <= (self.range as f64).powi(2)
+    }
     pub(crate) fn heap_bytes(&self) -> usize {
         super::contents::identity_heap(&self.id)
             + self.record.source.file.capacity()
@@ -262,22 +289,10 @@ pub fn required_world_lights(
 ) {
     let mut count = 0;
     for light in frame.lights {
-        if receiver_bounds.iter().any(|bounds| {
-            let squared = (0..3)
-                .map(|i| {
-                    let p = light.pose.position[i];
-                    let d = if p < bounds.min[i] {
-                        bounds.min[i] - p
-                    } else if p > bounds.max[i] {
-                        p - bounds.max[i]
-                    } else {
-                        0.
-                    };
-                    d * d
-                })
-                .sum::<f64>();
-            squared <= (light.range as f64).powi(2)
-        }) && !output[..count].contains(&light.id)
+        if receiver_bounds
+            .iter()
+            .any(|bounds| light.influences(*bounds))
+            && !output[..count].contains(&light.id)
         {
             if count == output.len() {
                 output.push(light.id.clone());

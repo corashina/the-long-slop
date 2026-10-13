@@ -258,16 +258,8 @@ impl WorldPresentation<'_, '_> {
         );
         self.surfaces
             .prepare_surface(stream, &mut self.meshes, &mut self.pipelines)?;
-        let pending_road = stream.prepared_surface().and_then(|(_, surface)| {
-            (surface.key.layer == crate::world::WorldLayer::Road).then_some(surface.key.unit)
-        });
-        let lamps = super::lamps::source_lamp_admission(
-            &stream.frame(),
-            receivers,
-            reference,
-            &mut self.lights,
-            pending_road,
-        )?;
+        let lamps =
+            super::lamps::source_lamp_admission(&stream.frame(), receivers, &mut self.lights)?;
         let old = self.allocation.lamps;
         let mut a = stream.presentation_allocation();
         a.active_cpu = a.active_cpu.saturating_sub(old.0) + lamps.0;
@@ -276,7 +268,9 @@ impl WorldPresentation<'_, '_> {
         stream.set_presentation_allocation(a)?;
         self.allocation.lamps = lamps;
         // Light admission and complete renderer preparation precede collision mutation.
-        stream.publish(physics)?;
+        if let Some(required) = self.lights.road_lamps.admitted_lights() {
+            stream.publish(physics, required)?;
+        }
         stream.sync_supplies(
             reference,
             &mut area.items,
@@ -300,8 +294,6 @@ impl WorldPresentation<'_, '_> {
         )?;
         super::lamps::sync_source_lamps(
             &stream.frame(),
-            receivers,
-            reference,
             enabled,
             &mut self.lights,
             &mut self.commands,

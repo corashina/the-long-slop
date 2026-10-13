@@ -82,6 +82,17 @@ impl ContentInstance {
             },
         }
     }
+    pub fn has_external_dependents(
+        &self,
+        items: &crate::interaction::items::ItemStore,
+        parts: &crate::interaction::parts::PartAttachments,
+        wheels: &crate::interaction::wheels::WheelAssemblies,
+    ) -> bool {
+        let owns = |item| self.item == Some(item) || self.bindings.iter().any(|b| b.item == item);
+        items.has_external_dependents(owns)
+            || parts.has_external_dependents(owns)
+            || wheels.has_external_dependents(owns)
+    }
     pub fn control_heap_bytes(&self) -> usize {
         placement_heap(&self.content.placement)
             + self.bindings.capacity() * std::mem::size_of::<ContentBinding>()

@@ -1087,8 +1087,8 @@ impl WorldStream {
                     + s.holes.len() * std::mem::size_of::<[[f32; 3]; 4]>()
             });
             let pending_bytes = TerrainSurfaceJob::allocation_bound(tile)
-                + self.placements.foundation_count()
-                + self.structure_helpers.count(&self.wanted_structures)
+                + (self.placements.foundation_count()
+                    + self.structure_helpers.count(&self.wanted_structures))
                     * 2
                     * (std::mem::size_of::<super::FoundationPoint>()
                         + std::mem::size_of::<TerrainFoundation>())
@@ -1265,14 +1265,34 @@ impl WorldStream {
         Ok(())
     }
     /// Publish at most one completed unit. Stale work never changes accepted collision.
-    pub fn publish(&mut self, physics: &mut PhysicsWorld) -> Result<(), ReferenceError> {
-        let result = self.publish_unit(physics);
+    pub fn publish(
+        &mut self,
+        physics: &mut PhysicsWorld,
+        required_lights: &[super::GeneratedId],
+    ) -> Result<(), ReferenceError> {
+        let result = self.publish_unit(physics, required_lights);
         if result.is_ok() && self.failure.is_none() {
             self.retire_surfaces(physics);
         }
         result
     }
-    fn publish_unit(&mut self, physics: &mut PhysicsWorld) -> Result<(), ReferenceError> {
+    fn publication_light(
+        &self,
+        light: &super::WorldLight,
+        required: &[super::GeneratedId],
+    ) -> bool {
+        required.contains(&light.id)
+            || (light.biome.is_some()
+                && self.ready.as_ref().is_some_and(|work| {
+                    work.published.key.layer == WorldLayer::Road
+                        && work.published.key.unit[0] == light.id.unit[0]
+                }))
+    }
+    fn publish_unit(
+        &mut self,
+        physics: &mut PhysicsWorld,
+        required_lights: &[super::GeneratedId],
+    ) -> Result<(), ReferenceError> {
         if !self.publication_available || self.failure.is_some() {
             return Ok(());
         }
@@ -1287,8 +1307,41 @@ impl WorldStream {
             self.ready = None;
             return Ok(());
         }
+        // The full required render set and this road's pole must finish preparation first.
+        if self
+            .lights
+            .iter()
+            .filter(|light| self.publication_light(light, required_lights))
+            .any(|light| {
+                !self
+                    .structures
+                    .iter()
+                    .any(|s| light.owned_by(&s.placement.id))
+                    && !self
+                        .ready_structures
+                        .iter()
+                        .any(|owner| light.owned_by(owner))
+            })
+        {
+            return Ok(());
+        }
+        // Structure receipts include geometry, materials and caster pipelines. Keep the surface
+        // and accepted collision while publishing its prepared dependencies, one unit per frame.
+        if self
+            .lights
+            .iter()
+            .filter(|light| self.publication_light(light, required_lights))
+            .any(|light| {
+                !self
+                    .structures
+                    .iter()
+                    .any(|s| light.owned_by(&s.placement.id))
+            })
+        {
+            return self.publish_structure(physics, required_lights);
+        }
         let Some(work) = self.ready.as_ref() else {
-            return self.publish_structure(physics);
+            return self.publish_structure(physics, required_lights);
         };
         let admitted = match &work.published.prototype {
             Some(source) => self.admissions.get(source).is_some_and(|v| v.ready),
@@ -1420,6 +1473,15 @@ impl WorldStream {
             [0, 2].into_iter().all(|axis| {
                 p.bounds.min[axis] <= swept.max[axis] && p.bounds.max[axis] >= swept.min[axis]
             }) && !self.structures.iter().any(|s| s.placement.id == p.id)
+        }) {
+            return false;
+        }
+        if self.lights.iter().any(|light| {
+            light.influences(swept)
+                && !self
+                    .structures
+                    .iter()
+                    .any(|s| light.owned_by(&s.placement.id))
         }) {
             return false;
         }
@@ -1642,18 +1704,33 @@ impl WorldStream {
         }
         Ok(())
     }
-    fn publish_structure(&mut self, physics: &mut PhysicsWorld) -> Result<(), ReferenceError> {
+    fn publish_structure(
+        &mut self,
+        physics: &mut PhysicsWorld,
+        required_lights: &[super::GeneratedId],
+    ) -> Result<(), ReferenceError> {
         if self.plan_revision != self.request.revision {
             return Ok(());
         }
-        let Some(placement) = self.wanted_structures.iter().find(|placement| {
+        let ready = |placement: &&Placement| {
             !self
                 .structures
                 .iter()
                 .any(|instance| instance.placement.id == placement.id)
                 && self.recipes.contains_key(&placement.prototype)
                 && self.ready_structures.contains(&placement.id)
-        }) else {
+        };
+        let Some(placement) = self
+            .wanted_structures
+            .iter()
+            .filter(ready)
+            .find(|placement| {
+                self.lights.iter().any(|light| {
+                    self.publication_light(light, required_lights) && light.owned_by(&placement.id)
+                })
+            })
+            .or_else(|| self.wanted_structures.iter().find(ready))
+        else {
             return Ok(());
         };
         let mut points = Vec::new();
@@ -1922,6 +1999,11 @@ impl WorldStream {
             let id = &self.structures[index].placement.id;
             let radius = self.reference.distances["BuildingGenDist"];
             if self.contents.contains(id)
+                || self
+                    .static_controls
+                    .iter()
+                    .filter(|c| &c.content.placement.id == id)
+                    .any(|c| c.has_external_dependents(items, &interaction.parts, wheels))
                 || (!id.children.is_empty() && self.wanted_structures.iter().any(|p| &p.id == id))
                 || (id.children.is_empty()
                     && id.layer != WorldLayer::Building
@@ -1938,7 +2020,13 @@ impl WorldStream {
                         }))
                 || self.supplies.iter().filter(|s| &s.key == id).any(|s| {
                     s.items.is_some_and(|(tank, cap)| {
-                        !items.can_remove_generated(tank) || !items.can_remove_generated(cap)
+                        !items.can_remove_generated(tank)
+                            || !items.can_remove_generated(cap)
+                            || items.has_external_dependents(|item| item == tank || item == cap)
+                            || interaction
+                                .parts
+                                .has_external_dependents(|item| item == tank || item == cap)
+                            || wheels.has_external_dependents(|item| item == tank || item == cap)
                     })
                 })
             {
