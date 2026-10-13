@@ -41,6 +41,36 @@ pub struct MechanismState {
     order: Vec<usize>,
 }
 impl MechanismState {
+    pub fn snapshot(&self, item: ItemId) -> Option<crate::world::MechanismSnapshot> {
+        let c = &self.controls[*self.items.get(&item)?];
+        Some(crate::world::MechanismSnapshot {
+            degrees: c.degrees,
+            slide: c.slide,
+            enabled: c.enabled,
+            turn_state: c.turn_state,
+        })
+    }
+    pub fn restore(
+        &mut self,
+        item: ItemId,
+        state: crate::world::MechanismSnapshot,
+    ) -> Result<(), ReferenceError> {
+        if !state.degrees.iter().all(|v| v.is_finite()) || !state.slide.is_finite() {
+            return Err(ReferenceError("Invalid mechanism snapshot".into()));
+        }
+        let index = *self
+            .items
+            .get(&item)
+            .ok_or_else(|| ReferenceError("Missing restored mechanism".into()))?;
+        let c = &mut self.controls[index];
+        c.degrees = state.degrees;
+        c.slide = state.slide;
+        c.enabled = state.enabled;
+        c.turn_state = state.turn_state;
+        self.apply(index);
+        Ok(())
+    }
+
     pub(super) fn retained_binding_bytes(&self) -> usize {
         use super::memory::{map, mechanism, vector};
         vector(&self.controls)

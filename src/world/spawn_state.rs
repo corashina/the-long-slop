@@ -172,6 +172,18 @@ pub struct SourceSpawnState {
     pub context: SpawnContext,
 }
 impl SourceSpawnState {
+    pub fn has_boundary(
+        &self,
+        parent: &GeneratedId,
+        caller: &SourceId,
+        ordinal: u32,
+        phase: SpawnPhase,
+    ) -> bool {
+        self.boundaries.iter().any(|b| {
+            &b.parent == parent && &b.caller == caller && b.ordinal == ordinal && b.phase == phase
+        })
+    }
+
     pub fn supplied_controlled_startup(
         reference: &crate::reference::WorldSpawnContext,
         context: SpawnContext,

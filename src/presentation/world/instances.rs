@@ -725,6 +725,13 @@ impl SourceInstances {
     ) -> Result<(), ReferenceError> {
         let frame = stream.frame();
         for instance in &mut self.instances {
+            if !stream.bindings_ready(&instance.placement.id) {
+                if instance.visible {
+                    commands.entity(instance.root).insert(Visibility::Hidden);
+                    instance.visible = false;
+                }
+                continue;
+            }
             let Some(published) = frame
                 .structures
                 .iter()

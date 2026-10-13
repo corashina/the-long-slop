@@ -151,6 +151,12 @@ pub struct WorldStream {
     reference: Arc<WorldReference>,
     presentation: PresentationAllocation,
     changes: super::ChangeRecords,
+    replay_roots: Vec<Placement>,
+    replay_keys: Vec<super::ObjectKey>,
+    replay_query: Vec<super::ObjectKey>,
+    change_revision: u64,
+    change_request: u64,
+    imported_baselines: Vec<(crate::reference::ItemId, super::ObjectSnapshot)>,
     road_light: super::source_lights::SourceRoadLight,
     lights: Vec<super::WorldLight>,
     wanted_lights: Vec<u32>,
@@ -286,6 +292,12 @@ impl WorldStream {
             road_layers,
             reference: Arc::clone(world),
             changes: super::ChangeRecords::default(),
+            replay_roots: Vec::new(),
+            replay_keys: Vec::new(),
+            replay_query: Vec::new(),
+            change_revision: u64::MAX,
+            change_request: u64::MAX,
+            imported_baselines: Vec::new(),
             road_light,
             lights: Vec::with_capacity(MAX_ROADS),
             wanted_lights: Vec::with_capacity(MAX_ROADS),
@@ -376,7 +388,10 @@ impl WorldStream {
                 .saturating_add(next.pending)
                 > 32
             || next.staging_bytes + self.generation_pending_bytes() > 32 * MIB
-            || next.jobs + usize::from(self.terrain_work.is_some()) > 2;
+            || next.jobs
+                + usize::from(self.terrain_work.is_some())
+                + usize::from(self.contents.has_replay())
+                > 2;
         if exceeds {
             return Err(ReferenceError(
                 "Source presentation admission exceeds its resource budget".into(),
@@ -413,7 +428,11 @@ impl WorldStream {
         if !self.indices_ready {
             return 0;
         }
-        2usize.saturating_sub(self.presentation.jobs + usize::from(self.terrain_work.is_some()))
+        2usize.saturating_sub(
+            self.presentation.jobs
+                + usize::from(self.terrain_work.is_some())
+                + usize::from(self.contents.has_replay()),
+        )
     }
     /// A completed renderer job uses the same frame publication slot as collision work.
     pub fn take_presentation_publication(&mut self) -> bool {
@@ -797,6 +816,13 @@ impl WorldStream {
         if self.failure.is_some() {
             return;
         }
+        if !self.contents.has_replay() && self.available_external_jobs() == 0 {
+            return;
+        }
+        self.select_changed_destinations();
+        if self.failure.is_some() {
+            return;
+        }
         let metrics = self.metrics();
         let limit = 32usize
             .saturating_sub(metrics.pending_work)
@@ -816,6 +842,7 @@ impl WorldStream {
         if let Err(error) = self.contents.advance(
             &self.reference,
             &self.wanted_structures,
+            &self.replay_roots,
             [self.request.player, self.request.vehicle],
             available,
             limit,
@@ -824,14 +851,96 @@ impl WorldStream {
             self.failure = Some(error.0);
             return;
         }
+        self.wanted_structures.retain(|p| {
+            self.changes
+                .get(super::ObjectKey::Generated(p.id.clone()))
+                .is_none_or(|change| {
+                    change.snapshot.is_some()
+                        && self
+                            .replay_keys
+                            .contains(&super::ObjectKey::Generated(p.id.clone()))
+                })
+        });
+        self.wanted_structures.retain(|p| {
+            let unbound = self
+                .contents
+                .active
+                .iter()
+                .any(|c| c.content.placement.id == p.id && c.item.is_none());
+            !unbound
+                || [self.request.player, self.request.vehicle]
+                    .into_iter()
+                    .any(|f| {
+                        source_distance_squared(f, p.pose.position)
+                            < self.reference.distances["ItemSpawnDist"].powi(2)
+                    })
+                || self.replay_keys.iter().any(|key| {
+                    self.changes.get(key).is_some_and(|c| {
+                        c.instance.as_ref() == Some(&p.id)
+                            || c.snapshot
+                                .as_ref()
+                                .and_then(|s| s.attachment.as_ref())
+                                .and_then(|a| a.owner.as_ref())
+                                == Some(&super::ObjectKey::Generated(p.id.clone()))
+                    })
+                })
+        });
+        for content in self.contents.instances() {
+            let key = super::ObjectKey::Generated(content.placement.id.clone());
+            let selected = self.replay_keys.iter().any(|key| {
+                self.changes.get(key).is_some_and(|c| {
+                    c.instance.as_ref() == Some(&content.placement.id)
+                        || c.snapshot
+                            .as_ref()
+                            .and_then(|s| s.attachment.as_ref())
+                            .and_then(|a| a.owner.as_ref())
+                            == Some(&super::ObjectKey::Generated(content.placement.id.clone()))
+                })
+            });
+            let changed = self.changes.get(&key);
+            if changed.is_some_and(|c| c.snapshot.is_none() || !selected) {
+                continue;
+            }
+            let baseline_near = [self.request.player, self.request.vehicle]
+                .into_iter()
+                .any(|p| {
+                    source_distance_squared(p, content.placement.pose.position)
+                        < self.reference.distances["ItemSpawnDist"].powi(2)
+                });
+            if !baseline_near
+                && !selected
+                && !self
+                    .structures
+                    .iter()
+                    .any(|s| s.placement.id == content.placement.id)
+            {
+                continue;
+            }
+            if !self
+                .wanted_structures
+                .iter()
+                .any(|p| p.id == content.placement.id)
+            {
+                self.wanted_structures.push(content.placement.clone());
+            }
+        }
         self.lights.retain(|light| {
             light.biome.is_some()
                 || self
                     .contents
                     .instances()
+                    .filter(|c| {
+                        self.wanted_structures
+                            .iter()
+                            .any(|p| p.id == c.placement.id)
+                    })
                     .any(|c| c.lights.iter().any(|l| l.id == light.id))
         });
-        for content in self.contents.instances() {
+        for content in self.contents.instances().filter(|c| {
+            self.wanted_structures
+                .iter()
+                .any(|p| p.id == c.placement.id)
+        }) {
             for light in &content.lights {
                 if let Some(current) = self.lights.iter_mut().find(|l| l.id == light.id) {
                     current.enabled = light.enabled;
@@ -842,16 +951,104 @@ impl WorldStream {
                 }
             }
         }
-        for content in &self.contents.active {
-            if !self
-                .wanted_structures
-                .iter()
-                .any(|p| p.id == content.content.placement.id)
+        self.contents
+            .discard_replay_siblings(&self.wanted_structures);
+        self.replay_roots.retain(|root| {
+            !self.contents.replay_finished(&root.id)
+                || self.replay_keys.iter().any(|key| {
+                    self.changes.get(key).is_some_and(|change| {
+                        change.replay.as_ref().is_some_and(|p| p.id == root.id)
+                            && change.instance.as_ref().is_some_and(|id| {
+                                !self
+                                    .contents
+                                    .active
+                                    .iter()
+                                    .chain(&self.static_controls)
+                                    .any(|c| &c.content.placement.id == id && c.restored)
+                            })
+                    })
+                })
+        });
+    }
+
+    fn select_changed_destinations(&mut self) {
+        if self.change_revision == self.changes.revision()
+            && self.change_request == self.request.revision
+        {
+            return;
+        }
+        let other_requests = self.metrics().pending_work.saturating_sub(
+            self.replay_roots
+                .len()
+                .max(usize::from(self.contents.has_replay())),
+        );
+        self.replay_roots.clear();
+        self.replay_keys.clear();
+        let radius = f64::from(self.reference.distances["ItemSpawnDist"]);
+        for focus in [self.request.player, self.request.vehicle] {
+            let bounds = WorldBounds {
+                min: [focus[0] - radius, f64::NEG_INFINITY, focus[2] - radius],
+                max: [focus[0] + radius, f64::INFINITY, focus[2] + radius],
+            };
+            let (count, bytes) = self.changes.query_reservation(bounds);
+            if count > MAX_OBJECTS
+                || bytes.saturating_mul(4) > self.available_staging_bytes()
+                || self
+                    .metrics()
+                    .active_cpu_bytes
+                    .saturating_add(bytes.saturating_mul(4))
+                    > ACTIVE_CPU
             {
-                self.wanted_structures
-                    .push(content.content.placement.clone());
+                self.failure =
+                    Some("Changed destination selection exceeds staging admission".into());
+                return;
+            }
+            self.replay_query.reserve(count);
+            self.changes.changes_in(
+                WorldBounds {
+                    min: [focus[0] - radius, f64::NEG_INFINITY, focus[2] - radius],
+                    max: [focus[0] + radius, f64::INFINITY, focus[2] + radius],
+                },
+                &mut self.replay_query,
+            );
+            for key in self.replay_query.drain(..) {
+                if self.replay_keys.contains(&key) {
+                    continue;
+                }
+                if let Some(origin) = self.changes.get(&key).and_then(|c| c.replay.as_ref()) {
+                    let active = self
+                        .changes
+                        .get(&key)
+                        .and_then(|c| c.instance.as_ref())
+                        .is_some_and(|id| {
+                            self.contents
+                                .active
+                                .iter()
+                                .chain(&self.static_controls)
+                                .any(|c| &c.content.placement.id == id)
+                        });
+                    let continuing = self.contents.replaying(&origin.id);
+                    if (!active || continuing)
+                        && !self.replay_roots.iter().any(|p| p.id == origin.id)
+                    {
+                        if other_requests + self.replay_roots.len() >= 32 {
+                            self.failure = Some(
+                                "Changed destination queue exceeds shared pending request limit"
+                                    .into(),
+                            );
+                            return;
+                        }
+                        self.replay_roots.push(origin.clone());
+                    }
+                }
+                self.replay_keys.push(key);
             }
         }
+        if self.replay_roots.len() > 32 || self.replay_keys.len() > MAX_OBJECTS {
+            self.failure = Some("Changed destination replay exceeds active admission".into());
+        }
+        self.change_revision = self.changes.revision();
+        self.change_request = self.request.revision;
     }
     pub fn spawn_boundaries(&self) -> &[super::SpawnBoundary] {
         self.contents.state.boundaries()
@@ -967,6 +1164,9 @@ impl WorldStream {
         Ok(())
     }
     fn prepare_road(&mut self) {
+        if self.available_external_jobs() == 0 {
+            return;
+        }
         let index = self.road_candidates[self.next_road];
         let segment = self.roads.prepare_segment(index, 8);
         self.last_road_work = self.roads.replay_work();
@@ -1067,6 +1267,9 @@ impl WorldStream {
         });
     }
     fn prepare_terrain(&mut self) {
+        if self.terrain_work.is_none() && self.available_external_jobs() == 0 {
+            return;
+        }
         if self.terrain_work.is_none() {
             let Some(key) = self
                 .wanted_tiles
@@ -1906,9 +2109,13 @@ impl WorldStream {
                     .unwrap(),
             ]);
             for (key, id) in [(tank_key, tank), (cap_key, cap)] {
-                if let Some(change) = self.changes.get(super::ObjectKey::Generated(key)) {
-                    items.restore_generated(id, &change.snapshot)?;
-                    if let Some(valve) = change.snapshot.valve {
+                if let Some(change) = self
+                    .changes
+                    .get(super::ObjectKey::Generated(key))
+                    .and_then(|c| c.snapshot.as_ref())
+                {
+                    items.restore_generated(id, change)?;
+                    if let Some(valve) = change.valve {
                         interaction.restore_generated_valve(id, valve)?;
                     }
                 }
@@ -1948,6 +2155,7 @@ impl WorldStream {
             }
             supply.items = Some((tank, cap));
         }
+        physics.refresh_queries();
         self.binding_owner_bytes = items.retained_binding_bytes()
             + interaction.retained_binding_bytes()
             + wheels.retained_binding_bytes();
@@ -2039,27 +2247,8 @@ impl WorldStream {
                     continue;
                 }
                 let supply = self.supplies.swap_remove(supply_index);
-                if let (Some((tank, cap)), Some(baselines)) = (supply.items, supply.baselines) {
-                    for (ordinal, (item, source, valve)) in [
-                        (tank, &supply.definition.tank, None),
-                        (
-                            cap,
-                            &supply.definition.cap,
-                            interaction.generated_valve(cap),
-                        ),
-                    ]
-                    .into_iter()
-                    .enumerate()
-                    {
-                        let mut key = supply.key.clone();
-                        key.children.push((source.clone(), 0));
-                        if let Some(snapshot) = items.generated_snapshot(item, valve) {
-                            self.changes.record(
-                                super::ObjectKey::Generated(key),
-                                snapshot,
-                                &baselines[ordinal],
-                            );
-                        }
+                if let Some((tank, cap)) = supply.items {
+                    for item in [tank, cap].into_iter() {
                         for (_, collider) in &instance.colliders {
                             interaction.unbind_generated(item, std::slice::from_ref(collider));
                         }
@@ -2258,7 +2447,11 @@ impl WorldStream {
     pub fn metrics(&self) -> WorldMetrics {
         let mut metrics = WorldMetrics {
             pending_bytes: self.presentation.staging_bytes + self.generation_pending_bytes(),
-            pending_work: self.contents.pending_requests()
+            pending_work: self
+                .replay_roots
+                .len()
+                .max(usize::from(self.contents.has_replay()))
+                + self.contents.pending_requests()
                 + self.props.pending_requests()
                 + self.ready_structures.len()
                 + usize::from(self.ready.is_some())
@@ -2283,9 +2476,30 @@ impl WorldStream {
             prototype_gpu_bytes: self.presentation.prototype_gpu,
             active_gpu_bytes: self.presentation.active_gpu,
             changed_record_bytes: self.changes.retained_bytes(),
-            changed_objects: self.changes.iter().count(),
-            active_cpu_bytes: self.static_controls.capacity()
-                * std::mem::size_of::<super::contents::ContentInstance>()
+            changed_objects: self.changes.len(),
+            active_cpu_bytes: self.imported_baselines.capacity()
+                * std::mem::size_of::<(crate::reference::ItemId, super::ObjectSnapshot)>()
+                + self
+                    .imported_baselines
+                    .iter()
+                    .map(|(_, s)| s.heap_bytes())
+                    .sum::<usize>()
+                + self.replay_roots.capacity() * std::mem::size_of::<Placement>()
+                + self
+                    .replay_roots
+                    .iter()
+                    .map(super::contents::placement_heap)
+                    .sum::<usize>()
+                + (self.replay_keys.capacity() + self.replay_query.capacity())
+                    * std::mem::size_of::<super::ObjectKey>()
+                + self
+                    .replay_keys
+                    .iter()
+                    .chain(&self.replay_query)
+                    .map(super::changes::key_heap)
+                    .sum::<usize>()
+                + self.static_controls.capacity()
+                    * std::mem::size_of::<super::contents::ContentInstance>()
                 + self
                     .static_controls
                     .iter()

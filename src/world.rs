@@ -1,6 +1,8 @@
 pub mod changes;
 pub mod types;
-pub use changes::{ChangeRecords, ObjectChange, ObjectSnapshot};
+pub use changes::{
+    AttachmentSnapshot, ChangeRecords, MechanismSnapshot, ObjectChange, ObjectSnapshot,
+};
 pub use types::*;
 
 use crate::reference::{Bounds, ColliderGeometry, ReferenceManifest, StartingAreaReference};

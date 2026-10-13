@@ -353,6 +353,7 @@ impl WorldPresentation<'_, '_> {
         }
         self.instances
             .request_grass(stream, &mut self.grass, view)?;
+        stream.capture_changes(reference, &mut area.items, &area.interaction, physics);
         stream.retire_structures(physics, &mut area.items, &mut area.interaction, wheels);
         self.instances.retire(
             stream,

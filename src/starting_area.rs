@@ -503,6 +503,7 @@ impl GarageRuntime {
         physics.refresh_queries();
         area.items.sync_poses(&physics);
         area.commit_poses(&physics, true);
+        stream.initialize_imported_changes(reference, &area.items, &area.interaction, &physics);
         let mut recovery_bounds = crate::reference::Bounds {
             min: [f32::MAX; 3],
             max: [f32::MIN; 3],
@@ -991,6 +992,12 @@ impl GarageRuntime {
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, false);
+        self.stream.capture_changes(
+            reference,
+            &mut self.area.items,
+            &self.area.interaction,
+            &self.physics,
+        );
         let current = self
             .stream
             .origin

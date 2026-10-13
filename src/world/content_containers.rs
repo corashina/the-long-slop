@@ -1,10 +1,7 @@
 //! Nested containers use the existing fluid and opening owners.
 use super::contents::{ContentBinding, ContentInstance};
 use super::spawn_rules::*;
-use super::{
-    AbsolutePose, ChangeRecords, ObjectKey, StructureInstance, SupplyDefinition, SupplyPoint,
-    WorldOrigin,
-};
+use super::{AbsolutePose, StructureInstance, SupplyDefinition, SupplyPoint};
 use crate::interaction::{
     InteractionState,
     items::{ItemLocation, ItemStore},
@@ -18,8 +15,6 @@ pub(super) fn bind(
     prototype: &WorldPrototypeReference,
     rules: &SourceRules,
     reference: &ReferenceManifest,
-    changes: &ChangeRecords,
-    origin: WorldOrigin,
     items: &mut ItemStore,
     interaction: &mut InteractionState,
     physics: &mut PhysicsWorld,
@@ -182,16 +177,7 @@ pub(super) fn bind(
         binding.baseline = items
             .generated_snapshot(binding.item, interaction.generated_valve(binding.item))
             .unwrap();
-        let mut key = content.content.placement.id.clone();
-        key.children.push((binding.source.clone(), 0));
-        if let Some(change) = changes.get(ObjectKey::Generated(key)) {
-            items.restore_generated(binding.item, &change.snapshot)?;
-            if let Some(valve) = change.snapshot.valve {
-                interaction.restore_generated_valve(binding.item, valve)?;
-            }
-        }
     }
-    let _ = origin;
     Ok(())
 }
 fn auxiliary(

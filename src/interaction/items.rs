@@ -34,6 +34,7 @@ pub struct ItemState {
 }
 
 pub struct ItemStore {
+    dirty: HashSet<ItemId>,
     states: Vec<ItemState>,
     indices: HashMap<ItemId, usize>,
     body_ids: Vec<BodyId>,
@@ -49,6 +50,28 @@ pub struct ItemStore {
 
 impl ItemStore {
     /// Stable generated identity and active physical state for change capture.
+    pub fn mark_dirty(&mut self, id: ItemId) {
+        self.dirty.insert(id);
+    }
+    pub fn take_dirty(&mut self) -> Option<ItemId> {
+        let id = self.dirty.iter().next().copied()?;
+        self.dirty.remove(&id);
+        Some(id)
+    }
+    pub fn object_key(&self, id: ItemId) -> crate::world::ObjectKey {
+        self.generated
+            .iter()
+            .find(|(_, value)| **value == id)
+            .map_or(crate::world::ObjectKey::Imported(id), |(key, _)| {
+                crate::world::ObjectKey::Generated(key.clone())
+            })
+    }
+    pub fn resolve_key(&self, key: &crate::world::ObjectKey) -> Option<ItemId> {
+        match key {
+            crate::world::ObjectKey::Imported(id) => self.get(*id).map(|_| *id),
+            crate::world::ObjectKey::Generated(id) => self.generated.get(id).copied(),
+        }
+    }
     pub fn generated_bindings(&self) -> impl Iterator<Item = (&GeneratedId, &ItemState)> {
         self.generated
             .iter()
@@ -56,7 +79,8 @@ impl ItemStore {
     }
     pub(crate) fn retained_binding_bytes(&self) -> usize {
         use super::memory::{map, set, strings, vector};
-        vector(&self.states)
+        set(&self.dirty)
+            + vector(&self.states)
             + map(&self.indices)
             + vector(&self.body_ids)
             + strings(&self.names)
@@ -160,6 +184,7 @@ impl ItemStore {
             }
         }
         Ok(Self {
+            dirty: HashSet::new(),
             generated: HashMap::new(),
             initialized_supplies: HashSet::new(),
             next_generated: reference
@@ -362,6 +387,12 @@ impl ItemStore {
         let state = self.get(id)?;
         Some(crate::world::ObjectSnapshot {
             lamp: None,
+            linear_velocity: [0.; 3],
+            angular_velocity: [0.; 3],
+            sleeping: false,
+            held: false,
+            attachment: None,
+            mechanism: None,
             pose: AbsolutePose {
                 position: self.origin.absolute(state.pose.position),
                 rotation: state.pose.rotation,
@@ -383,6 +414,15 @@ impl ItemStore {
         if !snapshot.pose.position.iter().all(|v| v.is_finite())
             || !snapshot.pose.rotation.iter().all(|v| v.is_finite())
             || !snapshot.condition.is_finite()
+            || !snapshot
+                .linear_velocity
+                .iter()
+                .chain(&snapshot.angular_velocity)
+                .all(|v| v.is_finite())
+            || snapshot.attachment.as_ref().is_some_and(|a| {
+                !a.local_pose.position.iter().all(|v| v.is_finite())
+                    || !a.local_pose.rotation.iter().all(|v| v.is_finite())
+            })
             || snapshot.temperature.is_some_and(|v| !v.is_finite())
             || snapshot
                 .fluid_quantities
@@ -429,6 +469,7 @@ impl ItemStore {
         }
         self.generated.retain(|_, value| *value != id);
         self.initialized_supplies.remove(&id);
+        self.dirty.remove(&id);
         self.indices.remove(&id);
         let last = self.states.len() - 1;
         self.states.swap_remove(index);
@@ -476,6 +517,7 @@ impl ItemStore {
         self.states.iter()
     }
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut ItemState> {
+        self.dirty.extend(self.states.iter().map(|s| s.id));
         self.states.iter_mut()
     }
 
@@ -485,6 +527,7 @@ impl ItemStore {
 
     pub fn get_mut(&mut self, id: ItemId) -> Option<&mut ItemState> {
         let index = *self.indices.get(&id)?;
+        self.dirty.insert(id);
         self.states.get_mut(index)
     }
 
@@ -494,11 +537,16 @@ impl ItemStore {
         second: ItemId,
     ) -> Option<(&mut ItemState, &mut ItemState)> {
         let indices = [*self.indices.get(&first)?, *self.indices.get(&second)?];
+        self.dirty.insert(first);
+        self.dirty.insert(second);
         let [first, second] = self.states.get_disjoint_mut(indices).ok()?;
         Some((first, second))
     }
 
     pub fn vehicle_fluids(&mut self) -> Result<VehicleFluids<'_>, ReferenceError> {
+        for index in self.vehicle_tanks {
+            self.dirty.insert(self.states[index].id);
+        }
         let [fuel, sump, coolant] = self
             .states
             .get_disjoint_mut(self.vehicle_tanks)
@@ -532,7 +580,14 @@ impl ItemStore {
             if let Some(handle) = state.body
                 && let Some(body) = physics.rapier().bodies.get(handle)
             {
-                state.pose = from_rapier(&(*body.position() * to_rapier(state.local_pose)));
+                let pose = from_rapier(&(*body.position() * to_rapier(state.local_pose)));
+                if state.pose.position != pose.position
+                    || state.pose.rotation != pose.rotation
+                    || !body.is_sleeping()
+                {
+                    self.dirty.insert(state.id);
+                }
+                state.pose = pose;
             }
         }
     }

@@ -56,6 +56,7 @@ impl WorldStream {
                         .iter()
                         .any(|b| &b.parent == parent && &b.source == source)
                         && self.structures.iter().any(|s| &s.placement.id == parent)
+                        && self.bindings_ready(parent)
                 })
                 .next()
                 .cloned();
@@ -91,13 +92,20 @@ impl WorldStream {
                 fluid_quantities: None,
                 valve: None,
                 lamp: Some(on),
+                linear_velocity: [0.; 3],
+                angular_velocity: [0.; 3],
+                sleeping: false,
+                held: false,
+                attachment: None,
+                mechanism: None,
             };
             let mut key = parent.clone();
             key.children.push((source.clone(), 0));
             if let Some(changed) = self
                 .changes
                 .get(ObjectKey::Generated(key))
-                .and_then(|r| r.snapshot.lamp)
+                .and_then(|r| r.snapshot.as_ref())
+                .and_then(|s| s.lamp)
             {
                 self.contents.set_lamp(
                     &self.reference,
@@ -187,7 +195,14 @@ impl WorldStream {
             });
         }
         for binding in &mut self.lamp_bindings {
-            if !binding.collision_dirty {
+            if !binding.collision_dirty
+                || self
+                    .contents
+                    .active
+                    .iter()
+                    .chain(&self.static_controls)
+                    .any(|c| c.content.placement.id == binding.parent && !c.restored)
+            {
                 continue;
             }
             let Some(instance) = self

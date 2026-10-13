@@ -1070,11 +1070,18 @@ impl InteractionState {
                 action = Some(InteractionAction::Seat(seat.id));
             }
         } else if let Some(target) = use_target {
+            if input.held & keys::USE != 0
+                || input.pressed & (keys::USE | keys::FILL) != 0
+                || input.wheel != 0.
+            {
+                items.mark_dirty(target.item);
+            }
             if input.pressed & keys::USE != 0
                 || (input.pressed & keys::FILL != 0 && availability.lmb_use)
             {
                 for opening in &mut self.openings {
                     if opening.reference.cap == target.item && opening.reference.can_toggle {
+                        items.mark_dirty(target.item);
                         opening.valve = if opening.valve > 0.0 { 0.0 } else { 1.0 };
                         action = Some(InteractionAction::Cap(opening.reference.id));
                         break;
@@ -1098,6 +1105,7 @@ impl InteractionState {
                     self.tuning_opening = Some(opening.reference.id);
                 }
                 if delta.is_finite() && delta != 0.0 {
+                    items.mark_dirty(target.item);
                     opening.valve =
                         (opening.valve + delta * dt * opening.reference.tune_rate).clamp(0.0, 1.0);
                     if opening.valve < 1e-6 {

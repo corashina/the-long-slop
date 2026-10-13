@@ -60,6 +60,24 @@ pub struct PartAttachments {
     bound: bool,
 }
 impl PartAttachments {
+    pub fn slot_identity(
+        &self,
+        id: PartSlotId,
+    ) -> Option<(Option<ItemId>, &crate::reference::SourceId)> {
+        let slot = &self.slots[*self.slot_indices.get(&id)?].reference;
+        Some((slot.owner, &slot.source))
+    }
+    pub fn resolve_slot(
+        &self,
+        owner: Option<ItemId>,
+        source: &crate::reference::SourceId,
+    ) -> Option<PartSlotId> {
+        self.slots
+            .iter()
+            .find(|s| s.reference.owner == owner && &s.reference.source == source)
+            .map(|s| s.reference.id)
+    }
+
     pub(super) fn retained_binding_bytes(&self) -> usize {
         use super::memory::{map, strings, vector};
         vector(&self.parts)

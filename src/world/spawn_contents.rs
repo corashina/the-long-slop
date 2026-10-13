@@ -65,6 +65,8 @@ impl<'a> SpawnEvaluation<'a> {
             super::contents::identity_heap(&parent.id),
             0,
         )?;
+        let bytes =
+            bytes + std::mem::size_of::<Placement>() + super::contents::placement_heap(parent);
         if self.admitted.saturating_add(bytes) > self.staging {
             return Err(ReferenceError(
                 "Source initialization exceeds staging admission".into(),

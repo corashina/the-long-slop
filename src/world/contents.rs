@@ -4,6 +4,7 @@ use super::spawn_rules::*;
 use super::{GeneratedId, Placement, SourceSpawnState, SpawnContext, SpawnPhase};
 use crate::reference::{ItemId, ReferenceError, SourceId, WorldReference};
 struct DeferredBatch {
+    replay_only: bool,
     owner: GeneratedId,
     tasks: Vec<(Placement, SourceId)>,
     inputs: super::spawn_state::SpawnInitialization,
@@ -11,6 +12,7 @@ struct DeferredBatch {
     eligible: u64,
 }
 struct Cursor {
+    replay_only: bool,
     parent: Placement,
     building: SourceId,
     callers: Vec<SourceId>,
@@ -43,6 +45,10 @@ pub struct GeneratedCapVisual {
     pub visual: crate::reference::CapVisualReference,
 }
 pub(crate) struct ContentInstance {
+    pub replay_only: bool,
+    pub restored: bool,
+    pub suspended_bodies: Vec<(rapier3d::prelude::RigidBodyHandle, bool)>,
+    pub origin: Placement,
     pub caps: Vec<GeneratedCapVisual>,
     pub poses: Vec<crate::vehicle::VehiclePose>,
     pub mechanism_colliders: Vec<ContentCollider>,
@@ -60,6 +66,10 @@ pub(crate) struct ContentInstance {
 impl ContentInstance {
     pub fn for_structure(placement: Placement) -> Self {
         Self {
+            replay_only: false,
+            restored: false,
+            suspended_bodies: Vec::new(),
+            origin: placement.clone(),
             caps: Vec::new(),
             slots: Vec::new(),
             bindings: Vec::new(),
@@ -94,7 +104,19 @@ impl ContentInstance {
             || wheels.has_external_dependents(owns)
     }
     pub fn control_heap_bytes(&self) -> usize {
-        placement_heap(&self.content.placement)
+        self.suspended_bodies.capacity()
+            * std::mem::size_of::<(rapier3d::prelude::RigidBodyHandle, bool)>()
+            + self
+                .baseline
+                .as_ref()
+                .map_or(0, super::ObjectSnapshot::heap_bytes)
+            + self
+                .bindings
+                .iter()
+                .map(|b| b.baseline.heap_bytes())
+                .sum::<usize>()
+            + placement_heap(&self.origin)
+            + placement_heap(&self.content.placement)
             + self.bindings.capacity() * std::mem::size_of::<ContentBinding>()
             + self
                 .bindings
@@ -116,6 +138,57 @@ pub(crate) struct SourceContents {
     deferred: Vec<DeferredBatch>,
 }
 impl SourceContents {
+    pub fn discard_replay_siblings(&mut self, wanted: &[Placement]) {
+        self.active.retain(|content| {
+            content.item.is_some()
+                || wanted.iter().any(|p| p.id == content.content.placement.id)
+                || !self.cursors.iter().any(|c| {
+                    c.replay_only
+                        && c.parent.id == content.origin.id
+                        && c.next >= c.callers.len().max(1)
+                        && !self.deferred.iter().any(|b| b.owner == c.parent.id)
+                })
+        });
+    }
+    pub fn has_replay(&self) -> bool {
+        self.cursors.iter().any(|c| c.replay_only)
+    }
+    pub fn replaying(&self, id: &GeneratedId) -> bool {
+        self.cursors
+            .iter()
+            .any(|c| c.replay_only && &c.parent.id == id)
+    }
+    pub fn replay_finished(&self, id: &GeneratedId) -> bool {
+        self.cursors
+            .iter()
+            .find(|c| &c.parent.id == id && c.replay_only)
+            .is_some_and(|c| {
+                c.root.is_some()
+                    && c.next >= c.callers.len().max(1)
+                    && !self
+                        .deferred
+                        .iter()
+                        .any(|b| &b.owner == id && b.replay_only)
+            })
+    }
+    pub fn replay_origin(&self, id: &GeneratedId) -> Option<&Placement> {
+        self.cursors
+            .iter()
+            .find(|c| {
+                c.parent.id.layer == id.layer
+                    && c.parent.id.generator == id.generator
+                    && c.parent.id.unit == id.unit
+                    && c.parent.id.ordinal == id.ordinal
+            })
+            .map(|c| &c.parent)
+            .or_else(|| {
+                self.active
+                    .iter()
+                    .find(|c| c.content.placement.id == *id)
+                    .map(|c| &c.origin)
+            })
+    }
+
     pub fn new(reference: &WorldReference) -> Self {
         Self {
             rules: SourceRules::new(reference),
@@ -162,6 +235,7 @@ impl SourceContents {
         &mut self,
         reference: &WorldReference,
         structures: &[Placement],
+        replays: &[Placement],
         focus: [[f64; 3]; 2],
         available_index_bytes: usize,
         limit: usize,
@@ -169,10 +243,18 @@ impl SourceContents {
     ) -> Result<(), ReferenceError> {
         let staging = self.admit_queues(limit, staging)?;
         self.update = self.update.wrapping_add(1);
-        self.cursors
-            .retain(|c| structures.iter().any(|p| p.id == c.parent.id));
-        self.deferred
-            .retain(|batch| self.cursors.iter().any(|c| c.parent.id == batch.owner));
+        self.active.retain(|c| {
+            !c.replay_only || c.item.is_some() || replays.iter().any(|p| p.id == c.origin.id)
+        });
+        self.cursors.retain(|c| {
+            let selected = if c.replay_only { replays } else { structures };
+            selected.iter().any(|p| p.id == c.parent.id)
+        });
+        self.deferred.retain(|batch| {
+            self.cursors
+                .iter()
+                .any(|c| c.parent.id == batch.owner && c.replay_only == batch.replay_only)
+        });
         let eligible = self
             .deferred
             .iter()
@@ -197,9 +279,21 @@ impl SourceContents {
         }
         let spawn = reference.distances["ItemSpawnDist"];
         let cursor_before = self.retained_bytes();
-        for instance in structures {
+        for (instance, replay_only) in structures
+            .iter()
+            .map(|p| (p, false))
+            .chain(replays.iter().take(1).map(|p| (p, true)))
+        {
             let p = instance;
-            if !p.id.children.is_empty() || self.cursors.iter().any(|c| c.parent.id == p.id) {
+            if !p.id.children.is_empty()
+                || self
+                    .cursors
+                    .iter()
+                    .any(|c| c.parent.id == p.id && c.replay_only == replay_only)
+            {
+                continue;
+            }
+            if replay_only && self.has_replay() {
                 continue;
             }
             let Some(building) = self
@@ -238,6 +332,7 @@ impl SourceContents {
                 }
             }
             self.cursors.push(Cursor {
+                replay_only,
                 parent: p.clone(),
                 building: building.source.clone(),
                 callers: eligible,
@@ -251,6 +346,18 @@ impl SourceContents {
         if let Some(index) = self.cursors.iter().position(|c| c.root.is_none()) {
             let cursor = &self.cursors[index];
             let parent = &cursor.parent;
+            if cursor.replay_only
+                && !self.state.has_boundary(
+                    &parent.id,
+                    &cursor.building,
+                    0,
+                    SpawnPhase::ComponentStart,
+                )
+            {
+                return Err(ReferenceError(
+                    "Changed object has no retained root initialization boundary".into(),
+                ));
+            }
             let (mut output, deferred, inputs) = self.state.invoke(
                 &parent.id,
                 &cursor.building,
@@ -286,6 +393,7 @@ impl SourceContents {
             self.cursors[index].inputs = inputs.for_parent(&self.cursors[index].parent.id);
             if !deferred.is_empty() {
                 self.deferred.push(DeferredBatch {
+                    replay_only: self.cursors[index].replay_only,
                     owner: self.cursors[index].parent.id.clone(),
                     tasks: deferred,
                     inputs,
@@ -294,10 +402,24 @@ impl SourceContents {
                 });
             }
             for content in output {
+                if self
+                    .active
+                    .iter()
+                    .any(|c| c.content.placement.id == content.placement.id)
+                {
+                    continue;
+                }
                 self.active.push(ContentInstance {
+                    replay_only: self.cursors[index].replay_only,
+                    origin: self
+                        .replay_origin(&content.placement.id)
+                        .cloned()
+                        .unwrap_or_else(|| content.placement.clone()),
                     content,
                     poses: Vec::new(),
                     mechanism_colliders: Vec::new(),
+                    restored: false,
+                    suspended_bodies: Vec::new(),
                     caps: Vec::new(),
                     slots: Vec::new(),
                     bindings: Vec::new(),
@@ -325,10 +447,14 @@ impl SourceContents {
             self.next = (index + 1) % self.cursors.len();
             let staging = self.admit_queues(limit, staging)?;
             let cursor = &self.cursors[index];
-            if focus
-                .iter()
-                .all(|f| distance(*f, cursor.parent.pose.position) >= spawn * spawn)
-                || self.deferred.iter().any(|b| b.owner == cursor.parent.id)
+            if (!cursor.replay_only
+                && focus
+                    .iter()
+                    .all(|f| distance(*f, cursor.parent.pose.position) >= spawn * spawn))
+                || self
+                    .deferred
+                    .iter()
+                    .any(|b| b.owner == cursor.parent.id && b.replay_only == cursor.replay_only)
                 || cursor.next >= cursor.callers.len().max(1)
             {
                 continue;
@@ -341,7 +467,20 @@ impl SourceContents {
             };
             let parent = &cursor.parent;
             let chance = cursor.chance;
-            self.state.context.chance_bits = chance.map(f32::to_bits);
+            if cursor.replay_only
+                && !self.state.has_boundary(
+                    &parent.id,
+                    source,
+                    cursor.next as u32,
+                    SpawnPhase::SynchronousAndStarts,
+                )
+            {
+                self.cursors[index].next = self.cursors[index].callers.len().max(1);
+                continue;
+            }
+            if !cursor.replay_only {
+                self.state.context.chance_bits = chance.map(f32::to_bits);
+            }
             self.active
                 .try_reserve_exact(limit)
                 .map_err(|_| ReferenceError("Nested content allocation failed".into()))?;
@@ -393,9 +532,11 @@ impl SourceContents {
                 },
             )?;
             let owner = parent.id.clone();
+            let replay_only = cursor.replay_only;
             self.cursors[index].inputs = initialization.for_parent(&self.cursors[index].parent.id);
             if !deferred.is_empty() {
                 self.deferred.push(DeferredBatch {
+                    replay_only,
                     owner,
                     tasks: deferred,
                     inputs: initialization,
@@ -416,9 +557,16 @@ impl SourceContents {
                     .any(|c| c.content.placement.id == content.placement.id)
                 {
                     self.active.push(ContentInstance {
+                        replay_only,
+                        origin: self
+                            .replay_origin(&content.placement.id)
+                            .cloned()
+                            .unwrap_or_else(|| content.placement.clone()),
                         content,
                         poses: Vec::new(),
                         mechanism_colliders: Vec::new(),
+                        restored: false,
+                        suspended_bodies: Vec::new(),
                         caps: Vec::new(),
                         slots: Vec::new(),
                         bindings: Vec::new(),
@@ -448,9 +596,22 @@ impl SourceContents {
             .map_err(|_| ReferenceError("Source continuation allocation failed".into()))?;
         let batch = &self.deferred[index];
         let (parent, source) = &batch.tasks[batch.next];
+        let replay_only = batch.replay_only;
         self.active
             .try_reserve_exact(limit)
             .map_err(|_| ReferenceError("Deferred content allocation failed".into()))?;
+        if replay_only
+            && !self.state.has_boundary(
+                &parent.id,
+                source,
+                batch.next as u32,
+                SpawnPhase::ComponentStart,
+            )
+        {
+            return Err(ReferenceError(
+                "Changed object has no retained slot continuation boundary".into(),
+            ));
+        }
         let (output, deferred, initialization) = self.state.invoke(
             &parent.id,
             source,
@@ -466,16 +627,14 @@ impl SourceContents {
                 evaluation.admit_initialization(parent)?;
                 evaluation.initialization = initialization.clone();
                 // The continuation can change its existing instance's selector and condition.
-                if let Some(existing) = self
-                    .active
-                    .iter()
-                    .find(|c| c.content.placement.id == parent.id)
-                {
+                if let Some(existing) = self.active.iter().find(|c| {
+                    c.content.placement.id == parent.id && (!replay_only || c.item.is_none())
+                }) {
                     evaluation.output.push(existing.content.clone());
                 } else if let Some(root) = self
                     .cursors
                     .iter()
-                    .find(|c| c.parent.id == parent.id)
+                    .find(|c| c.parent.id == parent.id && c.replay_only == replay_only)
                     .and_then(|c| c.root.as_ref())
                 {
                     evaluation.output.push(root.clone());
@@ -491,7 +650,11 @@ impl SourceContents {
             },
         )?;
         let owner = &self.deferred[index].owner;
-        if let Some(cursor) = self.cursors.iter_mut().find(|c| &c.parent.id == owner) {
+        if let Some(cursor) = self
+            .cursors
+            .iter_mut()
+            .find(|c| &c.parent.id == owner && c.replay_only == replay_only)
+        {
             cursor.inputs = initialization.for_parent(&cursor.parent.id);
         }
         let batch = &mut self.deferred[index];
@@ -500,6 +663,7 @@ impl SourceContents {
         if !deferred.is_empty() {
             // A newly started slot always yields past this update.
             let next = DeferredBatch {
+                replay_only,
                 owner: batch.owner.clone(),
                 tasks: deferred,
                 inputs: batch.inputs.clone(),
@@ -515,7 +679,7 @@ impl SourceContents {
             if let Some(cursor) = self
                 .cursors
                 .iter_mut()
-                .find(|c| c.parent.id == content.placement.id)
+                .find(|c| c.parent.id == content.placement.id && c.replay_only == replay_only)
             {
                 cursor.root = Some(content);
             } else if let Some(existing) = self
@@ -523,12 +687,21 @@ impl SourceContents {
                 .iter_mut()
                 .find(|c| c.content.placement.id == content.placement.id)
             {
-                existing.content = content;
+                if !replay_only || existing.item.is_none() {
+                    existing.content = content;
+                }
             } else {
                 self.active.push(ContentInstance {
+                    replay_only,
+                    origin: self
+                        .replay_origin(&content.placement.id)
+                        .cloned()
+                        .unwrap_or_else(|| content.placement.clone()),
                     content,
                     poses: Vec::new(),
                     mechanism_colliders: Vec::new(),
+                    restored: false,
+                    suspended_bodies: Vec::new(),
                     caps: Vec::new(),
                     slots: Vec::new(),
                     bindings: Vec::new(),
@@ -620,7 +793,22 @@ impl SourceContents {
         Ok(())
     }
     pub fn pending_bytes(&self) -> usize {
-        self.deferred.capacity() * std::mem::size_of::<DeferredBatch>()
+        self.cursors
+            .iter()
+            .filter(|c| c.replay_only)
+            .map(|c| std::mem::size_of::<Cursor>() + cursor_heap(c))
+            .sum::<usize>()
+            + self
+                .active
+                .iter()
+                .filter(|c| c.item.is_none() && c.replay_only)
+                .map(|c| {
+                    std::mem::size_of::<ContentInstance>()
+                        + placement_heap(&c.origin)
+                        + spawned_heap(&c.content)
+                })
+                .sum::<usize>()
+            + self.deferred.capacity() * std::mem::size_of::<DeferredBatch>()
             + self
                 .deferred
                 .iter()
@@ -690,46 +878,52 @@ impl SourceContents {
     }
     pub fn retained_bytes(&self) -> usize {
         self.cursors.capacity() * std::mem::size_of::<Cursor>()
-            + self
-                .cursors
-                .iter()
-                .map(|c| {
-                    placement_heap(&c.parent)
-                        + c.building.file.capacity()
-                        + c.inputs.retained_bytes()
-                        + c.root.as_ref().map_or(0, |root| {
-                            root.inputs.retained_bytes() + placement_heap(&root.placement)
-                                + root.tanks.capacity() * std::mem::size_of::<(SourceId, crate::fluids::FluidContainer)>()
-                                + root.tanks.iter().map(|(s, _)| s.file.capacity()).sum::<usize>()
-                                + root.lights.capacity() * std::mem::size_of::<super::WorldLight>()
-                                + root
-                                    .lights
-                                    .iter()
-                                    .map(super::WorldLight::heap_bytes)
-                                    .sum::<usize>()
-                                + root.appearance.capacity()
-                                    * std::mem::size_of::<super::NodeAppearance>()
-                                + root
-                                    .appearance
-                                    .iter()
-                                    .map(super::NodeAppearance::heap_bytes)
-                                    .sum::<usize>()
-                        })
-                        + c.callers.capacity() * std::mem::size_of::<SourceId>()
-                        + c.callers.iter().map(|s| s.file.capacity()).sum::<usize>()
-                })
-                .sum::<usize>()
+            + self.cursors.iter().map(cursor_heap).sum::<usize>()
             + self.active.capacity() * std::mem::size_of::<ContentInstance>()
             + self
                 .active
                 .iter()
                 .map(|c| {
-                    c.caps.capacity()*std::mem::size_of::<GeneratedCapVisual>() + c.caps.iter().map(|c|(c.visual.open_nodes.capacity()+c.visual.closed_nodes.capacity())*std::mem::size_of::<crate::reference::NodeId>()).sum::<usize>() + c.poses.capacity()*std::mem::size_of::<crate::vehicle::VehiclePose>() + c.mechanism_colliders.capacity()*std::mem::size_of::<ContentCollider>() + c.slots.capacity()*std::mem::size_of::<ContentSlot>() + c.slots.iter().map(|s|s.source.file.capacity()).sum::<usize>() + c.bindings.capacity() * std::mem::size_of::<ContentBinding>()
+                    c.suspended_bodies.capacity()
+                        * std::mem::size_of::<(rapier3d::prelude::RigidBodyHandle, bool)>()
+                        + c.baseline
+                            .as_ref()
+                            .map_or(0, super::ObjectSnapshot::heap_bytes)
+                        + c.bindings
+                            .iter()
+                            .map(|b| b.baseline.heap_bytes())
+                            .sum::<usize>()
+                        + placement_heap(&c.origin)
+                        + c.caps.capacity() * std::mem::size_of::<GeneratedCapVisual>()
+                        + c.caps
+                            .iter()
+                            .map(|c| {
+                                (c.visual.open_nodes.capacity() + c.visual.closed_nodes.capacity())
+                                    * std::mem::size_of::<crate::reference::NodeId>()
+                            })
+                            .sum::<usize>()
+                        + c.poses.capacity() * std::mem::size_of::<crate::vehicle::VehiclePose>()
+                        + c.mechanism_colliders.capacity() * std::mem::size_of::<ContentCollider>()
+                        + c.slots.capacity() * std::mem::size_of::<ContentSlot>()
+                        + c.slots
+                            .iter()
+                            .map(|s| s.source.file.capacity())
+                            .sum::<usize>()
+                        + c.bindings.capacity() * std::mem::size_of::<ContentBinding>()
                         + c.nodes.capacity() * std::mem::size_of::<crate::reference::NodeId>()
-                        + c.bindings.iter().map(|b| b.source.file.capacity()).sum::<usize>()
-                        + c.content.inputs.retained_bytes() + placement_heap(&c.content.placement)
-                        + c.content.tanks.capacity() * std::mem::size_of::<(SourceId, crate::fluids::FluidContainer)>()
-                        + c.content.tanks.iter().map(|(s, _)| s.file.capacity()).sum::<usize>()
+                        + c.bindings
+                            .iter()
+                            .map(|b| b.source.file.capacity())
+                            .sum::<usize>()
+                        + c.content.inputs.retained_bytes()
+                        + placement_heap(&c.content.placement)
+                        + c.content.tanks.capacity()
+                            * std::mem::size_of::<(SourceId, crate::fluids::FluidContainer)>()
+                        + c.content
+                            .tanks
+                            .iter()
+                            .map(|(s, _)| s.file.capacity())
+                            .sum::<usize>()
                         + c.content.lights.capacity() * std::mem::size_of::<super::WorldLight>()
                         + c.content
                             .lights
@@ -762,4 +956,40 @@ pub(crate) fn distance(a: [f64; 3], b: [f64; 3]) -> f32 {
     let x = (a[0] - b[0]) as f32;
     let z = (a[2] - b[2]) as f32;
     x * x + z * z
+}
+
+fn spawned_heap(content: &SpawnedContent) -> usize {
+    content.inputs.retained_bytes()
+        + placement_heap(&content.placement)
+        + content.tanks.capacity()
+            * std::mem::size_of::<(SourceId, crate::fluids::FluidContainer)>()
+        + content
+            .tanks
+            .iter()
+            .map(|(s, _)| s.file.capacity())
+            .sum::<usize>()
+        + content.lights.capacity() * std::mem::size_of::<super::WorldLight>()
+        + content
+            .lights
+            .iter()
+            .map(super::WorldLight::heap_bytes)
+            .sum::<usize>()
+        + content.appearance.capacity() * std::mem::size_of::<super::NodeAppearance>()
+        + content
+            .appearance
+            .iter()
+            .map(super::NodeAppearance::heap_bytes)
+            .sum::<usize>()
+}
+fn cursor_heap(cursor: &Cursor) -> usize {
+    placement_heap(&cursor.parent)
+        + cursor.building.file.capacity()
+        + cursor.inputs.retained_bytes()
+        + cursor.root.as_ref().map_or(0, spawned_heap)
+        + cursor.callers.capacity() * std::mem::size_of::<SourceId>()
+        + cursor
+            .callers
+            .iter()
+            .map(|s| s.file.capacity())
+            .sum::<usize>()
 }

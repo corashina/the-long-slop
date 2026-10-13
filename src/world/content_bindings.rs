@@ -5,6 +5,117 @@ use crate::reference::{ActionBinding, PickupReference, ReferenceError, Reference
 use crate::vehicle::{PhysicsWorld, from_rapier, to_rapier};
 use crate::world::spawn_rules::*;
 impl WorldStream {
+    pub fn initialize_imported_changes(
+        &mut self,
+        reference: &ReferenceManifest,
+        items: &ItemStore,
+        interaction: &InteractionState,
+        physics: &PhysicsWorld,
+    ) {
+        if self.imported_baselines.is_empty() {
+            self.imported_baselines
+                .extend(items.iter().filter_map(|item| {
+                    crate::world::changes::capture(item.id, items, interaction, physics, reference)
+                        .map(|s| (item.id, s))
+                }));
+        }
+    }
+    pub fn capture_changes(
+        &mut self,
+        reference: &ReferenceManifest,
+        items: &mut ItemStore,
+        interaction: &InteractionState,
+        physics: &PhysicsWorld,
+    ) {
+        while let Some(id) = items.take_dirty() {
+            if self
+                .contents
+                .active
+                .iter()
+                .chain(&self.static_controls)
+                .any(|c| {
+                    !c.restored && (c.item == Some(id) || c.bindings.iter().any(|b| b.item == id))
+                })
+            {
+                continue;
+            }
+            let Some(mut snapshot) =
+                crate::world::changes::capture(id, items, interaction, physics, reference)
+            else {
+                continue;
+            };
+            let key = items.object_key(id);
+            if items.get(id).and_then(|i| i.body).is_some_and(|b| {
+                physics.rapier().bodies[b].body_type()
+                    == rapier3d::prelude::RigidBodyType::KinematicPositionBased
+            }) && self
+                .contents
+                .active
+                .iter()
+                .any(|c| c.item == Some(id) && !c.content.buried)
+            {
+                if let Some(previous) = self.changes.get(&key).and_then(|c| c.snapshot.as_ref()) {
+                    snapshot.linear_velocity = previous.linear_velocity;
+                    snapshot.angular_velocity = previous.angular_velocity;
+                    snapshot.sleeping = previous.sleeping;
+                }
+            }
+            let baseline = match &key {
+                crate::world::ObjectKey::Imported(_) => self
+                    .imported_baselines
+                    .iter()
+                    .find(|(i, _)| *i == id)
+                    .map(|(_, s)| s),
+                crate::world::ObjectKey::Generated(_) => self
+                    .contents
+                    .active
+                    .iter()
+                    .chain(&self.static_controls)
+                    .find_map(|c| {
+                        if c.item == Some(id) {
+                            c.baseline.as_ref()
+                        } else {
+                            c.bindings
+                                .iter()
+                                .find(|b| b.item == id)
+                                .map(|b| &b.baseline)
+                        }
+                    })
+                    .or_else(|| {
+                        self.supplies.iter().find_map(|s| {
+                            s.items
+                                .zip(s.baselines.as_ref())
+                                .and_then(|((tank, cap), b)| {
+                                    if id == tank {
+                                        Some(&b[0])
+                                    } else if id == cap {
+                                        Some(&b[1])
+                                    } else {
+                                        None
+                                    }
+                                })
+                        })
+                    }),
+            };
+            let Some(baseline) = baseline else {
+                continue;
+            };
+            self.changes.record(key.clone(), snapshot, baseline);
+            if let crate::world::ObjectKey::Generated(_) = &key {
+                if let Some(owner) = self
+                    .contents
+                    .active
+                    .iter()
+                    .chain(&self.static_controls)
+                    .find(|c| c.item == Some(id) || c.bindings.iter().any(|b| b.item == id))
+                {
+                    self.changes
+                        .set_replay(&key, &owner.origin, &owner.content.placement.id);
+                }
+            }
+        }
+    }
+
     /// Bounds new owner payload, type-fit pairs, and existing vector/map reallocation.
     pub(super) fn binding_reservation(
         &self,
@@ -137,6 +248,25 @@ impl WorldStream {
                 self.structures.swap_remove(index).retire(physics);
                 return Err(error);
             }
+            crate::world::content_mechanisms::sync(&mut content, items, interaction, physics);
+            content.baseline = crate::world::changes::capture(
+                content.item.unwrap(),
+                items,
+                interaction,
+                physics,
+                reference,
+            );
+            for binding in &mut content.bindings {
+                binding.baseline = crate::world::changes::capture(
+                    binding.item,
+                    items,
+                    interaction,
+                    physics,
+                    reference,
+                )
+                .unwrap();
+            }
+            content.suspended_bodies.reserve(instance.bodies.len());
             self.static_controls.push(content);
         }
         Ok(())
@@ -312,8 +442,6 @@ impl WorldStream {
                     prototype,
                     &self.contents.rules,
                     reference,
-                    &self.changes,
-                    self.origin,
                     items,
                     interaction,
                     physics,
@@ -369,12 +497,19 @@ impl WorldStream {
                         items.get(id).unwrap().fluid.is_some(),
                     );
                 }
-                content.baseline = items.generated_snapshot(id, None);
-                if let Some(change) = self
-                    .changes
-                    .get(crate::world::ObjectKey::Generated(placement.id.clone()))
-                {
-                    items.restore_generated(id, &change.snapshot)?;
+                crate::world::content_mechanisms::sync(content, items, interaction, physics);
+                content.suspended_bodies.reserve(instance.bodies.len());
+                content.baseline =
+                    crate::world::changes::capture(id, items, interaction, physics, reference);
+                for binding in &mut content.bindings {
+                    binding.baseline = crate::world::changes::capture(
+                        binding.item,
+                        items,
+                        interaction,
+                        physics,
+                        reference,
+                    )
+                    .unwrap();
                 }
                 let state = items.get(id).unwrap();
                 physics.rapier_mut().bodies[body].set_position(
@@ -400,7 +535,11 @@ impl WorldStream {
                 let binding = &content.slots[slot_index];
                 let source = &binding.source;
                 let slot = binding.slot;
-                if binding.initialized || interaction.parts.slot_item(slot).is_some() {
+                if binding.initialized {
+                    continue;
+                }
+                if interaction.parts.slot_item(slot).is_some() {
+                    self.contents.active[content_index].slots[slot_index].initialized = true;
                     continue;
                 }
                 let embedded = self
@@ -445,17 +584,29 @@ impl WorldStream {
                         .parts
                         .mount_mechanism(item, &mut interaction.mechanisms);
                     if let Some(snapshot) =
-                        items.generated_snapshot(item, interaction.generated_valve(item))
+                        crate::world::changes::capture(item, items, interaction, physics, reference)
                     {
                         for owner in &mut self.contents.active {
                             if owner.item == Some(item) {
                                 owner.baseline = Some(snapshot);
+                                for binding in &mut owner.bindings {
+                                    binding.baseline = crate::world::changes::capture(
+                                        binding.item,
+                                        items,
+                                        interaction,
+                                        physics,
+                                        reference,
+                                    )
+                                    .unwrap();
+                                }
+                                owner.restored = false;
                                 break;
                             }
                             if let Some(binding) =
                                 owner.bindings.iter_mut().find(|b| b.item == item)
                             {
                                 binding.baseline = snapshot;
+                                owner.restored = false;
                                 break;
                             }
                         }
@@ -464,7 +615,154 @@ impl WorldStream {
                 }
             }
         }
+        self.restore_content_changes(reference, items, interaction, physics, wheels)?;
         Ok(())
+    }
+    fn restore_content_changes(
+        &mut self,
+        reference: &ReferenceManifest,
+        items: &mut ItemStore,
+        interaction: &mut InteractionState,
+        physics: &mut PhysicsWorld,
+        wheels: &mut crate::interaction::wheels::WheelAssemblies,
+    ) -> Result<(), ReferenceError> {
+        let count = self.contents.active.len() + self.static_controls.len();
+        for index in 0..count {
+            let pending_parent = {
+                let content = self
+                    .contents
+                    .active
+                    .iter()
+                    .chain(&self.static_controls)
+                    .nth(index)
+                    .unwrap();
+                if content.restored || content.item.is_none() {
+                    continue;
+                }
+                content
+                    .item
+                    .into_iter()
+                    .chain(content.bindings.iter().map(|b| b.item))
+                    .any(|item| {
+                        self.changes
+                            .get(items.object_key(item))
+                            .and_then(|c| c.snapshot.as_ref())
+                            .and_then(|s| s.attachment.as_ref())
+                            .and_then(|a| a.owner.as_ref())
+                            .and_then(|k| items.resolve_key(k))
+                            .is_some_and(|parent| {
+                                self.contents
+                                    .active
+                                    .iter()
+                                    .chain(&self.static_controls)
+                                    .any(|owner| {
+                                        owner.content.placement.id != content.content.placement.id
+                                            && !owner.restored
+                                            && (owner.item == Some(parent)
+                                                || owner.bindings.iter().any(|b| b.item == parent))
+                                    })
+                            })
+                    })
+            };
+            let content = self
+                .contents
+                .active
+                .iter_mut()
+                .chain(&mut self.static_controls)
+                .nth(index)
+                .unwrap();
+            if content.restored || content.item.is_none() {
+                continue;
+            }
+            for (body, enabled) in content.suspended_bodies.drain(..) {
+                physics.rapier_mut().bodies[body].set_enabled(enabled);
+            }
+            let mut complete = !pending_parent;
+            let mut restore_error = None;
+            for item in content
+                .item
+                .into_iter()
+                .chain(content.bindings.iter().map(|b| b.item))
+            {
+                if pending_parent {
+                    break;
+                }
+                if let Some(change) = self.changes.get(items.object_key(item)) {
+                    if let Some(snapshot) = &change.snapshot {
+                        match restore_item(
+                            item,
+                            snapshot,
+                            reference,
+                            items,
+                            interaction,
+                            physics,
+                            wheels,
+                        ) {
+                            Ok(ready) => complete &= ready,
+                            Err(error) => {
+                                complete = false;
+                                restore_error = Some(error);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            content.restored = complete;
+            if let Some(instance) = self
+                .structures
+                .iter()
+                .find(|i| i.placement.id == content.content.placement.id)
+            {
+                let prototype = reference
+                    .world
+                    .prototypes
+                    .iter()
+                    .find(|p| p.source == instance.placement.prototype)
+                    .unwrap();
+                for (source, handle) in &instance.colliders {
+                    let collider = prototype
+                        .colliders
+                        .iter()
+                        .find(|c| &c.source == source)
+                        .unwrap();
+                    physics.rapier_mut().colliders[*handle].set_enabled(
+                        complete
+                            && collider.enabled
+                            && crate::world::spawn_appearance::node_active(
+                                prototype,
+                                collider.node as usize,
+                                &content.content.appearance,
+                            ),
+                    );
+                }
+                if !complete {
+                    for body in &instance.bodies {
+                        let body_state = &mut physics.rapier_mut().bodies[*body];
+                        content
+                            .suspended_bodies
+                            .push((*body, body_state.is_enabled()));
+                        body_state.set_enabled(false);
+                    }
+                }
+            }
+            if complete {
+                crate::world::content_mechanisms::sync(content, items, interaction, physics);
+            }
+            if let Some(error) = restore_error {
+                physics.refresh_queries();
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+    pub fn bindings_ready(&self, id: &crate::world::GeneratedId) -> bool {
+        self.contents
+            .active
+            .iter()
+            .chain(&self.static_controls)
+            .find(|c| &c.content.placement.id == id)
+            .is_none_or(|c| c.item.is_none() || c.restored)
     }
     pub(super) fn retire_contents(
         &mut self,
@@ -540,14 +838,28 @@ impl WorldStream {
                             || distance >= freeze * freeze
                             || distance < unfreeze * unfreeze)
                     {
-                        physics.rapier_mut().bodies[body].set_body_type(
-                            if content.content.buried || distance >= freeze * freeze {
-                                rapier3d::prelude::RigidBodyType::KinematicPositionBased
-                            } else {
-                                rapier3d::prelude::RigidBodyType::Dynamic
-                            },
-                            true,
-                        );
+                        let kind = if content.content.buried || distance >= freeze * freeze {
+                            rapier3d::prelude::RigidBodyType::KinematicPositionBased
+                        } else {
+                            rapier3d::prelude::RigidBodyType::Dynamic
+                        };
+                        if physics.rapier().bodies[body].body_type() != kind {
+                            physics.rapier_mut().bodies[body].set_body_type(kind, true);
+                            if kind == rapier3d::prelude::RigidBodyType::Dynamic {
+                                if let Some(item) = id {
+                                    if let Some(snapshot) = self
+                                        .changes
+                                        .get(items.object_key(item))
+                                        .and_then(|c| c.snapshot.as_ref())
+                                    {
+                                        physics.rapier_mut().bodies[body]
+                                            .set_linvel(snapshot.linear_velocity.into(), true);
+                                        physics.rapier_mut().bodies[body]
+                                            .set_angvel(snapshot.angular_velocity.into(), true);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 index += 1;
@@ -570,17 +882,6 @@ impl WorldStream {
             }
             for binding in &content.bindings {
                 wheels.remove_generated(binding.item);
-                let mut key = content.content.placement.id.clone();
-                key.children.push((binding.source.clone(), 0));
-                if let Some(snapshot) = items
-                    .generated_snapshot(binding.item, interaction.generated_valve(binding.item))
-                {
-                    self.changes.record(
-                        crate::world::ObjectKey::Generated(key),
-                        snapshot,
-                        &binding.baseline,
-                    );
-                }
                 if let Some(instance) = self
                     .structures
                     .iter()
@@ -595,14 +896,7 @@ impl WorldStream {
                     crate::interaction::items::ItemLocation::World;
                 items.remove_generated(binding.item);
             }
-            if let (Some(id), Some(baseline)) = (content.item, content.baseline) {
-                if let Some(snapshot) = items.generated_snapshot(id, None) {
-                    self.changes.record(
-                        crate::world::ObjectKey::Generated(content.content.placement.id.clone()),
-                        snapshot,
-                        &baseline,
-                    );
-                }
+            if let Some(id) = content.item {
                 if let Some(instance) = self
                     .structures
                     .iter()
@@ -613,6 +907,8 @@ impl WorldStream {
                     }
                 }
                 items.get_mut(id).unwrap().body = None;
+                items.get_mut(id).unwrap().location =
+                    crate::interaction::items::ItemLocation::World;
                 items.remove_generated(id);
             }
             self.wanted_structures
@@ -684,4 +980,83 @@ pub(super) fn rollback(
     content.nodes.clear();
     content.poses.clear();
     content.mechanism_colliders.clear();
+}
+
+fn restore_item(
+    id: crate::reference::ItemId,
+    snapshot: &crate::world::ObjectSnapshot,
+    reference: &ReferenceManifest,
+    items: &mut ItemStore,
+    interaction: &mut InteractionState,
+    physics: &mut PhysicsWorld,
+    wheels: &mut crate::interaction::wheels::WheelAssemblies,
+) -> Result<bool, ReferenceError> {
+    use crate::interaction::items::ItemLocation;
+    if snapshot.held {
+        return Err(ReferenceError(
+            "Carried object reached streamed restoration".into(),
+        ));
+    }
+    let owner = snapshot.attachment.as_ref().and_then(|a| a.owner.as_ref());
+    let resolved = owner.and_then(|key| items.resolve_key(key));
+    if owner.is_some() && resolved.is_none() {
+        return Ok(false);
+    }
+    let slot = snapshot.attachment.as_ref().and_then(|a| a.slot.as_ref());
+    let target_slot = slot.and_then(|source| interaction.parts.resolve_slot(resolved, source));
+    if slot.is_some()
+        && target_slot.is_none()
+        && !slot.is_some_and(|source| reference.wheel_slots.iter().any(|s| &s.source == source))
+    {
+        return Ok(false);
+    }
+    let current = items.get(id).unwrap().location;
+    if let ItemLocation::PartSlot(current_slot) = current {
+        if target_slot != Some(current_slot) {
+            interaction.parts.remove(id, items, physics)?;
+            interaction
+                .parts
+                .detach_mechanism(id, &mut interaction.mechanisms, physics);
+        }
+    }
+    if let ItemLocation::Attached(parent) = current {
+        if resolved != Some(parent) && wheels.rules().iter().any(|r| r.item == id) {
+            wheels.split(parent, items, physics)?;
+        }
+    }
+    if let Some(slot) = target_slot {
+        interaction
+            .parts
+            .initialize_generated_slot(id, slot, items, physics)?;
+        interaction
+            .parts
+            .mount_mechanism(id, &mut interaction.mechanisms);
+    } else if let Some(parent) = resolved {
+        if slot.is_none()
+            && items.get(id).unwrap().location != ItemLocation::Attached(parent)
+            && wheels.rules().iter().any(|r| r.item == id)
+        {
+            wheels.assemble(parent, id, items, physics)?;
+        }
+    }
+    items.restore_generated(id, snapshot)?;
+    if let Some(valve) = snapshot.valve {
+        interaction.restore_generated_valve(id, valve)?;
+    }
+    if let Some(mechanism) = snapshot.mechanism {
+        interaction.mechanisms.restore(id, mechanism)?;
+    }
+    if let (Some(parent), Some(attachment)) = (resolved, &snapshot.attachment) {
+        let parent = items.get(parent).unwrap().clone();
+        let local = crate::vehicle::VehiclePose {
+            position: attachment.local_pose.position.map(|v| v as f32),
+            rotation: attachment.local_pose.rotation,
+        };
+        let item = items.get_mut(id).unwrap();
+        item.pose = from_rapier(&(to_rapier(parent.pose) * to_rapier(local)));
+        item.local_pose = from_rapier(&(to_rapier(parent.local_pose) * to_rapier(local)));
+    } else {
+        crate::world::changes::restore_motion(id, snapshot, items, physics);
+    }
+    Ok(true)
 }
