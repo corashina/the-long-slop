@@ -921,6 +921,12 @@ The 36-entry `.cache/equipment-checks/flashlight-final-receipts.json` records co
 The ignored probe restore record is `.cache/equipment-checks/flashlight-lifecycle-stage-pairing.json`.
 The ignored lifecycle route labels scripted placement, fixed input, active physics, and the inactive-model prototype.
 Its reports use `.cache/equipment-checks/`; captures use the task visualization directory.
+In the labelled newer-model stage, the yellow and black model and a white wall beam were visible.
+The model root, body, and item pose matched `[37.781, 3.415, -69.666]`; the gameplay body stayed disabled.
+Two model meshes were visible. The garage startup still kept the newer item inactive.
+The captures are `flashlight-task3-new-model.png` and `flashlight-task3-new-beam.png` in the task visualization directory.
+The active mirror showed the reflected car, interior, and lighting. Its direct white beam detail was not readable.
+The prototype does not prove source-matched beam pixels, cone, cookie, or shadow shape.
 The first ready route had five models, 309 source materials, 137 images, 29 bound lights, and 257 mesh assets.
 It had 1,317 mesh entities and three mirror cameras. The backend retained 159 textures and 58 programs.
 The 11 target textures requested 82,268,768 bytes; 1,422 buffers requested 11,217,648 bytes.
