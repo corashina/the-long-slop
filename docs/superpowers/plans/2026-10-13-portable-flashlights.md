@@ -9,7 +9,7 @@ A focused storage module manages body and collider ownership. Existing imported 
 
 **Tech Stack:** Rust 1.99, Bevy 0.19.1, Rapier 0.36.0, serde, Python, WASM, WebGL2, and the existing Docker toolchain.
 **Spec:** [Approved flashlight design](../specs/2026-10-13-portable-flashlights-design.md).
-**Status:** Spec and plan approved on 2026-10-13. Implementation is authorized and in progress.
+**Status:** Implementation and browser acceptance current on 2026-10-13. Task 4 reviews remain in progress.
 **Execution:** Preserve the user's selected subagent-driven method. Complete each task and review before starting the next.
 **Base:** codex/equipment at c7ddede. Plate implementation is complete at 542be78.
 
@@ -220,13 +220,13 @@ Fix product lifecycle code only for a demonstrated defect. Keep harnesses, sourc
 **Interfaces:** Consume all prior tasks, the game loading lifecycle, and current resource observers.
 Use held UI stages and read-only DOM observations through parent CUA. Subagents provide routes; the parent performs visible captures.
 
-- [ ] **Step 1: Build one matching final production revision.**
+- [x] **Step 1: Build one matching final production revision.**
 
 Run ./scripts/build.ps1. Run no automated tests or assertions.
 Record code, WASM, JS, manifest, library, model, cookie, and source shader receipts together.
 Keep production restore checks exact after every diagnostic build.
 
-- [ ] **Step 2: Observe critical interaction and source states.**
+- [x] **Step 2: Observe critical interaction and source states.**
 
 Check source-enabled older startup OFF and inactive newer startup.
 Check world use, held LMB, one-toggle precedence, carry rotation, drop, source storage delay, allowed/disallowed volumes, lock, and unlock.
@@ -235,7 +235,7 @@ Check a source storage restriction change, origin shift, pause, held resume, and
 Check newer source beam behavior only in a labelled diagnostic; do not claim its gameplay acquisition.
 Use separate non-overlapping held-stage buttons. Label any paused/frozen physics or scripted placement.
 
-- [ ] **Step 3: Compare matching lifecycle resource states.**
+- [x] **Step 3: Compare matching lifecycle resource states.**
 
 Observe three transition/restart cycles and a restored render size.
 Compare model, material, image, light, mesh, buffer, shadow storage, capture target, and pipeline counts after current readiness.

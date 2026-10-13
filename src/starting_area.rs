@@ -1059,9 +1059,9 @@ impl GarageRuntime {
         )?;
         if changed {
             self.wheels.sync(&mut self.area.items, &mut self.physics)?;
+            self.area.items.sync_poses(&self.physics);
+            self.area.commit_poses(&self.physics, true);
         }
-        self.area.items.sync_poses(&self.physics);
-        self.area.commit_poses(&self.physics, true);
         Ok(changed)
     }
 

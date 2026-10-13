@@ -181,3 +181,17 @@ It shares world lighting and the three existing mirror captures.
 It does not complete the deferred TMP shader path.
 Restart waits for current plate and mirror readiness before input or physics resumes.
 See `docs/verification.md` for the plate evidence and limits.
+
+## Portable flashlight ownership
+
+The equipment branch binds both imported flashlight roots to their item poses.
+The older source object starts in the garage. The newer scene object stays inactive in gameplay.
+The existing source light path handles both spot beams, shadows, and source cookies.
+Binding 103 uses one three-layer cookie array across normal, mirror, and plate materials.
+The renderer retains 34 light slots, 100 shadow slots, and the 4000 pixel atlas.
+Mirror ownership remains three cameras and three fixed 256 by 256 targets.
+
+Restart must clear flashlight control state and rebuild item ownership before current readiness.
+The loading gate includes five source storage frames and current mirror and plate preparation.
+The deferred graph must preserve these ownership and readiness rules when it later integrates mirror views.
+See `docs/verification.md` for the current lifecycle checks and appearance limits.

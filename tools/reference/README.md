@@ -200,3 +200,16 @@ Pause, resize, attachment changes, and origin changes keep the labels fixed.
 The renderer shares the checked atlas and material across game instances.
 Keep extracted font data, shader bytes, scenes, browser probes, and captures outside Git.
 See `docs/verification.md` for the current evidence and skipped checks.
+
+## Portable flashlight source export
+
+The selected runtime manifest includes two source flashlight models and their scene links.
+The older object starts in the garage. The newer object stays inactive.
+The exporter keeps their pickup, save, body, controller, collider, mesh, and material links.
+It validates both enabled renderer meshes against the generated `items.gltf` nodes.
+The current inactive model uses mesh 17 for Body and mesh 18 for Light.
+
+The manifest keeps source storage volumes as oriented collider geometry.
+The trunk and hood slots retain their source restrictions.
+The runtime binds eligible flashlight bodies and shapes after physics creation.
+See [portable flashlight verification](../../docs/verification.md#portable-flashlights-2026-10-13) for source values and browser limits.

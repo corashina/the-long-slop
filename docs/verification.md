@@ -889,3 +889,63 @@ Full mirror label readability remains unproved because the string was clipped or
 The controller restored production and observed ready=true with Start and Controls enabled, errors 0, and glErrors 0.
 The controller verified all 85 source/package/asset hash entries after restoration.
 Final screenshots include plate-lifecycle-resumed.png, plate-source-mirror-text-settled.png, and plate-final-production.png.
+
+## Portable flashlights, 2026-10-13
+
+Source: Steam build `11140890`, Unity `2021.3.18f1`. Branch: `codex/equipment`.
+The selected export includes the older active garage flashlight and the inactive newer scene object.
+The older controller starts OFF. The newer controller and body start disabled.
+The newer model has no gameplay acquisition route.
+
+The older source spot uses 0.85 intensity, a 12 m range, a 90 degree cone, and cookie 3.
+The newer source spot uses 1.5 intensity, a 15 m range, an 80 degree cone, and cookie 4.
+Both lights use source shadow strength 1, bias 0.05, normal bias 0.4, and near plane 0.2 m.
+The renderer keeps 34 light slots, 100 shadow slots, and the 4000 pixel source atlas.
+One 512 by 512 three-layer cookie array holds the prior custom cookie and both flashlight cookies.
+Normal, mirror, and plate materials share its checked array binding.
+
+Source storage uses mask `8388609`, a 1 second drop delay, and a scan interval above 1.5 seconds.
+The trunk and hood slots apply source restrictions. Storage types 5 and 7 cannot lock.
+Loading yields twice and runs three QuickFreeze passes. Only the first pass prescans.
+Readiness waits for all five frames, source lighting, plates, and three mirror targets.
+The runtime syncs wheel mass and item poses only when a storage frame changes ownership.
+The constructor sets initial poses before those loading frames.
+
+The user skipped further automated tests and assertions. Task 4 uses release builds and visible browser review.
+The release build passed. WASM SHA-256: `846eb20c15d266f5873ee5e1c77aa5f7f7e97f936f431f5a4a1636dbb7644c9b`.
+JS SHA-256: `a6a58cad9b9e2df83c335255e6a6238f60da9a702c640bd075d04bb9e57be40e`.
+The current export manifest is `3e1914fe710147da8b7d39cc17518a78c8a5502ca9b94adbd96a49bfe33db7f2`.
+The source library stays at `92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99`.
+The model glTF is `015a25dfb58694d7ca8700b40886b6aa43165a186bbbf9251f88593432158191`.
+The 36-entry `.cache/equipment-checks/flashlight-final-receipts.json` records code, models, cookies, and source shaders together.
+The ignored probe restore record is `.cache/equipment-checks/flashlight-lifecycle-stage-pairing.json`.
+The ignored lifecycle route labels scripted placement, fixed input, active physics, and the inactive-model prototype.
+Its reports use `.cache/equipment-checks/`; captures use the task visualization directory.
+The first ready route had five models, 309 source materials, 137 images, 29 bound lights, and 257 mesh assets.
+It had 1,317 mesh entities and three mirror cameras. The backend retained 159 textures and 58 programs.
+The 11 target textures requested 82,268,768 bytes; 1,422 buffers requested 11,217,648 bytes.
+The targets included one 4000 by 4000 shadow atlas and three 256 by 256 RGBA8 mirror colors.
+Three 256 by 256 HDR intermediates came from Bevy. These byte counts describe requests, not driver memory.
+The mirror cache held 48 capture variants and 113 total pipeline IDs at first readiness.
+The startup queue skipped 1,826 unknown capture keys. That count stayed fixed during the observed ready interval.
+Three native restart cycles restored old/new OFF, the older World, newer inactive, mass 961.60004 kg, and origin zero.
+The matching garage snapshots after all three cycles kept the same model, material, image, light, mesh, buffer, target, and program counts.
+All three cycles kept 48 mirror variants, 113 total pipeline IDs, and the same unknown-key counter.
+Texture creation and deletion reached 186 and 27; 159 textures remained live.
+At 1024 by 576, live textures, programs, targets, and buffers stayed at 159, 58, 11, and 1,422.
+Requested target storage fell to 78,287,456 bytes. Buffer requests stayed at 11,217,648 bytes.
+At the restored 1280 by 720 size, requested target storage returned to 82,268,768 bytes.
+The six 256 by 256 mirror and HDR targets kept their size. Texture totals reached 192 created and 33 deleted.
+Live textures stayed at 159. Capture variants stayed at 48, pipeline IDs at 113, and unknown keys at 1,826.
+The visible startup had old OFF, newer OFF and inactive, and storage ready after its fifth frame.
+World E and held LMB selected old control 10. Held LMB changed ON to OFF to ON.
+Three scripted native carry steps changed the held item rotation. Competing world LMB changed only control 10.
+An actual drop stayed loose 0.45 seconds later; a later native scan locked it in the trunk.
+Storage changed owner 27, collider parent, and chassis mass by 1 kg.
+Opening the source trunk usable released it and restored mass. Blocked type 5 stayed loose; allowed hood type 4 locked.
+Rejected pickup kept owner, body, collider parent, and mass. Valid pickup restored the loose body after an origin shift.
+Real pause kept the native clock fixed with the old light ON and the item Held. Resume advanced physics.
+The restored production route reached garage readiness with Start and Controls enabled, three mirror previews, and 387 capture draws.
+It reported zero browser and GL errors. Captures are in the task visualization directory.
+The scripted origin shift checks item ownership, physics, and the garage area. It does not prove full world streaming.
+These checks cannot prove trusted continuous input, exact native callback timing, or matched Unity pixels.
