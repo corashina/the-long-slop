@@ -155,7 +155,7 @@ pub struct WorldStream {
     replay_keys: Vec<super::ObjectKey>,
     replay_query: Vec<super::ObjectKey>,
     change_revision: u64,
-    change_request: u64,
+    change_bounds: Option<[WorldBounds; 2]>,
     imported_baselines: Vec<(crate::reference::ItemId, super::ObjectSnapshot)>,
     road_light: super::source_lights::SourceRoadLight,
     lights: Vec<super::WorldLight>,
@@ -296,7 +296,7 @@ impl WorldStream {
             replay_keys: Vec::new(),
             replay_query: Vec::new(),
             change_revision: u64::MAX,
-            change_request: u64::MAX,
+            change_bounds: None,
             imported_baselines: Vec::new(),
             road_light,
             lights: Vec::with_capacity(MAX_ROADS),
@@ -823,6 +823,8 @@ impl WorldStream {
         if self.failure.is_some() {
             return;
         }
+        self.contents
+            .retain_requests(&self.wanted_structures, &self.replay_roots);
         let metrics = self.metrics();
         let limit = 32usize
             .saturating_sub(metrics.pending_work)
@@ -972,83 +974,90 @@ impl WorldStream {
     }
 
     fn select_changed_destinations(&mut self) {
-        if self.change_revision == self.changes.revision()
-            && self.change_request == self.request.revision
-        {
+        let radius = f64::from(self.reference.distances["ItemSpawnDist"]);
+        let bounds = [self.request.player, self.request.vehicle].map(|focus| WorldBounds {
+            min: [focus[0] - radius, f64::NEG_INFINITY, focus[2] - radius],
+            max: [focus[0] + radius, f64::INFINITY, focus[2] + radius],
+        });
+        if self.change_revision != self.changes.revision() || self.change_bounds != Some(bounds) {
+            self.replay_keys.clear();
+            for bounds in bounds {
+                let (count, bytes) = self.changes.query_reservation(bounds);
+                if count > MAX_OBJECTS
+                    || bytes.saturating_mul(4) > self.available_staging_bytes()
+                    || self
+                        .metrics()
+                        .active_cpu_bytes
+                        .saturating_add(bytes.saturating_mul(4))
+                        > ACTIVE_CPU
+                {
+                    self.failure =
+                        Some("Changed destination selection exceeds staging admission".into());
+                    return;
+                }
+                self.replay_query.reserve(count);
+                self.changes.changes_in(bounds, &mut self.replay_query);
+                for key in self.replay_query.drain(..) {
+                    if !self.replay_keys.contains(&key) {
+                        self.replay_keys.push(key);
+                    }
+                }
+            }
+            if self.replay_keys.len() > MAX_OBJECTS {
+                self.failure = Some("Changed destination replay exceeds active admission".into());
+                return;
+            }
+            self.change_revision = self.changes.revision();
+            self.change_bounds = Some(bounds);
+        }
+        self.replay_roots.retain(|root| {
+            self.replay_keys.iter().any(|key| {
+                self.changes
+                    .get(key)
+                    .and_then(|c| c.replay.as_ref())
+                    .is_some_and(|origin| origin.id == root.id)
+            })
+        });
+        // Selected keys are not work requests. Admit one caller at a time and
+        // leave capacity for its first phase. Retry admission even with cached bounds.
+        if !self.replay_roots.is_empty() || self.metrics().pending_work >= 31 {
             return;
         }
-        let other_requests = self.metrics().pending_work.saturating_sub(
-            self.replay_roots
-                .len()
-                .max(usize::from(self.contents.has_replay())),
-        );
-        self.replay_roots.clear();
-        self.replay_keys.clear();
-        let radius = f64::from(self.reference.distances["ItemSpawnDist"]);
-        for focus in [self.request.player, self.request.vehicle] {
-            let bounds = WorldBounds {
-                min: [focus[0] - radius, f64::NEG_INFINITY, focus[2] - radius],
-                max: [focus[0] + radius, f64::INFINITY, focus[2] + radius],
+        for key in &self.replay_keys {
+            let Some(change) = self.changes.get(key) else {
+                continue;
             };
-            let (count, bytes) = self.changes.query_reservation(bounds);
-            if count > MAX_OBJECTS
-                || bytes.saturating_mul(4) > self.available_staging_bytes()
+            let Some(origin) = &change.replay else {
+                continue;
+            };
+            let active = change.instance.as_ref().is_some_and(|id| {
+                self.contents
+                    .active
+                    .iter()
+                    .chain(&self.static_controls)
+                    .any(|c| &c.content.placement.id == id)
+            });
+            if active {
+                continue;
+            }
+            let descriptor_bytes = super::contents::placement_heap(origin)
+                + usize::from(self.replay_roots.capacity() == 0) * std::mem::size_of::<Placement>();
+            if descriptor_bytes > self.available_staging_bytes()
                 || self
                     .metrics()
                     .active_cpu_bytes
-                    .saturating_add(bytes.saturating_mul(4))
+                    .saturating_add(descriptor_bytes)
                     > ACTIVE_CPU
             {
-                self.failure =
-                    Some("Changed destination selection exceeds staging admission".into());
                 return;
             }
-            self.replay_query.reserve(count);
-            self.changes.changes_in(
-                WorldBounds {
-                    min: [focus[0] - radius, f64::NEG_INFINITY, focus[2] - radius],
-                    max: [focus[0] + radius, f64::INFINITY, focus[2] + radius],
-                },
-                &mut self.replay_query,
-            );
-            for key in self.replay_query.drain(..) {
-                if self.replay_keys.contains(&key) {
-                    continue;
-                }
-                if let Some(origin) = self.changes.get(&key).and_then(|c| c.replay.as_ref()) {
-                    let active = self
-                        .changes
-                        .get(&key)
-                        .and_then(|c| c.instance.as_ref())
-                        .is_some_and(|id| {
-                            self.contents
-                                .active
-                                .iter()
-                                .chain(&self.static_controls)
-                                .any(|c| &c.content.placement.id == id)
-                        });
-                    let continuing = self.contents.replaying(&origin.id);
-                    if (!active || continuing)
-                        && !self.replay_roots.iter().any(|p| p.id == origin.id)
-                    {
-                        if other_requests + self.replay_roots.len() >= 32 {
-                            self.failure = Some(
-                                "Changed destination queue exceeds shared pending request limit"
-                                    .into(),
-                            );
-                            return;
-                        }
-                        self.replay_roots.push(origin.clone());
-                    }
-                }
-                self.replay_keys.push(key);
+            if self.replay_roots.try_reserve_exact(1).is_err() {
+                self.failure = Some("Changed destination descriptor allocation failed".into());
+                return;
             }
+            self.replay_roots.push(origin.clone());
+            break;
         }
-        if self.replay_roots.len() > 32 || self.replay_keys.len() > MAX_OBJECTS {
-            self.failure = Some("Changed destination replay exceeds active admission".into());
-        }
-        self.change_revision = self.changes.revision();
-        self.change_request = self.request.revision;
     }
     pub fn spawn_boundaries(&self) -> &[super::SpawnBoundary] {
         self.contents.state.boundaries()

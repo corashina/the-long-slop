@@ -231,18 +231,7 @@ impl SourceContents {
             .map_err(|_| ReferenceError("Source continuation queue allocation failed".into()))?;
         Ok(staging - bytes)
     }
-    pub fn advance(
-        &mut self,
-        reference: &WorldReference,
-        structures: &[Placement],
-        replays: &[Placement],
-        focus: [[f64; 3]; 2],
-        available_index_bytes: usize,
-        limit: usize,
-        staging: usize,
-    ) -> Result<(), ReferenceError> {
-        let staging = self.admit_queues(limit, staging)?;
-        self.update = self.update.wrapping_add(1);
+    pub fn retain_requests(&mut self, structures: &[Placement], replays: &[Placement]) {
         self.active.retain(|c| {
             !c.replay_only || c.item.is_some() || replays.iter().any(|p| p.id == c.origin.id)
         });
@@ -255,6 +244,19 @@ impl SourceContents {
                 .iter()
                 .any(|c| c.parent.id == batch.owner && c.replay_only == batch.replay_only)
         });
+    }
+    pub fn advance(
+        &mut self,
+        reference: &WorldReference,
+        structures: &[Placement],
+        replays: &[Placement],
+        focus: [[f64; 3]; 2],
+        available_index_bytes: usize,
+        limit: usize,
+        staging: usize,
+    ) -> Result<(), ReferenceError> {
+        let staging = self.admit_queues(limit, staging)?;
+        self.update = self.update.wrapping_add(1);
         let eligible = self
             .deferred
             .iter()

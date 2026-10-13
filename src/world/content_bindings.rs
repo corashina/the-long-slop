@@ -777,6 +777,15 @@ impl WorldStream {
         let mut index = 0;
         while index < self.contents.active.len() {
             let content = &self.contents.active[index];
+            // Replay keeps its source pose until binding applies the destination snapshot.
+            // Its caller owns cancellation, including intermediate deferred output.
+            if content.replay_only
+                && !content.restored
+                && (content.item.is_none() || self.contents.replaying(&content.origin.id))
+            {
+                index += 1;
+                continue;
+            }
             let id = content.item;
             let pose = id
                 .and_then(|id| items.get(id))
