@@ -316,6 +316,45 @@ pub(crate) fn sync_source_lamps(
     if source.road_lamps.recipe.is_none() || source.warming {
         return Ok(());
     }
+    // Accepted proxies keep their pose and controller output current while membership waits.
+    for proxy in &source.road_lamps.source_proxies {
+        let light = frame.lights.iter().find(|light| light.id == proxy.id);
+        if let Some(bound) = source
+            .lights
+            .iter_mut()
+            .find(|bound| bound.entity == proxy.light)
+            .and_then(|bound| bound.world.as_mut())
+        {
+            if let Some(light) = light {
+                bound.output.enabled = light.enabled && (light.biome.is_none() || enabled);
+                bound.output.intensity = light.intensity;
+            } else {
+                // Source retirement can precede the deferred membership replacement.
+                bound.output.enabled = false;
+            }
+        }
+        if let Ok(mut transform) = roots.get_mut(proxy.node) {
+            if let Some(light) = light {
+                transform.set_if_neq(
+                    Transform::from_translation(Vec3::from_array(
+                        frame.origin.local(light.pose.position),
+                    ))
+                    .with_rotation(Quat::from_array(light.pose.rotation)),
+                );
+            } else if source
+                .road_lamps
+                .origin
+                .iter()
+                .all(|value| value.is_finite())
+            {
+                let shift = std::array::from_fn(|i| {
+                    (source.road_lamps.origin[i] - frame.origin.offset[i]) as f32
+                });
+                transform.translation += Vec3::from_array(shift);
+            }
+        }
+    }
+    source.road_lamps.origin = frame.origin.offset;
     if !source.road_lamps.preflight_ready
         || source.road_lamps.required.iter().any(|id| {
             frame
@@ -352,25 +391,12 @@ pub(crate) fn sync_source_lamps(
         let pose =
             Transform::from_translation(Vec3::from_array(frame.origin.local(light.pose.position)))
                 .with_rotation(Quat::from_array(light.pose.rotation));
-        if let Some(proxy) = source
+        if !source
             .road_lamps
             .source_proxies
             .iter()
-            .find(|proxy| proxy.id == light.id)
+            .any(|proxy| proxy.id == light.id)
         {
-            if let Some(bound) = source
-                .lights
-                .iter_mut()
-                .find(|b| b.entity == proxy.light)
-                .and_then(|b| b.world.as_mut())
-            {
-                bound.output.enabled = light.enabled && (light.biome.is_none() || enabled);
-                bound.output.intensity = light.intensity;
-            }
-            if let Ok(mut transform) = roots.get_mut(proxy.node) {
-                transform.set_if_neq(pose);
-            }
-        } else {
             let index = source
                 .road_lamps
                 .required

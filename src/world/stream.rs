@@ -1307,26 +1307,9 @@ impl WorldStream {
             self.ready = None;
             return Ok(());
         }
-        // The full required render set and this road's pole must finish preparation first.
-        if self
-            .lights
-            .iter()
-            .filter(|light| self.publication_light(light, required_lights))
-            .any(|light| {
-                !self
-                    .structures
-                    .iter()
-                    .any(|s| light.owned_by(&s.placement.id))
-                    && !self
-                        .ready_structures
-                        .iter()
-                        .any(|owner| light.owned_by(owner))
-            })
-        {
-            return Ok(());
-        }
-        // Structure receipts include geometry, materials and caster pipelines. Keep the surface
-        // and accepted collision while publishing its prepared dependencies, one unit per frame.
+        // Hold the surface until every required owner publishes. Drain individually ready
+        // structures meanwhile, so unrelated owners cannot fill the shared pending queue.
+        // Each structure receipt already includes geometry, materials and caster pipelines.
         if self
             .lights
             .iter()
