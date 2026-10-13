@@ -1,5 +1,6 @@
 """Checked portable flashlight and vehicle storage bindings."""
 import json
+import re
 from .source import key, source_id
 
 ROOTS=(32123,32124)
@@ -19,17 +20,36 @@ def managed_contract(source):
         start=code.index(f'public class {name} : MonoBehaviour')
         end=code.find('\npublic class ',start+1)
         return code[start:end if end!=-1 else len(code)]
-    required={
-        'flashlightscript':('public void TURN()','public void Refresh(bool sendmulti = true)','return true;'),
-        'mountStuff':('private static float neededDropTime = 1f;','yield return null;\n\t\tyield return null;',
-                      'QuickFreeze(i == 0);','lastcols = cols;','if (cols[i] == lastcols[j])',
-                      'GetValue() > 0.1f'),
-        'mainscript':('Time.time - lastPhysicsLockTime1 > 1.5f','UpdPhysicsLock1();'),
-    }
-    for name,expressions in required.items():
+    def method(name,signature):
         class_code=selected(name)
+        match=re.search(r'(?m)^\s*'+re.escape(signature)+r'\s*\{',class_code)
+        if not match:raise ValueError(f'{name}.{signature} managed method missing')
+        depth=1
+        for pos in range(match.end(),len(class_code)):
+            if class_code[pos]=='{':depth+=1
+            elif class_code[pos]=='}':
+                depth-=1
+                if depth==0:return class_code[match.end():pos]
+        raise ValueError(f'{name}.{signature} managed method is incomplete')
+    required={
+        ('flashlightscript','public void TURN()'):('if (ON)','TurnOff(bsound: true);','TurnOn(bsound: true);'),
+        ('flashlightscript','public void Refresh(bool sendmulti = true)'):('if (lamp.broken)','else if (ON && Electronics())','r[i].material = lamp.mON;','r[i].material = lamp.mOFF;'),
+        ('flashlightscript','public bool Electronics()'):('return electronics.output > mainscript.lightTurnOffValue;','return true;'),
+        ('mountStuff','public void QuickFreeze(bool _prescan)'):('if (_prescan)','Scan();','if (CanStore())'),
+        ('mountStuff','public void FreezeUpd()'):('lastcols = cols;','if (cols[i] == lastcols[j])'),
+        ('mountStuff','public bool CanStore()'):('GetValue() > 0.1f',),
+        ('mainscript','private void Update()'):('Time.time - lastPhysicsLockTime1 > 1.5f','UpdPhysicsLock1();'),
+    }
+    for (name,signature),expressions in required.items():
+        body=method(name,signature)
         for expression in expressions:
-            if expression not in class_code:raise ValueError(f'{name} managed source differs: {expression}')
+            if expression not in body:raise ValueError(f'{name}.{signature} managed source differs: {expression}')
+    mount=selected('mountStuff')
+    if 'private static float neededDropTime = 1f;' not in mount:
+        raise ValueError('mountStuff drop delay differs')
+    start_freeze=method('mountStuff','private IEnumerator StartFreeze()')
+    if not re.search(r'yield return null;\s*yield return null;\s*for \(int i = 0; i < 3; i\+\+\)\s*\{\s*QuickFreeze\(i == 0\);\s*yield return null;\s*\}',start_freeze):
+        raise ValueError('mountStuff.StartFreeze three-pass initialization differs')
     return {'assembly':{'file':assembly,'sha256':decomp['input']['sha256']},
             'source':receipts['managed/Assembly-CSharp.cs']}
 
@@ -48,10 +68,13 @@ def recover_flashlights(source, roots, pointer_node, item_nodes, controllers, co
                                       'managed':managed_contract(source)}
     terrain=source.get('level1',64898)
     if ('level1',117) not in [key(source.resolve(terrain,p)) for p in source.read(terrain)['EnableAfterStart']]:raise ValueError('StartSpawnItems activation link missing')
+    spawn=source.transform_for(source.get('level1',117))
     expected_beams=((56881,12.,0.8500000238418579,90.,8.,(1.,0.8154796361923218,0.6009999513626099,1.)),
                     (56882,15.,1.5,80.,62.188602447509766,(1.,1.,1.,1.)))
     for transform_id,prefab_id,control_id,pickup_id,save_id,body_id,beam in zip(ROOTS,(28750,28749),(74834,74835),(69340,69341),(74314,74315),(50144,50143),expected_beams):
         root=source.get('level1',transform_id);go,components=source.components(root);active=bool(source.read(go)['m_IsActive'])
+        if key(linked(root,source.read(root)['m_Father']))!=key(spawn):
+            raise ValueError(f'level1:{transform_id} parent is not StartSpawnItems level1:117')
         ctrl=source.get('level1',control_id);cf=source.read(ctrl);pickup=source.get('level1',pickup_id);pf=source.read(pickup);save=source.get('level1',save_id)
         if any(key(source.resolve(r,source.read(r)['m_GameObject']))!=key(go) for r in (ctrl,pickup,save)):raise ValueError('Flashlight owner links differ')
         if key(linked(pickup,pf['lampa']))!=key(ctrl) or cf['ON'] or cf['randomStart'] or cf['SingleLight']['m_PathID'] or cf['electronics']['m_PathID'] or any(l['breaktrigger'] for l in cf['Lamps']):raise ValueError('Flashlight switch contract differs')
@@ -76,6 +99,8 @@ def recover_flashlights(source, roots, pointer_node, item_nodes, controllers, co
                     renderers.append(source_id(c));materials.extend(sid(c,p) for p in f['m_Materials'])
                 if c.type.name=='Light':lights.append(source_id(c))
         pc=source.get('sharedassets1.assets',148780 if prefab_id==28750 else 148779)
+        if key(pc) not in {key(c) for r in records for c in r['components']}:
+            raise ValueError(f'{source_id(pc)} is not in prefab sharedassets1.assets:{prefab_id}')
         models.append({'source':source_id(prefab),'controller':source_id(pc),'node':node,'meshes':meshes,'materials':materials,'renderers':renderers,'lights':lights})
         instances.append({'model':source_id(prefab),'item':item_nodes[node],'node':node,'pickup':source_id(pickup),'save':source_id(save),'controller':control['id'],'startup_active':active,'colliders':control['aim_colliders']})
         evidence['bodies'].append({'source':source_id(body),'fields':bf});evidence['prefabs'].append({'source':source_id(prefab),'controller':source.read(pc),'pickup':pf})

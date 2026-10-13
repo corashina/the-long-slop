@@ -391,7 +391,10 @@ fn exported_house_controls_use_native_confirmed_poses() {
         .lighting
         .controllers
         .iter()
-        .filter(|c| c.kind == LightControllerKind::Switch)
+        .filter(|c| {
+            c.kind == LightControllerKind::Switch
+                && !r.flashlights.instances.iter().any(|item| item.controller == c.id)
+        })
     {
         let collider = source
             .physics

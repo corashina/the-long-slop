@@ -50,7 +50,7 @@ These checks use code review and labelled browser observations. No automated ass
 
 **Files:** Create tools/reference/flashlights.py and src/reference/flashlights.rs.
 Modify tools/reference/{export,manifest,lighting,gltf}.py and src/reference.rs and src/reference/lighting.rs.
-Apply the required switch-kind rename in src/lighting.rs, src/interaction.rs, and existing schema consumers.
+Apply the required switch-kind rename in src/lighting.rs and existing schema consumers that use the obsolete symbol.
 Update existing fixtures only when required by the new contract or symbol rename. Add no test cases and run no tests.
 
 **Interfaces:**
