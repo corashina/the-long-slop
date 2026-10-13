@@ -270,7 +270,7 @@ impl ItemStore {
                 location,
                 condition: item.condition,
                 temperature: item.temperature,
-                fluids: item.fluid.as_ref().map(|f| f.mixture.quantities_liters),
+                fluids: item.fluid.as_ref().map(capture_fluids).transpose()?,
             });
         }
         records.sort_by(|a, b| a.instance.cmp(&b.instance));
@@ -457,6 +457,40 @@ impl ItemStore {
             }
         }
     }
+}
+
+/// Project source signed state into the nonnegative core save format without changing gameplay.
+fn capture_fluids(fluid: &FluidContainer) -> Result<[f32; 6], crate::save::SaveError> {
+    let mut quantities = fluid.mixture.quantities_liters;
+    if !fluid.capacity_liters.is_finite()
+        || fluid.capacity_liters < 0.
+        || quantities.iter().any(|amount| !amount.is_finite())
+    {
+        return Err(crate::save::SaveError::CorruptData(
+            "Nonfinite fluid or invalid capacity".into(),
+        ));
+    }
+    for amount in &mut quantities {
+        *amount = amount.max(0.);
+    }
+    let total: f64 = quantities.iter().map(|amount| f64::from(*amount)).sum();
+    let capacity = f64::from(fluid.capacity_liters);
+    if total > capacity {
+        let scale = capacity / total;
+        let mut remaining = capacity;
+        for amount in &mut quantities {
+            let scaled = (f64::from(*amount) * scale).min(remaining);
+            let rounded = scaled as f32;
+            // Round toward zero so the saved positive sum stays within capacity.
+            *amount = if f64::from(rounded) > scaled {
+                rounded.next_down()
+            } else {
+                rounded
+            };
+            remaining = (remaining - f64::from(*amount)).max(0.);
+        }
+    }
+    Ok(quantities)
 }
 
 pub fn node_pose(reference: &ReferenceManifest, id: NodeId) -> Result<VehiclePose, ReferenceError> {

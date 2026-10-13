@@ -149,7 +149,31 @@ Pause suspends entered sleep. Recovery ends it while retaining the source schedu
 No other selected active particle module is omitted. We added no substitute blur, opacity change, distortion, or splash.
 We added no runtime dependency, compatibility loader, migration, settings menu, rebinding, or deployment.
 
-## Current merge checks
+## Save projection review fix
+
+The independent review found that mixed-fluid drinking can leave signed source components in an item container.
+The core save format accepts finite, nonnegative quantities within tank capacity.
+Capture now projects only the saved copy: it removes nonpositive entries and scales excess positive volume proportionally.
+The projection uses f64 totals and rounds scaled f32 quantities down within the remaining capacity.
+Capture rejects nonfinite values or invalid capacity. The save validator remains strict and unchanged.
+Load restores this projected mixture. Signed deficits and excess positive volume do not persist.
+Capture leaves runtime fluid order, fractions, signed transfers, and cleanup_one unchanged.
+This explicit save adaptation adds no schema, compatibility path, or survival/weather persistence.
+
+The fix passed format, native library check/release, WASM release, and wasm-bindgen.
+The receipt is .cache/survival-weather-merge/merge-fix-build.log; all commands exited 0.
+Generated binding syntax and whitespace checks also exited 0. Tests and runtime acceptance remain waived.
+The frozen source check passed. The source export and fixture retain the hash recorded below.
+merge-fix-current-hashes.json links the unchanged source records to prior source/schema validation.
+
+| Fix artifact | SHA256 |
+|---|---|
+| Item save code | e1407f5001a8e1099cc9d21055aaf9e64b6c5559f9ee9e8e07d96abe1038216a |
+| Native library | f5d12a5246312ab7f2bba4a8e819c4c41b7ae4653c328e87674ba31d163a6e9c |
+| Bound WASM | 3ffb27ecbf812e13d3e153a35bf3c17ff5b362569d80437bbbac5370873a101e |
+| Bindgen JavaScript, unchanged | 7c7561fa928c8d36f42cf09f5601cd16b97a4f53a5e902ea1a97ed308d4d7270 |
+
+## Reviewed merge checks
 
 The merge passed these checks on 2026-10-13. No Rust, browser, or shader source changed during the final release pair.
 The exporter validation update followed the source freeze; strict rederivation and both schemas then passed.

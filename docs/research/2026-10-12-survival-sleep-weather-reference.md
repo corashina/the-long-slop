@@ -362,7 +362,7 @@ Presentation reads outputs and advances no gameplay clock.
 | Death | Source ragdoll, Unity volume, and menu scene need adapters or explicit limits. |
 | Wounds and hostile damage | Require weapons, enemies, blood leaks, or explosions. Exclude these absent gameplay systems. |
 | Radio during sleep | The existing radio owner advances FM stations once at SleepCamSource gain > 0.5. Each loop condition redraws Random.Range(1,6). |
-| Saves and multiplayer | Source saves needs, queues, sleep cooldown, and storms. Current core saves remain supported. Load resets these new states, food progress, generated food, and turds. Multiplayer respawn is absent. |
+| Saves and multiplayer | Source saves needs, queues, sleep cooldown, and storms. Core saves project item fluids to finite, nonnegative quantities within capacity. Load restores that projection and resets new survival/weather states, food progress, generated food, and turds. Multiplayer respawn is absent. |
 | Weather variety | Rain scheduling and active snow lack source support. Exclude them. |
 | Random draws | Source ranges and draw order exist. Unity's native random sequence remains unrecovered; report that limit. |
 
