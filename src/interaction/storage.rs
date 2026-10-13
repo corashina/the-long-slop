@@ -469,12 +469,12 @@ impl StorageLocks {
                     {
                         continue;
                     }
-                    let entered = light.shapes.iter().any(|s| {
+                    let retained = light.shapes.iter().any(|s| {
                         let h = s.handle.unwrap();
                         self.volumes[volume_index].current.contains(&h)
-                            && !self.volumes[volume_index].previous.contains(&h)
+                            && self.volumes[volume_index].previous.contains(&h)
                     });
-                    if entered {
+                    if retained {
                         self.lock(i, volume_index, owner, items, physics)?;
                         changed = true;
                     }

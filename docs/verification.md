@@ -905,6 +905,7 @@ One 512 by 512 three-layer cookie array holds the prior custom cookie and both f
 Normal, mirror, and plate materials share its checked array binding.
 
 Source storage uses mask `8388609`, a 1 second drop delay, and a scan interval above 1.5 seconds.
+The source locks a flashlight only when its collider appears in the preceding and current scans.
 The trunk and hood slots apply source restrictions. Storage types 5 and 7 cannot lock.
 Loading yields twice and runs three QuickFreeze passes. Only the first pass prescans.
 Readiness waits for all five frames, source lighting, plates, and three mirror targets.
@@ -912,12 +913,12 @@ The runtime syncs wheel mass and item poses only when a storage frame changes ow
 The constructor sets initial poses before those loading frames.
 
 The user skipped further automated tests and assertions. Task 4 uses release builds and visible browser review.
-The release build passed. WASM SHA-256: `846eb20c15d266f5873ee5e1c77aa5f7f7e97f936f431f5a4a1636dbb7644c9b`.
+The corrected release build passed. WASM SHA-256: `216e4317410fa35e37d5c31664fe9573cb8d7d1e1eb9a711d9baba4106949d52`.
 JS SHA-256: `a6a58cad9b9e2df83c335255e6a6238f60da9a702c640bd075d04bb9e57be40e`.
 The current export manifest is `3e1914fe710147da8b7d39cc17518a78c8a5502ca9b94adbd96a49bfe33db7f2`.
 The source library stays at `92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99`.
 The model glTF is `015a25dfb58694d7ca8700b40886b6aa43165a186bbbf9251f88593432158191`.
-The 36-entry `.cache/equipment-checks/flashlight-final-receipts.json` records code, models, cookies, and source shaders together.
+The 36-entry `.cache/equipment-checks/flashlight-final-fix-receipts.json` records code, models, cookies, and source shaders together.
 The ignored probe restore record is `.cache/equipment-checks/flashlight-lifecycle-stage-pairing.json`.
 The ignored lifecycle route labels scripted placement, fixed input, active physics, and the inactive-model prototype.
 Its reports use `.cache/equipment-checks/`; captures use the task visualization directory.
@@ -946,12 +947,34 @@ Live textures stayed at 159. Capture variants stayed at 48, pipeline IDs at 113,
 The visible startup had old OFF, newer OFF and inactive, and storage ready after its fifth frame.
 World E and held LMB selected old control 10. Held LMB changed ON to OFF to ON.
 Three scripted native carry steps changed the held item rotation. Competing world LMB changed only control 10.
-An actual drop stayed loose 0.45 seconds later; a later native scan locked it in the trunk.
-Storage changed owner 27, collider parent, and chassis mass by 1 kg.
-Opening the source trunk usable released it and restored mass. Blocked type 5 stayed loose; allowed hood type 4 locked.
-Rejected pickup kept owner, body, collider parent, and mass. Valid pickup restored the loose body after an origin shift.
-Real pause kept the native clock fixed with the old light ON and the item Held. Resume advanced physics.
-The restored production route reached garage readiness with Start and Controls enabled, three mirror previews, and 387 capture draws.
-It reported zero browser and GL errors. Captures are in the task visualization directory.
-The scripted origin shift checks item ownership, physics, and the garage area. It does not prove full world streaming.
+An actual drop stayed loose 0.45 seconds later in the earlier build.
+The earlier trunk lock and first-scan hood lock used an inverted overlap rule. These results are superseded.
+In the corrected build, an actual drop occurred at native clock `2.0162654` seconds.
+The first eligible scan ran after `1.5333319` seconds and found the torch in the current scan only.
+The torch stayed World. The next scan ran after `3.0166783` seconds and found it in both scans.
+That scan locked it to owner 27 in trunk volume 6.
+The probe held the loose body at the source trunk center during active physics.
+Its scripted pose hold kept the collider inside the volume across both scans.
+In a second drop, the early scan ran after `0.34999466` seconds with both memberships true.
+The torch stayed World until a later scan at age `1.8499718` seconds locked it.
+The native clock and storage scheduler advanced through resumed frames in both routes.
+The corrected trunk lock changed owner 27, collider parent, and chassis mass by 1 kg.
+The prior build checked trunk release, blocked type 5, allowed hood type 4, and origin shift.
+Those checks did not run again after the overlap fix.
+The corrected build rejected stored pickup with the old light ON and kept owner, body, collider parent, mass, and ON.
+Valid pickup restored Held, loose body 7, collider parent 7, mass `961.60004` kg, and ON.
+Held LMB changed OFF to ON once per press. Native restart returned both lights OFF and restored the starting item state.
+It reached storage readiness with origin zero and mass `961.60004` kg.
+The prior build kept its clock fixed during pause with the old light ON and item Held. Resume advanced physics.
+After corrected restart, the route retained five models, 309 materials, 137 images, 29 lights, and 257 mesh assets.
+It retained 1,317 mesh entities, three capture cameras, 48 capture variants, and 113 pipeline IDs.
+It kept 1,422 buffers, 159 textures, 58 programs, and 11 targets at 1280 by 720.
+The buffers requested 11,217,648 bytes; targets requested 82,268,768 bytes.
+The targets included one 4000-square shadow atlas and six 256-square mirror and HDR textures.
+The unknown capture-key count stayed at 1,826 during corrected play.
+The parent rehashed all 36 current receipts without mismatch.
+The restored corrected production route reached garage readiness with Start and Controls enabled and three mirror previews.
+It reported 387 capture draws, zero browser errors, and zero GL errors.
+The corrected captures are in the task visualization directory.
+The earlier scripted origin shift checked item ownership, physics, and the garage area. It does not prove full world streaming.
 These checks cannot prove trusted continuous input, exact native callback timing, or matched Unity pixels.
