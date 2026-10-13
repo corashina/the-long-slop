@@ -1,6 +1,6 @@
 # Portable Flashlights Design
 
-Status: source design prepared for review. Product implementation has not started.
+Status: approved on2026-10-13. Product implementation awaits plan review.
 Date: 2026-10-13. Branch: codex/equipment. Base: 542be787ee131861920c09c4ad37ba05a103b090.
 
 ## Goal
@@ -119,7 +119,9 @@ That dropdown uses defInt=2 and useDefInt=true.
 Use the recovered fresh-default policy2; do not use the pre-initialization serialized S.IPhysicsLock=0 as its default.
 Policy2 permits glove storage, trunk, and engine bay item locking, but excludes passenger-room item locking.
 Keep the policy in the source contract. Add no settings interface in this feature.
-Apply source scheduler and storage eligibility rules. Do not guess an update interval.
+All selected volumes use the non-basket scheduler: scan when elapsed time is strictly greater than1.5seconds.
+Source usable values above0.1 or missing required slot parts disable storage.
+Apply the recovered initialization sequence: two yielded frames, then three QuickFreeze passes with only the first prescanned.
 Restrict new locking integration to eligible flashlight items. Other cargo behavior remains outside this feature.
 
 ## Architecture
