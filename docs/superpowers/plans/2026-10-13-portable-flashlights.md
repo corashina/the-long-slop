@@ -9,7 +9,7 @@ A focused storage module manages body and collider ownership. Existing imported 
 
 **Tech Stack:** Rust 1.99, Bevy 0.19.1, Rapier 0.36.0, serde, Python, WASM, WebGL2, and the existing Docker toolchain.
 **Spec:** [Approved flashlight design](../specs/2026-10-13-portable-flashlights-design.md).
-**Status:** Implementation and browser acceptance current on 2026-10-13. Task 4 reviews remain in progress.
+**Status:** Complete on 2026-10-13. All task reviews and the final scoped review passed. Storage correction: d85cf4f.
 **Execution:** Preserve the user's selected subagent-driven method. Complete each task and review before starting the next.
 **Base:** codex/equipment at c7ddede. Plate implementation is complete at 542be78.
 
@@ -67,7 +67,7 @@ Update existing fixtures only when required by the new contract or symbol rename
 - prepare_flashlight_roots(source, roots) -> None adds the two existing startup scene roots to the items asset before lighting recovery.
 - Reuse existing SourceId, ItemId, NodeId, LightControlId, ColliderId, PartSlotId, and resource receipts.
 
-- [ ] **Step 1: Recover checked selected source links and geometry.**
+- [x] **Step 1: Recover checked selected source links and geometry.**
 
 Use .cache/equipment-source/flashlights/{source,details,startup,mounts,settings}.json as researched identities, then re-read selected checked records.
 Older scene: GameObject 12118, Transform 32123, controller 74834, pickup 69340, body 50144, save 74314, mass 73773, Light 56881.
@@ -76,7 +76,7 @@ Both live under StartSpawnItems117. Terrain64898 enables117; preserve each child
 Prefab roots are sharedassets1.assets:28750 older and28749 newer. Their controllers are148780 and148779.
 Recover source masks, cookies, renderer links, source materials, and pickup flags. Exclude PumpKin and player inventory prototypes from startup instances.
 
-- [ ] **Step 2: Add the typed contract and portable switch binding.**
+- [x] **Step 2: Add the typed contract and portable switch binding.**
 
 Require exactly one source-enabled older startup item and retain the newer source object inactive.
 Bind both source model records without forcing inactive actors visible, collidable, or pickable.
@@ -87,7 +87,7 @@ Recover new beam range 15/intensity 1.5/cones 80 and62.188602447509766/white RGB
 Validate links, source startup evidence, atlas capacities, required cookies, and same-item pickup/save/controller identity.
 Scope managed expression checks to their named source class and method. Do not repeat assembly-wide semantic checks.
 
-- [ ] **Step 3: Recover source storage bounds, policy, and scheduler.**
+- [x] **Step 3: Recover source storage bounds, policy, and scheduler.**
 
 Volumes are65838,65854,67560,79410,77806,78464,79301,69971 in level1, linked to parentTosave73405.
 Resolve their owners through source pointers. Do not hardcode runtime item numbers.
@@ -100,14 +100,14 @@ The first six volumes have no slot or usable restrictions. Trunk uses source slo
 All eight susable arrays are empty. Resolve the occupied hood/trunk item and reuse MechanismState::value(item, false).
 Recover the initialization sequence: two yielded frames, followed by three QuickFreeze passes; only the first pass prescans.
 
-- [ ] **Step 4: Derive a fresh export and build a matching package.**
+- [x] **Step 4: Derive a fresh export and build a matching package.**
 
 Use the accepted LibraryReader and existing atomic promotion path. Do not repeat whole-library owner audits.
 Run the necessary production export and ./scripts/build.ps1. Run no test suites or test commands.
 Confirm the manifest contains required records and one eligible startup light. Record code, manifest, model, cookie, and package hashes.
 Inspect source records and loading diagnostics. Fix source-ID failures before committing.
 
-- [ ] **Step 5: Commit recovered source bindings.**
+- [x] **Step 5: Commit recovered source bindings.**
 
 Commit: feat: recover source portable flashlight bindings.
 
@@ -129,14 +129,14 @@ Keep source data in Task1 contracts and presentation in Task3.
 - InteractionState.pickup_stored_item(item: ItemId, point: [f32;3], player: &PlayerState, items: &mut ItemStore, physics: &mut PhysicsWorld) -> Result<ItemId, ReferenceError> preflights carry before unlock.
 - Reuse LightingState::use_control(&LightingRecord, LightControlId) and InteractionAction::LightControl.
 
-- [ ] **Step 1: Bind retained bodies and unique collider ownership.**
+- [x] **Step 1: Bind retained bodies and unique collider ownership.**
 
 Use existing item bodies. Keep one retained independent body per flashlight, disabled while stored or source-inactive.
 Mark storage-owned shapes so StartingArea.sync_compound cannot overwrite their live parents.
 Store source-relative poses and retained shape offsets once. Prepare overlap and previous-membership storage once; allocate nothing in unchanged frame paths.
 Use ItemLocation::Attached(owner) for storage ownership. Keep storage membership separate from plate membership.
 
-- [ ] **Step 2: Route source world and held switch presses.**
+- [x] **Step 2: Route source world and held switch presses.**
 
 World use or permitted LMB presses call the existing switch action.
 Held flashlight LMB calls its pickup.lampa controller and consumes competing world LMB use.
@@ -144,7 +144,7 @@ Preserve E/use routing, reach, layers, seated rules, and existing carry controls
 No new mount key or flashlight socket is needed. Do not release carry on a switch press.
 Keep inactive instances unavailable to normal aim and pickup.
 
-- [ ] **Step 3: Implement source overlap, delay, restrictions, and locking.**
+- [x] **Step 3: Implement source overlap, delay, restrictions, and locking.**
 
 Use existing Rapier oriented-shape queries with source bounds and mount mask.
 Advance source elapsed time only in unpaused active runtime updates. Use strict group1 scan interval>1.5 seconds and elapsed drop time>=1 second.
@@ -155,7 +155,7 @@ Unstore when source eligibility becomes false. Preserve pose and inherited point
 Preflight stored-item acquisition against its retained dynamic body before changing ownership or carry.
 A rejected acquisition retains membership, shape parent, body state, mass, and switch state.
 
-- [ ] **Step 4: Integrate mass, timing, and origin transport.**
+- [x] **Step 4: Integrate mass, timing, and origin transport.**
 
 Add portable items once to the existing current-body ownership mass accounting.
 Their source startup mass is outside the car. Do not subtract it from the car's initial base mass.
@@ -165,7 +165,7 @@ Use existing update phases for initialization and storage scans. Keep rendering 
 Rebase retained bodies and world bounds once; keep local storage offsets unchanged.
 Run source-reviewed visible old-model pickup, switch, drop, storage lock, unlock, rejection, and origin checks. Run no automated tests.
 
-- [ ] **Step 5: Build, self-review, and commit native integration.**
+- [x] **Step 5: Build, self-review, and commit native integration.**
 
 Run ./scripts/build.ps1 and record its result. Record ownership and switch observations in an ignored labelled probe.
 Commit: feat: support carried flashlight controls and source storage locking.
@@ -180,7 +180,7 @@ Imported ItemVisual roots and their light children remain the pose authority.
 Current SourceLighting, SourceMaterials, LightingGpu, and mirror warmup collection remain the renderer interfaces.
 No separate flashlight renderer or camera-owned beam state is introduced.
 
-- [ ] **Step 1: Connect authored light nodes and material choices.**
+- [x] **Step 1: Connect authored light nodes and material choices.**
 
 Bind active and source-inactive source nodes without changing startup eligibility.
 Read the item's live imported hierarchy after physics, storage, and origin updates.
@@ -188,7 +188,7 @@ Use source spot range, full/inner cone, color, cookie, mask, hard-shadow paramet
 Do not apply a second source-axis conversion or tie an independent light to the player camera.
 Reuse the fixed source atlas and capacity checks: MAX_LIGHTS 34, SHADOW_SLOTS 100, atlas 4000, tile 400.
 
-- [ ] **Step 2: Warm all required layouts and material choices during loading.**
+- [x] **Step 2: Warm all required layouts and material choices during loading.**
 
 Prepare both models' existing source materials, cookies, spot shadow variants, and normal/mirror material variants before readiness.
 Preserve authored material binding order and late request sealing from the plate implementation.
@@ -196,7 +196,7 @@ Source-inactive model assets can warm without making that instance available in 
 Switch, carry, drop, lock, unlock, and rebase must select retained assets and warmed keys.
 Keep the existing three capture targets and owner feedback guard.
 
-- [ ] **Step 3: Connect initialization, pause, and restart.**
+- [x] **Step 3: Connect initialization, pause, and restart.**
 
 Call the storage initialization frame hook in an existing loading/frame phase after physical bindings exist.
 Reset native portable ownership and OFF state through the existing game restart.
@@ -204,7 +204,7 @@ Wait for current source lighting, material, plate, and mirror readiness before i
 Use existing mirror epochs. Add no unused asynchronous flashlight layer.
 Paused frames retain switch state and beam pose; source storage elapsed time stops.
 
-- [ ] **Step 4: Build and perform labelled source beam checks.**
+- [x] **Step 4: Build and perform labelled source beam checks.**
 
 Use the actual imported older model and a clearly labelled inactive newer-model diagnostic.
 Observe beam color, cone, cookie, shadows, pose, material switching, and movement across owner changes.
@@ -243,7 +243,7 @@ Require bounded retained resources and no unknown playing-state pipeline keys.
 Keep exactly three owned mirror capture targets. Record requested storage separately from driver memory.
 Check the real paused flag for pause/resume evidence. Do not use missed interval samples as positive evidence.
 
-- [ ] **Step 4: Restore production and complete documentation.**
+- [x] **Step 4: Restore production and complete documentation.**
 
 Visible production must reach readiness with existing controls enabled and zero browser/GL errors.
 Record screenshots, complete receipt hashes, source settings, resource counts, skipped automated tests, and explicit evidence limits.
