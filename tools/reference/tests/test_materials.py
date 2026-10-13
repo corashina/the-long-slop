@@ -29,6 +29,15 @@ class MaterialTests(unittest.TestCase):
             self.assertNotEqual(first, conditioned)
             self.assertEqual(conditioned, exporter.material(owner, white, dict(condition)))
 
+    def test_material_instancing_uses_required_source_flag(self):
+        from tools.reference.materials import recover_material
+        source,owner=self.material_source()
+        self.assertFalse(recover_material(source,owner)['enable_instancing'])
+        source.read(owner)['m_EnableInstancingVariants']=True
+        self.assertTrue(recover_material(source,owner)['enable_instancing'])
+        del source.read(owner)['m_EnableInstancingVariants']
+        with self.assertRaises(KeyError): recover_material(source,owner)
+
     def test_source_channel_samples(self):
         from tools.reference.materials import SOURCE_CHANNEL_SAMPLES
         detail, smoothness, linear = SOURCE_CHANNEL_SAMPLES
@@ -107,7 +116,7 @@ class MaterialTests(unittest.TestCase):
                                               m_Aniso=1, m_MipBias=0))
         env = {'m_Texture': {'m_FileID': 0, 'm_PathID': texture_pointer},
                'm_Scale': {'x': 3., 'y': 4.}, 'm_Offset': {'x': .2, 'y': .3}}
-        data = {'m_Name': 'fixture', 'm_Shader': {'m_PathID': 11},
+        data = {'m_Name': 'fixture', 'm_EnableInstancingVariants': False, 'm_Shader': {'m_PathID': 11},
             'm_ShaderKeywords': '_DETAIL_MULX2', 'm_CustomRenderQueue': -1,
             'm_SavedProperties': {'m_Floats': [], 'm_Colors': [],
                                  'm_TexEnvs': [('_DetailMask', env)]}}
@@ -160,6 +169,20 @@ class MaterialTests(unittest.TestCase):
         source, owner = self.material_source(shader_name='Unknown/Required')
         with self.assertRaisesRegex(ValueError, 'fixture.assets.*10.*Unknown/Required'):
             recover_material(source, owner, None, None)
+
+    def test_stored_texture_color_space_overrides_material_role(self):
+        from tools.reference.materials import recover_material
+        source, owner = self.material_source(texture_pointer=12)
+        texture = source.object(owner)
+        for stored, expected in ((0, 'linear'), (1, 'srgb')):
+            texture.m_ColorSpace = stored
+            record = recover_material(source, owner)
+            entry = next(t for t in record['properties']['textures'] if t['slot'] == '_DetailMask')
+            self.assertEqual(entry['color_space'], expected)
+            self.assertIn('-' + expected + '.', entry['file'])
+        texture.m_ColorSpace = 2
+        with self.assertRaisesRegex(ValueError, 'stored color space'):
+            recover_material(source, owner)
 
     def test_null_texture_uses_shader_default(self):
         from tools.reference.materials import recover_material

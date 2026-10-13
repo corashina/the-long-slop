@@ -58,8 +58,8 @@ pub fn mirror_material_for_view(
 }
 
 #[derive(Clone, Debug)]
-struct MirrorProjection {
-    perspective: PerspectiveProjection,
+pub(crate) struct MirrorProjection {
+    pub(crate) perspective: PerspectiveProjection,
 }
 impl CameraProjection for MirrorProjection {
     fn get_clip_from_view(&self) -> Mat4 {
@@ -101,7 +101,7 @@ pub struct SourceMirrors {
     inputs: Vec<MirrorInput>,
 }
 #[derive(Resource, Clone, Default, ExtractResource)]
-struct MirrorSurfaces {
+pub(crate) struct MirrorSurfaces {
     instance: u64,
     entries: Arc<Vec<(Entity, AssetId<SourceMaterial>, AssetId<SourceMaterial>)>>,
 }
@@ -144,16 +144,18 @@ fn collect_mirror_warmup(world: &mut World) {
         )
     });
     let mut pairs = Vec::new();
+    let mut scene_meshes = HashSet::new();
     super::materials::mirror_warmup_pairs(world, &mut pairs);
     for (mesh, source, standard, sky) in world
-        .query::<(
+        .query_filtered::<(
             &Mesh3d,
             Option<&MeshMaterial3d<SourceMaterial>>,
             Option<&MeshMaterial3d<StandardMaterial>>,
             Option<&MeshMaterial3d<super::sky::SkyMaterial>>,
-        )>()
+        ), Without<super::materials::SourceMaterialWarmup>>()
         .iter(world)
     {
+        scene_meshes.insert(mesh.0.id());
         if let Some(material) = source {
             pairs.push((mesh.0.id(), material.id().untyped()));
         }
@@ -172,6 +174,16 @@ fn collect_mirror_warmup(world: &mut World) {
             }
         }
     }
+    // Save replacement and streaming remove terrain meshes from the previous scene.
+    // Retain every material variant only while its mesh belongs to this scene.
+    let previous_count = pairs.len();
+    pairs.retain(|(mesh, _)| scene_meshes.contains(mesh));
+    world
+        .resource::<MirrorGpuStatus>()
+        .0
+        .lock()
+        .unwrap()
+        .obsolete_pairs_removed = (previous_count - pairs.len()) as u32;
     let mut seen = HashSet::new();
     pairs.retain(|pair| seen.insert(*pair));
     world.insert_resource(MirrorWarmup {
@@ -200,7 +212,7 @@ fn resolve_mirror_material(
 }
 
 #[derive(Component, Clone, Copy)]
-struct MirrorInstance(u64);
+pub(crate) struct MirrorInstance(pub(crate) u64);
 impl bevy::render::sync_component::SyncComponent for MirrorInstance {
     type Target = Self;
 }
@@ -293,15 +305,15 @@ impl Plugin for SourceMirrorPlugin {
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
             render
                 .init_resource::<CapturePipelines>()
-                .init_resource::<CaptureDepths>()
+                .init_resource::<MirrorOutputs>()
                 .add_render_command::<Opaque3d, DrawMirrorMaterial>()
                 .add_render_command::<AlphaMask3d, DrawMirrorMaterial>()
                 .add_render_command::<Transparent3d, DrawMirrorMaterial>()
                 .add_render_command::<Transmissive3d, DrawMirrorMaterial>()
                 .add_systems(
                     Render,
-                    prepare_capture_depths
-                        .after(bevy::core_pipeline::core_3d::prepare_core_3d_depth_textures)
+                    prepare_capture_outputs
+                        .after(super::surface_views::prepare_views)
                         .in_set(RenderSystems::PrepareResources),
                 )
                 .add_systems(
@@ -445,8 +457,17 @@ pub fn bind_mirrors(world: &mut World) {
         let camera = world
             .spawn((
                 Camera3d::default(),
+                bevy::render::camera::CameraRenderGraph::new(super::surface_graph::SourceSurface),
+                super::surface_views::SourceSurfaceView {
+                    index: super::surface_views::MIRROR_START + bindings.len(),
+                    near: record.near_plane,
+                    far: record.initial_far_plane,
+                    nonjittered_clip_from_world: Mat4::IDENTITY,
+                    shadow_fade: Vec4::ZERO,
+                    shadow_fade_center: Vec4::ZERO,
+                },
                 Camera {
-                    order: -3 + bindings.len() as isize,
+                    order: -6 + bindings.len() as isize,
                     is_active: false,
                     clear_color: ClearColorConfig::Custom(Color::srgba(
                         record.clear_color[0],
@@ -528,7 +549,7 @@ pub fn sync_mirror_views(world: &mut World, windows: &mut QueryState<&'static Wi
     let started = drive.runtime.started;
     let playing = started && !drive.runtime.paused && available;
     let ready = world.resource::<MirrorGpuStatus>().ready();
-    let warming = available && !drive.runtime.paused && !ready;
+    let warming = available && !ready;
     let player = drive
         .runtime
         .area
@@ -594,9 +615,9 @@ pub fn sync_mirror_views(world: &mut World, windows: &mut QueryState<&'static Wi
         let valid_clip = output.has_valid_clip_range();
         settings.is_active = output.pose_valid && valid_clip && (output.capture || warming);
         settings.order = if output.capture {
-            -3 + output.rank as isize
+            -6 + output.rank as isize
         } else {
-            -3
+            -6
         };
         if let Projection::Custom(projection) = &mut *camera.get_mut::<Projection>().unwrap() {
             let projection = projection.get_mut::<MirrorProjection>().unwrap();
@@ -644,66 +665,14 @@ use bevy::render::{
     render_phase::*,
     renderer::RenderDevice,
     sync_world::MainEntity,
-    texture::CachedTexture,
-    view::{ExtractedView, RenderVisibleEntities, ViewDepthTexture},
+    view::{ExtractedView, RenderVisibleEntities},
 };
 
-#[derive(Resource, Default)]
-struct CaptureDepths {
-    instance: u64,
-    textures: HashMap<usize, CachedTexture>,
-}
-fn prepare_capture_depths(
-    mut commands: Commands,
-    device: Res<RenderDevice>,
-    mut depths: ResMut<CaptureDepths>,
-    surfaces: Res<MirrorSurfaces>,
-    views: Query<(Entity, &MirrorViewRole, &MirrorInstance)>,
-) {
-    if depths.instance != surfaces.instance {
-        depths.textures.clear();
-        depths.instance = surfaces.instance;
-    }
-    for (entity, role, stamp) in &views {
-        if stamp.0 != surfaces.instance {
-            continue;
-        }
-        let MirrorViewRole::Capture(index) = role else {
-            continue;
-        };
-        let depth = depths.textures.entry(*index).or_insert_with(|| {
-            let texture = device.create_texture(&TextureDescriptor {
-                label: Some("source mirror D24S8"),
-                size: Extent3d {
-                    width: 256,
-                    height: 256,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Depth24PlusStencil8,
-                usage: TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            });
-            let default_view = texture.create_view(&TextureViewDescriptor::default());
-            CachedTexture {
-                texture,
-                default_view,
-            }
-        });
-        commands
-            .entity(entity)
-            .insert(ViewDepthTexture::new(depth.clone(), Some(0.)));
-    }
-}
 #[derive(Resource, Default)]
 struct CapturePipelines {
     instance: u64,
     sealed: bool,
     sources: HashSet<CachedRenderPipelineId>,
-    variants: HashMap<CachedRenderPipelineId, CachedRenderPipelineId>,
-    variant_ids: HashSet<CachedRenderPipelineId>,
     owner_sources: HashMap<(usize, CachedRenderPipelineId), CachedRenderPipelineId>,
 }
 
@@ -715,7 +684,9 @@ fn warm_capture_pipelines(
     if cache.sealed {
         return;
     }
+    let status = world.resource::<MirrorGpuStatus>().clone();
     let warmup = world.resource::<MirrorWarmup>().clone();
+    status.0.lock().unwrap().warmup_stage = 1;
     if warmup.instance != surfaces.instance || warmup.pairs.is_empty() {
         return;
     }
@@ -723,6 +694,7 @@ fn warm_capture_pipelines(
     let keys = world.resource::<ViewKeyCache>();
     let mut view_keys = Vec::new();
     let mut owners = [false; 3];
+    status.0.lock().unwrap().warmup_stage = 2;
     for (view, role, stamp) in views.iter(world) {
         if let MirrorViewRole::Capture(owner) = role {
             if stamp.is_none_or(|s| s.0 != surfaces.instance) {
@@ -740,6 +712,7 @@ fn warm_capture_pipelines(
     if !owners.iter().all(|v| *v) {
         return;
     }
+    status.0.lock().unwrap().warmup_stage = 3;
     let mut work = Vec::new();
     for (mesh_id, material_id) in warmup.pairs.iter() {
         let Some(mesh) = world.resource::<RenderAssets<RenderMesh>>().get(*mesh_id) else {
@@ -749,6 +722,7 @@ fn warm_capture_pipelines(
             .resource::<ErasedRenderAssets<PreparedMaterial>>()
             .get(*material_id)
         else {
+            status.0.lock().unwrap().warmup_stage = 4;
             return;
         };
         for view_key in &view_keys {
@@ -804,6 +778,7 @@ fn warm_capture_pipelines(
         }
     }
     cache.sealed = true;
+    status.0.lock().unwrap().warmup_stage = 5;
     info!(
         "Mirror loading contract: {} mesh/material pairs, {} view keys, {} source pipelines",
         warmup.pairs.len(),
@@ -829,27 +804,6 @@ fn prepare_capture_pipelines(
         cache.sources.clear();
     }
     warm_capture_pipelines(world, &mut cache, &surfaces);
-    let ready = world.resource::<MirrorGpuStatus>().ready();
-    // Only loading can create descriptors. Restart reuses the same structural variants.
-    if !ready && cache.sealed {
-        for source_id in &cache.sources {
-            if cache.variants.contains_key(source_id) {
-                continue;
-            }
-            let pipelines = world.resource::<PipelineCache>();
-            if pipelines.get_render_pipeline(*source_id).is_none() {
-                continue;
-            }
-            let mut descriptor = pipelines.get_render_pipeline_descriptor(*source_id).clone();
-            if let Some(depth) = &mut descriptor.depth_stencil {
-                depth.format = TextureFormat::Depth24PlusStencil8;
-            }
-            descriptor.label = Some("source mirror loaded capture".into());
-            let id = pipelines.queue_render_pipeline(descriptor);
-            cache.variants.insert(*source_id, id);
-            cache.variant_ids.insert(id);
-        }
-    }
     let mut capture_views = [None; 3];
     for (view, role, stamp) in views.iter(world) {
         if stamp.0 != surfaces.instance {
@@ -865,9 +819,6 @@ fn prepare_capture_pipelines(
                 continue;
             };
             for (entity, original) in pipelines.iter_mut() {
-                if cache.variant_ids.contains(original) {
-                    continue;
-                }
                 let source_id = if surfaces
                     .entries
                     .get(owner)
@@ -877,8 +828,8 @@ fn prepare_capture_pipelines(
                 } else {
                     Some(*original)
                 };
-                if let Some(id) = source_id.and_then(|id| cache.variants.get(&id)) {
-                    *original = *id;
+                if let Some(id) = source_id.filter(|id| cache.sources.contains(id)) {
+                    *original = id;
                 } else if cache.sealed && source_id.is_none_or(|id| !cache.sources.contains(&id)) {
                     let mut status = world.resource::<MirrorGpuStatus>().0.lock().unwrap();
                     if status.failure.is_none() {
@@ -894,7 +845,7 @@ fn prepare_capture_pipelines(
     world.insert_resource(cache);
 }
 
-struct SetMirrorMaterial<const I: usize>;
+pub(crate) struct SetMirrorMaterial<const I: usize>;
 impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMirrorMaterial<I> {
     type Param = (
         SRes<ErasedRenderAssets<PreparedMaterial>>,
@@ -903,11 +854,11 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMirrorMaterial<I> {
         SRes<MirrorSurfaces>,
         SRes<super::sky::SkyVariants>,
     );
-    type ViewQuery = &'static MirrorViewRole;
+    type ViewQuery = Option<&'static MirrorViewRole>;
     type ItemQuery = ();
     fn render<'w>(
         item: &P,
-        role: &'w MirrorViewRole,
+        role: Option<&'w MirrorViewRole>,
         _: Option<()>,
         (materials, instances, allocators, surfaces, sky): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
@@ -915,13 +866,14 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMirrorMaterial<I> {
         let Some(instance) = instances.into_inner().instances.get(&item.main_entity()) else {
             return RenderCommandResult::Skip;
         };
+        let role = role.copied().unwrap_or(MirrorViewRole::Normal);
         let selected = resolve_mirror_material(
-            *role,
+            role,
             item.main_entity(),
             instance.asset_id,
             surfaces.into_inner(),
         );
-        let selected = sky.into_inner().resolve(*role, selected);
+        let selected = sky.into_inner().resolve(role, selected);
         let Some(material) = materials.into_inner().get(selected) else {
             return RenderCommandResult::Skip;
         };
@@ -1035,7 +987,7 @@ fn queue_capture_meshes(
                 continue;
             };
 
-            if !captures.variant_ids.contains(&pipeline_id) {
+            if !captures.sources.contains(&pipeline_id) {
                 continue;
             }
             // Check for material instance, mesh, and material. If any of these
@@ -1103,7 +1055,14 @@ fn queue_capture_meshes(
                         opaque_phase.update_cache(*visible_entity, None);
                         continue;
                     }
-                    let draw_function = draw_opaque.read().id::<DrawMirrorMaterial>();
+                    let draw_function =
+                        if selected.type_id() == std::any::TypeId::of::<SourceMaterial>() {
+                            draw_opaque
+                                .read()
+                                .id::<super::source_lighting::DrawSourceMaterial>()
+                        } else {
+                            draw_opaque.read().id::<DrawMirrorMaterial>()
+                        };
                     let batch_set_key = Opaque3dBatchSetKey {
                         pipeline: pipeline_id,
                         draw_function,
@@ -1130,7 +1089,14 @@ fn queue_capture_meshes(
                 }
                 // Alpha mask
                 RenderPhaseType::AlphaMask => {
-                    let draw_function = draw_mask.read().id::<DrawMirrorMaterial>();
+                    let draw_function =
+                        if selected.type_id() == std::any::TypeId::of::<SourceMaterial>() {
+                            draw_mask
+                                .read()
+                                .id::<super::source_lighting::DrawSourceMaterial>()
+                        } else {
+                            draw_mask.read().id::<DrawMirrorMaterial>()
+                        };
                     let batch_set_key = OpaqueNoLightmap3dBatchSetKey {
                         draw_function,
                         pipeline: pipeline_id,
@@ -1195,12 +1161,71 @@ struct MirrorGpuData {
     instance: u64,
     banks: [[Option<PreparedBanks>; 2]; 3],
     submitted: [bool; 3],
+    encoded: [u32; 3],
+    sky_frames: [u32; 3],
+    validation: [u32; 3],
     ready: bool,
     failure: Option<String>,
+    warmup_stage: u8,
+    capture_pipelines: u32,
+    pipelines_pending: u32,
+    obsolete_pairs_removed: u32,
+}
+#[derive(serde::Serialize)]
+pub(crate) struct MirrorAudit {
+    instance: u64,
+    ready: bool,
+    banks_mask: u8,
+    warmup_stage: u8,
+    capture_pipelines: u32,
+    pipelines_pending: u32,
+    obsolete_pairs_removed: u32,
+    sky_frames: [u32; 3],
+    encoded: [u32; 3],
+    validation: [u32; 3],
+    submitted: [bool; 3],
 }
 #[derive(Resource, Clone, Default, ExtractResource)]
 pub struct MirrorGpuStatus(Arc<Mutex<MirrorGpuData>>);
 impl MirrorGpuStatus {
+    pub(crate) fn audit(&self) -> MirrorAudit {
+        let status = self.0.lock().unwrap();
+        let mut banks_mask = 0;
+        for (owner, pair) in status.banks.iter().enumerate() {
+            for (live, bank) in pair.iter().enumerate() {
+                banks_mask |= u8::from(bank.is_some()) << (owner * 2 + live);
+            }
+        }
+        MirrorAudit {
+            instance: status.instance,
+            ready: status.ready,
+            banks_mask,
+            warmup_stage: status.warmup_stage,
+            capture_pipelines: status.capture_pipelines,
+            pipelines_pending: status.pipelines_pending,
+            obsolete_pairs_removed: status.obsolete_pairs_removed,
+            sky_frames: status.sky_frames,
+            encoded: status.encoded,
+            validation: status.validation,
+            submitted: status.submitted,
+        }
+    }
+    pub(crate) fn sky_encoded(&self, instance: u64, owner: usize, frame: u32) {
+        let mut status = self.0.lock().unwrap();
+        if status.instance == instance {
+            status.sky_frames[owner] = frame;
+        }
+    }
+    pub(crate) fn sky_ready(&self, instance: u64, owner: usize, frame: u32) -> bool {
+        let status = self.0.lock().unwrap();
+        status.instance == instance && status.sky_frames[owner] == frame && frame != 0
+    }
+    pub(crate) fn encoded(&self, instance: u64, owner: usize, frame: u32) {
+        let mut status = self.0.lock().unwrap();
+        if status.instance == instance {
+            status.encoded[owner] = frame;
+        }
+    }
     pub fn ready(&self) -> bool {
         self.0.lock().unwrap().ready
     }
@@ -1229,17 +1254,16 @@ fn finish_capture_frame(
     captures: Res<CapturePipelines>,
     pipelines: Res<PipelineCache>,
     surfaces: Res<MirrorSurfaces>,
-    views: Query<(
-        &ExtractedView,
-        &MirrorViewRole,
-        &MirrorInstance,
-        &ViewDepthTexture,
-    )>,
+    frame: Res<super::view_frame::SourceViewFrame>,
+    gate: Res<super::source_lighting::SourceExecutionGate>,
+    queue: Res<bevy::render::renderer::RenderQueue>,
 ) {
     let mut status = status.0.lock().unwrap();
     if status.instance != surfaces.instance || status.failure.is_some() {
         return;
     }
+    status.capture_pipelines = captures.sources.len() as u32;
+    status.pipelines_pending = 0;
     if status
         .banks
         .iter()
@@ -1249,7 +1273,7 @@ fn finish_capture_frame(
     {
         return;
     }
-    for id in captures.sources.iter().chain(captures.variants.values()) {
+    for id in &captures.sources {
         match pipelines.get_render_pipeline_state(*id) {
             CachedPipelineState::Ok(_) => {}
             CachedPipelineState::Err(error) => {
@@ -1257,15 +1281,11 @@ fn finish_capture_frame(
                 status.ready = false;
                 return;
             }
-            _ => return,
+            _ => {
+                status.pipelines_pending += 1;
+                return;
+            }
         }
-    }
-    if captures
-        .sources
-        .iter()
-        .any(|id| !captures.variants.contains_key(id))
-    {
-        return;
     }
     if status.ready {
         return;
@@ -1300,23 +1320,54 @@ fn finish_capture_frame(
             return;
         }
     }
-    for (_, role, stamp, depth) in &views {
-        if stamp.0 != status.instance {
-            continue;
+    for index in 0..3 {
+        if status.encoded[index] == frame.frame && frame.frame != 0 && status.validation[index] == 0
+        {
+            status.validation[index] = gate.watch_submission(&queue);
         }
-        if let MirrorViewRole::Capture(index) = role {
-            if depth.texture.format() != TextureFormat::Depth24PlusStencil8 {
-                status.failure = Some("Mirror depth format mismatch".into());
-                return;
-            }
-            status.submitted[*index] = true;
-        }
+        status.submitted[index] = gate.submission_validated(status.validation[index]);
     }
     if status.submitted.iter().all(|submitted| *submitted) {
         status.ready = true;
         info!(
             "Source mirrors ready: 3 submitted targets; complete prepared banks feedback-safe; {} retained capture pipelines",
-            captures.variants.len()
+            captures.sources.len()
         );
+    }
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct MirrorOutputs(pub(crate) [Option<super::frame_copy::FrameCopy>; 3]);
+
+fn prepare_capture_outputs(
+    mut outputs: ResMut<MirrorOutputs>,
+    targets: Option<Res<super::surface_views::SurfaceResources>>,
+    assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,
+    device: Res<RenderDevice>,
+    cache: Res<PipelineCache>,
+    status: Res<MirrorGpuStatus>,
+) {
+    let (Some(targets), Some(assets)) = (targets, assets) else {
+        return;
+    };
+    for (index, output) in outputs.0.iter_mut().enumerate() {
+        if let Some(output) = output {
+            if let Some(error) = output.failure(&cache) {
+                status.0.lock().unwrap().failure = Some(error);
+            }
+            continue;
+        }
+        *output = Some(super::frame_copy::FrameCopy::new(
+            &device,
+            &cache,
+            assets.shaders.copy.clone(),
+            targets.targets.mirrors[index]
+                .resolved
+                .sampled
+                .as_ref()
+                .unwrap(),
+            TextureFormat::Rgba8Unorm,
+            1,
+        ));
     }
 }

@@ -67,6 +67,8 @@ extern "C" {
     #[wasm_bindgen(js_namespace = window, js_name = gameSaveResult)]
     pub fn game_save_result(id: u32, kind: &str, payload: &str, error: &str);
 
+    #[wasm_bindgen(js_namespace = window, js_name = gameLoading)]
+    pub fn game_loading();
     #[wasm_bindgen(js_namespace = window, js_name = gameReady)]
     pub fn game_ready();
     #[wasm_bindgen(js_namespace = window, js_name = gameFailure)]

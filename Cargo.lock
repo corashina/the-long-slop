@@ -3085,8 +3085,10 @@ dependencies = [
 name = "my-summer-slop"
 version = "0.1.0"
 dependencies = [
+ "async-lock",
  "bevy",
  "console_error_panic_hook",
+ "indexmap",
  "rapier3d",
  "serde",
  "serde_json",

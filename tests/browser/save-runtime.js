@@ -44,6 +44,16 @@ function reconstructed(actual,expected){
 }
 
 const frame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+let rendererReady=!document.querySelector('#new-game').disabled;
+const loading=window.gameLoading;
+window.gameLoading=()=>{rendererReady=false;loading();};
+async function waitForRenderer(){
+ const deadline=performance.now()+120000;
+ do{
+  await frame();
+  assert(performance.now()<deadline,'Renderer readiness timed out after scene replacement.');
+ }while(!rendererReady);
+}
 let action=0,fixtureSequence=0,fixtureQueue=[],fixturePending=new Map(),commitCalls=0,discardedCandidate,delayResult=null,holdDispatch=false,holdCommitQueue=null,holdCommitResult=null;
 const actions=window.gameActions,hasRequest=window.gameHasSaveRequest,takeRequest=window.gameSaveRequest,result=window.gameSaveResult;
 window.gameActions=()=>{const value=actions()|action;action=0;return value;};
@@ -78,15 +88,15 @@ async function continueCheck(){
  log('PASS usable_continue');
 }
 async function roundtrip(){
- const fresh=await runtime.prepareNewGame();await runtime.commit(fresh);await frame();
+ const fresh=await runtime.prepareNewGame();await runtime.commit(fresh);await waitForRenderer();
  assert(window.gameState.paused&&window.gameState.started,'New game is not paused.');
- const saved=await runtime.capture();const token=await runtime.prepare(saved);await runtime.commit(token);await frame();
+ const saved=await runtime.capture();const token=await runtime.prepare(saved);await runtime.commit(token);await waitForRenderer();
  const error=reconstructed(normalize(await runtime.capture()),normalize(saved));
  assert(window.gameState.paused,'Load resumed simulation.');log('PASS paused_runtime_roundtrip max_position_error_m='+error.positionError+' max_rotation_component_error='+error.rotationError);
 }
 async function missingHandleCheck(){
  const before=await runtime.capture(),presentation=state(),commits=commitCalls;
- const label=await fixture('FixtureRemoveMaterial');let candidate;
+ const label=await fixture('FixtureFailMaterialPreparation');let candidate;
  try{await rejects(async()=>{candidate=await runtime.prepare(before);},label);}
  finally{if(candidate!==undefined)runtime.discard(candidate);await fixture('FixtureRestoreAsset');}
  equal(normalize(await runtime.capture()),normalize(before),'Missing material changed the runtime.');equal(state(),presentation,'Missing material changed camera or origin.');assert(commitCalls===commits,'Missing material preparation committed.');
@@ -112,16 +122,16 @@ async function fixtureReady(){
  try{await fixture('FixtureRestoreAsset');fixtureEnabled=true;}catch{}
  enable();parentDocument.querySelector('#state').textContent=fixtureEnabled?'Runtime ready. Fault checks enabled.':'Runtime ready. Fault checks require the save-fixture build.';
 }
-const ready=window.gameReady;window.gameReady=()=>{ready();fixtureReady();};
+const ready=window.gameReady;window.gameReady=()=>{ready();rendererReady=true;fixtureReady();};
 if(!document.querySelector('#new-game').disabled)fixtureReady();
 for(const [button,work] of [[buttons[0],checks],[buttons[1],continueCheck],[buttons[2],roundtrip],[buttons[3],async()=>{await roundtrip();await missingHandleCheck();}]])button.addEventListener('click',()=>{buttons.forEach(b=>b.disabled=true);work().catch(error=>log('FAIL '+error.stack)).finally(enable);});
 import {createSaveStorage,verifyRecord} from '../../web/save-storage.js';
 const storage=createSaveStorage(),session=createSaveSession({runtime,storage});
 async function lifecycleChecks(){
- await session.newGame();await frame();
+ await session.newGame();await waitForRenderer();
  for(const name of ['save','newGame','load']){
   action=4;await frame();await frame();assert(!window.gameState.paused,'Continue failed before '+name);
-  action=2;await session[name]();await frame();assert(window.gameState.paused,'Same-frame '+name+' resumed simulation.');
+  action=2;await session[name]();await waitForRenderer();assert(window.gameState.paused,'Same-frame '+name+' resumed simulation.');
   log('PASS same_frame_pause_'+name);
  }
  const before=normalize(await runtime.capture()),presentation=state(),commits=commitCalls,states=[];
@@ -138,7 +148,7 @@ async function lifecycleChecks(){
  const dispatched=new Promise(resolve=>{holdCommitResult=resolve;}),replacement=controlled.newGame(),response=await dispatched;
  controlled.cancel();assert(controlled.pending,'Dispatched Commit lost pending state.');
  assert(states.at(-1)[0]==='pending','Dispatched Commit reported canceled.');
- result(...response);await replacement;
+ result(...response);await replacement;await waitForRenderer();
  assert(!controlled.pending&&states.at(-1)[0]==='success','Dispatched Commit lost completion.');
  log('PASS dispatched_commit_preserves_completion');await continueCheck();
 }
@@ -181,7 +191,7 @@ async function saveReload(kind,evidence){
  storage.close();parent.location.reload();
 }
 async function driveSave(){
- await session.newGame();await frame();
+ await session.newGame();await waitForRenderer();
  const setup=await fixture('FixtureSetupDriving');equal(setup.velocity,[0,0,0],'Setup injected velocity.');
  const before=await runtime.capture(),initial=await topology();
  await inputSteps(1024,240,1024);
@@ -199,7 +209,7 @@ async function driveSave(){
  await saveReload('driving_rebase',{setup,displacement,fuelBefore:fuel(before),fuelAfter:fuel(after),tripBefore:before.vehicles.find(v=>JSON.stringify(v.instance)===JSON.stringify(before.progress.selected_vehicle)).trip_m,tripAfter:after.vehicles.find(v=>JSON.stringify(v.instance)===JSON.stringify(after.progress.selected_vehicle)).trip_m});
 }
 async function fleetSave(){
- await session.newGame();await frame();
+ await session.newGame();await waitForRenderer();
  const setup=await fixture('FixtureSetupFleet');
  const snapshot=await runtime.capture();
  assert(snapshot.vehicles.length===2,'Fleet snapshot must contain both cars.');
@@ -211,7 +221,7 @@ async function fleetSave(){
  await saveReload('fleet',setup);
 }
 async function interactionSave(){
- await session.newGame();await frame();await inputSteps(0,120);
+ await session.newGame();await waitForRenderer();await inputSteps(0,120);
  const removed=await fixture('FixtureDetachAndCarry');assert(removed.supportCount===3,'Removal did not reduce wheel support.');
  await inputSteps(0,12);const stable=await topology();
  assert(stable.carryJoints===1&&stable.held===removed.removedPart,'Original carry did not survive twelve steps.');
@@ -225,7 +235,7 @@ async function interactionSave(){
 async function resumeReloadProof(){
  const text=sessionStorage.getItem(proofKey);if(!text)return;
  const proof=JSON.parse(text);sessionStorage.removeItem(proofKey);
- await session.load();await frame();
+ await session.load();await waitForRenderer();
  const current=await runtime.capture(),errors=reconstructed(normalize(current),normalize(proof.snapshot));
  if(proof.kind==='default_manual_slot'){
   assert(window.gameState.paused,'Default load resumed simulation.');log('PASS default_manual_slot_page_reload '+JSON.stringify(errors));await continueCheck();return;
@@ -272,7 +282,7 @@ async function rawRecord(record,abort=false){
  try{await new Promise((resolve,reject)=>{const tx=db.transaction('saves','readwrite');tx.oncomplete=resolve;tx.onabort=()=>abort?resolve():reject(tx.error);const r=tx.objectStore('saves').put(record,'manual');if(abort)r.onsuccess=()=>tx.abort();});}finally{db.close();}
 }
 async function activeFailureChecks(){
- await session.newGame();await frame();await session.save();
+ await session.newGame();await waitForRenderer();await session.save();
  const original=await storage.read(),before=normalize(await runtime.capture()),presentation=state();
  const preserved=async(label,work)=>{await rejects(work);equal(normalize(await runtime.capture()),before,label+' changed active state.');equal(state(),presentation,label+' changed camera/origin.');log('PASS active_session_preserved_'+label);};
  await rawRecord({...original,payload:{...original.payload,saved_at:'pending replacement'}},true);equal(await storage.read(),original,'Abort changed slot.');equal(normalize(await runtime.capture()),before,'Abort changed runtime.');log('PASS abort_preserves_slot_and_active_session');
@@ -284,13 +294,13 @@ async function activeFailureChecks(){
  const path=await fixture('FixtureRemoveAsset');try{await preserved('missing_asset',()=>session.load());equal(await storage.read(),original,'Missing asset changed slot.');}finally{await fixture('FixtureRestoreAsset');}
  log('Active storage failure checks complete.');
 }
-for(const [id,work] of [['stored-release',async()=>{await session.load();await frame();assert((await runtime.capture()).player.carry,'Saved item is not held.');await releaseHeld();assert((await runtime.capture()).player.carry===null,'Normal grab input did not drop restored item.');log('PASS restored_carry_normal_drop');}],['original-carry',async()=>{await session.newGame();await frame();await inputSteps(0,120);await fixture('FixtureDetachAndCarry');const before=await topology(),saved=await runtime.capture();await inputSteps(0,12);const after=await topology();log('ORIGINAL_CARRY '+JSON.stringify({before,after,player:saved.player,heldBody:saved.bodies.find(b=>JSON.stringify(b.identity.root)===JSON.stringify(saved.player.carry?.item))}));assert(after.carryJoints===1&&after.held!==null,'Original carry also drops before any save/load.');log('PASS original_carry_survives_resume');}],['inspect-topology',async()=>log('TOPOLOGY '+JSON.stringify(await fixture('FixtureInspect')))],['fleet-save',fleetSave],['drive-save',driveSave],['interaction-save',interactionSave],['active-failures',activeFailureChecks]])parentDocument.querySelector('#'+id).addEventListener('click',()=>{physicalButtons.forEach(b=>b.disabled=true);work().catch(e=>log('FAIL '+e.stack)).finally(()=>physicalButtons.forEach(b=>b.disabled=!fixtureEnabled));});
+for(const [id,work] of [['stored-release',async()=>{await session.load();await waitForRenderer();assert((await runtime.capture()).player.carry,'Saved item is not held.');await releaseHeld();assert((await runtime.capture()).player.carry===null,'Normal grab input did not drop restored item.');log('PASS restored_carry_normal_drop');}],['original-carry',async()=>{await session.newGame();await waitForRenderer();await inputSteps(0,120);await fixture('FixtureDetachAndCarry');const before=await topology(),saved=await runtime.capture();await inputSteps(0,12);const after=await topology();log('ORIGINAL_CARRY '+JSON.stringify({before,after,player:saved.player,heldBody:saved.bodies.find(b=>JSON.stringify(b.identity.root)===JSON.stringify(saved.player.carry?.item))}));assert(after.carryJoints===1&&after.held!==null,'Original carry also drops before any save/load.');log('PASS original_carry_survives_resume');}],['inspect-topology',async()=>log('TOPOLOGY '+JSON.stringify(await fixture('FixtureInspect')))],['fleet-save',fleetSave],['drive-save',driveSave],['interaction-save',interactionSave],['active-failures',activeFailureChecks]])parentDocument.querySelector('#'+id).addEventListener('click',()=>{physicalButtons.forEach(b=>b.disabled=true);work().catch(e=>log('FAIL '+e.stack)).finally(()=>physicalButtons.forEach(b=>b.disabled=!fixtureEnabled));});
 const previousFixtureReady=fixtureReady;
 fixtureReady=async()=>{await previousFixtureReady();physicalButtons.forEach(b=>b.disabled=!fixtureEnabled);parentDocument.querySelector('#manual-reload').disabled=false;parentDocument.querySelector('#lifecycle').disabled=false;await resumeReloadProof().catch(e=>log('FAIL '+e.stack));};
 parentDocument.querySelector('#manual-reload').addEventListener('click',async()=>{
  const button=parentDocument.querySelector('#manual-reload');button.disabled=true;
  try{
-  await session.newGame();await frame();await session.save();const record=await storage.read(),snapshot=await verifyRecord(record);
+  await session.newGame();await waitForRenderer();await session.save();const record=await storage.read(),snapshot=await verifyRecord(record);
   assert(snapshot.schema_version===1,'Stored schema is not 1.');
   sessionStorage.setItem(proofKey,JSON.stringify({kind:'default_manual_slot',snapshot}));storage.close();parent.location.reload();
  }catch(error){log('FAIL '+error.stack);button.disabled=false;}

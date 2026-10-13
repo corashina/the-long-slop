@@ -145,7 +145,7 @@ class GltfExporter(GltfBuilder):
         view = document.bufferViews[accessor.bufferView]
         content = (directory / unquote(document.buffers[view.buffer].uri)).read_bytes()
         code,size = {5126:('f',4),5125:('I',4),5123:('H',2),5121:('B',1)}[accessor.componentType]
-        width = {'SCALAR':1,'VEC3':3}[accessor.type]
+        width = {'SCALAR':1,'VEC2':2,'VEC3':3}[accessor.type]
         start = (view.byteOffset or 0)+(accessor.byteOffset or 0)
         stride = view.byteStride or size*width
         return [struct.unpack_from('<'+str(width)+code,content,start+i*stride) for i in range(accessor.count)]
@@ -289,6 +289,9 @@ class GltfExporter(GltfBuilder):
                         # Unity reuses the last renderer material for remaining submeshes.
                         materials += [materials[-1]] * (len(self.geometry(mesh_reader)[2]) - len(materials))
                     node.mesh = self.mesh(mesh_reader,materials,color,condition)
+                    if self.with_materials:
+                        from .render_lighting import recover_renderer
+                        node.extras["source_renderer"] = recover_renderer(self.source,renderer,mesh_reader)
                     if renderer.type.name == 'SkinnedMeshRenderer':
                         bones = [self.source.resolve(renderer, pointer) for pointer in renderer_data['m_Bones']]
                         if bones:

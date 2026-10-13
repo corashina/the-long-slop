@@ -959,7 +959,7 @@ impl GarageRuntime {
             self.lighting
                 .cycle_headlights(&reference.lighting, self.vehicle);
         }
-        if driving && input.pressed & keys::SPACE != 0 {
+        if (driving || self.area.player.driving2()) && input.pressed & keys::SPACE != 0 {
             let vehicle = &mut self.vehicles[self.vehicle];
             vehicle.handbrake = !vehicle.handbrake;
         }
@@ -1016,7 +1016,10 @@ impl GarageRuntime {
                     ambient_temperature: self.lighting.cycle.output().visual_temperature,
                     electronics_output: audio.reference.radio.electronics_output,
                     engine_present: active
-                        && self.area.items.mounted(reference.vehicles[index].engine.item),
+                        && self
+                            .area
+                            .items
+                            .mounted(reference.vehicles[index].engine.item),
                 },
                 FIXED_DT,
                 audio.game_seconds,

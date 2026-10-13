@@ -1,35 +1,39 @@
-# Deferred rendering completion plan
+# Source rendering completion plan
 
 Date: 2026-10-11.
-Status: Deferred at the user's request. Local master integrates the stable materials with accepted lighting and gameplay.
+Status: Tasks 1 through 7 accepted on `codex/rendering-completion`. Local merge authorized on 2026-10-12.
+Merged verification remains pending.
 
 Source: installed Steam build `11140890`, Unity `2021.3.18f1`.
 Scope: the imported home, fixed Lada, preparation items, and their rendering.
 Keep gameplay, physics, controls, and the existing road unchanged.
 
-## Resume safely
+## Execution record
 
-1. Start an isolated worktree from current master.
-2. Recover required modules from `codex/material-parity`, commit `1f18cc5ada986cc32082fd51bada22b1959d02d5`.
-3. Preserve current master lighting, library, menus, instruments, gameplay, and seven-bank WebGL2 materials.
-4. Resolve recovery interfaces against current master before compiling unfinished rendering code.
-5. Read the recovery manifest, task reports, and acceptance map.
-6. Verify retained input hashes before reusing evidence.
-7. Keep one owner for app registration, graph wiring, and shared builds.
-8. Use separate file ownership when independent effect work can run in parallel.
+The approved worktree starts from `dccd516` and preserves accepted master modules.
+The implementation owner recovered required source modules and reconciled their interfaces before each layer gate.
+Completed checkpoints: shadows 8182153, probes 1b77a1a, motion 538810e, effects 6148e66, glass 6f84766.
+One owner edits the graph and builds packages. The root runs native browser acceptance and independent reviews.
+The user authorized merging `67798ec` into local master `a5b9778`.
+Retain the rendering worktree and its evidence. Do not push without a separate request.
+Task 7 implementation and scoped reviews passed. Native restart, resize, pause, and terminal-fault checks passed.
+Whole-branch review found one motion streaming fault. Fixed slots passed three critical tests.
+Scoped correction review and all five real-body native stages passed.
+The rendering branch passed 240 native tests. Source and package hashes stayed fixed through branch acceptance.
+These results do not verify the merged master package.
+The [verification record](../../verification.md) lists the final package, checks, and limits.
 
-Ignored evidence stays in the retained worktree:
-`C:/Users/Corashina/.codex/worktrees/material-parity/the-long-drive-wasm`.
-Read relative evidence paths from that directory.
-Git does not copy these files into a new worktree.
-
-Local records are in `.superpowers/sdd/2026-10-10-material-parity/`.
-Source evidence and fixtures are in `.cache/lighting-research/`.
-The current renderer inventory and unfinished interfaces are preserved on the recovery branch.
+Current worktree: `C:/Users/Corashina/.codex/worktrees/rendering-completion/the-long-drive-wasm`.
+Local ledger: `.superpowers/sdd/2026-10-11-rendering-completion/progress.md`.
+Integration report: `.superpowers/sdd/2026-10-11-rendering-completion/graph-integration-report.md`.
+Source reports: `.superpowers/evidence/material-parity/reports/`.
+Native gates: `.cache/layer2-browser/` through `.cache/layer7-browser/`.
+These local files include evidence that Git does not distribute with game assets.
+The old recovery branch is no longer an execution dependency.
 
 ## 1. Finish texture storage reconciliation
 
-- Verify the source sRGB/linear storage correction already present on the recovery branch.
+- Verify exported sRGB and linear storage against the retained source proof.
 - Preserve separate decoded-normal and color identities.
 - Verify five metallic, three AO, and one parallax RGB slot.
 - Retain source alpha handling for the three alpha-only masks.

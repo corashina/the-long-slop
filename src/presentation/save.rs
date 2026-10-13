@@ -208,7 +208,7 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
     let authored = world.resource::<Assets<materials::SourceMaterial>>();
     world
         .resource::<WorldVisuals>()
-        .validate_reused_assets(meshes, standard)?;
+        .validate_reused_assets(meshes, authored)?;
     let road_path = &reference
         .assets
         .iter()
@@ -249,7 +249,9 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
             return Err(fail("sky material".into()));
         }
         // Generated terrain is rebuilt. Imported, caster, and sky meshes are reused.
-        if receiver.is_some() || sky.is_some() || entity.contains::<materials::SourceCaster>() {
+        let rebuilt = entity.get::<materials::GeneratedWorldMaterial>()
+            == Some(&materials::GeneratedWorldMaterial::Terrain);
+        if !rebuilt && (receiver.is_some() || sky.is_some()) {
             if let Some(mesh) = entity.get::<Mesh3d>() {
                 if !meshes.contains(mesh.0.id()) {
                     return Err(fail(format!("reused render mesh on {:?}", entity.id())));

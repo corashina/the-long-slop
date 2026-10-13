@@ -9,7 +9,7 @@ import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
 import {loadUiAssets} from './ui-layout.js';
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
-let audio,menu,feedback,failed=false,timeout,actions=0,frame;
+let audio,menu,feedback,failed=false,timeout,actions=0,frame,renderFailure;
 const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',condition:-1,held:'',throwCharge:0,throwActive:false,radioVolume:undefined,radioFrequency:undefined,radioAm:false,quantities:[0,0,0,0,0,0]};
 const input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas);
 const settleSave=window.gameSaveResult;
@@ -49,8 +49,9 @@ window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,n
  state.rpm=rpm;state.ignition=ignition;state.running=running;state.starter=starter;state.seated=seated;state.handbrake=handbrake;
  feedback?.update(record);
 };
-function fail(message){failed=true;clearTimeout(timeout);const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}}
-window.gameFailure=fail;
+function fail(message,notifyRenderer=true){if(failed)return;failed=true;clearTimeout(timeout);const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
+window.gameFailure=message=>fail(message,false);
+window.gameLoading=()=>{if(failed)return;menu.loading();clearTimeout(timeout);timeout=setTimeout(()=>fail('The garage did not load within 120 seconds.'),120000);};
 window.gameReady=()=>{if(failed)return;clearTimeout(timeout);menu.ready();};
 window.addEventListener('error',event=>fail(event.message||'The runtime stopped.'));
 window.addEventListener('unhandledrejection',event=>fail(event.reason?.message||String(event.reason)));
@@ -72,9 +73,9 @@ async function load(){
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
  feedback=createFeedback(manifest.ui,switchIconUrl);
  status.textContent='Loading game code...';
- const {default:init,run}=await import('./pkg/my_summer_slop.js');
+ const {default:init,run,source_render_failure}=await import('./pkg/my_summer_slop.js');
  const wasm=await fetch('./pkg/my_summer_slop_bg.wasm');if(!wasm.ok)throw Error('Cannot load game code (HTTP '+wasm.status+').');
- await init({module_or_path:wasm});status.textContent='Loading the garage...';
+ await init({module_or_path:wasm});if(failed)return;renderFailure=source_render_failure;status.textContent='Loading the garage...';
  timeout=setTimeout(()=>fail('The garage did not load within 120 seconds.'),120000);run(text,manifestHash);
 }
 load().catch(error=>fail(error.message));

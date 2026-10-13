@@ -453,11 +453,17 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
             path=output/Path(d['file']).name
             if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=d['sha256']:raise ValueError(f"{d['file']} dependency hash")
     if len(lighting.get('high_beams',[]))!=len(manifest['vehicles']):raise ValueError('Required headlight2 instruments')
-    for lamp in lighting['high_beams']:
+    for vehicle,lamp in zip(manifest['vehicles'],lighting['high_beams']):
         if not (lamp['signal']=='headlight2' and lamp['node'] in nodes and lamp['stay_on']):
             fail(lamp['source'],'headlight2 instrument')
+        instruments=[entry for entry in vehicle['instruments']['lamps'] if entry['signal']=='headlight2']
+        fields=('source','node','signal','min_value','max_value','stay_on')
+        if len(instruments)!=1 or any(lamp[field]!=instruments[0][field] for field in fields):
+            fail(lamp['source'],'headlight2 instrument correspondence')
         for field in ('on','off'):
             material=lamp[field];document=documents.get(material['asset']);index=material['gltf_material']
+            if any(material[key]!=instruments[0][field][key] for key in ('source','asset','gltf_material')):
+                fail(lamp['source'],f'headlight2 {field} source')
             if (nodes[lamp['node']]['asset']!=material['asset'] or not document
                     or not 0<=index<len(document['materials'])
                     or document['materials'][index]['extras']['source']!=material['source']
@@ -487,6 +493,13 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
             if any(len(cabin[field])!=4 for field in fields):fail(c['source'],'cabin door links')
             if any(nid not in nodes or nodes[nid]['asset']!=owner for nid in cabin['door_nodes']):
                 fail(c['source'],'cabin door links correspondence')
+            for slot_source,usable,nid,part_type in zip(cabin['door_slots'],cabin['door_usable_sources'],cabin['door_nodes'],('fldoor','frdoor','rldoor','rrdoor')):
+                slots=[slot for slot in manifest['part_slots'] if slot['source']==slot_source]
+                mechanisms=[mechanism for mechanism in manifest['mechanisms'] if mechanism['source']==usable]
+                if (len(slots)!=1 or len(mechanisms)!=1 or slots[0]['part_types']!=[part_type]
+                        or mechanisms[0]['parent_item']!=slots[0]['part']
+                        or mechanisms[0]['drag']['node']!=nid):
+                    fail(c['source'],'cabin door links correspondence')
     for l in lighting['lights']:
         if l['cookie'] is not None and l['cookie'] not in textures:fail(l['source'],'cookie')
         if l['node'] is not None and l['node'] not in nodes:fail(l['source'],'node')

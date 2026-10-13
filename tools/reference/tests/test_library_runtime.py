@@ -18,7 +18,7 @@ class RuntimeTests(unittest.TestCase):
         from tools.reference.export import validate_runtime_paths
         with self.assertRaises(ValueError): validate_runtime_paths({'assets':[{'path':'library/models/unused.gltf','dependencies':[]}]})
         manifest = {'assets': [{'path': f'reference/{name}.gltf', 'dependencies': []}
-                               for name in ('home', 'lada', 'items', 'road_lamp', 'sky')]}
+                               for name in ('home', 'lada', 'skoda', 'items', 'road_lamp', 'sky')]}
         validate_runtime_paths(manifest)
         manifest['ui']={'sprites':[{'path':'reference/ui-test-3.png','source':{'file':'test','path_id':3}}]}
         validate_runtime_paths(manifest)
@@ -31,7 +31,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_lighting_dependency_receipts_require_matching_typed_hashes(self):
         from tools.reference.export import validate_runtime_paths
-        manifest={'assets':[{'path':f'reference/{name}.gltf','dependencies':[]} for name in ('home','lada','items','road_lamp','sky')]}
+        manifest={'assets':[{'path':f'reference/{name}.gltf','dependencies':[]} for name in ('home','lada','skoda','items','road_lamp','sky')]}
         resource={'path':'reference/lighting-test-1.smip','sha256':'a'*64}
         manifest['lighting']={'textures':[resource]}
         manifest['assets'][0]['dependencies']=[{'file':resource['path'],'sha256':resource['sha256']}]
@@ -172,7 +172,7 @@ class LibraryInputTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             reader=LibraryReader(self.fixture(Path(tmp)))
             mesh=NS(assets_file=NS(source_container_path='test'),path_id=1)
-            writer=GltfExporter(None,Path(tmp)/'sky.gltf',reader,5)
+            writer=GltfExporter(None,Path(tmp)/'sky.gltf',reader,6,with_materials=False)
             writer.material=lambda *_: self.fail('Sky geometry must use the existing sky renderer')
             index=writer.mesh(mesh,[NS(assets_file=mesh.assets_file,path_id=99)])
             self.assertIsNone(writer.document.meshes[index].primitives[0].material)
@@ -253,9 +253,14 @@ class RuntimeContractTests(unittest.TestCase):
         manifest['assets'].append({'id':5,'usage':'unique_scene','material_count':1,'path':'reference/items.gltf','sha256':'a'*64,'root':{'file':'fixture','path_id':999},'dependencies':[]})
         manifest['rendering']['materials'].append({
             'source':{'file':'fixture','path_id':999},'asset':5,'gltf_material':0,
-            'shader_family':'unlit_color','color':[1.,1.,1.,1.],'condition':None,'keywords':[],
+            'shader_family':'unlit_color','enable_instancing':False,'color':[1.,1.,1.,1.],'condition':None,'keywords':[],
             'state':{'alpha_mode':'opaque','cull':2,'z_write':True,'z_test':4,'src_blend':1,'dst_blend':0,'render_queue':-1},
             'properties':{'floats':{},'colors':{'_Color':[1.,1.,1.,1.]},'textures':[],'defaults':{},'exclusions':[]}})
+        import copy
+        skoda=copy.deepcopy(manifest['assets'][-1]);skoda.update(id=6,path='reference/skoda.gltf',root={'file':'fixture','path_id':1000})
+        manifest['assets'].append(skoda)
+        material=copy.deepcopy(manifest['rendering']['materials'][-1]);material.update(asset=6,source={'file':'fixture','path_id':1000})
+        manifest['rendering']['materials'].append(material)
         for asset in manifest['assets']:
             scene={'asset':{'version':'2.0'},'nodes':[],'scenes':[{'nodes':[]}],'scene':0}
             content=json.dumps(scene).encode()
@@ -276,12 +281,13 @@ class RuntimeContractTests(unittest.TestCase):
         from tools.reference.export import lighting_resources
         def update_resource_hashes(value):
             if isinstance(value,dict):
-                if 'path' in value and 'sha256' in value:
+                if ('path' in value or 'file' in value) and 'sha256' in value:
                     value['sha256']=hashlib.sha256(b'fixture lighting bytes').hexdigest()
                 for child in value.values():update_resource_hashes(child)
             elif isinstance(value,list):
                 for child in value:update_resource_hashes(child)
         update_resource_hashes(manifest['lighting'])
+        update_resource_hashes(manifest['render_lighting'])
         for resource in lighting_resources(manifest):
             content=b'fixture lighting bytes'
             (root/Path(resource['path']).name).write_bytes(content)
@@ -304,7 +310,7 @@ class RuntimeContractTests(unittest.TestCase):
     def test_runtime_contract_rejects_missing_records(self):
         with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'):
             root=Path(tmp);manifest,receipt=self.runtime(root)
-            for field in ('app_id','build_id','nodes','player','vehicle','colliders'):
+            for field in ('app_id','build_id','nodes','player','vehicles','colliders'):
                 incomplete=dict(manifest);del incomplete[field];self.save(root,incomplete)
                 with self.subTest(field=field),self.assertRaisesRegex(ValueError,'Runtime manifest contract'):
                     verify_reference(root,receipt)
@@ -355,7 +361,7 @@ class RuntimeContractTests(unittest.TestCase):
             (root/'cache/work').mkdir(parents=True)
             def export(source,staged,library,snapshot):
                 manifest,_=self.runtime(staged);self.save(staged,manifest)
-            with patch('tools.reference.library.reader.LibraryReader',return_value=reader),patch('tools.reference.source.LibrarySource'),patch('tools.reference.export._export_selected',side_effect=export),patch('tools.reference.export.RUNTIME_WORK_ROOT',root/'cache'),patch('tools.reference.export.subprocess.run',side_effect=FileNotFoundError('docker')),patch('tools.reference.export.promote_reference') as promote:
+            with patch('tools.reference.library.reader.LibraryReader',return_value=reader),patch('tools.reference.source.LibrarySource'),patch('tools.reference.export._export_selected',side_effect=export),patch('tools.reference.export.subprocess.run',side_effect=FileNotFoundError('docker')),patch('tools.reference.export.promote_reference') as promote:
                 with self.assertRaisesRegex(ValueError,'needs Docker'):derive_reference(snapshot,receipt,accepted)
                 promote.assert_not_called()
             self.assertEqual(before,((accepted/'manifest.json').read_bytes(),(accepted/'manifest.json').stat().st_mtime_ns))

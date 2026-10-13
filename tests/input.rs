@@ -660,6 +660,7 @@ fn driving2_uses_car_controls_without_throttle() {
         &game,
         FrameInput {
             held: keys::HORN | keys::FORWARD,
+            pressed: keys::SPACE,
             ..Default::default()
         },
     );
@@ -673,6 +674,7 @@ fn driving2_uses_car_controls_without_throttle() {
             .playing
     );
     assert!(!run.vehicles[0].engine_output.starter);
+    assert!(!run.vehicles[0].handbrake, "driving2 must allow handbrake");
     assert!(
         !run.vehicles[0].engine_output.ignition,
         "driving2 forward must not trigger automatic throttle ignition"
@@ -692,7 +694,10 @@ fn driving2_uses_car_controls_without_throttle() {
             ..Default::default()
         },
     );
-    assert!(run.vehicles[0].engine_output.ignition, "driving2 must allow ignition");
+    assert!(
+        run.vehicles[0].engine_output.ignition,
+        "driving2 must allow ignition"
+    );
 }
 #[test]
 #[ignore = "requires installed source export"]

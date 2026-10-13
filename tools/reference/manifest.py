@@ -394,6 +394,7 @@ def build_manifest(source, roots, reports, hashes, library, cars):
     from .mirrors import recover_mirrors
     result['mirrors']=recover_mirrors(source,nodes,components,pointer_node,item_nodes,reports)
     result['lighting']=source.lighting
+    result['render_lighting']=source.render_lighting
     collider_ids={(c['source']['file'],c['source']['path_id']):c['id'] for c in colliders}
     old_colliders={v:k for k,v in source.lighting_collider_ids.items()}
     for controller in result['lighting']['controllers']:

@@ -3,7 +3,20 @@
 pub mod audio;
 pub use audio::*;
 
+pub mod lighting_scene;
+pub mod postprocessing;
+pub mod reflections;
+pub mod render_lighting;
 pub mod rendering;
+pub mod shadow_candidates;
+pub mod shadow_frame;
+pub mod shadow_planes;
+pub mod shadow_splits;
+pub mod shadows;
+pub mod sky;
+pub mod sorting;
+pub mod temporal;
+pub mod view_math;
 pub use rendering::*;
 
 use serde::{Deserialize, Serialize};
@@ -755,6 +768,7 @@ pub struct ReferenceManifest {
     pub library: LibraryProvenance,
     pub lighting: LightingRecord,
     pub mirrors: MirrorRecord,
+    pub render_lighting: lighting_scene::LightingRecord,
     pub app_id: u32,
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
@@ -851,6 +865,7 @@ impl ReferenceManifest {
         )?;
         self.lighting.validate(self)?;
         self.mirrors.validate(self)?;
+        self.render_lighting.validate(&self.nodes)?;
         require(
             self.bodies.iter().all(|b| {
                 self.nodes.iter().any(|n| {

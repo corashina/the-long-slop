@@ -87,7 +87,7 @@ class MirrorRecoveryTests(unittest.TestCase):
             output=root/'output/reference';output.parent.mkdir()
             snapshot=NS(manifest_sha256='a'*64,files=(),root=cache/'source',manifest_path=cache/'source-manifest.json')
             receipt=NS(source_manifest_sha256='a'*64)
-            reader=NS(snapshot=snapshot,root=root/'library',records_root=cache/'records')
+            reader=NS(snapshot=snapshot,root=root/'library',records_root=cache/'records',exports={})
             before=[(p.relative_to(cache),p.read_bytes(),p.stat().st_mtime_ns) for p in cache.rglob('*') if p.is_file()]
             def selected(source,staged,library,selected_snapshot):
                 self.assertEqual(staged.parent,output.parent)

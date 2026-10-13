@@ -16,7 +16,6 @@ use crate::simulation::{FrameInput, StepClock, keys};
 use crate::starting_area::GarageRuntime;
 use crate::vehicle::VehiclePose;
 use bevy::asset::{AssetMetaCheck, LoadState, RecursiveDependencyLoadState};
-use bevy::camera::visibility::RenderLayers;
 use bevy::ecs as bevy_ecs;
 use bevy::gltf::GltfExtras;
 use bevy::prelude::*;
@@ -37,8 +36,9 @@ pub(crate) struct Drive {
     rendered: VehiclePose,
     camera: CameraMode,
     frame_steps: u32,
+    pub render_delta_seconds: f32,
     skip_elapsed: bool,
-    ready: bool,
+    pub(crate) ready: bool,
     last_feedback: Option<FeedbackStamp>,
 }
 
@@ -90,11 +90,13 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
             rendered: current,
             camera: CameraMode::default(),
             frame_steps: 0,
+            render_delta_seconds: 0.,
             skip_elapsed: false,
             ready: false,
             last_feedback: None,
         })
         .insert_resource(ClearColor(Color::BLACK))
+        .add_plugins(presentation::source_io::SourceIoPlugin)
         .add_plugins(
             DefaultPlugins
                 .set(AssetPlugin {
@@ -117,6 +119,8 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
             presentation::lighting::SourceLightingPlugin,
             presentation::materials::SourceMaterialPlugin,
             presentation::mirrors::SourceMirrorPlugin,
+            presentation::source_lighting::SourceLightingPlugin,
+            presentation::frame_graph::SourceFramePlugin,
         ))
         .add_systems(Startup, setup)
         .add_systems(
@@ -133,6 +137,7 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
                 sync_instruments,
                 presentation::lighting::sync_control_visuals,
                 update_camera,
+                presentation::frame_graph::sync_stack_cameras,
                 update_hud,
             )
                 .chain(),
@@ -158,7 +163,8 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<presentation::materials::SourceMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     server: Res<AssetServer>,
     gltf_extensions: Res<bevy::gltf::extensions::GltfExtensionHandlers>,
     reference: Res<RuntimeReference>,
@@ -170,38 +176,19 @@ fn setup(
     commands.insert_resource(InstrumentVisuals::default());
     presentation::materials::load_materials(&mut commands, &server, &reference.0.rendering);
     presentation::lighting::load_lighting(&mut commands, &server, &reference.0.lighting);
+    presentation::lighting_assets::load_lighting(
+        &mut commands,
+        &server,
+        &reference.0.render_lighting,
+    );
     presentation::lighting::load_lamp_materials(&mut commands, &gltf_extensions, &reference.0);
     presentation::reference::load(&mut commands, &server, &reference.0);
-    commands.spawn((
-        DriveCamera,
-        presentation::mirrors::MirrorViewRole::Normal,
-        Camera3d::default(),
-        bevy::camera::Hdr,
-        (0..32)
-            .filter(|layer| reference.0.player.camera_culling_mask & (1u32 << layer) != 0)
-            .collect::<RenderLayers>(),
-        Projection::Perspective(PerspectiveProjection {
-            fov: reference.0.player.field_of_view_degrees.to_radians(),
-            near: reference
-                .0
-                .lighting
-                .cameras
-                .iter()
-                .map(|c| c.startup_near_plane)
-                .fold(f32::INFINITY, f32::min),
-            far: reference
-                .0
-                .lighting
-                .cameras
-                .iter()
-                .map(|c| c.startup_far_plane)
-                .fold(0., f32::max),
-            ..default()
-        }),
+    presentation::frame_graph::spawn_cameras(
+        &mut commands,
+        &mut images,
+        &reference.0,
         presentation::transform(drive.current),
-        Msaa::Off,
-        bevy::core_pipeline::tonemapping::Tonemapping::None,
-    ));
+    );
 }
 
 fn check_ready(
@@ -216,14 +203,20 @@ fn check_ready(
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
-    mut frames: Local<u8>,
     lighting: Res<presentation::lighting::SourceLighting>,
+    source_lighting: Res<presentation::source_lighting::SourceLighting>,
     mut materials: ResMut<presentation::materials::SourceMaterials>,
     mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
 ) {
     if let Some(error) = mirrors.failure() {
         game_failure(&error);
         visuals.failed = true;
+        return;
+    }
+    if let presentation::materials::RenderingState::Failed(error) = &source_lighting.state {
+        game_failure(error);
+        visuals.failed = true;
+        return;
     }
     if visuals.failed {
         return;
@@ -312,11 +305,11 @@ fn check_ready(
             if !mirrors.ready() {
                 return;
             }
-            *frames += 1;
-            if *frames >= 2 {
-                drive.ready = true;
-                game_ready();
+            if source_lighting.state != presentation::materials::RenderingState::Ready {
+                return;
             }
+            drive.ready = true;
+            game_ready();
         }
         Ok(false) => {}
         Err(error) => {
@@ -390,7 +383,8 @@ fn advance_physics(
     mut drive: ResMut<Drive>,
 ) {
     drive.frame_steps = 0;
-    if !drive.runtime.started || drive.runtime.paused {
+    drive.render_delta_seconds = 0.;
+    if !drive.ready || !drive.runtime.started || drive.runtime.paused {
         return;
     }
     if drive.skip_elapsed {
@@ -403,6 +397,7 @@ fn advance_physics(
             .radio
             .calendar((calendar / 100) as u8, (calendar % 100) as u8);
     }
+    drive.render_delta_seconds = time.delta_secs();
     drive
         .runtime
         .advance_lighting(&reference.0, time.delta_secs_f64());
@@ -716,7 +711,11 @@ fn publish_audio(
                     .items
                     .mounted(reference.0.vehicles[audio.vehicle_index].engine.item))
             && emitter.item.is_none_or(|id| {
-                runtime.area.items.get(id).is_some_and(|item| item.inactive_pose.is_none())
+                runtime
+                    .area
+                    .items
+                    .get(id)
+                    .is_some_and(|item| item.inactive_pose.is_none())
             });
         if let Some((global, visibility)) = visuals
             .nodes

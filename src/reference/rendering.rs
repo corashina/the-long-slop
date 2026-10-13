@@ -39,6 +39,7 @@ pub struct MaterialRecord {
     pub gltf_material: u32,
     pub source: SourceId,
     pub shader_family: ShaderFamily,
+    pub enable_instancing: bool,
     pub color: [f32; 4],
     pub condition: Option<MaterialCondition>,
     pub keywords: Vec<String>,
@@ -193,7 +194,7 @@ pub struct TextureMip {
 fn source(id: &SourceId) -> bool {
     !id.file.is_empty() && id.path_id != 0
 }
-fn safe_path(path: &str) -> bool {
+pub(super) fn safe_path(path: &str) -> bool {
     path.starts_with("reference/")
         && !path.contains(['\\', ':', '?', '#', '\0'])
         && path
@@ -406,10 +407,6 @@ impl RenderingRecord {
                     &field,
                 )?;
                 let normal = matches!(texture.slot.as_str(), "_BumpMap" | "_DetailNormalMap");
-                let color = matches!(
-                    texture.slot.as_str(),
-                    "_MainTex" | "_DetailAlbedoMap" | "_EmissionMap"
-                );
                 require(
                     texture.encoding
                         == if normal {
@@ -417,12 +414,7 @@ impl RenderingRecord {
                         } else {
                             TextureEncoding::Rgba
                         }
-                        && texture.color_space
-                            == if color {
-                                TextureColorSpace::Srgb
-                            } else {
-                                TextureColorSpace::Linear
-                            },
+                        && (!normal || texture.color_space == TextureColorSpace::Linear),
                     &field,
                 )?;
                 let sampler = &texture.sampler;

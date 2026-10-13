@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import unittest
 from tempfile import TemporaryDirectory
 from tools.reference.export import NATIVE_ENGINE_SHA256, native_engine_evidence
@@ -13,6 +14,25 @@ class LightingTests(unittest.TestCase):
     def setUpClass(cls):
         cls.source=Source(Path(r'C:/Program Files (x86)/Steam/steamapps/common/The Long Drive'))
         cls.output=Path('.cache/lighting-test');cls.output.mkdir(parents=True,exist_ok=True)
+        cls.runtime_output=Path(os.environ.get('TLD_REFERENCE_OUTPUT','web/assets/reference'))
+
+    def test_runtime_surface_meshes_have_source_renderer_state(self):
+        manifest=json.loads((self.runtime_output/'manifest.json').read_bytes())
+        for asset in manifest['assets']:
+            path=self.runtime_output/Path(asset['path']).name
+            document=json.loads(path.read_bytes())
+            mesh_nodes=[node for node in document['nodes'] if 'mesh' in node]
+            self.assertTrue(mesh_nodes,asset['path'])
+            for node in mesh_nodes:
+                with self.subTest(asset=asset['path'],node=node['name']):
+                    if path.name=='sky.gltf':
+                        self.assertNotIn('source_renderer',node['extras'])
+                    else:
+                        state=node['extras']['source_renderer']
+                        self.assertIn('source',state)
+                        self.assertEqual(state['motion_vectors'],1)
+                        self.assertEqual(len(state['bounds_center']),3)
+                        self.assertEqual(len(state['bounds_extents']),3)
 
     def test_decoded_mips_preserve_source_levels_and_alpha(self):
         from tools.reference.mips import decoded_mips,validate_mips
@@ -85,15 +105,15 @@ class LightingTests(unittest.TestCase):
                 self.assertFalse(any(t['slot']=='_EmissionMap' for t in record['properties']['textures']))
 
     def test_high_beam_instrument_uses_checked_source_links(self):
-        output=Path('web/assets/reference')
+        output=self.runtime_output
         original=json.loads((output/'manifest.json').read_text())
-        lamp=original['lighting']['high_beam']
+        lamp=original['lighting']['high_beams'][0]
         self.assertEqual(lamp['source'],{'file':'level1','path_id':66369})
         self.assertEqual(lamp['on']['source'],{'file':'sharedassets1.assets','path_id':325})
         self.assertEqual(lamp['off']['source'],{'file':'sharedassets1.assets','path_id':324})
         self.assertEqual(lamp['signal'],'headlight2')
-        mutations=[lambda l:l.pop('high_beam'),lambda l:l['high_beam'].update(node=original['vehicle']['root']),
-                   lambda l:l['high_beam'].update(on=l['high_beam']['off'])]
+        mutations=[lambda l:l.pop('high_beams'),lambda l:l['high_beams'][0].update(node=original['vehicles'][0]['root']),
+                   lambda l:l['high_beams'][0].update(on=l['high_beams'][0]['off'])]
         for mutate in mutations:
             altered=copy.deepcopy(original);mutate(altered['lighting'])
             with self.assertRaises(ValueError):validate_lighting_export(altered,output)
@@ -115,7 +135,7 @@ class LightingTests(unittest.TestCase):
             self.assertEqual(flare['directional'],bool(component['m_Directional']))
 
     def test_acceptance_rejects_missing_cabin_input_and_incomplete_door_links(self):
-        output=Path('web/assets/reference')
+        output=self.runtime_output
         original=json.loads((output/'manifest.json').read_text())
         validate_lighting_export(original,output)
         mutations=[lambda c:c.pop('cabin_input'),lambda c:c.update(cabin_input=None)]
@@ -133,7 +153,7 @@ class LightingTests(unittest.TestCase):
                     validate_lighting_export(altered,output)
 
     def test_acceptance_rejects_missing_flare_payload_and_atlas(self):
-        output=Path('web/assets/reference')
+        output=self.runtime_output
         original=json.loads((output/'manifest.json').read_text())
         mutations=[lambda m:m['lighting']['cycle']['sun_flares'].clear(),
             lambda m:m['lighting']['cycle']['sun_flares'][0]['flare'].update(sha256='0'*64),
@@ -145,7 +165,7 @@ class LightingTests(unittest.TestCase):
                 validate_lighting_export(altered,output)
 
     def test_acceptance_rejects_changed_typed_flare_values(self):
-        output=Path('web/assets/reference');original=json.loads((output/'manifest.json').read_text())
+        output=self.runtime_output;original=json.loads((output/'manifest.json').read_text())
         mutations=[lambda f:f.update(elements=[]),lambda f:f['elements'][0].update(size=42),
             lambda f:f.update(texture_layout=0),lambda f:f.update(fade_speed=-1),
             lambda f:f.update(color=[float('nan'),0,0,1]),lambda f:f.update(directional=False)]
@@ -162,7 +182,7 @@ class LightingTests(unittest.TestCase):
             self.assertEqual(len(cycle[field]),3)
 
     def test_acceptance_rejects_incomplete_and_nonfinite_visual_temperature_arrays(self):
-        output=Path('web/assets/reference');original=json.loads((output/'manifest.json').read_text())
+        output=self.runtime_output;original=json.loads((output/'manifest.json').read_text())
         for field in ('temp_days','temp_nights','temp_add_noons'):
             for values in (None,[],[1.,2.],[1.,2.,3.,4.],[float('nan'),1.,2.]):
                 altered=copy.deepcopy(original);altered['lighting']['cycle'][field]=values
@@ -178,7 +198,7 @@ class LightingTests(unittest.TestCase):
         self.assertEqual(evidence['maximum'],{'draw_distance':25000.,'fog_modifier':1.})
 
     def test_acceptance_rejects_missing_or_invalid_fog_modifier(self):
-        output=Path('web/assets/reference');original=json.loads((output/'manifest.json').read_text())
+        output=self.runtime_output;original=json.loads((output/'manifest.json').read_text())
         for value in (None,-1.,float('nan'),float('inf')):
             altered=copy.deepcopy(original);altered['lighting']['cycle']['fog_modifier']=value
             with self.assertRaisesRegex(ValueError,'fog_modifier'):validate_lighting_export(altered,output)
@@ -195,4 +215,5 @@ class LightingTests(unittest.TestCase):
     def recover(self):
         s=self.source
         roots=[s.get('level1',21400),s.transform_for(s.get('level1',17687))]
+        s.lighting_cars=[roots[1]]
         return recover_lighting(s,roots,self.output)

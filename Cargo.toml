@@ -16,6 +16,7 @@ serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["float_roundtrip"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+async-lock = "=3.4.2"
 bevy = { version = "=0.19.1", default-features = false, features = [
     "std", "async_executor", "bevy_asset", "bevy_log", "bevy_window",
     "bevy_winit", "bevy_render", "bevy_core_pipeline", "bevy_pbr",
@@ -24,6 +25,7 @@ bevy = { version = "=0.19.1", default-features = false, features = [
 ] }
 wasm-bindgen = "=0.2.129"
 console_error_panic_hook = "=0.1.7"
+indexmap = "=2.14.2"
 
 [profile.release]
 opt-level = 3

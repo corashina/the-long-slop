@@ -1284,6 +1284,7 @@ fn verify_source_passenger_controls(reference: &my_summer_slop::reference::Refer
         .find(|seat| seat.source.path_id == 66466)
         .expect("front passenger seat");
     assert!(!passenger.driver);
+    assert!(passenger.driving2);
     aim_at(&mut runtime, reference, passenger.item);
     runtime.step(
         reference,
@@ -1306,6 +1307,16 @@ fn verify_source_passenger_controls(reference: &my_summer_slop::reference::Refer
         "passenger entry must use actual source aim"
     );
     assert!(!runtime.area.player.driving());
+    assert!(runtime.area.player.driving2());
+    runtime.step(
+        reference,
+        FrameInput {
+            held: keys::FORWARD,
+            ..FrameInput::default()
+        },
+    );
+    assert!(!runtime.vehicles[0].engine_output.ignition);
+    assert!(!runtime.vehicles[0].engine_output.starter);
     for step in 0..180 {
         runtime.step(
             reference,
@@ -1327,11 +1338,12 @@ fn verify_source_passenger_controls(reference: &my_summer_slop::reference::Refer
             ..FrameInput::default()
         },
     );
-    assert!(!runtime.vehicles[0].engine_output.ignition);
-    assert!(!runtime.vehicles[0].engine_output.running);
-    assert!(runtime.vehicles[0].handbrake);
+    assert!(runtime.vehicles[0].engine_output.ignition);
+    runtime.step(reference, FrameInput::default());
+    assert!(!runtime.vehicles[0].engine_output.starter);
+    assert!(!runtime.vehicles[0].handbrake);
     println!(
-        "source passenger seat entered through aim; engine and handbrake controls remained disabled"
+        "source passenger seat entered through aim; ignition and handbrake worked without throttle"
     );
 }
 

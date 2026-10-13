@@ -86,6 +86,8 @@ def lighting_resources(manifest):
         elif isinstance(value, list):
             for child in value: collect(child)
     collect(manifest.get('lighting', {}))
+    for item in manifest.get('render_lighting', {}).get('dependencies', []):
+        collect({'path':item['file'],'sha256':item['sha256']})
     return list(resources.values())
 
 
@@ -136,7 +138,8 @@ def validate_runtime_paths(manifest):
                 raise ValueError('Invalid selected runtime dependency')
     for item in lighting_resources(manifest):
         name = item['path']
-        if not name.startswith('reference/lighting-') or len(Path(name).parts) != 2 or Path(name).suffix not in ('.bin','.png','.smip','.txt','.json'):
+        valid_prefix=name.startswith(('reference/lighting-','reference/texture-','reference/source-cloud.','reference/source-caster-dither-'))
+        if not valid_prefix or len(Path(name).parts) != 2 or Path(name).suffix not in ('.gltf','.bin','.png','.smip','.txt','.json'):
             raise ValueError('Invalid selected runtime lighting resource')
     sprites = manifest.get('ui', {}).get('sprites', [])
     paths = set()
@@ -222,6 +225,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from .ui import export_ui
     from .instruments import recover_instruments
     from .audio import recover_audio
+    from .render_lighting import prepare_startup_lighting, recover_lighting as recover_render_lighting
     if output.resolve().is_relative_to(source.root.resolve()):
         raise ValueError('Keep generated files outside the source installation')
     def transform(go):return source.transform_for(source.get('level1',go))
@@ -262,6 +266,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     source.lighting_root_assets[key(clouds)]=len(roots)+2
     source.lighting_cars=[roots[name][0] for name in CARS]
     recover_lighting(source,[root for readers in roots.values() for root in readers],output)
+    prepare_startup_lighting(source,[root for readers in roots.values() for root in readers])
+    source.render_lighting=recover_render_lighting(source,[root for readers in roots.values() for root in readers],output)
     roots['road_lamp']=[pole]
     roots['sky']=[clouds]
     report = {}
@@ -289,7 +295,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
         manifest['vehicles'][index]['instruments']=recover_instruments(source,manifest,report,name,roots[name][0])
     manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if name not in CARS or name == 'lada'},manifest,library,output)
     validate_lighting_export(manifest,output)
-    (output/'lighting-evidence.json').write_text(json.dumps({'lighting':manifest['lighting'],'byte_checks':source.evidence,'native_engine':native_engine,'fog_setting':source.lighting_fog_evidence,'library':manifest['library']},indent=2,allow_nan=False),encoding='utf-8')
+    (output/'lighting-evidence.json').write_text(json.dumps({'lighting':manifest['lighting'],'render_lighting':manifest['render_lighting'],'byte_checks':source.evidence,'native_engine':native_engine,'fog_setting':source.lighting_fog_evidence,'library':manifest['library']},indent=2,allow_nan=False),encoding='utf-8')
     parameters['controls']={
         'source':{'file':'level0','path_id':16865},
         'defaults':{'object_move':manifest['player']['obj_move_sensitivity'],'object_rotation':manifest['player']['obj_rotation_sensitivity'],

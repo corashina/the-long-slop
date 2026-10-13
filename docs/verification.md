@@ -1,5 +1,12 @@
 # Verification record
 
+## Rendering merge: 2026-10-12
+
+The user authorized a local merge of rendering commit `67798ec` into master `a5b9778`.
+The merge retains audio, save/load, both source vehicles, and live mirrors.
+Merged verification remains pending. Earlier branch results describe their recorded packages only.
+The user did not authorize a push. Retain the rendering worktree and its local evidence.
+
 ## Save lifecycle review fixes: 2026-10-12
 
 The fix range starts at `028bc222f0609f1e45923b25b3ec2cf0cd92ecd0` on `codex/save-load`.
@@ -275,6 +282,88 @@ Feature-only fault, setup, and inspection controls were disabled.
 | Maximum quaternion component error | 0.0000001199999999368373 |
 | Paused Load and controlled Continue | Passed |
 The earlier checkpoint results below retain their own revision and scope limits.
+## Rendering completion, 2026-10-12
+
+Tested branch: `codex/rendering-completion`, before the authorized local merge.
+These results do not verify the merged master package.
+Source authority: installed Steam build 11140890, Unity 2021.3.18f1.
+
+All seven layers passed their required implementation and native hardware gates.
+The root inspected upright shadow, effect, glass, and controlled door images.
+Full audits record issued draws, GPU completion, current tokens, resize, and stable storage.
+The glass fixture preserves 98 shipping source files and the shipping glass/order shaders.
+Its overlapping real doors issue two draws and two captures, then restore the original scene.
+
+Layer evidence: `.cache/layer2-browser/` through `.cache/layer6-browser/` in the rendering worktree.
+Task 7 evidence: `.cache/layer7-browser/` and `.cache/lifecycle-check/`.
+The lifecycle contract passed three extracted state tests and one large-delta transition test.
+The large-delta test covers loading, Start, pause, and Continue.
+
+| Final command check | Result |
+| --- | --- |
+| Native suite | Final rerun: 240 passed; 42 installed cases ignored by default |
+| Installed-source tests | 42 passed |
+| Exporter suite | 171 passed; one installed UI test skipped |
+| Skipped installed UI test | Passed separately with only input and output paths changed |
+| Web suite | 24 passed |
+| Context fault handlers | Two exact-handler tests passed |
+| Motion slot churn and history | Three exact-source tests passed; 4,096 membership changes |
+| Formatting and WASM all-target check | Passed |
+| Release build and wasm-bindgen | Passed |
+| Fresh selected export | 1,388 checks passed; all 1,380 shipping files matched |
+| Frozen source and package hashes | Matched the corrected build receipts |
+
+The installed-source run first lacked library receipts. Read-only input mounts resolved that environment failure.
+Export regeneration used a separate output directory. No regenerated files replaced shipping files.
+The final WASM contains 56,772,820 bytes.
+Its SHA256 is `365a657aad3ca3586b8d40c2b14190df5566ad7191b9ebc1b8461fad12c11d60`.
+
+Corrected stock readiness was observed by 72,746 ms, within the 120-second gate.
+Start stayed disabled until the complete renderer passed.
+The browser rejected pointer capture. Continuous mouse control remains unverified.
+Lifecycle checks used existing game actions after genuine rendering readiness.
+
+| Native lifecycle check | Result |
+| --- | --- |
+| Pause | Physics and renderer delta stopped; probe checks held |
+| Resize | Main targets changed to 960x540; probe capture stayed 64x64; graph validation passed |
+| Restart | Scene 2 closed readiness, then restored cold histories and a fresh validated probe |
+| Restart storage | Compatible allocation counts stayed fixed |
+| Missing texture | Required texture 735 produced a named failure and closed all controls |
+| Invalid pipeline | Uber binding 15 failed GPU pipeline creation and closed all controls |
+| Context loss | Shared state became Failed; the complete later render audit stayed identical |
+| Probe distance | Real player bodies disabled and restored the probe through its scaled-time checks |
+| Actual rebases | Forward and return runtime rebases matched motion and area origins |
+| Streaming storage | All five stages retained 780 GPU slots; 910 slot reuses by the return stage |
+
+The context-loss test used the actual WebGL context-loss extension after active physics.
+Frame 3,677, token 3,673, all histories, and probe publication stayed fixed after failure.
+Physics stayed paused at 922 steps. Start, Continue, and Restart stayed disabled.
+The terminal wrapper stops extraction and rendering, while Bevy still sends time to the main app.
+
+All five physics fixture stages passed. The fixture changes only app.rs.
+It preserves 98 Rust source files and all 27 shipping shaders.
+It uses real player bodies and the normal runtime rebase path. It cannot bypass rendering readiness.
+Forward origin was [2304, 0, -128]. Return origin was [0, 0, -128].
+Runtime and motion rebase counts both advanced from zero to two. Stream and area origins agreed.
+The returned probe was enabled and published. All motion tokens matched the submitted graph token.
+Live dither indices matched the source sequence in all three camera chains.
+The far body fell outside existing ground. The distance check includes that real vertical displacement.
+No fixture code wrote renderer clocks, histories, readiness, or origin values.
+
+Whole-branch review found one motion streaming fault. Fixed GPU slots replaced the map capacity check.
+The scoped correction review passed. Three exact-source tests and the native rerun passed.
+The final correction receipts are in `.cache/final-motion-fix/`.
+The native physics receipt is `.cache/layer7-browser/physics3-native-receipt.json`.
+Final native rerun: `.cache/final-motion-fix/native-final.log`; 240 passed, zero failed.
+The 42 installed-source cases passed separately before the final WASM-only corrections.
+Source and package hashes remained unchanged through final native acceptance.
+The [execution ledger](research/2026-10-12-rendering-completion-ledger.md) preserves the source rulings and evidence paths.
+
+These results establish the tested target behavior. Matched native pixels remain unavailable.
+See [the roadmap](roadmap.md) for limits and current scope.
+
+The following sections preserve earlier checkpoint results.
 
 ## Earlier material checkpoint, 2026-10-11
 
@@ -304,9 +393,8 @@ WASM SHA256: `4ecef4e02520bb660612ed05c3729b619fa65065fdf92144f1ff8a14adb88c2d`.
 Web audit SHA256: `7aefc0918a62daa32f98fc269964b342188765a1979484c7f08f3ac2b9fea2e6`.
 Build logs and the audit remain in `.superpowers/sdd/2026-10-10-material-parity/` and `.cache/`.
 
-The accepted material layer is not complete material or lighting parity.
-Source texture storage-color corrections remain on the recovery branch.
-Full shadows, probe publication, postprocessing, and stained-glass capture remain deferred.
+At this earlier checkpoint, texture corrections and the full rendering graph remained deferred.
+The rendering completion section above records the later approved integration.
 See [the roadmap](roadmap.md) and [remaining plan](superpowers/plans/2026-10-11-rendering-completion.md).
 
 
@@ -1227,3 +1315,79 @@ These controlled inputs do not prove uninterrupted trusted pointer lock or match
 The scoped integration review found no issues in code commit `6935e23f751222296085c228d99f7768f6c3b44a`.
 The review covered merge resolutions, fleet save ownership, dormant recovery, mirror integration, and the light-capacity fix.
 Later commits record verification only.
+
+## Rendering merge verification, 2026-10-13
+
+The user authorized merging rendering commit `67798ec` into local master `a5b9778`.
+The merge combines source rendering, both vehicles, save/load, audio assets, and three Lada mirrors.
+The verification date is 2026-10-13. Logs dated 2026-10-12 record earlier checks in this merge.
+
+| Check | Result and evidence |
+| --- | --- |
+| Native suite | 318 passed; 58 installed checks ignored in the normal run; `.cache/rendering-merge/native-final.log` |
+| Installed source | 58 passed across `.cache/rendering-merge/package-fixed.log` and `package-final2.log` |
+| Web suite | 87 passed; `.cache/rendering-merge/web-final.log` |
+| Exporter suite | 182 passed; `.cache/rendering-merge/exporter-tests-final.log` |
+| Final export fixes | Six library checks and one renderer metadata check passed; `export-finish-unit.log` and `renderer-metadata-after.log` |
+| Asset validation | Native manifest, receipts, geometry, audio, lighting, and inventory passed; `.cache/rendering-merge/verify-candidate-v4.log` |
+
+The native log contains a later failed installed garage check.
+After correcting that check, the team reran it and the two remaining wheel checks in `package-final2.log`.
+Those three checks passed. The earlier installed run passed the other 55 checks.
+
+The accepted source manifest SHA-256 is `deeb0fbcf4e5fd933a78a0c2906f15ca5f6d320e05b002160d7ff1fc2be3f2cd`.
+The export contains 1,632 files, two vehicles, three mirrors, 196 audio clips, 258 materials, and two probes.
+The accepted library manifest SHA-256 remains `92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99`.
+The team preserved the accepted library and prior runtime export under `.cache/rendering-merge/reference-before`.
+
+The merged renderer has 12 fixed views: three main views, six shared probe capture views, and three mirror views.
+Each vehicle probe owns six 64-square faces and seven mip levels. Each probe keeps its own publication state.
+The runtime requests exact eight-sample HDR and D24S8 depth storage on the accepted hardware.
+Source fetches share an eight-request limit through the existing `async-lock` dependency.
+
+The team corrected paused mirror warmup and reset probe elapsed time during scene replacement.
+Atomic face stamps removed conflicting mutable probe queries.
+Load now warms live mirror mesh IDs and removes stale terrain pairs from the prior scene.
+The renderer retains supported material variants during that reset.
+
+Production Load and repeated Load passed before the final default rebuild.
+The mirror audit reached stage 5, with bank mask 63, 23 pipelines, and three validated submissions.
+Load removed 11 obsolete mesh/material pairs. Both probes published, and all three main views completed.
+The motion pool retained 953 slots. Reuse increased from 698 to 1,047 across the two Load audits.
+Evidence: `.cache/rendering-merge/mirror-fixed-load.json` and `browser-repeated-load.json`.
+
+The final fixture lifecycle check passed six checks on 2026-10-13.
+The checks covered same-frame pause with Save, New Game, and Load.
+They also covered queued cancellation, dispatched completion, and usable Continue.
+Evidence: `.cache/rendering-merge/lifecycle-final.json`.
+
+The controlled fleet check passed a manual save and full page reload on 2026-10-13.
+It restored both vehicle records and kept Skoda source identity `level1:69517` selected while on foot.
+Maximum position error was `3.337860107421875e-6` metres. Maximum quaternion component error was `3e-7`.
+The restored scene had 114 bodies, 701 colliders, and four wheel supports.
+The audit found zero bad collider owners and zero duplicate assembly bodies.
+Both engines resumed from elapsed time 10 to 10.23333 seconds.
+Their distinct trip values reached 1634.5000423569968 and 1234.500024261401 metres.
+The renderer returned to Ready, completed all three main views, and published both probes.
+Its mirrors reached stage 5 with three validated submissions. The motion pool retained 953 slots.
+Evidence: `.cache/rendering-merge/fleet-final.json` and `fleet-renderer-final.json`.
+
+The final default release build and `wasm-bindgen` packaging passed on 2026-10-13 in 3m 08s.
+The build used `cargo build --release --target wasm32-unknown-unknown --locked --lib`.
+The default JS exports contain no `testsFixture` or `saveFixture` hooks.
+The WASM has 58,725,410 bytes and SHA-256 `484317a045ea038630dff6c0732baf430713f4135d9e8529578e007ec5f4f49d`.
+The JS SHA-256 is `e3f0f40cd8369b4a27a1aae2de7674dd75a22eb1f710bae3504fe7560f46f2a6`.
+Build output: `.cache/rendering-merge/stock-final-build-current.log`.
+Source and package hashes: `.cache/rendering-merge/stock-final-package-current.json`.
+
+The final default package passed browser startup and the visible Load action on 2026-10-13.
+The garage reached Ready. Load returned `Game loaded` with Continue enabled.
+Load restored the saved Skoda record with trip distance 1634.5 metres.
+Both audits reported Ready, main-view mask 7, two published probes, and three validated mirror submissions.
+The Load audit reached mirror stage 5 and removed 11 obsolete mesh/material pairs.
+The team found zero browser ERROR entries during the final default checks.
+Evidence: `.cache/rendering-merge/stock-startup-final.json` and `stock-load-final.json`.
+The final Load screenshot is `.cache/rendering-merge/final-rendering.jpg`.
+
+Matched native pixels, exact native blend rounding, and continuous trusted pointer capture remain unverified.
+The earlier audible acceptance limit remains unchanged. See `research/2026-10-12-audio-verification.md`.

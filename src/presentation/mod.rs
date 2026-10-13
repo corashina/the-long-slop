@@ -31,3 +31,33 @@ pub fn interpolate(a: VehiclePose, b: VehiclePose, alpha: f32) -> VehiclePose {
 pub mod textures;
 
 pub mod sky;
+
+pub mod camera_depth;
+pub mod caster;
+pub mod clouds;
+pub mod frame_copy;
+pub mod frame_graph;
+pub mod lighting_assets;
+pub mod lighting_scene;
+pub mod motion_draw;
+pub mod motion_vectors;
+pub mod postprocessing;
+pub mod probes;
+pub mod render_targets;
+pub mod renderers;
+pub mod shadow_atlas;
+pub mod shadow_collector;
+pub mod shadow_phase;
+pub mod shadow_queue;
+pub mod shadow_scene;
+pub mod source_effects;
+pub mod source_images;
+pub(crate) mod source_io;
+pub mod source_lighting;
+pub mod source_sky;
+pub mod stained_glass;
+pub mod surface_graph;
+pub mod surface_pass;
+pub mod surface_views;
+pub mod transparent;
+pub mod view_frame;

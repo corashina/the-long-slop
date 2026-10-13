@@ -8,12 +8,17 @@
     view_transformations::position_world_to_clip,
 }
 
+#import source_view_lighting::{lighting, probe_weight, fog_factor}
+
 struct SourceVertexOutput {
     // This is `clip position` when the struct is used as a vertex stage output
     // and `frag coord` when used as a fragment stage input
     @builtin(position) position: vec4<f32>,
     @location(0) world_position: vec4<f32>,
     @location(1) world_normal: vec3<f32>,
+    @location(9) @interpolate(flat) source_renderer: vec3<f32>,
+    @location(10) source_fog: f32,
+    @location(11) source_screen: vec4<f32>,
 #ifdef VERTEX_UVS_A
     @location(2) uv: vec2<f32>,
 #endif
@@ -63,7 +68,7 @@ fn morph_vertex(vertex_in: Vertex, instance_index: u32) -> Vertex {
 #endif
 
 @vertex
-fn vertex(vertex_no_morph: Vertex) -> SourceVertexOutput {
+fn vertex(vertex_no_morph: Vertex, @location(8) bounds_center_usage: vec4<f32>, @location(9) bounds_extents_flags: vec4<f32>) -> SourceVertexOutput {
     var out: SourceVertexOutput;
 
 #ifdef MORPH_TARGETS
@@ -138,5 +143,15 @@ fn vertex(vertex_no_morph: Vertex) -> SourceVertexOutput {
         vertex_no_morph.instance_index, mesh_world_from_local[3]);
 #endif
 
+#ifdef SOURCE_TRANSPARENT
+    out.position = lighting.nonjittered_clip_from_world * out.world_position;
+#endif
+    out.source_renderer = vec3(probe_weight(world_from_local,bounds_center_usage,bounds_extents_flags),bounds_extents_flags.w);
+    out.source_fog = out.position.z;
+#ifdef SOURCE_UNLIT
+    // Installed Unlit/Color vertex6 evaluates FOG_EXP2 before interpolation.
+    out.source_fog = fog_factor(out.position.z,lighting.near_far.x,lighting.near_far.y);
+#endif
+    out.source_screen = vec4(out.position.xy*vec2(0.5,-0.5)+out.position.ww*0.5,out.position.zw);
     return out;
 }

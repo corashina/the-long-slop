@@ -734,6 +734,6 @@ fn fleet_lighting_uniform_fits_webgl2() {
             other => panic!("Unmeasured uniform field {other}"),
         })
         .sum::<usize>();
-    assert_eq!(bytes, 16_080);
+    assert_eq!(bytes, 16_048);
     assert!(bytes <= 16_384);
 }

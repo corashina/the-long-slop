@@ -1,3 +1,4 @@
+use super::materials::{GeneratedWorldMaterial, SourceMaterial, generated_mesh};
 use bevy::asset::RenderAssetUsages;
 use bevy::ecs as bevy_ecs;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -20,21 +21,21 @@ struct ChunkAssets {
 pub struct WorldVisuals {
     chunks: Vec<ChunkAssets>,
     cube: Handle<Mesh>,
-    terrain_material: Handle<StandardMaterial>,
-    stripe: Handle<StandardMaterial>,
-    rock: Handle<StandardMaterial>,
-    cactus: Handle<StandardMaterial>,
-    post: Handle<StandardMaterial>,
-    wall: Handle<StandardMaterial>,
-    roof: Handle<StandardMaterial>,
-    pump: Handle<StandardMaterial>,
+    terrain_material: Handle<SourceMaterial>,
+    stripe: Handle<SourceMaterial>,
+    rock: Handle<SourceMaterial>,
+    cactus: Handle<SourceMaterial>,
+    post: Handle<SourceMaterial>,
+    wall: Handle<SourceMaterial>,
+    roof: Handle<SourceMaterial>,
+    pump: Handle<SourceMaterial>,
 }
 
 impl WorldVisuals {
     pub(crate) fn validate_reused_assets(
         &self,
         meshes: &Assets<Mesh>,
-        materials: &Assets<StandardMaterial>,
+        materials: &Assets<SourceMaterial>,
     ) -> Result<(), crate::save::SaveError> {
         if !meshes.contains(self.cube.id()) {
             return Err(crate::save::SaveError::MissingAssets(
@@ -75,7 +76,7 @@ impl WorldVisuals {
     }
 
     #[cfg(feature = "save-fixture")]
-    pub(crate) fn fixture_material(&self) -> bevy::asset::AssetId<StandardMaterial> {
+    pub(crate) fn fixture_material(&self) -> bevy::asset::AssetId<SourceMaterial> {
         self.terrain_material.id()
     }
     pub(crate) fn empty_copy(&self) -> Self {
@@ -92,21 +93,18 @@ impl WorldVisuals {
         }
     }
 
-    pub fn new(meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) -> Self {
+    pub fn new(meshes: &mut Assets<Mesh>, materials: &mut Assets<SourceMaterial>) -> Self {
         Self {
             chunks: Vec::with_capacity(11),
-            cube: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-            terrain_material: materials.add(StandardMaterial {
-                perceptual_roughness: 1.0,
-                ..default()
-            }),
-            stripe: materials.add(Color::srgb(0.86, 0.75, 0.48)),
-            rock: materials.add(Color::srgb(0.44, 0.32, 0.22)),
-            cactus: materials.add(Color::srgb(0.25, 0.34, 0.19)),
-            post: materials.add(Color::srgb(0.80, 0.75, 0.63)),
-            wall: materials.add(Color::srgb(0.69, 0.61, 0.45)),
-            roof: materials.add(Color::srgb(0.49, 0.25, 0.16)),
-            pump: materials.add(Color::srgb(0.67, 0.18, 0.10)),
+            cube: meshes.add(generated_mesh(Cuboid::new(1.0, 1.0, 1.0).into())),
+            terrain_material: materials.add(GeneratedWorldMaterial::Terrain.material()),
+            stripe: materials.add(GeneratedWorldMaterial::Stripe.material()),
+            rock: materials.add(GeneratedWorldMaterial::Rock.material()),
+            cactus: materials.add(GeneratedWorldMaterial::Cactus.material()),
+            post: materials.add(GeneratedWorldMaterial::Post.material()),
+            wall: materials.add(GeneratedWorldMaterial::Wall.material()),
+            roof: materials.add(GeneratedWorldMaterial::Roof.material()),
+            pump: materials.add(GeneratedWorldMaterial::Pump.material()),
         }
     }
 
@@ -150,6 +148,7 @@ impl WorldVisuals {
                 root.spawn((
                     Mesh3d(terrain.clone()),
                     MeshMaterial3d(self.terrain_material.clone()),
+                    GeneratedWorldMaterial::Terrain,
                 ));
                 let start = data.key.0 as f64 * 128.0;
                 for i in 0..16 {
@@ -161,6 +160,7 @@ impl WorldVisuals {
                     root.spawn((
                         Mesh3d(self.cube.clone()),
                         MeshMaterial3d(self.stripe.clone()),
+                        GeneratedWorldMaterial::Stripe,
                         Transform::from_xyz(
                             (sample.center[0] - data.origin()[0]) as f32,
                             sample.center[1] as f32 + 0.018,
@@ -171,15 +171,16 @@ impl WorldVisuals {
                     ));
                 }
                 for prop in &data.props {
-                    let material = match prop.kind {
-                        PropKind::Rock => &self.rock,
-                        PropKind::Cactus => &self.cactus,
-                        PropKind::Post => &self.post,
+                    let (material, identity) = match prop.kind {
+                        PropKind::Rock => (&self.rock, GeneratedWorldMaterial::Rock),
+                        PropKind::Cactus => (&self.cactus, GeneratedWorldMaterial::Cactus),
+                        PropKind::Post => (&self.post, GeneratedWorldMaterial::Post),
                     };
                     let position = chunk_local(data, prop.absolute_point);
                     root.spawn((
                         Mesh3d(self.cube.clone()),
                         MeshMaterial3d(material.clone()),
+                        identity,
                         Transform::from_translation(position)
                             .with_scale(Vec3::from_array(prop.half_size) * 2.0),
                     ));
@@ -188,6 +189,7 @@ impl WorldVisuals {
                             root.spawn((
                                 Mesh3d(self.cube.clone()),
                                 MeshMaterial3d(self.cactus.clone()),
+                                GeneratedWorldMaterial::Cactus,
                                 Transform::from_translation(
                                     position + Vec3::new(side * 0.5, 0.2, 0.0),
                                 )
@@ -196,6 +198,7 @@ impl WorldVisuals {
                             root.spawn((
                                 Mesh3d(self.cube.clone()),
                                 MeshMaterial3d(self.cactus.clone()),
+                                GeneratedWorldMaterial::Cactus,
                                 Transform::from_translation(
                                     position + Vec3::new(side * 0.8, 0.5, 0.0),
                                 )
@@ -206,31 +209,36 @@ impl WorldVisuals {
                 }
                 for station in &data.stations {
                     let point = chunk_local(data, station.absolute_point);
-                    for (offset, scale, material) in [
+                    for (offset, scale, material, identity) in [
                         (
                             Vec3::new(6.0, 1.5, 0.0),
                             Vec3::new(4.0, 3.0, 6.0),
                             &self.wall,
+                            GeneratedWorldMaterial::Wall,
                         ),
                         (
                             Vec3::new(6.0, 3.05, 0.0),
                             Vec3::new(4.4, 0.15, 6.4),
                             &self.roof,
+                            GeneratedWorldMaterial::Roof,
                         ),
                         (
                             Vec3::new(0.0, 0.7, -3.0),
                             Vec3::new(0.7, 1.4, 0.7),
                             &self.pump,
+                            GeneratedWorldMaterial::Pump,
                         ),
                         (
                             Vec3::new(0.0, 1.0, -2.64),
                             Vec3::new(0.4, 0.3, 0.02),
                             &self.post,
+                            GeneratedWorldMaterial::Post,
                         ),
                     ] {
                         root.spawn((
                             Mesh3d(self.cube.clone()),
                             MeshMaterial3d(material.clone()),
+                            identity,
                             Transform::from_translation(point + offset).with_scale(scale),
                         ));
                     }
@@ -282,7 +290,20 @@ fn terrain_mesh(chunk: &ChunkData) -> Mesh {
         chunk.indices.iter().flatten().copied().collect(),
     ));
     mesh.compute_smooth_normals();
-    mesh
+    generated_mesh(mesh)
+}
+
+/// Upper bound from this generator: terrain, stripes, rocks, posts, cactus parts, station parts.
+/// A station includes its sign/Post. Source imported primitives have a separate capacity.
+pub fn source_shadow_capacity() -> usize {
+    const TERRAIN: usize = 1;
+    const STRIPES: usize = 16;
+    const ROCKS: usize = 2;
+    const POSTS: usize = 2;
+    const CACTUS_PARTS: usize = 1 + 2 * 2;
+    const STATION_PARTS: usize = 4;
+    crate::world::active_chunks(0.).len()
+        * (TERRAIN + STRIPES + ROCKS + POSTS + CACTUS_PARTS + STATION_PARTS)
 }
 
 pub(crate) mod lamps;

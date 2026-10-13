@@ -23,6 +23,8 @@ struct RoadMeshRecipe {
     shadow_mode: u8,
     receive_shadows: bool,
     caster: Option<Handle<StandardMaterial>>,
+    renderer: crate::presentation::renderers::SourceRenderer,
+    bounds: bevy::camera::primitives::Aabb,
 }
 #[derive(Clone)]
 struct RoadNodeRecipe {
@@ -105,6 +107,16 @@ impl RoadLamps {
         }
     }
 
+    pub fn source_mesh_capacity(&self) -> usize {
+        self.recipe.as_ref().map_or(0, |recipe| {
+            self.capacity
+                * recipe
+                    .nodes
+                    .iter()
+                    .map(|node| node.meshes.len())
+                    .sum::<usize>()
+        })
+    }
     pub fn reset_instances(&mut self, commands: &mut Commands) {
         for instance in self.instances.drain(..) {
             commands.entity(instance.root).despawn();
@@ -152,6 +164,8 @@ pub(crate) fn prepare_road_lamp(
             &SourceShadowMode,
             Option<&bevy::light::NotShadowReceiver>,
             Option<&Children>,
+            &crate::presentation::renderers::SourceRenderer,
+            &bevy::camera::primitives::Aabb,
         ),
         Without<SourceCaster>,
     >,
@@ -287,7 +301,7 @@ pub(crate) fn prepare_road_lamp(
         {
             continue;
         }
-        let Ok((_, _, _, _, _, mode, _, children)) = receivers.get(entity) else {
+        let Ok((_, _, _, _, _, mode, _, children, _, _)) = receivers.get(entity) else {
             return;
         };
         if mode.0 != 0
@@ -329,8 +343,18 @@ pub(crate) fn prepare_road_lamp(
             if owner.parent() != entity {
                 continue;
             }
-            let (mesh, material, pose, visibility, layers, mode, no_receive, children) =
-                receivers.get(primitive).unwrap();
+            let (
+                mesh,
+                material,
+                pose,
+                visibility,
+                layers,
+                mode,
+                no_receive,
+                children,
+                renderer,
+                bounds,
+            ) = receivers.get(primitive).unwrap();
             let caster = children.and_then(|children| {
                 children
                     .iter()
@@ -340,6 +364,7 @@ pub(crate) fn prepare_road_lamp(
                 .spawn((
                     mesh.clone(),
                     material.clone(),
+                    crate::presentation::materials::SourceMaterialWarmup,
                     far,
                     Visibility::Visible,
                     bevy::light::NotShadowCaster,
@@ -370,6 +395,8 @@ pub(crate) fn prepare_road_lamp(
                 shadow_mode: mode.0,
                 receive_shadows: no_receive.is_none(),
                 caster,
+                renderer: renderer.clone(),
+                bounds: *bounds,
             });
         }
         nodes.push(RoadNodeRecipe {
@@ -528,6 +555,8 @@ pub(crate) fn sync_instances(
                         mesh.visibility,
                         mesh.layers.clone(),
                         SourceShadowMode(mesh.shadow_mode),
+                        mesh.renderer.clone(),
+                        mesh.bounds,
                         bevy::light::NotShadowCaster,
                         ChildOf(entity),
                     ));

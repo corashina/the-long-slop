@@ -10,7 +10,7 @@ pub struct SaveRequests {
     #[cfg(feature = "save-fixture")]
     removed_asset: Option<(bevy::asset::AssetId<bevy::gltf::Gltf>, bevy::gltf::Gltf)>,
     #[cfg(feature = "save-fixture")]
-    removed_material: Option<(bevy::asset::AssetId<StandardMaterial>, StandardMaterial)>,
+    fixture_material: Option<bevy::asset::AssetId<presentation::materials::SourceMaterial>>,
 }
 struct Candidate {
     id: u32,
@@ -48,7 +48,7 @@ impl SaveRequests {
             #[cfg(feature = "save-fixture")]
             removed_asset: None,
             #[cfg(feature = "save-fixture")]
-            removed_material: None,
+            fixture_material: None,
         }
     }
 }
@@ -79,6 +79,32 @@ fn process(
     requests: &mut SaveRequests,
     request: &Request,
 ) -> Result<String, SaveError> {
+    #[cfg(feature = "save-fixture")]
+    let removed = if request.kind == "Prepare" {
+        requests.fixture_material.and_then(|id| {
+            world
+                .resource_mut::<Assets<presentation::materials::SourceMaterial>>()
+                .remove(id)
+                .map(|material| (id, material))
+        })
+    } else {
+        None
+    };
+    let result = process_request(world, requests, request);
+    #[cfg(feature = "save-fixture")]
+    if let Some((id, material)) = removed {
+        world
+            .resource_mut::<Assets<presentation::materials::SourceMaterial>>()
+            .insert(id, material)
+            .map_err(|error| SaveError::ReconstructionFailure(error.to_string()))?;
+    }
+    result
+}
+fn process_request(
+    world: &mut World,
+    requests: &mut SaveRequests,
+    request: &Request,
+) -> Result<String, SaveError> {
     let reference = world.resource::<RuntimeReference>().0.clone();
     let invalid = |message: &str| SaveError::ReconstructionFailure(message.into());
     match request.kind.as_str() {
@@ -101,26 +127,16 @@ fn process(
             Ok(serde_json::to_string(&path).unwrap())
         }
         #[cfg(feature = "save-fixture")]
-        "FixtureRemoveMaterial" => {
-            if requests.removed_material.is_some() {
-                return Err(invalid("A fixture material is already removed"));
+        "FixtureFailMaterialPreparation" => {
+            if requests.fixture_material.is_some() {
+                return Err(invalid("A fixture material fault is already set"));
             }
-            let id = world.resource::<WorldVisuals>().fixture_material();
-            let material = world
-                .resource_mut::<Assets<StandardMaterial>>()
-                .remove(id)
-                .ok_or_else(|| invalid("Fixture material is missing"))?;
-            requests.removed_material = Some((id, material));
+            requests.fixture_material = Some(world.resource::<WorldVisuals>().fixture_material());
             Ok(serde_json::to_string("generated chunk terrain material").unwrap())
         }
         #[cfg(feature = "save-fixture")]
         "FixtureRestoreAsset" => {
-            if let Some((id, material)) = requests.removed_material.take() {
-                world
-                    .resource_mut::<Assets<StandardMaterial>>()
-                    .insert(id, material)
-                    .map_err(|error| invalid(&error.to_string()))?;
-            }
+            requests.fixture_material = None;
             if let Some((id, asset)) = requests.removed_asset.take() {
                 world
                     .resource_mut::<Assets<bevy::gltf::Gltf>>()
@@ -182,6 +198,9 @@ fn process(
             drive.input.clear();
             drive.clock = StepClock::default();
             drive.frame_steps = 0;
+            drive.render_delta_seconds = 0.;
+            drive.ready = false;
+            drive.runtime.paused = true;
             drive.skip_elapsed = true;
             drive.last_feedback = None;
             for (index, vehicle) in reference.vehicles.iter().enumerate() {
@@ -189,6 +208,8 @@ fn process(
                 drive.instruments[index].initialize_from_sample(&vehicle.instruments, sample);
             }
             drop(drive);
+            crate::browser::game_loading();
+            crate::presentation::view_frame::restart_scene(world);
             crate::presentation::mirrors::reset_mirrors(world);
             Ok(String::new())
         }

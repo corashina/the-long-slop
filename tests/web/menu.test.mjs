@@ -84,3 +84,43 @@ test('save_and_load_show_pending_status_and_block_actions',async()=>{
 });
 
 test('audio_unlock_throw_keeps_capture_working',async()=>{const m=new MenuState();m.ready();m.started=true;m.pause();m.takeActions();await m.capture(ACTIONS.CONTINUE,async()=>{},()=>{throw Error('audio');});assert.equal(m.state,'playing');assert.equal(m.takeActions(),ACTIONS.CONTINUE);});
+
+
+test('scene_loading_rejects_late_capture_and_requires_new_continue',async()=>{
+ const m=new MenuState();m.ready();m.started=true;m.pause();m.takeActions();
+ let resolve;const pending=m.capture(ACTIONS.CONTINUE,()=>new Promise(r=>{resolve=r;}));
+ m.loading();resolve();assert.equal(await pending,false);
+ assert.equal(m.readyFlag,false);assert.equal(m.state,'loading');assert.equal(m.takeActions(),0);
+ assert.equal(await m.capture(ACTIONS.CONTINUE,async()=>{}),false);
+ m.ready();assert.equal(m.state,'pause-menu');
+ assert.equal(await m.capture(ACTIONS.CONTINUE,async()=>{}),true);assert.equal(m.takeActions(),ACTIONS.CONTINUE);
+});
+test('scene_loading_cannot_reopen_a_terminal_failure',()=>{
+ const m=new MenuState();m.ready();m.started=true;m.fail('GPU failed');m.loading();m.ready();
+ assert.equal(m.state,'error');assert.equal(m.readyFlag,false);assert.equal(m.takeActions(),ACTIONS.PAUSE);
+});
+
+test('scene_loading_preserves_save_operation_until_commit_and_renderer_ready',async()=>{
+ for(const operation of ['newGame','load'])for(const readyFirst of [false,true]){
+  const m=new MenuState(),commit=deferred();m.ready();
+  const pending=m.run(operation,{[operation]:()=>commit.promise});
+  m.loading();m.pause();
+  assert.equal(m.pending,true);assert.equal(m.operation,operation);assert.equal(m.readyFlag,false);
+  assert.equal(await m.capture(ACTIONS.CONTINUE,async()=>{}),false);
+  if(readyFirst)m.ready();
+  commit.resolve();await pending;
+  assert.equal(m.started,true);assert.equal(m.pending,false);assert.equal(m.operation,'');
+  assert.equal(m.state,readyFirst?'pause-menu':'loading');
+  if(!readyFirst){assert.equal(await m.capture(ACTIONS.CONTINUE,async()=>{}),false);m.ready();}
+  assert.equal(m.state,'pause-menu');assert.equal(m.status,operation==='load'?'Game loaded.':'New game ready.');
+  assert.equal(await m.capture(ACTIONS.CONTINUE,async()=>{}),true);
+ }
+});
+
+test('scene_failure_rejects_late_save_completion_and_readiness',async()=>{
+ const m=new MenuState(),commit=deferred();m.ready();
+ const pending=m.run('newGame',{newGame:()=>commit.promise});
+ m.loading();m.fail('GPU failed');commit.resolve();await pending;m.ready();
+ assert.equal(m.state,'error');assert.equal(m.error,'GPU failed');assert.equal(m.readyFlag,false);
+ assert.equal(m.pending,false);assert.equal(m.operation,'');assert.equal(m.started,false);
+});
