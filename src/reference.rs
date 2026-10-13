@@ -25,6 +25,10 @@ use std::{
     fmt,
 };
 
+pub mod flashlights;
+pub use flashlights::*;
+pub mod plates;
+pub use plates::*;
 pub mod mirrors;
 pub use mirrors::*;
 pub mod survival;
@@ -59,6 +63,7 @@ id!(SeatId, u32);
 id!(OpeningId, u32);
 id!(WheelSlotId, u8);
 id!(PartSlotId, u32);
+id!(AttachmentTargetId, u32);
 id!(LightId, u32);
 id!(LightControlId, u32);
 
@@ -798,6 +803,8 @@ pub struct ReferenceManifest {
     pub lighting: LightingRecord,
     pub mirrors: MirrorRecord,
     pub render_lighting: lighting_scene::LightingRecord,
+    pub plates: PlateRecord,
+    pub flashlights: FlashlightRecord,
     pub app_id: u32,
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
@@ -912,6 +919,7 @@ impl ReferenceManifest {
         AudioGameplayReference::from_value(&self.audio)?;
         self.sleep.validate(self)?;
         self.weather.validate(self)?;
+        self.plates.validate(self)?;
         require(
             self.bodies.iter().all(|b| {
                 self.nodes.iter().any(|n| {
@@ -1341,7 +1349,7 @@ impl ReferenceManifest {
                         self.lighting
                             .controllers
                             .iter()
-                            .any(|g| g.source == *source && g.kind == LightControllerKind::House),
+                            .any(|g| g.source == *source && g.kind == LightControllerKind::Switch),
                         "switch lamp link",
                     )?,
                     TurnAction::InteriorLight => {
@@ -1914,6 +1922,7 @@ impl ReferenceManifest {
             )?;
         }
         require(a.driveway_height.is_finite(), "driveway height")?;
+        self.flashlights.validate(self)?;
         Ok(())
     }
 }

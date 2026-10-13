@@ -43,6 +43,8 @@ impl CompoundCollider {
 }
 
 pub struct StartingArea {
+    pub plates: crate::plates::PlateState,
+    _plate_draw: crate::plates::StartupDraw,
     pub bodies: HashMap<BodyId, RigidBodyHandle>,
     pub items: ItemStore,
     pub interaction: InteractionState,
@@ -61,6 +63,9 @@ impl StartingArea {
         physics: &mut PhysicsWorld,
         origin: [f64; 3],
     ) -> Result<Self, ReferenceError> {
+        let mut plate_draw = crate::plates::StartupDraw::new(DEFAULT_SEED);
+        let plates =
+            crate::plates::PlateState::new(&reference.plates, &mut |a, b| plate_draw.draw(a, b))?;
         let mut items = ItemStore::new(reference)?;
         let mut interaction = InteractionState::new(reference)?;
         let mut bodies = HashMap::with_capacity(reference.bodies.len());
@@ -87,9 +92,14 @@ impl StartingArea {
             } else {
                 RigidBodyBuilder::fixed()
             };
+            let inactive_flashlight = reference
+                .flashlights
+                .instances
+                .iter()
+                .any(|instance| instance.node == body.node && !instance.startup_active);
             let handle = physics
                 .rapier_mut()
-                .insert_body(builder.pose(to_rapier(pose)));
+                .insert_body(builder.enabled(!inactive_flashlight).pose(to_rapier(pose)));
             bodies.insert(body.id, handle);
         }
         for record in &reference.colliders {
@@ -231,6 +241,8 @@ impl StartingArea {
             physics.rapier_mut().colliders[collider.handle].set_position_wrt_parent(local);
         }
         interaction.parts.bind(&mut items, physics)?;
+        interaction.attachments.bind(&mut items, physics)?;
+        interaction.storage.bind(&mut items, physics)?;
         interaction.sync_parts(&mut items, physics)?;
         let starter = reference.survival.starter_food;
         if let Some(food) = items.get(starter).and_then(|item| item.food) {
@@ -359,6 +371,8 @@ impl StartingArea {
             attachments,
             render_poses,
             item_render_poses,
+            plates,
+            _plate_draw: plate_draw,
             compound_colliders,
             portable_mass,
         })
@@ -419,6 +433,21 @@ impl StartingArea {
     }
     pub fn sync_compound(&self, physics: &mut PhysicsWorld) {
         for record in &self.compound_colliders {
+            if self
+                .interaction
+                .attachments
+                .owns_collider(crate::reference::ColliderId(
+                    (physics.rapier().colliders[record.handle].user_data >> 64) as u32,
+                ))
+                || self
+                    .interaction
+                    .storage
+                    .owns_collider(crate::reference::ColliderId(
+                        (physics.rapier().colliders[record.handle].user_data >> 64) as u32,
+                    ))
+            {
+                continue;
+            }
             if physics.rapier().colliders[record.handle]
                 .parent()
                 .is_some_and(|body| !physics.body_active(body))
@@ -1134,6 +1163,23 @@ impl GarageRuntime {
             .sync(&mut self.area.items, &mut self.physics)
             .expect("validated wheel bindings");
         self.physics.refresh_queries();
+        if self
+            .area
+            .interaction
+            .storage
+            .advance(
+                &mut self.area.items,
+                &mut self.physics,
+                &self.area.interaction.parts,
+                &self.area.interaction.mechanisms,
+                FIXED_DT,
+            )
+            .expect("bound storage")
+        {
+            self.wheels
+                .sync(&mut self.area.items, &mut self.physics)
+                .expect("validated wheel bindings");
+        }
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, false);
         if let Some(audio) = &mut self.audio {
@@ -1463,6 +1509,22 @@ impl GarageRuntime {
             drive,
             crate::vehicle::drive_force(output, source, gear, radius, drive_count),
         );
+    }
+
+    pub fn initialize_storage_frame(&mut self, dt: f32) -> Result<bool, ReferenceError> {
+        let changed = self.area.interaction.storage.initialize_frame(
+            &mut self.area.items,
+            &mut self.physics,
+            &self.area.interaction.parts,
+            &self.area.interaction.mechanisms,
+            if self.paused { 0.0 } else { dt },
+        )?;
+        if changed {
+            self.wheels.sync(&mut self.area.items, &mut self.physics)?;
+            self.area.items.sync_poses(&self.physics);
+            self.area.commit_poses(&self.physics, true);
+        }
+        Ok(changed)
     }
 
     pub fn clear_input(&mut self) {

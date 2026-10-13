@@ -10,7 +10,7 @@ from .visibility import recover_camera_visibility
 from .parts import recover_parts
 
 
-def build_manifest(source, roots, reports, hashes, library, cars):
+def build_manifest(source, roots, reports, hashes, library, cars, output):
     """`cars` names the vehicle roots in manifest order."""
     nodes=[]; by_source={}; objects={}; components={}; node_readers={}
     assets=[]
@@ -39,7 +39,7 @@ def build_manifest(source, roots, reports, hashes, library, cars):
         return by_source[key(source.transform_for(go))]
     def pointer_node(owner,pointer):
         reader=source.resolve(owner,pointer)
-        return by_source[key(reader)] if reader.type.name=='Transform' else by_source[key(source.transform_for(reader))] if reader.type.name=='GameObject' else node_of(reader)
+        return by_source[key(reader)] if reader.type.name in ('Transform','RectTransform') else by_source[key(source.transform_for(reader))] if reader.type.name=='GameObject' else node_of(reader)
     def descendants(node):
         result={node}
         for entry in nodes:
@@ -83,7 +83,7 @@ def build_manifest(source, roots, reports, hashes, library, cars):
     car_bodies=[body(root,True,total_mass(root),source.resolve(reader,data['RB'])) for root,reader,data in zip(car_roots,car_readers,car_data)]
     for root in roots['items']:
         node=by_source[key(root)];rigidbody=components[node].get('Rigidbody',[])
-        body(node,bool(rigidbody),total_mass(node),rigidbody[0] if rigidbody else root)
+        body(node,bool(rigidbody),source.read(components[node]['massScript'][0])['mass'] if key(root) in getattr(source,'flashlight_root_keys',set()) else total_mass(node),rigidbody[0] if rigidbody else root)
     mechanisms=recover_mechanisms(source,nodes,components,pointer_node,node_of,main)
     driven_nodes={node for mechanism in mechanisms for node in mechanism['driven_nodes']}
     for node in sorted(driven_nodes):body(node,False,0.,node_readers[node])
@@ -99,7 +99,7 @@ def build_manifest(source, roots, reports, hashes, library, cars):
     item_classes={'tosaveitemscript','massScript','tankscript','enginescript','coolantTankscript','seatscript','tankcapscript','gumiscript','wheelscript','pickupable','usablescript','flashlightscript','pushablescript'}
     mechanism_nodes=driven_nodes
     for node,group in components.items():
-        if not nodes[node-1]['active'] or not (item_classes.intersection(group) or node in mechanism_nodes):continue
+        if (not nodes[node-1]['active'] and key(node_readers[node]) not in getattr(source,'flashlight_root_keys',set())) or not (item_classes.intersection(group) or node in mechanism_nodes):continue
         name=nodes[node-1]['name'];kind='decoration'
         if key(node_readers[node])==('level1',21482):name='Garage door right'
         elif key(node_readers[node])==('level1',21464):name='Garage door left'
@@ -150,12 +150,12 @@ def build_manifest(source, roots, reports, hashes, library, cars):
         if 'wheelscript' in group or 'gumiscript' in group:wheel_parts_source.append((node,part,part_data,identities))
     for node,group in components.items():
         food_geometry=key(node_readers[node]) in source.food_geometry_nodes
-        if not nodes[node-1]['active'] and not food_geometry and not any(key(reader) in detachable_colliders for readers in group.values() for reader in readers):continue
+        if not nodes[node-1]['active'] and not food_geometry and key(node_readers[node]) not in getattr(source,'flashlight_inactive_nodes',set()) and not any(key(reader) in detachable_colliders for readers in group.values() for reader in readers):continue
         layer=source.read(objects[node]['game_object'])['m_Layer']
         for class_name in ('BoxCollider','SphereCollider','CapsuleCollider','MeshCollider'):
             for reader in group.get(class_name,[]):
                 value=source.read(reader)
-                if not value['m_Enabled'] and key(reader) not in detachable_colliders:continue
+                if not value['m_Enabled'] and key(reader) not in detachable_colliders and key(reader) not in getattr(source,'storage_collider_keys',set()):continue
                 material=source.resolve(reader,value['m_Material']);friction,restitution=0.6,0.
                 if material:
                     properties=source.read(material);friction=properties['m_DynamicFriction'];restitution=properties['m_Bounciness']
@@ -412,6 +412,9 @@ def build_manifest(source, roots, reports, hashes, library, cars):
     result['action_bindings']=recover_bindings(source,nodes,components,item_nodes,colliders,mechanisms,openings,seats)
     from .mirrors import recover_mirrors
     result['mirrors']=recover_mirrors(source,nodes,components,pointer_node,item_nodes,reports)
+    from .plates import recover_plates, plate_resources
+    result['plates']=recover_plates(source,nodes,components,pointer_node,item_nodes,colliders,output)
+    assets[1]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in plate_resources(result['plates']))
     result['lighting']=source.lighting
     result['render_lighting']=source.render_lighting
     collider_ids={(c['source']['file'],c['source']['path_id']):c['id'] for c in colliders}
@@ -420,6 +423,8 @@ def build_manifest(source, roots, reports, hashes, library, cars):
         missing=[old_colliders[i] for i in controller['aim_colliders'] if old_colliders[i] not in collider_ids]
         if missing and controller['kind']!='road':raise ValueError(f"{controller['source']} required aim collider outside export: {missing}")
         controller['aim_colliders']=[collider_ids[old_colliders[i]] for i in controller['aim_colliders'] if old_colliders[i] in collider_ids]
+    from .flashlights import recover_flashlights
+    result['flashlights']=recover_flashlights(source,roots,pointer_node,item_nodes,result['lighting']['controllers'],colliders,output,part_slots)
     from .export import lighting_resources
     assets[0]['dependencies'].extend({'file':item['path'],'sha256':item['sha256']} for item in lighting_resources(result))
     return result

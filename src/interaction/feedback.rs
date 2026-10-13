@@ -25,6 +25,7 @@ impl ActionMask {
     pub const SCROLL: u32 = 262144;
     pub const CONSUME: u32 = 524288;
     pub const DRINK: u32 = 1048576;
+    pub const HELD_SWITCH: u32 = 2097152;
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[repr(u32)]
@@ -160,6 +161,10 @@ impl InteractionState {
                 a.actions.0 |= ActionMask::DRINK;
                 a.item = Some(held);
             }
+            if self.held_controls.contains_key(&held) {
+                a.actions.0 |= ActionMask::HELD_SWITCH;
+                a.context = FeedbackContext::LightSwitch;
+            }
             if self.carry.allows_held_rotation() {
                 a.actions.0 |= ActionMask::ROTATE;
             }
@@ -282,6 +287,33 @@ impl InteractionState {
                     a.context = FeedbackContext::Wheel;
                 }
                 match item.location {
+                    ItemLocation::Attached(_)
+                        if self.storage.stored(t.item)
+                            && self
+                                .carry
+                                .allows_pickup(t.item, player.seat().is_some(), true)
+                            && self.storage.loose_body(t.item).is_some_and(|body| {
+                                self.carry
+                                    .can_acquire(t.item, t.point, player, body, physics)
+                                    .is_ok()
+                            }) =>
+                    {
+                        a.actions.0 |= ActionMask::PICKUP;
+                    }
+                    ItemLocation::Attached(_)
+                        if self.attachments.target(t.item).is_some()
+                            && self
+                                .carry
+                                .allows_pickup(t.item, player.seat().is_some(), true)
+                            && self.attachments.loose_body(t.item).is_some_and(|body| {
+                                self.carry
+                                    .can_acquire(t.item, t.point, player, body, physics)
+                                    .is_ok()
+                            }) =>
+                    {
+                        a.actions.0 |= ActionMask::DISMOUNT;
+                        a.context = FeedbackContext::Part;
+                    }
                     ItemLocation::PartSlot(_)
                         if self.parts.can_remove(t.item, player, items).is_ok()
                             && self.parts.loose_body(t.item).is_some_and(|body| {
@@ -328,6 +360,9 @@ impl InteractionState {
             {
                 let fits = match slot {
                     SlotTarget::Part(slot) => self.parts.can_install(held, slot, items).is_ok(),
+                    SlotTarget::Attachment(target) => {
+                        self.attachments.can_mount(held, target, items).is_ok()
+                    }
                     SlotTarget::Wheel(_) => self.wheel_installation_block(aim, items).is_none(),
                 };
                 if fits {

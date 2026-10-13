@@ -31,6 +31,7 @@ struct FilterParams {
 @group(0) @binding(0) var<uniform> params: FilterParams;
 @group(0) @binding(1) var source: texture_cube<f32>;
 @group(0) @binding(2) var source_sampler: sampler;
+@group(0) @binding(3) var capture_color: texture_2d<f32>;
 @vertex
 fn vertex(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
     let uv = vec2<f32>(f32((index << 1u) & 2u), f32(index & 2u));
@@ -40,6 +41,14 @@ fn face_direction(position: vec4<f32>) -> vec3<f32> {
     let uv = position.xy / params.size;
     return params.right.xyz * (2.0*uv.x-1.0)
         + params.up.xyz * (2.0*uv.y-1.0) - params.back.xyz;
+}
+@fragment
+fn copy(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+    return textureSampleLevel(source, source_sampler, face_direction(position), 0.0);
+}
+@fragment
+fn capture(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+    return textureLoad(capture_color, vec2<i32>(position.xy), 0);
 }
 fn fold(st: vec3<f32>, face: vec3<f32>) -> vec3<f32> {
     let c = min(max(st, vec3<f32>(-1.0)), vec3<f32>(1.0));

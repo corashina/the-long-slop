@@ -166,7 +166,7 @@ pub(super) fn process(world: &mut World, kind: &str) -> Result<String, SaveError
                 .lighting
                 .controllers
                 .iter()
-                .find(|c| c.kind == crate::reference::LightControllerKind::House)
+                .find(|c| c.kind == crate::reference::LightControllerKind::Switch)
                 .unwrap();
             g.lighting.use_control(&reference.lighting, controller.id);
             g.lighting.advance_fades(&reference.lighting, 0.001);

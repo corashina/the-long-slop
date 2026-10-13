@@ -146,6 +146,7 @@ fn collect_mirror_warmup(world: &mut World) {
     let mut pairs = Vec::new();
     let mut scene_meshes = HashSet::new();
     super::materials::mirror_warmup_pairs(world, &mut pairs);
+    super::plates::plate_warmup_pairs(world, &mut pairs);
     for (mesh, source, standard, sky) in world
         .query_filtered::<(
             &Mesh3d,
@@ -1118,7 +1119,15 @@ fn queue_capture_meshes(
                     );
                 }
                 RenderPhaseType::Transparent => {
-                    let draw_function = draw_transparent.read().id::<DrawMirrorMaterial>();
+                    let draw_function = if selected.type_id()
+                        == std::any::TypeId::of::<super::plates::PlateTextMaterial>()
+                    {
+                        draw_transparent
+                            .read()
+                            .id::<super::source_lighting::DrawSourcePlate>()
+                    } else {
+                        draw_transparent.read().id::<DrawMirrorMaterial>()
+                    };
                     transparent_phase.add_retained(Transparent3d {
                         sorting_info: TransparentSortingInfo3d::Sorted {
                             mesh_center: get_mesh_instance_world_from_local(

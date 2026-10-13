@@ -121,6 +121,7 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
         .add_plugins((
             presentation::lighting::SourceLightingPlugin,
             presentation::materials::SourceMaterialPlugin,
+            presentation::plates::PlateTextPlugin,
             presentation::mirrors::SourceMirrorPlugin,
             presentation::source_lighting::SourceLightingPlugin,
             presentation::frame_graph::SourceFramePlugin,
@@ -130,6 +131,7 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
         .add_systems(
             Update,
             (
+                initialize_storage,
                 check_ready,
                 read_input,
                 save::dispatch,
@@ -180,7 +182,12 @@ fn setup(
     commands.insert_resource(visuals);
     commands.insert_resource(InstrumentVisuals::default());
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
-    presentation::materials::load_materials(&mut commands, &server, &reference.0.rendering);
+    presentation::materials::load_materials(
+        &mut commands,
+        &server,
+        &reference.0.rendering,
+        &reference.0.plates.material,
+    );
     presentation::lighting::load_lighting(&mut commands, &server, &reference.0.lighting);
     presentation::lighting_assets::load_lighting(
         &mut commands,
@@ -197,6 +204,20 @@ fn setup(
     );
 }
 
+fn initialize_storage(
+    time: Res<Time<Real>>,
+    mut drive: ResMut<Drive>,
+    mut visuals: ResMut<ReferenceVisuals>,
+) {
+    if drive.ready || visuals.failed {
+        return;
+    }
+    if let Err(error) = drive.runtime.initialize_storage_frame(time.delta_secs()) {
+        game_failure(&error.to_string());
+        visuals.failed = true;
+    }
+}
+
 fn check_ready(
     mut commands: Commands,
     server: Res<AssetServer>,
@@ -209,11 +230,16 @@ fn check_ready(
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
-    lighting: Res<presentation::lighting::SourceLighting>,
-    source_lighting: Res<presentation::source_lighting::SourceLighting>,
+    mut readiness: Local<u8>,
+    lighting: (
+        Res<presentation::lighting::SourceLighting>,
+        Res<presentation::source_lighting::SourceLighting>,
+    ),
     mut materials: ResMut<presentation::materials::SourceMaterials>,
     mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
+    plates: Res<presentation::plates::PlateTextStatus>,
 ) {
+    let (lighting, source_lighting) = lighting;
     if let Some(error) = mirrors.failure() {
         game_failure(&error);
         visuals.failed = true;
@@ -223,6 +249,10 @@ fn check_ready(
         game_failure(error);
         visuals.failed = true;
         return;
+    }
+    if let Some(error) = plates.failure() {
+        game_failure(error);
+        visuals.failed = true;
     }
     if visuals.failed {
         return;
@@ -238,6 +268,16 @@ fn check_ready(
         return;
     }
     if drive.ready {
+        *readiness = 0;
+        return;
+    }
+    if !drive
+        .runtime
+        .area
+        .interaction
+        .storage
+        .initialization_ready()
+    {
         return;
     }
     for (path, handle) in &visuals.handles {
@@ -308,14 +348,17 @@ fn check_ready(
             if materials.state != presentation::materials::RenderingState::Ready {
                 return;
             }
-            if !mirrors.ready() {
+            if !mirrors.ready() || !plates.ready() {
                 return;
             }
             if source_lighting.state != presentation::materials::RenderingState::Ready {
                 return;
             }
-            drive.ready = true;
-            game_ready();
+            *readiness += 1;
+            if *readiness >= 2 {
+                drive.ready = true;
+                game_ready();
+            }
         }
         Ok(false) => {}
         Err(error) => {
@@ -368,7 +411,7 @@ fn read_input(
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
         clear_input(&mut drive);
     }
-    if !drive.runtime.started || drive.runtime.paused {
+    if !drive.ready || !drive.runtime.started || drive.runtime.paused {
         drive.input.clear();
         return;
     }

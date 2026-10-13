@@ -228,7 +228,7 @@ def recover_controllers(source: Source, roots: list, node_ids: dict, material_id
             if key(reader) not in source.lighting_control_ids:continue
             f=source.read(reader);cls=source.class_name(reader);vehicle=car_of(reader)
             owner=cars[vehicle] if vehicle is not None else None
-            kind={'flashlightscript':'house','headlightscript':'cabin' if owner and key(reader) in owner['routes'] else 'headlight','rearlights':'rear','kozlampa':'road'}[cls]
+            kind={'flashlightscript':'switch','headlightscript':'cabin' if owner and key(reader) in owner['routes'] else 'headlight','rearlights':'rear','kozlampa':'road'}[cls]
             if kind in ('headlight','cabin','rear') and owner is None:raise ValueError(f'{key(reader)} vehicle light outside selected cars')
             elec=linked(reader,f.get('electronics',{'m_PathID':0}))
             if kind=='rear':elec=linked(owner['car'],source.read(owner['car'])['electronics'])
@@ -239,8 +239,8 @@ def recover_controllers(source: Source, roots: list, node_ids: dict, material_id
                 'current_state':f.get('currentState',0),'requested_state':f.get('switchToState',0),'energy':f.get('energy',1.),'energy_move':f.get('energyMove',0.),
                 'enabled':bool(f['m_Enabled']),'electronics_source':source_id(elec) if elec else None,'electronics_output':e['maxOutput'] if e else 1.,
                 'electronics_threshold':.2,'reverse_switch':bool(f.get('reverseSwitch',False)),'states':[],'usable_source':None,'usable_event':None,'cabin_input':None,'vehicle_switch':None}
-            if kind=='house':
-                if f['randomStart'] or f['SingleLight']['m_PathID']:raise ValueError(f'{key(reader)} unsupported selected house startup')
+            if kind=='switch':
+                if f['randomStart'] or f['SingleLight']['m_PathID']:raise ValueError(f'{key(reader)} unsupported selected switch startup')
                 for lamp in f['Lamps']:
                     lamp_lights=lights(reader,lamp['Lights'])
                     intensity=source.lighting_lights[lamp_lights[0]-1]['serialized_intensity'] if lamp_lights else 0.
@@ -249,7 +249,7 @@ def recover_controllers(source: Source, roots: list, node_ids: dict, material_id
                     c['aim_colliders'].extend(source.lighting_collider_ids[key(col)] for col in n['components'] if key(col) in source.lighting_collider_ids)
                 if f['GButton']['m_PathID']:
                     parents=[source.read(linked(reader,f[field]))['m_Father'] for field in ('GButton','GButtonOff','GButtonOn')]
-                    if parents[1:]!=parents[:-1]:raise ValueError(f'{key(reader)} house button parent frame')
+                    if parents[1:]!=parents[:-1]:raise ValueError(f'{key(reader)} switch button parent frame')
                     c['animated_poses'].append({'node':node(linked(reader,f['GButton'])),'states':[converted_transform(source.read(linked(reader,f['GButtonOff']))),converted_transform(source.read(linked(reader,f['GButtonOn'])))],'rule':'current_pose_lerp','speed':25.})
             elif kind in ('headlight','cabin'):
                 for i,s in enumerate(f['states']):
@@ -377,7 +377,7 @@ def recover_lighting(source: Source, roots: list, output: Path) -> dict:
     for c in controls:
         for i,state in enumerate(c['states']):
             for lid in state['lights']:
-                l=source.lighting_lights[lid-1];l['enabled']=False if c['kind'] in ('house','rear','road') else i==c['current_state']
+                l=source.lighting_lights[lid-1];l['enabled']=False if c['kind'] in ('switch','rear','road') else i==c['current_state']
                 l['startup_intensity']=state['intensity']*c['energy']*c['electronics_output'] if c['kind'] in ('headlight','cabin') else c['electronics_output'] if c['kind']=='road' else l['serialized_intensity']
             for nid in state['renderers']:
                 # Startup is off for every selected controller.
@@ -482,7 +482,7 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
                 if m:
                     document=documents.get(m['asset']);index=m['gltf_material']
                     if m['asset']!=owner or not document or not 0<=index<len(document['materials']) or document['materials'][index]['extras']['source']!=m['source']:fail(c['source'],field)
-        if c['kind']=='house' and not c['aim_colliders']:fail(c['source'],'aim colliders')
+        if c['kind']=='switch' and not c['aim_colliders']:fail(c['source'],'aim colliders')
         if c['kind']=='cabin':
             cabin=c.get('cabin_input')
             if not cabin:fail(c['source'],'cabin input missing')

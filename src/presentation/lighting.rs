@@ -8,9 +8,10 @@ use crate::{
     lighting::source_linear,
     reference::{LightId, LightKind, LightingRecord},
 };
-use bevy::asset::LoadState;
+use bevy::asset::{LoadState, RenderAssetUsages};
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs as bevy_ecs;
+use bevy::image::ImageSampler;
 use bevy::prelude::*;
 use bevy::render::{
     Extract, ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems,
@@ -23,7 +24,7 @@ use bevy::shader::Shader;
 use std::sync::{Arc, Mutex};
 
 // Both source vehicles and the full streamed road lamp window fit the 16 KiB uniform limit.
-pub const MAX_LIGHTS: usize = 40;
+pub const MAX_LIGHTS: usize = 42;
 pub const SHADOW_SLOTS: usize = 100;
 pub const ATLAS_SIZE: u32 = 4000;
 pub const TILE_SIZE: u32 = 400;
@@ -335,12 +336,88 @@ pub fn load_lamp_materials(
     });
 }
 
+/// Keep all custom source cookies in the existing single sampled texture slot.
+fn pack_custom_cookies(
+    images: &mut Assets<Image>,
+    handles: [&Handle<Image>; 3],
+) -> Result<Handle<Image>, String> {
+    let originals = handles.map(|handle| images.get(handle).expect("loaded source cookie"));
+    for (index, image) in originals.iter().enumerate() {
+        let size = if index == 0 { 512 } else { 256 };
+        if image.width() != size
+            || image.height() != size
+            || image.texture_descriptor.mip_level_count != if index == 0 { 10 } else { 9 }
+            || !matches!(
+                image.texture_descriptor.format,
+                TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb
+            )
+            || image.data.is_none()
+        {
+            return Err(format!(
+                "Source custom cookie {index} has an unsupported image layout"
+            ));
+        }
+    }
+    let mut array = Image::new_uninit(
+        Extent3d {
+            width: 512,
+            height: 512,
+            depth_or_array_layers: 3,
+        },
+        TextureDimension::D2,
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    array.texture_descriptor.mip_level_count = 10;
+    array.texture_view_descriptor = Some(TextureViewDescriptor {
+        dimension: Some(TextureViewDimension::D2Array),
+        ..default()
+    });
+    array.data_order = TextureDataOrder::LayerMajor;
+    array.sampler = match &originals[0].sampler {
+        ImageSampler::Descriptor(descriptor) => ImageSampler::Descriptor(descriptor.clone()),
+        ImageSampler::Default => return Err("Source custom cookie has no sampler".into()),
+    };
+    let layer_bytes = (0..10)
+        .map(|level| {
+            let size = 512usize >> level;
+            size * size * 4
+        })
+        .sum::<usize>();
+    let mut data = vec![0; layer_bytes * 3];
+    for (layer, image) in originals.iter().enumerate() {
+        let source = image.data.as_ref().unwrap();
+        let mut source_offset = 0;
+        let mut target_offset = layer * layer_bytes;
+        for level in 0..10 {
+            let target_size = 512usize >> level;
+            let source_size = (if layer == 0 { 512usize } else { 256usize } >> level).max(1);
+            let pad = (target_size - source_size) / 2;
+            for y in 0..target_size {
+                let source_y = y.saturating_sub(pad).min(source_size - 1);
+                for x in 0..target_size {
+                    let source_x = x.saturating_sub(pad).min(source_size - 1);
+                    let from = source_offset + (source_y * source_size + source_x) * 4;
+                    let to = target_offset + (y * target_size + x) * 4;
+                    data[to..to + 4].copy_from_slice(&source[from..from + 4]);
+                }
+            }
+            target_offset += target_size * target_size * 4;
+            if level < 8 || layer == 0 {
+                source_offset += source_size * source_size * 4;
+            }
+        }
+    }
+    array.data = Some(data);
+    Ok(images.add(array))
+}
+
 pub(crate) fn bind_lighting(
     mut commands: Commands,
     reference: Res<RuntimeReference>,
     visuals: Res<ReferenceVisuals>,
     mut source: ResMut<SourceLighting>,
-    images: Res<Assets<Image>>,
+    mut images: ResMut<Assets<Image>>,
     drive: Res<Drive>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
 ) {
@@ -366,24 +443,59 @@ pub(crate) fn bind_lighting(
         );
         return;
     }
+    let portable_cookies = [
+        &reference.0.flashlights.instances[0],
+        &reference.0.flashlights.instances[1],
+    ]
+    .map(|instance| {
+        let controller = r
+            .controllers
+            .iter()
+            .find(|control| control.id == instance.controller)
+            .expect("validated flashlight controller");
+        let id = controller.states[0].lights[0];
+        r.lights
+            .iter()
+            .find(|light| light.id == id)
+            .and_then(|light| light.cookie)
+            .expect("validated flashlight cookie")
+    });
     let cookie_ids = [
         r.cycle.cloud_shadow_cookie,
         r.default_spot_cookie,
         r.lights
             .iter()
-            .find(|l| l.kind == LightKind::Spot && l.cookie.is_some())
-            .and_then(|l| l.cookie)
-            .unwrap_or(r.default_spot_cookie),
+            .find(|light| light.kind == LightKind::Spot && light.cookie.is_some())
+            .and_then(|light| light.cookie)
+            .expect("validated source spot cookie"),
+        portable_cookies[0],
+        portable_cookies[1],
     ];
-    source.cookie_handles = Some(cookie_ids.map(|id| {
-        source
-            .textures
-            .iter()
-            .find(|(key, _, _)| *key == id)
-            .unwrap()
-            .2
-            .clone()
-    }));
+    if source.cookie_handles.is_none() {
+        let handle = |id| {
+            source
+                .textures
+                .iter()
+                .find(|(key, _, _)| *key == id)
+                .expect("validated source cookie texture")
+                .2
+                .clone()
+        };
+        let sun = handle(cookie_ids[0]);
+        let default = handle(cookie_ids[1]);
+        let custom = [
+            handle(cookie_ids[2]),
+            handle(cookie_ids[3]),
+            handle(cookie_ids[4]),
+        ];
+        match pack_custom_cookies(&mut images, custom.each_ref()) {
+            Ok(array) => source.cookie_handles = Some([sun, default, array]),
+            Err(error) => {
+                source.state = RenderingState::Failed(error);
+                return;
+            }
+        }
+    }
     if !source.materials_prepared {
         for (output_index, output) in drive.runtime.lighting.material_outputs().iter().enumerate() {
             let Some(node) = visuals.nodes.get(&output.renderer) else {

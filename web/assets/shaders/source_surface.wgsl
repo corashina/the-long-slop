@@ -1,3 +1,4 @@
+#define_import_path source_surface
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_fragment::pbr_input_from_vertex_output,
@@ -20,7 +21,7 @@ struct SourceLight {
 }
 struct SourceShadow { clip_from_world: mat4x4<f32>, rect: vec4<f32>, bias: vec4<f32> }
 struct SourceLighting {
-    lights: array<SourceLight,40>,
+    lights: array<SourceLight,42>,
     shadows: array<SourceShadow,100>,
     ambient: vec4<f32>,
     fog: vec4<f32>,
@@ -29,7 +30,7 @@ struct SourceLighting {
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> lamp_lighting: SourceLighting;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var shadow_atlas: texture_depth_2d;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var shadow_sampler: sampler_comparison;
-@group(#{MATERIAL_BIND_GROUP}) @binding(103) var cookies: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(103) var cookies: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var cookie_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(105) var attenuation: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(106) var<uniform> receiver: vec4<u32>;
@@ -230,7 +231,10 @@ fn fragment(
             }
             if lamp.cookie_rect.x == 1.0 { weight *= textureSampleGrad(sun_cookie, sun_cookie_sampler, cookie_uv, dpdx(cookie_uv), dpdy(cookie_uv)).a; }
             else if lamp.cookie_rect.x == 2.0 { weight *= textureSampleGrad(default_cookie, default_sampler, cookie_uv, dpdx(cookie_uv), dpdy(cookie_uv)).a; }
-            else { weight *= textureSampleGrad(cookies, cookie_sampler, cookie_uv, dpdx(cookie_uv), dpdy(cookie_uv)).a; }
+            else {
+                let array_uv = select(cookie_uv, cookie_uv * 0.5 + 0.25, lamp.cookie_rect.x > 3.0);
+                weight *= textureSampleGrad(cookies, cookie_sampler, array_uv, i32(lamp.cookie_rect.x) - 3, dpdx(array_uv), dpdy(array_uv)).a;
+            }
         }
         if receive_shadows { weight *= source_shadow(lamp, in.world_position.xyz, pbr.world_normal, view_depth); }
         light += source_brdf(diffuse, specular, smoothness, pbr.N, pbr.V, direction) * lamp.color.rgb * weight;

@@ -1,3 +1,4 @@
+pub mod attachments;
 pub mod carry;
 pub mod consumption;
 pub mod feedback;
@@ -7,6 +8,7 @@ pub mod labels;
 pub mod mechanisms;
 pub mod parts;
 pub mod push;
+pub mod storage;
 pub mod targets;
 pub mod wheels;
 use feedback::ActionMask;
@@ -15,9 +17,10 @@ pub use targets::{InteractionBlock, LightAim, ResolvedAim};
 use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
 use crate::reference::{
-    ActionBinding, ActionMasks, BodyId, ColliderGeometry, ColliderId, FluidParticleReference,
-    ItemId, ItemKind, LightControlId, LightControllerKind, NodeId, OpeningId, OpeningRecord,
-    PartSlotId, ReferenceError, ReferenceManifest, SeatId, TankRole, WheelSlotId,
+    ActionBinding, ActionMasks, AttachmentTargetId, BodyId, ColliderGeometry, ColliderId,
+    FluidParticleReference, ItemId, ItemKind, LightControlId, LightControllerKind, NodeId,
+    OpeningId, OpeningRecord, PartSlotId, ReferenceError, ReferenceManifest, SeatId, TankRole,
+    WheelSlotId,
 };
 use crate::simulation::{FrameInput, keys};
 use crate::survival::NeedsOutput;
@@ -42,6 +45,7 @@ pub struct AimTarget {
 pub enum SlotTarget {
     Wheel(WheelSlotId),
     Part(PartSlotId),
+    Attachment(AttachmentTargetId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -71,6 +75,8 @@ pub enum InteractionAction {
     },
     WheelRemove(ItemId),
     PartRemove(ItemId),
+    PlateRemove(ItemId),
+    PlateMount(ItemId),
     PartInstall(ItemId),
     WheelInstall {
         item: ItemId,
@@ -146,6 +152,8 @@ pub struct InteractionState {
     sounds: [Option<InteractionSound>; 64],
     sound_count: usize,
     light_controls: HashMap<ColliderId, LightControlId>,
+    held_controls: HashMap<ItemId, LightControlId>,
+    pub storage: storage::StorageLocks,
     light_nodes: HashMap<ColliderId, NodeId>,
     /// Door usable and owner per lighting controller. Only cabin controllers have links.
     cabin_doors: Vec<[Option<(ItemId, ItemId)>; 4]>,
@@ -165,6 +173,7 @@ pub struct InteractionState {
     bodies: HashMap<BodyId, RigidBodyHandle>,
     pub mechanisms: mechanisms::MechanismState,
     pub parts: parts::PartAttachments,
+    pub attachments: attachments::PlateAttachments,
     mechanism_bodies: HashMap<ItemId, BodyId>,
     openings: Vec<OpeningState>,
     seats: Vec<SeatState>,
@@ -448,6 +457,14 @@ impl InteractionState {
         Ok(Self {
             light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
             light_controls,
+            held_controls: reference
+                .flashlights
+                .instances
+                .iter()
+                .filter(|f| f.startup_active)
+                .map(|f| (f.item, f.controller))
+                .collect(),
+            storage: storage::StorageLocks::new(reference)?,
             cabin_doors,
             seat_action_latched: false,
             fill_opening: None,
@@ -484,6 +501,7 @@ impl InteractionState {
             bodies: HashMap::with_capacity(reference.bodies.len()),
             mechanisms: mechanisms::MechanismState::new(reference)?,
             parts: parts::PartAttachments::new(reference)?,
+            attachments: attachments::PlateAttachments::new(reference)?,
             mechanism_bodies: reference.items.iter().map(|i| (i.id, i.body)).collect(),
             openings,
             sounds: [None; 64],
@@ -556,6 +574,34 @@ impl InteractionState {
     }
     pub fn held(&self) -> Option<ItemId> {
         self.carry.held()
+    }
+    pub fn held_light_control(&self) -> Option<LightControlId> {
+        self.held()
+            .and_then(|item| self.held_controls.get(&item).copied())
+    }
+    pub fn pickup_stored_item(
+        &mut self,
+        item: ItemId,
+        point: [f32; 3],
+        player: &PlayerState,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<ItemId, ReferenceError> {
+        let body = self
+            .storage
+            .loose_body(item)
+            .ok_or_else(|| ReferenceError("Missing flashlight body".into()))?;
+        if !self.storage.stored(item)
+            || !self
+                .carry
+                .allows_pickup(item, player.seat().is_some(), items.mounted(item))
+        {
+            return Err(ReferenceError("Cannot carry this item".into()));
+        }
+        self.carry.can_acquire(item, point, player, body, physics)?;
+        self.storage.unlock(item, items, physics)?;
+        self.carry.pickup(item, point, player, items, physics)?;
+        Ok(item)
     }
     pub fn register_supply(&mut self, item: ItemId) {
         self.supplies.insert(item);
@@ -706,7 +752,9 @@ impl InteractionState {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> Option<ItemId> {
-        self.carry.drop(items, physics)
+        let item = self.carry.drop(items, physics)?;
+        self.storage.mark_dropped(item);
+        Some(item)
     }
     pub fn pickup_item(
         &mut self,
@@ -729,6 +777,8 @@ impl InteractionState {
     pub fn rebase(&mut self, shift: [f32; 3]) {
         self.mechanisms.rebase(shift);
         self.parts.rebase(shift);
+        self.attachments.rebase(shift);
+        self.storage.rebase(shift);
         for opening in &mut self.openings {
             if let Some(contact) = opening.contact.as_mut() {
                 contact.rebase(Vector::from_array(shift));
@@ -773,10 +823,16 @@ impl InteractionState {
             self.seat_action_latched = false;
         }
         let availability = self.available_actions(&aim, player, items, physics, needs);
-        let light_action = availability.light_control.filter(|_| {
-            input.pressed & keys::USE != 0
-                || (input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
-        });
+        let held_switch_pressed =
+            input.pressed & keys::PRIMARY != 0 && self.held_light_control().is_some();
+        let light_action = if held_switch_pressed {
+            self.held_light_control()
+        } else {
+            availability.light_control.filter(|_| {
+                input.pressed & keys::USE != 0
+                    || (input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
+            })
+        };
         let target = aim
             .use_target
             .filter(|target| valid(*target) && availability.light_control.is_none());
@@ -836,6 +892,9 @@ impl InteractionState {
         };
         let mut action = light_action.map(InteractionAction::LightControl);
         let mut carry_input = input;
+        if held_switch_pressed {
+            carry_input.pressed &= !keys::PRIMARY;
+        }
         self.tuning_opening = None;
         let can_use_target = availability.light_control.is_some()
             || use_target.is_some_and(|target| {
@@ -857,7 +916,9 @@ impl InteractionState {
             }
         } else if let Some(target) = use_target {
             if input.pressed & keys::USE != 0
-                || (input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
+                || (!held_switch_pressed
+                    && input.pressed & keys::PRIMARY != 0
+                    && availability.lmb_use)
             {
                 for opening in &mut self.openings {
                     if opening.reference.cap == target.item && opening.reference.can_toggle {
@@ -917,7 +978,8 @@ impl InteractionState {
             }
             if self.mechanisms.contains(target.item)
                 && (input.pressed & keys::USE != 0
-                    || (input.pressed & keys::PRIMARY != 0
+                    || (!held_switch_pressed
+                        && input.pressed & keys::PRIMARY != 0
                         && self.mechanisms.primary_switch(target.item)
                         && availability.lmb_use)
                     || input.held & keys::USE != 0
@@ -969,6 +1031,11 @@ impl InteractionState {
                             target: slot,
                         });
                     }
+                    SlotTarget::Attachment(target) => {
+                        self.mount_plate(held, target, items, physics)
+                            .expect("validated plate mount");
+                        action = Some(InteractionAction::PlateMount(held));
+                    }
                     SlotTarget::Part(slot) => {
                         self.drop_held(items, physics);
                         self.parts
@@ -997,7 +1064,11 @@ impl InteractionState {
                 if let Some(rim) = available.rim {
                     action = Some(InteractionAction::WheelSplit(rim));
                 } else if let Some(target) = grab_target {
-                    if self.parts.contains(target.item) {
+                    if self.attachments.contains(target.item) {
+                        self.remove_plate(target.item, target.point, player, items, physics)
+                            .expect("validated plate removal");
+                        action = Some(InteractionAction::PlateRemove(target.item));
+                    } else if self.parts.contains(target.item) {
                         self.parts
                             .remove(target.item, items, physics)
                             .expect("validated removal");
@@ -1015,10 +1086,14 @@ impl InteractionState {
                 }
             } else if available.actions.0 & ActionMask::PICKUP != 0
                 && let Some(target) = grab_target
-                && self
-                    .carry
-                    .pickup(target.item, target.point, player, items, physics)
-                    .is_ok()
+                && (if self.storage.stored(target.item) {
+                    self.pickup_stored_item(target.item, target.point, player, items, physics)
+                        .is_ok()
+                } else {
+                    self.carry
+                        .pickup(target.item, target.point, player, items, physics)
+                        .is_ok()
+                })
             {
                 action = Some(InteractionAction::Pickup(target.item));
             }
@@ -1063,6 +1138,7 @@ impl InteractionState {
             if input.released & keys::GRAB != 0 {
                 let throwing = self.carry.throw_charge() > self.carry.reference_throw_minimum();
                 if let Some(item) = self.carry.release_throw(player, items, physics) {
+                    self.storage.mark_dropped(item);
                     action = Some(if throwing {
                         InteractionAction::Throw(item)
                     } else {
@@ -1092,7 +1168,8 @@ impl InteractionState {
         items.sync_poses(physics);
         let mut filling = None;
         let mut filled_destination = None;
-        if input.held & keys::PRIMARY != 0
+        if !held_switch_pressed
+            && input.held & keys::PRIMARY != 0
             && available.actions.0 & ActionMask::FILL != 0
             && let Some(held) = self.held()
             && let Some(target) = filling_target
@@ -1286,6 +1363,49 @@ impl InteractionState {
         action
     }
 
+    pub fn remove_plate(
+        &mut self,
+        item: ItemId,
+        point: [f32; 3],
+        player: &PlayerState,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        if !self
+            .carry
+            .allows_pickup(item, player.seat().is_some(), true)
+        {
+            return Err(ReferenceError("Cannot remove plate".into()));
+        }
+        let body = self
+            .attachments
+            .loose_body(item)
+            .ok_or_else(|| ReferenceError("Missing loose plate body".into()))?;
+        self.carry.can_acquire(item, point, player, body, physics)?;
+        self.attachments.remove(item, items, physics)?;
+        self.carry.pickup(item, point, player, items, physics)?;
+        self.parts.sync(items, physics)?;
+        Ok(())
+    }
+    pub fn mount_plate(
+        &mut self,
+        item: ItemId,
+        target: AttachmentTargetId,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        self.attachments
+            .can_mount(item, target, items)
+            .map_err(|_| ReferenceError("Cannot mount plate".into()))?;
+        self.attachments
+            .preflight_mount(item, target, items, physics)?;
+        if self.held() != Some(item) {
+            return Err(ReferenceError("Plate is not held".into()));
+        }
+        self.drop_held(items, physics);
+        self.attachments.mount(item, target, items, physics)?;
+        self.parts.sync(items, physics)
+    }
     pub fn sync_parts(
         &mut self,
         items: &mut ItemStore,
@@ -1295,6 +1415,8 @@ impl InteractionState {
         self.mechanisms.sync(physics, true);
         self.parts
             .capture_mechanisms(items, &self.mechanisms, physics)?;
+        self.attachments.sync(items, physics)?;
+        self.parts.sync(items, physics)?;
         Ok(())
     }
     pub fn sync_mechanisms(&mut self, physics: &mut PhysicsWorld) {

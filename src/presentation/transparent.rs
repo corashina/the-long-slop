@@ -282,6 +282,8 @@ pub(crate) fn prepare_pass_order(
                         .is_some_and(|m| {
                             m.asset_id.type_id()
                                 == std::any::TypeId::of::<super::weather::ParticleMaterial>()
+                                || m.asset_id.type_id()
+                                    == std::any::TypeId::of::<super::plates::PlateTextMaterial>()
                         })
                     {
                         item.draw_function()

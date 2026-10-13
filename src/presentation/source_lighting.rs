@@ -200,6 +200,16 @@ pub(crate) type DrawSourceBase = (
     DrawMesh,
     SourceDrawMark<false, true>,
 );
+pub(crate) type DrawSourcePlate = (
+    SourceDrawMark<false, false>,
+    SetItemPipeline,
+    SetSourceViewCamera,
+    SetSourceViewLighting,
+    SetMeshBindGroup<2>,
+    bevy::pbr::SetMaterialBindGroup<3>,
+    DrawMesh,
+    SourceDrawMark<false, true>,
+);
 pub(crate) type DrawSourceGlass = (
     SourceDrawMark<false, false>,
     super::surface_pass::SourcePairReady,
@@ -481,6 +491,7 @@ impl Plugin for SourceLightingPlugin {
                 .add_render_command::<AlphaMask3d, DrawSourceMaterial>()
                 .add_render_command::<Transmissive3d, DrawSourceMaterial>()
                 .add_render_command::<Transparent3d, DrawSourceBase>()
+                .add_render_command::<Transparent3d, DrawSourcePlate>()
                 .add_render_command::<Transparent3d, DrawSourceAdd>()
                 .add_render_command::<Transparent3d, DrawSourceGlass>()
                 .add_systems(
@@ -534,6 +545,30 @@ fn prepare_source_draws(
         ),
     ];
     for (id, material) in materials.iter_mut() {
+        if id.type_id() == TypeId::of::<super::plates::PlateTextMaterial>() {
+            let label = MainPassTransparentDrawFunction.intern();
+            let draw = transparent.read().id::<DrawSourcePlate>();
+            if material
+                .properties
+                .draw_functions
+                .iter()
+                .any(|(key, current)| *key == label && *current != draw)
+            {
+                let Some(properties) = Arc::get_mut(&mut material.properties) else {
+                    *status.0.lock().expect("source lighting status lock") = RenderingState::Failed(
+                        "Plate draw properties were shared before specialization".into(),
+                    );
+                    return;
+                };
+                properties
+                    .draw_functions
+                    .iter_mut()
+                    .find(|(key, _)| *key == label)
+                    .expect("plate transparent draw label")
+                    .1 = draw;
+            }
+            continue;
+        }
         if id.type_id() != TypeId::of::<SourceMaterial>() {
             continue;
         }

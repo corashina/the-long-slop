@@ -156,7 +156,7 @@ pub struct LightReference {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LightControllerKind {
-    House,
+    Switch,
     Headlight,
     Cabin,
     Rear,
@@ -766,7 +766,7 @@ impl LightingRecord {
                 &control.source,
                 "controller state/node",
             )?;
-            if control.kind == LightControllerKind::House {
+            if control.kind == LightControllerKind::Switch {
                 check(
                     !control.aim_colliders.is_empty()
                         && control.states.iter().all(|s| {
@@ -776,7 +776,7 @@ impl LightingRecord {
                                 && s.off_material.is_some()
                         }),
                     &control.source,
-                    "house lamp bindings",
+                    "switch lamp bindings",
                 )?;
             }
             if control.kind == LightControllerKind::Headlight {

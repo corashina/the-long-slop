@@ -354,7 +354,7 @@ impl SurfaceTargets {
 /// A scratch cube has fixed per-face render views and per-mip sample views.
 /// The latter prevent attachment and sampled-subresource overlap during filtering.
 pub struct ScratchCube {
-    pub texture: Texture,
+    _texture: Texture,
     pub faces: [[TextureView; 6]; 7],
     pub levels: [TextureView; 7],
     pub cube: TextureView,
@@ -373,7 +373,6 @@ fn probe_texture(device: &RenderDevice, label: &'static str) -> Texture {
         format: HDR_FORMAT,
         usage: TextureUsages::RENDER_ATTACHMENT
             | TextureUsages::TEXTURE_BINDING
-            | TextureUsages::COPY_SRC
             | TextureUsages::COPY_DST,
         view_formats: &[],
     })
@@ -390,35 +389,39 @@ fn cube_view(texture: &Texture, level: u32, count: u32) -> TextureView {
 impl ScratchCube {
     fn new(device: &RenderDevice, label: &'static str) -> Self {
         let texture = probe_texture(device, label);
-        let faces = std::array::from_fn(|mip| {
-            std::array::from_fn(|face| {
-                texture.create_view(&TextureViewDescriptor {
-                    dimension: Some(TextureViewDimension::D2),
-                    base_mip_level: mip as u32,
-                    mip_level_count: Some(1),
-                    base_array_layer: face as u32,
-                    array_layer_count: Some(1),
-                    ..Default::default()
-                })
-            })
-        });
+        let faces = face_views(&texture);
         let levels = std::array::from_fn(|mip| cube_view(&texture, mip as u32, 1));
         let cube = cube_view(&texture, 0, 7);
         Self {
-            texture,
+            _texture: texture,
             faces,
             levels,
             cube,
         }
     }
 }
+fn face_views(texture: &Texture) -> [[TextureView; 6]; 7] {
+    std::array::from_fn(|mip| {
+        std::array::from_fn(|face| {
+            texture.create_view(&TextureViewDescriptor {
+                dimension: Some(TextureViewDimension::D2),
+                base_mip_level: mip as u32,
+                mip_level_count: Some(1),
+                base_array_layer: face as u32,
+                array_layer_count: Some(1),
+                ..Default::default()
+            })
+        })
+    })
+}
 /// Capture and filtering never write into the cube sampled by scene materials.
-/// Four textures and102 views are allocated once; publication copies all seven HDR levels.
+/// Fixed textures and views are allocated once. Publication copies all seven HDR levels.
 pub struct ProbeTargets {
     pub base: ScratchCube,
     pub auxiliary: ScratchCube,
     pub published: Texture,
     pub published_view: TextureView,
+    pub published_faces: [[TextureView; 6]; 7],
     pub capture_sample: Texture,
     pub capture_sample_view: TextureView,
 }
@@ -429,6 +432,7 @@ impl ProbeTargets {
         let auxiliary = ScratchCube::new(device, "source_probe_auxiliary");
         let published = probe_texture(device, "source_probe_published");
         let published_view = cube_view(&published, 0, 7);
+        let published_faces = face_views(&published);
         // Source reflectionBounces=1 keeps candidate selection, but substitutes
         // the builtin black cube for every registered cube probe during capture.
         // Its six pixels have zero color and alpha; decode is (1,1,0,0).
@@ -471,6 +475,7 @@ impl ProbeTargets {
             auxiliary,
             published,
             published_view,
+            published_faces,
             capture_sample,
             capture_sample_view,
         }
@@ -505,30 +510,6 @@ impl ProbeTargets {
                     },
                 );
             }
-        }
-    }
-    /// Called only after the last filter pass. Queue order preserves previous-frame sampling.
-    pub fn publish(&self, encoder: &mut CommandEncoder) {
-        for mip in 0..7 {
-            encoder.copy_texture_to_texture(
-                TexelCopyTextureInfo {
-                    texture: &self.base.texture,
-                    mip_level: mip,
-                    origin: Origin3d::ZERO,
-                    aspect: TextureAspect::All,
-                },
-                TexelCopyTextureInfo {
-                    texture: &self.published,
-                    mip_level: mip,
-                    origin: Origin3d::ZERO,
-                    aspect: TextureAspect::All,
-                },
-                Extent3d {
-                    width: 64 >> mip,
-                    height: 64 >> mip,
-                    depth_or_array_layers: 6,
-                },
-            );
         }
     }
 }

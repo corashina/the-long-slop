@@ -11,6 +11,7 @@ pub mod fluids;
 pub mod interaction;
 pub mod lighting;
 pub mod mirrors;
+pub mod plates;
 pub mod player;
 pub mod reference;
 pub mod save;

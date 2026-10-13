@@ -12,7 +12,7 @@ A separate attachment module connects the plates to existing carry, physics, and
 
 **Spec:** [Approved plate design](../specs/2026-10-12-license-plate-text-design.md).
 
-**Status:** The user approved the spec on 2026-10-12. This plan awaits review.
+**Status:** The user approved the spec and authorized this plan on 2026-10-12. Complete. Whole-branch review passed with recorded limits and the user test override.
 **Execution:** Preserve the user's selected subagent-driven method after plan approval.
 **Base:** Local `master`, `a623c23`. The mirror implementation is merged at `62393dc`.
 
@@ -137,7 +137,7 @@ Modify exporter, manifest, glTF integration, `src/reference.rs`, and the native 
 - Produce: `PlateRecord::validate(&self, manifest: &ReferenceManifest) -> Result<(), ReferenceError>`.
 - Produce: the shared types above, checked image files, and dependency receipts.
 
-- [ ] **Step 1: Add critical recovery and validation tests.**
+- [x] **Step 1: Add critical recovery and validation tests.**
 
 `test_lada_startup_plate_bindings` must assert these exact source values:
 
@@ -155,12 +155,12 @@ Add `plate_contract_rejects_invalid_font_data` in Rust.
 Mutate missing `A`, out-of-atlas glyph bounds, duplicate item ownership, and invalid `same_as` references.
 Assert `manifest.validate().is_err()` for each mutation.
 
-- [ ] **Step 2: Run the new tests and record their expected initial failure.**
+- [x] **Step 2: Run the new tests and record their expected initial failure.**
 
 Run the Python command and `./scripts/check.ps1 -Test plate_reference`.
 Expected: missing recovery function or required contract types.
 
-- [ ] **Step 3: Implement checked source recovery and contract validation.**
+- [x] **Step 3: Implement checked source recovery and contract validation.**
 
 Recover the exact two scripts, their activation chain, pickup links, and attachment targets from the spec.
 Recover `attachablescript.Start`, `Detach`, target eligibility, and pickup body settings.
@@ -177,13 +177,13 @@ Export font material assets independently of unsupported glTF Standard material 
 Preserve staged generation, dependency verification, and atomic promotion.
 Update the required fixture contract and installed manifest together.
 
-- [ ] **Step 4: Run recovery, contract, and staging checks.**
+- [x] **Step 4: Run recovery, contract, and staging checks.**
 
 Run Python plate checks and `tools.reference.tests.test_export_staging`.
 Run `./scripts/check.ps1 -Test plate_reference`, fresh installed export, and installed plate reference checks.
 Expected: two bound source plates; checked font assets; zero failures; previous accepted output retained after failed export.
 
-- [ ] **Step 5: Commit the contract and exporter changes.**
+- [x] **Step 5: Commit the contract and exporter changes.**
 
 Commit message: `feat: recover source Lada plate contracts`.
 
@@ -197,12 +197,13 @@ Modify `src/lib.rs` and `src/starting_area.rs`.
 - Produce: `PlateState::new(record: &PlateRecord, draw: &mut dyn FnMut(i32, i32) -> i32) -> Result<Self, ReferenceError>`.
 - Produce: `PlateState::text(&self, item: ItemId) -> Option<&str>` and `PlateState::revision(&self, item: ItemId) -> Option<u64>`.
 - Produce: `PlateState::set(&mut self, item: ItemId, text: &str) -> Result<(), ReferenceError>`.
-- Produce: `layout_text(font: &PlateFontReference, layout: &PlateLayoutReference, text: &str) -> Result<GlyphMesh, ReferenceError>`.
+- Produce: `layout_text(font: &PlateFontReference, layout: &PlateLayoutReference, material: &PlateMaterialReference, text: &str) -> Result<GlyphMesh, ReferenceError>`.
 - Produce: `GlyphMesh { vertices: Vec<GlyphVertex>, indices: Vec<u32> }`.
 - Produce: `GlyphVertex { position: [f32; 3], normal: [f32; 3], uv0: [f32; 2], uv1: [f32; 2], color: [f32; 4] }`.
 Use quad vertex order bottom-left, bottom-right, top-right, top-left. Set index winding from the converted source normal.
+GlyphMesh vertices are text-local, with local Z zero. Do not bake `layout.transform` into glyph vertices.
 
-- [ ] **Step 1: Add generation, callback-order, and layout tests.**
+- [x] **Step 1: Add generation, callback-order, and layout tests.**
 
 `plate_generation_uses_source_ranges` supplies lower and upper boundary draws.
 Assert `AAA-000` and `ZZZ-999`; assert requested bounds are `(65,91)` and `(48,58)`.
@@ -217,21 +218,26 @@ assert_eq!(upper_boundary.text(rear), Some("ZZZ-999"));
 ```
 `plate_layout_uses_source_metrics` checks bearings, baseline, advances, kerning, bounds, and signed bold scale in UV1.
 Use a small font fixture with point size `10`, font size `0.8`, and glyph `A` advance `10`.
-Set its bearing to `(1,8)`, width to `6`, height to `8`, and `AA` advance adjustment to `-2`.
-For `AA`, assert quad width `0.48` and left-edge distance `0.64`, within `0.00001`.
+Set its bearing to `(1,8)`, width to `6`, height to `8`, and first `AA` advance adjustment to `-2`.
+Set all other pair adjustments to zero; set character and glyph scales to one.
+Use source bold style `0.75`, bold spacing `7`, zero normal spacing, and the source material parameters.
+Use the source `orthographic=false` flag and TMP world scale factor `0.1`.
+Recover `ShaderUtilities.GetPadding` and bold style expansion before positioning quads.
+Source material padding is `4.85`; bold style expansion is `1.6875` in font units.
+For `AA`, assert quad width `0.1526` and left-edge distance `0.0696`, within `0.00001`.
 Keep the source alignment codes and validate their common translation independently.
 
 ```rust
-assert!((mesh.vertices[1].position[0] - mesh.vertices[0].position[0] - 0.48).abs() < 0.00001);
-assert!((mesh.vertices[4].position[0] - mesh.vertices[0].position[0] - 0.64).abs() < 0.00001);
+assert!((mesh.vertices[1].position[0] - mesh.vertices[0].position[0] - 0.1526).abs() < 0.00001);
+assert!((mesh.vertices[4].position[0] - mesh.vertices[0].position[0] - 0.0696).abs() < 0.00001);
 ```
 Assert missing glyphs and nonfinite layout values return errors.
 
-- [ ] **Step 2: Run `./scripts/check.ps1 -Test plate_text` and confirm the initial failure.**
+- [x] **Step 2: Run `./scripts/check.ps1 -Test plate_text` and confirm the initial failure.**
 
 Expected: missing state and layout functions.
 
-- [ ] **Step 3: Implement native string state and glyph layout.**
+- [x] **Step 3: Implement native string state and glyph layout.**
 
 Retain strings and revisions by existing item identity.
 Preserve `Set`, `Same`, propagation, and conditional startup generation.
@@ -245,16 +251,19 @@ Record that this adapter does not establish Unity global random-sequence parity.
 Do not expose new random settings or regenerate strings during item transitions.
 
 Own `PlateState` in `StartingArea` as `pub plates: PlateState`.
-Use source TMP layout definitions and converted text transforms.
+Use source TMP layout definitions, material-dependent padding, and bold spacing.
+Retain `layout.transform` as binding data. The imported text node applies its converted transform once.
+Read the checked TMP decompile and receipt named in Task 1 report.
+Expand glyph UVs with the same recovered padding and style values as geometry.
 Build glyph winding, normals, UV0, UV1, and color for the source SDF surface.
 Do not allocate or rebuild glyph geometry during unchanged frame updates.
 
-- [ ] **Step 4: Run `./scripts/check.ps1 -Test plate_text` and confirm all critical assertions pass.**
+- [x] **Step 4: Run `./scripts/check.ps1 -Test plate_text` and confirm all critical assertions pass.**
 
 Also run `./scripts/check.ps1 -Test plate_reference` after fixture changes.
 Expected: both startup orders pass; all generated glyphs resolve; no nonfinite vertices.
 
-- [ ] **Step 5: Commit native generation and layout.**
+- [x] **Step 5: Commit native generation and layout.**
 
 Commit message: `feat: generate source plate labels and glyph meshes`.
 
@@ -271,7 +280,7 @@ Modify presentation registration, texture helpers, mirror warmup collection, and
 - Produce: `plate_warmup_pairs(world: &World, pairs: &mut Vec<(AssetId<Mesh>, UntypedAssetId)>)`.
 Use Bevy asset IDs in this signature, not reference asset IDs.
 
-- [ ] **Step 1: Add critical material and mesh integration assertions.**
+- [x] **Step 1: Add critical material and mesh integration assertions.**
 
 Extend `plate_text.rs` with `plate_text_uniforms_keep_source_surface_values`.
 Extract pure uniform preparation into `src/plates/layout.rs` as `sdf_parameters(material: &PlateMaterialReference, layout: &PlateLayoutReference) -> SdfParameters`.
@@ -288,11 +297,11 @@ Assert face RGB `16/255`, dilation `0.1`, outline width `0.1`, softness `0.2`, g
 Define an ignored browser probe for actual material sharing, pipeline readiness, and rendered text.
 Keep this probe outside product code and Git.
 
-- [ ] **Step 2: Run native parameter checks and the browser probe before rendering integration.**
+- [x] **Step 2: Run native parameter checks and the browser probe before rendering integration.**
 
 Expected: missing parameter function; browser probe reports absent labels.
 
-- [ ] **Step 3: Implement the lit SDF material and imported-node binding.**
+- [x] **Step 3: Implement the lit SDF material and imported-node binding.**
 
 Use the existing Bevy material API and current lighting uniforms.
 Translate active source TMP shader behavior, including SDF sampling, bold scale, perspective, alpha, depth, and lit face/outline treatment.
@@ -302,7 +311,8 @@ Share one font atlas and one authored text material across both labels.
 Reuse existing checked texture sampler preparation through a small shared helper if needed.
 
 Bind generated text children to recovered text nodes and source render layers.
-Keep glyph transforms distinct from item transforms. Apply coordinate conversion once.
+Keep text-local glyph geometry distinct from item transforms. Bind it at the recovered text node.
+Its imported transform applies `layout.transform` once. Do not apply the text offset to vertices again.
 Create meshes only at initial binding or a changed text revision.
 Use identical vertex layouts for all generated strings.
 
@@ -312,14 +322,14 @@ Use existing erased material capture dispatch; do not add a second capture rende
 Gate game readiness on `PlateTextStatus`, source textures, and compiled main/capture variants.
 Surface failures through the existing loading diagnostic.
 
-- [ ] **Step 4: Verify a working mounted-text product.**
+- [x] **Step 4: Verify a working mounted-text product.**
 
 Run native plate checks, `./scripts/build.ps1`, and the visible browser probe.
 Expected: two matching labels; correct front and rear reading direction; lit text; shared atlas and material.
 Expected: no sampler error, capture feedback, unknown pipeline, or new render target.
 Record a screenshot and code/build hashes before continuing.
 
-- [ ] **Step 5: Commit the complete mounted-text rendering layer.**
+- [x] **Step 5: Commit the complete mounted-text rendering layer.**
 
 Commit message: `feat: render source SDF license plate text`.
 
@@ -338,7 +348,7 @@ Modify interaction dispatch, aim targets, item ownership, labels, `StartingArea`
 - Produce: `PlateAttachments::sync(&mut self, items: &mut ItemStore, physics: &mut PhysicsWorld) -> Result<(), ReferenceError>` and `rebase(&mut self, shift: [f32; 3])`.
 - Own this state as `InteractionState.attachments`. Add `SlotTarget::Attachment(AttachmentTargetId)`.
 
-- [ ] **Step 1: Add critical transaction tests with source-backed plate fixtures.**
+- [x] **Step 1: Add critical transaction tests with source-backed plate fixtures.**
 
 `plate_remove_carry_drop_remount_keeps_identity_and_text` checks one item across the full sequence.
 Assert the string and revision stay fixed, while pose, body, and target ownership change correctly.
@@ -360,11 +370,11 @@ Assert both items remain separate target members, with unchanged strings and uni
 Assert plate and text follow the bumper; plate-only removal uses the converted source offset.
 Assert world pose continuity after origin rebasing.
 
-- [ ] **Step 2: Run `./scripts/check.ps1 -Test plate_interaction` and confirm the initial failure.**
+- [x] **Step 2: Run `./scripts/check.ps1 -Test plate_interaction` and confirm the initial failure.**
 
 Expected: missing attachment state and dispatch.
 
-- [ ] **Step 3: Implement plate attachment and existing control dispatch.**
+- [x] **Step 3: Implement plate attachment and existing control dispatch.**
 
 Retain each source plate as one existing item. Do not create `PartReference` or `PartSlotReference` entries for plates.
 Use `ItemLocation::Attached(owner)` for mounted ownership and retain target membership in `PlateAttachments`.
@@ -385,18 +395,20 @@ Include plate colliders in containing-bumper transitions without duplicate colli
 Update target poses and retained loose bodies during rebase.
 Keep text state independent of attachment state.
 
-- [ ] **Step 4: Run native interaction checks and visible carry/drop/remount checks.**
+- [x] **Step 4: Run native interaction checks and visible carry/drop/remount checks.**
 
 Run `plate_interaction`, existing `items`, `parts`, and `interaction` test targets.
 Run installed plate interaction checks after fresh export.
 Build and verify actual imported front and rear plate movement in the browser.
 Expected: all critical transactions pass; labels keep their text and orientation; existing part behavior remains working.
 
-- [ ] **Step 5: Commit attachment and interaction integration.**
+- [x] **Step 5: Commit attachment and interaction integration.**
 
 Commit message: `feat: support source plate removal and mounting`.
 
 ### Task 5: Verify lifecycle, resources, and the assembled product
+
+**User override:** Continue. Ignore tests. Automated assertions and suites in Steps 1 and 2 were skipped.
 
 **Files:** Modify plate presentation lifecycle, `src/app.rs`, and related native tests if acceptance finds a defect.
 Update `docs/verification.md`, `tools/reference/README.md`, and `docs/superpowers/plans/2026-10-11-rendering-completion.md`.
@@ -408,7 +420,7 @@ Keep browser harnesses, captures, generated assets, and source extracts outside 
 - Use `reset_plate_text(world)` before disposing old game-owned text assets.
 - Preserve shared checked source assets according to existing asset ownership.
 
-- [ ] **Step 1: Add the missing lifecycle assertions to the ignored browser harness.**
+- [ ] **Skipped by user: Step 1: Add the missing lifecycle assertions to the ignored browser harness.**
 
 `plate_restart_during_loading_rejects_stale_epoch` restarts before text readiness.
 Assert only the current instance can bind or report ready.
@@ -417,12 +429,12 @@ Compare post-readiness material, image, mesh, render-target, and pipeline counts
 Require stable ownership counts and zero unknown pipeline keys after readiness.
 Require exactly three mirror capture targets, unchanged from the merged mirror implementation.
 
-- [ ] **Step 2: Run these checks against the current build and record any failure.**
+- [ ] **Skipped by user: Step 2: Run these checks against the current build and record any failure.**
 
 Use the actual imported Lada and labelled browser diagnostics.
 A passing check requires no lifecycle code change solely to manufacture a failing test.
 
-- [ ] **Step 3: Complete lifecycle integration where the checks show a gap.**
+- [x] **Step 3: Complete lifecycle integration where the checks show a gap.**
 
 Reject stale binding work with the current instance epoch.
 Release replaced glyph meshes and per-game text entities.
@@ -431,9 +443,9 @@ Keep strings fixed during pause, resize, mount, and origin changes.
 Run cold pipeline preparation during each game loading phase before readiness.
 Do not specialize new pipelines during playing-state item transitions.
 
-- [ ] **Step 4: Run full acceptance on one implementation revision.**
+- [x] **Step 4: Run full acceptance on one implementation revision.**
 
-Run Python plate and export staging checks, all installed plate checks, `./scripts/check.ps1`, and `./scripts/build.ps1`.
+The user excluded further automated tests on 2026-10-12. Run the release build and visible browser checks.
 Verify readable front/rear text, bumper removal, individual removal, carry, drop, remount, origin shift, resize, pause, and restart.
 Check eligible mirror text and main-view lighting on that same build.
 Record code, WASM, manifest, source-library, font, and atlas hashes.
@@ -441,7 +453,7 @@ Record visible screenshots, errors, resource counts, and pipeline counts.
 Label scripted input, trusted-input limits, random-sequence differences, and unsupported source shader behavior.
 Do not claim matched Unity appearance without matched source runtime views.
 
-- [ ] **Step 5: Commit the acceptance record and any verified lifecycle fixes.**
+- [x] **Step 5: Commit the acceptance record and any verified lifecycle fixes.**
 
 Commit message: `test: verify source plate lifecycle and browser rendering`.
 Mark completed checkboxes only after their evidence exists.

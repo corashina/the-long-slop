@@ -1,3 +1,4 @@
+use super::materials::{SourceCaster, SourceMaterial};
 use super::reference::{ReferenceVisuals, bind_node};
 use crate::app::{Drive, RuntimeReference};
 use crate::reference::{AssetUsage, ItemId, NodeId, SourceId};
@@ -15,7 +16,9 @@ struct FoodInstance {
     root: Entity,
     ready: bool,
     bound: bool,
+    source_materials_bound: bool,
     nodes: Vec<(NodeId, Entity)>,
+    primitives: Vec<Entity>,
     source_root: rapier3d::math::Pose,
 }
 
@@ -49,6 +52,8 @@ pub(crate) fn sync(
     extras: Query<(Entity, &GltfExtras)>,
     parents: Query<&ChildOf>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
+    source_casters: Query<(), With<SourceCaster>>,
+    source_materials: Query<(), With<MeshMaterial3d<SourceMaterial>>>,
     mut transforms: Query<&mut Transform, With<ConsumableScene>>,
     mut visibility: Query<&mut Visibility>,
 ) {
@@ -143,7 +148,9 @@ pub(crate) fn sync(
                     root,
                     ready: false,
                     bound: false,
+                    source_materials_bound: false,
                     nodes: Vec::new(),
+                    primitives: Vec::new(),
                     source_root: to_rapier(
                         crate::interaction::items::node_pose(manifest, prototype.root).unwrap(),
                     ),
@@ -194,7 +201,33 @@ pub(crate) fn sync(
             if instance.nodes.len() != count {
                 continue;
             }
+            for (primitive, parent) in &primitives {
+                if source_casters.contains(primitive) {
+                    continue;
+                }
+                let mut ancestor = parent.parent();
+                while ancestor != instance.root {
+                    let Ok(link) = parents.get(ancestor) else {
+                        break;
+                    };
+                    ancestor = link.parent();
+                }
+                if ancestor == instance.root {
+                    instance.primitives.push(primitive);
+                }
+            }
             instance.bound = true;
+        }
+        if !instance.source_materials_bound {
+            if instance.primitives.is_empty()
+                || !instance
+                    .primitives
+                    .iter()
+                    .all(|primitive| source_materials.contains(*primitive))
+            {
+                continue;
+            }
+            instance.source_materials_bound = true;
         }
         let pose = drive
             .runtime

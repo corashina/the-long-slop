@@ -296,6 +296,14 @@ impl WheelAssemblies {
             .items
             .iter()
             .filter(|item| {
+                if reference
+                    .plates
+                    .plates
+                    .iter()
+                    .any(|plate| plate.item == item.id)
+                {
+                    return true;
+                }
                 let mut node = Some(item.node);
                 while let Some(id) = node {
                     if reference.parts.iter().any(|p| p.node == id) {
@@ -311,6 +319,16 @@ impl WheelAssemblies {
             })
             .map(|i| (i.id, i.mass_kg))
             .collect();
+        // Flashlights start outside the car. Add their mass only while car-owned.
+        let mut general_mass = general_mass;
+        general_mass.extend(reference.flashlights.instances.iter().map(|instance| {
+            let item = reference
+                .items
+                .iter()
+                .find(|item| item.id == instance.item)
+                .unwrap();
+            (item.id, item.mass_kg)
+        }));
         let item_vehicle = |id: ItemId| {
             reference
                 .items

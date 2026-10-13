@@ -1391,3 +1391,163 @@ The final Load screenshot is `.cache/rendering-merge/final-rendering.jpg`.
 
 Matched native pixels, exact native blend rounding, and continuous trusted pointer capture remain unverified.
 The earlier audible acceptance limit remains unchanged. See `research/2026-10-12-audio-verification.md`.
+## Source plate lifecycle, 2026-10-12
+
+The equipment branch retains two imported text entities and two mesh handles.
+Both plates share the checked source font atlas and one plate material.
+Restart replaces each mesh payload under its existing handle.
+Bevy frees old vertex and index allocations before replacement in `MeshAllocator::free_meshes`.
+
+Restart now clears game readiness. Input and physics wait for current plate and mirror preparation.
+The first ready callback opens the start menu. Later ready transitions keep the existing restart menu state.
+`GarageRuntime::restart` starts the new game. The player can pause it through the existing menu.
+Plate binding uses an exclusive world system. It has no queued asynchronous binding work.
+Plate reset advances its instance and invalidates mesh revisions. Mirror preparation rejects earlier instances.
+
+The user asked to skip further tests. No new assertions, Python suites, installed checks, or full checks ran.
+The release product and ignored browser probe builds completed.
+The controller uses held browser stages for loading restart, plate transactions, pause, resize, and three restart cycles.
+The ignored observer counts live GL buffers and requested bytes without changing GL state.
+The source and product package receipts are in `.cache/equipment-checks/plate-lifecycle-pairing.json`.
+Source library, font, atlas, and scene receipts are in `plate-lifecycle-source-receipts.json` in the same directory.
+
+These browser checks use scripted camera poses and item transactions.
+Trusted mouse capture and matched Unity appearance remain unproved.
+The source TMP shader uses the supported forward path. Full Unity deferred shader behavior remains outside this work.
+
+The controller observed four ready states across three restart cycles, with plate instances 3, 4,5,6.
+Each retained 251 meshes, 130 images, one plate material, 297 source materials, 1373 GL buffers, and 11029400 requested buffer bytes.
+The backend retained 152 textures, 58 programs, 11 target textures, and three RGBA8 capture targets plus three HDR intermediates.
+Current main targets resized from 1280x720 to 1024x576 and returned. Target storage returned to 82268768 bytes.
+The readiness logs retained 48 capture variants. The controller found no warning, runtime error, or GL error.
+The visible front, rear, carry, drop, remount, bumper, plate removal, and origin-shift labels remained readable.
+The loading hold covered game readiness; synchronous text binding could finish before release.
+The first mirror placement screenshot proves placement only. It does not prove readable text in a capture.
+
+The final held resume view reported paused=false twice. Physics steps increased from 44 to 1527.
+The active source mirror showed partial DG/DGR glyphs from the selected plate through the existing capture path.
+Full mirror label readability remains unproved because the string was clipped or occluded.
+The controller restored production and observed ready=true with Start and Controls enabled, errors 0, and glErrors 0.
+The controller verified all 85 source/package/asset hash entries after restoration.
+Final screenshots include plate-lifecycle-resumed.png, plate-source-mirror-text-settled.png, and plate-final-production.png.
+
+## Portable flashlights, 2026-10-13
+
+Source: Steam build `11140890`, Unity `2021.3.18f1`. Branch: `codex/equipment`.
+The selected export includes the older active garage flashlight and the inactive newer scene object.
+The older controller starts OFF. The newer controller and body start disabled.
+The newer model has no gameplay acquisition route.
+
+The older source spot uses 0.85 intensity, a 12 m range, a 90 degree cone, and cookie 3.
+The newer source spot uses 1.5 intensity, a 15 m range, an 80 degree cone, and cookie 4.
+Both lights use source shadow strength 1, bias 0.05, normal bias 0.4, and near plane 0.2 m.
+The renderer keeps 34 light slots, 100 shadow slots, and the 4000 pixel source atlas.
+One 512 by 512 three-layer cookie array holds the prior custom cookie and both flashlight cookies.
+Normal, mirror, and plate materials share its checked array binding.
+
+Source storage uses mask `8388609`, a 1 second drop delay, and a scan interval above 1.5 seconds.
+The source locks a flashlight only when its collider appears in the preceding and current scans.
+The trunk and hood slots apply source restrictions. Storage types 5 and 7 cannot lock.
+Loading yields twice and runs three QuickFreeze passes. Only the first pass prescans.
+Readiness waits for all five frames, source lighting, plates, and three mirror targets.
+The runtime syncs wheel mass and item poses only when a storage frame changes ownership.
+The constructor sets initial poses before those loading frames.
+
+The user skipped further automated tests and assertions. Task 4 uses release builds and visible browser review.
+The corrected release build passed. WASM SHA-256: `216e4317410fa35e37d5c31664fe9573cb8d7d1e1eb9a711d9baba4106949d52`.
+JS SHA-256: `a6a58cad9b9e2df83c335255e6a6238f60da9a702c640bd075d04bb9e57be40e`.
+The current export manifest is `3e1914fe710147da8b7d39cc17518a78c8a5502ca9b94adbd96a49bfe33db7f2`.
+The source library stays at `92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99`.
+The model glTF is `015a25dfb58694d7ca8700b40886b6aa43165a186bbbf9251f88593432158191`.
+The 36-entry `.cache/equipment-checks/flashlight-final-fix-receipts.json` records code, models, cookies, and source shaders together.
+The ignored probe restore record is `.cache/equipment-checks/flashlight-lifecycle-stage-pairing.json`.
+The ignored lifecycle route labels scripted placement, fixed input, active physics, and the inactive-model prototype.
+Its reports use `.cache/equipment-checks/`; captures use the task visualization directory.
+In the labelled newer-model stage, the yellow and black model and a white wall beam were visible.
+The model root, body, and item pose matched `[37.781, 3.415, -69.666]`; the gameplay body stayed disabled.
+Two model meshes were visible. The garage startup still kept the newer item inactive.
+The captures are `flashlight-task3-new-model.png` and `flashlight-task3-new-beam.png` in the task visualization directory.
+The active mirror showed the reflected car, interior, and lighting. Its direct white beam detail was not readable.
+The prototype does not prove source-matched beam pixels, cone, cookie, or shadow shape.
+The first ready route had five models, 309 source materials, 137 images, 29 bound lights, and 257 mesh assets.
+It had 1,317 mesh entities and three mirror cameras. The backend retained 159 textures and 58 programs.
+The 11 target textures requested 82,268,768 bytes; 1,422 buffers requested 11,217,648 bytes.
+The targets included one 4000 by 4000 shadow atlas and three 256 by 256 RGBA8 mirror colors.
+Three 256 by 256 HDR intermediates came from Bevy. These byte counts describe requests, not driver memory.
+The mirror cache held 48 capture variants and 113 total pipeline IDs at first readiness.
+The startup queue skipped 1,826 unknown capture keys. That count stayed fixed during the observed ready interval.
+Three native restart cycles restored old/new OFF, the older World, newer inactive, mass 961.60004 kg, and origin zero.
+The matching garage snapshots after all three cycles kept the same model, material, image, light, mesh, buffer, target, and program counts.
+All three cycles kept 48 mirror variants, 113 total pipeline IDs, and the same unknown-key counter.
+Texture creation and deletion reached 186 and 27; 159 textures remained live.
+At 1024 by 576, live textures, programs, targets, and buffers stayed at 159, 58, 11, and 1,422.
+Requested target storage fell to 78,287,456 bytes. Buffer requests stayed at 11,217,648 bytes.
+At the restored 1280 by 720 size, requested target storage returned to 82,268,768 bytes.
+The six 256 by 256 mirror and HDR targets kept their size. Texture totals reached 192 created and 33 deleted.
+Live textures stayed at 159. Capture variants stayed at 48, pipeline IDs at 113, and unknown keys at 1,826.
+The visible startup had old OFF, newer OFF and inactive, and storage ready after its fifth frame.
+World E and held LMB selected old control 10. Held LMB changed ON to OFF to ON.
+Three scripted native carry steps changed the held item rotation. Competing world LMB changed only control 10.
+An actual drop stayed loose 0.45 seconds later in the earlier build.
+The earlier trunk lock and first-scan hood lock used an inverted overlap rule. These results are superseded.
+In the corrected build, an actual drop occurred at native clock `2.0162654` seconds.
+The first eligible scan ran after `1.5333319` seconds and found the torch in the current scan only.
+The torch stayed World. The next scan ran after `3.0166783` seconds and found it in both scans.
+That scan locked it to owner 27 in trunk volume 6.
+The probe held the loose body at the source trunk center during active physics.
+Its scripted pose hold kept the collider inside the volume across both scans.
+In a second drop, the early scan ran after `0.34999466` seconds with both memberships true.
+The torch stayed World until a later scan at age `1.8499718` seconds locked it.
+The native clock and storage scheduler advanced through resumed frames in both routes.
+The corrected trunk lock changed owner 27, collider parent, and chassis mass by 1 kg.
+The prior build checked trunk release, blocked type 5, allowed hood type 4, and origin shift.
+Those checks did not run again after the overlap fix.
+The corrected build rejected stored pickup with the old light ON and kept owner, body, collider parent, mass, and ON.
+Valid pickup restored Held, loose body 7, collider parent 7, mass `961.60004` kg, and ON.
+Held LMB changed OFF to ON once per press. Native restart returned both lights OFF and restored the starting item state.
+It reached storage readiness with origin zero and mass `961.60004` kg.
+The prior build kept its clock fixed during pause with the old light ON and item Held. Resume advanced physics.
+After corrected restart, the route retained five models, 309 materials, 137 images, 29 lights, and 257 mesh assets.
+It retained 1,317 mesh entities, three capture cameras, 48 capture variants, and 113 pipeline IDs.
+It kept 1,422 buffers, 159 textures, 58 programs, and 11 targets at 1280 by 720.
+The buffers requested 11,217,648 bytes; targets requested 82,268,768 bytes.
+The targets included one 4000-square shadow atlas and six 256-square mirror and HDR textures.
+The unknown capture-key count stayed at 1,826 during corrected play.
+The parent rehashed all 36 current receipts without mismatch.
+The restored corrected production route reached garage readiness with Start and Controls enabled and three mirror previews.
+It reported 387 capture draws, zero browser errors, and zero GL errors.
+The corrected captures are in the task visualization directory.
+The earlier scripted origin shift checked item ownership, physics, and the garage area. It does not prove full world streaming.
+These checks cannot prove trusted continuous input, exact native callback timing, or matched Unity pixels.
+
+## Equipment integration into master, 2026-10-13
+
+The merge joins equipment `b9749b7` with master `c924e89`.
+It retains both vehicles and the current rendering, audio, save, survival, and weather systems.
+The selected source export has two plate objects, two flashlight records, and eight storage volumes.
+The Lada plate slots remain empty. The checked Skoda plate objects retain their source targets.
+
+Flashlight feedback uses bit 2097152. Food and drink keep their existing bits.
+The shared light uniform has 42 entries and requests 16,368 bytes, below the 16 KiB limit.
+Stored item mass and collider flags use the actual parent vehicle.
+Plate glyphs use the current camera, lighting, sorting, and depth bindings in scene and mirror passes.
+Required sorting values come from the source renderer even when its editor glyph mesh is omitted.
+
+The browser check found two current renderer lifecycle faults during integration.
+Cube copies passed `TEXTURE_CUBE_MAP` as a framebuffer face and produced GL error 1280.
+Retained render copies now use native cube face bases and nearest texel centers for all three copy boundaries.
+New food scenes could become visible before source material conversion.
+They now stay hidden until every native mesh has its source material binding.
+
+Fresh source derivation, native contract validation, and the release build passed.
+The runtime manifest SHA-256 is `5a09eede8ca78fd95ded997ccabaf6c5e32d8c69e58941f1a147c236d3408963`.
+The WASM SHA-256 is `377b5f1102540c70b9d82101ad135378e5f404dacd3f360190a254f6109ac75b`.
+The JS SHA-256 is `8cf3aea78cd0b6dda377e8168225b91eab9449be5d6ef55760c6686f736f1173`.
+Command logs, source receipts, and browser records are in `.cache/equipment-merge/`.
+
+The final browser route reached readiness, New game, Save complete, and Game loaded.
+It reported zero browser errors and zero GL errors after each lifecycle change.
+The final draw-only observer uses no framebuffer readback or fault-consuming trace.
+The screenshot is `equipment-master-merged.png` in the task visualization directory.
+Automated tests and assertions were skipped under the user's instruction.
+These checks do not prove matched Unity pixels, trusted continuous input, or changed equipment ownership persistence.

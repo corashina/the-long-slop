@@ -950,29 +950,14 @@ fn finish_surface(
         if probe.sky_frames[usize::from(face)].load(Ordering::Acquire) != frame.frame {
             return;
         }
-        context.command_encoder().copy_texture_to_texture(
-            TexelCopyTextureInfo {
-                texture: &targets.0.colors.resolved.texture,
-                mip_level: 0,
-                origin: Origin3d::ZERO,
-                aspect: TextureAspect::All,
-            },
-            TexelCopyTextureInfo {
-                texture: &surfaces.probes[frame.probe_index].base.texture,
-                mip_level: 0,
-                origin: Origin3d {
-                    x: 0,
-                    y: 0,
-                    z: u32::from(face),
-                },
-                aspect: TextureAspect::All,
-            },
-            Extent3d {
-                width: 64,
-                height: 64,
-                depth_or_array_layers: 1,
-            },
-        );
+        if !probe.filter.capture_face(
+            context.command_encoder(),
+            &cache,
+            &surfaces.probes[frame.probe_index],
+            usize::from(face),
+        ) {
+            return;
+        }
         let job = ProbeJob::Face(face);
         if let Err(error) = probe.publication.encoded(frame.probe_token, job) {
             *status.0.lock().unwrap() = RenderingState::Failed(error.into());
@@ -1446,6 +1431,7 @@ fn prepare_probe(
             &cache,
             assets.shaders.probe.clone(),
             &surfaces.probes[index],
+            surfaces.targets.capture.resolved.sampled.as_ref().unwrap(),
             pipelines,
         );
         pipelines = Some(filter.pipelines());
@@ -1618,6 +1604,8 @@ fn filter_probe(
             probe.publication.encode_publication(
                 context.command_encoder(),
                 &surfaces.probes[frame.probe_index],
+                &probe.filter,
+                &cache,
             )
         });
         match result {

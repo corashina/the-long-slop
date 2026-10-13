@@ -63,3 +63,4 @@ pub mod surface_views;
 pub mod transparent;
 pub mod view_frame;
 pub mod weather;
+pub mod plates;

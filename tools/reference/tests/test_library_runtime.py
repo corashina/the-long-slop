@@ -19,6 +19,7 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError): validate_runtime_paths({'assets':[{'path':'library/models/unused.gltf','dependencies':[]}]})
         manifest = {'assets': [{'path': f'reference/{name}.gltf', 'dependencies': []}
                                for name in ('home', 'lada', 'skoda', 'items', 'road_lamp', 'sky')]}
+        manifest['plates']={'material':{'shader':{'path':'reference/plate-fixture.json','sha256':'a'*64},'compiled_shader':{'path':'reference/plate-fixture.bin','sha256':'a'*64},'resources':[]}}
         validate_runtime_paths(manifest)
         manifest['ui']={'sprites':[{'path':'reference/ui-test-3.png','source':{'file':'test','path_id':3}}]}
         validate_runtime_paths(manifest)
@@ -33,11 +34,12 @@ class RuntimeTests(unittest.TestCase):
         from tools.reference.export import validate_runtime_paths
         manifest={'assets':[{'path':f'reference/{name}.gltf','dependencies':[]} for name in ('home','lada','skoda','items','road_lamp','sky')]}
         resource={'path':'reference/lighting-test-1.smip','sha256':'a'*64}
+        manifest['plates']={'material':{'shader':{'path':'reference/plate-fixture.json','sha256':'a'*64},'compiled_shader':{'path':'reference/plate-fixture.bin','sha256':'a'*64},'resources':[]}}
         manifest['lighting']={'textures':[resource]}
         manifest['assets'][0]['dependencies']=[{'file':resource['path'],'sha256':resource['sha256']}]
         validate_runtime_paths(manifest)
         manifest['assets'][0]['dependencies'][0]['sha256']='b'*64
-        with self.assertRaisesRegex(ValueError,'Lighting dependency hash'):validate_runtime_paths(manifest)
+        with self.assertRaisesRegex(ValueError,'Runtime dependency hash'):validate_runtime_paths(manifest)
         manifest['assets'][0]['dependencies']=[{'file':'reference/unused.smip','sha256':'a'*64}]
         with self.assertRaisesRegex(ValueError,'Invalid selected runtime dependency'):validate_runtime_paths(manifest)
 
@@ -268,7 +270,7 @@ class RuntimeContractTests(unittest.TestCase):
             asset['sha256']=hashlib.sha256(content).hexdigest()
             material_mips={mip['file'] for material in manifest['rendering']['materials'] if material['asset']==asset['id']
                 for texture in material['properties']['textures'] for mip in texture['mips']}
-            asset['dependencies']=[d for d in asset['dependencies'] if d['file'].startswith('reference/lighting-') or d['file'] in material_mips]
+            asset['dependencies']=[d for d in asset['dependencies'] if d['file'].startswith(('reference/lighting-','reference/plate-')) or d['file'] in material_mips]
             for dependency in asset['dependencies']:
                 if dependency['file'] in material_mips:
                     content=b'fixture source mip bytes'
@@ -288,14 +290,16 @@ class RuntimeContractTests(unittest.TestCase):
                 for child in value:update_resource_hashes(child)
         update_resource_hashes(manifest['lighting'])
         update_resource_hashes(manifest['render_lighting'])
-        for resource in lighting_resources(manifest):
+        update_resource_hashes(manifest['plates'])
+        from tools.reference.plates import plate_resources
+        for resource in [*lighting_resources(manifest),*plate_resources(manifest['plates'])]:
             content=b'fixture lighting bytes'
             (root/Path(resource['path']).name).write_bytes(content)
             resource['sha256']=hashlib.sha256(content).hexdigest()
             for asset in manifest['assets']:
                 for dependency in asset['dependencies']:
                     if dependency['file']==resource['path']:dependency['sha256']=resource['sha256']
-        for name in ('geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json'):
+        for name in ('geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json','plate-evidence.json'):
             (root/name).write_text('{}')
         return manifest,receipt
 

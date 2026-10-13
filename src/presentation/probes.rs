@@ -24,21 +24,26 @@ struct FilterBinding {
 pub struct ProbeFilter {
     gaussian: CachedRenderPipelineId,
     remap: CachedRenderPipelineId,
+    copy: CachedRenderPipelineId,
+    capture: CachedRenderPipelineId,
     gaussian_bindings: [[FilterBinding; 6]; 6],
     remap_bindings: [[FilterBinding; 6]; 6],
+    copy_bindings: [[FilterBinding; 6]; 7],
+    capture_binding: BindGroup,
 }
 impl ProbeFilter {
-    pub fn pipelines(&self) -> [CachedRenderPipelineId; 2] {
-        [self.gaussian, self.remap]
+    pub fn pipelines(&self) -> [CachedRenderPipelineId; 4] {
+        [self.gaussian, self.remap, self.copy, self.capture]
     }
-    /// Seventy-two buffers and bind groups are prepared once. Draws only borrow them.
+    /// Buffers and bind groups are prepared once. Draws only borrow them.
     pub fn new(
         device: &RenderDevice,
         queue: &RenderQueue,
         cache: &PipelineCache,
         shader: Handle<Shader>,
         targets: &ProbeTargets,
-        pipelines: Option<[CachedRenderPipelineId; 2]>,
+        capture: &TextureView,
+        pipelines: Option<[CachedRenderPipelineId; 4]>,
     ) -> Self {
         let layout = BindGroupLayoutDescriptor::new(
             "source_probe_filter",
@@ -51,7 +56,14 @@ impl ProbeFilter {
                 ),
             ),
         );
-        let pipeline = |entry: &'static str| {
+        let capture_layout = BindGroupLayoutDescriptor::new(
+            "source_probe_capture",
+            &BindGroupLayoutEntries::with_indices(
+                ShaderStages::FRAGMENT,
+                ((3, texture_2d(TextureSampleType::Float { filterable: true })),),
+            ),
+        );
+        let pipeline = |entry: &'static str, layout: &BindGroupLayoutDescriptor| {
             cache.queue_render_pipeline(RenderPipelineDescriptor {
                 label: Some(entry.into()),
                 layout: vec![layout.clone()],
@@ -73,8 +85,14 @@ impl ProbeFilter {
                 ..default()
             })
         };
-        let [gaussian, remap] =
-            pipelines.unwrap_or_else(|| [pipeline("gaussian"), pipeline("remap")]);
+        let [gaussian, remap, copy, capture_pipeline] = pipelines.unwrap_or_else(|| {
+            [
+                pipeline("gaussian", &layout),
+                pipeline("remap", &layout),
+                pipeline("copy", &layout),
+                pipeline("capture", &capture_layout),
+            ]
+        });
         let point = device.create_sampler(&SamplerDescriptor {
             label: Some("source_probe_point"),
             mag_filter: FilterMode::Nearest,
@@ -135,30 +153,84 @@ impl ProbeFilter {
                 )
             })
         });
+        let copy_bindings = std::array::from_fn(|mip| {
+            std::array::from_fn(|face| {
+                make_binding(mip, face, &targets.base.levels[mip], &point, 0.)
+            })
+        });
+        let capture_binding = device.create_bind_group(
+            "source_probe_capture",
+            &cache.get_bind_group_layout(&capture_layout),
+            &BindGroupEntries::with_indices(((3, capture),)),
+        );
         Self {
             gaussian,
             remap,
+            copy,
+            capture: capture_pipeline,
             gaussian_bindings,
             remap_bindings,
+            copy_bindings,
+            capture_binding,
         }
     }
     pub fn ready(&self, cache: &PipelineCache) -> bool {
-        cache.get_render_pipeline(self.gaussian).is_some()
-            && cache.get_render_pipeline(self.remap).is_some()
+        self.pipelines()
+            .into_iter()
+            .all(|id| cache.get_render_pipeline(id).is_some())
     }
     pub fn failure(&self, cache: &PipelineCache) -> Option<String> {
-        [self.gaussian, self.remap].into_iter().find_map(|id| {
-            match cache.get_render_pipeline_state(id) {
+        self.pipelines()
+            .into_iter()
+            .find_map(|id| match cache.get_render_pipeline_state(id) {
                 CachedPipelineState::Err(
                     bevy::shader::ShaderCacheError::ShaderNotLoaded(_)
                     | bevy::shader::ShaderCacheError::ShaderImportNotYetAvailable,
                 ) => None,
                 CachedPipelineState::Err(error) => Some(format!("Source probe pipeline: {error}")),
                 _ => None,
-            }
-        })
+            })
     }
-    /// Job seven. Return false without encoding or advancing when either pipeline is pending.
+    pub fn capture_face(
+        &self,
+        encoder: &mut CommandEncoder,
+        cache: &PipelineCache,
+        targets: &ProbeTargets,
+        face: usize,
+    ) -> bool {
+        let Some(pipeline) = cache.get_render_pipeline(self.capture) else {
+            return false;
+        };
+        draw(
+            encoder,
+            pipeline,
+            &self.capture_binding,
+            &targets.base.faces[0][face],
+        );
+        true
+    }
+    pub fn publish(
+        &self,
+        encoder: &mut CommandEncoder,
+        cache: &PipelineCache,
+        targets: &ProbeTargets,
+    ) -> bool {
+        let Some(pipeline) = cache.get_render_pipeline(self.copy) else {
+            return false;
+        };
+        for mip in 0..7 {
+            for face in 0..6 {
+                draw(
+                    encoder,
+                    pipeline,
+                    &self.copy_bindings[mip][face].group,
+                    &targets.published_faces[mip][face],
+                );
+            }
+        }
+        true
+    }
+    /// Job seven waits for all pipelines before encoding or advancing.
     pub fn first_mip(
         &self,
         encoder: &mut CommandEncoder,
@@ -184,26 +256,16 @@ impl ProbeFilter {
         for mip in 2..7 {
             self.gaussian_mip(encoder, cache, targets, mip);
         }
+        let pipeline = cache.get_render_pipeline(self.copy).unwrap();
         for mip in [0, 2, 4, 6] {
-            encoder.copy_texture_to_texture(
-                TexelCopyTextureInfo {
-                    texture: &targets.base.texture,
-                    mip_level: mip,
-                    origin: Origin3d::ZERO,
-                    aspect: TextureAspect::All,
-                },
-                TexelCopyTextureInfo {
-                    texture: &targets.auxiliary.texture,
-                    mip_level: mip,
-                    origin: Origin3d::ZERO,
-                    aspect: TextureAspect::All,
-                },
-                Extent3d {
-                    width: 64 >> mip,
-                    height: 64 >> mip,
-                    depth_or_array_layers: 6,
-                },
-            );
+            for face in 0..6 {
+                draw(
+                    encoder,
+                    pipeline,
+                    &self.copy_bindings[mip][face].group,
+                    &targets.auxiliary.faces[mip][face],
+                );
+            }
         }
         let pipeline = cache.get_render_pipeline(self.remap).unwrap();
         for index in 0..6 {
@@ -380,11 +442,15 @@ impl ProbePublication {
         &mut self,
         encoder: &mut CommandEncoder,
         targets: &ProbeTargets,
+        filter: &ProbeFilter,
+        cache: &PipelineCache,
     ) -> Result<u32, &'static str> {
         let token = self
             .approved_token
             .ok_or("Source probe capture is not validated")?;
-        targets.publish(encoder);
+        if !filter.publish(encoder, cache, targets) {
+            return Err("Source probe copy pipeline is pending");
+        }
         self.approved_token = None;
         self.publication_token = Some(token);
         Ok(token)

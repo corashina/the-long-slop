@@ -1,5 +1,5 @@
 import {applyLayout} from './ui-layout.js';
-export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,SPLIT:16384,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144,CONSUME:524288,DRINK:1048576};
+export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,SPLIT:16384,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144,CONSUME:524288,DRINK:1048576,HELD_SWITCH:2097152};
 const FLUIDS=['Gas','Oil','Alcohol','Water','Blood','Diesel'];
 export function formatRadio(r){if(r.context===11&&Number.isFinite(r.radioVolume))return 'Volume: '+Math.round(r.radioVolume*10).toString().padStart(2,'0');if(r.context===12&&Number.isFinite(r.radioFrequency))return (r.radioAm?'AM '+r.radioFrequency.toFixed(0).padStart(3,'0'):'FM '+r.radioFrequency.toFixed(1).padStart(4,'0'));return '';}
 function volume(value){return (Math.round(value*10)/10).toFixed(1).replace(/\.0$/,'');}
@@ -25,6 +25,7 @@ export function selectIcon(mask,context,carrying) {
  if(mask&(ACTION.PUSH|ACTION.GRIP|ACTION.RELEASE_GRIP))return 'pickup';
  if(mask&(ACTION.USE|ACTION.TUNE))return 'cap';
  if(mask&ACTION.PICKUP)return 'pickup';
+ if(mask&ACTION.HELD_SWITCH)return 'light_switch';
  return carrying?'carrying':'default';
 }
 export class FeedbackState {
@@ -68,13 +69,14 @@ export function createFeedback(ui,switchIconUrl) {
   [ACTION.RELEASE_GRIP,'release','[WASD]: Push / [F]: Release'],
   [ACTION.THROW,'throw','[F]: Drop / hold to throw'],
   [ACTION.SPLIT,'split','[X]: Split / assemble'],
-  [ACTION.SCROLL,'scroll','[Scroll]: Open/Close']
+  [ACTION.SCROLL,'scroll','[Scroll]: Open/Close'],
+  [ACTION.HELD_SWITCH,'heldSwitch','[LMB]: Switch flashlight']
  ].map(([bit,role,text])=>{const n=document.createElement('p');n.textContent=text;n.className='action-row';n.hidden=true;root.append(n);return {bit,role,n,family:0,top:0,line:0,offset:-1};});
- let lastIcon='',lastFluid='',lastNotice='',lastName='',lastCondition='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='';
+ let lastIcon='',lastFluid='',lastNotice='',lastName='',lastCondition='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='';
  const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance / [Tab]: Center';
  const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance / [Tab]: Center';
  const counts=new Uint8Array(4);
- const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',split:'mount',scroll:'use'};
+ const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',split:'mount',scroll:'use',heldSwitch:'use'};
  const families={use:0,pickup:1,mount:2,fill:3};
  function placeRows(){
   counts.fill(0);
@@ -98,13 +100,15 @@ export function createFeedback(ui,switchIconUrl) {
   for(const r of rows)r.n.hidden=!(state.actions&r.bit)||(r.bit===ACTION.DROP&&Boolean(state.actions&ACTION.THROW))||(r.bit===ACTION.SWITCH&&Boolean(state.actions&ACTION.PRIMARY_SWITCH));
   const doorText=state.context===7?'[E]+[Mouse]: Move':'[E]+[Mouse]: Open/Close';
   if(doorText!==lastDoor){rows[1].n.textContent=doorText;lastDoor=doorText;}
-  const useText=state.context===10?(state.lmbUse?'[E] / [LMB]: Switch':'[E]: Switch'):'[E]: Open/Close';
+  const useText=state.context===10?(state.lmbUse&&!(state.actions&ACTION.HELD_SWITCH)?'[E] / [LMB]: Switch':'[E]: Switch'):'[E]: Open/Close';
   if(useText!==lastUse){rows[0].n.textContent=useText;lastUse=useText;}
   const radio=state.context===11||state.context===12;
   const tuneText=radio?(state.lmbUse?'[E] / [LMB]+[Mouse]: Tune':'[E]+[Mouse]: Tune'):'[E]+[Mouse] / [Scroll]: Open/Close';
-  if(tuneText!==lastTune){rows[7].n.textContent=tuneText;lastTune=tuneText;}
+  if(tuneText!==lastTune){rows[9].n.textContent=tuneText;lastTune=tuneText;}
   const scrollText=radio?'[Scroll]: Tune':'[Scroll]: Open/Close';
-  if(scrollText!==lastScroll){rows[17].n.textContent=scrollText;lastScroll=scrollText;}
+  if(scrollText!==lastScroll){rows[19].n.textContent=scrollText;lastScroll=scrollText;}
+  const primaryText=state.actions&ACTION.HELD_SWITCH?'[E]: Switch':'[E] / [LMB]: Switch';
+  if(primaryText!==lastPrimary){rows[13].n.textContent=primaryText;lastPrimary=primaryText;}
   placeRows();
   if(state.targetName!==lastName){target.textContent=state.targetName;lastName=state.targetName;}target.hidden=!state.targetName;
   const detail=state.condition>=0?'Condition '+Math.round(state.condition*100)+'%':'';

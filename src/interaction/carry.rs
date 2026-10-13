@@ -26,6 +26,7 @@ struct HeldState {
 pub struct CarryState {
     reference: PlayerReference,
     rules: HashMap<ItemId, PickupReference>,
+    plates: std::collections::HashSet<ItemId>,
     held: Option<HeldState>,
     anchor: Option<RigidBodyHandle>,
     acquisition_held: bool,
@@ -101,6 +102,7 @@ impl CarryState {
                 .iter()
                 .filter_map(|item| item.pickup.clone().map(|rule| (item.id, rule)))
                 .collect(),
+            plates: reference.plates.plates.iter().map(|p| p.item).collect(),
             held: None,
             anchor: None,
             acquisition_held: false,
@@ -222,6 +224,9 @@ impl CarryState {
     pub fn drop(&mut self, items: &mut ItemStore, physics: &mut PhysicsWorld) -> Option<ItemId> {
         let held = self.held.take()?;
         physics.rapier_mut().impulse_joints.remove(held.joint, true);
+        if self.plates.contains(&held.item) {
+            physics.rapier_mut().bodies[held.body].set_gravity_scale(1., true);
+        }
         if let Some(item) = items.get_mut(held.item) {
             item.location = ItemLocation::World;
         }
@@ -289,6 +294,9 @@ impl CarryState {
         let local_pose = to_rapier(item.local_pose);
         let item_pose = pose * local_pose;
         physics.rapier_mut().bodies[body].enable_ccd(true);
+        if self.plates.contains(&id) {
+            physics.rapier_mut().bodies[body].set_gravity_scale(0., true);
+        }
         self.held = Some(HeldState {
             item: id,
             body,

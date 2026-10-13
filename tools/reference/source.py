@@ -111,7 +111,7 @@ class Source:
     def transform_for(self, game_object):
         for part in self.read(game_object)['m_Component']:
             reader = self.resolve(game_object,part['component'])
-            if reader.type.name == 'Transform':
+            if reader.type.name in ('Transform','RectTransform'):
                 return reader
         raise ValueError(f'GameObject has no Transform: {key(game_object)}')
 
@@ -218,7 +218,7 @@ class Source:
             game_object, components = self.components(reader)
             go = self.read(game_object)
             path = f'{path}/{go["m_Name"]}' if path else go['m_Name']
-            active = active and (bool(go['m_IsActive']) or (parent is None and activate_root))
+            active = active and (bool(go['m_IsActive']) or (parent is None and activate_root and key(reader) not in getattr(self,'flashlight_inactive_nodes',set())))
             result.append({'reader': reader, 'game_object': game_object, 'components': components, 'parent': parent, 'path': path, 'active': active})
             for child in self.read(reader)['m_Children']:
                 visit(self.resolve(reader, child), reader, path, active)

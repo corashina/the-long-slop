@@ -221,7 +221,7 @@ class GltfExporter(GltfBuilder):
             identity = key(record['reader'])
             local_active = getattr(self.source,'food_active',{}).get(identity,condition_active.get(identity, bool(self.source.read(record['game_object'])['m_IsActive'])))
             parent_active = effective_active[key(record['parent'])] if record['parent'] else True
-            record['active'] = parent_active and (local_active or record['parent'] is None)
+            record['active'] = parent_active and (local_active or (record['parent'] is None and identity not in getattr(self.source,'flashlight_inactive_nodes',set())))
             effective_active[identity] = record['active']
         inactive_nodes = recover_startup_inactive_nodes(self.source, records)
         for record in records:
@@ -246,6 +246,7 @@ class GltfExporter(GltfBuilder):
             mapping[identity] = index
         for record in records:
             reader = record['reader']
+            identity = key(reader)
             data = self.source.read(reader)
             transform = converted_transform(data)
             if record['parent'] is None:
@@ -261,19 +262,27 @@ class GltfExporter(GltfBuilder):
             components = {r.type.name:r for r in record['components']}
             renderer = components.get('MeshRenderer') or components.get('SkinnedMeshRenderer')
             mesh_filter = components.get('MeshFilter')
-            if renderer and (mesh_filter or renderer.type.name == 'SkinnedMeshRenderer'):
+            if renderer:
                 renderer_data = self.source.read(renderer)
+                node.extras['sorting_layer'] = renderer_data['m_SortingLayer']
+                node.extras['sorting_order'] = renderer_data['m_SortingOrder']
+            if renderer and (mesh_filter or renderer.type.name == 'SkinnedMeshRenderer'):
                 component_classes={self.source.class_name(r) for r in record['components'] if r.type.name=='MonoBehaviour' and self.source.read(r)['m_Script']['m_PathID']}
                 render_enabled=renderer_visible(bool(renderer_data['m_Enabled']), component_classes) and key(renderer) not in hidden_lods and key(reader) not in inactive_nodes
                 if component_classes.intersection({'TextMeshPro','TMP_SubMesh'}):
+                    selected_text = key(reader) in {('level1',61809),('level1',62878)}
+                    selected_submesh = self.source.read(reader)['m_Father']['m_PathID'] in {61809,62878}
                     self.material_report.append({'source':source_id(renderer),
-                        'adaptation':'Omitted obsolete editor TMP glyphs. Seeded plate text requires glyph regeneration.'})
+                        'adaptation':'Runtime plate glyph binding uses the checked font contract.' if selected_text or selected_submesh else 'Omitted unrelated TMP editor glyphs.'})
+                    if selected_text:
+                        node.extras['plate_text_source'] = source_id(next(r for r in record['components'] if r.type.name=='MonoBehaviour' and self.source.class_name(r)=='TextMeshPro'))
+                        node.extras['runtime_glyph_binding'] = True
                 node.extras['renderer_enabled'] = render_enabled
                 node.extras['cast_shadows'] = renderer_data['m_CastShadows']
                 node.extras['receive_shadows'] = bool(renderer_data['m_ReceiveShadows'])
                 owner = mesh_filter or renderer
                 mesh_reader = getattr(self.source, 'condition_meshes', {}).get(key(renderer)) or self.source.resolve(owner, self.source.read(owner)['m_Mesh'])
-                if mesh_reader and (record['active'] or identity in getattr(self.source,'food_geometry_nodes',set())) and render_enabled:
+                if mesh_reader and (record['active'] or identity in getattr(self.source,'food_geometry_nodes',set()) or identity in getattr(self.source,'flashlight_inactive_nodes',set())) and render_enabled:
                     materials=[self.source.resolve(renderer,p) for p in renderer_data['m_Materials']]
                     selected=getattr(self.source,'lighting_startup_materials',{}).get(key(renderer)) or getattr(self.source,'condition_materials',{}).get(key(renderer))
                     if selected:materials=[selected for _ in materials]
