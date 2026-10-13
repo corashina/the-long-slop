@@ -1,6 +1,6 @@
 # Portable Flashlights Design
 
-Status: approved on2026-10-13. Product implementation awaits plan review.
+Status: approved on 2026-10-13. Product implementation awaits plan review.
 Date: 2026-10-13. Branch: codex/equipment. Base: 542be787ee131861920c09c4ad37ba05a103b090.
 
 ## Goal
@@ -23,8 +23,8 @@ Keep these records, models, textures, cookies, and browser probes outside Git.
 
 | Model | Source controller | Pickup | Startup evidence |
 | --- | --- | --- | --- |
-| Older regizseblampa | level1:74834 | level1:69340 | GameObject12118 is active under StartSpawnItems117; terrain startup enables117 |
-| Newer ujlamp | level1:74835 | level1:69341 | GameObject12119 is inactive under the same startup root |
+| Older regizseblampa | level1:74834 | level1:69340 | GameObject 12118 is active under StartSpawnItems117; terrain startup enables117 |
+| Newer ujlamp | level1:74835 | level1:69341 | GameObject 12119 is inactive under the same startup root |
 | Newer player model | level1:74880 | level1:69384 | Player80125 references it in alternate startup inventory groups |
 
 Recover both model hierarchies and their source materials.
@@ -77,7 +77,7 @@ Keep capacity checks explicit. Do not allocate a new renderer or per-frame beam 
 
 ## Carry and storage locking
 
-Both source rigid bodies have mass1, linear drag0, angular drag0.05, gravity enabled, and no kinematic flag.
+Both source rigid bodies have mass 1, linear drag0, angular drag0.05, gravity enabled, and no kinematic flag.
 Carry uses the existing retained dynamic body and joint. Drop restores source gravity and mass.
 Beam pose follows the imported light node under the moving item hierarchy.
 Do not attach the beam to the player camera independently of its model.
@@ -104,7 +104,7 @@ Recover collider pose, centre, size, scale, source ID, owner, and door or slot r
 Do not substitute axis-aligned world boxes for source oriented overlap rules.
 Source mountLayerMask is8388609.
 
-Source neededDropTime is1second.
+Source neededDropTime is1 second.
 The source requires membership in the preceding and current overlap scans before Lock.
 It excludes held, already locked, restricted, and incompatible attached items.
 Lock reparents the item, removes its independent rigid body, and updates containing mass.
@@ -116,10 +116,10 @@ Rebase must preserve local storage pose and world continuity.
 
 Settings source level1:65886 links physics dropdown level1:70023.
 That dropdown uses defInt=2 and useDefInt=true.
-Use the recovered fresh-default policy2; do not use the pre-initialization serialized S.IPhysicsLock=0 as its default.
+Use the recovered fresh-default policy 2; do not use the pre-initialization serialized S.IPhysicsLock=0 as its default.
 Policy2 permits glove storage, trunk, and engine bay item locking, but excludes passenger-room item locking.
 Keep the policy in the source contract. Add no settings interface in this feature.
-All selected volumes use the non-basket scheduler: scan when elapsed time is strictly greater than1.5seconds.
+All selected volumes use the non-basket scheduler: scan when elapsed time is strictly greater than1.5 seconds.
 Source usable values above0.1 or missing required slot parts disable storage.
 Apply the recovered initialization sequence: two yielded frames, then three QuickFreeze passes with only the first prescanned.
 Restrict new locking integration to eligible flashlight items. Other cargo behavior remains outside this feature.

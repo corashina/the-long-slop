@@ -7,15 +7,15 @@
 **Architecture:** Checked source records feed portable item bindings and the existing lamp switch state.
 A focused storage module manages body and collider ownership. Existing imported nodes drive beam poses and shared rendering resources.
 
-**Tech Stack:** Rust1.99, Bevy0.19.1, Rapier0.36.0, serde, Python, WASM, WebGL2, and the existing Docker toolchain.
+**Tech Stack:** Rust 1.99, Bevy 0.19.1, Rapier 0.36.0, serde, Python, WASM, WebGL2, and the existing Docker toolchain.
 **Spec:** [Approved flashlight design](../specs/2026-10-13-portable-flashlights-design.md).
-**Status:** Spec approved on2026-10-13. This plan awaits review before implementation.
+**Status:** Spec approved on 2026-10-13. This plan awaits review before implementation.
 **Execution:** Preserve the user's selected subagent-driven method. Complete each task and review before starting the next.
-**Base:** codex/equipment at c7ddede. Plate implementation is complete at542be78.
+**Base:** codex/equipment at c7ddede. Plate implementation is complete at 542be78.
 
 ## Global Constraints
 
-- Use installed Steam build11140890 and Unity2021.3.18f1.
+- Use installed Steam build 11140890 and Unity 2021.3.18f1.
 - Keep installed files and the primary source library unchanged.
 - Keep source records, models, textures, cookies, and browser probes outside Git.
 - Instantiate the older source-enabled garage flashlight at its authored pose.
@@ -70,8 +70,8 @@ Update existing fixtures only when required by the new contract or symbol rename
 - [ ] **Step 1: Recover checked selected source links and geometry.**
 
 Use .cache/equipment-source/flashlights/{source,details,startup,mounts,settings}.json as researched identities, then re-read selected checked records.
-Older scene: GameObject12118, Transform32123, controller74834, pickup69340, body50144, save74314, mass73773, Light56881.
-Newer inactive scene: GameObject12119, Transform32124, controller74835, pickup69341, body50143, save74315, mass73774, Light56882.
+Older scene: GameObject 12118, Transform 32123, controller 74834, pickup 69340, body 50144, save 74314, mass 73773, Light 56881.
+Newer inactive scene: GameObject 12119, Transform 32124, controller 74835, pickup 69341, body 50143, save 74315, mass 73774, Light 56882.
 Both live under StartSpawnItems117. Terrain64898 enables117; preserve each child's original activation.
 Prefab roots are sharedassets1.assets:28750 older and28749 newer. Their controllers are148780 and148779.
 Recover source masks, cookies, renderer links, source materials, and pickup flags. Exclude PumpKin and player inventory prototypes from startup instances.
@@ -80,10 +80,10 @@ Recover source masks, cookies, renderer links, source materials, and pickup flag
 
 Require exactly one source-enabled older startup item and retain the newer source object inactive.
 Bind both source model records without forcing inactive actors visible, collidable, or pickable.
-Keep body1kg, drag0, angular drag0.05, gravity=true, and kinematic=false from their authored records.
+Keep body 1 kg, drag0, angular drag0.05, gravity=true, and kinematic=false from their authored records.
 Both controllers start OFF, with randomStart=false, null electronics, null SingleLight, and empty break triggers.
-Recover old beam range12/intensity0.8500000238418579/cones90 and8/warm RGB from the spec.
-Recover new beam range15/intensity1.5/cones80 and62.188602447509766/white RGB from the spec.
+Recover old beam range 12/intensity 0.8500000238418579/cones 90 and8/warm RGB from the spec.
+Recover new beam range 15/intensity 1.5/cones 80 and62.188602447509766/white RGB from the spec.
 Validate links, source startup evidence, atlas capacities, required cookies, and same-item pickup/save/controller identity.
 Scope managed expression checks to their named source class and method. Do not repeat assembly-wide semantic checks.
 
@@ -91,12 +91,12 @@ Scope managed expression checks to their named source class and method. Do not r
 
 Volumes are65838,65854,67560,79410,77806,78464,79301,69971 in level1, linked to parentTosave73405.
 Resolve their owners through source pointers. Do not hardcode runtime item numbers.
-Settings65886 and dropdown70023 establish fresh-default policy2 through useDefInt=true and defInt=2.
+Settings65886 and dropdown70023 establish fresh-default policy 2 through useDefInt=true and defInt=2.
 Policy2 enables glove storage, trunk, and engine bay item storage, and disables passenger-room item storage.
-Mount mask8388609; drop delay1second; non-basket update group1 uses strictly greater than1.5seconds between scans.
+Mount mask 8388609; drop delay1 second; non-basket update group1 uses strictly greater than1.5 seconds between scans.
 All eight selected volumes are non-basket. Preserve the source two-scan membership rule and source usable threshold0.1.
 Recover slot, usable, owner-pickup, active, onlyManual, and noPhysicsLock rules.
-The first six volumes have no slot or usable restrictions. Trunk uses source slot77859; engine bay uses77842.
+The first six volumes have no slot or usable restrictions. Trunk uses source slot 77859; engine bay uses77842.
 All eight susable arrays are empty. Resolve the occupied hood/trunk item and reuse MechanismState::value(item, false).
 Recover the initialization sequence: two yielded frames, followed by three QuickFreeze passes; only the first pass prescans.
 
@@ -147,9 +147,9 @@ Keep inactive instances unavailable to normal aim and pickup.
 - [ ] **Step 3: Implement source overlap, delay, restrictions, and locking.**
 
 Use existing Rapier oriented-shape queries with source bounds and mount mask.
-Advance source elapsed time only in unpaused active runtime updates. Use strict group1 scan interval>1.5seconds and elapsed drop time>=1second.
+Advance source elapsed time only in unpaused active runtime updates. Use strict group1 scan interval>1.5 seconds and elapsed drop time>=1 second.
 Track preceding and current overlap membership. Exclude held, locked, source-inactive, restricted, and same-root candidates.
-Apply policy2 and source slot/usable restrictions. Missing required parts or GetValue()>0.1 makes storage unavailable.
+Apply policy 2 and source slot/usable restrictions. Missing required parts or GetValue()>0.1 makes storage unavailable.
 Lock at the current pose. Disable the loose body, transfer shapes to the owner, and retain the current switch state.
 Unstore when source eligibility becomes false. Preserve pose and inherited point/angular velocity.
 Preflight stored-item acquisition against its retained dynamic body before changing ownership or carry.
@@ -159,7 +159,7 @@ A rejected acquisition retains membership, shape parent, body state, mass, and s
 
 Add portable items once to the existing current-body ownership mass accounting.
 Their source startup mass is outside the car. Do not subtract it from the car's initial base mass.
-Subtract only source-initial car-owned members when deriving that base. Add1kg when the active flashlight becomes car-owned; remove it on unlock.
+Subtract only source-initial car-owned members when deriving that base. Add1 kg when the active flashlight becomes car-owned; remove it on unlock.
 Apply mass changes before carry acquisition. Do not add full mass through both collider and body.
 Use existing update phases for initialization and storage scans. Keep rendering readiness separate from simulated elapsed time.
 Rebase retained bodies and world bounds once; keep local storage offsets unchanged.
@@ -186,7 +186,7 @@ Bind active and source-inactive source nodes without changing startup eligibilit
 Read the item's live imported hierarchy after physics, storage, and origin updates.
 Use source spot range, full/inner cone, color, cookie, mask, hard-shadow parameters, and on/off materials.
 Do not apply a second source-axis conversion or tie an independent light to the player camera.
-Reuse the fixed source atlas and capacity checks: MAX_LIGHTS32, SHADOW_SLOTS100, atlas4000, tile400.
+Reuse the fixed source atlas and capacity checks: MAX_LIGHTS 32, SHADOW_SLOTS 100, atlas 4000, tile 400.
 
 - [ ] **Step 2: Warm all required layouts and material choices during loading.**
 
