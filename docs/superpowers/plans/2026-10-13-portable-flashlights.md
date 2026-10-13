@@ -63,7 +63,7 @@ Update existing fixtures only when required by the new contract or symbol rename
 - Retain source collider geometry and transforms through existing NodeRecord and ColliderRecord. Do not duplicate world bounds in this contract.
 - Rename LightControllerKind::House to Switch and serialized kind house to switch. Rename private house-only switch helper names accordingly.
 - Both stationary switches and handheld controllers use Switch. Portable ownership remains in FlashlightInstanceReference, rather than another controller implementation.
-- recover_flashlights(source, roots, pointer_node, item_nodes, controllers, colliders, output) -> dict produces the manifest record and checked evidence.
+- recover_flashlights(source, roots, pointer_node, item_nodes, controllers, colliders, output, part_slots) -> dict produces the manifest record and checked evidence.
 - prepare_flashlight_roots(source, roots) -> None adds the two existing startup scene roots to the items asset before lighting recovery.
 - Reuse existing SourceId, ItemId, NodeId, LightControlId, ColliderId, PartSlotId, and resource receipts.
 
@@ -186,7 +186,7 @@ Bind active and source-inactive source nodes without changing startup eligibilit
 Read the item's live imported hierarchy after physics, storage, and origin updates.
 Use source spot range, full/inner cone, color, cookie, mask, hard-shadow parameters, and on/off materials.
 Do not apply a second source-axis conversion or tie an independent light to the player camera.
-Reuse the fixed source atlas and capacity checks: MAX_LIGHTS 32, SHADOW_SLOTS 100, atlas 4000, tile 400.
+Reuse the fixed source atlas and capacity checks: MAX_LIGHTS 34, SHADOW_SLOTS 100, atlas 4000, tile 400.
 
 - [ ] **Step 2: Warm all required layouts and material choices during loading.**
 

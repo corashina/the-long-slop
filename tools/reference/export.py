@@ -149,7 +149,7 @@ def verify_reference(output: Path, library) -> None:
         raise ValueError('Unsupported runtime provenance')
     validate_runtime_manifest(content)
     validate_runtime_paths(manifest)
-    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json','plate-evidence.json'}
+    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json','plate-evidence.json','flashlights-evidence.json'}
     for asset in manifest['assets']:
         for record in [asset, *asset['dependencies']]:
             name = record.get('file', record.get('path')).removeprefix('reference/')
@@ -195,6 +195,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     roots = {'home':[source.get('level1',21400)], 'lada':[transform(17687)],
         'items':[transform(go) for go in (13023,13027,18878,13019,15637)]}
     spare=source.get('level1',71403)
+    from .flashlights import prepare_flashlight_roots
+    prepare_flashlight_roots(source, roots)
     roots['items'].append(source.transform_for(source.resolve(spare,source.read(spare)['m_GameObject'])))
     prefab=source.get('sharedassets1.assets',82556)
     scene_paths=[n['path'] for n in source.hierarchy(roots['lada'][0])]

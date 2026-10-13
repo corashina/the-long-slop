@@ -196,9 +196,9 @@ fn house_lamps_materials_visibility_and_current_pose_lerp() {
     let house: Vec<_> = r
         .controllers
         .iter()
-        .filter(|c| c.kind == LightControllerKind::House)
+        .filter(|c| c.kind == LightControllerKind::Switch)
         .collect();
-    assert_eq!(house.iter().map(|c| c.states.len()).sum::<usize>(), 6);
+    assert_eq!(house.iter().map(|c| c.states.len()).sum::<usize>(), 8);
     for c in house {
         for lamp in &c.states {
             assert!(
@@ -391,7 +391,7 @@ fn exported_house_controls_use_native_confirmed_poses() {
         .lighting
         .controllers
         .iter()
-        .filter(|c| c.kind == LightControllerKind::House)
+        .filter(|c| c.kind == LightControllerKind::Switch)
     {
         let collider = source
             .physics

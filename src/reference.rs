@@ -9,6 +9,8 @@ use std::{
     fmt,
 };
 
+pub mod flashlights;
+pub use flashlights::*;
 pub mod plates;
 pub use plates::*;
 pub mod mirrors;
@@ -752,6 +754,7 @@ pub struct ReferenceManifest {
     pub lighting: LightingRecord,
     pub mirrors: MirrorRecord,
     pub plates: PlateRecord,
+    pub flashlights: FlashlightRecord,
     pub app_id: u32,
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
@@ -1276,7 +1279,7 @@ impl ReferenceManifest {
                         self.lighting
                             .controllers
                             .iter()
-                            .any(|g| g.source == *source && g.kind == LightControllerKind::House),
+                            .any(|g| g.source == *source && g.kind == LightControllerKind::Switch),
                         "switch lamp link",
                     )?,
                     TurnAction::InteriorLight => {
@@ -1806,6 +1809,7 @@ impl ReferenceManifest {
             )?;
         }
         require(a.driveway_height.is_finite(), "driveway height")?;
+        self.flashlights.validate(self)?;
         Ok(())
     }
 }

@@ -220,7 +220,7 @@ class GltfExporter(GltfBuilder):
             identity = key(record['reader'])
             local_active = condition_active.get(identity, bool(self.source.read(record['game_object'])['m_IsActive']))
             parent_active = effective_active[key(record['parent'])] if record['parent'] else True
-            record['active'] = parent_active and (local_active or record['parent'] is None)
+            record['active'] = parent_active and (local_active or (record['parent'] is None and identity not in getattr(self.source,'flashlight_inactive_nodes',set())))
             effective_active[identity] = record['active']
         inactive_nodes = recover_startup_inactive_nodes(self.source, records)
         for record in records:
@@ -277,7 +277,7 @@ class GltfExporter(GltfBuilder):
                 node.extras['receive_shadows'] = bool(renderer_data['m_ReceiveShadows'])
                 owner = mesh_filter or renderer
                 mesh_reader = getattr(self.source, 'condition_meshes', {}).get(key(renderer)) or self.source.resolve(owner, self.source.read(owner)['m_Mesh'])
-                if mesh_reader and record['active'] and render_enabled:
+                if mesh_reader and (record['active'] or identity in getattr(self.source,'flashlight_inactive_nodes',set())) and render_enabled:
                     materials=[self.source.resolve(renderer,p) for p in renderer_data['m_Materials']]
                     selected=getattr(self.source,'lighting_startup_materials',{}).get(key(renderer)) or getattr(self.source,'condition_materials',{}).get(key(renderer))
                     if selected:materials=[selected for _ in materials]

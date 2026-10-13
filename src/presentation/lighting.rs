@@ -23,7 +23,7 @@ use bevy::render::{
 use bevy::shader::Shader;
 use std::sync::{Arc, Mutex};
 
-pub const MAX_LIGHTS: usize = 32;
+pub const MAX_LIGHTS: usize = 34;
 pub const SHADOW_SLOTS: usize = 100;
 pub const ATLAS_SIZE: u32 = 4000;
 pub const TILE_SIZE: u32 = 400;

@@ -85,9 +85,14 @@ impl StartingArea {
             } else {
                 RigidBodyBuilder::fixed()
             };
+            let inactive_flashlight = reference
+                .flashlights
+                .instances
+                .iter()
+                .any(|instance| instance.node == body.node && !instance.startup_active);
             let handle = physics
                 .rapier_mut()
-                .insert_body(builder.pose(to_rapier(pose)));
+                .insert_body(builder.enabled(!inactive_flashlight).pose(to_rapier(pose)));
             bodies.insert(body.id, handle);
         }
         for record in &reference.colliders {

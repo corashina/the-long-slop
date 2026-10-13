@@ -55,8 +55,8 @@ fn production_lighting_has_checked_source_links() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let manifest = ReferenceManifest::from_json(&bytes).unwrap();
     assert_eq!(manifest.expected_instances(), 3);
-    assert_eq!(manifest.lighting.controllers.len(), 10);
-    assert_eq!(manifest.lighting.lights.len(), 17);
+    assert_eq!(manifest.lighting.controllers.len(), 12);
+    assert_eq!(manifest.lighting.lights.len(), 19);
     assert_eq!(manifest.lighting.cycle.startup_offset_seconds, 240.);
 }
 
@@ -370,8 +370,8 @@ fn production_lighting_records_match_selected_scene() {
     ] {
         assert_eq!(a["cycle"][field], b["cycle"][field], "cycle {field}");
     }
-    assert_eq!(manifest.lighting.controllers.len(), 10);
-    assert_eq!(manifest.lighting.lights.len(), 17);
+    assert_eq!(manifest.lighting.controllers.len(), 12);
+    assert_eq!(manifest.lighting.lights.len(), 19);
     for (light, checked) in a["lights"]
         .as_array()
         .unwrap()
@@ -388,7 +388,6 @@ fn production_lighting_records_match_selected_scene() {
             "inner_cone_degrees",
             "shadows",
             "culling_mask",
-            "cookie",
         ] {
             assert_eq!(
                 light[field], checked[field],
@@ -396,6 +395,17 @@ fn production_lighting_records_match_selected_scene() {
                 light["id"]
             );
         }
+        let cookie_source = |record: &serde_json::Value, lighting: &serde_json::Value| {
+            record["cookie"].as_u64().and_then(|id| {
+                lighting["textures"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|texture| texture["id"].as_u64() == Some(id))
+                    .map(|texture| texture["source"].clone())
+            })
+        };
+        assert_eq!(cookie_source(light, a), cookie_source(checked, b));
     }
     for (control, checked) in a["controllers"]
         .as_array()

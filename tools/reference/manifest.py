@@ -73,7 +73,7 @@ def build_manifest(source, roots, reports, hashes, library, output):
     car_body=body(car_root,True,total_mass(car_root),source.resolve(car_reader,car['RB']))
     for root in roots['items']:
         node=by_source[key(root)];rigidbody=components[node].get('Rigidbody',[])
-        body(node,bool(rigidbody),total_mass(node),rigidbody[0] if rigidbody else root)
+        body(node,bool(rigidbody),source.read(components[node]['massScript'][0])['mass'] if key(root) in getattr(source,'flashlight_root_keys',set()) else total_mass(node),rigidbody[0] if rigidbody else root)
     mechanisms=recover_mechanisms(source,nodes,components,pointer_node,node_of,main)
     driven_nodes={node for mechanism in mechanisms for node in mechanism['driven_nodes']}
     for node in sorted(driven_nodes):body(node,False,0.,node_readers[node])
@@ -89,7 +89,7 @@ def build_manifest(source, roots, reports, hashes, library, output):
     item_classes={'tosaveitemscript','massScript','tankscript','enginescript','coolantTankscript','seatscript','tankcapscript','gumiscript','wheelscript','pickupable','usablescript','flashlightscript','pushablescript'}
     mechanism_nodes=driven_nodes
     for node,group in components.items():
-        if not nodes[node-1]['active'] or not (item_classes.intersection(group) or node in mechanism_nodes):continue
+        if (not nodes[node-1]['active'] and key(node_readers[node]) not in getattr(source,'flashlight_root_keys',set())) or not (item_classes.intersection(group) or node in mechanism_nodes):continue
         name=nodes[node-1]['name'];kind='decoration'
         if key(node_readers[node])==('level1',21482):name='Garage door right'
         elif key(node_readers[node])==('level1',21464):name='Garage door left'
@@ -139,12 +139,12 @@ def build_manifest(source, roots, reports, hashes, library, output):
             identities.append(key(collider));detachable_colliders.add(key(collider))
         if 'wheelscript' in group or 'gumiscript' in group:wheel_parts_source.append((node,part,part_data,identities))
     for node,group in components.items():
-        if not nodes[node-1]['active'] and not any(key(reader) in detachable_colliders for readers in group.values() for reader in readers):continue
+        if not nodes[node-1]['active'] and key(node_readers[node]) not in getattr(source,'flashlight_inactive_nodes',set()) and not any(key(reader) in detachable_colliders for readers in group.values() for reader in readers):continue
         layer=source.read(objects[node]['game_object'])['m_Layer']
         for class_name in ('BoxCollider','SphereCollider','CapsuleCollider','MeshCollider'):
             for reader in group.get(class_name,[]):
                 value=source.read(reader)
-                if not value['m_Enabled'] and key(reader) not in detachable_colliders:continue
+                if not value['m_Enabled'] and key(reader) not in detachable_colliders and key(reader) not in getattr(source,'storage_collider_keys',set()):continue
                 material=source.resolve(reader,value['m_Material']);friction,restitution=0.6,0.
                 if material:
                     properties=source.read(material);friction=properties['m_DynamicFriction'];restitution=properties['m_Bounciness']
@@ -380,6 +380,8 @@ def build_manifest(source, roots, reports, hashes, library, output):
         missing=[old_colliders[i] for i in controller['aim_colliders'] if old_colliders[i] not in collider_ids]
         if missing and controller['kind']!='road':raise ValueError(f"{controller['source']} required aim collider outside export: {missing}")
         controller['aim_colliders']=[collider_ids[old_colliders[i]] for i in controller['aim_colliders'] if old_colliders[i] in collider_ids]
+    from .flashlights import recover_flashlights
+    result['flashlights']=recover_flashlights(source,roots,pointer_node,item_nodes,result['lighting']['controllers'],colliders,output,part_slots)
     from .export import lighting_resources
     assets[0]['dependencies'].extend({'file':item['path'],'sha256':item['sha256']} for item in lighting_resources(result))
     return result

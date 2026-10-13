@@ -55,7 +55,7 @@ class LightingTests(unittest.TestCase):
 
     def test_selected_scene_lamps_have_checked_links(self):
         lighting=self.recover();controls=lighting['controllers']
-        house=[c for c in controls if c['kind']=='house']
+        house=[c for c in controls if c['kind']=='switch']
         self.assertEqual(len(house),5)
         self.assertEqual(sum(len(c['states']) for c in house),6)
         self.assertEqual(sum(c['kind']=='headlight' for c in controls),2)

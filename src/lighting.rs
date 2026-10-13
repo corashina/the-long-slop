@@ -721,8 +721,8 @@ impl LightingState {
             .unwrap()
             .electronics_output;
         for index in 0..reference.controllers.len() {
-            if reference.controllers[index].kind == crate::reference::LightControllerKind::House {
-                self.refresh_house(reference, index);
+            if reference.controllers[index].kind == crate::reference::LightControllerKind::Switch {
+                self.refresh_switch(reference, index);
             }
         }
         self.update_vehicle(
@@ -743,12 +743,12 @@ impl LightingState {
         };
         let c = &reference.controllers[index];
         match c.kind {
-            crate::reference::LightControllerKind::House => {
+            crate::reference::LightControllerKind::Switch => {
                 self.controllers[index].on = !self.controllers[index].on;
                 if self.pose_progress[index].is_none() {
                     self.pose_progress[index] = Some(SwitchMotion::Initial);
                 }
-                self.refresh_house(reference, index);
+                self.refresh_switch(reference, index);
             }
             crate::reference::LightControllerKind::Cabin => {
                 let input = c.cabin_input.as_ref().unwrap();
@@ -758,7 +758,7 @@ impl LightingState {
             _ => {}
         }
     }
-    fn refresh_house(&mut self, reference: &crate::reference::LightingRecord, index: usize) {
+    fn refresh_switch(&mut self, reference: &crate::reference::LightingRecord, index: usize) {
         let c = &reference.controllers[index];
         let on = self.controllers[index].on
             && (c.electronics_source.is_none() || c.electronics_output > c.electronics_threshold);
@@ -873,7 +873,7 @@ impl LightingState {
             return;
         }
         for (index, control) in reference.controllers.iter().enumerate() {
-            if control.kind == crate::reference::LightControllerKind::House {
+            if control.kind == crate::reference::LightControllerKind::Switch {
                 if let Some(motion) = self.pose_progress[index] {
                     let progress = match motion {
                         SwitchMotion::Initial => 0.,

@@ -1041,6 +1041,18 @@
         }
       ],
       "material_count": 0
+    },
+    {
+      "id": 5,
+      "material_count": 4,
+      "usage": "unique_scene",
+      "path": "reference/fixture_flashlights.gltf",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "root": {
+        "file": "fixture",
+        "path_id": 100
+      },
+      "dependencies": []
     }
   ],
   "nodes": [
@@ -5321,6 +5333,781 @@
           1.0
         ]
       }
+    },
+    {
+      "id": 139,
+      "source": {
+        "file": "level1",
+        "path_id": 32123
+      },
+      "name": "Synthetic fixture regizseblampa",
+      "hierarchy_path": "Synthetic fixture/regizseblampa",
+      "asset": 5,
+      "gltf_node": 81,
+      "parent": null,
+      "active": true,
+      "transform": {
+        "translation": [
+          40.72100217230949,
+          2.05649995803833,
+          -68.75000341341246
+        ],
+        "rotation": [
+          0.6899614474166782,
+          0.1547684221916228,
+          -0.1547684221916228,
+          0.6899614474166782
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 140,
+      "source": {
+        "file": "level1",
+        "path_id": 32122
+      },
+      "name": "Spot Light",
+      "hierarchy_path": "Synthetic fixture/regizseblampa/Spot Light",
+      "asset": 5,
+      "gltf_node": 82,
+      "parent": 139,
+      "active": true,
+      "transform": {
+        "translation": [
+          0.0,
+          -0.006099999882280827,
+          -0.0004299997817724943
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.7071068286895752,
+          0.7071068286895752
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 141,
+      "source": {
+        "file": "level1",
+        "path_id": 29289
+      },
+      "name": "RHPos",
+      "hierarchy_path": "Synthetic fixture/regizseblampa/RHPos",
+      "asset": 5,
+      "gltf_node": 83,
+      "parent": 139,
+      "active": true,
+      "transform": {
+        "translation": [
+          0.04360000044107437,
+          -0.0925000011920929,
+          -0.007600000128149986
+        ],
+        "rotation": [
+          -0.50035160779953,
+          0.4169487953186035,
+          -0.4770412743091583,
+          0.5901132225990295
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 142,
+      "source": {
+        "file": "level1",
+        "path_id": 33720
+      },
+      "name": "regizseblampa",
+      "hierarchy_path": "Synthetic fixture/regizseblampa/regizseblampa",
+      "asset": 5,
+      "gltf_node": 84,
+      "parent": 139,
+      "active": true,
+      "transform": {
+        "translation": [
+          0.0,
+          -0.06790000200271606,
+          -0.0
+        ],
+        "rotation": [
+          -0.0,
+          -0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 143,
+      "source": {
+        "file": "level1",
+        "path_id": 35179
+      },
+      "name": "Black",
+      "hierarchy_path": "Synthetic fixture/regizseblampa/regizseblampa/Black",
+      "asset": 5,
+      "gltf_node": 85,
+      "parent": 142,
+      "active": true,
+      "transform": {
+        "translation": [
+          -0.0,
+          0.0,
+          -0.0
+        ],
+        "rotation": [
+          -0.0,
+          0.0,
+          -0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 144,
+      "source": {
+        "file": "level1",
+        "path_id": 34876
+      },
+      "name": "Body",
+      "hierarchy_path": "Synthetic fixture/regizseblampa/regizseblampa/Body",
+      "asset": 5,
+      "gltf_node": 86,
+      "parent": 142,
+      "active": true,
+      "transform": {
+        "translation": [
+          -0.0,
+          0.0,
+          -0.0
+        ],
+        "rotation": [
+          -0.0,
+          0.0,
+          -0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 145,
+      "source": {
+        "file": "level1",
+        "path_id": 22849
+      },
+      "name": "Lamp",
+      "hierarchy_path": "Synthetic fixture/regizseblampa/regizseblampa/Lamp",
+      "asset": 5,
+      "gltf_node": 87,
+      "parent": 142,
+      "active": true,
+      "transform": {
+        "translation": [
+          -0.0,
+          0.0,
+          -0.0
+        ],
+        "rotation": [
+          -0.0,
+          0.0,
+          -0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 146,
+      "source": {
+        "file": "level1",
+        "path_id": 37827
+      },
+      "name": "Metal",
+      "hierarchy_path": "Synthetic fixture/regizseblampa/regizseblampa/Metal",
+      "asset": 5,
+      "gltf_node": 88,
+      "parent": 142,
+      "active": true,
+      "transform": {
+        "translation": [
+          -0.0,
+          0.0,
+          -0.0
+        ],
+        "rotation": [
+          -0.0,
+          0.0,
+          -0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 147,
+      "source": {
+        "file": "level1",
+        "path_id": 37624
+      },
+      "name": "Collider",
+      "hierarchy_path": "Synthetic fixture/regizseblampa/Collider",
+      "asset": 5,
+      "gltf_node": 89,
+      "parent": 139,
+      "active": true,
+      "transform": {
+        "translation": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "rotation": [
+          -0.0,
+          -0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 148,
+      "source": {
+        "file": "level1",
+        "path_id": 32124
+      },
+      "name": "Synthetic fixture ujlamp (1)",
+      "hierarchy_path": "Synthetic fixture/ujlamp (1)",
+      "asset": 5,
+      "gltf_node": 90,
+      "parent": null,
+      "active": false,
+      "transform": {
+        "translation": [
+          40.70600185370872,
+          1.5449999570846558,
+          -68.55100338370593
+        ],
+        "rotation": [
+          0.029584870676583237,
+          0.7065133799466776,
+          -0.02958701160460096,
+          0.7064619186463335
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 149,
+      "source": {
+        "file": "level1",
+        "path_id": 35249
+      },
+      "name": "ujlamp (1)",
+      "hierarchy_path": "Synthetic fixture/ujlamp (1)/ujlamp (1)",
+      "asset": 5,
+      "gltf_node": 91,
+      "parent": 148,
+      "active": false,
+      "transform": {
+        "translation": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "rotation": [
+          -0.0,
+          -0.7071068286895752,
+          0.0,
+          0.7071068286895752
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 150,
+      "source": {
+        "file": "level1",
+        "path_id": 25369
+      },
+      "name": "Body",
+      "hierarchy_path": "Synthetic fixture/ujlamp (1)/ujlamp (1)/Body",
+      "asset": 5,
+      "gltf_node": 92,
+      "parent": 149,
+      "active": false,
+      "transform": {
+        "translation": [
+          -0.0,
+          0.0,
+          -0.0
+        ],
+        "rotation": [
+          8.146033536604591e-08,
+          -0.0,
+          -0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 151,
+      "source": {
+        "file": "level1",
+        "path_id": 40090
+      },
+      "name": "Light",
+      "hierarchy_path": "Synthetic fixture/ujlamp (1)/ujlamp (1)/Light",
+      "asset": 5,
+      "gltf_node": 93,
+      "parent": 149,
+      "active": false,
+      "transform": {
+        "translation": [
+          -0.0,
+          0.0,
+          -0.0
+        ],
+        "rotation": [
+          8.146033536604591e-08,
+          -0.0,
+          -0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 152,
+      "source": {
+        "file": "level1",
+        "path_id": 38229
+      },
+      "name": "Collider",
+      "hierarchy_path": "Synthetic fixture/ujlamp (1)/Collider",
+      "asset": 5,
+      "gltf_node": 94,
+      "parent": 148,
+      "active": false,
+      "transform": {
+        "translation": [
+          0.0,
+          -0.08089995384216309,
+          -0.016849994659423828
+        ],
+        "rotation": [
+          0.7071068286895752,
+          -0.7071068286895752,
+          -0.0,
+          0.0
+        ],
+        "scale": [
+          50.000030517578125,
+          50.000022888183594,
+          50.00004196166992
+        ]
+      }
+    },
+    {
+      "id": 153,
+      "source": {
+        "file": "level1",
+        "path_id": 36393
+      },
+      "name": "Collider",
+      "hierarchy_path": "Synthetic fixture/ujlamp (1)/Collider",
+      "asset": 5,
+      "gltf_node": 95,
+      "parent": 148,
+      "active": false,
+      "transform": {
+        "translation": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "rotation": [
+          0.5,
+          -0.5,
+          0.5,
+          0.5
+        ],
+        "scale": [
+          50.0,
+          50.0,
+          50.0
+        ]
+      }
+    },
+    {
+      "id": 154,
+      "source": {
+        "file": "level1",
+        "path_id": 32121
+      },
+      "name": "Spot Light",
+      "hierarchy_path": "Synthetic fixture/ujlamp (1)/Spot Light",
+      "asset": 5,
+      "gltf_node": 96,
+      "parent": 148,
+      "active": false,
+      "transform": {
+        "translation": [
+          0.0,
+          0.0,
+          -0.042999979108572006
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.7071068286895752,
+          0.7071068286895752
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 155,
+      "source": {
+        "file": "level1",
+        "path_id": 29288
+      },
+      "name": "RHPos",
+      "hierarchy_path": "Synthetic fixture/ujlamp (1)/RHPos",
+      "asset": 5,
+      "gltf_node": 97,
+      "parent": 148,
+      "active": false,
+      "transform": {
+        "translation": [
+          0.0,
+          0.0729999989271164,
+          0.005900000222027302
+        ],
+        "rotation": [
+          -0.0,
+          -0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": 156,
+      "source": {
+        "file": "fixture",
+        "path_id": 1000
+      },
+      "name": "Synthetic fixture storage 1",
+      "hierarchy_path": "Synthetic fixture storage 1",
+      "asset": 2,
+      "gltf_node": 1000,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 157,
+      "source": {
+        "file": "fixture",
+        "path_id": 1001
+      },
+      "name": "Synthetic fixture storage 2",
+      "hierarchy_path": "Synthetic fixture storage 2",
+      "asset": 2,
+      "gltf_node": 1001,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 158,
+      "source": {
+        "file": "fixture",
+        "path_id": 1002
+      },
+      "name": "Synthetic fixture storage 3",
+      "hierarchy_path": "Synthetic fixture storage 3",
+      "asset": 2,
+      "gltf_node": 1002,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 159,
+      "source": {
+        "file": "fixture",
+        "path_id": 1003
+      },
+      "name": "Synthetic fixture storage 4",
+      "hierarchy_path": "Synthetic fixture storage 4",
+      "asset": 2,
+      "gltf_node": 1003,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 160,
+      "source": {
+        "file": "fixture",
+        "path_id": 1004
+      },
+      "name": "Synthetic fixture storage 5",
+      "hierarchy_path": "Synthetic fixture storage 5",
+      "asset": 2,
+      "gltf_node": 1004,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 161,
+      "source": {
+        "file": "fixture",
+        "path_id": 1005
+      },
+      "name": "Synthetic fixture storage 6",
+      "hierarchy_path": "Synthetic fixture storage 6",
+      "asset": 2,
+      "gltf_node": 1005,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 162,
+      "source": {
+        "file": "fixture",
+        "path_id": 1006
+      },
+      "name": "Synthetic fixture storage 7",
+      "hierarchy_path": "Synthetic fixture storage 7",
+      "asset": 2,
+      "gltf_node": 1006,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "id": 163,
+      "source": {
+        "file": "fixture",
+        "path_id": 1007
+      },
+      "name": "Synthetic fixture storage 8",
+      "hierarchy_path": "Synthetic fixture storage 8",
+      "asset": 2,
+      "gltf_node": 1007,
+      "parent": 2,
+      "active": true,
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      }
     }
   ],
   "bodies": [
@@ -5385,6 +6172,68 @@
       "parent_body": null,
       "linear_damping": 0.004999999888241291,
       "angular_damping": 0.05000000074505806
+    },
+    {
+      "id": 3,
+      "source": {
+        "file": "level1",
+        "path_id": 50144
+      },
+      "node": 139,
+      "dynamic": true,
+      "mass_kg": 1.0,
+      "pose": {
+        "translation": [
+          40.72100217230949,
+          2.05649995803833,
+          -68.75000341341246
+        ],
+        "rotation": [
+          0.6899614474166782,
+          0.1547684221916228,
+          -0.1547684221916228,
+          0.6899614474166782
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "linear_damping": 0.0,
+      "angular_damping": 0.05000000074505806,
+      "parent_body": null
+    },
+    {
+      "id": 4,
+      "source": {
+        "file": "level1",
+        "path_id": 50143
+      },
+      "node": 148,
+      "dynamic": true,
+      "mass_kg": 1.0,
+      "pose": {
+        "translation": [
+          40.70600185370872,
+          1.5449999570846558,
+          -68.55100338370593
+        ],
+        "rotation": [
+          0.029584870676583237,
+          0.7065133799466776,
+          -0.02958701160460096,
+          0.7064619186463335
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "linear_damping": 0.0,
+      "angular_damping": 0.05000000074505806,
+      "parent_body": null
     }
   ],
   "colliders": [
@@ -6113,6 +6962,506 @@
         "path_id": 900002
       },
       "node": 136,
+      "body": 2,
+      "sensor": false,
+      "enabled": false,
+      "membership": 1,
+      "filter": 4294967295,
+      "friction": 0.6,
+      "restitution": 0,
+      "geometry": {
+        "kind": "convex",
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": 21,
+      "source": {
+        "file": "level1",
+        "path_id": 53743
+      },
+      "node": 147,
+      "body": 3,
+      "sensor": false,
+      "enabled": true,
+      "membership": 1,
+      "filter": 4039039487,
+      "friction": 0.6,
+      "restitution": 0.0,
+      "geometry": {
+        "kind": "convex",
+        "points": [
+          [
+            -0.0572293156737587,
+            -0.152858405419266,
+            0.013754556412350159
+          ],
+          [
+            -0.05722931593333322,
+            -0.15285841039705175,
+            -0.02451786996278785
+          ],
+          [
+            -0.05722929972128088,
+            0.046117118706356534,
+            0.013754532096708998
+          ],
+          [
+            -0.057229299980855394,
+            0.0461171137285708,
+            -0.02451789427842902
+          ],
+          [
+            0.05722929135006019,
+            -0.1528584215740638,
+            0.013754562614376001
+          ],
+          [
+            0.0572292910904921,
+            -0.15285842655184648,
+            -0.02451786376076201
+          ],
+          [
+            0.05722930730255052,
+            0.04611710255154898,
+            0.013754538298734827
+          ],
+          [
+            0.05722930704297599,
+            0.04611709757376325,
+            -0.024517888076403184
+          ]
+        ]
+      }
+    },
+    {
+      "id": 22,
+      "source": {
+        "file": "level1",
+        "path_id": 53761
+      },
+      "node": 152,
+      "body": 4,
+      "sensor": false,
+      "enabled": false,
+      "membership": 1,
+      "filter": 4039039487,
+      "friction": 0.6,
+      "restitution": 0.0,
+      "geometry": {
+        "kind": "convex",
+        "points": [
+          [
+            0.07500008521053353,
+            -0.060899930343907845,
+            -0.06435006605558331
+          ],
+          [
+            0.07500007145859576,
+            -0.06089992776471599,
+            0.050650108556941326
+          ],
+          [
+            -0.07500006322381807,
+            -0.060899948812604694,
+            -0.0643500841264917
+          ],
+          [
+            -0.07500007697577003,
+            -0.06089994623341364,
+            0.05065009048602588
+          ],
+          [
+            0.07500008210241316,
+            -0.08589995020535801,
+            -0.06435006658631977
+          ],
+          [
+            0.07500006835046119,
+            -0.08589994762616676,
+            0.05065010802619776
+          ],
+          [
+            -0.07500006633195264,
+            -0.0858999686740551,
+            -0.06435008465722813
+          ],
+          [
+            -0.0750000800838904,
+            -0.08589996609486382,
+            0.0506500899552894
+          ]
+        ]
+      }
+    },
+    {
+      "id": 23,
+      "source": {
+        "file": "level1",
+        "path_id": 51866
+      },
+      "node": 153,
+      "body": 4,
+      "sensor": false,
+      "enabled": false,
+      "membership": 1,
+      "filter": 4039039487,
+      "friction": 0.6,
+      "restitution": 0.0,
+      "geometry": {
+        "kind": "convex",
+        "points": [
+          [
+            0.05000002473065844,
+            -0.052499999984032514,
+            -0.02000000380543892
+          ],
+          [
+            0.05000002347642229,
+            0.07249999750325495,
+            -0.02000000115172894
+          ],
+          [
+            -0.05000001889381439,
+            -0.052499998860605884,
+            -0.020000015852704327
+          ],
+          [
+            -0.050000020148050536,
+            0.07249999862668158,
+            -0.020000013198994353
+          ],
+          [
+            0.05000002174111222,
+            -0.05249999942333947,
+            0.005000007087699508
+          ],
+          [
+            0.05000002048687606,
+            0.07249999806394798,
+            0.005000009741409482
+          ],
+          [
+            -0.05000002188336061,
+            -0.05249999829991225,
+            0.004999995040441178
+          ],
+          [
+            -0.050000023137596765,
+            0.07249999918737461,
+            0.004999997694144068
+          ]
+        ]
+      }
+    },
+    {
+      "id": 24,
+      "source": {
+        "file": "fixture",
+        "path_id": 2000
+      },
+      "node": 156,
+      "body": 2,
+      "sensor": false,
+      "enabled": false,
+      "membership": 1,
+      "filter": 4294967295,
+      "friction": 0.6,
+      "restitution": 0,
+      "geometry": {
+        "kind": "convex",
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": 25,
+      "source": {
+        "file": "fixture",
+        "path_id": 2001
+      },
+      "node": 157,
+      "body": 2,
+      "sensor": false,
+      "enabled": false,
+      "membership": 1,
+      "filter": 4294967295,
+      "friction": 0.6,
+      "restitution": 0,
+      "geometry": {
+        "kind": "convex",
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": 26,
+      "source": {
+        "file": "fixture",
+        "path_id": 2002
+      },
+      "node": 158,
+      "body": 2,
+      "sensor": false,
+      "enabled": false,
+      "membership": 1,
+      "filter": 4294967295,
+      "friction": 0.6,
+      "restitution": 0,
+      "geometry": {
+        "kind": "convex",
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": 27,
+      "source": {
+        "file": "fixture",
+        "path_id": 2003
+      },
+      "node": 159,
+      "body": 2,
+      "sensor": false,
+      "enabled": false,
+      "membership": 1,
+      "filter": 4294967295,
+      "friction": 0.6,
+      "restitution": 0,
+      "geometry": {
+        "kind": "convex",
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": 28,
+      "source": {
+        "file": "fixture",
+        "path_id": 2004
+      },
+      "node": 160,
+      "body": 2,
+      "sensor": false,
+      "enabled": false,
+      "membership": 1,
+      "filter": 4294967295,
+      "friction": 0.6,
+      "restitution": 0,
+      "geometry": {
+        "kind": "convex",
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": 29,
+      "source": {
+        "file": "fixture",
+        "path_id": 2005
+      },
+      "node": 161,
+      "body": 2,
+      "sensor": false,
+      "enabled": false,
+      "membership": 1,
+      "filter": 4294967295,
+      "friction": 0.6,
+      "restitution": 0,
+      "geometry": {
+        "kind": "convex",
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": 30,
+      "source": {
+        "file": "fixture",
+        "path_id": 2006
+      },
+      "node": 162,
+      "body": 2,
+      "sensor": false,
+      "enabled": false,
+      "membership": 1,
+      "filter": 4294967295,
+      "friction": 0.6,
+      "restitution": 0,
+      "geometry": {
+        "kind": "convex",
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": 31,
+      "source": {
+        "file": "fixture",
+        "path_id": 2007
+      },
+      "node": 163,
       "body": 2,
       "sensor": false,
       "enabled": false,
@@ -7315,6 +8664,84 @@
       "mass_kg": 1.0,
       "attached_to": 1,
       "pickup": null
+    },
+    {
+      "id": 23,
+      "source": {
+        "file": "level1",
+        "path_id": 32123
+      },
+      "node": 139,
+      "body": 3,
+      "name": "Synthetic fixture regizseblampa",
+      "kind": "decoration",
+      "condition": 0.75,
+      "mass_kg": 1.0,
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 69340
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          -0.0,
+          -0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
+    },
+    {
+      "id": 24,
+      "source": {
+        "file": "level1",
+        "path_id": 32124
+      },
+      "node": 148,
+      "body": 4,
+      "name": "Synthetic fixture ujlamp (1)",
+      "kind": "decoration",
+      "condition": 1.0,
+      "mass_kg": 1.0,
+      "attached_to": null,
+      "pickup": {
+        "source": {
+          "file": "level1",
+          "path_id": 69341
+        },
+        "cant_pickup": false,
+        "cant_pickup_while_mounted": false,
+        "cant_pickup_while_seated": false,
+        "no_rotation": false,
+        "move_with_rotation": false,
+        "use_recenter_position": false,
+        "recenter_position": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "use_recenter_rotation": false,
+        "recenter_rotation": [
+          -0.0,
+          -0.0,
+          0.0,
+          1.0
+        ],
+        "recenter_distance": -0.5
+      }
     }
   ],
   "openings": [
@@ -11828,6 +13255,27 @@
       "pickup_owner": null,
       "removal_owner": null,
       "push_owner": null
+    },
+    {
+      "collider": 21,
+      "use_owner": 23,
+      "pickup_owner": 23,
+      "removal_owner": null,
+      "push_owner": null
+    },
+    {
+      "collider": 22,
+      "use_owner": 24,
+      "pickup_owner": 24,
+      "removal_owner": null,
+      "push_owner": null
+    },
+    {
+      "collider": 23,
+      "use_owner": 24,
+      "pickup_owner": 24,
+      "removal_owner": null,
+      "push_owner": null
     }
   ],
   "lighting": {
@@ -12776,6 +14224,108 @@
       },
       {
         "id": 17,
+        "source": {
+          "file": "level1",
+          "path_id": 56881
+        },
+        "node": 140,
+        "pose": {
+          "translation": [
+            0.0,
+            -0.006099999882280827,
+            -0.0004299997817724943
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.7071068286895752,
+            0.7071068286895752
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "kind": "spot",
+        "color": [
+          1.0,
+          0.8154796361923218,
+          0.6009999513626099,
+          1.0
+        ],
+        "serialized_intensity": 0.8500000238418579,
+        "startup_intensity": 0.8500000238418579,
+        "range_meters": 12.0,
+        "full_cone_degrees": 90.0,
+        "inner_cone_degrees": 8.0,
+        "enabled": false,
+        "culling_mask": 4294967295,
+        "shadows": {
+          "kind": 1,
+          "strength": 1.0,
+          "bias": 0.05000000074505806,
+          "normal_bias": 0.4000000059604645,
+          "near_plane": 0.20000000298023224,
+          "resolution": -1,
+          "custom_resolution": -1
+        },
+        "cookie": 12,
+        "cookie_size": 10.0
+      },
+      {
+        "id": 18,
+        "source": {
+          "file": "level1",
+          "path_id": 56882
+        },
+        "node": 154,
+        "pose": {
+          "translation": [
+            0.0,
+            0.0,
+            -0.042999979108572006
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.7071068286895752,
+            0.7071068286895752
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "kind": "spot",
+        "color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "serialized_intensity": 1.5,
+        "startup_intensity": 1.5,
+        "range_meters": 15.0,
+        "full_cone_degrees": 80.0,
+        "inner_cone_degrees": 62.188602447509766,
+        "enabled": false,
+        "culling_mask": 4294967295,
+        "shadows": {
+          "kind": 1,
+          "strength": 1.0,
+          "bias": 0.05000000074505806,
+          "normal_bias": 0.4000000059604645,
+          "near_plane": 0.20000000298023224,
+          "resolution": -1,
+          "custom_resolution": -1
+        },
+        "cookie": 13,
+        "cookie_size": 10.0
+      },
+      {
+        "id": 19,
         "source": {
           "file": "sharedassets1.assets",
           "path_id": 123899
@@ -14823,7 +16373,7 @@
           "file": "level1",
           "path_id": 76065
         },
-        "kind": "house",
+        "kind": "switch",
         "node": 27,
         "aim_colliders": [
           10
@@ -14930,7 +16480,7 @@
           "file": "level1",
           "path_id": 67484
         },
-        "kind": "house",
+        "kind": "switch",
         "node": 35,
         "aim_colliders": [
           11
@@ -15037,7 +16587,7 @@
           "file": "level1",
           "path_id": 68886
         },
-        "kind": "house",
+        "kind": "switch",
         "node": 42,
         "aim_colliders": [
           12
@@ -15178,7 +16728,7 @@
           "file": "level1",
           "path_id": 75508
         },
-        "kind": "house",
+        "kind": "switch",
         "node": 53,
         "aim_colliders": [
           13
@@ -15285,7 +16835,7 @@
           "file": "level1",
           "path_id": 72019
         },
-        "kind": "house",
+        "kind": "switch",
         "node": 61,
         "aim_colliders": [
           14
@@ -15930,6 +17480,129 @@
       {
         "id": 10,
         "source": {
+          "file": "level1",
+          "path_id": 74834
+        },
+        "kind": "switch",
+        "node": 139,
+        "aim_colliders": [
+          21
+        ],
+        "animated_poses": [],
+        "startup_on": false,
+        "current_state": 0,
+        "requested_state": 0,
+        "energy": 1.0,
+        "energy_move": 0.0,
+        "enabled": true,
+        "electronics_source": null,
+        "electronics_output": 1.0,
+        "electronics_threshold": 0.2,
+        "reverse_switch": false,
+        "states": [
+          {
+            "signal": "switch",
+            "lights": [
+              17
+            ],
+            "intensity": 0.8500000238418579,
+            "renderers": [
+              145
+            ],
+            "on_material": {
+              "asset": 5,
+              "gltf_material": 1,
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 78
+              },
+              "condition_key": null
+            },
+            "off_material": {
+              "asset": 5,
+              "gltf_material": 0,
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 77
+              },
+              "condition_key": null
+            },
+            "broken": false,
+            "working_nodes": [],
+            "broken_nodes": [],
+            "dont_overwrite": false
+          }
+        ],
+        "usable_source": null,
+        "usable_event": null,
+        "cabin_input": null,
+        "vehicle_switch": null
+      },
+      {
+        "id": 11,
+        "source": {
+          "file": "level1",
+          "path_id": 74835
+        },
+        "kind": "switch",
+        "node": 148,
+        "aim_colliders": [
+          22,
+          23
+        ],
+        "animated_poses": [],
+        "startup_on": false,
+        "current_state": 0,
+        "requested_state": 0,
+        "energy": 1.0,
+        "energy_move": 0.0,
+        "enabled": false,
+        "electronics_source": null,
+        "electronics_output": 1.0,
+        "electronics_threshold": 0.2,
+        "reverse_switch": false,
+        "states": [
+          {
+            "signal": "switch",
+            "lights": [
+              18
+            ],
+            "intensity": 1.5,
+            "renderers": [
+              151
+            ],
+            "on_material": {
+              "asset": 5,
+              "gltf_material": 3,
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 636
+              },
+              "condition_key": null
+            },
+            "off_material": {
+              "asset": 5,
+              "gltf_material": 2,
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 635
+              },
+              "condition_key": null
+            },
+            "broken": false,
+            "working_nodes": [],
+            "broken_nodes": [],
+            "dont_overwrite": false
+          }
+        ],
+        "usable_source": null,
+        "usable_event": null,
+        "cabin_input": null,
+        "vehicle_switch": null
+      },
+      {
+        "id": 12,
+        "source": {
           "file": "sharedassets1.assets",
           "path_id": 144809
         },
@@ -15954,7 +17627,7 @@
           {
             "signal": "road",
             "lights": [
-              17
+              19
             ],
             "intensity": 1.5,
             "renderers": [],
@@ -16022,9 +17695,9 @@
           40
         ]
       ],
-      "controller": 10,
+      "controller": 12,
       "lights": [
-        17
+        19
       ],
       "global_enabled": true,
       "startup_on": false,
@@ -16426,6 +18099,78 @@
           "path": "reference/lighting-unity default resources-10001.texture.bin.smip",
           "sha256": "d770ef4af2f0ac92a4dede3f353a578edfac0d29187eb1beec2ab5c69c517300"
         }
+      },
+      {
+        "id": 12,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 974
+        },
+        "path": "reference/lighting-sharedassets1.assets-974.png",
+        "sha256": "2bc4508ff107d9479999705a4d05f8e26da62319e77f766ddb659c43e5153b29",
+        "width": 256,
+        "height": 256,
+        "source_format": 29,
+        "sample_channel": "rgba",
+        "color_space": 1,
+        "filter_mode": 1,
+        "wrap_u": 1,
+        "wrap_v": 1,
+        "mip_data": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 974
+          },
+          "path": "reference/lighting-sharedassets1.assets-974.smip",
+          "sha256": "474357c82b32dd96ec4c3c4261c616a2ff64af0a1ae859e75574365c7cb24847"
+        },
+        "source_data": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 974
+          },
+          "path": "reference/lighting-sharedassets1.assets-974.texture.bin",
+          "sha256": "968d8548cdf70f29efe3b8ef8e35e37035f3a778df53e40d617cdf3956bcfef8"
+        },
+        "mip_count": 9,
+        "aniso": 1,
+        "mip_bias": 0.0
+      },
+      {
+        "id": 13,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 990
+        },
+        "path": "reference/lighting-sharedassets1.assets-990.png",
+        "sha256": "21fcd133eedaa98b45936a80cd6a5e11b42dfc4cfe7d27d7531a3cccee8004b2",
+        "width": 256,
+        "height": 256,
+        "source_format": 29,
+        "sample_channel": "rgba",
+        "color_space": 1,
+        "filter_mode": 1,
+        "wrap_u": 1,
+        "wrap_v": 1,
+        "mip_data": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 990
+          },
+          "path": "reference/lighting-sharedassets1.assets-990.smip",
+          "sha256": "502b1d4a4d8e376b506b2a192e66e78b2346629850921838aada6124dd238628"
+        },
+        "source_data": {
+          "source": {
+            "file": "sharedassets1.assets",
+            "path_id": 990
+          },
+          "path": "reference/lighting-sharedassets1.assets-990.texture.bin",
+          "sha256": "815abca02144dfa4177030cda0b482b46622e98fc6d03fe3e8f1c7b43d1a9587"
+        },
+        "mip_count": 9,
+        "aniso": 1,
+        "mip_bias": 0.0
       }
     ],
     "materials": [
@@ -16547,6 +18292,38 @@
         "source": {
           "file": "sharedassets1.assets",
           "path_id": 324
+        }
+      },
+      {
+        "asset": 5,
+        "gltf_material": 0,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 77
+        }
+      },
+      {
+        "asset": 5,
+        "gltf_material": 1,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 78
+        }
+      },
+      {
+        "asset": 5,
+        "gltf_material": 2,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 635
+        }
+      },
+      {
+        "asset": 5,
+        "gltf_material": 3,
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 636
         }
       }
     ],
@@ -19722,6 +21499,872 @@
         },
         "asset": 2,
         "gltf_material": 66
+      },
+      {
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 77
+        },
+        "shader_family": "standard",
+        "color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "condition": null,
+        "keywords": [
+          "_DETAIL_MULX2",
+          "_GLOSSYREFLECTIONS_OFF",
+          "_NORMALMAP"
+        ],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {
+            "_Cutoff": 0.5,
+            "_Glossiness": 1.0,
+            "_GlossMapScale": 1.0,
+            "_SmoothnessTextureChannel": 0.0,
+            "_Metallic": 0.0,
+            "_SpecularHighlights": 1.0,
+            "_GlossyReflections": 0.0,
+            "_BumpScale": 1.0,
+            "_Parallax": 0.019999999552965164,
+            "_OcclusionStrength": 1.0,
+            "_DetailNormalMapScale": 1.0,
+            "_UVSec": 0.0,
+            "_Mode": 0.0,
+            "_SrcBlend": 1.0,
+            "_DstBlend": 0.0,
+            "_ZWrite": 1.0
+          },
+          "colors": {
+            "_Color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "_EmissionColor": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "textures": [
+            {
+              "slot": "_MainTex",
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 719
+              },
+              "file": "reference/texture-sharedassets1.assets-719-srgb.png",
+              "color_space": "srgb",
+              "encoding": "rgba",
+              "source_encoding": "rgba",
+              "uv_channel": 0,
+              "scale": [
+                1.0,
+                1.0
+              ],
+              "offset": [
+                0.0,
+                0.0
+              ],
+              "sampler": {
+                "filter": 1,
+                "wrap_u": 0,
+                "wrap_v": 0,
+                "aniso": 1,
+                "mip_bias": 0.0,
+                "mip_count": 10
+              },
+              "mips": [
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb.png",
+                  "width": 512,
+                  "height": 512
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-1.png",
+                  "width": 256,
+                  "height": 256
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-2.png",
+                  "width": 128,
+                  "height": 128
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-3.png",
+                  "width": 64,
+                  "height": 64
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-4.png",
+                  "width": 32,
+                  "height": 32
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-5.png",
+                  "width": 16,
+                  "height": 16
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-6.png",
+                  "width": 8,
+                  "height": 8
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-7.png",
+                  "width": 4,
+                  "height": 4
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-8.png",
+                  "width": 2,
+                  "height": 2
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-9.png",
+                  "width": 1,
+                  "height": 1
+                }
+              ]
+            },
+            {
+              "slot": "_DetailNormalMap",
+              "source": {
+                "file": "sharedassets0.assets",
+                "path_id": 286
+              },
+              "file": "reference/texture-sharedassets0.assets-286-linear-normal-ag.png",
+              "color_space": "linear",
+              "encoding": "rgb",
+              "source_encoding": "ag",
+              "uv_channel": 0,
+              "scale": [
+                2.5,
+                2.5
+              ],
+              "offset": [
+                0.0,
+                0.0
+              ],
+              "sampler": {
+                "filter": 1,
+                "wrap_u": 0,
+                "wrap_v": 0,
+                "aniso": 1,
+                "mip_bias": 0.0,
+                "mip_count": 11
+              },
+              "mips": [
+                {
+                  "file": "reference/texture-sharedassets0.assets-286-linear-normal-ag.png",
+                  "width": 1024,
+                  "height": 1024
+                },
+                {
+                  "file": "reference/texture-sharedassets0.assets-286-linear-normal-ag-mip-1.png",
+                  "width": 512,
+                  "height": 512
+                },
+                {
+                  "file": "reference/texture-sharedassets0.assets-286-linear-normal-ag-mip-2.png",
+                  "width": 256,
+                  "height": 256
+                },
+                {
+                  "file": "reference/texture-sharedassets0.assets-286-linear-normal-ag-mip-3.png",
+                  "width": 128,
+                  "height": 128
+                },
+                {
+                  "file": "reference/texture-sharedassets0.assets-286-linear-normal-ag-mip-4.png",
+                  "width": 64,
+                  "height": 64
+                },
+                {
+                  "file": "reference/texture-sharedassets0.assets-286-linear-normal-ag-mip-5.png",
+                  "width": 32,
+                  "height": 32
+                },
+                {
+                  "file": "reference/texture-sharedassets0.assets-286-linear-normal-ag-mip-6.png",
+                  "width": 16,
+                  "height": 16
+                },
+                {
+                  "file": "reference/texture-sharedassets0.assets-286-linear-normal-ag-mip-7.png",
+                  "width": 8,
+                  "height": 8
+                },
+                {
+                  "file": "reference/texture-sharedassets0.assets-286-linear-normal-ag-mip-8.png",
+                  "width": 4,
+                  "height": 4
+                },
+                {
+                  "file": "reference/texture-sharedassets0.assets-286-linear-normal-ag-mip-9.png",
+                  "width": 2,
+                  "height": 2
+                },
+                {
+                  "file": "reference/texture-sharedassets0.assets-286-linear-normal-ag-mip-10.png",
+                  "width": 1,
+                  "height": 1
+                }
+              ]
+            }
+          ],
+          "defaults": {
+            "_OcclusionMap": "white",
+            "_BumpMap": "bump",
+            "_DetailMask": "white",
+            "_DetailAlbedoMap": "grey"
+          },
+          "exclusions": []
+        },
+        "gltf_material": 0,
+        "asset": 5
+      },
+      {
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 78
+        },
+        "shader_family": "standard",
+        "color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "condition": null,
+        "keywords": [
+          "_EMISSION",
+          "_GLOSSYREFLECTIONS_OFF"
+        ],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {
+            "_Cutoff": 0.5,
+            "_Glossiness": 1.0,
+            "_GlossMapScale": 1.0,
+            "_SmoothnessTextureChannel": 0.0,
+            "_Metallic": 0.0,
+            "_SpecularHighlights": 1.0,
+            "_GlossyReflections": 0.0,
+            "_BumpScale": 1.0,
+            "_Parallax": 0.019999999552965164,
+            "_OcclusionStrength": 1.0,
+            "_DetailNormalMapScale": 1.0,
+            "_UVSec": 0.0,
+            "_Mode": 0.0,
+            "_SrcBlend": 1.0,
+            "_DstBlend": 0.0,
+            "_ZWrite": 1.0
+          },
+          "colors": {
+            "_Color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "_EmissionColor": [
+              1.7746994495391846,
+              1.5528620481491089,
+              1.220105767250061,
+              1.0
+            ]
+          },
+          "textures": [
+            {
+              "slot": "_MainTex",
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 719
+              },
+              "file": "reference/texture-sharedassets1.assets-719-srgb.png",
+              "color_space": "srgb",
+              "encoding": "rgba",
+              "source_encoding": "rgba",
+              "uv_channel": 0,
+              "scale": [
+                1.0,
+                1.0
+              ],
+              "offset": [
+                0.0,
+                0.0
+              ],
+              "sampler": {
+                "filter": 1,
+                "wrap_u": 0,
+                "wrap_v": 0,
+                "aniso": 1,
+                "mip_bias": 0.0,
+                "mip_count": 10
+              },
+              "mips": [
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb.png",
+                  "width": 512,
+                  "height": 512
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-1.png",
+                  "width": 256,
+                  "height": 256
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-2.png",
+                  "width": 128,
+                  "height": 128
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-3.png",
+                  "width": 64,
+                  "height": 64
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-4.png",
+                  "width": 32,
+                  "height": 32
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-5.png",
+                  "width": 16,
+                  "height": 16
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-6.png",
+                  "width": 8,
+                  "height": 8
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-7.png",
+                  "width": 4,
+                  "height": 4
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-8.png",
+                  "width": 2,
+                  "height": 2
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-719-srgb-mip-9.png",
+                  "width": 1,
+                  "height": 1
+                }
+              ]
+            },
+            {
+              "slot": "_EmissionMap",
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 829
+              },
+              "file": "reference/texture-sharedassets1.assets-829-srgb.png",
+              "color_space": "srgb",
+              "encoding": "rgba",
+              "source_encoding": "rgba",
+              "uv_channel": 0,
+              "scale": [
+                1.0,
+                1.0
+              ],
+              "offset": [
+                0.0,
+                0.0
+              ],
+              "sampler": {
+                "filter": 1,
+                "wrap_u": 1,
+                "wrap_v": 1,
+                "aniso": 1,
+                "mip_bias": 0.0,
+                "mip_count": 9
+              },
+              "mips": [
+                {
+                  "file": "reference/texture-sharedassets1.assets-829-srgb.png",
+                  "width": 256,
+                  "height": 256
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-829-srgb-mip-1.png",
+                  "width": 128,
+                  "height": 128
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-829-srgb-mip-2.png",
+                  "width": 64,
+                  "height": 64
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-829-srgb-mip-3.png",
+                  "width": 32,
+                  "height": 32
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-829-srgb-mip-4.png",
+                  "width": 16,
+                  "height": 16
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-829-srgb-mip-5.png",
+                  "width": 8,
+                  "height": 8
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-829-srgb-mip-6.png",
+                  "width": 4,
+                  "height": 4
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-829-srgb-mip-7.png",
+                  "width": 2,
+                  "height": 2
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-829-srgb-mip-8.png",
+                  "width": 1,
+                  "height": 1
+                }
+              ]
+            }
+          ],
+          "defaults": {
+            "_OcclusionMap": "white"
+          },
+          "exclusions": []
+        },
+        "gltf_material": 1,
+        "asset": 5
+      },
+      {
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 635
+        },
+        "shader_family": "standard",
+        "color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "condition": null,
+        "keywords": [],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {
+            "_Cutoff": 0.5,
+            "_Glossiness": 0.20000000298023224,
+            "_GlossMapScale": 1.0,
+            "_SmoothnessTextureChannel": 0.0,
+            "_Metallic": 0.800000011920929,
+            "_SpecularHighlights": 1.0,
+            "_GlossyReflections": 1.0,
+            "_BumpScale": 1.0,
+            "_Parallax": 0.019999999552965164,
+            "_OcclusionStrength": 1.0,
+            "_DetailNormalMapScale": 1.0,
+            "_UVSec": 0.0,
+            "_Mode": 0.0,
+            "_SrcBlend": 1.0,
+            "_DstBlend": 0.0,
+            "_ZWrite": 1.0
+          },
+          "colors": {
+            "_Color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "_EmissionColor": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "textures": [
+            {
+              "slot": "_MainTex",
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 1194
+              },
+              "file": "reference/texture-sharedassets1.assets-1194-srgb.png",
+              "color_space": "srgb",
+              "encoding": "rgba",
+              "source_encoding": "rgba",
+              "uv_channel": 0,
+              "scale": [
+                1.0,
+                1.0
+              ],
+              "offset": [
+                0.0,
+                0.0
+              ],
+              "sampler": {
+                "filter": 1,
+                "wrap_u": 0,
+                "wrap_v": 0,
+                "aniso": 1,
+                "mip_bias": 0.0,
+                "mip_count": 12
+              },
+              "mips": [
+                {
+                  "file": "reference/texture-sharedassets1.assets-1194-srgb.png",
+                  "width": 2048,
+                  "height": 2048
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1194-srgb-mip-1.png",
+                  "width": 1024,
+                  "height": 1024
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1194-srgb-mip-2.png",
+                  "width": 512,
+                  "height": 512
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1194-srgb-mip-3.png",
+                  "width": 256,
+                  "height": 256
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1194-srgb-mip-4.png",
+                  "width": 128,
+                  "height": 128
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1194-srgb-mip-5.png",
+                  "width": 64,
+                  "height": 64
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1194-srgb-mip-6.png",
+                  "width": 32,
+                  "height": 32
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1194-srgb-mip-7.png",
+                  "width": 16,
+                  "height": 16
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1194-srgb-mip-8.png",
+                  "width": 8,
+                  "height": 8
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1194-srgb-mip-9.png",
+                  "width": 4,
+                  "height": 4
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1194-srgb-mip-10.png",
+                  "width": 2,
+                  "height": 2
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1194-srgb-mip-11.png",
+                  "width": 1,
+                  "height": 1
+                }
+              ]
+            }
+          ],
+          "defaults": {
+            "_OcclusionMap": "white"
+          },
+          "exclusions": []
+        },
+        "gltf_material": 2,
+        "asset": 5
+      },
+      {
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 636
+        },
+        "shader_family": "standard",
+        "color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "condition": null,
+        "keywords": [
+          "_EMISSION"
+        ],
+        "state": {
+          "alpha_mode": "opaque",
+          "cull": 2,
+          "z_write": true,
+          "z_test": 4,
+          "src_blend": 1,
+          "dst_blend": 0,
+          "render_queue": -1
+        },
+        "properties": {
+          "floats": {
+            "_Cutoff": 0.5,
+            "_Glossiness": 0.20000000298023224,
+            "_GlossMapScale": 1.0,
+            "_SmoothnessTextureChannel": 0.0,
+            "_Metallic": 0.800000011920929,
+            "_SpecularHighlights": 1.0,
+            "_GlossyReflections": 1.0,
+            "_BumpScale": 1.0,
+            "_Parallax": 0.019999999552965164,
+            "_OcclusionStrength": 1.0,
+            "_DetailNormalMapScale": 1.0,
+            "_UVSec": 0.0,
+            "_Mode": 0.0,
+            "_SrcBlend": 1.0,
+            "_DstBlend": 0.0,
+            "_ZWrite": 1.0
+          },
+          "colors": {
+            "_Color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "_EmissionColor": [
+              2.0814292430877686,
+              1.6188894510269165,
+              1.1353250741958618,
+              1.0
+            ]
+          },
+          "textures": [
+            {
+              "slot": "_MainTex",
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 1340
+              },
+              "file": "reference/texture-sharedassets1.assets-1340-srgb.png",
+              "color_space": "srgb",
+              "encoding": "rgba",
+              "source_encoding": "rgba",
+              "uv_channel": 0,
+              "scale": [
+                1.0,
+                1.0
+              ],
+              "offset": [
+                0.0,
+                0.0
+              ],
+              "sampler": {
+                "filter": 1,
+                "wrap_u": 0,
+                "wrap_v": 0,
+                "aniso": 1,
+                "mip_bias": 0.0,
+                "mip_count": 12
+              },
+              "mips": [
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb.png",
+                  "width": 2048,
+                  "height": 2048
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-1.png",
+                  "width": 1024,
+                  "height": 1024
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-2.png",
+                  "width": 512,
+                  "height": 512
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-3.png",
+                  "width": 256,
+                  "height": 256
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-4.png",
+                  "width": 128,
+                  "height": 128
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-5.png",
+                  "width": 64,
+                  "height": 64
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-6.png",
+                  "width": 32,
+                  "height": 32
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-7.png",
+                  "width": 16,
+                  "height": 16
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-8.png",
+                  "width": 8,
+                  "height": 8
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-9.png",
+                  "width": 4,
+                  "height": 4
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-10.png",
+                  "width": 2,
+                  "height": 2
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-11.png",
+                  "width": 1,
+                  "height": 1
+                }
+              ]
+            },
+            {
+              "slot": "_EmissionMap",
+              "source": {
+                "file": "sharedassets1.assets",
+                "path_id": 1340
+              },
+              "file": "reference/texture-sharedassets1.assets-1340-srgb.png",
+              "color_space": "srgb",
+              "encoding": "rgba",
+              "source_encoding": "rgba",
+              "uv_channel": 0,
+              "scale": [
+                1.0,
+                1.0
+              ],
+              "offset": [
+                0.0,
+                0.0
+              ],
+              "sampler": {
+                "filter": 1,
+                "wrap_u": 0,
+                "wrap_v": 0,
+                "aniso": 1,
+                "mip_bias": 0.0,
+                "mip_count": 12
+              },
+              "mips": [
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb.png",
+                  "width": 2048,
+                  "height": 2048
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-1.png",
+                  "width": 1024,
+                  "height": 1024
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-2.png",
+                  "width": 512,
+                  "height": 512
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-3.png",
+                  "width": 256,
+                  "height": 256
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-4.png",
+                  "width": 128,
+                  "height": 128
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-5.png",
+                  "width": 64,
+                  "height": 64
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-6.png",
+                  "width": 32,
+                  "height": 32
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-7.png",
+                  "width": 16,
+                  "height": 16
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-8.png",
+                  "width": 8,
+                  "height": 8
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-9.png",
+                  "width": 4,
+                  "height": 4
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-10.png",
+                  "width": 2,
+                  "height": 2
+                },
+                {
+                  "file": "reference/texture-sharedassets1.assets-1340-srgb-mip-11.png",
+                  "width": 1,
+                  "height": 1
+                }
+              ]
+            }
+          ],
+          "defaults": {
+            "_OcclusionMap": "white"
+          },
+          "exclusions": []
+        },
+        "gltf_material": 3,
+        "asset": 5
       }
     ]
   },
@@ -21893,6 +24536,321 @@
             "dst_blend": 0,
             "render_queue": -1
           }
+        }
+      ]
+    }
+  },
+  "flashlights": {
+    "models": [
+      {
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 28750
+        },
+        "controller": {
+          "file": "sharedassets1.assets",
+          "path_id": 148780
+        },
+        "node": 139,
+        "meshes": [
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 1606
+          },
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 3284
+          },
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 3330
+          },
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 3448
+          }
+        ],
+        "materials": [
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 254
+          },
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 561
+          },
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 77
+          },
+          {
+            "file": "sharedassets0.assets",
+            "path_id": 41
+          }
+        ],
+        "renderers": [
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 90101
+          },
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 93647
+          },
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 96799
+          },
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 93787
+          }
+        ],
+        "lights": [
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 123693
+          }
+        ]
+      },
+      {
+        "source": {
+          "file": "sharedassets1.assets",
+          "path_id": 28749
+        },
+        "controller": {
+          "file": "sharedassets1.assets",
+          "path_id": 148779
+        },
+        "node": 148,
+        "meshes": [
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 3286
+          },
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 3858
+          }
+        ],
+        "materials": [
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 635
+          },
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 635
+          }
+        ],
+        "renderers": [
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 98828
+          },
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 98433
+          }
+        ],
+        "lights": [
+          {
+            "file": "sharedassets1.assets",
+            "path_id": 123692
+          }
+        ]
+      }
+    ],
+    "instances": [
+      {
+        "model": {
+          "file": "sharedassets1.assets",
+          "path_id": 28750
+        },
+        "item": 23,
+        "node": 139,
+        "pickup": {
+          "file": "level1",
+          "path_id": 69340
+        },
+        "save": {
+          "file": "level1",
+          "path_id": 74314
+        },
+        "controller": 10,
+        "startup_active": true,
+        "colliders": [
+          21
+        ]
+      },
+      {
+        "model": {
+          "file": "sharedassets1.assets",
+          "path_id": 28749
+        },
+        "item": 24,
+        "node": 148,
+        "pickup": {
+          "file": "level1",
+          "path_id": 69341
+        },
+        "save": {
+          "file": "level1",
+          "path_id": 74315
+        },
+        "controller": 11,
+        "startup_active": false,
+        "colliders": [
+          22,
+          23
+        ]
+      }
+    ],
+    "storage": {
+      "settings_source": {
+        "file": "level1",
+        "path_id": 65886
+      },
+      "default_setting": 2,
+      "mount_mask": 8388609,
+      "drop_delay_seconds": 1.0,
+      "scan_interval_seconds": 1.5,
+      "volumes": [
+        {
+          "source": {
+            "file": "fixture",
+            "path_id": 3000
+          },
+          "node": 156,
+          "owner": 1,
+          "collider": 24,
+          "storage_type": 0,
+          "only_manual": false,
+          "no_physics_lock": false,
+          "owner_pickup": null,
+          "dont_lock_if_owner_picked_up": false,
+          "slots": [],
+          "usables": [],
+          "active": true
+        },
+        {
+          "source": {
+            "file": "fixture",
+            "path_id": 3001
+          },
+          "node": 157,
+          "owner": 1,
+          "collider": 25,
+          "storage_type": 0,
+          "only_manual": false,
+          "no_physics_lock": false,
+          "owner_pickup": null,
+          "dont_lock_if_owner_picked_up": false,
+          "slots": [],
+          "usables": [],
+          "active": true
+        },
+        {
+          "source": {
+            "file": "fixture",
+            "path_id": 3002
+          },
+          "node": 158,
+          "owner": 1,
+          "collider": 26,
+          "storage_type": 5,
+          "only_manual": false,
+          "no_physics_lock": false,
+          "owner_pickup": null,
+          "dont_lock_if_owner_picked_up": false,
+          "slots": [],
+          "usables": [],
+          "active": true
+        },
+        {
+          "source": {
+            "file": "fixture",
+            "path_id": 3003
+          },
+          "node": 159,
+          "owner": 1,
+          "collider": 27,
+          "storage_type": 5,
+          "only_manual": false,
+          "no_physics_lock": false,
+          "owner_pickup": null,
+          "dont_lock_if_owner_picked_up": false,
+          "slots": [],
+          "usables": [],
+          "active": true
+        },
+        {
+          "source": {
+            "file": "fixture",
+            "path_id": 3004
+          },
+          "node": 160,
+          "owner": 1,
+          "collider": 28,
+          "storage_type": 5,
+          "only_manual": false,
+          "no_physics_lock": false,
+          "owner_pickup": null,
+          "dont_lock_if_owner_picked_up": false,
+          "slots": [],
+          "usables": [],
+          "active": true
+        },
+        {
+          "source": {
+            "file": "fixture",
+            "path_id": 3005
+          },
+          "node": 161,
+          "owner": 1,
+          "collider": 29,
+          "storage_type": 5,
+          "only_manual": false,
+          "no_physics_lock": false,
+          "owner_pickup": null,
+          "dont_lock_if_owner_picked_up": false,
+          "slots": [],
+          "usables": [],
+          "active": true
+        },
+        {
+          "source": {
+            "file": "fixture",
+            "path_id": 3006
+          },
+          "node": 162,
+          "owner": 1,
+          "collider": 30,
+          "storage_type": 3,
+          "only_manual": false,
+          "no_physics_lock": false,
+          "owner_pickup": null,
+          "dont_lock_if_owner_picked_up": false,
+          "slots": [],
+          "usables": [],
+          "active": true
+        },
+        {
+          "source": {
+            "file": "fixture",
+            "path_id": 3007
+          },
+          "node": 163,
+          "owner": 1,
+          "collider": 31,
+          "storage_type": 4,
+          "only_manual": false,
+          "no_physics_lock": false,
+          "owner_pickup": null,
+          "dont_lock_if_owner_picked_up": false,
+          "slots": [],
+          "usables": [],
+          "active": true
         }
       ]
     }
