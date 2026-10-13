@@ -9,7 +9,7 @@ A focused storage module manages body and collider ownership. Existing imported 
 
 **Tech Stack:** Rust 1.99, Bevy 0.19.1, Rapier 0.36.0, serde, Python, WASM, WebGL2, and the existing Docker toolchain.
 **Spec:** [Approved flashlight design](../specs/2026-10-13-portable-flashlights-design.md).
-**Status:** Spec approved on 2026-10-13. This plan awaits review before implementation.
+**Status:** Spec and plan approved on 2026-10-13. Implementation is authorized and in progress.
 **Execution:** Preserve the user's selected subagent-driven method. Complete each task and review before starting the next.
 **Base:** codex/equipment at c7ddede. Plate implementation is complete at 542be78.
 
