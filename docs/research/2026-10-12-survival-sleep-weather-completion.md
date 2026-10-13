@@ -6,8 +6,8 @@ Execution base: `8daacbd1047883ea5a9aa00c82fca2597225ccae`.
 Final fix base: `5abfb6c19a88d6b99f1cacf3c5cacf32198917b1`.
 
 Tasks 1–8 implement the approved feature. Task 9 inspected integration and retained the evidence.
-The final branch review found two P2 contract defects. This fix wave addresses both defects.
-The controller must review these fixes before integration.
+The final branch review found two P2 contract defects. Scoped review approved both fixes; no findings remain open.
+Reviewed product head: 03964b7da1a27c55302195d532bf7a5eb5d1d7c8.
 
 The user said “Continue. Ignore tests”, after “Skip tests”.
 We skipped further behavioral test edits, test runs, browser acceptance, and audible checks.

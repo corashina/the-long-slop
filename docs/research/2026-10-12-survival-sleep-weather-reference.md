@@ -2,7 +2,7 @@
 
 Date: 2026-10-13, Europe/Warsaw.
 Status: Tasks 1–8 implemented and reviewed. Task 9 completed source inspection and documentation.
-The final branch review found two P2 defects. The final fixes await scoped review.
+Final branch review and scoped fix review are complete. Both implementation defects are addressed.
 See the [completion report](2026-10-12-survival-sleep-weather-completion.md) for current evidence and limits.
 
 ## Evidence
