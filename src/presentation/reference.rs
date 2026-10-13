@@ -230,6 +230,11 @@ pub fn bind(
                 .plates
                 .iter()
                 .any(|plate| plate.item == item.id)
+            && !reference
+                .flashlights
+                .instances
+                .iter()
+                .any(|flashlight| flashlight.item == item.id)
         {
             continue;
         }

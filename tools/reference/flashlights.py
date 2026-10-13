@@ -59,6 +59,41 @@ def prepare_flashlight_roots(source, roots):
     source.storage_collider_keys={key(source.resolve(r,source.read(r)['col'])) for r in (source.get('level1',i) for i in VOLUMES)}
     for i in ROOTS:roots['items'].append(source.get('level1',i))
 
+def validate_flashlight_mesh_export(source, path):
+    """Require each selected source renderer mesh in the exported scene."""
+    document=json.loads(path.read_text(encoding='utf-8'))
+    nodes=document['nodes']; meshes=document['meshes']
+    exported={(key_from['file'],key_from['path_id']): (index,node)
+              for index,node in enumerate(nodes)
+              if (key_from:=node.get('extras',{}).get('reference_id'))}
+    for root_id in ROOTS:
+        records=source.hierarchy(source.get('level1',root_id))
+        root_key=key(records[0]['reader'])
+        root_index=exported[root_key][0]
+        descendants=set();pending=[root_index]
+        while pending:
+            index=pending.pop()
+            if index in descendants:continue
+            descendants.add(index)
+            pending.extend(nodes[index].get('children',[]))
+        checked=0
+        for record in records:
+            components={part.type.name:part for part in record['components']}
+            renderer=components.get('MeshRenderer'); mesh_filter=components.get('MeshFilter')
+            if not renderer or not mesh_filter or not source.read(renderer)['m_Enabled']:continue
+            mesh=source.resolve(mesh_filter,source.read(mesh_filter)['m_Mesh'])
+            if mesh is None:raise ValueError(f'Flashlight source renderer mesh is missing: {source_id(renderer)}')
+            index,node=exported.get(key(record['reader']),(None,None))
+            if index not in descendants or node['extras'].get('hierarchy_path')!=record['path']:
+                raise ValueError(f'Flashlight renderer left exported hierarchy: {source_id(renderer)}')
+            mesh_index=node.get('mesh')
+            if not isinstance(mesh_index,int) or not 0<=mesh_index<len(meshes):
+                raise ValueError(f'Flashlight renderer mesh omitted: {source_id(renderer)}')
+            if meshes[mesh_index].get('extras',{}).get('source')!=source_id(mesh):
+                raise ValueError(f'Flashlight renderer mesh differs from source: {source_id(renderer)}')
+            checked+=1
+        if not checked:raise ValueError(f'Flashlight hierarchy has no source renderer mesh: level1:{root_id}')
+
 def recover_flashlights(source, roots, pointer_node, item_nodes, controllers, colliders, output, part_slots):
     def linked(reader,pointer):return source.resolve(reader,pointer) if pointer['m_PathID'] else None
     def sid(reader,pointer):

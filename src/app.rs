@@ -114,6 +114,7 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
         .add_systems(
             Update,
             (
+                initialize_storage,
                 check_ready,
                 presentation::lighting::bind_lighting,
                 presentation::lighting::lighting_readiness,
@@ -194,6 +195,20 @@ fn setup(
     ));
 }
 
+fn initialize_storage(
+    time: Res<Time<Real>>,
+    mut drive: ResMut<Drive>,
+    mut visuals: ResMut<ReferenceVisuals>,
+) {
+    if drive.ready || visuals.failed {
+        return;
+    }
+    if let Err(error) = drive.runtime.initialize_storage_frame(time.delta_secs()) {
+        game_failure(&error.to_string());
+        visuals.failed = true;
+    }
+}
+
 fn check_ready(
     mut commands: Commands,
     server: Res<AssetServer>,
@@ -235,6 +250,9 @@ fn check_ready(
     }
     if drive.ready {
         readiness.0 = 0;
+        return;
+    }
+    if !drive.runtime.area.interaction.storage.initialization_ready() {
         return;
     }
     for (path, handle) in &visuals.handles {

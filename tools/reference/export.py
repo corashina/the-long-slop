@@ -195,7 +195,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     roots = {'home':[source.get('level1',21400)], 'lada':[transform(17687)],
         'items':[transform(go) for go in (13023,13027,18878,13019,15637)]}
     spare=source.get('level1',71403)
-    from .flashlights import prepare_flashlight_roots
+    from .flashlights import prepare_flashlight_roots, validate_flashlight_mesh_export
     prepare_flashlight_roots(source, roots)
     roots['items'].append(source.transform_for(source.resolve(spare,source.read(spare)['m_GameObject'])))
     prefab=source.get('sharedassets1.assets',82556)
@@ -225,6 +225,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     report = {}
     for name, readers in roots.items():
         report[name] = export_gltf((source,readers),output/f'{name}.gltf',library,list(roots).index(name)+1)
+        if name == 'items': validate_flashlight_mesh_export(source, output/'items.gltf')
         print(f'Exported {name}: {report[name]["node_count"]} nodes',flush=True)
     (output/'material-evidence.json').write_text(json.dumps(list(source.material_evidence.values()), indent=2, allow_nan=False), encoding='utf-8')
     (output/'geometry-evidence.json').write_text(json.dumps(report,indent=2,allow_nan=False),encoding='utf-8')

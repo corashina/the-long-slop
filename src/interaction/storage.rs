@@ -49,6 +49,7 @@ pub struct StorageLocks {
     scan_interval: f32,
     elapsed: f32,
     last_scan: f32,
+    startup_frame: u8,
     bound: bool,
 }
 impl StorageLocks {
@@ -156,6 +157,7 @@ impl StorageLocks {
             scan_interval: policy.scan_interval_seconds,
             elapsed: 0.0,
             last_scan: 0.0,
+            startup_frame: 0,
             bound: false,
         })
     }
@@ -380,23 +382,40 @@ impl StorageLocks {
         light.dropped_at = self.elapsed;
         Ok(())
     }
+    pub fn initialization_ready(&self) -> bool {
+        self.startup_frame == 5
+    }
+
+    /// Run the two source yields, then one QuickFreeze pass per loading frame.
     pub fn initialize_frame(
         &mut self,
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
         parts: &PartAttachments,
         mechanisms: &MechanismState,
-    ) -> Result<(), ReferenceError> {
-        if !self.bound {
-            return Err(error("Storage is not bound"));
+        dt: f32,
+    ) -> Result<bool, ReferenceError> {
+        if !self.bound || !dt.is_finite() || dt < 0.0 {
+            return Err(error("Invalid storage initialization frame"));
+        }
+        if self.initialization_ready() {
+            return Ok(false);
+        }
+        self.elapsed += dt;
+        if self.startup_frame < 2 {
+            self.startup_frame += 1;
+            return Ok(false);
         }
         physics.refresh_queries();
-        for volume in &mut self.volumes {
-            Self::scan_volume(volume, physics, self.mount_mask);
-            std::mem::swap(&mut volume.previous, &mut volume.current);
+        if self.startup_frame == 2 {
+            for volume in &mut self.volumes {
+                Self::scan_volume(volume, physics, self.mount_mask);
+                std::mem::swap(&mut volume.previous, &mut volume.current);
+            }
         }
-        self.advance(items, physics, parts, mechanisms, 0.0)?;
-        Ok(())
+        let changed = self.advance(items, physics, parts, mechanisms, 0.0)?;
+        self.startup_frame += 1;
+        Ok(changed)
     }
     pub fn advance(
         &mut self,

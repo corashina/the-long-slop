@@ -121,7 +121,7 @@ Keep source data in Task1 contracts and presentation in Task3.
 - StorageLocks::new(reference: &ReferenceManifest) -> Result<Self, ReferenceError>.
 - StorageLocks::bind(&mut self, items: &mut ItemStore, physics: &mut PhysicsWorld) -> Result<(), ReferenceError>.
 - StorageLocks::advance(&mut self, items: &mut ItemStore, physics: &mut PhysicsWorld, parts: &PartAttachments, mechanisms: &MechanismState, dt: f32) -> Result<bool, ReferenceError> returns whether ownership or mass changed.
-- StorageLocks::initialize_frame(&mut self, items: &mut ItemStore, physics: &mut PhysicsWorld, parts: &PartAttachments, mechanisms: &MechanismState) -> Result<(), ReferenceError> owns the recovered initialization phase.
+- StorageLocks::initialize_frame(&mut self, items: &mut ItemStore, physics: &mut PhysicsWorld, parts: &PartAttachments, mechanisms: &MechanismState, dt: f32) -> Result<bool, ReferenceError> returns ownership changes during initialization. StorageLocks::initialization_ready() -> bool gates readiness after the source frame sequence.
 - StorageLocks::unlock(&mut self, item: ItemId, items: &mut ItemStore, physics: &mut PhysicsWorld) -> Result<(), ReferenceError>.
 - StorageLocks::owns_collider(&self, collider: ColliderId) -> bool; contains(&self, item: ItemId) -> bool; loose_body(&self, item: ItemId) -> Option<RigidBodyHandle>; rebase(&mut self, shift: [f32;3]).
 - InteractionState.storage owns StorageLocks and a retained item-to-LightControlId lookup.
@@ -172,7 +172,7 @@ Commit: feat: support carried flashlight controls and source storage locking.
 
 ### Task 3: Bind moving beams and shared renderer preparation
 
-**Files:** Modify src/presentation/{lighting,reference,materials}.rs and src/app.rs only where required.
+**Files:** Modify src/presentation/{lighting,reference,materials}.rs and src/app.rs only where required. Complete the existing loading hook in src/interaction/storage.rs and src/starting_area.rs. Correct per-node identity in tools/reference/gltf.py and validate actual exported flashlight geometry.
 Use existing shaders and source shadow implementation. Modify shader code only for a demonstrated integration defect.
 
 **Interfaces:** Consume Task1 instance/controller/light records and Task2 live item ownership.

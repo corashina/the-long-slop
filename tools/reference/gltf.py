@@ -245,6 +245,7 @@ class GltfExporter(GltfBuilder):
             mapping[identity] = index
         for record in records:
             reader = record['reader']
+            identity = key(reader)
             data = self.source.read(reader)
             transform = converted_transform(data)
             if record['parent'] is None:

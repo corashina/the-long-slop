@@ -34,7 +34,7 @@ struct SourceLighting {
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> lighting: SourceLighting;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var shadow_atlas: texture_depth_2d;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var shadow_sampler: sampler_comparison;
-@group(#{MATERIAL_BIND_GROUP}) @binding(103) var cookies: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(103) var cookies: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var cookie_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(105) var attenuation: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(106) var<uniform> receiver: vec4<u32>;
@@ -122,7 +122,10 @@ fn source_lit_fragment(in:VertexOutput, front:bool)->FragmentOutput {
                 }
                 if light.cookie_rect.x==1.0 { weight*=textureSampleGrad(sun_cookie,sun_sampler,uv,dpdx(uv),dpdy(uv)).a; }
                 else if light.cookie_rect.x==2.0 { weight*=textureSampleGrad(default_cookie,default_sampler,uv,dpdx(uv),dpdy(uv)).a; }
-                else { weight*=textureSampleGrad(cookies,cookie_sampler,uv,dpdx(uv),dpdy(uv)).a; }
+                else {
+                    let cookie_uv = select(uv, uv * 0.5 + 0.25, light.cookie_rect.x > 3.0);
+                    weight *= textureSampleGrad(cookies, cookie_sampler, cookie_uv, i32(light.cookie_rect.x) - 3, dpdx(cookie_uv), dpdy(cookie_uv)).a;
+                }
             }
             if (p.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT)!=0u {weight*=source_shadow(light,p.world_position.xyz,p.world_normal,depth);}
             rgb+=direct_brdf(p.material.base_color.rgb,p.material.metallic,p.material.perceptual_roughness,p.N,p.V,l)*light.color.rgb*weight;
@@ -295,7 +298,10 @@ fn fragment(
             }
             if lamp.cookie_rect.x == 1.0 { weight *= textureSampleGrad(sun_cookie, sun_sampler, cookie_uv, dpdx(cookie_uv), dpdy(cookie_uv)).a; }
             else if lamp.cookie_rect.x == 2.0 { weight *= textureSampleGrad(default_cookie, default_sampler, cookie_uv, dpdx(cookie_uv), dpdy(cookie_uv)).a; }
-            else { weight *= textureSampleGrad(cookies, cookie_sampler, cookie_uv, dpdx(cookie_uv), dpdy(cookie_uv)).a; }
+            else {
+                let array_uv = select(cookie_uv, cookie_uv * 0.5 + 0.25, lamp.cookie_rect.x > 3.0);
+                weight *= textureSampleGrad(cookies, cookie_sampler, array_uv, i32(lamp.cookie_rect.x) - 3, dpdx(array_uv), dpdy(array_uv)).a;
+            }
         }
         if (pbr.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u { weight *= source_shadow(lamp, in.world_position.xyz, pbr.world_normal, depth); }
         light += source_brdf(diffuse, specular, smoothness, pbr.N, pbr.V, direction) * lamp.color.rgb * weight;

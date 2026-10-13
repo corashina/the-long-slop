@@ -77,7 +77,10 @@ struct Out { @builtin(position) position:vec4<f32>, @location(0) world:vec4<f32>
             else {if local.z<=0. {continue;} uv=local.xy/local.w+.5;if any(uv<vec2(0.))||any(uv>vec2(1.)){continue;}}
             if lamp.cookie_rect.x==1. {weight*=textureSampleGrad(sun_cookie,sun_sampler,uv,dpdx(uv),dpdy(uv)).a;}
             else if lamp.cookie_rect.x==2. {weight*=textureSampleGrad(default_cookie,default_sampler,uv,dpdx(uv),dpdy(uv)).a;}
-            else {weight*=textureSampleGrad(cookies,cookie_sampler,uv,dpdx(uv),dpdy(uv)).a;}
+            else {
+                let array_uv=select(uv,uv*0.5+0.25,lamp.cookie_rect.x>3.0);
+                weight*=textureSampleGrad(cookies,cookie_sampler,array_uv,i32(lamp.cookie_rect.x)-3,dpdx(array_uv),dpdy(array_uv)).a;
+            }
         }
         weight*=source_shadow(lamp,i.world.xyz,normal,depth);
         let specular=pow(max(dot(normal,normalize(direction+eye)),0.),shininess);

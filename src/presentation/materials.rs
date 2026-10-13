@@ -1074,7 +1074,7 @@ impl AsBindGroup for SourceExtension {
                 (
                     103,
                     OwnedBindingResource::TextureView(
-                        TextureViewDimension::D2,
+                        TextureViewDimension::D2Array,
                         cookies[2].0.clone(),
                     ),
                 ),
@@ -1158,7 +1158,7 @@ impl AsBindGroup for SourceExtension {
                 (102, sampler(SamplerBindingType::Comparison)),
                 (
                     103,
-                    texture_2d(TextureSampleType::Float { filterable: true }),
+                    texture_2d_array(TextureSampleType::Float { filterable: true }),
                 ),
                 (104, sampler(SamplerBindingType::Filtering)),
                 (

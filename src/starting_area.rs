@@ -228,12 +228,6 @@ impl StartingArea {
         interaction.storage.bind(&mut items, physics)?;
         interaction.sync_parts(&mut items, physics)?;
         physics.refresh_queries();
-        interaction.storage.initialize_frame(
-            &mut items,
-            physics,
-            &interaction.parts,
-            &interaction.mechanisms,
-        )?;
         items.sync_poses(physics);
         let spawn = &reference.area.player_spawn;
         let mut player = PlayerState::new(
@@ -1053,6 +1047,22 @@ impl GarageRuntime {
             &mut self.area.interaction,
             &mut self.physics,
         );
+    }
+
+    pub fn initialize_storage_frame(&mut self, dt: f32) -> Result<bool, ReferenceError> {
+        let changed = self.area.interaction.storage.initialize_frame(
+            &mut self.area.items,
+            &mut self.physics,
+            &self.area.interaction.parts,
+            &self.area.interaction.mechanisms,
+            if self.paused { 0.0 } else { dt },
+        )?;
+        if changed {
+            self.wheels.sync(&mut self.area.items, &mut self.physics)?;
+        }
+        self.area.items.sync_poses(&self.physics);
+        self.area.commit_poses(&self.physics, true);
+        Ok(changed)
     }
 
     pub fn clear_input(&mut self) {
