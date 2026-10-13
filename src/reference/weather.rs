@@ -304,16 +304,36 @@ impl WeatherReference {
             }
         }
         for p in &self.particles {
-            require(
-                p.flags.contains_key("gameObject.active")
-                    && p.flags.contains_key("renderer.enabled")
-                    && p.scalars.contains_key("gameObject.layer"),
-                "particle renderer owner",
-            )?;
-            require(
-                p.scalars.get("ShapeModule.type")
-                    == Some(&if p.role.starts_with("storm_") { 2. } else { 4. }),
-                "selected particle shape",
+            let check = |valid: bool, field: &str| {
+                if valid {
+                    Ok(())
+                } else {
+                    Err(ReferenceError(format!(
+                        "Invalid particle {}:{} role {} field {field}",
+                        p.source.file, p.source.path_id, p.role
+                    )))
+                }
+            };
+            let scalar = |field: &str| -> Result<f32, ReferenceError> {
+                check(p.scalars.contains_key(field), field)?;
+                let value = p.scalars[field];
+                check(value.is_finite(), field)?;
+                Ok(value)
+            };
+            for name in ["gameObject.active", "renderer.enabled"] {
+                check(p.flags.contains_key(name), name)?;
+            }
+            for name in [
+                "ForceModule",
+                "TriggerModule",
+                "RotationModule",
+                "EmissionModule",
+            ] {
+                check(p.module_flags.contains_key(name), name)?;
+            }
+            check(
+                scalar("ShapeModule.type")? == if p.role.starts_with("storm_") { 2. } else { 4. },
+                "ShapeModule.type",
             )?;
             for name in [
                 "InitialModule.startSize",
@@ -323,39 +343,167 @@ impl WeatherReference {
                 "InitialModule.gravityModifier",
                 "SizeModule.curve",
             ] {
-                require(p.curves.contains_key(name), "particle required curve")?;
+                check(p.curves.contains_key(name), name)?;
             }
             for name in ["InitialModule.startColor", "ColorModule.gradient"] {
-                require(p.colors.contains_key(name), "particle required gradient")?;
+                check(p.colors.contains_key(name), name)?;
             }
             for name in ["ShapeModule.m_Rotation", "ShapeModule.m_Scale"] {
-                require(p.vectors.contains_key(name), "particle required vector")?;
+                check(p.vectors.contains_key(name), name)?;
             }
-            for name in [
+            check(
+                (0. ..=90.).contains(&scalar("ShapeModule.angle")?),
                 "ShapeModule.angle",
-                "ShapeModule.radius.value",
-                "ShapeModule.radiusThickness",
-                "ShapeModule.randomPositionAmount",
-                "renderer.m_SortMode",
-                "renderer.m_MinParticleSize",
-                "renderer.m_MaxParticleSize",
-                "ringBufferMode",
-            ] {
-                require(p.scalars.contains_key(name), "particle required scalar")?;
-            }
-            require(
-                p.materials.len() == 1
-                    && p.materials[0]
-                        .textures
-                        .iter()
-                        .any(|t| t.property == "_MainTex"),
-                "particle source material",
             )?;
-            for c in p.curves.values() {
-                require(
+            check(
+                scalar("ShapeModule.radius.value")? >= 0.,
+                "ShapeModule.radius.value",
+            )?;
+            check(
+                (0. ..=1.).contains(&scalar("ShapeModule.radiusThickness")?),
+                "ShapeModule.radiusThickness",
+            )?;
+            check(
+                scalar("ShapeModule.randomPositionAmount")? >= 0.,
+                "ShapeModule.randomPositionAmount",
+            )?;
+            let layer = scalar("gameObject.layer")?;
+            check(
+                (0. ..=31.).contains(&layer) && layer.fract() == 0.,
+                "gameObject.layer",
+            )?;
+            let sort = scalar("renderer.m_SortMode")?;
+            check(
+                (0. ..=5.).contains(&sort) && sort.fract() == 0.,
+                "renderer.m_SortMode",
+            )?;
+            let min_size = scalar("renderer.m_MinParticleSize")?;
+            let max_size = scalar("renderer.m_MaxParticleSize")?;
+            check(min_size >= 0., "renderer.m_MinParticleSize")?;
+            check(max_size >= min_size, "renderer.m_MaxParticleSize")?;
+            scalar("renderer.m_SortingFudge")?;
+            let ring = scalar("ringBufferMode")?;
+            check(
+                (0. ..=2.).contains(&ring) && ring.fract() == 0.,
+                "ringBufferMode",
+            )?;
+            if p.module_flags["ForceModule"] {
+                for name in ["ForceModule.x", "ForceModule.y", "ForceModule.z"] {
+                    check(p.curves.contains_key(name), name)?;
+                }
+                check(
+                    p.flags.contains_key("ForceModule.inWorldSpace"),
+                    "ForceModule.inWorldSpace",
+                )?;
+            }
+            if p.module_flags["RotationModule"] {
+                check(
+                    p.curves.contains_key("RotationModule.curve"),
+                    "RotationModule.curve",
+                )?;
+            }
+            if p.module_flags["TriggerModule"] {
+                let inside = scalar("TriggerModule.inside")?;
+                check(
+                    (0. ..=3.).contains(&inside) && inside.fract() == 0.,
+                    "TriggerModule.inside",
+                )?;
+                check(
+                    scalar("TriggerModule.radiusScale")? >= 0.,
+                    "TriggerModule.radiusScale",
+                )?;
+            }
+            if p.module_flags["EmissionModule"] {
+                scalar("EmissionModule.m_BurstCount")?;
+            }
+            if p.scalars.contains_key("EmissionModule.m_BurstCount") {
+                let bursts = scalar("EmissionModule.m_BurstCount")?;
+                check(
+                    (0. ..=1.).contains(&bursts) && bursts.fract() == 0.,
+                    "EmissionModule.m_BurstCount",
+                )?;
+                if bursts == 1. {
+                    let name = "EmissionModule.m_Bursts.0.countCurve";
+                    check(p.curves.contains_key(name), name)?;
+                    check(p.curves[name].scalar >= 0., name)?;
+                }
+            }
+            if p.role == "urine" || p.role.starts_with("outlet_") {
+                check(
+                    p.module_flags.get("CollisionModule") == Some(&true),
+                    "CollisionModule",
+                )?;
+                for name in [
+                    "CollisionModule.m_Bounce",
+                    "CollisionModule.m_Dampen",
+                    "CollisionModule.m_EnergyLossOnCollision",
+                ] {
+                    check(p.curves.contains_key(name), name)?;
+                    check((0. ..=1.).contains(&p.curves[name].scalar), name)?;
+                }
+                check(
+                    p.curves["InitialModule.startLifetime"].scalar > 0.,
+                    "InitialModule.startLifetime.scalar",
+                )?;
+                check(
+                    p.curves["InitialModule.startSize"].scalar > 0.,
+                    "InitialModule.startSize.scalar",
+                )?;
+                check(
+                    scalar("CollisionModule.radiusScale")? > 0.,
+                    "CollisionModule.radiusScale",
+                )?;
+                let mask = scalar("CollisionModule.collidesWith.m_Bits")?;
+                // Unity exports its unsigned layer mask through a floating-point map.
+                check(
+                    mask >= 0. && mask <= u32::MAX as f32 && mask.fract() == 0.,
+                    "CollisionModule.collidesWith.m_Bits",
+                )?;
+                check(scalar("outlet.maxSpeed")? >= 0., "outlet.maxSpeed")?;
+                let min_rate = scalar("outlet.minRate")?;
+                check(min_rate >= 0., "outlet.minRate")?;
+                check(scalar("outlet.maxRate")? >= min_rate, "outlet.maxRate")?;
+                for index in 0..6 {
+                    let name = format!("fluid.{index}");
+                    check(p.vectors.contains_key(&name), &name)?;
+                    scalar(&format!("fluid.{index}.alpha"))?;
+                }
+                check(
+                    p.flags.contains_key("outlet.forceColor"),
+                    "outlet.forceColor",
+                )?;
+                if p.flags["outlet.forceColor"] {
+                    check(
+                        p.vectors.contains_key("outlet.forceColor"),
+                        "outlet.forceColor",
+                    )?;
+                    scalar("outlet.forceAlpha")?;
+                    check(
+                        (0. ..=1.).contains(&scalar("outlet.forceColorM")?),
+                        "outlet.forceColorM",
+                    )?;
+                }
+            }
+            check(p.materials.len() == 1, "materials")?;
+            let material = &p.materials[0];
+            check(
+                material.textures.iter().any(|t| t.property == "_MainTex"),
+                "materials.textures._MainTex",
+            )?;
+            let tint = if material.shader.name == "Legacy Shaders/Particles/Alpha Blended" {
+                "_TintColor"
+            } else {
+                "_Color"
+            };
+            check(
+                material.colors.get(tint).is_some_and(|v| finite(v)),
+                &format!("materials.colors.{tint}"),
+            )?;
+            for (name, c) in &p.curves {
+                check(
                     (c.mode != 1 && c.mode != 2 || !c.max_curve.keys.is_empty())
                         && (c.mode != 2 || !c.min_curve.keys.is_empty()),
-                    "particle curve keys",
+                    name,
                 )?;
             }
 
@@ -380,27 +528,29 @@ impl WeatherReference {
                     && !p.materials.is_empty(),
                 "particle modules",
             )?;
-            require(
-                p.scalars.values().all(|v| v.is_finite()) && p.vectors.values().all(|v| finite(v)),
-                "particle values",
-            )?;
-            for c in p.curves.values() {
-                require(
+            for (name, value) in &p.scalars {
+                check(value.is_finite(), name)?;
+            }
+            for (name, value) in &p.vectors {
+                check(finite(value), name)?;
+            }
+            for (name, c) in &p.curves {
+                check(
                     c.mode <= 3
                         && finite(&[c.scalar, c.min_scalar])
                         && curve_valid(&c.min_curve)
                         && curve_valid(&c.max_curve),
-                    "particle curve",
+                    name,
                 )?;
             }
-            for c in p.colors.values() {
-                require(
+            for (name, c) in &p.colors {
+                check(
                     c.mode <= 4
                         && finite(&c.min_color)
                         && finite(&c.max_color)
                         && gradient_valid(&c.min_gradient)
                         && gradient_valid(&c.max_gradient),
-                    "particle color",
+                    name,
                 )?;
             }
             for l in &p.limits {

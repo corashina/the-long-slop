@@ -1,8 +1,8 @@
 # Survival, sleep, and weather source audit
 
-Date: 2026-10-12, Europe/Warsaw.
+Date: 2026-10-13, Europe/Warsaw.
 Status: Tasks 1–8 implemented and reviewed. Task 9 completed source inspection and documentation.
-Final branch review remains required.
+The final branch review found two P2 defects. The final fixes await scoped review.
 See the [completion report](2026-10-12-survival-sleep-weather-completion.md) for current evidence and limits.
 
 ## Evidence
@@ -114,6 +114,23 @@ Each update removes that fraction from each queue and applies it to the current 
 The global sleep multiplier does not multiply this queue fraction.
 Excess food increases bowel state; excess drink changes bladder fluid.
 Some source fluid paths bypass capacity clamps. Do not replace them with one uniform clamp without evidence.
+
+Final review source checks confirm retained bladder order `[alcohol, water]` in tank `level1:73403`.
+`ChangeOne` appends a new fluid type; later gasoline therefore follows water.
+`fluidcontainer.ChangeWithoutMix`, managed lines 28368–28389, mutates that retained list.
+`GetPercent`, lines 28304–28314, divides each amount by the current total after the prior mutation.
+The fluid owner now keeps this order for urine debit and queued excess water.
+The ordered path also sums the retained entries in source order.
+`tankcapscript`, lines 63456–63458, calls `Tank.Upd()` after the urine debit.
+`tankscript.Upd`, lines 63615–63624, removes the first nonpositive entry and stops.
+The urine boundary now calls the fluid owner's one-entry cleanup. Queued excess water adds no capacity clamp or cleanup.
+Source `GetPercent` has no zero-total guard. Exact intermediate zero totals can produce non-finite fractions.
+These fixes preserve that source division; we ran no malformed-input or behavioral harness under the user waiver.
+
+The final particle validator checks role, enabled-module, outlet, collision, fluid-color, and material map fields before construction.
+It checks consumer bounds for layers, sizes, radii, lifetimes, rates, masks, and module enums.
+Errors include particle source, role, and field. Validation accepts finite signed force, gravity, rotation, sorting fudge, and HDR colors.
+Current production and fixture schema checks pass; this result does not establish malformed-input execution or runtime parity.
 
 ## Consumption and toilet actions
 

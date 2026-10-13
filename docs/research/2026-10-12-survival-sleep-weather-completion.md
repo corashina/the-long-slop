@@ -1,17 +1,17 @@
 # Survival, sleep, and weather completion
 
-Date: 2026-10-12, Europe/Warsaw.
+Date: 2026-10-13, Europe/Warsaw.
 Branch: `codex/survival-weather`.
 Execution base: `8daacbd1047883ea5a9aa00c82fca2597225ccae`.
-Product head: `7f166072e319681a325618c66c5b1d6b0e892f64`.
+Final fix base: `5abfb6c19a88d6b99f1cacf3c5cacf32198917b1`.
 
-Tasks 1–8 implement the approved feature. Their source and code reviews have no open implementation blocker.
-Task 9 inspected integration and retained the evidence. Task 9 changes documentation only.
-The controller must complete the final whole-branch review before integration.
+Tasks 1–8 implement the approved feature. Task 9 inspected integration and retained the evidence.
+The final branch review found two P2 contract defects. This fix wave addresses both defects.
+The controller must review these fixes before integration.
 
 The user said “Continue. Ignore tests”, after “Skip tests”.
 We skipped further behavioral test edits, test runs, browser acceptance, and audible checks.
-Earlier test counts describe earlier code. They do not certify this product head.
+Earlier test counts describe earlier code. They do not certify the final fixes.
 Compilation and source validation do not establish assembled behavior or matched Unity appearance.
 
 ## Source identities
@@ -124,7 +124,28 @@ We added no runtime dependency, compatibility loader, migration, settings menu, 
 
 ## Current build and source evidence
 
-Task 9 verified current artifact sizes and hashes against final Task 8B receipts.
+The final fixes use retained fluid order for bladder changes and remove one nonpositive entry after each urine debit.
+Queued excess water still uses the uncapped source path.
+Particle validation checks fields before fluid, storm, splash, and render owners can index their maps.
+Errors identify the particle source, role, and field. Signed force, gravity, rotation, sorting fudge, and HDR colors remain valid.
+
+| Current check | Evidence and result |
+|---|---|
+| Changed Rust format, full format check, native check/release, WASM release, bindings | `final-fix-build-2.log`; each command and Docker exited 0 |
+| Managed order, fractions, cleanup, and initial tank | `final-fix-source.log`; accepted managed hash and tank receipt matched |
+| Strict selected particle recovery, production and fixture schemas, material/texture hashes | `final-fix-validation.log`; each check exited 0 |
+| JavaScript/Python syntax and diff whitespace | `final-fix-static.log`; each check exited 0 |
+| Current artifact and frozen source hashes | `final-fix-hashes.log` and `final-fix-current-hashes.json` |
+
+The first build stopped during native release after Docker lost its container connection, exit 125.
+`final-fix-build.log` retains that failure. Docker reported no running container before the retry.
+The retry completed the full build against frozen code. We added no runtime check or test harness.
+The export, particle shader, emitted GLSL, and particle source document match the Task 8B hashes.
+We reuse their static shader and source-export receipts below.
+
+### Historical Task 8B and Task 9 receipts
+
+Task 9 verified artifact sizes and hashes against the Task 8B receipts at that earlier head.
 Documentation is the only Task 9 change. We reused those builds and did not rebuild unchanged code.
 
 | Check | Evidence and result |
@@ -137,12 +158,16 @@ Documentation is the only Task 9 change. We reused those builds and did not rebu
 | Task 9 source receipts and current hashes | `task9-source-hashes.log`; selected records, managed receipt, and eight artifact hashes matched, exit 0 |
 | Task 9 final documentation checks | `task9-static.log`; diff whitespace, artifact unchanged checks, document contract, and evidence retention checks exited 0 |
 
-Task 8B logs retain intermediate failures and their repairs. Only final receipts certify that build.
+Task 8B logs retain intermediate failures and their repairs. Their final receipts certify that earlier build.
 Git emitted five CRLF conversion notices in Task 8B. We make no warning-free claim.
+
+The earlier Task 8B WASM had 54,681,405 bytes and SHA256
+`dbf8a05b30f6633b64beefc0ed6607892a98cee0e6dc72bf6d7a541e522477bf`.
+The following table records the current final-fix artifacts.
 
 | Current artifact | Bytes | SHA256 |
 |---|---:|---|
-| WASM | 54681405 | `dbf8a05b30f6633b64beefc0ed6607892a98cee0e6dc72bf6d7a541e522477bf` |
+| WASM | 54689967 | `3adbee6be9632ad21147713f3075b3a542f9fae86a2c293d566af24da487141f` |
 | Generated JavaScript | 104793 | `57ecb910a598e15d730344dcef3ac42fa42f15fec3c9ddefd4d41ff09d1531c0` |
 | Production manifest | 6726486 | `783ccf07f57c44a46a938f7ed1298981177ce83be7c42fb4e932e4b69d39ff3e` |
 | Current schema fixture | 1046113 | `76b70ec8c2ecc762dc04b6644ee27d4ff5c523c956cfc67600343f72c8217e51` |
@@ -154,7 +179,9 @@ Keep `.cache/survival-weather/` in the owned worktree through integration.
 `execution-evidence/` preserves SDD briefs, reports, reviews, raw logs, diffs, override, and the complete ledger.
 `particles-evidence/` preserves selected native shape, activity, pose, module, and material receipts.
 `task9-source-evidence/` preserves mouth 67363, urine 70534, tank 73403, decompilation receipt, and numbered managed excerpts.
-`task9-current-hashes.json` preserves eight current artifact hashes, including emitted GLSL stages and the particle reference.
+`task9-current-hashes.json` preserves eight historical artifact hashes, including emitted GLSL stages and the particle reference.
+`final-fix-current-hashes.json` records current artifacts and the three frozen source files.
+`final-fix-report.md` records the fix commit, commands, source causes, self-review, and limits.
 The cache retains final build scripts and full command output. The tracked reports retain source identities and limits.
 Recovered source, selected assets, and local evidence remain ignored.
 

@@ -80,7 +80,21 @@ impl FluidContainer {
         changed
     }
 
-    fn cleanup_one(&mut self) {
+    /// Source ChangeWithoutMix updates retained entries with each new total.
+    pub(crate) fn change_without_mix(&mut self, amount: f32) {
+        self.track_positive_types();
+        for position in 0..self.order_len as usize {
+            let index = self.order[position] as usize;
+            let total: f32 = self.order[..self.order_len as usize]
+                .iter()
+                .map(|&entry| self.mixture.quantities_liters[entry as usize])
+                .sum();
+            let fraction = self.mixture.quantities_liters[index] / total;
+            self.mixture.quantities_liters[index] += amount * fraction;
+        }
+    }
+
+    pub(crate) fn cleanup_one(&mut self) {
         if let Some(position) = self.order[..self.order_len as usize]
             .iter()
             .position(|&index| self.mixture.quantities_liters[index as usize] <= 0.)

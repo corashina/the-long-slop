@@ -284,7 +284,8 @@ impl SurvivalState {
             let area =
                 reference.toilet.radius * reference.toilet.radius * std::f32::consts::PI * 0.025;
             let poured = area * self.valve * 2. * dt * fluid_scale;
-            self.change_without_mix(-poured);
+            self.bladder.change_without_mix(-poured);
+            self.bladder.cleanup_one();
             result.poured_liters = poured;
         }
         if input.burp_held {
@@ -354,17 +355,6 @@ impl SurvivalState {
         self.bladder.record_type(3);
     }
 
-    fn change_without_mix(&mut self, amount: f32) {
-        // ChangeWithoutMix distributes an uncapped change over the present fluids.
-        for index in 0..6 {
-            let total = self.bladder.mixture.total();
-            if total > 0. {
-                let fraction = self.bladder.mixture.quantities_liters[index] / total;
-                self.bladder.mixture.quantities_liters[index] += amount * fraction;
-            }
-        }
-    }
-
     fn eat_instant(&mut self, reference: &SurvivalReference, effect: ConsumptionEffect) {
         let free_food = reference.maximum.food - self.needs.food;
         if effect.food <= free_food {
@@ -377,7 +367,7 @@ impl SurvivalState {
         }
         let to_water = (reference.maximum.water - self.needs.water).min(effect.water);
         self.needs.water = (self.needs.water + to_water).clamp(0., reference.maximum.water);
-        self.change_without_mix(effect.water - to_water);
+        self.bladder.change_without_mix(effect.water - to_water);
         if effect.hp > 0. {
             if !self.dead {
                 self.needs.hp = (self.needs.hp + effect.hp).clamp(0., reference.maximum.hp);
