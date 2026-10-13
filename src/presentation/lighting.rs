@@ -185,10 +185,6 @@ impl Plugin for SourceLightingPlugin {
                 )
                     .chain(),
             );
-        app.add_systems(
-            PostUpdate,
-            super::world::sync_road_lamps.before(bevy::transform::TransformSystems::Propagate),
-        );
         let render_app = app.sub_app_mut(RenderApp);
         render_app
             .init_resource::<ExtractedLighting>()
@@ -220,6 +216,8 @@ pub fn load_lighting(commands: &mut Commands, server: &AssetServer, lighting: &L
                         filter,
                         wrap_u,
                         wrap_v,
+                        main_world_only: false,
+                        decoded_bytes: 0,
                     };
                 })
                 .load(texture.mip_data.path.clone());
@@ -592,6 +590,11 @@ pub(crate) fn bind_lighting(
             usize::from(light.shadows.kind != 0)
         })
         .sum();
+    source.road_lamps.capacity = (MAX_LIGHTS - source.lights.len()).min(if road_faces == 0 {
+        MAX_LIGHTS
+    } else {
+        (SHADOW_SLOTS - shadow_start) / road_faces
+    });
     if road.lights.len() != 1
         || source.lights.len() + source.road_lamps.capacity > MAX_LIGHTS
         || shadow_start + source.road_lamps.capacity * road_faces > SHADOW_SLOTS

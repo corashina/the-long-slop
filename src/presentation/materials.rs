@@ -1,3 +1,10 @@
+pub mod grass;
+pub mod impostor;
+pub mod lod;
+pub mod primary;
+pub mod specular;
+pub mod terrain;
+pub mod world_textures;
 use crate::reference::{
     self as source, AssetUsage, MaterialRecord, ReferenceManifest, ShaderFamily, TextureColorSpace,
     TextureRecord,
@@ -48,10 +55,12 @@ pub enum RenderingState {
 pub struct SourceUniform {
     color: Vec4,
     emission: Vec4,
+    specular: Vec4,
     factors: Vec4,
     scales: Vec4,
     flags: UVec4,
     banks: [UVec4; 3],
+    layers: [UVec4; 3],
     uv: [Vec4; 9],
     sampling: [Vec4; 9],
     defaults: [Vec4; 9],
@@ -99,6 +108,8 @@ fn blend_factor(value: u8) -> BlendFactor {
 }
 
 struct SourceTexture {
+    eager: bool,
+    users: usize,
     record: TextureRecord,
     levels: Vec<Handle<Image>>,
     image: Option<Handle<Image>>,
@@ -106,6 +117,9 @@ struct SourceTexture {
 }
 #[derive(Resource)]
 pub struct SourceMaterials {
+    pub world_textures: world_textures::WorldTextures,
+    pub world_primary: primary::PrimaryOwnership,
+    pub world_deferred: primary::DeferredAllocation,
     pub standard_records: HashMap<AssetId<StandardMaterial>, (source::AssetId, u32)>,
     records: Vec<MaterialRecord>,
     textures: Vec<SourceTexture>,
@@ -138,20 +152,28 @@ struct WarmedPipelines {
 pub struct SourceMaterialPlugin;
 impl Plugin for SourceMaterialPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((ExtractResourcePlugin::<MaterialLoading>::default(),))
-            .insert_resource(MaterialLoading(Arc::new(Mutex::new(LoadingData {
-                requests: Vec::new(),
-                sealed: false,
-                state: RenderingState::Loading,
-            }))))
-            .add_systems(
-                Update,
-                (
-                    material_readiness,
-                    bind_authored_materials.after(bind_materials),
-                )
-                    .chain(),
-            );
+        app.add_plugins((
+            ExtractResourcePlugin::<MaterialLoading>::default(),
+            MaterialPlugin::<terrain::TerrainMaterial>::default(),
+            MaterialPlugin::<specular::SpecularMaterial>::default(),
+            MaterialPlugin::<impostor::ImpostorMaterial>::default(),
+            MaterialPlugin::<lod::LodCasterMaterial>::default(),
+            MaterialPlugin::<grass::material::GrassMaterial>::default(),
+            grass::writers::GrassDisplacementPlugin,
+        ))
+        .insert_resource(MaterialLoading(Arc::new(Mutex::new(LoadingData {
+            requests: Vec::new(),
+            sealed: false,
+            state: RenderingState::Loading,
+        }))))
+        .add_systems(
+            Update,
+            (
+                material_readiness,
+                bind_authored_materials.after(bind_materials),
+            )
+                .chain(),
+        );
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
             render.init_resource::<WarmedPipelines>().add_systems(
                 Render,
@@ -202,6 +224,8 @@ pub fn load_materials(
                 .collect();
             texture_indices.insert(texture.file.clone(), textures.len());
             textures.push(SourceTexture {
+                eager: true,
+                users: 0,
                 record: texture.clone(),
                 levels,
                 image: None,
@@ -213,6 +237,9 @@ pub fn load_materials(
         }
     }
     commands.insert_resource(SourceMaterials {
+        world_textures: world_textures::WorldTextures::default(),
+        world_primary: primary::PrimaryOwnership::default(),
+        world_deferred: primary::DeferredAllocation::default(),
         standard_records: HashMap::new(),
         records,
         textures,
@@ -243,52 +270,74 @@ pub fn material_readiness(
             return;
         }
     }
-    let mut added_bytes = 0;
-    for texture in &mut source.textures {
-        if texture.image.is_some() {
-            continue;
+    match assemble_textures(&mut source.textures, &server, &mut images, true) {
+        Ok(bytes) => source.texture_bytes += bytes,
+        Err(error) => {
+            source.state = RenderingState::Failed(error.0);
+            return;
         }
+    }
+    if source.bound {
+        source.state = loading.0.lock().unwrap().state.clone();
+    }
+}
+fn assemble_textures(
+    textures: &mut [SourceTexture],
+    server: &AssetServer,
+    images: &mut Assets<Image>,
+    eager: bool,
+) -> Result<usize, source::ReferenceError> {
+    for texture in textures
+        .iter_mut()
+        .filter(|texture| texture.eager == eager && texture.image.is_none())
+    {
         for (level, handle) in texture.levels.iter().enumerate() {
             if let LoadState::Failed(error) = server.load_state(handle.id()) {
-                source.state =
-                    RenderingState::Failed(format!("{} mip {level}: {error}", texture.label));
-                return;
+                return Err(source::ReferenceError(format!(
+                    "{} mip {level}: {error}",
+                    texture.label
+                )));
             }
         }
-        if !texture
-            .levels
-            .iter()
-            .all(|handle| images.contains(handle.id()))
+        if texture.levels.len() != texture.record.mips.len()
+            || !texture
+                .levels
+                .iter()
+                .all(|handle| images.contains(handle.id()))
         {
             continue;
         }
-        let byte_count: usize = texture
+        let byte_count = texture
             .record
             .mips
             .iter()
             .map(|mip| mip.width as usize * mip.height as usize * 4)
             .sum();
-        let mut bytes = Vec::with_capacity(byte_count);
-        let mut assembled = None;
+        // Validate every mip before removing any admitted source image.
         for (handle, mip) in texture.levels.iter().zip(&texture.record.mips) {
-            let mut image = images.remove(handle.id()).expect("checked source mip");
+            let image = images.get(handle.id()).unwrap();
             let expected = mip.width as usize * mip.height as usize * 4;
             if image.width() != mip.width
                 || image.height() != mip.height
                 || image.data.as_ref().map(Vec::len) != Some(expected)
             {
-                source.state = RenderingState::Failed(format!(
+                return Err(source::ReferenceError(format!(
                     "{}: invalid decoded mip {}",
                     texture.label, mip.file
-                ));
-                return;
+                )));
             }
-            bytes.append(image.data.as_mut().expect("checked pixels"));
+        }
+        let mut bytes = Vec::with_capacity(byte_count);
+        let mut assembled = None;
+        for handle in &texture.levels {
+            let mut image = images.remove(handle.id()).unwrap();
+            bytes.append(image.data.as_mut().unwrap());
             if assembled.is_none() {
                 assembled = Some(image);
             }
         }
-        let mut image = assembled.expect("validated mip chain");
+        let mut image =
+            assembled.ok_or_else(|| source::ReferenceError("Missing authored mip chain".into()))?;
         image.data = Some(bytes);
         image.texture_descriptor.mip_level_count = texture.record.sampler.mip_count;
         image.asset_usage = RenderAssetUsages::RENDER_WORLD;
@@ -314,12 +363,9 @@ pub fn material_readiness(
         });
         texture.image = Some(images.add(image));
         texture.levels.clear();
-        added_bytes += byte_count;
+        return Ok(byte_count);
     }
-    source.texture_bytes += added_bytes;
-    if source.bound {
-        source.state = loading.0.lock().unwrap().state.clone();
-    }
+    Ok(0)
 }
 fn wrap(value: u8) -> ImageAddressMode {
     match value {
@@ -455,6 +501,7 @@ fn make_material(
                 ..default()
             },
             extension: SourceExtension {
+                lod_fade: 1.,
                 receiver_mask: mask,
                 surface: None,
             },
@@ -496,6 +543,7 @@ fn make_material(
             .to_f32_array(),
         ),
         emission: Vec4::ZERO,
+        specular: Vec4::ZERO,
         factors: Vec4::new(
             factor("_Metallic", 0.),
             factor("_Glossiness", 0.5),
@@ -520,6 +568,7 @@ fn make_material(
             factor("_UVSec", 0.) as u32,
         ),
         banks: [UVec4::ZERO; 3],
+        layers: [UVec4::ZERO; 3],
         uv: [Vec4::new(1., 1., 0., 0.); 9],
         sampling: [Vec4::ZERO; 9],
         defaults: [Vec4::ONE; 9],
@@ -621,6 +670,7 @@ fn make_material(
             ..default()
         },
         extension: SourceExtension {
+            lod_fade: 1.,
             receiver_mask: mask,
             surface: Some(SourceSurface {
                 data,
@@ -804,10 +854,12 @@ impl Default for SourceSurface {
             data: SourceUniform {
                 color: Vec4::ONE,
                 emission: Vec4::ZERO,
+                specular: Vec4::ZERO,
                 factors: Vec4::ZERO,
                 scales: Vec4::ZERO,
                 flags: UVec4::ZERO,
                 banks: [UVec4::ZERO; 3],
+                layers: [UVec4::ZERO; 3],
                 uv: [Vec4::ZERO; 9],
                 sampling: [Vec4::ZERO; 9],
                 defaults: [Vec4::ONE; 9],
@@ -945,10 +997,20 @@ impl Material for SourceMaterial {
     }
 }
 
-#[derive(Asset, TypePath, Clone, Debug, Default)]
+#[derive(Asset, TypePath, Clone, Debug)]
 pub struct SourceExtension {
     pub receiver_mask: u32,
+    pub lod_fade: f32,
     pub surface: Option<SourceSurface>,
+}
+impl Default for SourceExtension {
+    fn default() -> Self {
+        Self {
+            receiver_mask: 0,
+            lod_fade: 1.,
+            surface: None,
+        }
+    }
 }
 impl MaterialExtension for SourceExtension {
     fn vertex_shader() -> ShaderRef {
@@ -1139,8 +1201,13 @@ impl AsBindGroup for SourceExtension {
                     OwnedBindingResource::Buffer(
                         device.create_buffer_with_data(&BufferInitDescriptor {
                             label: Some("source receiver mask"),
-                            contents: &[self.receiver_mask.to_le_bytes(), [0; 4], [0; 4], [0; 4]]
-                                .concat(),
+                            contents: &[
+                                self.receiver_mask.to_le_bytes(),
+                                self.lod_fade.to_le_bytes(),
+                                [0; 4],
+                                [0; 4],
+                            ]
+                            .concat(),
                             usage: BufferUsages::UNIFORM,
                         }),
                     ),
@@ -1331,6 +1398,7 @@ pub fn bind_materials(
                     materials.add(SourceMaterial {
                         base,
                         extension: SourceExtension {
+                            lod_fade: 1.,
                             receiver_mask: mask,
                             surface: None,
                         },

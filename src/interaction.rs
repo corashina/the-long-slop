@@ -461,6 +461,29 @@ impl InteractionState {
         }
     }
 
+    pub fn generated_valve(&self, cap: ItemId) -> Option<f32> {
+        self.openings
+            .iter()
+            .find(|opening| opening.reference.cap == cap)
+            .map(|opening| opening.valve)
+    }
+    pub fn restore_generated_valve(
+        &mut self,
+        cap: ItemId,
+        valve: f32,
+    ) -> Result<(), ReferenceError> {
+        if !valve.is_finite() || !(0.0..=1.0).contains(&valve) {
+            return Err(ReferenceError("Invalid generated valve snapshot".into()));
+        }
+        let opening = self
+            .openings
+            .iter_mut()
+            .find(|opening| opening.reference.cap == cap)
+            .ok_or_else(|| ReferenceError("Missing generated valve".into()))?;
+        opening.valve = valve;
+        Ok(())
+    }
+
     pub fn register_supply(&mut self, item: ItemId) {
         self.supplies.insert(item);
     }

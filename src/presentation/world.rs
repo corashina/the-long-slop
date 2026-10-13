@@ -3,7 +3,7 @@ use bevy::ecs as bevy_ecs;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
-use crate::world::{ChunkData, ChunkKey, PropKind, WorldStream, road_sample};
+use crate::world::{ChunkData, ChunkKey, LegacyWorldStream, PropKind, road_sample};
 
 #[derive(Component)]
 pub struct ChunkVisual(pub [f64; 3]);
@@ -50,7 +50,7 @@ impl WorldVisuals {
 
     pub fn sync(
         &mut self,
-        stream: &WorldStream,
+        stream: &LegacyWorldStream,
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
     ) {
@@ -224,4 +224,26 @@ fn terrain_mesh(chunk: &ChunkData) -> Mesh {
 }
 
 mod lamps;
-pub(crate) use lamps::{RoadLamps, finish_road_lamp_warmup, prepare_road_lamp, sync_road_lamps};
+pub(crate) use lamps::{RoadLamps, finish_road_lamp_warmup, prepare_road_lamp};
+
+mod source;
+pub use source::{SourceWorldVisuals, SurfaceMaterial};
+
+pub mod preflight;
+pub mod prototype_loader;
+
+pub mod prototypes;
+
+pub mod pipelines;
+
+mod surface_bindings;
+
+pub mod grass_jobs;
+
+pub mod instance_materials;
+
+pub mod lod;
+
+pub mod instances;
+
+pub mod runtime;

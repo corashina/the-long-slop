@@ -405,6 +405,10 @@ impl PlacementIndex {
         }
     }
 
+    pub fn foundation_count(&self) -> usize {
+        self.foundations.len()
+    }
+
     pub fn foundations_in(&self, bounds: WorldBounds, output: &mut Vec<FoundationPoint>) {
         output.clear();
         for block in &self.blocks {

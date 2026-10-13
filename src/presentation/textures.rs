@@ -1,4 +1,5 @@
 //! Original decoded source mip loader.
+use bevy::tasks::futures_lite::AsyncReadExt;
 use bevy::{
     asset::{AssetLoader, LoadContext, RenderAssetUsages, io::Reader},
     image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
@@ -14,6 +15,10 @@ pub struct SourceImageSettings {
     pub filter: u8,
     pub wrap_u: u8,
     pub wrap_v: u8,
+    #[serde(default)]
+    pub main_world_only: bool,
+    #[serde(default)]
+    pub decoded_bytes: usize,
 }
 impl AssetLoader for SourceImageLoader {
     type Asset = Image;
@@ -25,8 +30,27 @@ impl AssetLoader for SourceImageLoader {
         settings: &Self::Settings,
         _: &mut LoadContext<'_>,
     ) -> Result<Image, Self::Error> {
-        let mut data = Vec::new();
-        reader.read_to_end(&mut data).await?;
+        let capacity = settings.decoded_bytes.checked_add(16).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Source image size overflow",
+            )
+        })?;
+        let mut data = Vec::with_capacity(capacity);
+        if settings.decoded_bytes == 0 {
+            Reader::read_to_end(reader, &mut data).await?;
+        } else {
+            reader
+                .take(capacity as u64 + 1)
+                .read_to_end(&mut data)
+                .await?;
+            if data.len() > capacity {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Source mip exceeds admitted bytes",
+                ));
+            }
+        }
         let invalid = || {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -48,7 +72,9 @@ impl AssetLoader for SourceImageLoader {
                 u64::from((width >> level).max(1)) * u64::from((height >> level).max(1)) * 4
             })
             .sum::<u64>();
-        if bytes + 16 != data.len() as u64 {
+        if bytes + 16 != data.len() as u64
+            || (settings.decoded_bytes != 0 && bytes != settings.decoded_bytes as u64)
+        {
             return Err(invalid());
         }
         data.drain(..16);
@@ -64,7 +90,11 @@ impl AssetLoader for SourceImageLoader {
             } else {
                 TextureFormat::Rgba8Unorm
             },
-            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+            if settings.main_world_only {
+                RenderAssetUsages::MAIN_WORLD
+            } else {
+                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD
+            },
         );
         image.texture_descriptor.mip_level_count = count;
         image.data = Some(data);

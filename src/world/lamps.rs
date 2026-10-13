@@ -40,7 +40,7 @@ pub fn road_lamp_placement(
     }
 }
 
-fn flatten_then_tilt(incoming: Rotation, angles: [i32; 3]) -> Rotation {
+pub(crate) fn flatten_then_tilt(incoming: Rotation, angles: [i32; 3]) -> Rotation {
     let forward = incoming * Vector::NEG_Z;
     let yaw = (-forward.x).atan2(-forward.z);
     let [x, y, z] = angles.map(|angle| (angle as f32).to_radians());
@@ -51,7 +51,7 @@ fn flatten_then_tilt(incoming: Rotation, angles: [i32; 3]) -> Rotation {
         * Rotation::from_rotation_z(z)
 }
 
-fn source_angles(seed: u64, id: RoadLampId, reference: &RoadLampReference) -> [i32; 3] {
+pub(crate) fn source_angles(seed: u64, id: RoadLampId, reference: &RoadLampReference) -> [i32; 3] {
     // Source seed and segment index are signed integers. Preserve their low bits and wrapping sum.
     let mut random = SourceRandom::new((seed as i32).wrapping_add(id.0 as i32));
     let [chance1, chance2] = reference.rotation_chances;

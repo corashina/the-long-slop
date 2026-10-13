@@ -386,6 +386,7 @@ impl TerrainSurfaceJob {
         }
         output.vertices.reserve(n * n);
         output.normals.reserve(n * n);
+        output.tangents.reserve(n * n);
         output.uv.reserve(n * n);
         output.colors.reserve(n * n);
         for z in 0..n {
@@ -445,6 +446,9 @@ impl TerrainSurfaceJob {
             output.colors.push(color);
             output.vertices[index][2] = -p[2];
             output.normals[index][2] = -output.normals[index][2];
+            // Unity D3D11 missing TANGENT0 is RGBA8_UNORM FF0000FF.
+            // Reflect the source (1,0,0,1) tangent frame once.
+            output.tangents.push([1.0, 0.0, 0.0, -1.0]);
         }
         for triangle in &mut output.triangles {
             triangle.swap(1, 2);

@@ -1,0 +1,297 @@
+//! Source publication order and shared presentation ownership.
+use super::{
+    SourceWorldVisuals, grass_jobs::GrassJobs, instance_materials::InstanceMaterials,
+    instances::SourceInstances, pipelines::WorldPipelines, prototype_loader::SourceGltf,
+    prototypes::SourcePrototypes,
+};
+use crate::{
+    presentation::{
+        lighting::SourceLighting,
+        materials::{
+            grass::{GrassView, writers::GrassWriters},
+            terrain::TerrainMaterial,
+        },
+    },
+    reference::{ReferenceError, ReferenceManifest},
+    starting_area::StartingArea,
+    vehicle::PhysicsWorld,
+    world::{WorldBounds, WorldStream},
+};
+use bevy::{
+    ecs as bevy_ecs, ecs::system::SystemParam, mesh::skinning::SkinnedMeshInverseBindposes,
+    prelude::*,
+};
+#[derive(Resource, Default)]
+pub struct SourcePresentationAllocation {
+    session: u64,
+    lamps: (usize, usize, usize),
+    imported_writers: Vec<(Entity, Handle<Mesh>)>,
+    writers_bound: bool,
+    retired_materials: Vec<crate::reference::SourceId>,
+}
+#[derive(SystemParam)]
+pub struct WorldPresentation<'w, 's> {
+    pub commands: Commands<'w, 's>,
+    pub roots: Query<'w, 's, &'static mut Transform>,
+    pub prototypes: ResMut<'w, SourcePrototypes>,
+    pub pipelines: ResMut<'w, WorldPipelines>,
+    pub surfaces: ResMut<'w, SourceWorldVisuals>,
+    pub instances: ResMut<'w, SourceInstances>,
+    pub grass: ResMut<'w, GrassJobs>,
+    pub writers: ResMut<'w, GrassWriters>,
+    pub materials: InstanceMaterials<'w>,
+    pub terrain: ResMut<'w, Assets<TerrainMaterial>>,
+    pub casters: ResMut<'w, Assets<StandardMaterial>>,
+    pub assets: ResMut<'w, Assets<SourceGltf>>,
+    pub meshes: ResMut<'w, Assets<Mesh>>,
+    pub skins: ResMut<'w, Assets<SkinnedMeshInverseBindposes>>,
+    pub images: ResMut<'w, Assets<Image>>,
+    pub server: Res<'w, AssetServer>,
+    pub lights: ResMut<'w, SourceLighting>,
+    pub imported: Res<'w, crate::presentation::reference::ReferenceVisuals>,
+    pub imported_meshes: Query<'w, 's, (Entity, &'static ChildOf, &'static Mesh3d)>,
+    pub world_poses: Query<'w, 's, &'static GlobalTransform>,
+    pub allocation: ResMut<'w, SourcePresentationAllocation>,
+}
+impl WorldPresentation<'_, '_> {
+    pub fn prepare(
+        &mut self,
+        stream: &mut WorldStream,
+        reference: &ReferenceManifest,
+        physics: &mut PhysicsWorld,
+        area: &mut StartingArea,
+        view: GrassView,
+        time: f32,
+        lod_view: super::lod::LodView,
+        receivers: &[WorldBounds],
+        enabled: bool,
+    ) -> Result<(), ReferenceError> {
+        if self.allocation.session != stream.frame().request.session {
+            self.allocation.session = stream.frame().request.session;
+            self.allocation.lamps = (0, 0, 0);
+            self.allocation.writers_bound = false;
+            self.allocation.imported_writers.clear();
+            self.instances.retire(
+                stream,
+                &mut self.commands,
+                &mut self.meshes,
+                &mut self.materials,
+                &mut self.grass,
+                &mut self.writers,
+            )?;
+            self.grass.release_domains();
+            self.materials.cache.begin_world_session();
+            self.surfaces
+                .retire_session(&mut self.commands, &mut self.meshes);
+            self.surfaces
+                .reset_bindings(&mut self.terrain, &mut self.casters);
+        }
+        self.pipelines.prepare(stream)?;
+        self.writers.configure(stream, &reference.world)?;
+        self.writers.update_frame(
+            view.position,
+            Vec3::from_array(stream.origin.offset.map(|v| v as f32)),
+            time,
+        );
+        self.materials
+            .cache
+            .prepare_world_primary(stream, &self.server, &mut self.images)?;
+        self.materials
+            .cache
+            .prepare_world_deferred(stream, &self.server, &mut self.images)?;
+        self.prototypes.prepare(
+            stream,
+            reference,
+            &self.server,
+            &mut self.assets,
+            &mut self.meshes,
+            &mut self.skins,
+        )?;
+        stream.prepare();
+        if let Some(error) = stream.frame().failure {
+            return Err(ReferenceError(error.to_owned()));
+        }
+        while let Some(source) = self.prototypes.take_retired() {
+            self.allocation.retired_materials.push(source);
+        }
+        let mut index = 0;
+        while index < self.allocation.retired_materials.len() {
+            let source = &self.allocation.retired_materials[index];
+            if self.prototypes.requested(source) {
+                self.allocation.retired_materials.swap_remove(index);
+                continue;
+            }
+            let prototype = reference
+                .world
+                .prototypes
+                .iter()
+                .find(|p| p.source == *source)
+                .expect("retired prototype");
+            if !self.materials.cache.world_asset_ready(prototype.asset)
+                || prototype
+                    .deferred_materials
+                    .iter()
+                    .any(|m| !self.materials.cache.world_textures.ready(&m.source))
+            {
+                index += 1;
+                continue;
+            }
+            self.materials.cache.release_world_asset(
+                prototype.asset,
+                &mut self.images,
+                &mut self.materials.primary,
+            )?;
+            for material in &prototype.deferred_materials {
+                if !self
+                    .prototypes
+                    .references_material(reference, &material.source)
+                {
+                    self.materials.cache.world_textures.release(
+                        &material.source,
+                        &mut self.images,
+                        &self.server,
+                    )?;
+                }
+            }
+            self.allocation.retired_materials.swap_remove(index);
+        }
+        self.surfaces.prepare_bindings(
+            stream,
+            reference,
+            &mut self.prototypes,
+            &mut self.materials.cache,
+            &mut self.materials.primary,
+            &mut self.terrain,
+            &mut self.casters,
+        )?;
+        self.instances.prepare(
+            stream,
+            reference,
+            &mut self.prototypes,
+            &self.assets,
+            &self.meshes,
+            &mut self.materials,
+            &mut self.grass,
+            &mut self.pipelines,
+            &mut self.commands,
+            view,
+        )?;
+        self.instances.select_lods(
+            reference,
+            lod_view,
+            &mut self.commands,
+            &mut self.materials,
+            &mut self.grass,
+        );
+        self.surfaces
+            .prepare_surface(stream, &mut self.meshes, &mut self.pipelines)?;
+        let pending_road = stream.prepared_surface().and_then(|(_, surface)| {
+            (surface.key.layer == crate::world::WorldLayer::Road).then_some(surface.key.unit)
+        });
+        let lamps = super::lamps::source_lamp_admission(
+            &stream.frame(),
+            receivers,
+            reference,
+            &mut self.lights,
+            pending_road,
+        )?;
+        let old = self.allocation.lamps;
+        let mut a = stream.presentation_allocation();
+        a.active_cpu = a.active_cpu.saturating_sub(old.0) + lamps.0;
+        a.active_gpu = a.active_gpu.saturating_sub(old.1) + lamps.1;
+        a.objects = a.objects.saturating_sub(old.2) + lamps.2;
+        stream.set_presentation_allocation(a)?;
+        self.allocation.lamps = lamps;
+        // Light admission and complete renderer preparation precede collision mutation.
+        stream.publish(physics)?;
+        stream.sync_supplies(reference, &mut area.items, &mut area.interaction, physics)?;
+        self.surfaces.sync(
+            &stream.frame(),
+            &mut self.commands,
+            &mut self.meshes,
+            &mut self.roots,
+        )?;
+        self.instances.sync(
+            &stream.frame(),
+            reference,
+            physics,
+            &mut self.commands,
+            &mut self.roots,
+            &mut self.materials,
+        )?;
+        super::lamps::sync_source_lamps(
+            &stream.frame(),
+            receivers,
+            reference,
+            enabled,
+            &mut self.lights,
+            &mut self.commands,
+            &mut self.roots,
+        )?;
+        self.instances
+            .request_writers(stream, reference, &mut self.writers, &self.meshes)?;
+        if !self.allocation.writers_bound && self.imported.bound {
+            for writer in &reference.world.grass_displacement.writers {
+                if !writer.enabled {
+                    continue;
+                }
+                let Some(node) = reference
+                    .nodes
+                    .iter()
+                    .find(|n| n.source == writer.transform && n.active)
+                else {
+                    continue;
+                };
+                let Some(&entity) = self.imported.nodes.get(&node.id) else {
+                    continue;
+                };
+                for (primitive, parent, mesh) in &self.imported_meshes {
+                    if parent.parent() == entity {
+                        self.allocation
+                            .imported_writers
+                            .push((primitive, mesh.0.clone()));
+                    }
+                }
+            }
+            let mut a = stream.presentation_allocation();
+            a.active_cpu += self.allocation.imported_writers.capacity()
+                * std::mem::size_of::<(Entity, Handle<Mesh>)>();
+            stream.set_presentation_allocation(a)?;
+            self.allocation.writers_bound = true;
+        }
+        for (entity, mesh) in &self.allocation.imported_writers {
+            if let Ok(pose) = self.world_poses.get(*entity) {
+                self.writers.request(
+                    stream,
+                    *entity,
+                    mesh.clone(),
+                    pose.to_matrix(),
+                    &self.meshes,
+                )?;
+            }
+        }
+        self.writers.prepare(stream, &self.meshes)?;
+        if self.writers.ready()? {
+            self.grass.prepare(
+                stream,
+                &mut self.commands,
+                &mut self.meshes,
+                &mut self.materials.grass,
+                &mut self.pipelines,
+            )?;
+        }
+        self.instances
+            .request_grass(stream, &mut self.grass, view)?;
+        stream.retire_structures(physics, &mut area.items, &mut area.interaction);
+        self.instances.retire(
+            stream,
+            &mut self.commands,
+            &mut self.meshes,
+            &mut self.materials,
+            &mut self.grass,
+            &mut self.writers,
+        )?;
+        self.prototypes.retire_unused(stream, reference);
+        Ok(())
+    }
+}

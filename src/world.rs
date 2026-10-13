@@ -1,10 +1,14 @@
+pub mod changes;
 pub mod types;
+pub use changes::{ChangeRecords, ObjectChange, ObjectSnapshot};
 pub use types::*;
 
 use crate::reference::{Bounds, ColliderGeometry, ReferenceManifest, StartingAreaReference};
 use crate::vehicle::{ColliderHandle, PhysicsWorld, VehiclePose};
 
 mod lamps;
+mod source_lights;
+pub use source_lights::{WorldLight, required_world_lights};
 mod noise;
 mod placement;
 mod random;
@@ -23,8 +27,8 @@ mod instances;
 pub use instances::{StructureInstance, StructureRecipe};
 mod stream;
 pub use stream::{
-    PublishedSupply, PublishedSurface, SourceWorldStream, SurfaceKey, WorldFrame, WorldMetrics,
-    WorldRequest,
+    PresentationAllocation, PublishedSupply, PublishedSurface, SurfaceKey, WorldFrame,
+    WorldMetrics, WorldRequest, WorldStream,
 };
 mod startup;
 pub use startup::StartupTerrain;
@@ -363,7 +367,7 @@ pub struct LoadedChunk {
     pumps: Vec<(i64, ColliderHandle)>,
 }
 
-pub struct WorldStream {
+pub struct LegacyWorldStream {
     pub seed: u64,
     pub origin: WorldOrigin,
     chunks: Vec<LoadedChunk>,
@@ -374,7 +378,7 @@ pub struct WorldStream {
     vehicle_support: Vec<(ChunkKey, i64, ColliderHandle)>,
 }
 
-impl WorldStream {
+impl LegacyWorldStream {
     pub fn new(seed: u64) -> Self {
         Self {
             seed,
@@ -589,7 +593,7 @@ impl WorldStream {
 }
 
 pub fn sync_station_supplies(
-    stream: &mut WorldStream,
+    stream: &mut LegacyWorldStream,
     items: &mut crate::interaction::items::ItemStore,
     interaction: &mut crate::interaction::InteractionState,
     physics: &mut PhysicsWorld,

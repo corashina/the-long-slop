@@ -173,6 +173,18 @@ impl ItemStore {
         })
     }
 
+    pub fn attached_to(&self, mut id: ItemId, root: ItemId) -> bool {
+        for _ in 0..self.states.len() {
+            if id == root {
+                return true;
+            }
+            match self.get(id).map(|item| item.location) {
+                Some(ItemLocation::Attached(parent)) => id = parent,
+                _ => return false,
+            }
+        }
+        false
+    }
     pub fn mounted(&self, mut id: ItemId) -> bool {
         for _ in 0..self.states.len() {
             if id == self.vehicle_item {
@@ -286,6 +298,67 @@ impl ItemStore {
         });
         self.initialized_supplies.insert(id);
         Ok(())
+    }
+
+    pub fn generated_snapshot(
+        &self,
+        id: ItemId,
+        valve: Option<f32>,
+    ) -> Option<crate::world::ObjectSnapshot> {
+        let state = self.get(id)?;
+        Some(crate::world::ObjectSnapshot {
+            pose: AbsolutePose {
+                position: self.origin.absolute(state.pose.position),
+                rotation: state.pose.rotation,
+            },
+            condition: state.condition,
+            temperature: state.temperature,
+            fluid_quantities: state
+                .fluid
+                .as_ref()
+                .map(|fluid| fluid.mixture.quantities_liters),
+            valve,
+        })
+    }
+    pub fn restore_generated(
+        &mut self,
+        id: ItemId,
+        snapshot: &crate::world::ObjectSnapshot,
+    ) -> Result<(), ReferenceError> {
+        if !snapshot.pose.position.iter().all(|v| v.is_finite())
+            || !snapshot.pose.rotation.iter().all(|v| v.is_finite())
+            || !snapshot.condition.is_finite()
+            || snapshot.temperature.is_some_and(|v| !v.is_finite())
+            || snapshot
+                .fluid_quantities
+                .is_some_and(|values| values.iter().any(|v| !v.is_finite() || *v < 0.))
+        {
+            return Err(ReferenceError("Invalid generated object snapshot".into()));
+        }
+        let pose = VehiclePose {
+            position: self.origin.local(snapshot.pose.position),
+            rotation: snapshot.pose.rotation,
+        };
+        let item = self
+            .get_mut(id)
+            .ok_or_else(|| ReferenceError("Missing generated snapshot target".into()))?;
+        item.pose = pose;
+        item.condition = snapshot.condition;
+        item.temperature = snapshot.temperature;
+        if let Some(quantities) = snapshot.fluid_quantities {
+            let fluid = item
+                .fluid
+                .as_mut()
+                .ok_or_else(|| ReferenceError("Source snapshot has no container".into()))?;
+            fluid.mixture.quantities_liters = quantities;
+        }
+        Ok(())
+    }
+    pub fn can_remove_generated(&self, id: ItemId) -> bool {
+        self.generated.values().any(|value| *value == id)
+            && self
+                .get(id)
+                .is_some_and(|item| item.location == ItemLocation::World && item.body.is_none())
     }
 
     /// Unbind colliders first. Held, mounted, and attached items retain their identity.

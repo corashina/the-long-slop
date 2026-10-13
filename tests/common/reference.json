@@ -19008,7 +19008,15 @@
           "floats": {},
           "colors": {},
           "textures": [],
-          "render_targets": []
+          "render_targets": [],
+          "texture_coordinates": {
+            "_texcoord": [
+              1.0,
+              1.0,
+              0.0,
+              0.0
+            ]
+          }
         },
         {
           "source": {
@@ -19043,7 +19051,15 @@
           "floats": {},
           "colors": {},
           "textures": [],
-          "render_targets": []
+          "render_targets": [],
+          "texture_coordinates": {
+            "_texcoord": [
+              1.0,
+              1.0,
+              0.0,
+              0.0
+            ]
+          }
         },
         {
           "source": {
@@ -19078,7 +19094,15 @@
           "floats": {},
           "colors": {},
           "textures": [],
-          "render_targets": []
+          "render_targets": [],
+          "texture_coordinates": {
+            "_texcoord": [
+              1.0,
+              1.0,
+              0.0,
+              0.0
+            ]
+          }
         }
       ],
       "game_settings": {

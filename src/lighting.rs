@@ -57,6 +57,8 @@ pub struct CycleState {
     cloud_coordinate: f32,
     star_rotation: f32,
     output: CycleOutput,
+    terrain_color: [f32; 4],
+    next_biome_refresh: f64,
 }
 
 impl CycleState {
@@ -68,7 +70,9 @@ impl CycleState {
             cycle_seconds,
             cloud_coordinate: 0.,
             star_rotation: 0.,
-            output: evaluate(reference, cycle_seconds, 0., 0., 0.),
+            output: evaluate(reference, cycle_seconds, 0., 0., 0., [0.; 4]),
+            terrain_color: [0.; 4],
+            next_biome_refresh: reference.biome_refresh_seconds as f64,
         }
     }
 
@@ -103,6 +107,7 @@ impl CycleState {
             active,
             self.cloud_coordinate,
             self.star_rotation,
+            self.terrain_color,
         );
         // The source changes startTime, then evaluates the old t in this update.
         self.cycle_seconds = if cycle as f32 > reference.day_seconds + reference.night_seconds {
@@ -112,6 +117,16 @@ impl CycleState {
         };
     }
 
+    pub fn needs_terrain_color(&self, dt: f64) -> bool {
+        self.elapsed_seconds + dt >= self.next_biome_refresh
+    }
+    pub fn set_terrain_color(&mut self, reference: &CycleReference, color: &[f32; 4], dt: f64) {
+        if self.needs_terrain_color(dt) {
+            self.terrain_color = *color;
+            self.next_biome_refresh =
+                self.elapsed_seconds + dt + reference.biome_refresh_seconds as f64;
+        }
+    }
     pub fn reset(&mut self, reference: &CycleReference) {
         *self = Self::new(reference);
     }
@@ -132,6 +147,7 @@ fn evaluate(
     active: f64,
     cloud_x: f32,
     star_rotation: f32,
+    biome: [f32; 4],
 ) -> CycleOutput {
     let t = seconds as f32;
     let (phase, p) = if t > r.day_seconds {
@@ -189,12 +205,6 @@ fn evaluate(
             r.max_exposure,
             1.,
         ),
-    };
-    // SetBiome waits one second before its first desert-color assignment.
-    let biome = if active >= f64::from(r.biome_refresh_seconds) {
-        r.desert_color
-    } else {
-        [0.; 4]
     };
     let day_temp = biome_float(&r.temp_days, biome);
     let night_temp = biome_float(&r.temp_nights, biome);

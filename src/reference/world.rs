@@ -1,8 +1,15 @@
 //! Checked source world inputs. Prototype node indices belong to one asset instance.
+mod grass;
+mod initial_materials;
+mod lod;
+mod memory;
 use super::{
     AssetId, AssetUsage, ColliderGeometry, LibraryProvenance, ReferenceError, ReferenceManifest,
     SourceHash, SourceId, Transform, finite, hash, require, transform,
 };
+pub use grass::*;
+pub use initial_materials::*;
+pub use lod::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -30,6 +37,9 @@ pub struct WorldReference {
     pub startup: Vec<WorldStartupReference>,
     pub startup_holes: Vec<WorldStartupHole>,
     pub collision_rules: WorldCollisionRules,
+    pub grass_displacement: WorldGrassDisplacement,
+    pub lod: WorldLodReference,
+    pub initial_materials: Vec<WorldInitialMaterial>,
     pub prototypes: Vec<WorldPrototypeReference>,
     pub records: Vec<WorldSourceRecord>,
     pub receipts: Vec<WorldSourceReceipt>,
@@ -564,6 +574,12 @@ impl WorldReference {
                 .all(|prototype| prototype.nodes.iter().all(|node| node.layer < 32)),
             "source prototype collision layers",
         )?;
+        self.lod.validate(&record_map)?;
+        for binding in &self.initial_materials {
+            binding.validate(&record_map)?;
+        }
+        self.grass_displacement
+            .validate(&record_map, &self.receipts)?;
         let mut hole_components = HashSet::new();
         for hole in &self.startup_holes {
             let component = checked_record(&record_map, &hole.component, &["digholescript2"])?;
@@ -768,6 +784,37 @@ impl WorldReference {
                         &field(&material.source, &link.property),
                     )?;
                 }
+            }
+        }
+        for material in t
+            .materials
+            .iter()
+            .chain(self.prototypes.iter().flat_map(|p| &p.deferred_materials))
+        {
+            require(
+                material
+                    .valid_keywords
+                    .iter()
+                    .all(|keyword| !keyword.is_empty())
+                    && material
+                        .valid_keywords
+                        .iter()
+                        .enumerate()
+                        .all(|(i, keyword)| !material.valid_keywords[..i].contains(keyword)),
+                &field(&material.source, "source material keywords"),
+            )?;
+            require(
+                material
+                    .texture_coordinates
+                    .iter()
+                    .all(|(name, st)| !name.is_empty() && finite(st)),
+                &field(&material.source, "texture coordinates"),
+            )?;
+            if material.shader.name == "TerrainBiome" {
+                require(
+                    material.texture_coordinates.contains_key("_texcoord"),
+                    &field(&material.source, "_texcoord_ST"),
+                )?;
             }
         }
         for target in t
@@ -1414,12 +1461,14 @@ pub struct WorldPartScopeSlot {
 #[serde(deny_unknown_fields)]
 pub struct WorldSourceMaterial {
     pub source: SourceId,
+    pub valid_keywords: Vec<String>,
     pub shader: super::rendering::ShaderReference,
     pub source_data: super::rendering::ResourceReference,
     pub floats: BTreeMap<String, f32>,
     pub colors: BTreeMap<String, [f32; 4]>,
     pub textures: Vec<super::rendering::TextureLink>,
     pub render_targets: Vec<WorldRenderTarget>,
+    pub texture_coordinates: BTreeMap<String, [f32; 4]>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

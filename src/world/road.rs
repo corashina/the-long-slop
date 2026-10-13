@@ -613,52 +613,14 @@ pub fn deform_road(
     segment: &RoadSegment,
     output: &mut super::WorldSurface,
 ) {
-    use rapier3d::math::{Rotation, Vector};
-    #[derive(Clone, Copy)]
-    struct Frame {
-        position: Vector,
-        rotation: Rotation,
-        scale: Vector,
-    }
+    use rapier3d::math::Vector;
     let identity = &reference.road.prototypes[segment.biome as usize];
     let prototype = reference
         .prototypes
         .iter()
         .find(|p| &p.source == identity)
         .expect("validated road prototype");
-    let mut frames = Vec::with_capacity(prototype.nodes.len());
-    for (index, node) in prototype.nodes.iter().enumerate() {
-        let parent = node.parent.map(|i| frames[i as usize]).unwrap_or(Frame {
-            position: Vector::ZERO,
-            rotation: Rotation::IDENTITY,
-            scale: Vector::ONE,
-        });
-        let mut frame = if index == 0 {
-            parent
-        } else {
-            Frame {
-                position: parent.position
-                    + parent.rotation
-                        * (Vector::from_array(node.transform.translation) * parent.scale),
-                rotation: parent.rotation * Rotation::from_array(node.transform.rotation),
-                scale: parent.scale * Vector::from_array(node.transform.scale),
-            }
-        };
-        if let Some(control) = prototype.controls.iter().position(|&i| i as usize == index) {
-            let angles = segment.source_rotations[control];
-            let axes = [
-                -(parent.rotation * Vector::X),
-                -Vector::Y,
-                -(parent.rotation * Vector::Y),
-            ];
-            for (angle, axis) in angles.into_iter().zip(axes) {
-                let (sin, cos) = half_angle(angle);
-                let axis = axis.normalize() * sin;
-                frame.rotation = Rotation::from_xyzw(axis.x, axis.y, axis.z, cos) * frame.rotation;
-            }
-        }
-        frames.push(frame);
-    }
+    let frames = road_frames(prototype, segment);
     output.origin = segment.position();
     output.vertices.clear();
     output.normals.clear();
@@ -716,4 +678,55 @@ pub fn deform_road(
             output.submeshes.push(first..output.triangles.len());
         }
     }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct RoadFrame {
+    pub position: rapier3d::math::Vector,
+    pub rotation: rapier3d::math::Rotation,
+    pub scale: rapier3d::math::Vector,
+}
+
+pub(crate) fn road_frames(
+    prototype: &crate::reference::WorldPrototypeReference,
+    segment: &RoadSegment,
+) -> Vec<RoadFrame> {
+    use rapier3d::math::{Rotation, Vector};
+    let mut frames = Vec::with_capacity(prototype.nodes.len());
+    for (index, node) in prototype.nodes.iter().enumerate() {
+        let parent = node
+            .parent
+            .map(|i| frames[i as usize])
+            .unwrap_or(RoadFrame {
+                position: Vector::ZERO,
+                rotation: Rotation::IDENTITY,
+                scale: Vector::ONE,
+            });
+        let mut frame = if index == 0 {
+            parent
+        } else {
+            RoadFrame {
+                position: parent.position
+                    + parent.rotation
+                        * (Vector::from_array(node.transform.translation) * parent.scale),
+                rotation: parent.rotation * Rotation::from_array(node.transform.rotation),
+                scale: parent.scale * Vector::from_array(node.transform.scale),
+            }
+        };
+        if let Some(control) = prototype.controls.iter().position(|&i| i as usize == index) {
+            let angles = segment.source_rotations[control];
+            let axes = [
+                -(parent.rotation * Vector::X),
+                -Vector::Y,
+                -(parent.rotation * Vector::Y),
+            ];
+            for (angle, axis) in angles.into_iter().zip(axes) {
+                let (sin, cos) = half_angle(angle);
+                let axis = axis.normalize() * sin;
+                frame.rotation = Rotation::from_xyzw(axis.x, axis.y, axis.z, cos) * frame.rotation;
+            }
+        }
+        frames.push(frame);
+    }
+    frames
 }

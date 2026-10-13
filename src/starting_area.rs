@@ -1,4 +1,5 @@
 //! Persistent imported home bodies and preparation state.
+pub mod recovery;
 use crate::interaction::{
     InteractionAction, InteractionState, ResolvedAim,
     items::{ItemStore, node_pose},
@@ -466,6 +467,8 @@ pub struct GarageRuntime {
     pub physics: PhysicsWorld,
     pub area: StartingArea,
     pub stream: WorldStream,
+    pub recovering: bool,
+    pub startup_aligned: bool,
     pub engine: EngineState,
     pub engine_output: EngineOutput,
     pub trip_m: f64,
@@ -482,6 +485,7 @@ pub struct GarageRuntime {
     auto_gear: usize,
     recovery_bounds: crate::reference::Bounds,
     recovery_bodies: Vec<RigidBodyHandle>,
+    recovery_held_bodies: Vec<RigidBodyHandle>,
     light_owners: Vec<Option<ItemId>>,
 }
 
@@ -489,17 +493,10 @@ impl GarageRuntime {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut physics = PhysicsWorld::new(reference, initial_vehicle_pose(reference)?)?;
         let mut area = StartingArea::new(reference, &mut physics, [0.0; 3])?;
-        let mut stream = WorldStream::new(DEFAULT_SEED);
-        stream.configure_starting_area(reference);
-        stream.sync_at(
+        let mut stream = WorldStream::new(reference, DEFAULT_SEED as i32)?;
+        stream.request_at(
             reference.area.player_spawn.translation.map(|v| v as f64),
-            &mut physics,
-        );
-        crate::world::sync_station_supplies(
-            &mut stream,
-            &mut area.items,
-            &mut area.interaction,
-            &mut physics,
+            physics.snapshot().pose.position.map(|v| v as f64),
         );
         let mut wheels = crate::interaction::wheels::WheelAssemblies::new(reference)?;
         wheels.sync(&mut area.items, &mut physics)?;
@@ -529,6 +526,8 @@ impl GarageRuntime {
             physics,
             area,
             stream,
+            recovering: false,
+            startup_aligned: false,
             lighting: crate::lighting::LightingState::new(&reference.lighting),
             engine: EngineState::new(&reference.engine),
             engine_output: EngineOutput::default(),
@@ -552,7 +551,8 @@ impl GarageRuntime {
                 .position(|ratio| *ratio == 0.0)
                 .expect("validated neutral"),
             recovery_bounds,
-            recovery_bodies: Vec::with_capacity(reference.items.len()),
+            recovery_bodies: Vec::with_capacity(reference.items.len() + reference.bodies.len()),
+            recovery_held_bodies: Vec::with_capacity(reference.items.len()),
             light_owners: reference
                 .lighting
                 .controllers
@@ -578,6 +578,18 @@ impl GarageRuntime {
 
     pub fn advance_lighting(&mut self, reference: &ReferenceManifest, elapsed_seconds: f64) {
         if self.started && !self.paused {
+            if self.lighting.cycle.needs_terrain_color(elapsed_seconds) {
+                let point = self
+                    .stream
+                    .origin
+                    .absolute(self.area.player.focus_position(&self.physics));
+                let color = self.stream.terrain_color(point);
+                self.lighting.cycle.set_terrain_color(
+                    &reference.lighting.cycle,
+                    &color,
+                    elapsed_seconds,
+                );
+            }
             self.lighting
                 .cycle
                 .advance(&reference.lighting.cycle, elapsed_seconds);
@@ -598,7 +610,7 @@ impl GarageRuntime {
     }
 
     pub fn step(&mut self, reference: &ReferenceManifest, input: FrameInput) {
-        if !self.started || self.paused {
+        if !self.started || self.paused || self.recovering || !self.world_supported() {
             self.clear_input();
             return;
         }
@@ -994,12 +1006,11 @@ impl GarageRuntime {
             }));
             self.rebases += 1;
         }
-        self.stream.sync_at(absolute, &mut self.physics);
-        crate::world::sync_station_supplies(
-            &mut self.stream,
-            &mut self.area.items,
-            &mut self.area.interaction,
-            &mut self.physics,
+        self.stream.request_at(
+            absolute,
+            self.stream
+                .origin
+                .absolute(self.physics.snapshot().pose.position),
         );
     }
 
@@ -1018,135 +1029,80 @@ impl GarageRuntime {
     }
 
     pub fn recover(&mut self, reference: &ReferenceManifest) {
-        self.clear_input();
-        self.area
-            .interaction
-            .finish_cancelled_input(&mut self.area.player, &mut self.physics);
-        self.aim = ResolvedAim::default();
-        let held = self
-            .area
-            .interaction
-            .held()
-            .and_then(|item| self.area.items.get(item))
-            .and_then(|item| item.body);
-        let old_view = to_rapier(self.area.player.view_pose(&self.physics));
-        let old_car = to_rapier(self.physics.snapshot().pose);
-        let inverse = old_car.inverse();
-        self.recovery_bodies.clear();
-        for item in self.area.items.iter() {
-            let Some(handle) = item.body else {
-                continue;
-            };
-            if Some(handle) == held
-                || handle == self.physics.chassis_handle()
-                || self.recovery_bodies.contains(&handle)
-            {
-                continue;
-            }
-            let body = &self.physics.rapier().bodies[handle];
-            if !body.is_dynamic() || !body.is_enabled() {
-                continue;
-            }
-            let point = inverse * body.position().translation;
-            if (0..3).all(|i| {
-                point[i] >= self.recovery_bounds.min[i] && point[i] <= self.recovery_bounds.max[i]
-            }) {
-                self.recovery_bodies.push(handle);
-            }
-        }
-        self.area
-            .interaction
-            .drop_held(&mut self.area.items, &mut self.physics);
-        let old = self.physics.snapshot().pose;
-        let fuel = self
+        let position = self
+            .stream
+            .origin
+            .absolute(self.physics.snapshot().pose.position);
+        let empty = self
             .area
             .items
             .get(reference.engine.fuel_tank)
             .and_then(|item| item.fluid.as_ref())
-            .map_or(0.0, |fluid| fluid.mixture.total());
-        let distance = -self.stream.origin.absolute(old.position)[2];
-        let pose = self
-            .stream
-            .reset_pose(distance, fuel <= 0.0, &mut self.physics);
-        crate::world::sync_station_supplies(
-            &mut self.stream,
-            &mut self.area.items,
-            &mut self.area.interaction,
-            &mut self.physics,
-        );
-        self.physics.reset(pose);
-        let cargo_delta = to_rapier(pose) * inverse;
-        for &body in &self.recovery_bodies {
-            transport_body(&mut self.physics, body, cargo_delta);
-        }
-        self.area.interaction.sync_mechanisms(&mut self.physics);
-        self.area.sync_attachments(&mut self.physics, false);
-        self.area.sync_compound(&mut self.physics);
-        self.area
-            .interaction
-            .sync_parts(&mut self.area.items, &mut self.physics)
-            .expect("bound parts");
-        self.wheels
-            .sync(&mut self.area.items, &mut self.physics)
-            .expect("validated wheel bindings");
-        self.physics.refresh_queries();
-        self.area.items.sync_poses(&self.physics);
-        if self.area.player.seat().is_none() {
-            let old_player = self.area.player.body_handle();
-            let standing = rapier3d::prelude::SharedShape::capsule_y(
-                reference.player.standing_height * 0.5 - reference.player.standing_radius,
-                reference.player.standing_radius,
-            );
-            let mut clear = None;
-            for distance in [3.0, 4.0, 5.0, 6.0] {
-                for side in [-1.0, 1.0] {
-                    let mut candidate = to_rapier(pose);
-                    candidate.translation += candidate.rotation
-                        * rapier3d::math::Vector::new(
-                            distance * side,
-                            reference.player.standing_height * 0.5 - 1.1 + 0.05,
-                            0.0,
-                        );
-                    if self
-                        .physics
-                        .queries(
-                            rapier3d::prelude::QueryFilter::default()
-                                .exclude_sensors()
-                                .exclude_rigid_body(old_player),
-                        )
-                        .intersect_shape(candidate, standing.as_ref())
-                        .next()
-                        .is_none()
-                    {
-                        clear = Some(crate::vehicle::from_rapier(&candidate));
-                        break;
-                    }
-                }
-                if clear.is_some() {
-                    break;
-                }
+            .is_some_and(|fluid| fluid.mixture.total() <= 0.0);
+        match self.stream.recovery_target(position, empty) {
+            Ok(_) => {
+                self.recovering = true;
+                self.clear_input();
             }
-            if let Some(clear) = clear {
-                self.physics.rapier_mut().remove_body(old_player);
-                self.area.player = PlayerState::new(&reference.player, clear, &mut self.physics);
-                self.area.player.configure_seats(&reference.seats);
-                self.area
-                    .interaction
-                    .bind_player_body(self.area.player.body_handle());
+            Err(error) => self.stream.fail(error),
+        }
+    }
+    pub fn world_supported(&self) -> bool {
+        if !self.startup_aligned || !self.stream.metrics().indices_ready {
+            return false;
+        }
+        let points = [
+            self.area.player.focus_position(&self.physics),
+            self.physics.snapshot().pose.position,
+        ];
+        points.into_iter().all(|point| {
+            let center = self.stream.origin.absolute(point);
+            let velocity = self.physics.rapier().bodies[self.physics.chassis_handle()].linvel();
+            let padding = 8.0 + velocity.length() as f64 * FIXED_DT as f64;
+            self.stream.supports(crate::world::WorldBounds {
+                min: center.map(|v| v - padding),
+                max: center.map(|v| v + padding),
+            })
+        })
+    }
+    pub fn align_startup(&mut self, reference: &ReferenceManifest) -> Result<bool, ReferenceError> {
+        if self.startup_aligned {
+            return Ok(true);
+        }
+        let frame = self.stream.frame();
+        let Some(startup) = frame.startup else {
+            return Ok(false);
+        };
+        for body in &reference.bodies {
+            let mut node = reference.nodes.iter().find(|n| n.id == body.node);
+            let mut offset = 0.0;
+            while let Some(record) = node {
+                offset += startup
+                    .root_offsets
+                    .iter()
+                    .filter(|(id, _)| *id == record.source)
+                    .map(|(_, value)| *value)
+                    .sum::<f32>();
+                node = record
+                    .parent
+                    .and_then(|id| reference.nodes.iter().find(|n| n.id == id));
             }
+            let handle = self.area.bodies[&body.id];
+            let body = &mut self.physics.rapier_mut().bodies[handle];
+            let mut pose = *body.position();
+            pose.translation.y += offset;
+            body.set_position(pose, true);
         }
-        if let Some(body) = held {
-            let player_delta =
-                to_rapier(self.area.player.view_pose(&self.physics)) * old_view.inverse();
-            transport_body(&mut self.physics, body, player_delta);
-            self.area
-                .interaction
-                .sync_parts(&mut self.area.items, &mut self.physics)
-                .expect("bound parts");
-        }
+        let handle = self.area.player.body_handle();
+        let body = &mut self.physics.rapier_mut().bodies[handle];
+        let mut pose = *body.position();
+        pose.translation.y += startup.player_offset;
+        body.set_position(pose, true);
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, true);
+        self.startup_aligned = true;
+        Ok(true)
     }
 }
 

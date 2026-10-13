@@ -522,7 +522,20 @@ impl PhysicsWorld {
         filter: u32,
         friction: f32,
         restitution: f32,
-    ) -> Result<ColliderHandle, ReferenceError> {
+        available_cpu: usize,
+    ) -> Result<(ColliderHandle, usize), ReferenceError> {
+        // Reserve vertices, indices, BVH construction and retained collider storage before allocation.
+        let reservation = surface
+            .vertices
+            .len()
+            .saturating_mul(48)
+            .saturating_add(surface.triangles.len().saturating_mul(256))
+            .saturating_add(std::mem::size_of::<rapier3d::prelude::Collider>());
+        if reservation > available_cpu {
+            return Err(ReferenceError(format!(
+                "Source collision reservation exceeds budget: {reservation}"
+            )));
+        }
         let mesh = ColliderBuilder::trimesh(
             surface
                 .vertices
@@ -540,10 +553,22 @@ impl PhysicsWorld {
             Group::from_bits_truncate(1u32 << layer),
             Group::from_bits_truncate(filter),
             InteractionTestMode::And,
-        ));
+        ))
+        .build();
+        let bytes = std::mem::size_of::<rapier3d::prelude::Collider>()
+            + mesh
+                .shape()
+                .as_trimesh()
+                .expect("source triangle mesh")
+                .total_memory_size();
+        if bytes > available_cpu {
+            return Err(ReferenceError(format!(
+                "Source collision allocation exceeds budget: {bytes}"
+            )));
+        }
         let handle = self.physics.colliders.insert(mesh);
         self.refresh_queries();
-        Ok(handle)
+        Ok((handle, bytes))
     }
 
     pub fn remove_collider(&mut self, handle: ColliderHandle) {

@@ -131,8 +131,9 @@ def source_material(source, selected, owner, output, texture_source):
         if image.type.name=='RenderTexture':
             selected.record(image);targets.append(dict(binding,source=source_id(image)))
         else:textures.append(dict(binding,texture=texture(texture_source,image,output)))
-    return {'source':source_id(owner),'shader':shader_data,'source_data':resource(owner,output,'bin',source.raw_data(owner)),
-        'floats':dict(props['m_Floats']),'colors':{k:rgba(v) for k,v in props['m_Colors']},'textures':textures,'render_targets':targets}
+    return {'source':source_id(owner),'valid_keywords':data['m_ValidKeywords'],'shader':shader_data,'source_data':resource(owner,output,'bin',source.raw_data(owner)),
+        'floats':dict(props['m_Floats']),'colors':{k:rgba(v) for k,v in props['m_Colors']},'textures':textures,'render_targets':targets,
+        'texture_coordinates':{name:[env['m_Scale'][c] for c in ('x','y')]+[env['m_Offset'][c] for c in ('x','y')] for name,env in props['m_TexEnvs']}}
 
 
 def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) -> dict:
@@ -432,6 +433,8 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) ->
         startup_holes.append({'component':source_id(component),'filter':source_id(mesh_filter),
             'mesh':source_id(mesh),'mesh_sha256':selected.receipts[key(mesh)]['sha256'],
             'vertices':[[x,y,-z] for x,y,z in points[:4]]})
+    grass_displacement=recover_grass_displacement(source,selected,prototypes)
+    lod=recover_lod(source,selected)
     road_fields=('length','roadBoneNum','roadBoneLength','roadSegmentLength','roadAboveTerrain','width','scale','XmaxAngle','YmaxAngle','startStraight','straightModifier','alignEdgeOfTheWorld','aliignRoad','alignBuildings','forceHomesick','noises','defPointRange','defPointStep','addPoint','buildingBoneNum')
     assembled=samples['assembled'][0]
     world={'sample_payload_sha256':PAYLOAD_SHA256,'managed_sha256':samples['managed_sha256'],'library':dict(schema_version=1,**samples['library']),
@@ -441,7 +444,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) ->
             'tiles':[{k:settings[t][k] for k in ('tileSize','resolution','drawDistance','YCoord')} for t in ('Terrain','DistantTerrain','DistantTerrain2')],
             **{k:settings[k] for k in ('edgeOfWorld','edgeOfWorldGradient','edgeOfWorldGenerationDist','edgeOfWorldWarpDist','edgeOfWorldWarpOffset','randomSeed','seed')}},
         'buildings':{'source':source_id(building_owner),'types':building_types,**{k:buildings[k] for k in ('groups','defaultSides','minStartDist','maxStartDist','distModifier')}},
-        'part_scope_slots':part_scope_slots,'catalog':catalog,'generators':generators,'startup':startup,'startup_holes':startup_holes,'collision_rules':collision_rules,'prototypes':prototypes,'records':list(selected.records.values()),
+        'part_scope_slots':part_scope_slots,'catalog':catalog,'generators':generators,'startup':startup,'startup_holes':startup_holes,'grass_displacement':grass_displacement,'lod':lod,'initial_materials':recover_initial_materials(source,selected),'collision_rules':collision_rules,'prototypes':prototypes,'records':list(selected.records.values()),
         'receipts':list(selected.receipts.values()),'exclusions':excluded,'material_textures':list(source.world_material_source.lighting_textures.values())}
     files={row['source']['file'] for row in world['receipts']}
     world['source_hashes']=[{'file':f,'sha256':reader.source_files[f'TheLongDrive_Data/{f}'].sha256} for f in sorted(files)]
@@ -508,3 +511,61 @@ def recover_catalog(source, reader, selected, database):
     for row in categories:
         row['invalid_category_indices']=[i for i in row['categories'] or [] if i>=len(category_names)]
     return {'source':source_id(database),'items':items,'categories':sorted(categories,key=lambda c:c['index'])}
+
+def recover_grass_displacement(source, selected, prototypes):
+    """Retain the checked displacement camera and selected renderer writers."""
+    camera=source.get('level1',40217);follow=source.get('level1',65072);writer=source.get('level1',65073)
+    for owner in (camera,follow,writer):
+        selected.records.pop(key(owner),None)
+        selected.record(owner)
+    c=required_record(source,camera,('m_GameObject','m_TargetTexture','orthographic','orthographic size','m_CullingMask'))
+    f=required_record(source,follow,('follow','followHeight'));w=required_record(source,writer,('borderSmoothingArea',))
+    game_object=source.resolve(camera,c['m_GameObject']);transform=source.transform_for(game_object)
+    target=source.resolve(camera,c['m_TargetTexture']);follow_target=source.resolve(follow,f['follow'])
+    for owner in (game_object,transform,target,follow_target):selected.record(owner)
+    writers=[];seen=set();transforms=[source.get('level1',29482),source.get('level1',24842)]
+    transforms.extend(source.get(node['source']['file'],node['source']['path_id']) for prototype in prototypes for node in prototype['nodes'] if node['layer']==18)
+    for node in transforms:
+        if key(node) in seen:continue
+        seen.add(key(node));go=source.resolve(node,source.read(node)['m_GameObject']);data=source.read(go)
+        components=[source.resolve(go,row['component']) for row in data['m_Component']]
+        renderer=next((x for x in components if x.type.name=='MeshRenderer'),None)
+        mesh_filter=next((x for x in components if x.type.name=='MeshFilter'),None)
+        if renderer is None or mesh_filter is None:continue
+        rd=source.read(renderer);mesh=source.resolve(mesh_filter,source.read(mesh_filter)['m_Mesh'])
+        materials=[source.resolve(renderer,link) for link in rd['m_Materials']]
+        for owner in (node,go,renderer,mesh_filter,*materials):
+            selected.records.pop(key(owner),None);selected.record(owner)
+        selected.receipt(mesh)
+        writers.append({'transform':source_id(node),'owner':source_id(go),'renderer':source_id(renderer),
+            'filter':source_id(mesh_filter),'mesh':source_id(mesh),'materials':[source_id(x) for x in materials],
+            'layer':data['m_Layer'],'enabled':bool(rd['m_Enabled'])})
+    return {'camera':source_id(camera),'follow':source_id(follow),'displacement':source_id(writer),
+        'transform':source_id(transform),'follow_target':source_id(follow_target),'target':source_id(target),
+        'follow_height':f['followHeight'],'border':w['borderSmoothingArea'],'writers':writers}
+
+def recover_lod(source, selected):
+    """Retain checked quality inputs and the statically recovered engine dither mask."""
+    owner=source.get('globalgamemanagers',12)
+    data=required_record(source,owner,('m_CurrentQuality','m_QualitySettings'))
+    selected.record(owner)
+    index=data['m_CurrentQuality'];profile=data['m_QualitySettings'][index]
+    if profile['lodBias']!=1 or profile['maximumLODLevel']!=0:
+        raise ValueError('Checked LOD quality context changed')
+    return {'quality':source_id(owner),'profile':index,'lod_bias':profile['lodBias'],'maximum_lod':profile['maximumLODLevel'],
+        'dither':{'engine_sha256':'553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86',
+            'creator_rva':0x372b80,'creator_sha256':'397f40191129798e57cb4beaa1ba9d881f25c140987f656a6b24c7614dfbbd1d',
+            'binding_rva':0x374580,'binding_sha256':'13b5c5a6eb2c0427b7a3181e1e4cce6678312f6e7523b04d14ad5b1fa30df7be',
+            'property_slot':18,'property_name':'unity_DitherMask','alpha':[0,192,48,240,128,64,176,112,32,224,16,208,160,96,144,80]}}
+
+
+def recover_initial_materials(source, selected):
+    """Checked headlightscript.Start/RefreshLights applies MOFF to shared Lamp1 renderer."""
+    controller=source.get('sharedassets1.assets',134437)
+    data=required_record(source,controller,('MOFF','currentState','states'))
+    renderer=source.get('sharedassets1.assets',99000)
+    node=source.get('sharedassets1.assets',88898)
+    material=source.resolve(controller,data['MOFF'])
+    if data['currentState']!=0 or len(data['states'])!=3: raise ValueError('Changed checked Lamp1 initialization')
+    for owner in (controller,renderer,node,material): selected.record(owner)
+    return [{'controller':source_id(controller),'renderer':source_id(renderer),'node':source_id(node),'material':source_id(material)}]
