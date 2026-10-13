@@ -96,6 +96,8 @@ Policy2 enables glove storage, trunk, and engine bay item storage, and disables 
 Mount mask8388609; drop delay1second; non-basket update group1 uses strictly greater than1.5seconds between scans.
 All eight selected volumes are non-basket. Preserve the source two-scan membership rule and source usable threshold0.1.
 Recover slot, usable, owner-pickup, active, onlyManual, and noPhysicsLock rules.
+The first six volumes have no slot or usable restrictions. Trunk uses source slot77859; engine bay uses77842.
+All eight susable arrays are empty. Resolve the occupied hood/trunk item and reuse MechanismState::value(item, false).
 Recover the initialization sequence: two yielded frames, followed by three QuickFreeze passes; only the first pass prescans.
 
 - [ ] **Step 4: Derive a fresh export and build a matching package.**
