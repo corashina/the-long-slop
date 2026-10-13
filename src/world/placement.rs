@@ -405,6 +405,30 @@ impl PlacementIndex {
         }
     }
 
+    /// Refresh source membership without cloning unchanged placement identities.
+    pub fn update_buildings_in(
+        &mut self,
+        bounds: WorldBounds,
+        output: &mut Vec<Placement>,
+        accept: impl Fn([f64; 3]) -> bool,
+    ) {
+        output.retain(|p| accept(p.pose.position));
+        for block in &self.blocks {
+            if !intersects(block.bounds, bounds, false) {
+                continue;
+            }
+            self.replay.restore(&block.checkpoint);
+            for _ in block.checkpoint.next_building..block.end {
+                let building = self.replay.advance().unwrap();
+                if accept(building.pose.position)
+                    && !output.iter().any(|p| p.id.unit[0] == building.index as i64)
+                {
+                    output.push(self.replay.placement(building));
+                }
+            }
+        }
+    }
+
     pub fn foundation_count(&self) -> usize {
         self.foundations.len()
     }

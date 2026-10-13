@@ -66,6 +66,7 @@ struct Layer {
     staging_id: Option<AssetId<Image>>,
 }
 struct TextureArray {
+    failed: bool,
     key: ArrayKey,
     layers: Vec<Layer>,
     image: Option<Handle<Image>>,
@@ -287,6 +288,7 @@ impl WorldTextures {
                     })
                     .collect();
                 let array = Some(TextureArray {
+                    failed: false,
                     key,
                     layers,
                     image: None,
@@ -365,6 +367,39 @@ impl WorldTextures {
                 }
             }
         }
+        let mut failure = None;
+        for array in self.arrays.iter_mut().flatten() {
+            for layer in &mut array.layers {
+                if let Some(handle) = &layer.load {
+                    if let LoadState::Failed(error) = server.load_state(handle.id()) {
+                        if !array.failed {
+                            failure = Some(ReferenceError(format!(
+                                "Source texture {}:{}: {error}",
+                                layer.source.file, layer.source.path_id
+                            )));
+                        }
+                        array.failed = true;
+                        images.remove(handle.id());
+                        layer.load = None;
+                    }
+                }
+            }
+        }
+        let retired: Vec<_> = self
+            .materials
+            .iter()
+            .filter(|(_, m)| {
+                m.arrays
+                    .iter()
+                    .any(|&i| self.arrays[i].as_ref().is_some_and(|a| a.failed))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for material in retired {
+            if self.retirable(&material, images, server) {
+                self.release(&material, images, server)?;
+            }
+        }
         let mut pending = self
             .arrays
             .iter()
@@ -375,7 +410,7 @@ impl WorldTextures {
             .count();
         let job_limit = pending + new_jobs;
         for array in self.arrays.iter_mut().flatten() {
-            if array.image.is_some() {
+            if array.failed || array.image.is_some() {
                 continue;
             }
             let key = array.key;
@@ -394,18 +429,6 @@ impl WorldTextures {
                         settings.main_world_only=true;settings.decoded_bytes=key.layer_bytes().expect("admitted layer size");
                     }).load(layer.path.clone()));
                     pending += 1;
-                }
-            }
-            for layer in &array.layers {
-                if let LoadState::Failed(error) = layer
-                    .load
-                    .as_ref()
-                    .map_or(LoadState::NotLoaded, |h| server.load_state(h.id()))
-                {
-                    return Err(ReferenceError(format!(
-                        "Source texture {}:{}: {error}",
-                        layer.source.file, layer.source.path_id
-                    )));
                 }
             }
             if !array
@@ -492,9 +515,9 @@ impl WorldTextures {
                 layer.staging_id = layer.load.as_ref().map(Handle::id);
                 layer.load = None;
             }
-            return Ok(());
+            return failure.map_or(Ok(()), Err);
         }
-        Ok(())
+        failure.map_or(Ok(()), Err)
     }
     pub fn jobs(&self, images: &Assets<Image>) -> usize {
         self.arrays
@@ -553,6 +576,26 @@ impl WorldTextures {
             m.arrays
                 .iter()
                 .all(|&i| self.arrays[i].as_ref().is_some_and(|a| a.image.is_some()))
+        })
+    }
+    pub fn retirable(
+        &self,
+        material: &SourceId,
+        images: &Assets<Image>,
+        server: &AssetServer,
+    ) -> bool {
+        self.materials.get(material).is_none_or(|m| {
+            m.arrays.iter().all(|&i| {
+                self.arrays[i].as_ref().is_none_or(|a| {
+                    a.users > 1
+                        || a.layers.iter().all(|l| {
+                            l.load.as_ref().is_none_or(|h| {
+                                images.contains(h.id())
+                                    || matches!(server.load_state(h.id()), LoadState::Failed(_))
+                            })
+                        })
+                })
+            })
         })
     }
     pub fn release(

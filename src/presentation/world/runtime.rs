@@ -86,31 +86,49 @@ impl WorldPresentation<'_, '_> {
             self.surfaces
                 .reset_bindings(&mut self.terrain, &mut self.casters);
         }
-        self.pipelines.prepare(stream)?;
+        // Cancellation and cleanup run before any material or stream failure can return.
+        self.instances.retire(
+            stream,
+            &mut self.commands,
+            &mut self.meshes,
+            &mut self.materials,
+            &mut self.grass,
+            &mut self.writers,
+        )?;
+        self.prototypes.retire_unused(stream, reference);
+        let mut failure = self.pipelines.prepare(stream).err();
         self.writers.configure(stream, &reference.world)?;
         self.writers.update_frame(
             view.position,
             Vec3::from_array(stream.origin.offset.map(|v| v as f32)),
             time,
         );
-        self.materials
-            .cache
-            .prepare_world_primary(stream, &self.server, &mut self.images)?;
-        self.materials
-            .cache
-            .prepare_world_deferred(stream, &self.server, &mut self.images)?;
-        self.prototypes.prepare(
+        if let Err(error) = self.materials.cache.prepare_world_primary(
+            stream,
+            &self.server,
+            &mut self.images,
+            &mut self.materials.primary,
+        ) {
+            failure.get_or_insert(error);
+        }
+        if let Err(error) =
+            self.materials
+                .cache
+                .prepare_world_deferred(stream, &self.server, &mut self.images)
+        {
+            failure.get_or_insert(error);
+        }
+        if let Err(error) = self.prototypes.prepare(
             stream,
             reference,
             &self.server,
             &mut self.assets,
             &mut self.meshes,
             &mut self.skins,
-        )?;
-        stream.prepare();
-        if let Some(error) = stream.frame().failure {
-            return Err(ReferenceError(error.to_owned()));
+        ) {
+            failure.get_or_insert(error);
         }
+        stream.prepare();
         while let Some(source) = self.prototypes.take_retired() {
             self.allocation.retired_materials.push(source);
         }
@@ -127,11 +145,28 @@ impl WorldPresentation<'_, '_> {
                 .iter()
                 .find(|p| p.source == *source)
                 .expect("retired prototype");
-            if !self.materials.cache.world_asset_ready(prototype.asset)
-                || prototype
-                    .deferred_materials
-                    .iter()
-                    .any(|m| !self.materials.cache.world_textures.ready(&m.source))
+            if !self.materials.cache.world_asset_retirable(
+                prototype.asset,
+                &self.images,
+                &self.server,
+            ) || prototype.deferred_materials.iter().any(|m| {
+                !self.materials.cache.world_textures.retirable(
+                    &m.source,
+                    &self.images,
+                    &self.server,
+                )
+            }) || prototype
+                .nodes
+                .iter()
+                .filter_map(|n| super::preflight::initial_material(reference, &n.source))
+                .any(|(asset, _)| {
+                    !self.prototypes.references_asset(reference, asset)
+                        && !self.materials.cache.world_asset_retirable(
+                            asset,
+                            &self.images,
+                            &self.server,
+                        )
+                })
             {
                 index += 1;
                 continue;
@@ -140,7 +175,22 @@ impl WorldPresentation<'_, '_> {
                 prototype.asset,
                 &mut self.images,
                 &mut self.materials.primary,
+                &self.server,
             )?;
+            for (asset, _) in prototype
+                .nodes
+                .iter()
+                .filter_map(|n| super::preflight::initial_material(reference, &n.source))
+            {
+                if !self.prototypes.references_asset(reference, asset) {
+                    self.materials.cache.release_world_asset(
+                        asset,
+                        &mut self.images,
+                        &mut self.materials.primary,
+                        &self.server,
+                    )?;
+                }
+            }
             for material in &prototype.deferred_materials {
                 if !self
                     .prototypes
@@ -154,6 +204,12 @@ impl WorldPresentation<'_, '_> {
                 }
             }
             self.allocation.retired_materials.swap_remove(index);
+        }
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        if let Some(error) = stream.frame().failure {
+            return Err(ReferenceError(error.to_owned()));
         }
         self.surfaces.prepare_bindings(
             stream,
@@ -169,7 +225,7 @@ impl WorldPresentation<'_, '_> {
             reference,
             &mut self.prototypes,
             &self.assets,
-            &self.meshes,
+            &mut self.meshes,
             &mut self.materials,
             &mut self.grass,
             &mut self.pipelines,

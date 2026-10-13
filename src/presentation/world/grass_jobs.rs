@@ -83,6 +83,19 @@ fn allocation(
         .expect("Grass pending ownership");
     stream.set_presentation_allocation(next)
 }
+fn pending_allocation(
+    stream: &mut WorldStream,
+    cpu: usize,
+    gpu: usize,
+    jobs: usize,
+) -> Result<(), ReferenceError> {
+    let mut next = stream.presentation_allocation();
+    next.active_cpu += cpu;
+    next.active_gpu += gpu;
+    next.jobs += jobs;
+    next.staging_bytes += cpu;
+    stream.set_presentation_allocation(next)
+}
 impl GrassJobs {
     pub fn release_domains(&mut self) {
         if self.instances.is_empty() {
@@ -218,7 +231,7 @@ impl GrassJobs {
                     Arc::clone(&instance.patches),
                     Arc::clone(self.domains.as_ref().unwrap()),
                     |bytes, _| {
-                        allocation(stream, bytes, 0, 1, 0)?;
+                        pending_allocation(stream, bytes, 0, 1)?;
                         cpu = bytes;
                         Ok(())
                     },
@@ -229,7 +242,7 @@ impl GrassJobs {
             if let Some(Pending::Expand(job)) = &mut instance.pending {
                 let mut added = (0, 0);
                 let complete = job.prepare(|cpu, gpu| {
-                    allocation(stream, cpu * 2, gpu, 0, 0)?;
+                    pending_allocation(stream, cpu * 2, gpu, 0)?;
                     added = (cpu * 2, gpu);
                     Ok(())
                 })?;
@@ -321,6 +334,9 @@ impl GrassJobs {
                         gpu: instance.pending_gpu,
                         _ticket: ticket.unwrap(),
                     });
+                    let mut next = stream.presentation_allocation();
+                    next.staging_bytes = next.staging_bytes.saturating_sub(instance.pending_cpu);
+                    stream.set_presentation_allocation(next)?;
                     instance.pending_cpu = 0;
                     instance.pending_gpu = 0;
                     instance.ready = true;
@@ -355,6 +371,7 @@ impl GrassJobs {
         }
         let mut next = stream.presentation_allocation();
         next.active_cpu = next.active_cpu.saturating_sub(cpu);
+        next.staging_bytes = next.staging_bytes.saturating_sub(instance.pending_cpu);
         next.active_gpu = next.active_gpu.saturating_sub(gpu);
         next.pending = next
             .pending

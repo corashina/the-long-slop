@@ -22,6 +22,7 @@ pub enum InstanceMaterial {
     Impostor(Handle<ImpostorMaterial>),
     Grass(Handle<GrassMaterial>),
 }
+#[derive(Clone)]
 pub struct RendererMaterial {
     pub visible: InstanceMaterial,
     pub caster: Option<Handle<LodCasterMaterial>>,
@@ -44,6 +45,14 @@ impl InstanceMaterials<'_> {
     ) -> Result<bool, ReferenceError> {
         self.cache
             .admit_world_asset(prototype.asset, reference, stream)?;
+        for node in &prototype.nodes {
+            if let Some((asset, _)) = super::preflight::initial_material(reference, &node.source) {
+                self.cache.admit_world_asset(asset, reference, stream)?;
+                if !self.cache.world_asset_ready(asset) {
+                    return Ok(false);
+                }
+            }
+        }
         for material in &prototype.deferred_materials {
             self.cache
                 .admit_world_material(material, reference, stream)?;
@@ -68,7 +77,7 @@ impl InstanceMaterials<'_> {
     ) -> Result<Option<RendererMaterial>, ReferenceError> {
         let mask = 1u32 << layer;
         let mut caster = None;
-        let visible = if primitive.has_source_material {
+        let visible = if initial.is_none() && primitive.has_source_material {
             let Some(id) = &primitive.source_material else {
                 return Err(ReferenceError(
                     "Unresolved source null material draw".into(),
@@ -96,6 +105,12 @@ impl InstanceMaterials<'_> {
                     )?))
                 }
                 "Standard (Specular setup)" => {
+                    let material = SpecularMaterial::from_source(
+                        record,
+                        &self.cache.world_textures,
+                        mask,
+                        reflected,
+                    )?;
                     if shadow_mode != 0 {
                         caster = Some(self.casters.add(LodCasterMaterial {
                             base: StandardMaterial {
@@ -113,12 +128,7 @@ impl InstanceMaterials<'_> {
                             extension: LodCaster { fade: Vec4::X },
                         }));
                     }
-                    InstanceMaterial::Specular(self.specular.add(SpecularMaterial::from_source(
-                        record,
-                        &self.cache.world_textures,
-                        mask,
-                        reflected,
-                    )?))
+                    InstanceMaterial::Specular(self.specular.add(material))
                 }
                 name => {
                     return Err(ReferenceError(format!(

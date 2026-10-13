@@ -108,6 +108,7 @@ fn blend_factor(value: u8) -> BlendFactor {
 }
 
 struct SourceTexture {
+    failed: bool,
     eager: bool,
     users: usize,
     record: TextureRecord,
@@ -224,6 +225,7 @@ pub fn load_materials(
                 .collect();
             texture_indices.insert(texture.file.clone(), textures.len());
             textures.push(SourceTexture {
+                failed: false,
                 eager: true,
                 users: 0,
                 record: texture.clone(),
@@ -289,10 +291,14 @@ fn assemble_textures(
 ) -> Result<usize, source::ReferenceError> {
     for texture in textures
         .iter_mut()
-        .filter(|texture| texture.eager == eager && texture.image.is_none())
+        .filter(|texture| texture.eager == eager && texture.image.is_none() && !texture.failed)
     {
         for (level, handle) in texture.levels.iter().enumerate() {
             if let LoadState::Failed(error) = server.load_state(handle.id()) {
+                // Dynamic owners drain terminal loads in prepare_world_primary before reporting.
+                if !eager {
+                    continue;
+                }
                 return Err(source::ReferenceError(format!(
                     "{} mip {level}: {error}",
                     texture.label

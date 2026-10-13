@@ -8,6 +8,7 @@ const ENCODED_JOB_BYTES: usize = 32 * 1024 * 1024;
 #[derive(Default)]
 pub struct PrimaryOwnership {
     assets: HashMap<SourceAssetId, Vec<String>>,
+    borrowed_records: std::collections::HashSet<SourceAssetId>,
     cpu: usize,
     gpu: usize,
     jobs: usize,
@@ -60,7 +61,10 @@ impl SourceMaterials {
             + self
                 .records
                 .iter()
-                .filter(|r| self.world_primary.assets.contains_key(&r.asset))
+                .filter(|r| {
+                    self.world_primary.assets.contains_key(&r.asset)
+                        && !self.world_primary.borrowed_records.contains(&r.asset)
+                })
                 .map(record_bytes)
                 .sum::<usize>();
         let gpu = self
@@ -107,6 +111,7 @@ impl SourceMaterials {
         if self.world_primary.assets.contains_key(&asset) {
             return Ok(());
         }
+        let borrowed = self.records.iter().any(|r| r.asset == asset);
         let records: Vec<_> = reference
             .rendering
             .materials
@@ -171,6 +176,7 @@ impl SourceMaterials {
                     self.texture_indices
                         .insert(texture.file.clone(), self.textures.len());
                     self.textures.push(SourceTexture {
+                        failed: false,
                         eager: false,
                         users: 0,
                         record: texture.clone(),
@@ -183,10 +189,15 @@ impl SourceMaterials {
                     });
                 }
             }
-            self.records.push(record.clone());
+            if !borrowed {
+                self.records.push(record.clone());
+            }
         }
         for path in &paths {
             self.textures[self.texture_indices[path]].users += 1;
+        }
+        if borrowed {
+            self.world_primary.borrowed_records.insert(asset);
         }
         self.world_primary.assets.insert(asset, paths);
         Ok(())
@@ -203,7 +214,49 @@ impl SourceMaterials {
         stream: &mut WorldStream,
         server: &AssetServer,
         images: &mut Assets<Image>,
+        materials: &mut Assets<SourceMaterial>,
     ) -> Result<(), ReferenceError> {
+        let mut failure = None;
+        for texture in self
+            .textures
+            .iter_mut()
+            .filter(|t| !t.eager && t.image.is_none())
+        {
+            for handle in &texture.levels {
+                if let LoadState::Failed(error) = server.load_state(handle.id()) {
+                    if !texture.failed {
+                        failure = Some(ReferenceError(format!("{}: {error}", texture.label)));
+                    }
+                    texture.failed = true;
+                }
+            }
+            if texture.failed {
+                texture.levels.retain(|h| {
+                    if matches!(server.load_state(h.id()), LoadState::Failed(_)) {
+                        images.remove(h.id());
+                        false
+                    } else {
+                        true
+                    }
+                });
+            }
+        }
+        let retired: Vec<_> = self
+            .world_primary
+            .assets
+            .iter()
+            .filter(|(_, paths)| {
+                paths
+                    .iter()
+                    .any(|p| self.textures[self.texture_indices[p]].failed)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for asset in retired {
+            if self.world_asset_retirable(asset, images, server) {
+                self.release_world_asset(asset, images, materials, server)?;
+            }
+        }
         let jobs = self
             .textures
             .iter()
@@ -220,7 +273,8 @@ impl SourceMaterials {
                 break;
             }
             let texture = &self.textures[index];
-            if texture.eager
+            if texture.failed
+                || texture.eager
                 || texture.image.is_some()
                 || texture.levels.len() == texture.record.mips.len()
             {
@@ -245,22 +299,53 @@ impl SourceMaterials {
                     .load(mip.file.clone()),
             );
         }
-        self.texture_bytes += assemble_textures(&mut self.textures, server, images, false)?;
-        Ok(())
+        let assembled = assemble_textures(&mut self.textures, server, images, false);
+        if let Ok(bytes) = &assembled {
+            self.texture_bytes += bytes;
+        }
+        let jobs = self
+            .textures
+            .iter()
+            .filter(|t| !t.eager && t.image.is_none())
+            .flat_map(|t| &t.levels)
+            .filter(|h| !images.contains(h.id()))
+            .count();
+        let (cpu, gpu) = self.primary_bytes();
+        self.account_primary(stream, cpu + jobs * ENCODED_JOB_BYTES, gpu, jobs)?;
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        assembled.map(|_| ())
+    }
+    pub fn world_asset_retirable(
+        &self,
+        asset: SourceAssetId,
+        images: &Assets<Image>,
+        server: &AssetServer,
+    ) -> bool {
+        self.world_primary.assets.get(&asset).is_none_or(|paths| {
+            paths.iter().all(|path| {
+                let t = &self.textures[self.texture_indices[path]];
+                t.eager
+                    || t.image.is_some()
+                    || t.levels.iter().all(|h| {
+                        images.contains(h.id())
+                            || matches!(server.load_state(h.id()), LoadState::Failed(_))
+                    })
+            })
+        })
     }
     pub fn release_world_asset(
         &mut self,
         asset: SourceAssetId,
         images: &mut Assets<Image>,
         materials: &mut Assets<SourceMaterial>,
+        server: &AssetServer,
     ) -> Result<(), ReferenceError> {
-        let Some(paths) = self.world_primary.assets.get(&asset) else {
+        let Some(_paths) = self.world_primary.assets.get(&asset) else {
             return Ok(());
         };
-        if paths.iter().any(|path| {
-            let t = &self.textures[self.texture_indices[path]];
-            !t.eager && t.image.is_none() && !t.levels.is_empty()
-        }) {
+        if !self.world_asset_retirable(asset, images, server) {
             return Err(ReferenceError(
                 "Source primary texture retirement still has a loader job".into(),
             ));
@@ -269,17 +354,24 @@ impl SourceMaterials {
         for path in paths {
             self.textures[self.texture_indices[&path]].users -= 1;
         }
-        self.handles.retain(|key, handle| {
-            if key.0 == asset {
-                materials.remove(handle.id());
-                false
-            } else {
-                true
-            }
-        });
-        self.records.retain(|r| r.asset != asset);
+        // Startup overrides can borrow one of the five imported material assets.
+        // Their cache handles and records remain owned by the imported scene.
+        if !self.world_primary.borrowed_records.remove(&asset) {
+            self.handles.retain(|key, handle| {
+                if key.0 == asset {
+                    materials.remove(handle.id());
+                    false
+                } else {
+                    true
+                }
+            });
+            self.records.retain(|r| r.asset != asset);
+        }
         self.textures.retain(|texture| {
             if !texture.eager && texture.users == 0 {
+                for level in &texture.levels {
+                    images.remove(level.id());
+                }
                 if let Some(image) = &texture.image {
                     images.remove(image.id());
                 }

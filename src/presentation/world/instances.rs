@@ -59,7 +59,7 @@ impl SourceInstances {
         reference: &ReferenceManifest,
         prototypes: &mut SourcePrototypes,
         assets: &Assets<SourceGltf>,
-        meshes: &Assets<Mesh>,
+        meshes: &mut Assets<Mesh>,
         materials: &mut InstanceMaterials,
         grass: &mut GrassJobs,
         pipelines: &mut WorldPipelines,
@@ -134,300 +134,345 @@ impl SourceInstances {
                                 Visibility::Hidden,
                             ))
                             .id();
-                        let mut nodes = Vec::with_capacity(count);
-                        let mut worlds = vec![Mat4::IDENTITY; count];
-                        for node in &loaded.plan.nodes {
-                            let local = if let Some(matrix) = node.matrix {
-                                Mat4::from_cols_array(&matrix)
-                            } else {
-                                Mat4::from_scale_rotation_translation(
-                                    Vec3::from_array(node.scale),
-                                    Quat::from_array(node.rotation),
-                                    Vec3::from_array(node.translation),
-                                )
-                            };
-                            worlds[node.index as usize] = local;
-                            nodes.push(
-                                commands
-                                    .spawn((Transform::from_matrix(local), Visibility::Inherited))
-                                    .id(),
-                            );
-                        }
-                        for node in &loaded.plan.nodes {
-                            let parent = loaded
-                                .plan
-                                .nodes
-                                .iter()
-                                .find(|p| p.children.contains(&node.index));
-                            commands
-                                .entity(nodes[node.index as usize])
-                                .insert(ChildOf(parent.map_or(root, |p| nodes[p.index as usize])));
-                        }
-                        // Parent traversal preserves glTF order without assuming topological node indices.
-                        for node in &loaded.plan.nodes {
-                            let mut matrix = worlds[node.index as usize];
-                            let mut current = node.index;
-                            for _ in 0..count {
-                                let Some(parent) = loaded
-                                    .plan
-                                    .nodes
-                                    .iter()
-                                    .find(|p| p.children.contains(&current))
-                                else {
-                                    break;
-                                };
-                                let local = if let Some(matrix) = parent.matrix {
+                        let mut owned_bindings = Vec::with_capacity(primitives);
+                        let construction = (|| -> Result<Instance, ReferenceError> {
+                            let mut nodes = Vec::with_capacity(count);
+                            let mut worlds = vec![Mat4::IDENTITY; count];
+                            for node in &loaded.plan.nodes {
+                                let local = if let Some(matrix) = node.matrix {
                                     Mat4::from_cols_array(&matrix)
                                 } else {
                                     Mat4::from_scale_rotation_translation(
-                                        Vec3::from_array(parent.scale),
-                                        Quat::from_array(parent.rotation),
-                                        Vec3::from_array(parent.translation),
+                                        Vec3::from_array(node.scale),
+                                        Quat::from_array(node.rotation),
+                                        Vec3::from_array(node.translation),
                                     )
                                 };
-                                matrix = local * matrix;
-                                current = parent.index;
+                                worlds[node.index as usize] = local;
+                                nodes.push(
+                                    commands
+                                        .spawn((
+                                            Transform::from_matrix(local),
+                                            Visibility::Inherited,
+                                        ))
+                                        .id(),
+                                );
                             }
-                            worlds[node.index as usize] = root_pose * matrix;
-                        }
-                        let lods = LodGroup::for_prototype(&reference.world, prototype)?;
-                        let mut renderers = Vec::with_capacity(primitives);
-                        for (source_index, source_node) in prototype.nodes.iter().enumerate() {
-                            if !source_node.renderer_enabled || !active(prototype, source_index) {
-                                continue;
+                            for node in &loaded.plan.nodes {
+                                let parent = loaded
+                                    .plan
+                                    .nodes
+                                    .iter()
+                                    .find(|p| p.children.contains(&node.index));
+                                commands.entity(nodes[node.index as usize]).insert(ChildOf(
+                                    parent.map_or(root, |p| nodes[p.index as usize]),
+                                ));
                             }
-                            let node = &loaded.plan.nodes[source_node.gltf_node as usize];
-                            let Some(mesh_index) = node.mesh else {
-                                continue;
-                            };
-                            let extras = node.extras.as_ref().ok_or_else(|| {
-                                ReferenceError("Missing generated renderer metadata".into())
-                            })?;
-                            let shadow = extras.cast_shadows.ok_or_else(|| {
-                                ReferenceError("Missing generated shadow mode".into())
-                            })?;
-                            let receive = extras.receive_shadows.ok_or_else(|| {
-                                ReferenceError("Missing generated receiver state".into())
-                            })?;
-                            for primitive in loaded
-                                .plan
-                                .primitives
-                                .iter()
-                                .filter(|p| p.mesh == mesh_index)
-                            {
-                                let index = asset
-                                    .primitives
-                                    .iter()
-                                    .position(|&(m, p)| {
-                                        m == primitive.mesh as usize
-                                            && p == primitive.primitive as usize
-                                    })
-                                    .ok_or_else(|| {
-                                        ReferenceError("Missing generated primitive mesh".into())
-                                    })?;
-                                let mesh = asset.meshes[index].clone();
-                                let world = worlds[node.index as usize];
-                                let source_position =
-                                    world.w_axis.truncate() * Vec3::new(1., 1., -1.);
-                                let initial = reference
-                                    .world
-                                    .initial_materials
-                                    .iter()
-                                    .find(|m| m.node == source_node.source)
-                                    .and_then(|binding| {
-                                        reference
-                                            .rendering
-                                            .materials
-                                            .iter()
-                                            .find(|m| m.source == binding.material)
-                                    })
-                                    .map(|m| (m.asset, m.gltf_material));
-                                let Some(binding) = materials.bind(
-                                    prototype,
-                                    primitive,
-                                    initial,
-                                    source_node.layer,
-                                    receive,
-                                    shadow,
-                                    world.determinant() < 0.,
-                                    source_position,
-                                    view,
-                                )?
-                                else {
+                            // Parent traversal preserves glTF order without assuming topological node indices.
+                            for node in &loaded.plan.nodes {
+                                let mut matrix = worlds[node.index as usize];
+                                let mut current = node.index;
+                                for _ in 0..count {
+                                    let Some(parent) = loaded
+                                        .plan
+                                        .nodes
+                                        .iter()
+                                        .find(|p| p.children.contains(&current))
+                                    else {
+                                        break;
+                                    };
+                                    let local = if let Some(matrix) = parent.matrix {
+                                        Mat4::from_cols_array(&matrix)
+                                    } else {
+                                        Mat4::from_scale_rotation_translation(
+                                            Vec3::from_array(parent.scale),
+                                            Quat::from_array(parent.rotation),
+                                            Vec3::from_array(parent.translation),
+                                        )
+                                    };
+                                    matrix = local * matrix;
+                                    current = parent.index;
+                                }
+                                worlds[node.index as usize] = root_pose * matrix;
+                            }
+                            let lods = LodGroup::for_prototype(&reference.world, prototype)?;
+                            let mut renderers = Vec::with_capacity(primitives);
+                            for (source_index, source_node) in prototype.nodes.iter().enumerate() {
+                                if !source_node.renderer_enabled || !active(prototype, source_index)
+                                {
+                                    continue;
+                                }
+                                let node = &loaded.plan.nodes[source_node.gltf_node as usize];
+                                let Some(mesh_index) = node.mesh else {
                                     continue;
                                 };
-                                let is_grass =
-                                    matches!(binding.visible, InstanceMaterial::Grass(_));
-                                let entity = commands
-                                    .spawn((
-                                        Transform::default(),
-                                        Visibility::Inherited,
-                                        ChildOf(nodes[node.index as usize]),
-                                        RenderLayers::layer(source_node.layer as usize),
-                                        SourceShadowMode(shadow),
-                                        bevy::light::NotShadowCaster,
-                                    ))
-                                    .id();
-                                if !receive {
-                                    commands
-                                        .entity(entity)
-                                        .insert(bevy::light::NotShadowReceiver);
-                                }
-                                if !is_grass {
-                                    commands.entity(entity).insert(Mesh3d(mesh.clone()));
-                                    binding.visible.insert(entity, commands);
-                                }
-                                let mut skin_binding = None;
-                                if let Some(skin) = node.skin {
-                                    let joints = asset
-                                        .joints
-                                        .get(skin as usize)
-                                        .ok_or_else(|| {
-                                            ReferenceError("Missing generated skin joints".into())
-                                        })?
+                                let extras = node.extras.as_ref().ok_or_else(|| {
+                                    ReferenceError("Missing generated renderer metadata".into())
+                                })?;
+                                let shadow = extras.cast_shadows.ok_or_else(|| {
+                                    ReferenceError("Missing generated shadow mode".into())
+                                })?;
+                                let receive = extras.receive_shadows.ok_or_else(|| {
+                                    ReferenceError("Missing generated receiver state".into())
+                                })?;
+                                for primitive in loaded
+                                    .plan
+                                    .primitives
+                                    .iter()
+                                    .filter(|p| p.mesh == mesh_index)
+                                {
+                                    let index = asset
+                                        .primitives
                                         .iter()
-                                        .map(|&j| nodes[j])
-                                        .collect();
-                                    let binding = SkinnedMesh {
-                                        inverse_bindposes: asset.inverse_bindposes[skin as usize]
-                                            .clone(),
-                                        joints,
-                                    };
-                                    commands.entity(entity).insert(binding.clone());
-                                    skin_binding = Some(binding);
-                                }
-                                if let Some(caster) = &binding.caster {
-                                    let caster = commands
-                                        .spawn((
-                                            SourceCaster,
-                                            Mesh3d(mesh.clone()),
-                                            MeshMaterial3d(caster.clone()),
-                                            Transform::default(),
-                                            Visibility::Inherited,
-                                            ChildOf(entity),
-                                            RenderLayers::layer(source_node.layer as usize + 32),
-                                        ))
-                                        .id();
-                                    if let Some(skin) = &skin_binding {
-                                        commands.entity(caster).insert(skin.clone());
-                                    }
-                                } else if shadow != 0 && !is_grass {
-                                    let caster = commands
-                                        .spawn((
-                                            SourceCaster,
-                                            Mesh3d(mesh.clone()),
-                                            Transform::default(),
-                                            Visibility::Inherited,
-                                            ChildOf(entity),
-                                            RenderLayers::layer(source_node.layer as usize + 32),
-                                        ))
-                                        .id();
-                                    binding.visible.insert(caster, commands);
-                                    if let Some(skin) = &skin_binding {
-                                        commands.entity(caster).insert(skin.clone());
-                                    }
-                                }
-                                let (_patches, settings) = if is_grass {
-                                    let record = prototype
-                                        .deferred_materials
-                                        .iter()
-                                        .find(|m| {
-                                            Some(&m.source) == primitive.source_material.as_ref()
+                                        .position(|&(m, p)| {
+                                            m == primitive.mesh as usize
+                                                && p == primitive.primitive as usize
                                         })
                                         .ok_or_else(|| {
-                                            ReferenceError("Missing Grass source material".into())
+                                            ReferenceError(
+                                                "Missing generated primitive mesh".into(),
+                                            )
                                         })?;
-                                    let mesh_data = meshes.get(&mesh).ok_or_else(|| {
-                                        ReferenceError("Missing Grass prototype mesh".into())
-                                    })?;
-                                    let patch_bytes = mesh_data
-                                        .indices()
-                                        .ok_or_else(|| {
-                                            ReferenceError("Missing Grass source triangles".into())
-                                        })?
-                                        .len()
-                                        / 3
-                                        * std::mem::size_of::<GrassPatch>()
-                                        * 2;
-                                    let mut a = stream.presentation_allocation();
-                                    a.active_cpu += patch_bytes;
-                                    stream.set_presentation_allocation(a)?;
-                                    cpu += patch_bytes;
-                                    let patches = grass_patches(mesh_data, world)?;
-                                    let settings = GrassSettings::from_source(record)?;
-                                    if let InstanceMaterial::Grass(handle) = &binding.visible {
-                                        let caster = (shadow != 0).then(|| {
-                                            commands
-                                                .spawn((
-                                                    SourceCaster,
-                                                    Transform::default(),
-                                                    Visibility::Inherited,
-                                                    ChildOf(entity),
-                                                    RenderLayers::layer(
-                                                        source_node.layer as usize + 32,
-                                                    ),
-                                                ))
-                                                .id()
-                                        });
-                                        let bounds = grass_bounds(
-                                            &patches,
-                                            world,
-                                            materials
-                                                .grass
-                                                .get(handle)
-                                                .expect("bound Grass material")
-                                                .displacement_radius(),
-                                        );
-                                        grass.request(
-                                            stream,
-                                            entity,
-                                            Arc::clone(&patches),
-                                            settings,
-                                            handle.clone(),
-                                            view,
-                                            shadow != 0,
-                                            caster,
-                                            bounds,
-                                        )?;
+                                    let mesh = asset.meshes[index].clone();
+                                    let world = worlds[node.index as usize];
+                                    let source_position =
+                                        world.w_axis.truncate() * Vec3::new(1., 1., -1.);
+                                    let initial = reference
+                                        .world
+                                        .initial_materials
+                                        .iter()
+                                        .find(|m| m.node == source_node.source)
+                                        .and_then(|binding| {
+                                            reference
+                                                .rendering
+                                                .materials
+                                                .iter()
+                                                .find(|m| m.source == binding.material)
+                                        })
+                                        .map(|m| (m.asset, m.gltf_material));
+                                    let Some(binding) = materials.bind(
+                                        prototype,
+                                        primitive,
+                                        initial,
+                                        source_node.layer,
+                                        receive,
+                                        shadow,
+                                        world.determinant() < 0.,
+                                        source_position,
+                                        view,
+                                    )?
+                                    else {
+                                        continue;
+                                    };
+                                    let is_grass =
+                                        matches!(binding.visible, InstanceMaterial::Grass(_));
+                                    let entity = commands
+                                        .spawn((
+                                            Transform::default(),
+                                            Visibility::Inherited,
+                                            ChildOf(nodes[node.index as usize]),
+                                            RenderLayers::layer(source_node.layer as usize),
+                                            SourceShadowMode(shadow),
+                                            bevy::light::NotShadowCaster,
+                                        ))
+                                        .id();
+                                    owned_bindings.push((entity, binding.clone()));
+                                    if !receive {
+                                        commands
+                                            .entity(entity)
+                                            .insert(bevy::light::NotShadowReceiver);
                                     }
-                                    (Some(patches), Some(settings))
-                                } else {
-                                    (None, None)
-                                };
-                                renderers.push(Renderer {
-                                    node: source_index,
-                                    entity,
-                                    mesh,
-                                    binding,
-                                    tickets: [None, None],
-                                    lod_state: None,
-                                    shadow: shadow != 0,
-                                    settings,
-                                });
+                                    if !is_grass {
+                                        commands.entity(entity).insert(Mesh3d(mesh.clone()));
+                                        binding.visible.insert(entity, commands);
+                                    }
+                                    let mut skin_binding = None;
+                                    if let Some(skin) = node.skin {
+                                        let joints = asset
+                                            .joints
+                                            .get(skin as usize)
+                                            .ok_or_else(|| {
+                                                ReferenceError(
+                                                    "Missing generated skin joints".into(),
+                                                )
+                                            })?
+                                            .iter()
+                                            .map(|&j| nodes[j])
+                                            .collect();
+                                        let binding = SkinnedMesh {
+                                            inverse_bindposes: asset.inverse_bindposes
+                                                [skin as usize]
+                                                .clone(),
+                                            joints,
+                                        };
+                                        commands.entity(entity).insert(binding.clone());
+                                        skin_binding = Some(binding);
+                                    }
+                                    if let Some(caster) = &binding.caster {
+                                        let caster = commands
+                                            .spawn((
+                                                SourceCaster,
+                                                Mesh3d(mesh.clone()),
+                                                MeshMaterial3d(caster.clone()),
+                                                Transform::default(),
+                                                Visibility::Inherited,
+                                                ChildOf(entity),
+                                                RenderLayers::layer(
+                                                    source_node.layer as usize + 32,
+                                                ),
+                                            ))
+                                            .id();
+                                        if let Some(skin) = &skin_binding {
+                                            commands.entity(caster).insert(skin.clone());
+                                        }
+                                    } else if shadow != 0 && !is_grass {
+                                        let caster = commands
+                                            .spawn((
+                                                SourceCaster,
+                                                Mesh3d(mesh.clone()),
+                                                Transform::default(),
+                                                Visibility::Inherited,
+                                                ChildOf(entity),
+                                                RenderLayers::layer(
+                                                    source_node.layer as usize + 32,
+                                                ),
+                                            ))
+                                            .id();
+                                        binding.visible.insert(caster, commands);
+                                        if let Some(skin) = &skin_binding {
+                                            commands.entity(caster).insert(skin.clone());
+                                        }
+                                    }
+                                    let (_patches, settings) = if is_grass {
+                                        let record = prototype
+                                            .deferred_materials
+                                            .iter()
+                                            .find(|m| {
+                                                Some(&m.source)
+                                                    == primitive.source_material.as_ref()
+                                            })
+                                            .ok_or_else(|| {
+                                                ReferenceError(
+                                                    "Missing Grass source material".into(),
+                                                )
+                                            })?;
+                                        let mesh_data = meshes.get(&mesh).ok_or_else(|| {
+                                            ReferenceError("Missing Grass prototype mesh".into())
+                                        })?;
+                                        let patch_bytes = mesh_data
+                                            .indices()
+                                            .ok_or_else(|| {
+                                                ReferenceError(
+                                                    "Missing Grass source triangles".into(),
+                                                )
+                                            })?
+                                            .len()
+                                            / 3
+                                            * std::mem::size_of::<GrassPatch>()
+                                            * 2;
+                                        let mut a = stream.presentation_allocation();
+                                        a.active_cpu += patch_bytes;
+                                        stream.set_presentation_allocation(a)?;
+                                        cpu += patch_bytes;
+                                        let patches = grass_patches(mesh_data, world)?;
+                                        let settings = GrassSettings::from_source(record)?;
+                                        if let InstanceMaterial::Grass(handle) = &binding.visible {
+                                            let caster = (shadow != 0).then(|| {
+                                                commands
+                                                    .spawn((
+                                                        SourceCaster,
+                                                        Transform::default(),
+                                                        Visibility::Inherited,
+                                                        ChildOf(entity),
+                                                        RenderLayers::layer(
+                                                            source_node.layer as usize + 32,
+                                                        ),
+                                                    ))
+                                                    .id()
+                                            });
+                                            let bounds = grass_bounds(
+                                                &patches,
+                                                world,
+                                                materials
+                                                    .grass
+                                                    .get(handle)
+                                                    .expect("bound Grass material")
+                                                    .displacement_radius(),
+                                            );
+                                            grass.request(
+                                                stream,
+                                                entity,
+                                                Arc::clone(&patches),
+                                                settings,
+                                                handle.clone(),
+                                                view,
+                                                shadow != 0,
+                                                caster,
+                                                bounds,
+                                            )?;
+                                        }
+                                        (Some(patches), Some(settings))
+                                    } else {
+                                        (None, None)
+                                    };
+                                    renderers.push(Renderer {
+                                        node: source_index,
+                                        entity,
+                                        mesh,
+                                        binding,
+                                        tickets: [None, None],
+                                        lod_state: None,
+                                        shadow: shadow != 0,
+                                        settings,
+                                    });
+                                }
+                            }
+                            Ok(Instance {
+                                placement: placement.clone(),
+                                session: stream.frame().request.session,
+                                root,
+                                nodes,
+                                worlds,
+                                renderers,
+                                lods,
+                                ready: false,
+                                cpu,
+                                gpu,
+                                objects,
+                                visible: false,
+                                origin: stream.origin.offset,
+                            })
+                        })();
+                        match construction {
+                            Ok(instance) => self.instances.push(instance),
+                            Err(error) => {
+                                commands.entity(root).despawn();
+                                for (entity, binding) in owned_bindings {
+                                    grass.retire(stream, entity, meshes, &mut materials.grass)?;
+                                    materials.release(binding);
+                                }
+                                let mut a = stream.presentation_allocation();
+                                a.active_cpu = a.active_cpu.saturating_sub(cpu);
+                                a.active_gpu = a.active_gpu.saturating_sub(gpu);
+                                a.objects = a.objects.saturating_sub(objects);
+                                a.pending = a.pending.saturating_sub(1);
+                                stream.set_presentation_allocation(a)?;
+                                return Err(error);
                             }
                         }
-                        self.instances.push(Instance {
-                            placement: placement.clone(),
-                            session: stream.frame().request.session,
-                            root,
-                            nodes,
-                            worlds,
-                            renderers,
-                            lods,
-                            ready: false,
-                            cpu,
-                            gpu,
-                            objects,
-                            visible: false,
-                            origin: stream.origin.offset,
-                        });
                         self.pending = None;
                     }
                 }
             }
         }
         for instance in &mut self.instances {
-            if instance.ready {
+            if instance.ready
+                || instance.session != stream.frame().request.session
+                || !stream
+                    .pending_structures()
+                    .iter()
+                    .any(|p| p.id == instance.placement.id)
+            {
                 continue;
             }
             let mut complete = true;

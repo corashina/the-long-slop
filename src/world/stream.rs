@@ -111,12 +111,14 @@ pub struct RecoveryPermit {
     vehicle: [f64; 3],
 }
 struct PreparedSurface {
+    pending_bytes: usize,
     renderer_ready: bool,
     renderer_reserved: bool,
     request: WorldRequest,
     published: PublishedSurface,
 }
 struct TerrainWork {
+    pending_bytes: usize,
     request: WorldRequest,
     key: SurfaceKey,
     job: TerrainSurfaceJob,
@@ -153,6 +155,7 @@ pub struct WorldStream {
     road_layers: [u8; 3],
     indices_ready: bool,
     plan_revision: u64,
+    road_focus: [[f64; 3]; 2],
     road_candidates: Vec<u32>,
     next_road: usize,
     wanted_roads: Vec<u32>,
@@ -261,6 +264,7 @@ impl WorldStream {
             ],
             indices_ready: false,
             plan_revision: 0,
+            road_focus: [[f64::INFINITY; 3]; 2],
             road_candidates: Vec::new(),
             next_road: 0,
             wanted_roads: Vec::with_capacity(MAX_ROADS),
@@ -324,7 +328,7 @@ impl WorldStream {
                 .saturating_sub(old.pending)
                 .saturating_add(next.pending)
                 > 32
-            || next.staging_bytes > 32 * MIB
+            || next.staging_bytes + self.generation_pending_bytes() > 32 * MIB
             || next.jobs + usize::from(self.terrain_work.is_some()) > 2;
         if exceeds {
             return Err(ReferenceError(
@@ -334,8 +338,26 @@ impl WorldStream {
         self.presentation = next;
         Ok(())
     }
+    fn generation_pending_bytes(&self) -> usize {
+        self.terrain_work.as_ref().map_or(0, |w| w.pending_bytes)
+            + self.ready.as_ref().map_or(0, |w| {
+                w.pending_bytes
+                    + if w.renderer_reserved {
+                        surface_render_cpu(&w.published.surface)
+                    } else {
+                        0
+                    }
+            })
+    }
+    fn admit_generation(&mut self, bytes: usize) -> bool {
+        if bytes > 32 * MIB || self.metrics().active_cpu_bytes.saturating_add(bytes) > ACTIVE_CPU {
+            self.failure = Some("Source generation allocation exceeds its resource budget".into());
+            return false;
+        }
+        bytes <= self.available_staging_bytes()
+    }
     pub fn available_staging_bytes(&self) -> usize {
-        (32 * MIB).saturating_sub(self.presentation.staging_bytes)
+        (32 * MIB).saturating_sub(self.presentation.staging_bytes + self.generation_pending_bytes())
     }
     pub fn available_external_jobs(&self) -> usize {
         if !self.indices_ready {
@@ -473,16 +495,29 @@ impl WorldStream {
         }
         let cell = |p: [f64; 3], size: u32| {
             [
-                (p[0] / size as f64).round_ties_even() as i64,
-                (-p[2] / size as f64).round_ties_even() as i64,
+                (p[0] as f32 / size as f32).round_ties_even() as i64,
+                (-p[2] as f32 / size as f32).round_ties_even() as i64,
             ]
         };
-        let changed = self.tiles.iter().any(|tile| {
-            cell(player, tile.size) != cell(self.request.player, tile.size)
-                || cell(vehicle, tile.size) != cell(self.request.vehicle, tile.size)
-        });
+        // roadGenScript.controlDist is a squared distance of 10000 (Update 39509).
+        let road_changed = [player, vehicle]
+            .into_iter()
+            .zip(self.road_focus)
+            .any(|(a, b)| source_distance_squared(a, b) >= 10000.0);
+        if road_changed {
+            self.road_focus = [player, vehicle];
+        }
+        let changed = road_changed
+            || self.tiles.iter().any(|tile| {
+                cell(player, tile.size) != cell(self.request.player, tile.size)
+                    || cell(vehicle, tile.size) != cell(self.request.vehicle, tile.size)
+            });
+        let moved = player != self.request.player || vehicle != self.request.vehicle;
         self.request.player = player;
         self.request.vehicle = vehicle;
+        if moved && self.indices_ready {
+            self.refresh_structures();
+        }
         if changed {
             self.request.revision = self.request.revision.wrapping_add(1);
             self.ready = None;
@@ -571,6 +606,22 @@ impl WorldStream {
         self.startup_candidates.clear();
     }
 
+    fn refresh_structures(&mut self) {
+        let radius = self.reference.distances["BuildingGenDist"];
+        let points = [self.request.player, self.request.vehicle];
+        let bounds = union(
+            window(points[0], radius as f64),
+            window(points[1], radius as f64),
+        );
+        self.placements
+            .update_buildings_in(bounds, &mut self.wanted_structures, |position| {
+                points
+                    .into_iter()
+                    .any(|p| source_distance_squared(p, position) < radius * radius)
+            });
+        self.ready_structures
+            .retain(|id| self.wanted_structures.iter().any(|p| &p.id == id));
+    }
     fn plan(&mut self) -> Result<(), ReferenceError> {
         self.road_candidates.clear();
         self.next_road = 0;
@@ -578,26 +629,15 @@ impl WorldStream {
         self.wanted_lights.clear();
         self.road_points.clear();
         self.wanted_tiles.clear();
-        self.wanted_structures.clear();
         let road_distance =
             self.reference.distances["RoadGenDist"] as f64 + self.road_light.influence_margin();
         // One union query retains both support windows without copying full index arrays.
         let query = union(
-            window(self.request.player, road_distance),
-            window(self.request.vehicle, road_distance),
+            window(self.road_focus[0], road_distance),
+            window(self.road_focus[1], road_distance),
         );
         self.roads.segments_in(query, &mut self.road_candidates);
-        let building_distance = self.reference.distances["BuildingGenDist"] as f64;
-        let bounds = union(
-            window(self.request.player, building_distance),
-            window(self.request.vehicle, building_distance),
-        );
-        self.placements
-            .buildings_in(bounds, &mut self.wanted_structures);
-        self.wanted_structures.retain(|p| {
-            intersects(p.bounds, window(self.request.player, building_distance))
-                || intersects(p.bounds, window(self.request.vehicle, building_distance))
-        });
+        self.refresh_structures();
         if self.wanted_structures.len() > MAX_OBJECTS {
             return Err(ReferenceError("Source object count exceeds8192".into()));
         }
@@ -618,8 +658,8 @@ impl WorldStream {
             }
             for point in [self.request.player, self.request.vehicle] {
                 let center = [
-                    (point[0] / tile.size as f64).round_ties_even() as i64,
-                    (-point[2] / tile.size as f64).round_ties_even() as i64,
+                    (point[0] as f32 / tile.size as f32).round_ties_even() as i64,
+                    (-point[2] as f32 / tile.size as f32).round_ties_even() as i64,
                 ];
                 for offset in &offsets[..count] {
                     let key = SurfaceKey {
@@ -652,6 +692,26 @@ impl WorldStream {
         let Some(segment) = segment else {
             return;
         };
+        if !self
+            .admissions
+            .get(&self.reference.road.prototypes[segment.biome as usize])
+            .is_some_and(|a| a.ready)
+        {
+            return;
+        }
+        let radius = self.reference.distances["RoadGenDist"];
+        let needs_output = self
+            .road_focus
+            .into_iter()
+            .any(|p| source_distance_squared(p, segment.position()) <= radius * radius)
+            && !self
+                .surfaces
+                .iter()
+                .any(|s| s.key.layer == WorldLayer::Road && s.key.unit[0] == index as i64);
+        let pending_bytes = super::road::road_surface_bound(&self.reference, segment.biome);
+        if needs_output && !self.admit_generation(pending_bytes) {
+            return;
+        }
         self.next_road += 1;
         let radius = self.reference.distances["RoadGenDist"] as f64;
         if !self
@@ -684,10 +744,9 @@ impl WorldStream {
             self.failure = Some("Source object count exceeds 8192".into());
             return;
         }
-        if ![self.request.player, self.request.vehicle]
-            .into_iter()
-            .any(|p| intersects(segment.bounds, window(p, radius)))
-        {
+        if !self.road_focus.into_iter().any(|p| {
+            source_distance_squared(p, segment.position()) <= (radius as f32) * (radius as f32)
+        }) {
             return;
         }
         if self.wanted_roads.len() == MAX_ROADS {
@@ -710,6 +769,7 @@ impl WorldStream {
         let mut surface = WorldSurface::default();
         deform_road(&self.reference, &segment, &mut surface);
         self.ready = Some(PreparedSurface {
+            pending_bytes,
             renderer_ready: false,
             renderer_reserved: false,
             request: self.request,
@@ -736,6 +796,25 @@ impl WorldStream {
             };
             let tier = layer_tier(key.layer);
             let tile = self.tiles[tier];
+            if !self.terrain_ready[tier] {
+                return;
+            }
+            // Reserve all output, border and context storage before constructing the job.
+            let startup = self.startup.as_ref().map_or(0, |s| {
+                s.foundations.len() * std::mem::size_of::<TerrainFoundation>()
+                    + s.holes.len() * std::mem::size_of::<[[f32; 3]; 4]>()
+            });
+            let pending_bytes = TerrainSurfaceJob::allocation_bound(tile)
+                + self.placements.foundation_count()
+                    * 2
+                    * (std::mem::size_of::<super::FoundationPoint>()
+                        + std::mem::size_of::<TerrainFoundation>())
+                + startup * 2
+                + self.road_points.len() * std::mem::size_of::<TerrainRoadPoint>() * 2
+                + 512;
+            if !self.admit_generation(pending_bytes) {
+                return;
+            }
             let mut foundations = Vec::new();
             let mut holes = Vec::new();
             if tier == 0 {
@@ -776,6 +855,7 @@ impl WorldStream {
                 }));
             }
             let mut work = TerrainWork {
+                pending_bytes,
                 request: self.request,
                 key,
                 job: TerrainSurfaceJob::default(),
@@ -831,6 +911,7 @@ impl WorldStream {
         if done {
             let work = self.terrain_work.take().unwrap();
             self.ready = Some(PreparedSurface {
+                pending_bytes: work.pending_bytes,
                 renderer_ready: false,
                 renderer_reserved: false,
                 request: work.request,
@@ -865,10 +946,11 @@ impl WorldStream {
             return Ok(());
         }
         let metrics = self.metrics();
-        if metrics
-            .active_cpu_bytes
-            .saturating_add(surface_render_cpu(&work.published.surface))
-            > ACTIVE_CPU
+        if surface_render_cpu(&work.published.surface) > self.available_staging_bytes()
+            || metrics
+                .active_cpu_bytes
+                .saturating_add(surface_render_cpu(&work.published.surface))
+                > ACTIVE_CPU
             || metrics
                 .active_gpu_bytes
                 .saturating_add(surface_render_bytes(&work.published.surface))
@@ -899,6 +981,13 @@ impl WorldStream {
     }
     /// Publish at most one completed unit. Stale work never changes accepted collision.
     pub fn publish(&mut self, physics: &mut PhysicsWorld) -> Result<(), ReferenceError> {
+        let result = self.publish_unit(physics);
+        if result.is_ok() && self.failure.is_none() {
+            self.retire_surfaces(physics);
+        }
+        result
+    }
+    fn publish_unit(&mut self, physics: &mut PhysicsWorld) -> Result<(), ReferenceError> {
         if !self.publication_available || self.failure.is_some() {
             return Ok(());
         }
@@ -973,18 +1062,52 @@ impl WorldStream {
             }
         }
         self.surfaces.push(work.published);
+        Ok(())
+    }
+    fn retire_surfaces(&mut self, physics: &mut PhysicsWorld) {
         // Keep old support until both new receiver windows have published near terrain.
         if self.recovery.is_none()
             && self.next_road == self.road_candidates.len()
             && self.supports(window(self.request.player, 3.0))
             && self.supports(window(self.request.vehicle, 4.0))
         {
+            let distances = &self.reference.distances;
+            let focus = [self.request.player, self.request.vehicle];
+            let tiles = self.tiles;
+            let mut removed = [false; 4];
             self.surfaces.retain(|surface| {
-                let keep = if surface.key.layer == WorldLayer::Road {
+                let tier = if surface.key.layer == WorldLayer::Road {
+                    0
+                } else {
+                    layer_tier(surface.key.layer) + 1
+                };
+                let inside = if tier == 0 {
                     self.wanted_roads.contains(&(surface.key.unit[0] as u32))
                 } else {
-                    self.wanted_tiles.contains(&surface.key)
+                    let size = tiles[tier - 1].size as f32;
+                    let field = [
+                        "TerrainRemoveDist",
+                        "DistantTerrainRemoveDist",
+                        "DistantTerrain2RemoveDist",
+                    ][tier - 1];
+                    let radius = distances[field];
+                    let center = [
+                        surface.key.unit[0] as f32 * size,
+                        surface.key.unit[1] as f32 * size,
+                    ];
+                    focus.into_iter().any(|p| {
+                        let x = (p[0] as f32 / size).round_ties_even() * size;
+                        let z = (-p[2] as f32 / size).round_ties_even() * size;
+                        let dx = center[0] - x;
+                        let dz = center[1] - z;
+                        dx * dx + dz * dz < radius * radius
+                    })
                 };
+                // The source removes at most one object per tier update.
+                let keep = inside || removed[tier];
+                if !keep {
+                    removed[tier] = true;
+                }
                 if !keep {
                     if let Some(handle) = surface.collider {
                         physics.remove_collider(handle);
@@ -997,7 +1120,6 @@ impl WorldStream {
             self.lights
                 .retain(|light| self.wanted_lights.contains(&(light.id.unit[0] as u32)));
         }
-        Ok(())
     }
     pub fn supports(&self, swept: WorldBounds) -> bool {
         if !self.indices_ready
@@ -1378,7 +1500,13 @@ impl WorldStream {
         let mut index = 0;
         while index < self.structures.len() {
             let id = &self.structures[index].placement.id;
-            if self.wanted_structures.iter().any(|p| &p.id == id)
+            let radius = self.reference.distances["BuildingGenDist"];
+            if [self.request.player, self.request.vehicle]
+                .into_iter()
+                .any(|p| {
+                    source_distance_squared(p, self.structures[index].placement.pose.position)
+                        < radius * radius
+                })
                 || self.supplies.iter().filter(|s| &s.key == id).any(|s| {
                     s.items.is_some_and(|(tank, cap)| {
                         !items.can_remove_generated(tank) || !items.can_remove_generated(cap)
@@ -1425,6 +1553,7 @@ impl WorldStream {
                 }
             }
             instance.retire(physics);
+            break;
         }
     }
 
@@ -1613,7 +1742,7 @@ impl WorldStream {
     }
     pub fn metrics(&self) -> WorldMetrics {
         let mut metrics = WorldMetrics {
-            pending_bytes: self.presentation.staging_bytes,
+            pending_bytes: self.presentation.staging_bytes + self.generation_pending_bytes(),
             pending_work: self.ready_structures.len()
                 + usize::from(self.ready.is_some())
                 + usize::from(self.terrain_work.is_some())
@@ -1683,18 +1812,14 @@ impl WorldStream {
             metrics.active_gpu_bytes += render_bytes;
         }
         if let Some(work) = &self.ready {
-            metrics.active_cpu_bytes += surface_bytes(&work.published.surface);
+            metrics.active_cpu_bytes += work.pending_bytes;
             if work.renderer_reserved {
                 metrics.active_cpu_bytes += surface_render_cpu(&work.published.surface);
                 metrics.active_gpu_bytes += surface_render_bytes(&work.published.surface);
             }
         }
         if let Some(work) = &self.terrain_work {
-            metrics.active_cpu_bytes += work.job.retained_bytes()
-                + surface_bytes(&work.surface)
-                + work.foundations.capacity() * std::mem::size_of::<TerrainFoundation>()
-                + work.holes.capacity() * std::mem::size_of::<[[f32; 3]; 4]>()
-                + work.roads.capacity() * std::mem::size_of::<TerrainRoadPoint>();
+            metrics.active_cpu_bytes += work.pending_bytes;
         }
         if let Some(startup) = &self.startup {
             metrics.active_cpu_bytes += startup.foundations.capacity()
@@ -1806,4 +1931,11 @@ fn append_road_points(output: &mut Vec<TerrainRoadPoint>, segment: RoadSegment, 
             range,
         });
     }
+}
+
+// Frozen source coordinates, with source float vector boundaries.
+fn source_distance_squared(a: [f64; 3], b: [f64; 3]) -> f32 {
+    let x = a[0] as f32 - b[0] as f32;
+    let z = (-a[2]) as f32 - (-b[2]) as f32;
+    x * x + z * z
 }

@@ -119,6 +119,26 @@ impl SourcePrototypes {
                 .is_some_and(|p| p.deferred_materials.iter().any(|m| m.source == *source))
         })
     }
+    pub fn references_asset(
+        &self,
+        reference: &ReferenceManifest,
+        asset: crate::reference::AssetId,
+    ) -> bool {
+        self.entries.iter().filter(|e| !e.retired).any(|e| {
+            reference
+                .world
+                .prototypes
+                .iter()
+                .find(|p| p.source == e.source)
+                .is_some_and(|p| {
+                    p.asset == asset
+                        || p.nodes.iter().any(|n| {
+                            super::preflight::initial_material(reference, &n.source)
+                                .is_some_and(|m| m.0 == asset)
+                        })
+                })
+        })
+    }
     pub fn requested(&self, source: &SourceId) -> bool {
         self.entries
             .iter()
@@ -252,7 +272,7 @@ impl SourcePrototypes {
                         .iter()
                         .find(|p| p.source == entry.source)
                         .ok_or_else(|| ReferenceError("Missing checked source prototype".into()))?;
-                    validate_plan(&plan, prototype)?;
+                    validate_plan(&plan, prototype, reference)?;
                     let record = reference
                         .assets
                         .iter()
@@ -421,6 +441,7 @@ impl SourcePrototypes {
 fn validate_plan(
     plan: &PrototypePlan,
     prototype: &crate::reference::WorldPrototypeReference,
+    reference: &ReferenceManifest,
 ) -> Result<(), ReferenceError> {
     for source in &prototype.nodes {
         let node = plan
@@ -436,6 +457,25 @@ fn validate_plan(
         }
     }
     for primitive in &plan.primitives {
+        let null = primitive.source_material.is_none()
+            && (primitive.has_source_material || primitive.material.is_none());
+        if null {
+            let mut owners = plan.nodes.iter().filter(|n| n.mesh == Some(primitive.mesh));
+            if !owners.clone().any(|_| true)
+                || !owners.all(|node| {
+                    node.extras
+                        .as_ref()
+                        .and_then(|e| e.reference_id.as_ref())
+                        .and_then(|id| super::preflight::initial_material(reference, id))
+                        .is_some()
+                })
+            {
+                return Err(ReferenceError(
+                    "Unresolved checked startup material slot".into(),
+                ));
+            }
+            continue;
+        }
         if let Some(source) = &primitive.source_material {
             if !prototype
                 .deferred_materials

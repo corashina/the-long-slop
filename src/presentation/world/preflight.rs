@@ -146,3 +146,21 @@ impl PrototypePreflight {
         self.result.lock().unwrap().take()
     }
 }
+
+/// Only checked startup assignments may replace a serialized null material.
+pub fn initial_material(
+    reference: &crate::reference::ReferenceManifest,
+    node: &SourceId,
+) -> Option<(crate::reference::AssetId, u32)> {
+    let binding = reference
+        .world
+        .initial_materials
+        .iter()
+        .find(|m| &m.node == node)?;
+    let material = reference
+        .rendering
+        .materials
+        .iter()
+        .find(|m| m.source == binding.material)?;
+    Some((material.asset, material.gltf_material))
+}

@@ -606,6 +606,25 @@ fn forward_step(rotation: [f32; 3], length: f32) -> [f32; 3] {
     ]
 }
 
+pub(crate) fn road_surface_bound(reference: &WorldReference, biome: u8) -> usize {
+    let prototype = reference
+        .prototypes
+        .iter()
+        .find(|p| p.source == reference.road.prototypes[biome as usize])
+        .expect("road prototype");
+    prototype
+        .skins
+        .iter()
+        .map(|s| {
+            s.positions.len() * 24
+                + s.tangents.len() * 16
+                + s.uv.len() * 8
+                + s.triangles.iter().map(|t| t.len() * 12).sum::<usize>()
+                + s.triangles.len() * std::mem::size_of::<std::ops::Range<usize>>()
+        })
+        .sum::<usize>()
+        + prototype.nodes.len() * std::mem::size_of::<RoadFrame>()
+}
 /// Deform the admitted road skin in its authored bone and influence order.
 /// Source mesh inputs already contain the Z reflection; do not reflect them again.
 pub fn deform_road(
@@ -629,6 +648,29 @@ pub fn deform_road(
     output.colors.clear();
     output.triangles.clear();
     output.submeshes.clear();
+    output
+        .vertices
+        .reserve_exact(prototype.skins.iter().map(|s| s.positions.len()).sum());
+    output
+        .normals
+        .reserve_exact(prototype.skins.iter().map(|s| s.normals.len()).sum());
+    output
+        .tangents
+        .reserve_exact(prototype.skins.iter().map(|s| s.tangents.len()).sum());
+    output
+        .uv
+        .reserve_exact(prototype.skins.iter().map(|s| s.uv.len()).sum());
+    output.triangles.reserve_exact(
+        prototype
+            .skins
+            .iter()
+            .flat_map(|s| &s.triangles)
+            .map(Vec::len)
+            .sum(),
+    );
+    output
+        .submeshes
+        .reserve_exact(prototype.skins.iter().map(|s| s.triangles.len()).sum());
     for skin in &prototype.skins {
         let base = output.vertices.len() as u32;
         output.vertices.reserve(skin.positions.len());
