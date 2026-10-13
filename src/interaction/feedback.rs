@@ -23,6 +23,7 @@ impl ActionMask {
     pub const RELEASE_GRIP: u32 = 65536;
     pub const PRIMARY_SWITCH: u32 = 131072;
     pub const SCROLL: u32 = 262144;
+    pub const HELD_SWITCH: u32 = 524288;
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[repr(u32)]
@@ -131,7 +132,7 @@ impl InteractionState {
         if let Some(held) = self.held() {
             a.actions.0 |= ActionMask::DROP | ActionMask::THROW;
             if self.held_controls.contains_key(&held) {
-                a.actions.0 |= ActionMask::PRIMARY_SWITCH;
+                a.actions.0 |= ActionMask::HELD_SWITCH;
                 a.context = FeedbackContext::LightSwitch;
             }
             if self.carry.allows_held_rotation() {
