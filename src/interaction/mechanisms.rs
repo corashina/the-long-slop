@@ -41,6 +41,22 @@ pub struct MechanismState {
     order: Vec<usize>,
 }
 impl MechanismState {
+    pub(super) fn retained_binding_bytes(&self) -> usize {
+        use super::memory::{map, mechanism, vector};
+        vector(&self.controls)
+            + self
+                .controls
+                .iter()
+                .map(|c| mechanism(&c.reference))
+                .sum::<usize>()
+            + map(&self.items)
+            + vector(&self.frames)
+            + map(&self.nodes)
+            + map(&self.bodies)
+            + map(&self.item_nodes)
+            + vector(&self.order)
+    }
+
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut needed = HashSet::new();
         needed.extend(reference.items.iter().map(|i| i.node));
@@ -160,6 +176,150 @@ impl MechanismState {
             state.apply(i);
         }
         Ok(state)
+    }
+    pub fn register_generated(
+        &mut self,
+        prototype: &WorldPrototypeReference,
+        pose: VehiclePose,
+        scale: [f32; 3],
+        item: ItemId,
+        pickup_node: usize,
+    ) -> Result<Vec<NodeId>, ReferenceError> {
+        let first = self
+            .frames
+            .iter()
+            .map(|f| f.node.0)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or_else(|| ReferenceError("Generated node identity exhausted".into()))?;
+        first
+            .checked_add(prototype.nodes.len() as u32)
+            .ok_or_else(|| ReferenceError("Generated node identity exhausted".into()))?;
+        let base = self.frames.len();
+        let ids: Vec<_> = (0..prototype.nodes.len())
+            .map(|i| NodeId(first + i as u32))
+            .collect();
+        self.frames.reserve_exact(ids.len());
+        self.order.reserve_exact(ids.len());
+        self.nodes.reserve(ids.len());
+        for (i, node) in prototype.nodes.iter().enumerate() {
+            let local = if node.parent.is_none() {
+                to_rapier(pose)
+            } else {
+                to_rapier(VehiclePose {
+                    position: node.transform.translation,
+                    rotation: node.transform.rotation,
+                })
+            };
+            self.nodes.insert(ids[i], base + i);
+            self.frames.push(Frame {
+                node: ids[i],
+                parent: node.parent.map(|p| base + p as usize),
+                local,
+                scale: Vector::from_array(if node.parent.is_none() {
+                    scale
+                } else {
+                    node.transform.scale
+                }),
+                world: local,
+                world_scale: Vector::ONE,
+                handle: None,
+                driven: false,
+                body: None,
+                root_body: None,
+                relative: local,
+                external: None,
+                external_pose: None,
+            });
+        }
+        while self.order.len() < self.frames.len() {
+            let before = self.order.len();
+            for i in base..self.frames.len() {
+                if !self.order.contains(&i)
+                    && self.frames[i]
+                        .parent
+                        .is_none_or(|p| self.order.contains(&p))
+                {
+                    self.order.push(i);
+                }
+            }
+            if before == self.order.len() {
+                return Err(ReferenceError("Generated node hierarchy cycle".into()));
+            }
+        }
+        self.item_nodes.insert(item, ids[pickup_node]);
+        self.propagate();
+        Ok(ids)
+    }
+    pub fn register_generated_control(&mut self, reference: MechanismReference) {
+        for node in &reference.driven_nodes {
+            self.frames[self.nodes[node]].driven = true;
+        }
+        let index = self.controls.len();
+        self.items.insert(reference.item, index);
+        self.controls.push(Control {
+            degrees: reference
+                .rotation
+                .as_ref()
+                .map_or([0.; 2], |r| r.initial_degrees),
+            slide: reference.slide.as_ref().map_or(0., |s| s.initial_value),
+            enabled: reference.enabled,
+            turn_state: 0,
+            reference,
+        });
+        self.apply(index);
+    }
+    pub fn generated_local_pose(&self, node: NodeId) -> Option<VehiclePose> {
+        self.nodes
+            .get(&node)
+            .map(|i| from_rapier(&self.frames[*i].local))
+    }
+    pub fn item_node(&self, item: ItemId) -> Option<NodeId> {
+        self.item_nodes.get(&item).copied()
+    }
+    pub fn register_generated_item(&mut self, item: ItemId, node: NodeId) {
+        self.item_nodes.insert(item, node);
+    }
+    pub fn remove_generated(&mut self, item: ItemId, ids: &[NodeId]) {
+        self.item_nodes.retain(|_, node| !ids.contains(node));
+        self.item_nodes.remove(&item);
+        self.controls.retain(|c| {
+            c.reference.item != item && !c.reference.driven_nodes.iter().any(|n| ids.contains(n))
+        });
+        self.items.clear();
+        for (index, control) in self.controls.iter().enumerate() {
+            self.items.insert(control.reference.item, index);
+        }
+        for index in (0..self.frames.len()).rev() {
+            if !ids.contains(&self.frames[index].node) {
+                continue;
+            }
+            self.nodes.remove(&self.frames[index].node);
+            if let Some(body) = self.frames[index].body {
+                self.bodies.remove(&body);
+            }
+            self.frames.remove(index);
+            self.order.retain(|i| *i != index);
+            for i in &mut self.order {
+                if *i > index {
+                    *i -= 1;
+                }
+            }
+            for f in &mut self.frames {
+                if let Some(parent) = &mut f.parent {
+                    if *parent > index {
+                        *parent -= 1;
+                    }
+                }
+            }
+        }
+        for (i, f) in self.frames.iter().enumerate() {
+            self.nodes.insert(f.node, i);
+            if let Some(body) = f.body {
+                self.bodies.insert(body, i);
+            }
+        }
     }
     pub fn take_control_action(&mut self) -> Option<ControlAction> {
         self.control_action.take()

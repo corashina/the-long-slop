@@ -479,6 +479,7 @@ fn sync_world(
             &reference.0,
             &mut runtime.physics,
             &mut runtime.area,
+            &mut runtime.wheels,
             view,
             runtime.lighting.cycle.output().shader_time_seconds as f32,
             lod_view,

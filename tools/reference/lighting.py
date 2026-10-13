@@ -18,6 +18,23 @@ def resource(reader, output, suffix, payload):
     path=output/name;path.write_bytes(payload)
     return {'source':source_id(reader),'path':f'reference/{name}','sha256':hashlib.sha256(payload).hexdigest()}
 
+def texture_chunks(reader, output, payload):
+    """Bound browser reader and upload ownership without changing decoded bytes."""
+    width,height,count=struct.unpack_from('<III',payload,4)
+    chunks=[];offset=16
+    for mip in range(count):
+        w=max(1,width>>mip);h=max(1,height>>mip)
+        rows=max(1,(1024*1024)//(w*4))
+        for row in range(0,h,rows):
+            size=min(rows,h-row)
+            part=b'SMIP'+struct.pack('<III',w,size,1)+payload[offset:offset+w*size*4]
+            chunks.append({'data':resource(reader,output,f'mip-{mip}-row-{row}.smip',part),
+                'mip':mip,'row':row,'width':w,'rows':size})
+            offset+=w*size*4
+    if offset!=len(payload):raise ValueError('Decoded texture payload length')
+    return chunks
+
+
 def texture(source, reader, output):
     if reader is None or reader.type.name!='Texture2D':raise ValueError(f'Required lighting Texture2D: {key(reader) if reader else None}')
     identity=key(reader)
@@ -26,12 +43,13 @@ def texture(source, reader, output):
         obj=source.texture_object(reader);name=f'lighting-{reader.assets_file.name}-{reader.path_id}.png'
         path=output/name;obj.image.transpose(Image.Transpose.FLIP_TOP_BOTTOM).save(path)
         from .mips import decoded_mips
-        mip_data=resource(reader,output,"smip",decoded_mips(obj))
+        payload=decoded_mips(obj)
+        mip_data=resource(reader,output,"smip",payload)
         s=obj.m_TextureSettings
         source.lighting_textures[identity]={'id':len(source.lighting_textures)+1,'source':source_id(reader),'path':f'reference/{name}',
             'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'width':obj.m_Width,'height':obj.m_Height,
             'source_format':obj.m_TextureFormat,'sample_channel':'alpha' if obj.m_TextureFormat==1 else 'rgba','color_space':obj.m_ColorSpace,'filter_mode':s.m_FilterMode,'wrap_u':s.m_WrapU,'wrap_v':s.m_WrapV,
-            'mip_data':mip_data,'source_data':resource(reader,output,'texture.bin',obj.get_image_data()),'mip_count':obj.m_MipCount,'aniso':s.m_Aniso,'mip_bias':s.m_MipBias}
+            'chunks':texture_chunks(reader,output,payload),'mip_data':mip_data,'source_data':resource(reader,output,'texture.bin',obj.get_image_data()),'mip_count':obj.m_MipCount,'aniso':s.m_Aniso,'mip_bias':s.m_MipBias}
     return source.lighting_textures[identity]['id']
 
 def sky_material(source, reader, output):

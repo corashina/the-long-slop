@@ -5,10 +5,11 @@ use std::{
     mem::{align_of, size_of},
 };
 
-pub(crate) trait RetainedBytes {
+// Deserialized immutable reference inputs only. Runtime maps use separate bounds.
+trait ImmutableInputBytes {
     fn heap_bytes(&self) -> usize;
 }
-macro_rules! inline {($($kind:ty),*)=>{$(impl RetainedBytes for $kind {fn heap_bytes(&self)->usize {0}})*};}
+macro_rules! inline {($($kind:ty),*)=>{$(impl ImmutableInputBytes for $kind {fn heap_bytes(&self)->usize {0}})*};}
 inline!(
     bool,
     u8,
@@ -21,27 +22,31 @@ inline!(
     Transform,
     WorldPrototypeRole
 );
-impl RetainedBytes for String {
+impl ImmutableInputBytes for String {
     fn heap_bytes(&self) -> usize {
         self.capacity()
     }
 }
-impl<T: RetainedBytes> RetainedBytes for Vec<T> {
+impl<T: ImmutableInputBytes> ImmutableInputBytes for Vec<T> {
     fn heap_bytes(&self) -> usize {
-        self.capacity() * size_of::<T>() + self.iter().map(RetainedBytes::heap_bytes).sum::<usize>()
+        self.capacity() * size_of::<T>()
+            + self
+                .iter()
+                .map(ImmutableInputBytes::heap_bytes)
+                .sum::<usize>()
     }
 }
-impl<T: RetainedBytes, const N: usize> RetainedBytes for [T; N] {
+impl<T: ImmutableInputBytes, const N: usize> ImmutableInputBytes for [T; N] {
     fn heap_bytes(&self) -> usize {
-        self.iter().map(RetainedBytes::heap_bytes).sum()
+        self.iter().map(ImmutableInputBytes::heap_bytes).sum()
     }
 }
-impl<T: RetainedBytes> RetainedBytes for Option<T> {
+impl<T: ImmutableInputBytes> ImmutableInputBytes for Option<T> {
     fn heap_bytes(&self) -> usize {
-        self.as_ref().map_or(0, RetainedBytes::heap_bytes)
+        self.as_ref().map_or(0, ImmutableInputBytes::heap_bytes)
     }
 }
-impl<K: RetainedBytes, V: RetainedBytes> RetainedBytes for BTreeMap<K, V> {
+impl<K: ImmutableInputBytes, V: ImmutableInputBytes> ImmutableInputBytes for BTreeMap<K, V> {
     fn heap_bytes(&self) -> usize {
         // Rust's B-tree has eleven entry slots and twelve child slots. Every
         // non-root node has at least five entries. Charge every possible node
@@ -49,6 +54,10 @@ impl<K: RetainedBytes, V: RetainedBytes> RetainedBytes for BTreeMap<K, V> {
         // bound on container payload, not an allocator residency measurement.
         let nodes = if self.is_empty() {
             0
+        } else if self.len() <= 11 {
+            // Deserialization populated this map from empty. It never split and shrank.
+            // Charge an internal root conservatively.
+            1
         } else {
             1 + (self.len() - 1) / 5
         };
@@ -63,15 +72,16 @@ impl<K: RetainedBytes, V: RetainedBytes> RetainedBytes for BTreeMap<K, V> {
                 .sum::<usize>()
     }
 }
-macro_rules! fields {($kind:ty:$($field:ident),*)=>{impl RetainedBytes for $kind {fn heap_bytes(&self)->usize {0$(+self.$field.heap_bytes())*}}};}
+macro_rules! fields {($kind:ty:$($field:ident),*)=>{impl ImmutableInputBytes for $kind {fn heap_bytes(&self)->usize {0$(+self.$field.heap_bytes())*}}};}
 fields!(SourceId:file);
 fields!(SourceHash:file,sha256);
 fields!(LibraryProvenance:manifest_sha256,catalog_sha256,source_manifest_sha256);
 fields!(super::super::rendering::ResourceReference:source,path,sha256);
 fields!(super::super::rendering::ShaderReference:compiled_data,source,path,sha256,name);
-fields!(super::super::rendering::LightingTextureRecord:mip_data,source_data,source,path,sha256,sample_channel);
+fields!(super::super::rendering::LightingTextureRecord:chunks,mip_data,source_data,source,path,sha256,sample_channel);
 fields!(super::super::rendering::TextureLink:property);
-impl RetainedBytes for WorldValue {
+fields!(super::super::rendering::LightingTextureChunk:data);
+impl ImmutableInputBytes for WorldValue {
     fn heap_bytes(&self) -> usize {
         match self {
             Self::Text(value) => value.heap_bytes(),
@@ -82,7 +92,7 @@ impl RetainedBytes for WorldValue {
         }
     }
 }
-impl RetainedBytes for ColliderGeometry {
+impl ImmutableInputBytes for ColliderGeometry {
     fn heap_bytes(&self) -> usize {
         match self {
             Self::Convex { points } => points.heap_bytes(),
@@ -98,14 +108,18 @@ impl WorldReference {
         size_of::<Self>() + 2 * size_of::<usize>() + self.heap_bytes()
     }
 }
-fields!(WorldReference:sample_payload_sha256,managed_sha256,library,settings_context,generation_frame,distances,source_hashes,road,terrain,buildings,catalog,part_scope_slots,generators,startup,startup_holes,collision_rules,grass_displacement,lod,initial_materials,prototypes,records,receipts,exclusions,material_textures);
+fields!(WorldReference:mechanisms,sample_payload_sha256,managed_sha256,library,settings_context,spawn_context,initialization,generation_frame,distances,source_hashes,road,terrain,buildings,catalog,part_scope_slots,generators,startup,startup_holes,collision_rules,grass_displacement,lod,initial_materials,painting_materials,prototypes,records,receipts,exclusions,material_textures);
 fields!(WorldPrototypeReference:source,role,asset,nodes,controls,excluded_actions,deferred_materials,skins,bodies,colliders,prefab_pose);
 fields!(WorldPrototypeNode:source,name,parent,active,renderer_enabled,layer,transform,gltf_node);
 fields!(WorldSkinReference:source,mesh,node,bones,bind_poses,positions,normals,tangents,uv,joints,weights,triangles);
 fields!(WorldColliderReference:body,source,node,enabled,trigger,material,deformed_skin,source_empty_mesh,geometry);
 fields!(WorldSourceReceipt:source,sha256);
-fields!(WorldSourceLink:field,target);
-fields!(WorldSourceRecord:source,class_name,fields,links);
+fields!(WorldSourceRecord:source,class_name,fields);
+impl ImmutableInputBytes for WorldFields {
+    fn heap_bytes(&self) -> usize {
+        self.entries().heap_bytes()
+    }
+}
 fields!(WorldExclusion:source,field,target,reason,catalog);
 fields!(WorldStartupReference:group,source,pose);
 fields!(WorldCollisionRules:source,record_sha256,layers);
@@ -154,8 +168,13 @@ impl ReferenceManifest {
             + self
                 .assets
                 .iter()
-                .filter(|asset| asset.usage == AssetUsage::WorldPrototype)
-                .map(RetainedBytes::heap_bytes)
+                .filter(|asset| {
+                    matches!(
+                        asset.usage,
+                        AssetUsage::WorldPrototype | AssetUsage::WorldMaterial
+                    )
+                })
+                .map(ImmutableInputBytes::heap_bytes)
                 .sum::<usize>()
             + self.rendering.materials.capacity()
                 * size_of::<super::super::rendering::MaterialRecord>()
@@ -168,8 +187,13 @@ impl ReferenceManifest {
                         .prototypes
                         .iter()
                         .any(|prototype| prototype.asset == material.asset)
+                        || self
+                            .world
+                            .painting_materials
+                            .iter()
+                            .any(|painting| painting.asset == material.asset)
                 })
-                .map(RetainedBytes::heap_bytes)
+                .map(ImmutableInputBytes::heap_bytes)
                 .sum::<usize>()
     }
 }
@@ -178,3 +202,30 @@ fields!(WorldLodReference:quality,dither);
 fields!(WorldDitherReference:engine_sha256,creator_sha256,binding_sha256,property_name);
 
 fields!(WorldInitialMaterial:controller,renderer,node,material);
+
+fields!(WorldSpawnContext:classification,engine_sha256,clock_input,initial_state,startup_state,startup_draws,date);
+
+fields!(WorldInitialization:nodes,components);
+fields!(WorldInitNode:source,owner,parent,children,components,active,pose);
+fields!(WorldInitComponent:source,owner,class_name,execution_order,fields);
+fields!(WorldInitField:name,value);
+impl WorldInitialization {
+    /// Decoded capacities and the immutable source-map bound, counted once.
+    pub fn retained_cpu_bytes(&self) -> usize {
+        size_of::<Self>() + self.heap_bytes()
+    }
+}
+
+fields!(WorldPaintingMaterial:material,texture,asset);
+
+impl WorldValue {
+    pub(crate) fn input_heap_bytes(&self) -> usize {
+        self.heap_bytes()
+    }
+}
+
+impl ImmutableInputBytes for WorldMechanism {
+    fn heap_bytes(&self) -> usize {
+        self.prototype.heap_bytes() + crate::interaction::memory::mechanism(&self.recipe)
+    }
+}

@@ -42,9 +42,26 @@ impl InstanceMaterials<'_> {
         stream: &mut WorldStream,
         reference: &ReferenceManifest,
         prototype: &WorldPrototypeReference,
+        id: &crate::world::GeneratedId,
     ) -> Result<bool, ReferenceError> {
         self.cache
             .admit_world_asset(prototype.asset, reference, stream)?;
+        let mut selected = 0;
+        loop {
+            let Some(asset) = stream
+                .appearance(id)
+                .iter()
+                .filter_map(|a| a.primary.map(|p| p.0))
+                .nth(selected)
+            else {
+                break;
+            };
+            self.cache.admit_world_asset(asset, reference, stream)?;
+            if !self.cache.world_asset_ready(asset) {
+                return Ok(false);
+            }
+            selected += 1;
+        }
         for node in &prototype.nodes {
             if let Some((asset, _)) = super::preflight::initial_material(reference, &node.source) {
                 self.cache.admit_world_asset(asset, reference, stream)?;
@@ -68,6 +85,7 @@ impl InstanceMaterials<'_> {
         prototype: &WorldPrototypeReference,
         primitive: &PlanPrimitive,
         initial: Option<(crate::reference::AssetId, u32)>,
+        selected: Option<&crate::reference::SourceId>,
         layer: u8,
         receive: bool,
         shadow_mode: u8,
@@ -77,8 +95,9 @@ impl InstanceMaterials<'_> {
     ) -> Result<Option<RendererMaterial>, ReferenceError> {
         let mask = 1u32 << layer;
         let mut caster = None;
-        let visible = if initial.is_none() && primitive.has_source_material {
-            let Some(id) = &primitive.source_material else {
+        let visible = if initial.is_none() && (selected.is_some() || primitive.has_source_material)
+        {
+            let Some(id) = selected.or(primitive.source_material.as_ref()) else {
                 return Err(ReferenceError(
                     "Unresolved source null material draw".into(),
                 ));
@@ -173,6 +192,34 @@ impl InstanceMaterials<'_> {
         };
         Ok(Some(RendererMaterial { visible, caster }))
     }
+    pub fn color(
+        &mut self,
+        binding: &RendererMaterial,
+        color: [f32; 4],
+    ) -> Result<(), ReferenceError> {
+        let color = Color::srgba(color[0], color[1], color[2], color[3]);
+        match &binding.visible {
+            InstanceMaterial::Primary(h) => {
+                if let Some(mut m) = self.primary.get_mut(h) {
+                    m.base.base_color = color;
+                    if let Some(surface) = &mut m.extension.surface {
+                        surface.set_color(color);
+                    }
+                }
+            }
+            InstanceMaterial::Specular(h) => {
+                if let Some(mut m) = self.specular.get_mut(h) {
+                    m.set_color(color);
+                }
+            }
+            _ => {
+                return Err(ReferenceError(
+                    "Condition color requires its checked shader property".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
     pub fn fade(&mut self, binding: &RendererMaterial, fade: f32, source_position: Vec3) {
         match &binding.visible {
             InstanceMaterial::Primary(h) => {
@@ -224,6 +271,16 @@ impl InstanceMaterials<'_> {
     }
 }
 impl InstanceMaterial {
+    pub fn replace(&self, entity: Entity, commands: &mut Commands) {
+        commands.entity(entity).remove::<(
+            MeshMaterial3d<SourceMaterial>,
+            MeshMaterial3d<SpecularMaterial>,
+            MeshMaterial3d<ImpostorMaterial>,
+            MeshMaterial3d<GrassMaterial>,
+        )>();
+        self.insert(entity, commands);
+    }
+
     pub fn insert(&self, entity: Entity, commands: &mut Commands) {
         match self {
             Self::Primary(h) => {

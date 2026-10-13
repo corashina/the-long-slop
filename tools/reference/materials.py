@@ -85,7 +85,7 @@ def shader_defaults(shader, family):
     return floats, colors, textures
 
 
-def recover_material(source, reader, color_override=None, condition=None):
+def recover_material(source, reader, color_override=None, condition=None, texture_overrides=None):
     data = source.read(reader)
     shader_reader = required_pointer(source, reader, data['m_Shader'], 'm_Shader')
     if shader_reader is None: raise ValueError(f'{source_id(reader)} m_Shader: missing shader')
@@ -124,7 +124,7 @@ def recover_material(source, reader, color_override=None, condition=None):
     for slot in active:
         env = environments.get(slot)
         pointer = env['m_Texture'] if env else {'m_PathID': 0}
-        texture_reader = required_pointer(source, reader, pointer, slot)
+        texture_reader = (texture_overrides or {}).get(slot) or required_pointer(source, reader, pointer, slot)
         if texture_reader is None:
             active_defaults[slot] = defaults[slot]; continue
         if texture_reader.type.name == 'RenderTexture':
@@ -214,7 +214,7 @@ def export_material_textures(source, owner, record, output):
     cache = getattr(source, 'material_texture_cache', None)
     if cache is None: source.material_texture_cache = cache = set()
     for entry in record['properties']['textures']:
-        reader = required_pointer(source, owner, environments[entry['slot']]['m_Texture'], entry['slot'])
+        reader = source.get(entry['source']['file'], entry['source']['path_id'])
         destination = output / entry['file'].removeprefix('reference/')
         identity = str(destination.resolve())
         if identity not in cache:

@@ -40,11 +40,10 @@ impl AssetLoader for SourceImageLoader {
         if settings.decoded_bytes == 0 {
             Reader::read_to_end(reader, &mut data).await?;
         } else {
-            reader
-                .take(capacity as u64 + 1)
-                .read_to_end(&mut data)
-                .await?;
-            if data.len() > capacity {
+            data.resize(capacity, 0);
+            reader.read_exact(&mut data).await?;
+            let mut extra = [0_u8; 1];
+            if reader.read(&mut extra).await? != 0 {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "Source mip exceeds admitted bytes",

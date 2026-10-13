@@ -36,6 +36,15 @@ pub struct CarryState {
 }
 
 impl CarryState {
+    pub(super) fn retained_binding_bytes(&self) -> usize {
+        super::memory::map(&self.rules)
+            + self
+                .rules
+                .values()
+                .map(|r| r.source.file.capacity())
+                .sum::<usize>()
+    }
+
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let player = &reference.player;
         if !player.carry_min_weight.is_finite()
@@ -59,6 +68,12 @@ impl CarryState {
             charge_falling: false,
             charge_stopped: false,
         })
+    }
+    pub(super) fn register_generated(&mut self, id: ItemId, rule: PickupReference) {
+        self.rules.insert(id, rule);
+    }
+    pub(super) fn unregister_generated(&mut self, id: ItemId) {
+        self.rules.remove(&id);
     }
     pub(super) fn reference_throw_minimum(&self) -> f32 {
         self.reference.throw_minimum

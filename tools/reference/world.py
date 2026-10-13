@@ -21,8 +21,8 @@ RULE_CLASSES = {'roadscript', 'buildingscript', 'newRandomStuffSpawnScript', 'st
     'tankscript', 'openablefluidcontainerscript', 'benzinkut', 'kozlampscript', 'kozlampscript2',
     'pickupable','usablescript','pushablescript','massScript','layerScript','tosaveitemscript',
     'enginescript','coolantTankscript','seatscript','tankcapscript','gumiscript','wheelscript',
-    'craftscript','partscript','capsscript','kozlampa','headlightscript','rearlights','flashlightscript',
-    'randomTypeSelector','ginlampscript','partconditionscript','partslotscript','wheelgraphicsscript','doorscript','benzinkutscript'}
+    'craftscript','partscript','capsscript','kozlampa','electronicsscript','headlightscript','rearlights','flashlightscript',
+    'randomFlyer','newAiScript','nyulscript','paintingMain','childunparent','randomRock','RandomSpawnedObjScript','randomScaleScript','undergroundSpawnScript','spawnInBoxScript','paintingScript','ammoscript','foodscript','randomTypeSelector','ginlampscript','partconditionscript','partslotscript','wheelgraphicsscript','doorscript','benzinkutscript'}
 IDENTITY = {'translation':[0.,0.,0.], 'rotation':[0.,0.,0.,1.], 'scale':[1.,1.,1.]}
 
 
@@ -159,6 +159,11 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) ->
             roots[key(root)]=root;roles[key(root)]=role
         return source_id(root)
     road_roots=[add(source.resolve(road_owner,p),'road') for p in road['prefabs']]
+    for road_root in road_roots:
+        root=source.get(road_root['file'],road_root['path_id'])
+        controller=next(c for c in source.hierarchy(root,activate_root=True)[0]['components'] if c.type.name=='MonoBehaviour' and source.class_name(c)=='roadscript')
+        pole=source.resolve(controller,source.read(controller)['randomPoleRotTransform'])
+        roots[key(pole)]=pole;roles[key(pole)]='prop'
     generators=[]
     for pid in GENERATORS:
         owner=source.get('level1',pid)
@@ -315,6 +320,9 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) ->
                     for link in rule['links']:
                         target=source.get(link['target']['file'],link['target']['path_id'])
                         if target.type.name=='Transform':selected.record(target)
+                    if cname in ('undergroundSpawnScript','spawnInBoxScript'):
+                        for item in source.read(component)['spawn']:
+                            catalog_items(item['category'],bool(item['itemNameInsteadOfCategory']))
                     if cname=='newRandomStuffSpawnScript':
                         for index,item in enumerate(source.read(component)['items']):
                             target=source.resolve(component,item['G'])
@@ -342,77 +350,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) ->
     source.world_material_source=copy.copy(source)
     source.world_material_source.lighting_textures={}
     source.world_material_export=lambda material:source_material(source,selected,material,output,source.world_material_source)
-    prototypes=[]
-    for index,(identity,root) in enumerate(roots.items(),6):
-        name=f'world-{identity[0].replace(".","-")}-{identity[1]}'
-        exporter=GltfExporter(source,output/f'{name}.gltf',reader,index)
-        report=exporter.export([root])
-        for material in report['deferred_materials']:
-            selected.record(source.get(material['source']['file'],material['source']['path_id']))
-        hierarchy=source.hierarchy(root,activate_root=True)
-        for node in hierarchy:
-            selected.record(node['reader'])
-            selected.record(node['game_object'])
-        mapping={key(node['reader']):i for i,node in enumerate(hierarchy)}
-        nodes=[{'source':r['source'],'name':source.read(n['game_object'])['m_Name'],'parent':mapping[key(n['parent'])] if n['parent'] else None,
-                'active':bool(source.read(n['game_object'])['m_IsActive']),'renderer_enabled':bool(exporter.document.nodes[r['gltf_node']].extras.get('source_renderer_enabled',False)),'layer':source.read(n['game_object'])['m_Layer'],'transform':r['transform'],'gltf_node':r['gltf_node']} for r,n in zip(report['nodes'],hierarchy)]
-        local=copy.copy(source)
-        ancestor_count=len(source.chain(root))
-        local.chain=lambda transform: source.chain(transform)[:-ancestor_count]
-        bodies=[];body_nodes={}
-        for n in hierarchy:
-            for component in n['components']:
-                if component.type.name!='Rigidbody':continue
-                data=source.read(component);selected.record(component)
-                body_nodes[key(n['reader'])]=len(bodies)
-                bodies.append({'source':source_id(component),'node':mapping[key(n['reader'])],
-                    'mass_kg':data['m_Mass'],'linear_damping':data['m_Drag'],'angular_damping':data['m_AngularDrag'],
-                    'kinematic':bool(data['m_IsKinematic']),'use_gravity':bool(data['m_UseGravity']),
-                    'constraints':data['m_Constraints'],'pose':world_pose(local,n['reader'])})
-        skins=[];colliders=[];controls=[]
-        for n in hierarchy:
-            for component in n['components']:
-                data=source.read(component)
-                if component.type.name=='MonoBehaviour' and source.class_name(component)=='roadscript':
-                    controls=[mapping[key(source.resolve(component,p))] for p in data['bones']]
-                if component.type.name=='SkinnedMeshRenderer' and data['m_Mesh']['m_PathID']:
-                    mesh=source.resolve(component,data['m_Mesh']);doc,directory,mesh_index=exporter.accepted_mesh(mesh)
-                    primitive=doc.meshes[mesh_index].primitives[0]
-                    skins.append({'source':source_id(component),'mesh':source_id(mesh),'node':mapping[key(n['reader'])],
-                        'bones':[mapping[key(source.resolve(component,p))] for p in data['m_Bones']],
-                        'bind_poses':convert_bind_poses(source.read(mesh)['m_BindPose']),
-                        'positions':exporter.rows(doc,directory,primitive.attributes.POSITION),
-                        'normals':exporter.rows(doc,directory,primitive.attributes.NORMAL),
-                        'tangents':exporter.rows(doc,directory,primitive.attributes.TANGENT) if primitive.attributes.TANGENT is not None else [],
-                        'uv':exporter.rows(doc,directory,primitive.attributes.TEXCOORD_0),
-                        'joints':exporter.rows(doc,directory,primitive.attributes.JOINTS_0),
-                        'weights':exporter.rows(doc,directory,primitive.attributes.WEIGHTS_0),
-                        'triangles':exporter.geometry(mesh)[2]})
-                if component.type.name in ('BoxCollider','MeshCollider','SphereCollider','CapsuleCollider'):
-                    selected.record(component)
-                    physical_material=source.resolve(component,data['m_Material'])
-                    if physical_material:selected.record(physical_material)
-                    # A road collider receives the deformed skin at runtime.
-                    skin_collider=roles[identity]=='road' and component.type.name=='MeshCollider' and not data['m_Mesh']['m_PathID']
-                    empty_mesh=None
-                    if component.type.name=='MeshCollider' and data['m_Mesh']['m_PathID']:
-                        collider_mesh=source.resolve(component,data['m_Mesh'])
-                        if source.read(collider_mesh)['m_VertexData']['m_VertexCount']==0:
-                            selected.record(collider_mesh);empty_mesh=source_id(collider_mesh)
-                    owner_node=n['reader']
-                    while key(owner_node) not in body_nodes and key(owner_node)!=key(root):
-                        owner_node=source.resolve(owner_node,source.read(owner_node)['m_Father'])
-                    body=body_nodes.get(key(owner_node))
-                    shape=None if skin_collider or empty_mesh else geometry(local,exporter,component,n['reader'],bodies[body]['pose'] if body is not None else IDENTITY,body is not None and not bodies[body]['kinematic'])
-                    colliders.append({'source':source_id(component),'node':mapping[key(n['reader'])],'enabled':bool(data['m_Enabled']),
-                        'body':body,'trigger':bool(data['m_IsTrigger']),'material':selected.receipt(physical_material) if physical_material else None,'deformed_skin':0 if skin_collider else None,'source_empty_mesh':empty_mesh,'geometry':shape})
-        for node in hierarchy:
-            for component in node['components']:selected.component_record(component)
-        prototypes.append({'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,
-            'deferred_materials':report['deferred_materials'],'excluded_actions':scope_cache.get(identity,('',[]))[1],'skins':skins,'bodies':bodies,'colliders':colliders,'prefab_pose':converted_transform(source.read(root)),
-            'asset_record':{'id':index,'material_count':report['material_count'],'usage':'world_prototype','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(root),'dependencies':report['dependencies']},
-            'materials':[dict(material,asset=index) for material in report['materials']]})
-        print(f'Exported {name}: {len(nodes)} nodes, {len(colliders)} colliders',flush=True)
+    prototypes=export_world_prototypes(source,reader,selected,output,roots,roles,scope_cache,6)
     physics=next(owner for owner in source.objects.values() if owner.type.name=='PhysicsManager')
     selected.record(physics)
     collision_rows=source.read(physics)['m_LayerCollisionMatrix']
@@ -438,7 +376,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) ->
     road_fields=('length','roadBoneNum','roadBoneLength','roadSegmentLength','roadAboveTerrain','width','scale','XmaxAngle','YmaxAngle','startStraight','straightModifier','alignEdgeOfTheWorld','aliignRoad','alignBuildings','forceHomesick','noises','defPointRange','defPointStep','addPoint','buildingBoneNum')
     assembled=samples['assembled'][0]
     world={'sample_payload_sha256':PAYLOAD_SHA256,'managed_sha256':samples['managed_sha256'],'library':dict(schema_version=1,**samples['library']),
-        'settings_context':CONTEXT,'generation_frame':IDENTITY,'distances':assembled['distances'],'source_hashes':[],
+        'settings_context':CONTEXT,'spawn_context':recover_spawn_context(samples),'generation_frame':IDENTITY,'distances':assembled['distances'],'source_hashes':[],
         'road':{'source':source_id(road_owner),'prototypes':road_roots,**{k:road[k] for k in road_fields}},
         'terrain':{'source':source_id(settings_owner),'prefabs':terrain_prefabs,'materials':terrain_materials,'textures':list(terrain_source.lighting_textures.values()),'game_settings':{'source':source_id(main_owner),**{k:main['GSettings'][k] for k in ('biome','homesickMode')}},
             'tiles':[{k:settings[t][k] for k in ('tileSize','resolution','drawDistance','YCoord')} for t in ('Terrain','DistantTerrain','DistantTerrain2')],
@@ -448,6 +386,23 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) ->
         'receipts':list(selected.receipts.values()),'exclusions':excluded,'material_textures':list(source.world_material_source.lighting_textures.values())}
     files={row['source']['file'] for row in world['receipts']}
     world['source_hashes']=[{'file':f,'sha256':reader.source_files[f'TheLongDrive_Data/{f}'].sha256} for f in sorted(files)]
+    from .world_spawn import extend_spawn_closure
+    extend_spawn_closure(source,reader,output,world)
+    from .world_mechanisms import recover_world_mechanisms
+    world['mechanisms'] = recover_world_mechanisms(source,selected,world)
+    from .world_paintings import export_paintings
+    world['painting_materials'] = export_paintings(source,reader,selected,world,output,max(p['asset'] for p in world['prototypes'])+1)
+    receipts={tuple(r['source'].values()):r for r in world['receipts']}
+    receipts.update(selected.receipts)
+    world['receipts']=list(receipts.values())
+    records={tuple(r['source'].values()):r for r in world['records']}
+    for identity,record in selected.records.items():
+        if identity not in records:records[identity]=record
+    world['records']=list(records.values())
+    from .world_spawn import project_runtime_receipts
+    from .world_fields import project_runtime_fields
+    project_runtime_receipts(world,output)
+    project_runtime_fields(world,output)
     return world
 
 def recover_catalog(source, reader, selected, database):
@@ -569,3 +524,93 @@ def recover_initial_materials(source, selected):
     if data['currentState']!=0 or len(data['states'])!=3: raise ValueError('Changed checked Lamp1 initialization')
     for owner in (controller,renderer,node,material): selected.record(owner)
     return [{'controller':source_id(controller),'renderer':source_id(renderer),'node':source_id(node),'material':source_id(material)}]
+
+
+def recover_spawn_context(samples):
+    context=samples['source_context']
+    assembled=next(row for row in samples['assembled'] if row['seed']==42)
+    before=json.loads(assembled['initialRandomState'])
+    after=json.loads(assembled['afterStartupRandomState'])
+    if context['clock_input']!='2026-10-12T09:00:00 local':
+        raise ValueError('Spawn replay requires the checked frozen clock context')
+    return {'classification':'controlled_startup_before_garage',
+        'engine_sha256':samples['native_engine']['sha256'],
+        'clock_input':context['clock_input'],
+        'initial_state':[before['s'+str(i)]&0xffffffff for i in range(4)],
+        'startup_state':[after['s'+str(i)]&0xffffffff for i in range(4)],
+        'startup_draws':4,'date':[2026,10,12]}
+
+
+def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cache,first_asset):
+    prototypes=[]
+    for index,(identity,root) in enumerate(roots.items(),first_asset):
+        name=f'world-{identity[0].replace(".","-")}-{identity[1]}'
+        exporter=GltfExporter(source,output/f'{name}.gltf',reader,index)
+        report=exporter.export([root])
+        for material in report['deferred_materials']:
+            selected.record(source.get(material['source']['file'],material['source']['path_id']))
+        hierarchy=source.hierarchy(root,activate_root=True)
+        for node in hierarchy:
+            selected.record(node['reader'])
+            selected.record(node['game_object'])
+        mapping={key(node['reader']):i for i,node in enumerate(hierarchy)}
+        nodes=[{'source':r['source'],'name':source.read(n['game_object'])['m_Name'],'parent':mapping[key(n['parent'])] if n['parent'] else None,
+                'active':bool(source.read(n['game_object'])['m_IsActive']),'renderer_enabled':bool(exporter.document.nodes[r['gltf_node']].extras.get('source_renderer_enabled',False)),'layer':source.read(n['game_object'])['m_Layer'],'transform':r['transform'],'gltf_node':r['gltf_node']} for r,n in zip(report['nodes'],hierarchy)]
+        local=copy.copy(source)
+        ancestor_count=len(source.chain(root))
+        local.chain=lambda transform: source.chain(transform)[:-ancestor_count]
+        bodies=[];body_nodes={}
+        for n in hierarchy:
+            for component in n['components']:
+                if component.type.name!='Rigidbody':continue
+                data=source.read(component);selected.record(component)
+                body_nodes[key(n['reader'])]=len(bodies)
+                bodies.append({'source':source_id(component),'node':mapping[key(n['reader'])],
+                    'mass_kg':data['m_Mass'],'linear_damping':data['m_Drag'],'angular_damping':data['m_AngularDrag'],
+                    'kinematic':bool(data['m_IsKinematic']),'use_gravity':bool(data['m_UseGravity']),
+                    'constraints':data['m_Constraints'],'pose':world_pose(local,n['reader'])})
+        skins=[];colliders=[];controls=[]
+        for n in hierarchy:
+            for component in n['components']:
+                data=source.read(component)
+                if component.type.name=='MonoBehaviour' and source.class_name(component)=='roadscript':
+                    controls=[mapping[key(source.resolve(component,p))] for p in data['bones']]
+                if component.type.name=='SkinnedMeshRenderer' and data['m_Mesh']['m_PathID']:
+                    mesh=source.resolve(component,data['m_Mesh']);doc,directory,mesh_index=exporter.accepted_mesh(mesh)
+                    primitive=doc.meshes[mesh_index].primitives[0]
+                    skins.append({'source':source_id(component),'mesh':source_id(mesh),'node':mapping[key(n['reader'])],
+                        'bones':[mapping[key(source.resolve(component,p))] for p in data['m_Bones']],
+                        'bind_poses':convert_bind_poses(source.read(mesh)['m_BindPose']),
+                        'positions':exporter.rows(doc,directory,primitive.attributes.POSITION),
+                        'normals':exporter.rows(doc,directory,primitive.attributes.NORMAL),
+                        'tangents':exporter.rows(doc,directory,primitive.attributes.TANGENT) if primitive.attributes.TANGENT is not None else [],
+                        'uv':exporter.rows(doc,directory,primitive.attributes.TEXCOORD_0),
+                        'joints':exporter.rows(doc,directory,primitive.attributes.JOINTS_0),
+                        'weights':exporter.rows(doc,directory,primitive.attributes.WEIGHTS_0),
+                        'triangles':exporter.geometry(mesh)[2]})
+                if component.type.name in ('BoxCollider','MeshCollider','SphereCollider','CapsuleCollider'):
+                    selected.record(component)
+                    physical_material=source.resolve(component,data['m_Material'])
+                    if physical_material:selected.record(physical_material)
+                    # A road collider receives the deformed skin at runtime.
+                    skin_collider=roles[identity]=='road' and component.type.name=='MeshCollider' and not data['m_Mesh']['m_PathID']
+                    empty_mesh=None
+                    if component.type.name=='MeshCollider' and data['m_Mesh']['m_PathID']:
+                        collider_mesh=source.resolve(component,data['m_Mesh'])
+                        if source.read(collider_mesh)['m_VertexData']['m_VertexCount']==0:
+                            selected.record(collider_mesh);empty_mesh=source_id(collider_mesh)
+                    owner_node=n['reader']
+                    while key(owner_node) not in body_nodes and key(owner_node)!=key(root):
+                        owner_node=source.resolve(owner_node,source.read(owner_node)['m_Father'])
+                    body=body_nodes.get(key(owner_node))
+                    shape=None if skin_collider or empty_mesh else geometry(local,exporter,component,n['reader'],bodies[body]['pose'] if body is not None else IDENTITY,body is not None and not bodies[body]['kinematic'])
+                    colliders.append({'source':source_id(component),'node':mapping[key(n['reader'])],'enabled':bool(data['m_Enabled']),
+                        'body':body,'trigger':bool(data['m_IsTrigger']),'material':selected.receipt(physical_material) if physical_material else None,'deformed_skin':0 if skin_collider else None,'source_empty_mesh':empty_mesh,'geometry':shape})
+        for node in hierarchy:
+            for component in node['components']:selected.component_record(component)
+        prototypes.append({'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,
+            'deferred_materials':report['deferred_materials'],'excluded_actions':scope_cache.get(identity,('',[]))[1],'skins':skins,'bodies':bodies,'colliders':colliders,'prefab_pose':converted_transform(source.read(root)),
+            'asset_record':{'id':index,'material_count':report['material_count'],'usage':'world_prototype','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(root),'dependencies':report['dependencies']},
+            'materials':[dict(material,asset=index) for material in report['materials']]})
+        print(f'Exported {name}: {len(nodes)} nodes, {len(colliders)} colliders',flush=True)
+    return prototypes

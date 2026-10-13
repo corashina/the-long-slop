@@ -49,3 +49,11 @@ impl WorldInitialMaterial {
         Ok(())
     }
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldPaintingMaterial {
+    pub material: SourceId,
+    pub texture: SourceId,
+    pub asset: AssetId,
+}

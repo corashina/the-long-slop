@@ -89,14 +89,52 @@ class GltfExporter(GltfBuilder):
         self.asset_id = asset_id
         self.material_indices = {}
 
-    def material(self, reader, color_override=None, condition=None):
+    def world_variants(self, records):
+        """Keep selected component material recipes beside their prototype owner."""
+        from .materials import FAMILIES
+        materials = {}
+        common = self.source.read(self.source.get('level1', 64919))['conditionmaterials']
+        def add(owner, pointer):
+            if pointer['m_PathID']:
+                material = self.source.resolve(owner, pointer)
+                materials[key(material)] = material
+        for record in records:
+            for component in record['components']:
+                if component.type.name != 'MonoBehaviour': continue
+                name = self.source.class_name(component)
+                data = self.source.read(component)
+                if name == 'randomRock':
+                    for pointer in data['materials']: add(component, pointer)
+                elif name == 'partconditionscript':
+                    if data['UseMatList']:
+                        for pointer in data['MatList']: add(component, pointer)
+                    if not data['DontUseWorn']:
+                        for field in ('defNew','defUsed','defMiddle','defOld','defRusty'): add(component, data[field])
+                        kinds = {data['tipus'], data['materialTipus']}
+                        kinds.update(row['tipus'] for row in data['randomTipusok'])
+                        for row in common:
+                            if row['tipus'] in kinds:
+                                for field in ('New','Used','Middle','Old','Rusty'): add(self.source.get('level1',64919), row[field])
+                elif name == 'flashlightscript':
+                    for field in ('mON','mOFF'):
+                        if field in data: add(component, data[field])
+                    for row in data['Lamps']:
+                        for field in ('mON','mOFF'): add(component,row[field])
+        for material in materials.values():
+            shader = self.source.resolve(material, self.source.read(material)['m_Shader'])
+            if self.source.read(shader)['m_ParsedForm']['m_Name'] in FAMILIES:
+                self.material(material)
+            elif key(material) not in self.deferred_materials:
+                self.deferred_materials[key(material)] = self.source.world_material_export(material)
+
+    def material(self, reader, color_override=None, condition=None, texture_overrides=None):
         if reader is None: raise ValueError('Required renderer material has no source')
         import json
-        record = recover_material(self.source, reader, color_override, condition)
+        record = recover_material(self.source, reader, color_override, condition, texture_overrides)
         identity = json.dumps(record, sort_keys=True, separators=(',', ':'))
         if identity in self.materials:
             index = self.materials[identity]
-            if color_override is None and condition is None:
+            if color_override is None and condition is None and not texture_overrides:
                 self.material_indices[f"{reader.assets_file.name}:{reader.path_id}"] = index
             return index
         material_source_evidence(self.source, reader, record)
@@ -125,7 +163,7 @@ class GltfExporter(GltfBuilder):
         index = len(self.document.materials)
         self.materials[identity] = index; record['gltf_material'] = index
         self.material_records.append(record); self.document.materials.append(material)
-        if color_override is None and condition is None:
+        if color_override is None and condition is None and not texture_overrides:
             self.material_indices[f"{reader.assets_file.name}:{reader.path_id}"] = index
         self.material_report.append({'source': record['source'], 'shader': record['shader_family'],
             'keywords': record['keywords'], 'rule': ('Retained imported PBR; rope sag and sway remain unimplemented.'
@@ -345,6 +383,8 @@ class GltfExporter(GltfBuilder):
                 else:pointers=[v[k] for v in data['szamok'] for k in ('MOn','MOff')]
                 for ptr in pointers:
                     if ptr['m_PathID']:self.material(self.source.resolve(component,ptr))
+        if world_prototype:
+            self.world_variants(records)
         self.document.scenes.append(gl.Scene(nodes=root_nodes))
         self.document.scene = 0
         self.document.buffers.append(gl.Buffer(uri=self.output.with_suffix('.bin').name,byteLength=len(self.binary)))

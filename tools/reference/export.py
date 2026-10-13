@@ -93,6 +93,8 @@ def validate_runtime_paths(manifest):
         raise ValueError('Missing required source world dependency')
     expected = {'reference/home.gltf','reference/lada.gltf','reference/items.gltf','reference/road_lamp.gltf','reference/sky.gltf'}
     prototype_ids={p['asset'] for p in world['prototypes']}
+    material_ids={p['asset'] for p in world['painting_materials']}
+    expected.update(a['path'] for a in manifest['assets'] if a['id'] in material_ids and a['usage']=='world_material')
     expected.update(a['path'] for a in manifest['assets'] if a['id'] in prototype_ids and a['usage']=='world_prototype')
     if {a['path'] for a in assets} != expected or len(assets) != len(expected):
         raise ValueError('Runtime must contain only selected scenes and world prototypes')

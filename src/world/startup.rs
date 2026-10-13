@@ -57,12 +57,10 @@ impl StartupTerrain {
                 let owner = link(component, "m_GameObject")
                     .ok_or_else(|| ReferenceError("Startup component owner".into()))?;
                 let object = get(owner)?;
-                for child in &object.links {
-                    if child.field.starts_with("m_Component[") {
-                        let candidate = get(&child.target)?;
-                        if candidate.class_name == "Transform" {
-                            return Ok(candidate);
-                        }
+                for child in object.components() {
+                    let candidate = get(child)?;
+                    if candidate.class_name == "Transform" {
+                        return Ok(candidate);
                     }
                 }
                 Err(ReferenceError(format!(

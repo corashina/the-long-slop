@@ -79,7 +79,14 @@ pub struct SourceLight {
     pub faces: usize,
     pub enabled: bool,
 }
+pub struct WorldBoundLight {
+    pub record: crate::reference::LightReference,
+    pub output: crate::lighting::LightOutput,
+    pub shadow_start: usize,
+    pub faces: usize,
+}
 pub struct BoundLight {
+    pub world: Option<WorldBoundLight>,
     pub index: usize,
     pub road: bool,
     pub id: LightId,
@@ -523,6 +530,7 @@ pub(crate) fn bind_lighting(
         }
         let entity = entity.id();
         source.lights.push(BoundLight {
+            world: None,
             index,
             road: false,
             id: light.id,
@@ -655,11 +663,19 @@ pub(crate) fn sync_lighting(
         .runtime
         .lighting
         .road_lamp_output(&reference.0.lighting);
+    let source = &mut *source;
     for bound_index in 0..source.lights.len() {
         let bound = &source.lights[bound_index];
         let index = bound.index;
-        let record = &reference.0.lighting.lights[bound.source_index];
-        let output = if bound.road {
+        let record = bound
+            .world
+            .as_ref()
+            .map_or(&reference.0.lighting.lights[bound.source_index], |w| {
+                &w.record
+            });
+        let output = if let Some(world) = &bound.world {
+            &world.output
+        } else if bound.road {
             &road_output
         } else {
             &drive.runtime.lighting.light_outputs()[bound.source_index]
@@ -1142,6 +1158,7 @@ pub(crate) fn register_road_light(
     }
     let entity = entity.id();
     source.lights.push(BoundLight {
+        world: None,
         index,
         road: true,
         id: light.id,
@@ -1173,6 +1190,110 @@ pub(crate) fn register_road_light(
     entity
 }
 
+pub(crate) fn register_world_light(
+    source: &mut SourceLighting,
+    commands: &mut Commands,
+    light: &crate::world::WorldLight,
+    slot: usize,
+    shadow_start: usize,
+    node: Entity,
+    enabled: bool,
+) -> Entity {
+    let record = &light.record;
+    let index = source.road_lamps.fixed_lights + slot;
+    let faces = if record.shadows.kind == 0 {
+        0
+    } else if record.kind == LightKind::Point {
+        6
+    } else {
+        1
+    };
+    let mut entity = commands.spawn((
+        SourceLight {
+            index,
+            shadow_start,
+            faces,
+            enabled,
+        },
+        Transform::default(),
+        (32..64)
+            .filter(|layer| record.culling_mask & (1 << (layer - 32)) != 0)
+            .collect::<RenderLayers>(),
+    ));
+    if record.kind == LightKind::Point {
+        entity.insert(PointLight {
+            intensity: 0.,
+            range: record.range_meters,
+            shadow_maps_enabled: enabled && faces > 0,
+            shadow_map_near_z: record.shadows.near_plane,
+            shadow_depth_bias: record.shadows.bias,
+            shadow_normal_bias: record.shadows.normal_bias,
+            ..default()
+        });
+    } else {
+        entity.insert(SpotLight {
+            intensity: 0.,
+            range: record.range_meters,
+            outer_angle: record.full_cone_degrees.to_radians() * 0.5,
+            inner_angle: record.inner_cone_degrees.to_radians() * 0.5,
+            shadow_maps_enabled: enabled && faces > 0,
+            shadow_map_near_z: record.shadows.near_plane,
+            shadow_depth_bias: record.shadows.bias,
+            shadow_normal_bias: record.shadows.normal_bias,
+            ..default()
+        });
+    }
+    let entity = entity.id();
+    source.lights.push(BoundLight {
+        world: Some(WorldBoundLight {
+            record: record.clone(),
+            output: crate::lighting::LightOutput {
+                id: record.id,
+                enabled,
+                intensity: light.intensity,
+            },
+            shadow_start,
+            faces,
+        }),
+        index,
+        road: light.biome.is_some(),
+        id: record.id,
+        source_index: 0,
+        entity,
+        node: Some(node),
+        pose: Transform::default(),
+    });
+    let half = record.full_cone_degrees.to_radians() * 0.5;
+    source.uniform.lights[index] = GpuLight {
+        cookie_rect: Vec4::new(
+            if record.kind == LightKind::Spot {
+                2.
+            } else {
+                0.
+            },
+            0.,
+            0.,
+            0.,
+        ),
+        shadow: Vec4::new(
+            shadow_start as f32,
+            faces as f32,
+            record.shadows.strength,
+            record.cookie_size,
+        ),
+        mask: UVec4::new(
+            record.culling_mask,
+            (half.cos() / half.sin()).to_bits(),
+            record.shadows.kind as u32,
+            0,
+        ),
+        ..default()
+    };
+    source.uniform.counts.x = source.uniform.counts.x.max(index as u32 + 1);
+    source.uniform.counts.y = source.uniform.counts.y.max((shadow_start + faces) as u32);
+    entity
+}
+
 pub(crate) fn remove_road_light(
     source: &mut SourceLighting,
     commands: &mut Commands,
@@ -1193,7 +1314,9 @@ pub(crate) fn remove_road_light(
         .lights
         .iter()
         .map(|light| {
-            if light.road {
+            if let Some(world) = &light.world {
+                world.shadow_start + world.faces
+            } else if light.road {
                 source.road_lamps.fixed_shadows + light.index - source.road_lamps.fixed_lights + 1
             } else {
                 source.road_lamps.fixed_shadows

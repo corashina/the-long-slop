@@ -60,6 +60,7 @@ impl WorldPresentation<'_, '_> {
         reference: &ReferenceManifest,
         physics: &mut PhysicsWorld,
         area: &mut StartingArea,
+        wheels: &mut crate::interaction::wheels::WheelAssemblies,
         view: GrassView,
         time: f32,
         lod_view: super::lod::LodView,
@@ -205,6 +206,22 @@ impl WorldPresentation<'_, '_> {
             }
             self.allocation.retired_materials.swap_remove(index);
         }
+        for binding in &reference.world.painting_materials {
+            if !stream.uses_painting_asset(binding.asset)
+                && self.materials.cache.world_asset_retirable(
+                    binding.asset,
+                    &self.images,
+                    &self.server,
+                )
+            {
+                self.materials.cache.release_world_asset(
+                    binding.asset,
+                    &mut self.images,
+                    &mut self.materials.primary,
+                    &self.server,
+                )?;
+            }
+        }
         if let Some(error) = failure {
             return Err(error);
         }
@@ -260,7 +277,13 @@ impl WorldPresentation<'_, '_> {
         self.allocation.lamps = lamps;
         // Light admission and complete renderer preparation precede collision mutation.
         stream.publish(physics)?;
-        stream.sync_supplies(reference, &mut area.items, &mut area.interaction, physics)?;
+        stream.sync_supplies(
+            reference,
+            &mut area.items,
+            &mut area.interaction,
+            physics,
+            wheels,
+        )?;
         self.surfaces.sync(
             &stream.frame(),
             &mut self.commands,
@@ -268,7 +291,7 @@ impl WorldPresentation<'_, '_> {
             &mut self.roots,
         )?;
         self.instances.sync(
-            &stream.frame(),
+            stream,
             reference,
             physics,
             &mut self.commands,
@@ -338,7 +361,7 @@ impl WorldPresentation<'_, '_> {
         }
         self.instances
             .request_grass(stream, &mut self.grass, view)?;
-        stream.retire_structures(physics, &mut area.items, &mut area.interaction);
+        stream.retire_structures(physics, &mut area.items, &mut area.interaction, wheels);
         self.instances.retire(
             stream,
             &mut self.commands,

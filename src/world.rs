@@ -11,11 +11,18 @@ mod source_lights;
 pub use source_lights::{WorldLight, required_world_lights};
 mod noise;
 mod placement;
+mod prop_layers;
+mod props;
+pub use props::{PropCandidate, PropGenerator};
 mod random;
+mod spawn_state;
+mod unity_random;
 pub use placement::{
     BUILDING_CHECKPOINT_INTERVAL, BuildingCheckpoint, BuildingGroupState, BuildingSequence,
     FoundationPoint, PlacementIndex, SupplyDefinition, SupplyFluid, SupplyPoint,
 };
+pub use spawn_state::{SourceSpawnState, SpawnBoundary, SpawnContext, SpawnPhase};
+pub use unity_random::{UnityRandom, UnityRandomState};
 mod road;
 pub use noise::{TerrainEvaluator, source_perlin};
 pub use random::{RandomState, SourceRandom};
@@ -633,3 +640,31 @@ pub fn sync_station_supplies(
         }
     }
 }
+
+mod spawn_contents;
+mod spawn_initialization;
+mod spawn_rules;
+mod spawn_selection;
+
+mod building_extras;
+mod spawn_appearance;
+mod spawn_building;
+mod spawn_conditions;
+mod spawn_lamps;
+pub use spawn_appearance::NodeAppearance;
+mod spawn_slots;
+mod spawn_starts;
+mod structure_helpers;
+
+mod contents;
+
+mod content_containers;
+
+mod content_parts;
+
+mod content_slots;
+mod content_wheels;
+
+mod content_mechanisms;
+
+pub use contents::GeneratedCapVisual;

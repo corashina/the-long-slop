@@ -48,6 +48,35 @@ pub struct ItemStore {
 }
 
 impl ItemStore {
+    /// Stable generated identity and active physical state for change capture.
+    pub fn generated_bindings(&self) -> impl Iterator<Item = (&GeneratedId, &ItemState)> {
+        self.generated
+            .iter()
+            .filter_map(|(key, id)| self.get(*id).map(|state| (key, state)))
+    }
+    pub(crate) fn retained_binding_bytes(&self) -> usize {
+        use super::memory::{map, set, strings, vector};
+        vector(&self.states)
+            + map(&self.indices)
+            + vector(&self.body_ids)
+            + strings(&self.names)
+            + map(&self.slot_owners)
+            + map(&self.generated)
+            + set(&self.initialized_supplies)
+            + self
+                .generated
+                .keys()
+                .map(|id| {
+                    id.generator.file.capacity()
+                        + vector(&id.children)
+                        + id.children
+                            .iter()
+                            .map(|(s, _)| s.file.capacity())
+                            .sum::<usize>()
+                })
+                .sum::<usize>()
+    }
+
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut states = Vec::with_capacity(reference.items.len());
         let mut indices = HashMap::with_capacity(reference.items.len());
@@ -173,6 +202,12 @@ impl ItemStore {
         })
     }
 
+    pub fn register_generated_slot(&mut self, id: PartSlotId, owner: Option<ItemId>) {
+        self.slot_owners.insert(id, owner);
+    }
+    pub fn remove_generated_slot(&mut self, id: PartSlotId) {
+        self.slot_owners.remove(&id);
+    }
     pub fn attached_to(&self, mut id: ItemId, root: ItemId) -> bool {
         for _ in 0..self.states.len() {
             if id == root {
@@ -307,6 +342,7 @@ impl ItemStore {
     ) -> Option<crate::world::ObjectSnapshot> {
         let state = self.get(id)?;
         Some(crate::world::ObjectSnapshot {
+            lamp: None,
             pose: AbsolutePose {
                 position: self.origin.absolute(state.pose.position),
                 rotation: state.pose.rotation,

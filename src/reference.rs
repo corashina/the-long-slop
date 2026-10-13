@@ -71,6 +71,7 @@ pub enum AssetUsage {
     RoadLampPrototype,
     SkyPrototype,
     WorldPrototype,
+    WorldMaterial,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

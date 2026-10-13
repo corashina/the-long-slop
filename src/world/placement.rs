@@ -63,6 +63,17 @@ pub struct SupplyPoint {
     prototype_index: usize,
 }
 
+impl SupplyPoint {
+    pub(crate) fn nested(tank_pose: AbsolutePose, cap_pose: AbsolutePose) -> Self {
+        Self {
+            building_index: 0,
+            supply_index: 0,
+            tank_pose,
+            cap_pose,
+            prototype_index: 0,
+        }
+    }
+}
 #[derive(Clone, Copy, Debug)]
 pub struct FoundationPoint {
     pub building_index: u32,
@@ -567,7 +578,7 @@ fn yaw_rotation(yaw: f32) -> [f32; 4] {
     let angle = (radians * 0.5) as f64;
     [0.0, angle.sin() as f32, 0.0, angle.cos() as f32]
 }
-fn rotate(q: [f32; 4], p: [f32; 3]) -> [f32; 3] {
+pub(crate) fn rotate(q: [f32; 4], p: [f32; 3]) -> [f32; 3] {
     let [x, y, z, w] = q.map(|v| v as f64);
     let [a, b, c] = p.map(|v| v as f64);
     [
@@ -579,7 +590,7 @@ fn rotate(q: [f32; 4], p: [f32; 3]) -> [f32; 3] {
             as f32,
     ]
 }
-fn multiply(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+pub(crate) fn multiply(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
     let [x, y, z, w] = a.map(|v| v as f64);
     let [i, j, k, l] = b.map(|v| v as f64);
     [
@@ -589,14 +600,14 @@ fn multiply(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
         (w * l - x * i - y * j - z * k) as f32,
     ]
 }
-fn place_point(pose: AbsolutePose, scale: [f32; 3], point: [f32; 3]) -> [f64; 3] {
+pub(crate) fn place_point(pose: AbsolutePose, scale: [f32; 3], point: [f32; 3]) -> [f64; 3] {
     let local = rotate(
         pose.rotation,
         std::array::from_fn(|a| (point[a] as f64 * scale[a] as f64) as f32),
     );
     std::array::from_fn(|a| pose.position[a] + local[a] as f64)
 }
-fn place_pose(pose: AbsolutePose, scale: [f32; 3], local: Transform) -> AbsolutePose {
+pub(crate) fn place_pose(pose: AbsolutePose, scale: [f32; 3], local: Transform) -> AbsolutePose {
     AbsolutePose {
         position: place_point(pose, scale, local.translation),
         rotation: multiply(pose.rotation, local.rotation),
@@ -723,7 +734,7 @@ fn array(value: &WorldValue) -> &[WorldValue] {
         _ => panic!("expected checked source array"),
     }
 }
-fn fields(value: &WorldValue) -> &std::collections::BTreeMap<String, WorldValue> {
+fn fields(value: &WorldValue) -> &crate::reference::WorldFields {
     match value {
         WorldValue::Record(v) => v,
         _ => panic!("expected checked source record"),
@@ -747,7 +758,7 @@ fn vector(value: &WorldValue) -> [f32; 3] {
     let f = fields(value);
     [number(&f["x"]), number(&f["y"]), number(&f["z"])]
 }
-fn active(prototype: &WorldPrototypeReference, index: usize) -> bool {
+pub(crate) fn active(prototype: &WorldPrototypeReference, index: usize) -> bool {
     let mut node = Some(index);
     while let Some(i) = node {
         let n = &prototype.nodes[i];
@@ -759,7 +770,7 @@ fn active(prototype: &WorldPrototypeReference, index: usize) -> bool {
     }
     true
 }
-fn node_pose(prototype: &WorldPrototypeReference, index: usize) -> Transform {
+pub(crate) fn node_pose(prototype: &WorldPrototypeReference, index: usize) -> Transform {
     let mut result = Transform {
         translation: [0.0; 3],
         rotation: [0.0, 0.0, 0.0, 1.0],
@@ -781,7 +792,11 @@ fn node_pose(prototype: &WorldPrototypeReference, index: usize) -> Transform {
     }
     result
 }
-fn node_point(prototype: &WorldPrototypeReference, index: usize, mut point: [f32; 3]) -> [f32; 3] {
+pub(crate) fn node_point(
+    prototype: &WorldPrototypeReference,
+    index: usize,
+    mut point: [f32; 3],
+) -> [f32; 3] {
     let mut node = Some(index);
     while let Some(i) = node {
         let n = &prototype.nodes[i];
@@ -807,10 +822,8 @@ fn copy_prototype(
     for (index, node) in prototype.nodes.iter().enumerate() {
         let transform = record(records, &node.source);
         let object = record(records, link(&transform.fields["m_GameObject"]));
-        for child in &object.links {
-            if child.field.starts_with("m_Component[") {
-                components.push((index, record(records, &child.target)));
-            }
+        for source in object.components() {
+            components.push((index, record(records, source)));
         }
     }
     for &(index, component) in &components {
@@ -979,4 +992,66 @@ fn geometry_radius(geometry: &ColliderGeometry) -> f64 {
             points.iter().map(|p| norm(*p)).fold(0.0, f64::max)
         }
     }
+}
+
+pub(crate) fn prototype_radius(
+    reference: &WorldReference,
+    prototype: &WorldPrototypeReference,
+) -> f64 {
+    let records = reference.records.iter().map(|r| (&r.source, r)).collect();
+    bound_prototype(prototype, &records)
+}
+
+pub(crate) fn prototype_radii(
+    reference: &WorldReference,
+) -> std::collections::HashMap<SourceId, f64> {
+    let records = reference.records.iter().map(|r| (&r.source, r)).collect();
+    reference
+        .prototypes
+        .iter()
+        .map(|p| (p.source.clone(), bound_prototype(p, &records)))
+        .collect()
+}
+
+fn bound_prototype(prototype: &WorldPrototypeReference, records: &Records<'_>) -> f64 {
+    let mut radius = 0.0f64;
+    for collider in &prototype.colliders {
+        if let Some(geometry) = &collider.geometry {
+            let mut reach = geometry_radius(geometry);
+            if let Some(body) = collider.body {
+                let pose = prototype.bodies[body as usize].pose;
+                reach += norm(pose.translation);
+            }
+            radius = radius.max(reach);
+        }
+    }
+    for (i, node) in prototype.nodes.iter().enumerate() {
+        let object = record(
+            records,
+            link(&record(records, &node.source).fields["m_GameObject"]),
+        );
+        for component in object.components() {
+            let r = record(records, component);
+            if r.class_name == "LODGroup" {
+                let source = vector(&r.fields["m_LocalReferencePoint"]);
+                let center = node_point(prototype, i, [source[0], source[1], -source[2]]);
+                radius = radius.max(
+                    norm(center)
+                        + number(&r.fields["m_Size"]) as f64
+                            * 3.0f64.sqrt()
+                            * 0.5
+                            * node_scale_bound(prototype, i),
+                );
+            }
+        }
+    }
+    radius
+        * prototype
+            .prefab_pose
+            .scale
+            .iter()
+            .map(|v| v.abs() as f64)
+            .fold(0., f64::max)
+        * 1.0001
+        + 0.01
 }

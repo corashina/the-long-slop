@@ -47,6 +47,9 @@ pub struct WorldMetrics {
     pub checkpoint_bytes: usize,
     pub changed_record_bytes: usize,
     pub changed_objects: usize,
+    pub spawn_parents: usize,
+    pub spawn_boundaries: usize,
+    pub spawn_boundary_bytes: usize,
     pub prepared_roads: u32,
     pub prepared_buildings: u32,
     pub indices_ready: bool,
@@ -136,6 +139,15 @@ struct PrototypeAllocation {
 
 /// Source world publication and session ownership.
 pub struct WorldStream {
+    static_controls: Vec<super::contents::ContentInstance>,
+    binding_baseline: Option<usize>,
+    binding_bytes: usize,
+    binding_owner_bytes: usize,
+    binding_objects: usize,
+    binding_reserved: usize,
+    lamp_bindings: Vec<content_lamps::LampBinding>,
+    seed: i32,
+    structure_helpers: super::structure_helpers::StructureHelpers,
     reference: Arc<WorldReference>,
     presentation: PresentationAllocation,
     changes: super::ChangeRecords,
@@ -147,6 +159,8 @@ pub struct WorldStream {
     recovery: Option<PendingRecovery>,
     roads: RoadIndex,
     placements: PlacementIndex,
+    props: super::prop_layers::PropLayers,
+    contents: super::contents::SourceContents,
     evaluator: TerrainEvaluator,
     color_foundations: Vec<super::FoundationPoint>,
     color_helpers: Vec<TerrainFoundation>,
@@ -183,6 +197,14 @@ pub struct WorldStream {
 }
 
 impl WorldStream {
+    pub fn uses_painting_asset(&self, asset: crate::reference::AssetId) -> bool {
+        self.contents.instances().any(|c| {
+            c.appearance
+                .iter()
+                .any(|a| a.primary.is_some_and(|p| p.0 == asset))
+        })
+    }
+
     pub fn new(reference: &ReferenceManifest, seed: i32) -> Result<Self, ReferenceError> {
         let world = &reference.world;
         let shared_cpu_bytes = reference.world_retained_cpu_bytes();
@@ -235,13 +257,36 @@ impl WorldStream {
             }
             road_layers[index] = prototype.nodes[collider.node as usize].layer;
         }
+        let contents = super::contents::SourceContents::new(world);
+        let structure_helpers =
+            super::structure_helpers::StructureHelpers::new(world, &contents.rules)?;
+        let road_light = super::source_lights::SourceRoadLight::new(reference, seed)?;
+        if shared_cpu_bytes
+            .saturating_add(road_light.retained_bytes())
+            .saturating_add(contents.rules.retained_bytes())
+            .saturating_add(structure_helpers.retained_bytes())
+            > PROTOTYPE_CPU
+        {
+            return Err(ReferenceError(
+                "Source rule indices exceed prototype CPU budget".into(),
+            ));
+        }
         Ok(Self {
+            static_controls: Vec::new(),
+            binding_baseline: None,
+            binding_bytes: 0,
+            binding_owner_bytes: 0,
+            binding_objects: reference.items.len(),
+            binding_reserved: 0,
+            lamp_bindings: Vec::new(),
+            seed,
+            structure_helpers,
             presentation: PresentationAllocation::default(),
             terrain_layer: *terrain_layer as u8,
             road_layers,
             reference: Arc::clone(world),
             changes: super::ChangeRecords::default(),
-            road_light: super::source_lights::SourceRoadLight::new(reference, seed)?,
+            road_light,
             lights: Vec::with_capacity(MAX_ROADS),
             wanted_lights: Vec::with_capacity(MAX_ROADS),
             origin: WorldOrigin::default(),
@@ -254,6 +299,8 @@ impl WorldStream {
             recovery: None,
             roads,
             placements: PlacementIndex::new(world, seed),
+            props: super::prop_layers::PropLayers::new(world, seed)?,
+            contents,
             evaluator,
             color_foundations: Vec::new(),
             color_helpers: Vec::new(),
@@ -339,7 +386,10 @@ impl WorldStream {
         Ok(())
     }
     fn generation_pending_bytes(&self) -> usize {
-        self.terrain_work.as_ref().map_or(0, |w| w.pending_bytes)
+        self.binding_reserved
+            + self.contents.pending_bytes()
+            + self.props.pending_bytes()
+            + self.terrain_work.as_ref().map_or(0, |w| w.pending_bytes)
             + self.ready.as_ref().map_or(0, |w| {
                 w.pending_bytes
                     + if w.renderer_reserved {
@@ -558,7 +608,11 @@ impl WorldStream {
             self.prepare_road();
             return;
         }
-        self.prepare_terrain();
+        self.prepare_props();
+        self.prepare_contents();
+        if self.failure.is_none() {
+            self.prepare_terrain();
+        }
     }
     fn prepare_startup(&mut self) {
         if self.startup_candidates.is_empty() && self.startup_next == 0 {
@@ -619,8 +673,235 @@ impl WorldStream {
                     .into_iter()
                     .any(|p| source_distance_squared(p, position) < radius * radius)
             });
+        self.wanted_structures
+            .extend(self.props.placements().iter().cloned());
+        self.wanted_structures.extend(
+            self.contents
+                .active
+                .iter()
+                .map(|c| c.content.placement.clone()),
+        );
+        if let Err(error) = super::building_extras::append_ramps(
+            &self.reference,
+            &self.contents.rules,
+            self.seed,
+            &mut self.wanted_structures,
+            MAX_OBJECTS,
+        ) {
+            self.failure = Some(error.0);
+        }
+        self.refresh_poles();
         self.ready_structures
             .retain(|id| self.wanted_structures.iter().any(|p| &p.id == id));
+    }
+    fn refresh_poles(&mut self) {
+        self.wanted_structures
+            .retain(|p| p.id.layer != WorldLayer::Lamp || self.lights.iter().any(|l| l.id == p.id));
+        for light in &self.lights {
+            if light.biome.is_none() || self.wanted_structures.iter().any(|p| p.id == light.id) {
+                continue;
+            }
+            self.wanted_structures.push(Placement {
+                id: light.id.clone(),
+                prototype: light.prototype.clone(),
+                pose: light.pole,
+                scale: light.scale,
+                bounds: WorldBounds {
+                    min: light.pole.position.map(|v| v - light.range as f64),
+                    max: light.pole.position.map(|v| v + light.range as f64),
+                },
+                object_seed: 0,
+            });
+        }
+    }
+    fn prepare_props(&mut self) {
+        for _ in 0..4 {
+            self.prepare_prop_layer();
+            if self.failure.is_some() {
+                break;
+            }
+        }
+    }
+    fn prepare_prop_layer(&mut self) {
+        let budget = self.props.allocation_bound();
+        let can_request = self.metrics().pending_work < 32 && self.admit_generation(budget);
+        if self.failure.is_some() {
+            return;
+        }
+        let helper_radius = ["ObjGenDist", "MountainGenDist", "BuildingGenDist"]
+            .into_iter()
+            .map(|key| self.reference.distances[key])
+            .fold(0_f32, f32::max) as f64;
+        self.refresh_helper_context(union(
+            window(self.request.player, helper_radius),
+            window(self.request.vehicle, helper_radius),
+        ));
+        if self.failure.is_some() {
+            return;
+        }
+        let context = TerrainContext {
+            evaluator: &self.evaluator,
+            tile: self.tiles[0],
+            roads: &self.road_points,
+            road_radius_squared: None,
+            foundations: &self.color_helpers,
+            holes: &[],
+            biome_override: source_override(&self.reference),
+        };
+        let current = self.props.placements().len();
+        let maximum = MAX_OBJECTS
+            .saturating_sub(self.metrics().generated_objects)
+            .saturating_add(current);
+        if let Err(error) = self.props.advance(
+            [self.request.player, self.request.vehicle],
+            context,
+            can_request,
+            maximum,
+        ) {
+            self.failure = Some(error.0);
+            return;
+        }
+        self.wanted_structures.retain(|p| {
+            !matches!(
+                p.id.layer,
+                WorldLayer::Prop
+                    | WorldLayer::Mountain
+                    | WorldLayer::Tower
+                    | WorldLayer::DesertBuilding
+            ) || self.props.contains(&p.id)
+                || (!p.id.children.is_empty()
+                    && self.props.placements().iter().any(|parent| {
+                        parent.id.layer == p.id.layer
+                            && parent.id.unit == p.id.unit
+                            && parent.id.ordinal == p.id.ordinal
+                    }))
+        });
+        for p in self.props.placements() {
+            if !self.wanted_structures.iter().any(|w| w.id == p.id) {
+                self.wanted_structures.push(p.clone());
+            }
+        }
+        if let Err(error) = super::building_extras::append_ramps(
+            &self.reference,
+            &self.contents.rules,
+            self.seed,
+            &mut self.wanted_structures,
+            MAX_OBJECTS,
+        ) {
+            self.failure = Some(error.0);
+        }
+        self.ready_structures
+            .retain(|id| self.wanted_structures.iter().any(|p| &p.id == id));
+    }
+    fn prepare_contents(&mut self) {
+        if self.failure.is_some() {
+            return;
+        }
+        let metrics = self.metrics();
+        let limit = 32usize
+            .saturating_sub(metrics.pending_work)
+            .min(MAX_OBJECTS.saturating_sub(metrics.generated_objects));
+        if limit == 0 {
+            return;
+        }
+        let reservation = self
+            .available_staging_bytes()
+            .min(ACTIVE_CPU.saturating_sub(metrics.active_cpu_bytes));
+        if !self.admit_generation(reservation) {
+            return;
+        }
+        let available = (16 * MIB).saturating_sub(
+            self.roads.retained_index_bytes() + self.placements.retained_index_bytes(),
+        );
+        if let Err(error) = self.contents.advance(
+            &self.reference,
+            &self.wanted_structures,
+            [self.request.player, self.request.vehicle],
+            available,
+            limit,
+            reservation,
+        ) {
+            self.failure = Some(error.0);
+            return;
+        }
+        self.lights.retain(|light| {
+            light.biome.is_some()
+                || self
+                    .contents
+                    .instances()
+                    .any(|c| c.lights.iter().any(|l| l.id == light.id))
+        });
+        for content in self.contents.instances() {
+            for light in &content.lights {
+                if let Some(current) = self.lights.iter_mut().find(|l| l.id == light.id) {
+                    current.enabled = light.enabled;
+                    current.intensity = light.intensity;
+                    current.pose = light.pose;
+                } else {
+                    self.lights.push(light.clone());
+                }
+            }
+        }
+        for content in &self.contents.active {
+            if !self
+                .wanted_structures
+                .iter()
+                .any(|p| p.id == content.content.placement.id)
+            {
+                self.wanted_structures
+                    .push(content.content.placement.clone());
+            }
+        }
+    }
+    pub fn spawn_boundaries(&self) -> &[super::SpawnBoundary] {
+        self.contents.state.boundaries()
+    }
+    pub fn contents_initialized(&self, id: &super::GeneratedId) -> bool {
+        self.contents.initialized(id)
+    }
+    pub fn appearance(&self, id: &super::GeneratedId) -> &[super::NodeAppearance] {
+        self.contents.appearance(id)
+    }
+    pub fn lamp_materials(
+        &self,
+        prototype: &SourceId,
+        node: &SourceId,
+        output: &mut Vec<SourceId>,
+    ) -> Result<(), ReferenceError> {
+        use super::spawn_rules::*;
+        let mut controllers = Vec::new();
+        self.contents.rules.children(
+            &self.reference,
+            prototype,
+            "flashlightscript",
+            true,
+            &mut controllers,
+        )?;
+        for source in controllers {
+            let f = self.contents.rules.get(&self.reference, source)?.fields;
+            for lamp in array(f, "Lamps")? {
+                let lamp = fields(lamp)?;
+                if !array(lamp, "R")?.iter().any(|r| {
+                    value_link(r)
+                        .ok()
+                        .and_then(|r| self.contents.rules.root(&self.reference, r).ok())
+                        == Some(node)
+                }) {
+                    continue;
+                }
+                for field in ["mON", "mOFF"] {
+                    if let Some(material) = optional(lamp, field)?.or(optional(f, field)?) {
+                        if !output.contains(material) {
+                            output.push(material.clone());
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    pub fn prop_material(&self, placement: &Placement) -> Option<(&SourceId, &SourceId)> {
+        self.props.material(placement)
     }
     fn plan(&mut self) -> Result<(), ReferenceError> {
         self.road_candidates.clear();
@@ -730,6 +1011,7 @@ impl WorldStream {
                     })
                 {
                     self.lights.push(light);
+                    self.refresh_poles();
                 }
             }
         }
@@ -806,6 +1088,7 @@ impl WorldStream {
             });
             let pending_bytes = TerrainSurfaceJob::allocation_bound(tile)
                 + self.placements.foundation_count()
+                + self.structure_helpers.count(&self.wanted_structures)
                     * 2
                     * (std::mem::size_of::<super::FoundationPoint>()
                         + std::mem::size_of::<TerrainFoundation>())
@@ -845,6 +1128,8 @@ impl WorldStream {
                 ];
                 self.placements
                     .foundations_in(window(center, tile.size as f64), &mut generated);
+                self.structure_helpers
+                    .append(&self.wanted_structures, &mut foundations);
                 foundations.extend(generated.iter().map(|p| TerrainFoundation {
                     position: [
                         p.position[0] as f32,
@@ -1117,8 +1402,10 @@ impl WorldStream {
             });
         }
         if self.recovery.is_none() && self.next_road == self.road_candidates.len() {
-            self.lights
-                .retain(|light| self.wanted_lights.contains(&(light.id.unit[0] as u32)));
+            self.lights.retain(|light| {
+                light.biome.is_none() || self.wanted_lights.contains(&(light.id.unit[0] as u32))
+            });
+            self.refresh_poles();
         }
     }
     pub fn supports(&self, swept: WorldBounds) -> bool {
@@ -1157,9 +1444,18 @@ impl WorldStream {
             })
         })
     }
-    pub fn terrain_color(&mut self, point: [f64; 3]) -> [f32; 4] {
+    fn refresh_helper_context(&mut self, bounds: WorldBounds) {
+        let required = self.placements.foundation_count()
+            + self.startup.as_ref().map_or(0, |s| s.foundations.len())
+            + self.structure_helpers.count(&self.wanted_structures);
+        let extra = required.saturating_sub(self.color_helpers.capacity())
+            * std::mem::size_of::<TerrainFoundation>();
+        if self.metrics().active_cpu_bytes.saturating_add(extra) > ACTIVE_CPU {
+            self.failure = Some("Source helper context exceeds active CPU budget".into());
+            return;
+        }
         self.placements
-            .foundations_in(window(point, 1000.0), &mut self.color_foundations);
+            .foundations_in(bounds, &mut self.color_foundations);
         self.color_helpers.clear();
         if let Some(startup) = &self.startup {
             self.color_helpers.extend_from_slice(&startup.foundations);
@@ -1173,6 +1469,11 @@ impl WorldStream {
                 ],
                 range_squared: p.range_squared,
             }));
+        self.structure_helpers
+            .append(&self.wanted_structures, &mut self.color_helpers);
+    }
+    pub fn terrain_color(&mut self, point: [f64; 3]) -> [f32; 4] {
+        self.refresh_helper_context(window(point, 1000.));
         let xz = [point[0] as f32, -point[2] as f32];
         let context = TerrainContext {
             evaluator: &self.evaluator,
@@ -1356,8 +1657,10 @@ impl WorldStream {
             return Ok(());
         };
         let mut points = Vec::new();
-        self.placements
-            .supplies_for_building(placement.id.unit[0] as u32, &mut points);
+        if placement.id.layer == WorldLayer::Building && placement.id.children.is_empty() {
+            self.placements
+                .supplies_for_building(placement.id.unit[0] as u32, &mut points);
+        }
         if self.metrics().generated_objects + 1 + points.len() * 2 > MAX_OBJECTS {
             return Err(ReferenceError("Source object count exceeds 8192".into()));
         }
@@ -1371,8 +1674,76 @@ impl WorldStream {
                 "Source structure physics exceeds active CPU budget".into(),
             ));
         }
-        let instance =
-            self.recipes[&placement.prototype].publish(placement.clone(), self.origin, physics)?;
+        let prototype = self
+            .reference
+            .prototypes
+            .iter()
+            .find(|p| p.source == placement.prototype)
+            .unwrap();
+        let (binding_reservation, binding_objects) =
+            self.binding_reservation(prototype, &placement.id)?;
+        if binding_reservation > self.available_staging_bytes()
+            || self
+                .metrics()
+                .active_cpu_bytes
+                .saturating_add(binding_reservation)
+                .saturating_add(self.recipes[&placement.prototype].instance_bytes())
+                > ACTIVE_CPU
+            || self
+                .metrics()
+                .generated_objects
+                .saturating_add(binding_objects)
+                > MAX_OBJECTS
+        {
+            return Err(ReferenceError(
+                "Source generated bindings exceed admission budget".into(),
+            ));
+        }
+        let appearance = self.contents.appearance(&placement.id);
+        let instance = if placement.scale == prototype.prefab_pose.scale
+            && !appearance.iter().any(|a| a.scale.is_some())
+        {
+            self.recipes[&placement.prototype].publish(placement.clone(), self.origin, physics)?
+        } else {
+            let extra = super::StructureRecipe::reservation(prototype);
+            if self.metrics().active_cpu_bytes.saturating_add(extra * 2) > ACTIVE_CPU
+                || extra > self.available_staging_bytes()
+            {
+                return Err(ReferenceError(
+                    "Source scaled collision exceeds allocation budget".into(),
+                ));
+            }
+            let recipe = super::StructureRecipe::with_appearance(
+                &self.reference,
+                prototype,
+                placement.scale,
+                appearance,
+            )?;
+            let mut instance = recipe.publish(placement.clone(), self.origin, physics)?;
+            instance.cpu_bytes += extra;
+            instance
+        };
+        let appearance = self.contents.appearance(&placement.id);
+        for (index, body) in prototype.bodies.iter().enumerate() {
+            physics.rapier_mut().bodies[instance.bodies[index]].set_enabled(
+                super::spawn_appearance::node_active(prototype, body.node as usize, appearance),
+            );
+        }
+        for (source, handle) in &instance.colliders {
+            let collider = prototype
+                .colliders
+                .iter()
+                .find(|c| &c.source == source)
+                .unwrap();
+            physics.rapier_mut().colliders[*handle].set_enabled(
+                collider.enabled
+                    && super::spawn_appearance::node_active(
+                        prototype,
+                        collider.node as usize,
+                        appearance,
+                    ),
+            );
+        }
         for point in points {
             self.supplies.push(PublishedSupply {
                 key: placement.id.clone(),
@@ -1385,6 +1756,7 @@ impl WorldStream {
         self.ready_structures
             .retain(|id| *id != instance.placement.id);
         self.structures.push(instance);
+        self.binding_reserved = binding_reservation;
         self.publication_available = false;
         Ok(())
     }
@@ -1396,7 +1768,47 @@ impl WorldStream {
         items: &mut crate::interaction::items::ItemStore,
         interaction: &mut crate::interaction::InteractionState,
         physics: &mut PhysicsWorld,
+        wheels: &mut crate::interaction::wheels::WheelAssemblies,
     ) -> Result<(), ReferenceError> {
+        let owned = items.retained_binding_bytes()
+            + interaction.retained_binding_bytes()
+            + wheels.retained_binding_bytes();
+        let baseline = *self.binding_baseline.get_or_insert(owned);
+        self.binding_bytes = owned.saturating_sub(baseline);
+        self.binding_owner_bytes = owned;
+        self.binding_objects = items.len();
+        if let Err(error) =
+            self.sync_static_controls(reference, items, interaction, physics, wheels)
+        {
+            self.binding_reserved = 0;
+            self.binding_owner_bytes = items.retained_binding_bytes()
+                + interaction.retained_binding_bytes()
+                + wheels.retained_binding_bytes();
+            self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
+            return Err(error);
+        }
+        if let Err(error) = self.sync_contents(reference, items, interaction, physics, wheels) {
+            self.binding_reserved = 0;
+            self.binding_owner_bytes = items.retained_binding_bytes()
+                + interaction.retained_binding_bytes()
+                + wheels.retained_binding_bytes();
+            self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
+            return Err(error);
+        }
+        if let Err(error) = self.sync_lamp_bindings(interaction, physics) {
+            self.binding_reserved = 0;
+            self.binding_owner_bytes = items.retained_binding_bytes()
+                + interaction.retained_binding_bytes()
+                + wheels.retained_binding_bytes();
+            self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
+            return Err(error);
+        }
+        self.sync_moving_lamps(items);
+        self.binding_bytes = (items.retained_binding_bytes()
+            + interaction.retained_binding_bytes()
+            + wheels.retained_binding_bytes())
+        .saturating_sub(baseline);
+
         for supply in &mut self.supplies {
             if supply.items.is_some() {
                 continue;
@@ -1476,6 +1888,12 @@ impl WorldStream {
             }
             supply.items = Some((tank, cap));
         }
+        self.binding_owner_bytes = items.retained_binding_bytes()
+            + interaction.retained_binding_bytes()
+            + wheels.retained_binding_bytes();
+        self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
+        self.binding_objects = items.len();
+        self.binding_reserved = 0;
         Ok(())
     }
 
@@ -1489,6 +1907,7 @@ impl WorldStream {
         physics: &mut PhysicsWorld,
         items: &mut crate::interaction::items::ItemStore,
         interaction: &mut crate::interaction::InteractionState,
+        wheels: &mut crate::interaction::wheels::WheelAssemblies,
     ) {
         if self.recovery.is_some()
             || self.plan_revision != self.request.revision
@@ -1497,16 +1916,26 @@ impl WorldStream {
         {
             return;
         }
+        self.retire_contents(physics, items, interaction, wheels);
         let mut index = 0;
         while index < self.structures.len() {
             let id = &self.structures[index].placement.id;
             let radius = self.reference.distances["BuildingGenDist"];
-            if [self.request.player, self.request.vehicle]
-                .into_iter()
-                .any(|p| {
-                    source_distance_squared(p, self.structures[index].placement.pose.position)
-                        < radius * radius
-                })
+            if self.contents.contains(id)
+                || (!id.children.is_empty() && self.wanted_structures.iter().any(|p| &p.id == id))
+                || (id.children.is_empty()
+                    && id.layer != WorldLayer::Building
+                    && self.props.contains(id))
+                || (id.children.is_empty()
+                    && id.layer == WorldLayer::Building
+                    && [self.request.player, self.request.vehicle]
+                        .into_iter()
+                        .any(|p| {
+                            source_distance_squared(
+                                p,
+                                self.structures[index].placement.pose.position,
+                            ) < radius * radius
+                        }))
                 || self.supplies.iter().filter(|s| &s.key == id).any(|s| {
                     s.items.is_some_and(|(tank, cap)| {
                         !items.can_remove_generated(tank) || !items.can_remove_generated(cap)
@@ -1517,6 +1946,21 @@ impl WorldStream {
                 continue;
             }
             let instance = self.structures.swap_remove(index);
+            if let Some(i) = self
+                .static_controls
+                .iter()
+                .position(|c| c.content.placement.id == instance.placement.id)
+            {
+                let mut content = self.static_controls.swap_remove(i);
+                content_bindings::rollback(
+                    &mut content,
+                    &instance,
+                    items,
+                    interaction,
+                    physics,
+                    wheels,
+                );
+            }
             let mut supply_index = 0;
             while supply_index < self.supplies.len() {
                 if self.supplies[supply_index].key != instance.placement.id {
@@ -1743,13 +2187,22 @@ impl WorldStream {
     pub fn metrics(&self) -> WorldMetrics {
         let mut metrics = WorldMetrics {
             pending_bytes: self.presentation.staging_bytes + self.generation_pending_bytes(),
-            pending_work: self.ready_structures.len()
+            pending_work: self.contents.pending_requests()
+                + self.props.pending_requests()
+                + self.ready_structures.len()
                 + usize::from(self.ready.is_some())
                 + usize::from(self.terrain_work.is_some())
                 + self.presentation.pending,
-            checkpoint_bytes: self.roads.retained_index_bytes()
+            spawn_parents: self.contents.state.parent_count(),
+            spawn_boundaries: self.contents.state.boundary_count(),
+            spawn_boundary_bytes: self.contents.state.retained_bytes(),
+            checkpoint_bytes: self.contents.state.retained_bytes()
+                + self.roads.retained_index_bytes()
                 + self.placements.retained_index_bytes(),
-            prototype_cpu_bytes: self.shared_cpu_bytes.unwrap_or(0)
+            prototype_cpu_bytes: self.road_light.retained_bytes()
+                + self.contents.rules.retained_bytes()
+                + self.structure_helpers.retained_bytes()
+                + self.shared_cpu_bytes.unwrap_or(0)
                 + self.presentation.prototype_cpu
                 + self
                     .recipes
@@ -1760,7 +2213,24 @@ impl WorldStream {
             active_gpu_bytes: self.presentation.active_gpu,
             changed_record_bytes: self.changes.retained_bytes(),
             changed_objects: self.changes.iter().count(),
-            active_cpu_bytes: self.presentation.active_cpu
+            active_cpu_bytes: self.static_controls.capacity()
+                * std::mem::size_of::<super::contents::ContentInstance>()
+                + self
+                    .static_controls
+                    .iter()
+                    .map(super::contents::ContentInstance::control_heap_bytes)
+                    .sum::<usize>()
+                + self.binding_reserved
+                + self.binding_bytes
+                + self.lamp_bindings.capacity() * std::mem::size_of::<content_lamps::LampBinding>()
+                + self
+                    .lamp_bindings
+                    .iter()
+                    .map(content_lamps::LampBinding::heap_bytes)
+                    .sum::<usize>()
+                + self.contents.retained_bytes()
+                + self.props.retained_bytes()
+                + self.presentation.active_cpu
                 + self.color_foundations.capacity() * std::mem::size_of::<super::FoundationPoint>()
                 + self.color_helpers.capacity() * std::mem::size_of::<TerrainFoundation>()
                 + self
@@ -1772,7 +2242,7 @@ impl WorldStream {
                 + self
                     .ready_structures
                     .iter()
-                    .map(|id| id.generator.file.capacity())
+                    .map(super::contents::identity_heap)
                     .sum::<usize>()
                 + self.road_candidates.capacity() * std::mem::size_of::<u32>()
                 + self.wanted_roads.capacity() * std::mem::size_of::<u32>()
@@ -1783,15 +2253,32 @@ impl WorldStream {
                 + self.startup_points.capacity() * std::mem::size_of::<TerrainRoadPoint>()
                 + self.surfaces.capacity() * std::mem::size_of::<PublishedSurface>()
                 + self.lights.capacity() * std::mem::size_of::<super::WorldLight>()
+                + self
+                    .lights
+                    .iter()
+                    .map(super::WorldLight::heap_bytes)
+                    .sum::<usize>()
                 + self.structures.capacity() * std::mem::size_of::<super::StructureInstance>()
                 + self.supplies.capacity() * std::mem::size_of::<PublishedSupply>()
-                + self.wanted_structures.capacity() * std::mem::size_of::<Placement>(),
+                + self.wanted_structures.capacity() * std::mem::size_of::<Placement>()
+                + self
+                    .wanted_structures
+                    .iter()
+                    .map(super::contents::placement_heap)
+                    .sum::<usize>(),
             prepared_roads: self.roads.prepared_segments(),
             prepared_buildings: self.placements.prepared_buildings(),
             indices_ready: self.indices_ready,
             last_road_work: self.last_road_work,
             last_terrain_work: self.last_terrain_work,
-            generated_objects: self.structures.len()
+            generated_objects: self
+                .contents
+                .active
+                .iter()
+                .chain(&self.static_controls)
+                .map(|c| c.bindings.len() + usize::from(c.item.is_some()))
+                .sum::<usize>()
+                + self.structures.len()
                 + self.supplies.len() * 2
                 + self.lights.len()
                 + self.presentation.objects,
@@ -1939,3 +2426,9 @@ fn source_distance_squared(a: [f64; 3], b: [f64; 3]) -> f32 {
     let z = (-a[2]) as f32 - (-b[2]) as f32;
     x * x + z * z
 }
+
+#[path = "content_bindings.rs"]
+pub(super) mod content_bindings;
+
+#[path = "content_lamps.rs"]
+mod content_lamps;

@@ -10,6 +10,7 @@ pub struct ObjectSnapshot {
     pub temperature: Option<f32>,
     pub fluid_quantities: Option<[f32; 6]>,
     pub valve: Option<f32>,
+    pub lamp: Option<bool>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

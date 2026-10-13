@@ -598,6 +598,7 @@ impl GarageRuntime {
 
     pub fn advance_light_fades(&mut self, reference: &ReferenceManifest, elapsed_seconds: f64) {
         if self.started && !self.paused {
+            self.stream.advance_generated_lamps(elapsed_seconds as f32);
             for (index, owner) in self.light_owners.iter().enumerate() {
                 self.lighting.set_controller_mounted(
                     index,
@@ -650,7 +651,11 @@ impl GarageRuntime {
         }
         match action {
             Some(InteractionAction::LightControl(control)) => {
-                self.lighting.use_control(&reference.lighting, control);
+                match self.stream.use_generated_light(control) {
+                    Ok(false) => self.lighting.use_control(&reference.lighting, control),
+                    Ok(true) => {}
+                    Err(error) => self.stream.fail(error),
+                }
                 self.notice = "";
             }
             Some(InteractionAction::WheelRemove(item)) => {

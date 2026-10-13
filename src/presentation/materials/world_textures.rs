@@ -62,8 +62,8 @@ struct Layer {
     source: SourceId,
     path: String,
     hash: String,
+    chunks: Vec<crate::reference::LightingTextureChunk>,
     load: Option<Handle<Image>>,
-    staging_id: Option<AssetId<Image>>,
 }
 struct TextureArray {
     failed: bool,
@@ -74,6 +74,9 @@ struct TextureArray {
     bytes: usize,
     cpu_bytes: usize,
     cpu_live: bool,
+    next_layer: usize,
+    next_chunk: usize,
+    pending_upload: bool,
 }
 #[derive(Clone, Copy, Debug)]
 pub struct TextureBinding {
@@ -89,13 +92,18 @@ struct MaterialTextures {
 #[derive(Default)]
 pub struct WorldTextures {
     uploaded: Arc<Mutex<HashSet<AssetId<Image>>>>,
+    uploads: Arc<Mutex<super::world_texture_upload::UploadQueue>>,
     arrays: Vec<Option<TextureArray>>,
     materials: HashMap<SourceId, MaterialTextures>,
-    /// Reserved decoded image bytes. Includes the array and its source staging images.
+    /// Live source layer and bounded queue upload overlap.
     cpu_reserved: usize,
     gpu_reserved: usize,
 }
 impl WorldTextures {
+    pub(super) fn upload_queue(&self) -> &Arc<Mutex<super::world_texture_upload::UploadQueue>> {
+        &self.uploads
+    }
+
     pub fn upload_receipts(&self) -> Arc<Mutex<HashSet<AssetId<Image>>>> {
         Arc::clone(&self.uploaded)
     }
@@ -119,6 +127,17 @@ impl WorldTextures {
                                 layer.source.file.capacity()
                                     + layer.path.capacity()
                                     + layer.hash.capacity()
+                                    + layer.chunks.capacity()
+                                        * size_of::<crate::reference::LightingTextureChunk>()
+                                    + layer
+                                        .chunks
+                                        .iter()
+                                        .map(|c| {
+                                            c.data.path.capacity()
+                                                + c.data.sha256.capacity()
+                                                + c.data.source.file.capacity()
+                                        })
+                                        .sum::<usize>()
                             })
                             .sum::<usize>()
                 })
@@ -139,7 +158,10 @@ impl WorldTextures {
                     + material.slots.keys().map(String::capacity).sum::<usize>()
             })
             .sum::<usize>();
-        arrays
+        size_of::<super::world_texture_upload::UploadQueue>()
+            + 4 * size_of::<usize>()
+            + size_of::<Mutex<super::world_texture_upload::UploadQueue>>()
+            + arrays
             + materials
             + map_bytes(
                 self.uploaded.lock().unwrap().capacity(),
@@ -166,6 +188,7 @@ impl WorldTextures {
                 .ok_or_else(|| {
                     ReferenceError(format!("Missing source texture {}", link.texture))
                 })?;
+            validate_chunks(record)?;
             let key = ArrayKey::from(record);
             let index = groups
                 .iter()
@@ -205,10 +228,9 @@ impl WorldTextures {
             })
             .collect();
         let mut added = 0usize;
-        let mut staging_headers = 0usize;
+
         for ((key, layers), existing) in groups.iter().zip(&existing) {
             if existing.is_none() {
-                staging_headers += layers.len() * 16;
                 let bytes = key
                     .layer_bytes()?
                     .checked_mul(layers.len())
@@ -218,7 +240,7 @@ impl WorldTextures {
                     .ok_or_else(|| ReferenceError("Source texture allocation overflow".into()))?;
             }
         }
-        // Reserve both decoded buffers, SMIP headers, and new binding metadata.
+        // Reserve binding metadata. Layer buffers are admitted when loading starts.
         let metadata = groups
             .iter()
             .zip(&existing)
@@ -232,6 +254,17 @@ impl WorldTextures {
                                 + layer.source.file.len()
                                 + layer.mip_data.path.len()
                                 + layer.mip_data.sha256.len()
+                                + layer.chunks.len()
+                                    * std::mem::size_of::<crate::reference::LightingTextureChunk>()
+                                + layer
+                                    .chunks
+                                    .iter()
+                                    .map(|c| {
+                                        c.data.path.len()
+                                            + c.data.sha256.len()
+                                            + c.data.source.file.len()
+                                    })
+                                    .sum::<usize>()
                         })
                         .sum::<usize>()
             })
@@ -251,10 +284,7 @@ impl WorldTextures {
                 .sum::<usize>()
             + material.source.file.len()
             + groups.len() * std::mem::size_of::<usize>();
-        let cpu = added
-            .checked_mul(2)
-            .and_then(|v| v.checked_add(staging_headers))
-            .and_then(|v| v.checked_add(self.cpu_reserved));
+        let cpu = Some(self.cpu_reserved);
         let gpu = added.checked_add(self.gpu_reserved);
         if cpu.is_none_or(|v| {
             v.saturating_add(self.metadata_bytes())
@@ -276,15 +306,16 @@ impl WorldTextures {
                 index
             } else {
                 let bytes = key.layer_bytes()? * records.len();
-                let cpu_bytes = bytes * 2 + records.len() * 16;
+                // Fetch buffer, reader, shared asset, upload payload, and GPU upload copy.
+                let cpu_bytes = 5 * (super::world_texture_upload::UPLOAD_BYTES + 16);
                 let layers = records
                     .into_iter()
                     .map(|record| Layer {
                         source: record.source.clone(),
                         path: record.mip_data.path.clone(),
                         hash: record.mip_data.sha256.clone(),
+                        chunks: record.chunks.clone(),
                         load: None,
-                        staging_id: None,
                     })
                     .collect();
                 let array = Some(TextureArray {
@@ -295,7 +326,10 @@ impl WorldTextures {
                     users: 1,
                     bytes,
                     cpu_bytes,
-                    cpu_live: true,
+                    cpu_live: false,
+                    next_layer: 0,
+                    next_chunk: 0,
+                    pending_upload: false,
                 });
                 if let Some(index) = self.arrays.iter().position(Option::is_none) {
                     self.arrays[index] = array;
@@ -341,183 +375,194 @@ impl WorldTextures {
         );
         Ok(())
     }
-    /// Assemble one completed array per update. Never generate missing mip pixels.
+    /// Admit one source layer, then upload at most four MiB per render update.
     pub fn prepare(
         &mut self,
         server: &AssetServer,
         images: &mut Assets<Image>,
         new_jobs: usize,
-        mut staging_available: usize,
+        staging_available: usize,
+        cpu_available: usize,
     ) -> Result<(), ReferenceError> {
-        {
-            let uploaded = self.uploaded.lock().unwrap();
-            for array in self.arrays.iter_mut().flatten() {
-                if array.cpu_live
-                    && array
-                        .layers
+        let result = self.prepare_inner(server, images, new_jobs, staging_available, cpu_available);
+        loop {
+            let failed = self
+                .materials
+                .iter()
+                .find(|(id, material)| {
+                    material
+                        .arrays
                         .iter()
-                        .all(|layer| layer.staging_id.is_none_or(|id| !images.contains(id)))
-                    && array
-                        .image
-                        .as_ref()
-                        .is_some_and(|image| uploaded.contains(&image.id()))
+                        .any(|&i| self.arrays[i].as_ref().is_some_and(|a| a.failed))
+                        && self.retirable(id, images, server)
+                })
+                .map(|(id, _)| id.clone());
+            let Some(id) = failed else {
+                break;
+            };
+            self.release(&id, images, server)?;
+        }
+        result
+    }
+    fn prepare_inner(
+        &mut self,
+        server: &AssetServer,
+        images: &mut Assets<Image>,
+        new_jobs: usize,
+        staging_available: usize,
+        cpu_available: usize,
+    ) -> Result<(), ReferenceError> {
+        if let Some((image, layer, chunk)) = self.uploads.lock().unwrap().completed.take() {
+            if let Some(array) = self
+                .arrays
+                .iter_mut()
+                .flatten()
+                .find(|a| a.image.as_ref().is_some_and(|h| h.id() == image))
+            {
+                if array.pending_upload
+                    && array.next_layer == layer as usize
+                    && array.next_chunk == chunk as usize
                 {
+                    array.pending_upload = false;
+                    // Drop only this consumer. AssetServer owns shared chunk retirement.
+                    array.layers[array.next_layer].load = None;
+                    array.next_chunk += 1;
+                    if array.next_chunk == array.layers[array.next_layer].chunks.len() {
+                        array.next_layer += 1;
+                        array.next_chunk = 0;
+                    }
                     self.cpu_reserved -= array.cpu_bytes;
                     array.cpu_live = false;
                 }
             }
         }
-        let mut failure = None;
-        for array in self.arrays.iter_mut().flatten() {
-            for layer in &mut array.layers {
-                if let Some(handle) = &layer.load {
-                    if let LoadState::Failed(error) = server.load_state(handle.id()) {
-                        if !array.failed {
-                            failure = Some(ReferenceError(format!(
-                                "Source texture {}:{}: {error}",
-                                layer.source.file, layer.source.path_id
-                            )));
-                        }
-                        array.failed = true;
-                        images.remove(handle.id());
-                        layer.load = None;
-                    }
-                }
-            }
-        }
-        let retired: Vec<_> = self
-            .materials
-            .iter()
-            .filter(|(_, m)| {
-                m.arrays
-                    .iter()
-                    .any(|&i| self.arrays[i].as_ref().is_some_and(|a| a.failed))
-            })
-            .map(|(id, _)| id.clone())
-            .collect();
-        for material in retired {
-            if self.retirable(&material, images, server) {
-                self.release(&material, images, server)?;
-            }
-        }
-        let mut pending = self
+        let active = self
             .arrays
             .iter()
-            .flatten()
-            .flat_map(|a| &a.layers)
-            .filter_map(|l| l.load.as_ref())
-            .filter(|h| !images.contains(h.id()))
-            .count();
-        let job_limit = pending + new_jobs;
-        for array in self.arrays.iter_mut().flatten() {
-            if array.failed || array.image.is_some() {
-                continue;
-            }
-            let key = array.key;
-            for layer in &mut array.layers {
-                let staging = key.layer_bytes()? + 16;
-                if staging > 32 * 1024 * 1024 {
-                    return Err(ReferenceError(
-                        "Source mip payload exceeds shared staging cap".into(),
-                    ));
-                }
-                if layer.load.is_none() && pending < job_limit && staging <= staging_available {
-                    staging_available -= staging;
-                    layer.load=Some(server.load_builder().with_settings(move |settings: &mut crate::presentation::textures::SourceImageSettings| {
-                        settings.srgb=key.srgb;settings.filter=key.filter;
-                        settings.wrap_u=key.wrap_u;settings.wrap_v=key.wrap_v;
-                        settings.main_world_only=true;settings.decoded_bytes=key.layer_bytes().expect("admitted layer size");
-                    }).load(layer.path.clone()));
-                    pending += 1;
-                }
-            }
-            if !array
-                .layers
-                .iter()
-                .all(|l| l.load.as_ref().is_some_and(|h| images.contains(h.id())))
-            {
-                continue;
-            }
-            let key = array.key;
-            let layer_bytes = key.layer_bytes()?;
-            // Validate all layers before removing any source image.
-            for layer in &array.layers {
-                let image = images.get(layer.load.as_ref().unwrap()).unwrap();
-                if image.width() != key.width
-                    || image.height() != key.height
-                    || image.texture_descriptor.mip_level_count != key.mips
-                    || image.data.as_ref().map(Vec::len) != Some(layer_bytes)
-                    || image.texture_descriptor.format
-                        != if key.srgb {
-                            TextureFormat::Rgba8UnormSrgb
-                        } else {
-                            TextureFormat::Rgba8Unorm
-                        }
-                {
-                    return Err(ReferenceError(format!(
-                        "Invalid source array layer {}:{}",
-                        layer.source.file, layer.source.path_id
-                    )));
-                }
-            }
-            let mut data = Vec::with_capacity(array.bytes);
-            for layer in &mut array.layers {
-                // The loading handles are unique by source path. Another admitted array can
-                // share a source layer, so retain its asset until all loading handles drop.
-                let image = images.get(layer.load.as_ref().unwrap()).unwrap();
-                data.extend_from_slice(image.data.as_ref().unwrap());
-            }
-            let mut image = Image::new_uninit(
-                Extent3d {
-                    width: key.width,
-                    height: key.height,
-                    depth_or_array_layers: array.layers.len() as u32,
-                },
-                TextureDimension::D2,
-                if key.srgb {
-                    TextureFormat::Rgba8UnormSrgb
-                } else {
-                    TextureFormat::Rgba8Unorm
-                },
-                RenderAssetUsages::RENDER_WORLD,
-            );
-            image.data = Some(data);
-            image.data_order = TextureDataOrder::LayerMajor;
-            image.texture_descriptor.mip_level_count = key.mips;
-            image.texture_view_descriptor = Some(TextureViewDescriptor {
-                dimension: Some(TextureViewDimension::D2Array),
-                ..default()
-            });
-            let filter = if key.filter == 0 {
-                ImageFilterMode::Nearest
-            } else {
-                ImageFilterMode::Linear
-            };
-            image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-                address_mode_u: super::wrap(key.wrap_u),
-                address_mode_v: super::wrap(key.wrap_v),
-                mag_filter: filter,
-                min_filter: filter,
-                mipmap_filter: if key.filter == 2 || key.aniso > 1 {
-                    ImageFilterMode::Linear
-                } else {
-                    ImageFilterMode::Nearest
-                },
-                anisotropy_clamp: u16::try_from(key.aniso.max(1)).map_err(|_| {
-                    ReferenceError("Source anisotropy exceeds GPU sampler range".into())
-                })?,
-                lod_max_clamp: (key.mips - 1) as f32,
-                ..default()
-            });
-            array.image = Some(images.add(image));
-            // Release staging only after the render-world upload receipt.
-            for layer in &mut array.layers {
-                layer.staging_id = layer.load.as_ref().map(Handle::id);
-                layer.load = None;
-            }
-            return failure.map_or(Ok(()), Err);
+            .position(|a| a.as_ref().is_some_and(|a| a.cpu_live));
+        let index = active.or_else(|| {
+            self.arrays.iter().position(|a| {
+                a.as_ref()
+                    .is_some_and(|a| !a.failed && a.next_layer < a.layers.len())
+            })
+        });
+        let Some(index) = index else {
+            return Ok(());
+        };
+        let array = self.arrays[index].as_mut().unwrap();
+        if array.pending_upload {
+            return Ok(());
         }
-        failure.map_or(Ok(()), Err)
+        if array.failed {
+            return Ok(());
+        }
+        let key = array.key;
+        let layer = &mut array.layers[array.next_layer];
+        let chunk = &layer.chunks[array.next_chunk];
+        let (width, rows, mip, row) = (chunk.width, chunk.rows, chunk.mip, chunk.row);
+        if let Some(handle) = &layer.load {
+            if let LoadState::Failed(error) = server.load_state(handle.id()) {
+                array.failed = true;
+                layer.load = None;
+                self.cpu_reserved -= array.cpu_bytes;
+                array.cpu_live = false;
+                return Err(ReferenceError(format!(
+                    "Source texture {}:{}: {error}",
+                    layer.source.file, layer.source.path_id
+                )));
+            }
+            let Some(image) = images.get(handle) else {
+                return Ok(());
+            };
+            if image.width() != width
+                || image.height() != rows
+                || image.texture_descriptor.mip_level_count != 1
+                || image.data.as_ref().map(Vec::len) != Some(width as usize * rows as usize * 4)
+                || !matches!(
+                    image.texture_descriptor.format,
+                    TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb
+                )
+            {
+                array.failed = true;
+                layer.load = None;
+                return Err(ReferenceError("Invalid source array layer".into()));
+            }
+            let mut queue = self.uploads.lock().unwrap();
+            if queue.job.is_some() || queue.completed.is_some() {
+                return Err(ReferenceError(
+                    "Source array upload ownership overlap".into(),
+                ));
+            }
+            if array.image.is_none() {
+                array.image = Some(images.add(array_image(key, array.layers.len())?));
+            }
+            // A chunk path may serve several arrays or an overlapping Restart.
+            // Retain its strong handle through completion; never remove its shared asset.
+            let data = images
+                .get(array.layers[array.next_layer].load.as_ref().unwrap())
+                .ok_or_else(|| ReferenceError("Source layer ownership disappeared".into()))?
+                .data
+                .as_ref()
+                .unwrap()
+                .clone();
+            queue.job = Some(super::world_texture_upload::Upload {
+                image: array.image.as_ref().unwrap().clone(),
+                layer: array.next_layer as u32,
+                width,
+                height: rows,
+                chunk: array.next_chunk as u32,
+                data,
+                mip,
+                row,
+                finished: false,
+                submitted: false,
+                callback_registered: false,
+                completion: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            });
+            array.pending_upload = true;
+            return Ok(());
+        }
+        if new_jobs == 0 {
+            return Ok(());
+        }
+        if array.cpu_bytes > 32 * 1024 * 1024 {
+            return Err(ReferenceError(
+                "Source layer and upload overlap exceed shared staging cap".into(),
+            ));
+        }
+        if array.cpu_bytes > staging_available
+            || self
+                .cpu_reserved
+                .saturating_add(array.cpu_bytes)
+                .saturating_add(self.metadata_bytes())
+                > cpu_available
+        {
+            return Ok(());
+        }
+        let array = self.arrays[index].as_mut().unwrap();
+        self.cpu_reserved += array.cpu_bytes;
+        array.cpu_live = true;
+        array.layers[array.next_layer].load = Some(
+            server
+                .load_builder()
+                .with_settings(
+                    move |settings: &mut crate::presentation::textures::SourceImageSettings| {
+                        settings.srgb = key.srgb;
+                        settings.filter = key.filter;
+                        settings.wrap_u = key.wrap_u;
+                        settings.wrap_v = key.wrap_v;
+                        settings.main_world_only = true;
+                        settings.decoded_bytes = width as usize * rows as usize * 4;
+                    },
+                )
+                .load(
+                    array.layers[array.next_layer].chunks[array.next_chunk]
+                        .data
+                        .path
+                        .clone(),
+                ),
+        );
+        Ok(())
     }
     pub fn jobs(&self, images: &Assets<Image>) -> usize {
         self.arrays
@@ -528,25 +573,8 @@ impl WorldTextures {
             .filter(|h| !images.contains(h.id()))
             .count()
     }
-    pub fn staging_bytes(&self, images: &Assets<Image>) -> usize {
-        self.arrays
-            .iter()
-            .flatten()
-            .map(|array| {
-                let bytes = array.key.layer_bytes().expect("admitted source dimensions") + 16;
-                array
-                    .layers
-                    .iter()
-                    .filter(|layer| {
-                        layer
-                            .load
-                            .as_ref()
-                            .is_some_and(|h| !images.contains(h.id()))
-                    })
-                    .count()
-                    * bytes
-            })
-            .sum()
+    pub fn staging_bytes(&self, _images: &Assets<Image>) -> usize {
+        self.cpu_reserved
     }
     pub fn admitted(&self, material: &SourceId) -> bool {
         self.materials.contains_key(material)
@@ -573,10 +601,27 @@ impl WorldTextures {
     }
     pub fn ready(&self, material: &SourceId) -> bool {
         self.materials.get(material).is_some_and(|m| {
-            m.arrays
-                .iter()
-                .all(|&i| self.arrays[i].as_ref().is_some_and(|a| a.image.is_some()))
+            m.arrays.iter().all(|&i| {
+                self.arrays[i]
+                    .as_ref()
+                    .is_some_and(|a| a.next_layer == a.layers.len())
+            })
         })
+    }
+    fn upload_in_flight(&self, array: &TextureArray) -> bool {
+        self.uploads
+            .lock()
+            .unwrap()
+            .job
+            .as_ref()
+            .is_some_and(|job| {
+                array
+                    .image
+                    .as_ref()
+                    .is_some_and(|image| image.id() == job.image.id())
+                    && job.submitted
+                    && !job.completion.load(std::sync::atomic::Ordering::Acquire)
+            })
     }
     pub fn retirable(
         &self,
@@ -588,12 +633,13 @@ impl WorldTextures {
             m.arrays.iter().all(|&i| {
                 self.arrays[i].as_ref().is_none_or(|a| {
                     a.users > 1
-                        || a.layers.iter().all(|l| {
-                            l.load.as_ref().is_none_or(|h| {
-                                images.contains(h.id())
-                                    || matches!(server.load_state(h.id()), LoadState::Failed(_))
-                            })
-                        })
+                        || (!self.upload_in_flight(a)
+                            && a.layers.iter().all(|l| {
+                                l.load.as_ref().is_none_or(|h| {
+                                    images.contains(h.id())
+                                        || matches!(server.load_state(h.id()), LoadState::Failed(_))
+                                })
+                            }))
                 })
             })
         })
@@ -604,6 +650,11 @@ impl WorldTextures {
         images: &mut Assets<Image>,
         server: &AssetServer,
     ) -> Result<(), ReferenceError> {
+        if !self.retirable(material, images, server) {
+            return Err(ReferenceError(
+                "Source texture retirement still has pending work".into(),
+            ));
+        }
         if self.materials.get(material).is_some_and(|binding| {
             binding.arrays.iter().any(|&index| {
                 self.arrays[index].as_ref().is_some_and(|array| {
@@ -635,17 +686,29 @@ impl WorldTextures {
             }
             let array = self.arrays[index].take().unwrap();
             if let Some(image) = array.image {
+                let mut queue = self.uploads.lock().unwrap();
+                if queue
+                    .job
+                    .as_ref()
+                    .is_some_and(|job| job.image.id() == image.id())
+                {
+                    queue.job = None;
+                }
+                if queue
+                    .completed
+                    .as_ref()
+                    .is_some_and(|(id, _, _)| *id == image.id())
+                {
+                    queue.completed = None;
+                }
                 self.uploaded.lock().unwrap().remove(&image.id());
                 images.remove(image.id());
             }
             if array.cpu_live {
                 self.cpu_reserved -= array.cpu_bytes;
             }
-            for layer in array.layers {
-                if let Some(image) = layer.load {
-                    images.remove(image.id());
-                }
-            }
+            // Dropping layer handles releases this owner without invalidating other users.
+            drop(array.layers);
             self.gpu_reserved -= array.bytes;
         }
         Ok(())
@@ -662,4 +725,82 @@ fn map_bytes(capacity: usize, entry: usize) -> usize {
             .saturating_mul(entry + 1)
             .saturating_add(16)
     }
+}
+
+fn array_image(key: ArrayKey, layers: usize) -> Result<Image, ReferenceError> {
+    let mut image = Image::new_uninit(
+        Extent3d {
+            width: key.width,
+            height: key.height,
+            depth_or_array_layers: layers as u32,
+        },
+        TextureDimension::D2,
+        if key.srgb {
+            TextureFormat::Rgba8UnormSrgb
+        } else {
+            TextureFormat::Rgba8Unorm
+        },
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.texture_descriptor.mip_level_count = key.mips;
+    image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST;
+    image.texture_view_descriptor = Some(TextureViewDescriptor {
+        dimension: Some(TextureViewDimension::D2Array),
+        ..default()
+    });
+    let filter = if key.filter == 0 {
+        ImageFilterMode::Nearest
+    } else {
+        ImageFilterMode::Linear
+    };
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: super::wrap(key.wrap_u),
+        address_mode_v: super::wrap(key.wrap_v),
+        mag_filter: filter,
+        min_filter: filter,
+        mipmap_filter: if key.filter == 2 || key.aniso > 1 {
+            ImageFilterMode::Linear
+        } else {
+            ImageFilterMode::Nearest
+        },
+        anisotropy_clamp: u16::try_from(key.aniso.max(1))
+            .map_err(|_| ReferenceError("Source anisotropy exceeds GPU sampler range".into()))?,
+        lod_max_clamp: (key.mips - 1) as f32,
+        ..default()
+    });
+    Ok(image)
+}
+
+fn validate_chunks(texture: &LightingTextureRecord) -> Result<(), ReferenceError> {
+    let mut index = 0;
+    for mip in 0..texture.mip_count {
+        let width = (texture.width >> mip).max(1);
+        let height = (texture.height >> mip).max(1);
+        let mut row = 0;
+        while row < height {
+            let chunk = texture
+                .chunks
+                .get(index)
+                .ok_or_else(|| ReferenceError("Missing source texture chunk".into()))?;
+            if chunk.mip != mip
+                || chunk.row != row
+                || chunk.width != width
+                || chunk.rows == 0
+                || chunk.rows > height - row
+                || u64::from(width) * u64::from(chunk.rows) * 4
+                    > super::world_texture_upload::UPLOAD_BYTES as u64
+                || chunk.data.source != texture.source
+            {
+                return Err(ReferenceError(
+                    "Invalid source texture chunk coverage".into(),
+                ));
+            }
+            row += chunk.rows;
+            index += 1;
+        }
+    }
+    if index != texture.chunks.len() {
+        return Err(ReferenceError("Extra source texture chunks".into()));
+    }
+    Ok(())
 }

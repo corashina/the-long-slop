@@ -477,9 +477,12 @@ impl SourceMaterials {
         stream.set_presentation_allocation(allocation)?;
         self.world_deferred.jobs += free;
         self.world_deferred.staging += staging_available;
-        let result = self
-            .world_textures
-            .prepare(server, images, free, staging_available);
+        let available_cpu = (256 * 1024 * 1024usize)
+            .saturating_sub(stream.metrics().prototype_cpu_bytes)
+            + self.world_textures.bytes().0;
+        let result =
+            self.world_textures
+                .prepare(server, images, free, staging_available, available_cpu);
         let jobs = self.world_textures.jobs(images);
         self.account_deferred(stream, jobs, self.world_textures.staging_bytes(images))?;
         result

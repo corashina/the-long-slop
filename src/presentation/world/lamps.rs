@@ -2,48 +2,24 @@
 use bevy::prelude::*;
 
 use crate::presentation::lighting::{
-    RenderingState, SourceLighting, register_road_light, remove_road_light,
+    RenderingState, SourceLighting, register_road_light, register_world_light, remove_road_light,
 };
 use crate::presentation::materials::{SourceCaster, SourceMaterial, SourceShadowMode};
-use crate::world::{RoadLampId, RoadLampPlacement};
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::gltf::GltfExtras;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 
-struct RoadMeshRecipe {
-    mesh: Handle<Mesh>,
-    material: Handle<SourceMaterial>,
-    pose: Transform,
-    visibility: Visibility,
-    layers: RenderLayers,
-    shadow_mode: u8,
-    receive_shadows: bool,
-    caster: Option<Handle<StandardMaterial>>,
-}
-struct RoadNodeRecipe {
-    id: crate::reference::NodeId,
-    parent: Option<usize>,
-    pose: Transform,
-    visibility: Visibility,
-    meshes: Vec<RoadMeshRecipe>,
-}
-pub(crate) struct RoadLampRecipe {
-    nodes: Vec<RoadNodeRecipe>,
-    light_node: usize,
-}
+pub(crate) struct RoadLampRecipe;
 
-struct SourcePole {
-    id: crate::world::GeneratedId,
-    root: Entity,
-}
 struct SourceProxy {
     id: crate::world::GeneratedId,
     node: Entity,
     light: Entity,
     slot: usize,
+    shadow_start: usize,
+    faces: usize,
 }
 pub(crate) struct RoadLamps {
-    source_poles: Vec<SourcePole>,
     source_proxies: Vec<SourceProxy>,
     required: Vec<crate::world::GeneratedId>,
     pub capacity: usize,
@@ -59,9 +35,6 @@ pub(crate) struct RoadLamps {
 }
 impl RoadLamps {
     pub fn reset_instances(&mut self, commands: &mut Commands) {
-        for pole in self.source_poles.drain(..) {
-            commands.entity(pole.root).despawn();
-        }
         for proxy in self.source_proxies.drain(..) {
             commands.entity(proxy.node).despawn();
             commands.entity(proxy.light).despawn();
@@ -72,7 +45,6 @@ impl RoadLamps {
     pub fn new(_spacing: f64) -> Self {
         let capacity = crate::presentation::lighting::MAX_LIGHTS;
         Self {
-            source_poles: Vec::with_capacity(512),
             source_proxies: Vec::with_capacity(crate::presentation::lighting::MAX_LIGHTS),
             required: Vec::with_capacity(crate::presentation::lighting::MAX_LIGHTS),
             capacity,
@@ -254,8 +226,6 @@ pub(crate) fn prepare_road_lamp(
         }
     }
     let far = Transform::from_translation(Vec3::splat(1_000_000.));
-    let mut nodes: Vec<RoadNodeRecipe> =
-        Vec::with_capacity(source.road_lamps.prototype_nodes.len());
     for node in manifest
         .nodes
         .iter()
@@ -268,24 +238,11 @@ pub(crate) fn prepare_road_lamp(
             .find(|(id, _)| *id == node.id)
             .unwrap()
             .1;
-        let parent = match node.parent {
-            Some(parent) => match nodes.iter().position(|n| n.id == parent) {
-                Some(index) => Some(index),
-                None => {
-                    source.state = RenderingState::Failed(
-                        "Road lamp source hierarchy is not parent ordered".into(),
-                    );
-                    return;
-                }
-            },
-            None => None,
-        };
-        let mut meshes = Vec::new();
         for (primitive, owner) in &primitives {
             if owner.parent() != entity {
                 continue;
             }
-            let (mesh, material, pose, visibility, layers, mode, no_receive, children) =
+            let (mesh, material, _pose, _visibility, _layers, _mode, _no_receive, children) =
                 receivers.get(primitive).unwrap();
             let caster = children.and_then(|children| {
                 children
@@ -317,50 +274,9 @@ pub(crate) fn prepare_road_lamp(
                     .id();
                 source.warmups.push((warm, true));
             }
-            meshes.push(RoadMeshRecipe {
-                mesh: mesh.0.clone(),
-                material: material.0.clone(),
-                pose: *pose,
-                visibility: *visibility,
-                layers: layers.clone(),
-                shadow_mode: mode.0,
-                receive_shadows: no_receive.is_none(),
-                caster,
-            });
         }
-        nodes.push(RoadNodeRecipe {
-            id: node.id,
-            parent,
-            pose: crate::presentation::transform(crate::vehicle::VehiclePose {
-                position: node.transform.translation,
-                rotation: node.transform.rotation,
-            })
-            .with_scale(Vec3::from_array(node.transform.scale)),
-            visibility: if node.active {
-                Visibility::Inherited
-            } else {
-                Visibility::Hidden
-            },
-            meshes,
-        });
     }
-    let light = manifest
-        .lighting
-        .lights
-        .iter()
-        .find(|l| l.id == road.lights[0])
-        .unwrap();
-    let light_node = nodes
-        .iter()
-        .position(|node| Some(node.id) == light.node)
-        .unwrap();
-    info!(
-        "Source road lamp cache: {} nodes, {} meshes, {} reserved poles",
-        nodes.len(),
-        nodes.iter().map(|n| n.meshes.len()).sum::<usize>(),
-        source.road_lamps.capacity
-    );
-    source.road_lamps.recipe = Some(RoadLampRecipe { nodes, light_node });
+    source.road_lamps.recipe = Some(RoadLampRecipe);
 }
 
 pub(crate) fn finish_road_lamp_warmup(commands: &mut Commands, source: &mut SourceLighting) {
@@ -373,70 +289,11 @@ pub(crate) fn finish_road_lamp_warmup(commands: &mut Commands, source: &mut Sour
     source.road_lamps.prototype_nodes.clear();
 }
 
-fn spawn_pole(
-    commands: &mut Commands,
-    recipe: &RoadLampRecipe,
-    placement: RoadLampPlacement,
-    road: &crate::reference::RoadLampReference,
-    origin: crate::world::WorldOrigin,
-) -> (Entity, Entity, Vec<(crate::reference::NodeId, Entity)>) {
-    let root = commands
-        .spawn((
-            Transform::from_translation(Vec3::from_array(origin.local(placement.absolute_point)))
-                .with_rotation(Quat::from_array(placement.rotation))
-                .with_scale(Vec3::from_array(road.road_pose.scale)),
-            Visibility::Inherited,
-        ))
-        .id();
-    let mut nodes: Vec<(crate::reference::NodeId, Entity)> = Vec::with_capacity(recipe.nodes.len());
-    for node in &recipe.nodes {
-        let parent = node.parent.map_or(root, |index| nodes[index].1);
-        let entity = commands
-            .spawn((node.pose, node.visibility, ChildOf(parent)))
-            .id();
-        nodes.push((node.id, entity));
-        for mesh in &node.meshes {
-            let mut primitive = commands.spawn((
-                Mesh3d(mesh.mesh.clone()),
-                MeshMaterial3d(mesh.material.clone()),
-                mesh.pose,
-                mesh.visibility,
-                mesh.layers.clone(),
-                SourceShadowMode(mesh.shadow_mode),
-                bevy::light::NotShadowCaster,
-                ChildOf(entity),
-            ));
-            if !mesh.receive_shadows {
-                primitive.insert(bevy::light::NotShadowReceiver);
-            }
-            let primitive = primitive.id();
-            if let Some(caster) = &mesh.caster {
-                let layers = mesh
-                    .layers
-                    .iter()
-                    .map(|layer| layer + 32)
-                    .collect::<RenderLayers>();
-                commands.spawn((
-                    SourceCaster,
-                    Mesh3d(mesh.mesh.clone()),
-                    MeshMaterial3d(caster.clone()),
-                    Transform::default(),
-                    Visibility::Inherited,
-                    layers,
-                    ChildOf(primitive),
-                ));
-            }
-        }
-    }
-    let light_node = nodes[recipe.light_node].1;
-    (root, light_node, nodes)
-}
-
 /// The source frame owns pole geometry. Receiver influence owns independent light proxies.
 pub(crate) fn sync_source_lamps(
     frame: &crate::world::WorldFrame<'_>,
     receivers: &[crate::world::WorldBounds],
-    reference: &crate::reference::ReferenceManifest,
+    _reference: &crate::reference::ReferenceManifest,
     enabled: bool,
     source: &mut SourceLighting,
     commands: &mut Commands,
@@ -450,13 +307,21 @@ pub(crate) fn sync_source_lamps(
     let light_capacity = crate::presentation::lighting::MAX_LIGHTS - source.road_lamps.fixed_lights;
     let shadow_capacity =
         crate::presentation::lighting::SHADOW_SLOTS - source.road_lamps.fixed_shadows;
-    let shadows = reference
-        .lighting
+    let shadow_count: usize = frame
         .lights
         .iter()
-        .find(|light| Some(light.id) == reference.lighting.road_lamp.lights.first().copied())
-        .is_some_and(|light| light.shadows.kind != 0);
-    if required > light_capacity || (shadows && required > shadow_capacity) {
+        .filter(|l| source.road_lamps.required.contains(&l.id))
+        .map(|l| {
+            if l.record.shadows.kind == 0 {
+                0
+            } else if l.record.kind == crate::reference::LightKind::Point {
+                6
+            } else {
+                1
+            }
+        })
+        .sum();
+    if required > light_capacity || shadow_count > shadow_capacity {
         return Err(crate::reference::ReferenceError(format!(
             "Required source lights exceed renderer capacity: {required}"
         )));
@@ -486,6 +351,15 @@ pub(crate) fn sync_source_lamps(
             .iter()
             .find(|proxy| proxy.id == light.id)
         {
+            if let Some(bound) = source
+                .lights
+                .iter_mut()
+                .find(|b| b.entity == proxy.light)
+                .and_then(|b| b.world.as_mut())
+            {
+                bound.output.enabled = light.enabled && (light.biome.is_none() || enabled);
+                bound.output.intensity = light.intensity;
+            }
             if let Ok(mut transform) = roots.get_mut(proxy.node) {
                 transform.set_if_neq(pose);
             }
@@ -500,67 +374,44 @@ pub(crate) fn sync_source_lamps(
                 })
                 .unwrap();
             let node = commands.spawn((pose, Visibility::Inherited)).id();
-            let entity =
-                register_road_light(source, commands, &reference.lighting, slot, node, enabled);
+            let faces = if light.record.shadows.kind == 0 {
+                0
+            } else if light.record.kind == crate::reference::LightKind::Point {
+                6
+            } else {
+                1
+            };
+            let shadow_start = (source.road_lamps.fixed_shadows
+                ..=crate::presentation::lighting::SHADOW_SLOTS - faces)
+                .find(|start| {
+                    source.road_lamps.source_proxies.iter().all(|p| {
+                        faces == 0
+                            || p.faces == 0
+                            || *start + faces <= p.shadow_start
+                            || *start >= p.shadow_start + p.faces
+                    })
+                })
+                .ok_or_else(|| {
+                    crate::reference::ReferenceError(
+                        "Source shadow atlas has no complete lamp range".into(),
+                    )
+                })?;
+            let entity = register_world_light(
+                source,
+                commands,
+                light,
+                slot,
+                shadow_start,
+                node,
+                light.enabled && (light.biome.is_none() || enabled),
+            );
             source.road_lamps.source_proxies.push(SourceProxy {
                 id: light.id.clone(),
                 node,
                 light: entity,
                 slot,
-            });
-        }
-    }
-    for index in (0..source.road_lamps.source_poles.len()).rev() {
-        let id = &source.road_lamps.source_poles[index].id;
-        let geometry = frame.surfaces.iter().any(|surface| {
-            surface.key.layer == crate::world::WorldLayer::Road && surface.key.unit == id.unit
-        });
-        let caster = source.road_lamps.required.contains(id);
-        if geometry || caster {
-            continue;
-        }
-        let pole = source.road_lamps.source_poles.swap_remove(index);
-        commands.entity(pole.root).despawn();
-    }
-    for light in frame.lights {
-        let geometry = frame.surfaces.iter().any(|surface| {
-            surface.key.layer == crate::world::WorldLayer::Road && surface.key.unit == light.id.unit
-        });
-        // An influencing offscreen pole remains a possible shadow caster.
-        if !geometry && !source.road_lamps.required.contains(&light.id) {
-            continue;
-        }
-        let pose =
-            Transform::from_translation(Vec3::from_array(frame.origin.local(light.pole.position)))
-                .with_rotation(Quat::from_array(light.pole.rotation))
-                .with_scale(Vec3::from_array(
-                    reference.lighting.road_lamp.road_pose.scale,
-                ));
-        if let Some(pole) = source
-            .road_lamps
-            .source_poles
-            .iter()
-            .find(|pole| pole.id == light.id)
-        {
-            if let Ok(mut transform) = roots.get_mut(pole.root) {
-                transform.set_if_neq(pose);
-            }
-        } else {
-            let placement = RoadLampPlacement {
-                id: RoadLampId(light.id.unit[0]),
-                absolute_point: light.pole.position,
-                rotation: light.pole.rotation,
-            };
-            let (root, _, _) = spawn_pole(
-                commands,
-                source.road_lamps.recipe.as_ref().unwrap(),
-                placement,
-                &reference.lighting.road_lamp,
-                frame.origin,
-            );
-            source.road_lamps.source_poles.push(SourcePole {
-                id: light.id.clone(),
-                root,
+                shadow_start,
+                faces,
             });
         }
     }
@@ -570,11 +421,11 @@ pub(crate) fn sync_source_lamps(
 pub(crate) fn source_lamp_admission(
     frame: &crate::world::WorldFrame<'_>,
     receivers: &[crate::world::WorldBounds],
-    reference: &crate::reference::ReferenceManifest,
+    _reference: &crate::reference::ReferenceManifest,
     source: &mut SourceLighting,
-    pending_road: Option<[i64; 2]>,
+    _pending_road: Option<[i64; 2]>,
 ) -> Result<(usize, usize, usize), crate::reference::ReferenceError> {
-    let Some(recipe) = &source.road_lamps.recipe else {
+    let Some(_recipe) = &source.road_lamps.recipe else {
         return Ok((0, 0, 0));
     };
     crate::world::required_world_lights(frame, receivers, &mut source.road_lamps.required);
@@ -582,37 +433,25 @@ pub(crate) fn source_lamp_admission(
     let light_capacity = crate::presentation::lighting::MAX_LIGHTS - source.road_lamps.fixed_lights;
     let shadow_capacity =
         crate::presentation::lighting::SHADOW_SLOTS - source.road_lamps.fixed_shadows;
-    let shadows = reference
-        .lighting
+    let shadow_count: usize = frame
         .lights
         .iter()
-        .find(|light| Some(light.id) == reference.lighting.road_lamp.lights.first().copied())
-        .is_some_and(|light| light.shadows.kind != 0);
-    if required > light_capacity || (shadows && required > shadow_capacity) {
+        .filter(|l| source.road_lamps.required.contains(&l.id))
+        .map(|l| {
+            if l.record.shadows.kind == 0 {
+                0
+            } else if l.record.kind == crate::reference::LightKind::Point {
+                6
+            } else {
+                1
+            }
+        })
+        .sum();
+    if required > light_capacity || shadow_count > shadow_capacity {
         return Err(crate::reference::ReferenceError(format!(
             "Required source lights exceed renderer capacity: {required}"
         )));
     }
-    let selected = |id: &crate::world::GeneratedId| {
-        pending_road == Some(id.unit)
-            || source.road_lamps.required.contains(id)
-            || frame.surfaces.iter().any(|surface| {
-                surface.key.layer == crate::world::WorldLayer::Road && surface.key.unit == id.unit
-            })
-    };
-    let poles = source.road_lamps.source_poles.len()
-        + frame
-            .lights
-            .iter()
-            .filter(|light| {
-                selected(&light.id)
-                    && !source
-                        .road_lamps
-                        .source_poles
-                        .iter()
-                        .any(|pole| pole.id == light.id)
-            })
-            .count();
     let proxies = source.road_lamps.source_proxies.len()
         + source
             .road_lamps
@@ -626,21 +465,7 @@ pub(crate) fn source_lamp_admission(
                     .any(|p| p.id == **id)
             })
             .count();
-    let meshes = recipe
-        .nodes
-        .iter()
-        .map(|n| {
-            n.meshes
-                .iter()
-                .map(|m| 1 + usize::from(m.caster.is_some()))
-                .sum::<usize>()
-        })
-        .sum::<usize>();
-    let objects = poles * (recipe.nodes.len() + meshes + 1) + proxies * 2;
+    let objects = proxies * 2;
     // ECS and GPU transform reservations include old/new overlap until the next frame.
-    Ok((
-        objects * 2048 + (poles + proxies) * 256,
-        objects * 256,
-        objects,
-    ))
+    Ok((objects * 2048 + proxies * 1024, objects * 256, objects))
 }

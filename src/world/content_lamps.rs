@@ -1,0 +1,353 @@
+//! Active source lamp controls retain state independently of render proxy slots.
+use super::WorldStream;
+use crate::interaction::InteractionState;
+use crate::reference::Transform;
+use crate::reference::{ColliderId, LightControlId, ReferenceError, SourceId};
+use crate::vehicle::PhysicsWorld;
+use crate::world::spawn_rules::*;
+use crate::world::{GeneratedId, ObjectKey, ObjectSnapshot};
+struct ButtonPose {
+    node: SourceId,
+    pose: Transform,
+    target: Transform,
+    progress: f32,
+    moving: bool,
+}
+pub(super) struct LampBinding {
+    button: Option<ButtonPose>,
+    collision_dirty: bool,
+    pub parent: GeneratedId,
+    pub source: SourceId,
+    pub control: LightControlId,
+    pub baseline: ObjectSnapshot,
+}
+impl LampBinding {
+    pub fn heap_bytes(&self) -> usize {
+        crate::world::contents::identity_heap(&self.parent)
+            + self.source.file.capacity()
+            + self.button.as_ref().map_or(0, |b| b.node.file.capacity())
+    }
+}
+impl WorldStream {
+    pub(super) fn sync_lamp_bindings(
+        &mut self,
+        interaction: &mut InteractionState,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        let mut i = 0;
+        while i < self.lamp_bindings.len() {
+            if self
+                .structures
+                .iter()
+                .any(|s| s.placement.id == self.lamp_bindings[i].parent)
+            {
+                i += 1;
+                continue;
+            }
+            interaction.remove_generated_light(self.lamp_bindings.swap_remove(i).control);
+        }
+        loop {
+            let next = self
+                .contents
+                .lamp_states()
+                .filter(|(parent, source, _)| {
+                    !self
+                        .lamp_bindings
+                        .iter()
+                        .any(|b| &b.parent == parent && &b.source == source)
+                        && self.structures.iter().any(|s| &s.placement.id == parent)
+                })
+                .next()
+                .cloned();
+            let Some((parent, source, on)) = next else {
+                break;
+            };
+            if self
+                .lamp_bindings
+                .iter()
+                .any(|b| b.parent == parent && b.source == source)
+            {
+                continue;
+            }
+            let Some(instance) = self.structures.iter().find(|s| s.placement.id == parent) else {
+                continue;
+            };
+            let prototype = self
+                .reference
+                .prototypes
+                .iter()
+                .find(|p| p.source == instance.placement.prototype)
+                .unwrap();
+            let root = self.contents.rules.root(&self.reference, &source)?;
+            let root_index = prototype
+                .nodes
+                .iter()
+                .position(|n| &n.source == root)
+                .ok_or_else(|| ReferenceError("Generated lamp controller root missing".into()))?;
+            let baseline = ObjectSnapshot {
+                pose: instance.placement.pose,
+                condition: 1.,
+                temperature: None,
+                fluid_quantities: None,
+                valve: None,
+                lamp: Some(on),
+            };
+            let mut key = parent.clone();
+            key.children.push((source.clone(), 0));
+            if let Some(changed) = self
+                .changes
+                .get(ObjectKey::Generated(key))
+                .and_then(|r| r.snapshot.lamp)
+            {
+                self.contents.set_lamp(
+                    &self.reference,
+                    &parent,
+                    &source,
+                    changed,
+                    self.available_staging_bytes(),
+                )?;
+            }
+            let f = self.contents.rules.get(&self.reference, &source)?.fields;
+            let button = if let Some(node) = optional(f, "GButton")? {
+                let selected_on = self
+                    .contents
+                    .lamp_states()
+                    .find(|(p, s, _)| p == &parent && s == &source)
+                    .unwrap()
+                    .2;
+                let target = link(
+                    f,
+                    if selected_on ^ flag(f, "reverseSwitch")? {
+                        "GButtonOn"
+                    } else {
+                        "GButtonOff"
+                    },
+                )?;
+                Some(ButtonPose {
+                    node: node.clone(),
+                    pose: self.contents.rules.node(&self.reference, node)?.pose,
+                    target: self.contents.rules.node(&self.reference, target)?.pose,
+                    progress: 0.,
+                    moving: true,
+                })
+            } else {
+                None
+            };
+            let instance = self
+                .structures
+                .iter()
+                .find(|s| s.placement.id == parent)
+                .unwrap();
+            let prototype = self
+                .reference
+                .prototypes
+                .iter()
+                .find(|p| p.source == instance.placement.prototype)
+                .unwrap();
+            let control = interaction.allocate_generated_light()?;
+            for (source, handle) in &instance.colliders {
+                let collider = prototype
+                    .colliders
+                    .iter()
+                    .find(|c| &c.source == source)
+                    .unwrap();
+                let mut node = Some(collider.node);
+                let mut belongs = false;
+                while let Some(n) = node {
+                    if n as usize == root_index {
+                        belongs = true;
+                        break;
+                    }
+                    node = prototype.nodes[n as usize].parent;
+                }
+                if !belongs {
+                    continue;
+                }
+                let mut id =
+                    ColliderId((physics.rapier().colliders[*handle].user_data >> 64) as u32);
+                if id.0 == 0 {
+                    id = match interaction.allocate_generated_collider() {
+                        Ok(id) => id,
+                        Err(error) => {
+                            interaction.remove_generated_light(control);
+                            return Err(error);
+                        }
+                    };
+                    physics.rapier_mut().colliders[*handle].user_data |= (id.0 as u128) << 64;
+                }
+                interaction.bind_generated_light(control, id);
+            }
+            self.lamp_bindings.push(LampBinding {
+                button,
+                collision_dirty: true,
+                parent,
+                source,
+                control,
+                baseline,
+            });
+        }
+        for binding in &mut self.lamp_bindings {
+            if !binding.collision_dirty {
+                continue;
+            }
+            let Some(instance) = self
+                .structures
+                .iter()
+                .find(|s| s.placement.id == binding.parent)
+            else {
+                continue;
+            };
+            let prototype = self
+                .reference
+                .prototypes
+                .iter()
+                .find(|p| p.source == instance.placement.prototype)
+                .unwrap();
+            let appearance = self.contents.appearance(&binding.parent);
+            for (source, handle) in &instance.colliders {
+                let collider = prototype
+                    .colliders
+                    .iter()
+                    .find(|c| &c.source == source)
+                    .unwrap();
+                physics.rapier_mut().colliders[*handle].set_enabled(
+                    collider.enabled
+                        && super::super::spawn_appearance::node_active(
+                            prototype,
+                            collider.node as usize,
+                            appearance,
+                        ),
+                );
+            }
+            binding.collision_dirty = false;
+        }
+        self.refresh_lamp_outputs();
+        Ok(())
+    }
+    pub fn use_generated_light(&mut self, control: LightControlId) -> Result<bool, ReferenceError> {
+        let Some(binding) = self.lamp_bindings.iter().find(|b| b.control == control) else {
+            return Ok(false);
+        };
+        let on = self
+            .contents
+            .lamp_states()
+            .find(|(p, s, _)| p == &binding.parent && s == &binding.source)
+            .ok_or_else(|| ReferenceError("Generated lamp state missing".into()))?
+            .2;
+        self.contents.set_lamp(
+            &self.reference,
+            &binding.parent,
+            &binding.source,
+            !on,
+            self.available_staging_bytes(),
+        )?;
+        let mut key = binding.parent.clone();
+        key.children.push((binding.source.clone(), 0));
+        let mut snapshot = binding.baseline.clone();
+        snapshot.lamp = Some(!on);
+        self.changes
+            .record(ObjectKey::Generated(key), snapshot, &binding.baseline);
+        let binding = self
+            .lamp_bindings
+            .iter_mut()
+            .find(|b| b.control == control)
+            .unwrap();
+        binding.collision_dirty = true;
+        if let Some(button) = &mut binding.button {
+            let f = self
+                .contents
+                .rules
+                .get(&self.reference, &binding.source)?
+                .fields;
+            let target = link(
+                f,
+                if !on ^ flag(f, "reverseSwitch")? {
+                    "GButtonOn"
+                } else {
+                    "GButtonOff"
+                },
+            )?;
+            button.target = self.contents.rules.node(&self.reference, target)?.pose;
+            if !button.moving {
+                button.progress = 0.;
+                button.moving = true;
+            }
+        }
+        self.refresh_lamp_outputs();
+        Ok(true)
+    }
+    pub(super) fn sync_moving_lamps(&mut self, items: &crate::interaction::items::ItemStore) {
+        for content in &self.contents.active {
+            let Some(item) = content.item.and_then(|id| items.get(id)) else {
+                continue;
+            };
+            let old = content.content.placement.pose;
+            let old_inverse = [
+                -old.rotation[0],
+                -old.rotation[1],
+                -old.rotation[2],
+                old.rotation[3],
+            ];
+            let rotation = crate::world::placement::multiply(item.pose.rotation, old_inverse);
+            let position = self.origin.absolute(item.pose.position);
+            for source in &content.content.lights {
+                if let Some(light) = self.lights.iter_mut().find(|l| l.id == source.id) {
+                    let offset = crate::world::placement::rotate(
+                        rotation,
+                        std::array::from_fn(|i| (source.pose.position[i] - old.position[i]) as f32),
+                    );
+                    light.pose.position = std::array::from_fn(|i| position[i] + offset[i] as f64);
+                    light.pose.rotation =
+                        crate::world::placement::multiply(rotation, source.pose.rotation);
+                }
+            }
+        }
+    }
+    pub fn advance_generated_lamps(&mut self, dt: f32) {
+        if !dt.is_finite() || dt < 0. {
+            return;
+        }
+        for binding in &mut self.lamp_bindings {
+            let Some(button) = &mut binding.button else {
+                continue;
+            };
+            if !button.moving {
+                continue;
+            }
+            let t = button.progress.min(1.);
+            button.pose.translation = std::array::from_fn(|i| {
+                button.pose.translation[i]
+                    + (button.target.translation[i] - button.pose.translation[i]) * t
+            });
+            let a = rapier3d::math::Rotation::from_array(button.pose.rotation);
+            let b = rapier3d::math::Rotation::from_array(button.target.rotation);
+            button.pose.rotation = a.lerp(b, t).normalize().to_array();
+            if button.progress >= 1. {
+                button.pose = button.target;
+                button.moving = false;
+                button.progress = 0.;
+            } else {
+                button.progress += dt * 25.;
+            }
+        }
+    }
+    pub fn lamp_button_pose(&self, parent: &GeneratedId, node: &SourceId) -> Option<Transform> {
+        self.lamp_bindings
+            .iter()
+            .filter(|b| &b.parent == parent)
+            .filter_map(|b| b.button.as_ref())
+            .find(|b| &b.node == node)
+            .map(|b| b.pose)
+    }
+    fn refresh_lamp_outputs(&mut self) {
+        for content in self.contents.instances() {
+            for light in &content.lights {
+                if let Some(current) = self.lights.iter_mut().find(|l| l.id == light.id) {
+                    current.enabled = light.enabled;
+                    current.intensity = light.intensity;
+                    current.pose = light.pose;
+                }
+            }
+        }
+    }
+}

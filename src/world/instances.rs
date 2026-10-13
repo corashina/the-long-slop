@@ -70,7 +70,21 @@ impl StructureRecipe {
         reference: &WorldReference,
         prototype: &WorldPrototypeReference,
     ) -> Result<Self, ReferenceError> {
-        let scale = prototype.prefab_pose.scale;
+        Self::with_scale(reference, prototype, prototype.prefab_pose.scale)
+    }
+    pub fn with_scale(
+        reference: &WorldReference,
+        prototype: &WorldPrototypeReference,
+        scale: [f32; 3],
+    ) -> Result<Self, ReferenceError> {
+        Self::with_appearance(reference, prototype, scale, &[])
+    }
+    pub(crate) fn with_appearance(
+        reference: &WorldReference,
+        prototype: &WorldPrototypeReference,
+        scale: [f32; 3],
+        appearance: &[super::spawn_appearance::NodeAppearance],
+    ) -> Result<Self, ReferenceError> {
         if scale[0] <= 0. || scale[0] != scale[1] || scale[1] != scale[2] {
             return Err(ReferenceError(
                 "Unresolved nonuniform source structure collision scale".into(),
@@ -152,7 +166,8 @@ impl StructureRecipe {
                 (0.6, 0.0)
             };
             let layer = prototype.nodes[record.node as usize].layer as usize;
-            let scaled = scaled_geometry(geometry, scale[0]);
+            let deformed = node_scaled_geometry(prototype, record, geometry, appearance)?;
+            let scaled = scaled_geometry(&deformed, scale[0]);
             let collider = collider_builder(&scaled)?
                 .friction(friction)
                 .restitution(restitution)
@@ -274,4 +289,73 @@ fn scaled_geometry(
             triangles: triangles.clone(),
         },
     }
+}
+
+/// Source mesh points are baked in the owning body frame. Apply child scale there.
+fn node_scaled_geometry(
+    prototype: &WorldPrototypeReference,
+    record: &crate::reference::WorldColliderReference,
+    geometry: &crate::reference::ColliderGeometry,
+    appearance: &[super::spawn_appearance::NodeAppearance],
+) -> Result<crate::reference::ColliderGeometry, ReferenceError> {
+    use crate::reference::ColliderGeometry;
+    use rapier3d::math::{Rotation, Vector};
+    let mut chain = Vec::new();
+    let mut node = Some(record.node as usize);
+    while let Some(i) = node {
+        chain.push(i);
+        node = prototype.nodes[i].parent.map(|n| n as usize);
+    }
+    if !chain.iter().any(|&i| {
+        appearance
+            .iter()
+            .any(|a| a.node == prototype.nodes[i].source && a.scale.is_some())
+    }) {
+        return Ok(geometry.clone());
+    }
+    let body = record
+        .body
+        .map(|b| {
+            let t = prototype.bodies[b as usize].pose;
+            to_rapier(VehiclePose {
+                position: t.translation,
+                rotation: t.rotation,
+            })
+        })
+        .unwrap_or(Pose::IDENTITY);
+    let point = |p: [f32; 3]| {
+        let mut p = body * Vector::from_array(p);
+        for &i in chain.iter().rev() {
+            let t = prototype.nodes[i].transform;
+            p = (Rotation::from_array(t.rotation).inverse()
+                * (p - Vector::from_array(t.translation)))
+                / Vector::from_array(t.scale);
+        }
+        for &i in &chain {
+            let t = prototype.nodes[i].transform;
+            let scale = appearance
+                .iter()
+                .rev()
+                .find(|a| a.node == prototype.nodes[i].source && a.scale.is_some())
+                .and_then(|a| a.scale)
+                .unwrap_or(t.scale);
+            p = Rotation::from_array(t.rotation) * (p * Vector::from_array(scale))
+                + Vector::from_array(t.translation);
+        }
+        (body.inverse() * p).to_array()
+    };
+    Ok(match geometry {
+        ColliderGeometry::Convex { points } => ColliderGeometry::Convex {
+            points: points.iter().copied().map(point).collect(),
+        },
+        ColliderGeometry::Trimesh { points, triangles } => ColliderGeometry::Trimesh {
+            points: points.iter().copied().map(point).collect(),
+            triangles: triangles.clone(),
+        },
+        _ => {
+            return Err(ReferenceError(
+                "Source random scale affects an untraced primitive collider".into(),
+            ));
+        }
+    })
 }

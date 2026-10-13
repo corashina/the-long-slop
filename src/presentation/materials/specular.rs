@@ -27,6 +27,10 @@ pub struct SpecularMaterial {
         std::sync::Arc<std::sync::Mutex<std::collections::HashSet<bevy::asset::AssetId<Image>>>>,
 }
 impl SpecularMaterial {
+    pub fn set_color(&mut self, color: Color) {
+        self.base.base_color = color;
+        self.uniform.color = Vec4::from_array(color.to_linear().to_f32_array());
+    }
     pub fn from_source(
         record: &WorldSourceMaterial,
         textures: &WorldTextures,

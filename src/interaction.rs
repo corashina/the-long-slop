@@ -3,6 +3,7 @@ pub mod feedback;
 pub mod items;
 pub mod labels;
 pub mod mechanisms;
+pub(crate) mod memory;
 pub mod parts;
 pub mod push;
 pub mod targets;
@@ -114,6 +115,8 @@ struct SeatState {
 }
 
 pub struct InteractionState {
+    next_generated_collider: u32,
+    next_generated_light: u32,
     light_controls: HashMap<ColliderId, LightControlId>,
     light_nodes: HashMap<ColliderId, NodeId>,
     cabin_doors: [Option<(ItemId, ItemId)>; 4],
@@ -161,6 +164,30 @@ struct TankRules {
 }
 
 impl InteractionState {
+    pub(crate) fn retained_binding_bytes(&self) -> usize {
+        use memory::{map, set, vector};
+        map(&self.light_controls)
+            + map(&self.light_nodes)
+            + set(&self.usable_light_controls)
+            + map(&self.kinds)
+            + map(&self.slot_fits)
+            + self.slot_fits.values().map(set).sum::<usize>()
+            + set(&self.tire_fits)
+            + map(&self.pickup_layers)
+            + map(&self.removal_layers)
+            + set(&self.usable_items)
+            + set(&self.filling_items)
+            + map(&self.collider_bindings)
+            + map(&self.mechanism_bodies)
+            + vector(&self.openings)
+            + set(&self.supplies)
+            + map(&self.source_supply_emission)
+            + map(&self.tank_rules)
+            + self.carry.retained_binding_bytes()
+            + self.parts.retained_binding_bytes()
+            + self.mechanisms.retained_binding_bytes()
+    }
+
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut openings = Vec::with_capacity(reference.openings.len());
         for opening in &reference.openings {
@@ -336,6 +363,21 @@ impl InteractionState {
             light_controls,
             cabin_doors,
             seat_action_latched: false,
+            next_generated_light: reference
+                .lighting
+                .controllers
+                .iter()
+                .map(|c| c.id.0)
+                .max()
+                .unwrap_or(0)
+                + 1,
+            next_generated_collider: reference
+                .colliders
+                .iter()
+                .map(|c| c.id.0)
+                .max()
+                .unwrap_or(0)
+                + 1,
             fill_opening: None,
             usable_light_controls: reference
                 .lighting
@@ -418,6 +460,92 @@ impl InteractionState {
     pub fn held(&self) -> Option<ItemId> {
         self.carry.held()
     }
+    pub fn allocate_generated_light(&mut self) -> Result<LightControlId, ReferenceError> {
+        let id = self.next_generated_light;
+        self.next_generated_light = id
+            .checked_add(1)
+            .ok_or_else(|| ReferenceError("Generated light identity exhausted".into()))?;
+        Ok(LightControlId(id))
+    }
+    pub fn bind_generated_light(&mut self, control: LightControlId, collider: ColliderId) {
+        self.light_controls.insert(collider, control);
+        self.light_nodes.insert(collider, NodeId(collider.0));
+        self.usable_light_controls.insert(control);
+    }
+    pub fn remove_generated_light(&mut self, control: LightControlId) {
+        self.light_nodes
+            .retain(|id, _| self.light_controls.get(id) != Some(&control));
+        self.light_controls.retain(|_, id| *id != control);
+        self.usable_light_controls.remove(&control);
+    }
+    pub fn allocate_generated_collider(&mut self) -> Result<ColliderId, ReferenceError> {
+        let id = self.next_generated_collider;
+        self.next_generated_collider = id
+            .checked_add(1)
+            .ok_or_else(|| ReferenceError("Generated collider identity exhausted".into()))?;
+        Ok(ColliderId(id))
+    }
+    pub fn register_generated_part_kind(&mut self, item: ItemId, layers: u32) {
+        self.removal_layers.insert(item, layers);
+        for binding in self.collider_bindings.values_mut() {
+            if binding.pickup_owner == Some(item) {
+                binding.removal_owner = Some(item);
+            }
+        }
+    }
+    pub fn register_generated_wheel(
+        &mut self,
+        rule: &crate::reference::WheelPartReference,
+        rim: bool,
+        rules: &[crate::reference::WheelPartReference],
+        reference: &ReferenceManifest,
+    ) {
+        self.kinds
+            .insert(rule.item, if rim { ItemKind::Rim } else { ItemKind::Tire });
+        for slot in &reference.wheel_slots {
+            if rim
+                && wheels::fits(
+                    &slot.rim_main_types,
+                    &slot.rim_types,
+                    &rule.main_types,
+                    &rule.part_types,
+                )
+            {
+                self.slot_fits.entry(slot.id).or_default().insert(rule.item);
+            }
+        }
+        for old in rules {
+            if old.item == rule.item {
+                continue;
+            }
+            let old_rim = self
+                .kinds
+                .get(&old.item)
+                .is_some_and(|kind| matches!(kind, ItemKind::Rim | ItemKind::Wheel));
+            if rim
+                && !old_rim
+                && wheels::fits(
+                    &rule.tire_main_types,
+                    &rule.tire_types,
+                    &old.main_types,
+                    &old.part_types,
+                )
+            {
+                self.tire_fits.insert((rule.item, old.item));
+            }
+            if !rim
+                && old_rim
+                && wheels::fits(
+                    &old.tire_main_types,
+                    &old.tire_types,
+                    &rule.main_types,
+                    &rule.part_types,
+                )
+            {
+                self.tire_fits.insert((old.item, rule.item));
+            }
+        }
+    }
     /// Remove only bindings owned by this generated instance.
     pub fn unbind_generated(&mut self, id: ItemId, colliders: &[ColliderHandle]) {
         for collider in colliders {
@@ -433,6 +561,21 @@ impl InteractionState {
                 self.collider_bindings.remove(collider);
             }
         }
+        if let Some(body) = self.mechanism_bodies.remove(&id) {
+            self.bodies.remove(&body);
+        }
+        if self
+            .latched_mechanism
+            .is_some_and(|(item, _, _, _)| item == id)
+        {
+            self.latched_mechanism = None;
+        }
+        self.carry.unregister_generated(id);
+        for fits in self.slot_fits.values_mut() {
+            fits.remove(&id);
+        }
+        self.tire_fits
+            .retain(|(rim, tire)| *rim != id && *tire != id);
         self.kinds.remove(&id);
         self.pickup_layers.remove(&id);
         self.removal_layers.remove(&id);
@@ -461,6 +604,73 @@ impl InteractionState {
         }
     }
 
+    pub fn register_generated_mechanism(
+        &mut self,
+        item: ItemId,
+        body: RigidBodyHandle,
+        colliders: &[(crate::reference::SourceId, ColliderHandle)],
+    ) -> Result<(), ReferenceError> {
+        let id = BodyId(
+            self.bodies
+                .keys()
+                .map(|b| b.0)
+                .max()
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or_else(|| ReferenceError("Generated body identity exhausted".into()))?,
+        );
+        self.bodies.insert(id, body);
+        self.mechanism_bodies.insert(item, id);
+        self.usable_items.insert(item);
+        for (_, handle) in colliders {
+            if let Some(binding) = self.collider_bindings.get_mut(handle) {
+                binding.use_owner = Some(item);
+            }
+        }
+        Ok(())
+    }
+    pub fn bind_generated_mechanism_surface(
+        &mut self,
+        item: ItemId,
+        handle: ColliderHandle,
+        collider: ColliderId,
+    ) {
+        let binding = self
+            .collider_bindings
+            .entry(handle)
+            .or_insert(ActionBinding {
+                collider,
+                use_owner: None,
+                pickup_owner: None,
+                removal_owner: None,
+                push_owner: None,
+            });
+        binding.use_owner = Some(item);
+    }
+    pub fn register_generated_pickup(
+        &mut self,
+        id: ItemId,
+        rule: crate::reference::PickupReference,
+        layers: u32,
+        container: bool,
+    ) {
+        self.carry.register_generated(id, rule);
+        self.pickup_layers.insert(id, layers);
+        self.kinds.insert(
+            id,
+            if container {
+                ItemKind::Container
+            } else {
+                ItemKind::Decoration
+            },
+        );
+    }
+    pub fn generated_opening(&self, cap: ItemId) -> Option<OpeningId> {
+        self.openings
+            .iter()
+            .find(|o| o.reference.cap == cap)
+            .map(|o| o.reference.id)
+    }
     pub fn generated_valve(&self, cap: ItemId) -> Option<f32> {
         self.openings
             .iter()
@@ -609,6 +819,33 @@ impl InteractionState {
         Ok(())
     }
 
+    /// A movable container shares source opening rules but is not a fixed supply nozzle.
+    pub fn register_generated_container(
+        &mut self,
+        tank: ItemId,
+        cap: ItemId,
+        definition: &crate::world::SupplyDefinition,
+        point: &crate::world::SupplyPoint,
+        reference: &ReferenceManifest,
+    ) -> Result<(), ReferenceError> {
+        self.register_generated_supply(tank, cap, definition, point, reference)?;
+        self.supplies.remove(&tank);
+        self.kinds.insert(tank, ItemKind::Container);
+        Ok(())
+    }
+    pub fn bind_generated_cap(&mut self, handle: ColliderHandle, cap: ItemId) {
+        let binding = self
+            .collider_bindings
+            .entry(handle)
+            .or_insert(ActionBinding {
+                collider: ColliderId(0),
+                use_owner: None,
+                pickup_owner: None,
+                removal_owner: None,
+                push_owner: None,
+            });
+        binding.use_owner = Some(cap);
+    }
     pub fn register_pump(&mut self, item: ItemId, flow: f32) -> Result<(), ReferenceError> {
         if !flow.is_finite() || flow <= 0.0 {
             return Err(ReferenceError("Invalid pump flow".into()));

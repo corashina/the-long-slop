@@ -64,7 +64,7 @@ impl WorldGrassDisplacement {
                     && record_link(filter, "m_GameObject") == Some(&writer.owner)
                     && record_link(filter, "m_Mesh") == Some(&writer.mesh)
                     && matches!(owner.fields.get("m_Layer"), Some(WorldValue::Integer(n)) if *n == writer.layer as i64)
-                    && matches!(renderer.fields.get("m_Enabled"), Some(WorldValue::Integer(n)) if (*n != 0) == writer.enabled)
+                    && matches!(renderer.fields.get("m_Enabled"), Some(WorldValue::Bool(enabled)) if *enabled == writer.enabled)
                     && receipts.iter().any(|receipt| receipt.source == writer.mesh),
                 "Grass writer ownership and layer",
             )?;

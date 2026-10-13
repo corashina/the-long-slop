@@ -1,6 +1,9 @@
 //! Checked source world inputs. Prototype node indices belong to one asset instance.
+mod fields;
 mod grass;
+pub use fields::WorldFields;
 mod initial_materials;
+mod initialization;
 mod lod;
 mod memory;
 use super::{
@@ -9,6 +12,7 @@ use super::{
 };
 pub use grass::*;
 pub use initial_materials::*;
+pub use initialization::*;
 pub use lod::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -25,26 +29,63 @@ pub struct WorldReference {
     pub managed_sha256: String,
     pub library: LibraryProvenance,
     pub settings_context: String,
+    pub spawn_context: WorldSpawnContext,
+    pub initialization: WorldInitialization,
     pub generation_frame: Transform,
     pub distances: BTreeMap<String, f32>,
+    #[serde(deserialize_with = "compact_vec")]
     pub source_hashes: Vec<SourceHash>,
     pub road: WorldRoadReference,
     pub terrain: WorldTerrainReference,
     pub buildings: WorldBuildingReference,
     pub catalog: WorldCatalogReference,
+    #[serde(deserialize_with = "compact_vec")]
     pub part_scope_slots: Vec<WorldPartScopeSlot>,
+    #[serde(deserialize_with = "compact_vec")]
     pub generators: Vec<WorldGeneratorReference>,
+    #[serde(deserialize_with = "compact_vec")]
     pub startup: Vec<WorldStartupReference>,
+    #[serde(deserialize_with = "compact_vec")]
     pub startup_holes: Vec<WorldStartupHole>,
     pub collision_rules: WorldCollisionRules,
     pub grass_displacement: WorldGrassDisplacement,
     pub lod: WorldLodReference,
+    #[serde(deserialize_with = "compact_vec")]
     pub initial_materials: Vec<WorldInitialMaterial>,
+    #[serde(deserialize_with = "compact_vec")]
+    pub mechanisms: Vec<WorldMechanism>,
+    #[serde(deserialize_with = "compact_vec")]
+    pub painting_materials: Vec<WorldPaintingMaterial>,
+    #[serde(deserialize_with = "compact_vec")]
     pub prototypes: Vec<WorldPrototypeReference>,
+    #[serde(deserialize_with = "compact_vec")]
     pub records: Vec<WorldSourceRecord>,
+    #[serde(deserialize_with = "compact_vec")]
     pub receipts: Vec<WorldSourceReceipt>,
+    #[serde(deserialize_with = "compact_vec")]
     pub exclusions: Vec<WorldExclusion>,
+    #[serde(deserialize_with = "compact_vec")]
     pub material_textures: Vec<super::rendering::LightingTextureRecord>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldSpawnContext {
+    pub classification: String,
+    pub engine_sha256: String,
+    pub clock_input: String,
+    pub initial_state: [u32; 4],
+    pub startup_state: [u32; 4],
+    pub startup_draws: u32,
+    pub date: [i32; 3],
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldMechanism {
+    pub prototype: SourceId,
+    pub node: u32,
+    pub recipe: super::MechanismReference,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -53,12 +94,19 @@ pub struct WorldPrototypeReference {
     pub source: SourceId,
     pub role: WorldPrototypeRole,
     pub asset: AssetId,
+    #[serde(deserialize_with = "compact_vec")]
     pub nodes: Vec<WorldPrototypeNode>,
+    #[serde(deserialize_with = "compact_vec")]
     pub controls: Vec<u32>,
+    #[serde(deserialize_with = "compact_vec")]
     pub excluded_actions: Vec<String>,
+    #[serde(deserialize_with = "compact_vec")]
     pub deferred_materials: Vec<WorldSourceMaterial>,
+    #[serde(deserialize_with = "compact_vec")]
     pub skins: Vec<WorldSkinReference>,
+    #[serde(deserialize_with = "compact_vec")]
     pub bodies: Vec<WorldPrototypeBody>,
+    #[serde(deserialize_with = "compact_vec")]
     pub colliders: Vec<WorldColliderReference>,
     pub prefab_pose: Transform,
 }
@@ -90,14 +138,23 @@ pub struct WorldSkinReference {
     pub source: SourceId,
     pub mesh: SourceId,
     pub node: u32,
+    #[serde(deserialize_with = "compact_vec")]
     pub bones: Vec<u32>,
+    #[serde(deserialize_with = "compact_vec")]
     pub bind_poses: Vec<[f32; 16]>,
+    #[serde(deserialize_with = "compact_vec")]
     pub positions: Vec<[f32; 3]>,
+    #[serde(deserialize_with = "compact_vec")]
     pub normals: Vec<[f32; 3]>,
+    #[serde(deserialize_with = "compact_vec")]
     pub tangents: Vec<[f32; 4]>,
+    #[serde(deserialize_with = "compact_vec")]
     pub uv: Vec<[f32; 2]>,
+    #[serde(deserialize_with = "compact_vec")]
     pub joints: Vec<[u32; 4]>,
+    #[serde(deserialize_with = "compact_vec")]
     pub weights: Vec<[f32; 4]>,
+    #[serde(deserialize_with = "compact_vec")]
     pub triangles: Vec<Vec<[u32; 3]>>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -119,13 +176,6 @@ pub struct WorldSourceReceipt {
     pub source: SourceId,
     pub sha256: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorldSourceLink {
-    pub field: String,
-    pub target: SourceId,
-}
-
 /// Preserve caller fields and explicit null selections without unresolved Unity pointers.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(
@@ -141,16 +191,15 @@ pub enum WorldValue {
     Number(f64),
     Text(String),
     Link(SourceId),
-    Array(Vec<WorldValue>),
-    Record(BTreeMap<String, WorldValue>),
+    Array(#[serde(deserialize_with = "compact_vec")] Vec<WorldValue>),
+    Record(WorldFields),
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldSourceRecord {
     pub source: SourceId,
     pub class_name: String,
-    pub fields: BTreeMap<String, WorldValue>,
-    pub links: Vec<WorldSourceLink>,
+    pub fields: WorldFields,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -202,6 +251,7 @@ pub struct WorldNoiseReference {
 #[serde(deny_unknown_fields)]
 pub struct WorldRoadReference {
     pub source: SourceId,
+    #[serde(deserialize_with = "compact_vec")]
     pub prototypes: Vec<SourceId>,
     pub length: f32,
     #[serde(rename = "roadBoneNum")]
@@ -238,6 +288,7 @@ pub struct WorldRoadReference {
     pub add_point: u32,
     #[serde(rename = "buildingBoneNum")]
     pub building_bone_num: u32,
+    #[serde(deserialize_with = "compact_vec")]
     pub noises: Vec<WorldNoiseReference>,
 }
 
@@ -245,10 +296,14 @@ pub struct WorldRoadReference {
 #[serde(deny_unknown_fields)]
 pub struct WorldTerrainReference {
     pub source: SourceId,
+    #[serde(deserialize_with = "compact_vec")]
     pub prefabs: Vec<SourceId>,
+    #[serde(deserialize_with = "compact_vec")]
     pub materials: Vec<WorldSourceMaterial>,
+    #[serde(deserialize_with = "compact_vec")]
     pub textures: Vec<super::rendering::LightingTextureRecord>,
     pub game_settings: WorldGameSettings,
+    #[serde(deserialize_with = "compact_vec")]
     pub tiles: Vec<WorldTileReference>,
     #[serde(rename = "edgeOfWorld")]
     pub edge_of_world: f32,
@@ -289,6 +344,7 @@ pub struct WorldTileReference {
 #[serde(deny_unknown_fields)]
 pub struct WorldGeneratorReference {
     pub source: SourceId,
+    #[serde(deserialize_with = "compact_vec")]
     pub types: Vec<WorldObjectTypeReference>,
     pub seedplus: i32,
     #[serde(rename = "noSpawnChance")]
@@ -337,9 +393,12 @@ pub struct WorldObjectTypeReference {
 #[serde(deny_unknown_fields)]
 pub struct WorldBuildingReference {
     pub source: SourceId,
+    #[serde(deserialize_with = "compact_vec")]
     pub types: Vec<WorldBuildingType>,
+    #[serde(deserialize_with = "compact_vec")]
     pub groups: Vec<WorldBuildingGroup>,
     #[serde(rename = "defaultSides")]
+    #[serde(deserialize_with = "compact_vec")]
     pub default_sides: Vec<WorldBuildingSide>,
     #[serde(rename = "minStartDist")]
     pub min_start_dist: f32,
@@ -359,8 +418,10 @@ pub struct WorldBuildingType {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldBuildingGroup {
+    #[serde(deserialize_with = "compact_vec")]
     pub available: Vec<i32>,
     #[serde(rename = "currentAvailable")]
+    #[serde(deserialize_with = "compact_vec")]
     pub current_available: Vec<i32>,
     #[serde(rename = "currentCount")]
     pub current_count: i32,
@@ -370,6 +431,7 @@ pub struct WorldBuildingGroup {
     pub max_count: i32,
     #[serde(rename = "minCount")]
     pub min_count: i32,
+    #[serde(deserialize_with = "compact_vec")]
     pub types: Vec<WorldBuildingSelection>,
 }
 
@@ -382,6 +444,7 @@ pub struct WorldBuildingSelection {
     pub dont_use_default: u8,
     #[serde(rename = "useModifier")]
     pub use_modifier: u8,
+    #[serde(deserialize_with = "compact_vec")]
     pub sides: Vec<WorldBuildingSide>,
     #[serde(rename = "maxDist")]
     pub max_dist: f32,
@@ -418,22 +481,6 @@ fn values_valid(value: &WorldValue, receipts: &HashSet<&SourceId>) -> bool {
         _ => true,
     }
 }
-fn links(value: &WorldValue, path: String, result: &mut Vec<(String, SourceId)>) {
-    match value {
-        WorldValue::Link(s) => result.push((path, s.clone())),
-        WorldValue::Array(a) => {
-            for (i, v) in a.iter().enumerate() {
-                links(v, format!("{path}[{i}]"), result);
-            }
-        }
-        WorldValue::Record(a) => {
-            for (k, v) in a {
-                links(v, format!("{path}.{k}"), result);
-            }
-        }
-        _ => {}
-    }
-}
 fn record_link<'a>(record: &'a WorldSourceRecord, name: &str) -> Option<&'a SourceId> {
     match record.fields.get(name) {
         Some(WorldValue::Link(source)) => Some(source),
@@ -456,10 +503,7 @@ fn checked_record<'a>(
     Ok(record)
 }
 fn component_listed(record: &WorldSourceRecord, source: &SourceId) -> bool {
-    record
-        .links
-        .iter()
-        .any(|link| link.field.starts_with("m_Component[") && &link.target == source)
+    record.components().any(|component| component == source)
 }
 fn node_links_match(
     record: &WorldSourceRecord,
@@ -489,6 +533,19 @@ impl WorldReference {
                 && self.library.source_manifest_sha256 == manifest.library.source_manifest_sha256,
             "world library receipt",
         )?;
+        require(
+            self.spawn_context.classification == "controlled_startup_before_garage"
+                && self.spawn_context.engine_sha256
+                    == "553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86"
+                && self.spawn_context.clock_input == "2026-10-12T09:00:00 local"
+                && self.spawn_context.date == [2026, 10, 12]
+                && self.spawn_context.initial_state
+                    == [123456789, 2139825738, 225031475, 1427228704]
+                && self.spawn_context.startup_state
+                    == [2365297906, 2858699345, 3940856323, 829372343]
+                && self.spawn_context.startup_draws == 4,
+            "world controlled spawn context",
+        )?;
         require(!self.source_hashes.is_empty(), "world source hashes")?;
         let mut files = HashSet::new();
         for h in &self.source_hashes {
@@ -513,6 +570,57 @@ impl WorldReference {
                 &field(&r.source, "record receipt"),
             )?;
         }
+        self.initialization.validate(self, &receipts)?;
+        for row in &self.mechanisms {
+            let prototype = self
+                .prototypes
+                .iter()
+                .find(|p| p.source == row.prototype)
+                .ok_or_else(|| ReferenceError("Missing world mechanism prototype".into()))?;
+            let node = |n: super::NodeId| n.0 > 0 && n.0 as usize <= prototype.nodes.len();
+            require(
+                (row.node as usize) < prototype.nodes.len()
+                    && receipts.contains(&row.recipe.source),
+                "world mechanism source/node",
+            )?;
+            require(
+                row.recipe.driven_nodes.iter().all(|n| node(*n))
+                    && node(row.recipe.drag.node)
+                    && node(row.recipe.drag.node2),
+                "world mechanism targets",
+            )?;
+            if let Some(rotation) = &row.recipe.rotation {
+                require(
+                    rotation.targets.iter().all(|t| node(t.node))
+                        && rotation.sensitivity.is_finite(),
+                    "world rotation inputs",
+                )?;
+            }
+            if let Some(slide) = &row.recipe.slide {
+                require(
+                    slide.paths.iter().all(|p| {
+                        node(p.node) && p.points.iter().all(|p| node(p.node) && p.value.is_finite())
+                    }) && slide
+                        .rotations
+                        .iter()
+                        .all(|r| node(r.node) && node(r.reference))
+                        && slide
+                            .animation_source
+                            .as_ref()
+                            .is_none_or(|s| receipts.contains(s)),
+                    "world slide inputs",
+                )?;
+            }
+            require(
+                row.recipe.child.is_none_or(|id| {
+                    self.mechanisms
+                        .iter()
+                        .any(|r| r.prototype == row.prototype && r.node + 1 == id.0)
+                }),
+                "world mechanism child",
+            )?;
+        }
+
         let records: HashSet<_> = self.records.iter().map(|r| &r.source).collect();
         require(
             records.len() == self.records.len(),
@@ -524,20 +632,9 @@ impl WorldReference {
                 receipts.contains(&r.source) && !r.class_name.is_empty() && !r.fields.is_empty(),
                 &field(&r.source, "record"),
             )?;
-            for (k, v) in &r.fields {
+            for (k, v) in r.fields.iter() {
                 require(values_valid(v, &receipts), &field(&r.source, k))?;
             }
-            let mut expected = vec![];
-            for (k, v) in &r.fields {
-                links(v, k.clone(), &mut expected);
-            }
-            require(
-                expected.len() == r.links.len()
-                    && expected
-                        .iter()
-                        .all(|(k, v)| r.links.iter().any(|l| l.field == *k && l.target == *v)),
-                &field(&r.source, "resolved links"),
-            )?;
             let required: &[&str] = match r.class_name.as_str() {
                 "newRandomStuffSpawnScript" => &[
                     "items",
@@ -552,7 +649,7 @@ impl WorldReference {
                 _ => &[],
             };
             for name in required {
-                require(r.fields.contains_key(*name), &field(&r.source, name))?;
+                require(r.fields.get(name).is_some(), &field(&r.source, name))?;
             }
         }
         let collision = checked_record(
@@ -575,6 +672,25 @@ impl WorldReference {
             "source prototype collision layers",
         )?;
         self.lod.validate(&record_map)?;
+        for binding in &self.painting_materials {
+            checked_record(&record_map, &binding.material, &["Material"])?;
+            require(
+                self.receipts.iter().any(|r| r.source == binding.texture),
+                "Painting texture receipt",
+            )?;
+            require(
+                manifest.rendering.materials.iter().any(|m| {
+                    m.asset == binding.asset
+                        && m.gltf_material == 0
+                        && m.source == binding.material
+                        && m.properties
+                            .textures
+                            .iter()
+                            .any(|t| t.slot == "_MainTex" && t.source == binding.texture)
+                }),
+                "Painting source material and texture assignment",
+            )?;
+        }
         for binding in &self.initial_materials {
             binding.validate(&record_map)?;
         }
@@ -737,6 +853,8 @@ impl WorldReference {
                             (&x.mip_data.path, &x.mip_data.sha256),
                             (&x.source_data.path, &x.source_data.sha256),
                         ]
+                        .into_iter()
+                        .chain(x.chunks.iter().map(|c| (&c.data.path, &c.data.sha256)))
                     }),
             )
             .collect();
@@ -1159,20 +1277,13 @@ impl WorldReference {
         // Every source component needs type and owner evidence before selecting a body.
         let mut source_bodies = HashMap::new();
         for (index, object) in objects.iter().enumerate() {
-            for link in object
-                .links
-                .iter()
-                .filter(|link| link.field.starts_with("m_Component["))
-            {
-                let component = records.get(&link.target).ok_or_else(|| {
-                    ReferenceError(field(
-                        &link.target,
-                        "missing source component type/owner record",
-                    ))
+            for source in object.components() {
+                let component = records.get(source).ok_or_else(|| {
+                    ReferenceError(field(source, "missing source component type/owner record"))
                 })?;
                 require(
                     record_link(component, "m_GameObject") == Some(&object.source),
-                    &field(&link.target, "source component GameObject ownership"),
+                    &field(source, "source component GameObject ownership"),
                 )?;
                 if component.class_name == "Rigidbody" {
                     require(
@@ -1197,9 +1308,8 @@ impl WorldReference {
         }
         let road_rules: Vec<_> = objects
             .iter()
-            .flat_map(|object| object.links.iter())
-            .filter(|link| link.field.starts_with("m_Component["))
-            .filter_map(|link| records.get(&link.target).copied())
+            .flat_map(|object| object.components())
+            .filter_map(|source| records.get(source).copied())
             .filter(|record| record.class_name == "roadscript")
             .collect();
         if p.role == WorldPrototypeRole::Road {
@@ -1406,24 +1516,29 @@ fn collider_valid(g: &ColliderGeometry) -> bool {
 #[serde(deny_unknown_fields)]
 pub struct WorldCatalogReference {
     pub source: SourceId,
+    #[serde(deserialize_with = "compact_vec")]
     pub items: Vec<WorldCatalogItem>,
+    #[serde(deserialize_with = "compact_vec")]
     pub categories: Vec<WorldCategory>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldCatalogItem {
     pub field: String,
+    #[serde(deserialize_with = "compact_vec")]
     pub compatible_slots: Vec<SourceId>,
     pub index: u32,
     pub name: String,
     pub source: SourceId,
     pub prototype: Option<SourceId>,
     pub exclusion: String,
+    #[serde(deserialize_with = "compact_vec")]
     pub excluded_actions: Vec<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldCategory {
+    #[serde(deserialize_with = "compact_vec")]
     pub invalid_category_indices: Vec<u32>,
     pub initialized: bool,
     pub index: u32,
@@ -1453,7 +1568,9 @@ pub struct WorldPrototypeBody {
 #[serde(deny_unknown_fields)]
 pub struct WorldPartScopeSlot {
     pub source: SourceId,
+    #[serde(deserialize_with = "compact_vec")]
     pub main_types: Vec<String>,
+    #[serde(deserialize_with = "compact_vec")]
     pub part_types: Vec<String>,
 }
 
@@ -1461,12 +1578,15 @@ pub struct WorldPartScopeSlot {
 #[serde(deny_unknown_fields)]
 pub struct WorldSourceMaterial {
     pub source: SourceId,
+    #[serde(deserialize_with = "compact_vec")]
     pub valid_keywords: Vec<String>,
     pub shader: super::rendering::ShaderReference,
     pub source_data: super::rendering::ResourceReference,
     pub floats: BTreeMap<String, f32>,
     pub colors: BTreeMap<String, [f32; 4]>,
+    #[serde(deserialize_with = "compact_vec")]
     pub textures: Vec<super::rendering::TextureLink>,
+    #[serde(deserialize_with = "compact_vec")]
     pub render_targets: Vec<WorldRenderTarget>,
     pub texture_coordinates: BTreeMap<String, [f32; 4]>,
 }
@@ -1477,4 +1597,24 @@ pub struct WorldRenderTarget {
     pub source: SourceId,
     pub scale: [f32; 2],
     pub offset: [f32; 2],
+}
+
+/// Source inputs are immutable after decoding; retain no deserializer growth slack.
+fn compact_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    let values = Vec::<T>::deserialize(deserializer)?;
+    // Input decoding precedes world jobs. This is the only live compaction buffer.
+    let overlap = values
+        .capacity()
+        .saturating_add(values.len())
+        .saturating_mul(std::mem::size_of::<T>());
+    if values.capacity() != values.len() && overlap > 32 * 1024 * 1024 {
+        return Err(serde::de::Error::custom(
+            "Source input compaction exceeds shared pending budget",
+        ));
+    }
+    Ok(values.into_boxed_slice().into_vec())
 }

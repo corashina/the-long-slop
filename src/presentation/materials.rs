@@ -4,6 +4,7 @@ pub mod lod;
 pub mod primary;
 pub mod specular;
 pub mod terrain;
+mod world_texture_upload;
 pub mod world_textures;
 use crate::reference::{
     self as source, AssetUsage, MaterialRecord, ReferenceManifest, ShaderFamily, TextureColorSpace,
@@ -91,6 +92,11 @@ pub struct SourceSurface {
     bank6: Option<Handle<Image>>,
     state: SurfaceKey,
 }
+impl SourceSurface {
+    pub fn set_color(&mut self, color: Color) {
+        self.data.color = Vec4::from_array(color.to_linear().to_f32_array());
+    }
+}
 fn blend_factor(value: u8) -> BlendFactor {
     match value {
         0 => BlendFactor::Zero,
@@ -161,6 +167,7 @@ impl Plugin for SourceMaterialPlugin {
             MaterialPlugin::<lod::LodCasterMaterial>::default(),
             MaterialPlugin::<grass::material::GrassMaterial>::default(),
             grass::writers::GrassDisplacementPlugin,
+            world_texture_upload::WorldTextureUploadPlugin,
         ))
         .insert_resource(MaterialLoading(Arc::new(Mutex::new(LoadingData {
             requests: Vec::new(),

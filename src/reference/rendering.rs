@@ -536,7 +536,18 @@ pub struct ShaderReference {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct LightingTextureChunk {
+    pub data: ResourceReference,
+    pub mip: u32,
+    pub row: u32,
+    pub width: u32,
+    pub rows: u32,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LightingTextureRecord {
+    #[serde(default)]
+    pub chunks: Vec<LightingTextureChunk>,
     pub mip_data: ResourceReference,
     pub source_data: ResourceReference,
     pub id: u32,

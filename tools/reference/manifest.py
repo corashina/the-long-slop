@@ -388,6 +388,9 @@ def attach_world(manifest, world):
             raise ValueError(f"{prototype['source']} world asset index")
         manifest['assets'].append(asset)
         manifest['rendering']['materials'].extend(prototype.pop('materials'))
+    for binding in world['painting_materials']:
+        manifest['assets'].append(binding.pop('asset_record'))
+        manifest['rendering']['materials'].extend(binding.pop('materials'))
     manifest['world']=world
     from .export import runtime_resources
     world_resources=runtime_resources({'world':world})

@@ -60,6 +60,48 @@ pub struct PartAttachments {
     bound: bool,
 }
 impl PartAttachments {
+    pub(super) fn retained_binding_bytes(&self) -> usize {
+        use super::memory::{map, strings, vector};
+        vector(&self.parts)
+            + map(&self.indices)
+            + vector(&self.slots)
+            + map(&self.slot_indices)
+            + map(&self.collider_slots)
+            + map(&self.wheel_covers)
+            + self
+                .parts
+                .iter()
+                .map(|p| {
+                    let r = &p.reference;
+                    r.source.file.capacity()
+                        + strings(&r.main_types)
+                        + strings(&r.part_types)
+                        + vector(&r.colliders)
+                        + vector(&r.enable_if_mounted)
+                        + vector(&r.enable_if_dismounted)
+                        + vector(&r.disable_if_mounted)
+                        + vector(&r.disable_if_dismounted)
+                        + vector(&p.shapes)
+                        + vector(&p.members)
+                        + p.pickup.source.file.capacity()
+                        + vector(&p.seats)
+                        + vector(&p.assembly_fluids)
+                })
+                .sum::<usize>()
+            + self
+                .slots
+                .iter()
+                .map(|s| {
+                    s.reference.source.file.capacity()
+                        + strings(&s.reference.main_types)
+                        + strings(&s.reference.part_types)
+                        + vector(&s.reference.colliders)
+                        + vector(&s.scan_shapes)
+                        + vector(&s.compatible)
+                })
+                .sum::<usize>()
+    }
+
     pub fn new(r: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let indices: HashMap<_, _> = r
             .parts
@@ -201,6 +243,216 @@ impl PartAttachments {
                 .filter_map(|p| p.cover_slot.map(|s| (p.item, s)))
                 .collect(),
         })
+    }
+    pub fn register_generated(
+        &mut self,
+        reference: PartReference,
+        pickup: PickupReference,
+        body: RigidBodyHandle,
+        colliders: &[(ColliderId, ColliderHandle)],
+        pose: crate::vehicle::VehiclePose,
+        members: Vec<(ItemId, NodeId, f32)>,
+        mass: f32,
+        items: &ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        if self.indices.contains_key(&reference.item) {
+            return Err(error("Generated part already bound"));
+        }
+        let item = reference.item;
+        let world_pose = to_rapier(pose);
+        let mut shapes = Vec::with_capacity(colliders.len());
+        for &(id, handle) in colliders {
+            let collider = &physics.rapier().colliders[handle];
+            let local = world_pose.inverse() * *collider.position();
+            shapes.push(Shape {
+                id,
+                handle: Some(handle),
+                body: BodyId(u32::MAX),
+                shape: local,
+                part_local: local,
+                enabled: collider.is_enabled(),
+            });
+        }
+        for slot in &mut self.slots {
+            if fits(
+                &slot.reference.main_types,
+                &slot.reference.part_types,
+                &reference.main_types,
+                &reference.part_types,
+            ) {
+                slot.compatible.push(item);
+            }
+        }
+        self.indices.insert(item, self.parts.len());
+        self.parts.push(Part {
+            scan_offset: to_rapier(items.get(item).unwrap().pose)
+                .inverse()
+                .transform_point(world_pose.translation),
+            reference,
+            slot: None,
+            body: Some(body),
+            shapes,
+            members,
+            pickup,
+            seats: Vec::new(),
+            pose: world_pose,
+            mass: f32::NAN,
+            assembly_dry_mass: mass,
+            assembly_fluids: Vec::with_capacity(1),
+        });
+        for &(_, handle) in colliders {
+            physics.rapier_mut().colliders[handle].set_density(0.);
+        }
+        self.cache_assembly_mass(items);
+        Ok(())
+    }
+    pub fn set_generated_usable(&mut self, item: ItemId, usable: ItemId) {
+        if let Some(i) = self.indices.get(&item) {
+            self.parts[*i].reference.usable = Some(usable);
+        }
+    }
+    pub fn next_generated_slot(&self) -> Result<PartSlotId, ReferenceError> {
+        self.slots
+            .iter()
+            .map(|s| s.reference.id.0)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .map(PartSlotId)
+            .ok_or_else(|| error("Generated slot identity exhausted"))
+    }
+    pub fn register_generated_slot(
+        &mut self,
+        reference: PartSlotReference,
+        mount_node: NodeId,
+        detach_node: Option<NodeId>,
+        shapes: &[(ColliderId, ColliderHandle)],
+        mechanisms: &MechanismState,
+        physics: &PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        let node = to_rapier(
+            mechanisms
+                .node_pose(reference.node)
+                .ok_or_else(|| error("Generated slot node missing"))?,
+        );
+        let mount_pose = to_rapier(
+            mechanisms
+                .node_pose(mount_node)
+                .ok_or_else(|| error("Generated mount node missing"))?,
+        );
+        let mut scan_shapes = Vec::with_capacity(shapes.len());
+        for &(id, handle) in shapes {
+            scan_shapes.push(ScanShape {
+                id,
+                handle: Some(handle),
+                node,
+                local_node: physics.rapier().colliders[handle].position().inverse() * node,
+            });
+            self.collider_slots.insert(id, reference.id);
+        }
+        let compatible = self
+            .parts
+            .iter()
+            .filter(|p| {
+                fits(
+                    &reference.main_types,
+                    &reference.part_types,
+                    &p.reference.main_types,
+                    &p.reference.part_types,
+                )
+            })
+            .map(|p| p.reference.item)
+            .collect();
+        self.slot_indices.insert(reference.id, self.slots.len());
+        self.slots.push(Slot {
+            scan_shapes,
+            part: None,
+            mount_node,
+            detach_node,
+            compatible,
+            mount_pose,
+            detach_pose: detach_node
+                .and_then(|n| mechanisms.node_pose(n))
+                .map(to_rapier),
+            reference,
+        });
+        Ok(())
+    }
+    pub fn remove_generated_slot(&mut self, id: PartSlotId) {
+        let Some(index) = self.slot_indices.remove(&id) else {
+            return;
+        };
+        self.slots.remove(index);
+        self.collider_slots.retain(|_, slot| *slot != id);
+        self.wheel_covers.retain(|_, slot| *slot != id);
+        for (i, slot) in self.slots.iter().enumerate() {
+            self.slot_indices.insert(slot.reference.id, i);
+        }
+        for part in &mut self.parts {
+            if let Some(slot) = part.slot {
+                part.slot = if slot == index {
+                    None
+                } else {
+                    Some(slot - usize::from(slot > index))
+                };
+            }
+        }
+    }
+    pub fn set_generated_cover(&mut self, item: ItemId, slot: PartSlotId) {
+        if let Some(&index) = self.indices.get(&item) {
+            self.parts[index].reference.cover_slot = Some(slot);
+        } else {
+            self.wheel_covers.insert(item, slot);
+        }
+    }
+    pub fn initialize_generated_slot(
+        &mut self,
+        item: ItemId,
+        id: PartSlotId,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        let i = *self
+            .indices
+            .get(&item)
+            .ok_or_else(|| error("Generated initial slot part missing"))?;
+        let s = *self
+            .slot_indices
+            .get(&id)
+            .ok_or_else(|| error("Generated initial slot missing"))?;
+        if self.slots[s].part == Some(i) {
+            return Ok(());
+        }
+        if self.slots[s].part.is_some() {
+            return Err(error("Generated initial slot occupied"));
+        }
+        self.parts[i].slot = Some(s);
+        self.slots[s].part = Some(i);
+        physics.rapier_mut().bodies[self.parts[i].body.unwrap()].set_enabled(false);
+        items.get_mut(item).unwrap().location = ItemLocation::PartSlot(id);
+        let old = to_rapier(items.get(item).unwrap().pose);
+        let world = self.slots[s].mount_pose
+            * Pose::from_rotation(rotation(self.parts[i].reference.local_rotation_after_mount));
+        self.move_assembly(i, old, world, items, physics);
+        self.cache_assembly_mass(items);
+        self.sync(items, physics)?;
+        Ok(())
+    }
+    pub fn remove_generated(&mut self, item: ItemId) {
+        let Some(index) = self.indices.remove(&item) else {
+            return;
+        };
+        self.parts.remove(index);
+        for slot in &mut self.slots {
+            slot.compatible.retain(|id| *id != item);
+            slot.part = slot
+                .part
+                .and_then(|part| (part != index).then_some(part - usize::from(part > index)));
+        }
+        for (i, part) in self.parts.iter().enumerate() {
+            self.indices.insert(part.reference.item, i);
+        }
     }
     pub fn rebase(&mut self, shift: [f32; 3]) {
         let shift = rapier3d::math::Vector::from_array(shift);
