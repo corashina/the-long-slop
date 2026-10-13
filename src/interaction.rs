@@ -6,6 +6,7 @@ pub mod labels;
 pub mod mechanisms;
 pub mod parts;
 pub mod push;
+pub mod storage;
 pub mod targets;
 pub mod wheels;
 use feedback::ActionMask;
@@ -119,6 +120,8 @@ struct SeatState {
 
 pub struct InteractionState {
     light_controls: HashMap<ColliderId, LightControlId>,
+    held_controls: HashMap<ItemId, LightControlId>,
+    pub storage: storage::StorageLocks,
     light_nodes: HashMap<ColliderId, NodeId>,
     cabin_doors: [Option<(ItemId, ItemId)>; 4],
     seat_action_latched: bool,
@@ -337,6 +340,14 @@ impl InteractionState {
         Ok(Self {
             light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
             light_controls,
+            held_controls: reference
+                .flashlights
+                .instances
+                .iter()
+                .filter(|f| f.startup_active)
+                .map(|f| (f.item, f.controller))
+                .collect(),
+            storage: storage::StorageLocks::new(reference)?,
             cabin_doors,
             seat_action_latched: false,
             fill_opening: None,
@@ -421,6 +432,34 @@ impl InteractionState {
     }
     pub fn held(&self) -> Option<ItemId> {
         self.carry.held()
+    }
+    pub fn held_light_control(&self) -> Option<LightControlId> {
+        self.held()
+            .and_then(|item| self.held_controls.get(&item).copied())
+    }
+    pub fn pickup_stored_item(
+        &mut self,
+        item: ItemId,
+        point: [f32; 3],
+        player: &PlayerState,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<ItemId, ReferenceError> {
+        let body = self
+            .storage
+            .loose_body(item)
+            .ok_or_else(|| ReferenceError("Missing flashlight body".into()))?;
+        if !self.storage.stored(item)
+            || !self
+                .carry
+                .allows_pickup(item, player.seat().is_some(), items.mounted(item))
+        {
+            return Err(ReferenceError("Cannot carry this item".into()));
+        }
+        self.carry.can_acquire(item, point, player, body, physics)?;
+        self.storage.unlock(item, items, physics)?;
+        self.carry.pickup(item, point, player, items, physics)?;
+        Ok(item)
     }
     pub fn register_supply(&mut self, item: ItemId) {
         self.supplies.insert(item);
@@ -525,7 +564,9 @@ impl InteractionState {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> Option<ItemId> {
-        self.carry.drop(items, physics)
+        let item = self.carry.drop(items, physics)?;
+        self.storage.mark_dropped(item);
+        Some(item)
     }
     pub fn pickup_item(
         &mut self,
@@ -542,6 +583,7 @@ impl InteractionState {
         self.mechanisms.rebase(shift);
         self.parts.rebase(shift);
         self.attachments.rebase(shift);
+        self.storage.rebase(shift);
     }
 
     pub fn step(
@@ -567,10 +609,16 @@ impl InteractionState {
             self.seat_action_latched = false;
         }
         let availability = self.available_actions(&aim, player, items, physics);
-        let light_action = availability.light_control.filter(|_| {
-            input.pressed & keys::USE != 0
-                || (input.pressed & keys::FILL != 0 && availability.lmb_use)
-        });
+        let held_switch_pressed =
+            input.pressed & keys::FILL != 0 && self.held_light_control().is_some();
+        let light_action = if held_switch_pressed {
+            self.held_light_control()
+        } else {
+            availability.light_control.filter(|_| {
+                input.pressed & keys::USE != 0
+                    || (input.pressed & keys::FILL != 0 && availability.lmb_use)
+            })
+        };
         let target = aim
             .use_target
             .filter(|target| valid(*target) && availability.light_control.is_none());
@@ -630,6 +678,9 @@ impl InteractionState {
         };
         let mut action = light_action.map(InteractionAction::LightControl);
         let mut carry_input = input;
+        if held_switch_pressed {
+            carry_input.pressed &= !keys::FILL;
+        }
         self.tuning_opening = None;
         let can_use_target = availability.light_control.is_some()
             || use_target.is_some_and(|target| {
@@ -651,7 +702,7 @@ impl InteractionState {
             }
         } else if let Some(target) = use_target {
             if input.pressed & keys::USE != 0
-                || (input.pressed & keys::FILL != 0 && availability.lmb_use)
+                || (!held_switch_pressed && input.pressed & keys::FILL != 0 && availability.lmb_use)
             {
                 for opening in &mut self.openings {
                     if opening.reference.cap == target.item && opening.reference.can_toggle {
@@ -697,7 +748,8 @@ impl InteractionState {
             }
             if self.mechanisms.contains(target.item)
                 && (input.pressed & keys::USE != 0
-                    || (input.pressed & keys::FILL != 0
+                    || (!held_switch_pressed
+                        && input.pressed & keys::FILL != 0
                         && self.mechanisms.primary_switch(target.item))
                     || input.held & keys::USE != 0
                     || (input.wheel != 0.0 && self.mechanisms.scroll_eligible(target.item)))
@@ -788,10 +840,14 @@ impl InteractionState {
                 }
             } else if available.actions.0 & ActionMask::PICKUP != 0
                 && let Some(target) = grab_target
-                && self
-                    .carry
-                    .pickup(target.item, target.point, player, items, physics)
-                    .is_ok()
+                && (if self.storage.stored(target.item) {
+                    self.pickup_stored_item(target.item, target.point, player, items, physics)
+                        .is_ok()
+                } else {
+                    self.carry
+                        .pickup(target.item, target.point, player, items, physics)
+                        .is_ok()
+                })
             {
                 action = Some(InteractionAction::Pickup(target.item));
             }
@@ -836,6 +892,7 @@ impl InteractionState {
             if input.released & keys::GRAB != 0 {
                 let throwing = self.carry.throw_charge() > self.carry.reference_throw_minimum();
                 if let Some(item) = self.carry.release_throw(player, items, physics) {
+                    self.storage.mark_dropped(item);
                     action = Some(if throwing {
                         InteractionAction::Throw(item)
                     } else {
@@ -864,7 +921,8 @@ impl InteractionState {
         self.mechanisms.sync(physics, false);
         items.sync_poses(physics);
         let mut filling = None;
-        if input.held & keys::FILL != 0
+        if !held_switch_pressed
+            && input.held & keys::FILL != 0
             && available.actions.0 & ActionMask::FILL != 0
             && let Some(held) = self.held()
             && let Some(target) = filling_target

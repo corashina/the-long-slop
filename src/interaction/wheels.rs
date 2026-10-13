@@ -244,7 +244,27 @@ impl WheelAssemblies {
             })
             .map(|i| (i.id, i.mass_kg))
             .collect();
-        let general_dry: f32 = general_mass.iter().map(|(_, mass)| mass).sum();
+        // Flashlights start outside the car. Add their mass only while car-owned.
+        let mut general_mass = general_mass;
+        general_mass.extend(reference.flashlights.instances.iter().map(|instance| {
+            let item = reference
+                .items
+                .iter()
+                .find(|item| item.id == instance.item)
+                .unwrap();
+            (item.id, item.mass_kg)
+        }));
+        let general_dry: f32 = general_mass
+            .iter()
+            .filter(|(id, _)| {
+                !reference
+                    .flashlights
+                    .instances
+                    .iter()
+                    .any(|f| f.item == *id)
+            })
+            .map(|(_, mass)| mass)
+            .sum();
         Ok(Self {
             parts,
             indices,

@@ -225,8 +225,15 @@ impl StartingArea {
         }
         interaction.parts.bind(&mut items, physics)?;
         interaction.attachments.bind(&mut items, physics)?;
+        interaction.storage.bind(&mut items, physics)?;
         interaction.sync_parts(&mut items, physics)?;
         physics.refresh_queries();
+        interaction.storage.initialize_frame(
+            &mut items,
+            physics,
+            &interaction.parts,
+            &interaction.mechanisms,
+        )?;
         items.sync_poses(physics);
         let spawn = &reference.area.player_spawn;
         let mut player = PlayerState::new(
@@ -394,6 +401,12 @@ impl StartingArea {
                 .owns_collider(crate::reference::ColliderId(
                     (physics.rapier().colliders[record.handle].user_data >> 64) as u32,
                 ))
+                || self
+                    .interaction
+                    .storage
+                    .owns_collider(crate::reference::ColliderId(
+                        (physics.rapier().colliders[record.handle].user_data >> 64) as u32,
+                    ))
             {
                 continue;
             }
@@ -994,6 +1007,23 @@ impl GarageRuntime {
             .sync(&mut self.area.items, &mut self.physics)
             .expect("validated wheel bindings");
         self.physics.refresh_queries();
+        if self
+            .area
+            .interaction
+            .storage
+            .advance(
+                &mut self.area.items,
+                &mut self.physics,
+                &self.area.interaction.parts,
+                &self.area.interaction.mechanisms,
+                FIXED_DT,
+            )
+            .expect("bound storage")
+        {
+            self.wheels
+                .sync(&mut self.area.items, &mut self.physics)
+                .expect("validated wheel bindings");
+        }
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, false);
         let current = self

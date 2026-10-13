@@ -188,6 +188,10 @@ impl InteractionState {
                     ItemLocation::Attached(_) if self.attachments.target(target.item).is_some() => {
                         self.carry.allows_pickup(target.item, false, true)
                     }
+                    ItemLocation::Attached(_) if self.storage.stored(target.item) => {
+                        self.carry.allows_pickup(target.item, false, true)
+                            && self.storage.loose_body(target.item).is_some()
+                    }
                     ItemLocation::World => {
                         self.carry.allows_pickup(target.item, false, false)
                             && item.body.is_some_and(|body| {

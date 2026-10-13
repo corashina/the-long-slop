@@ -130,6 +130,10 @@ impl InteractionState {
             .map(|t| t.item);
         if let Some(held) = self.held() {
             a.actions.0 |= ActionMask::DROP | ActionMask::THROW;
+            if self.held_controls.contains_key(&held) {
+                a.actions.0 |= ActionMask::PRIMARY_SWITCH;
+                a.context = FeedbackContext::LightSwitch;
+            }
             if self.carry.allows_held_rotation() {
                 a.actions.0 |= ActionMask::ROTATE;
             }
@@ -242,6 +246,19 @@ impl InteractionState {
                     a.context = FeedbackContext::Wheel;
                 }
                 match item.location {
+                    ItemLocation::Attached(_)
+                        if self.storage.stored(t.item)
+                            && self
+                                .carry
+                                .allows_pickup(t.item, player.seat().is_some(), true)
+                            && self.storage.loose_body(t.item).is_some_and(|body| {
+                                self.carry
+                                    .can_acquire(t.item, t.point, player, body, physics)
+                                    .is_ok()
+                            }) =>
+                    {
+                        a.actions.0 |= ActionMask::PICKUP;
+                    }
                     ItemLocation::Attached(_)
                         if self.attachments.target(t.item).is_some()
                             && self
