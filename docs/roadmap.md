@@ -9,6 +9,10 @@ We keep the complete source-world integration on `codex/world-integration-deferr
 We completed nine source-world implementation layers and two integration merges in that separate branch.
 The user deferred integration into master. Master does not contain the source generator or Bevy ownership patch.
 Source-world changes shared startup, collision, save identities, and renderer paths. It requires the later integration work.
+We fixed hidden grass preparation and generated attachment readiness in `8d4341f`.
+We fixed the final review's texture receipt cleanup finding in `103bee7`.
+The full integration review and scoped re-review have no open Critical or Important findings.
+The branch remains separate from master. We added no features or dependencies during these fixes.
 
 ### Changes in master
 
@@ -71,9 +75,9 @@ We preserved existing WASM warnings and unchanged upstream whitespace.
 
 Remaining deferred work:
 
-1. Resolve the reported hidden grass write and generated attachment owner restore issues.
-2. Complete the interrupted integration review and repeat builds after required fixes.
-3. Perform runtime acceptance when authorized. Merge into master requires a later user instruction.
+1. Perform runtime acceptance when authorized. Tests and runtime checks remain skipped.
+2. Reconcile later master changes only when a future integration is requested.
+3. Merge into master only after a later user instruction.
 
 ### Verification limits
 
