@@ -1,6 +1,6 @@
 //! Source material bindings and authored texture levels.
 
-use super::{AssetId, AssetRecord, ReferenceError, SourceId, finite, require};
+use super::{AssetId, AssetRecord, AssetUsage, ReferenceError, SourceId, finite, require};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
@@ -30,6 +30,7 @@ pub enum ShaderFamily {
     UnlitColor,
     StainedGlass,
     AmplifyRope,
+    PlayerModel,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -48,6 +49,14 @@ pub struct MaterialRecord {
 }
 
 impl MaterialRecord {
+    /// Source player operations require a camera-specific renderer.
+    pub fn validate_active_use(&self) -> Result<(), ReferenceError> {
+        require(
+            self.shader_family != ShaderFamily::PlayerModel,
+            "player_model active preparation: camera distance clip and custom normal operation unsupported",
+        )
+    }
+
     /// Keep MainTex at bank zero for the existing alpha caster material.
     pub fn texture_banks(&self) -> Result<[Option<u8>; 9], ReferenceError> {
         let mut banks = [None; 9];
@@ -154,6 +163,7 @@ pub enum TextureEncoding {
     Rgba,
     Rgb,
     Ag,
+    Rag,
     Rg,
 }
 
@@ -248,6 +258,12 @@ impl RenderingRecord {
                     &format!("{label}: condition"),
                 )?;
             }
+            let player_source = material.source.file == "sharedassets0.assets"
+                && matches!(material.source.path_id, 57 | 59 | 61 | 75);
+            require(
+                !player_source || material.shader_family == ShaderFamily::PlayerModel,
+                &format!("{label}: player shader family"),
+            )?;
             let state = &material.state;
             require(
                 state.cull <= 2
@@ -362,6 +378,120 @@ impl RenderingRecord {
                         }
                     }
                 }
+                ShaderFamily::PlayerModel => {
+                    require(
+                        player_source && asset.usage == AssetUsage::PlayerPrototype,
+                        &format!("{label}: player prototype usage"),
+                    )?;
+                    let floats = &material.properties.floats;
+                    for field in [
+                        "_Dist",
+                        "_Cutoff",
+                        "_BumpStrength",
+                        "_Glossiness",
+                        "_Metallic",
+                        "_BumpScale",
+                        "_DetailNormalMapScale",
+                        "_DstBlend",
+                        "_GlossMapScale",
+                        "_GlossyReflections",
+                        "_Mode",
+                        "_OcclusionStrength",
+                        "_Parallax",
+                        "_SmoothnessTextureChannel",
+                        "_SpecularHighlights",
+                        "_SrcBlend",
+                        "_UVSec",
+                        "_ZWrite",
+                    ] {
+                        require(floats.contains_key(field), &format!("{label}: {field}"))?;
+                    }
+                    require(
+                        floats.keys().all(|field| {
+                            matches!(
+                                field.as_str(),
+                                "_Dist"
+                                    | "_Cutoff"
+                                    | "_BumpStrength"
+                                    | "_Glossiness"
+                                    | "_Metallic"
+                                    | "_BumpScale"
+                                    | "_DetailNormalMapScale"
+                                    | "_DstBlend"
+                                    | "_GlossMapScale"
+                                    | "_GlossyReflections"
+                                    | "_Mode"
+                                    | "_OcclusionStrength"
+                                    | "_Parallax"
+                                    | "_SmoothnessTextureChannel"
+                                    | "_SpecularHighlights"
+                                    | "_SrcBlend"
+                                    | "_UVSec"
+                                    | "_ZWrite"
+                                    | "_Red"
+                            )
+                        }),
+                        &format!("{label}: player properties"),
+                    )?;
+                    require(
+                        (0. ..=10.).contains(&floats["_Dist"])
+                            && (0. ..=1.).contains(&floats["_Cutoff"])
+                            && (0. ..=5.).contains(&floats["_BumpStrength"])
+                            && (0. ..=1.).contains(&floats["_Glossiness"])
+                            && (0. ..=1.).contains(&floats["_Metallic"])
+                            && floats.contains_key("_Red") == (material.source.path_id == 61)
+                            && material.properties.colors.contains_key("_EmissionColor")
+                            && material
+                                .properties
+                                .colors
+                                .keys()
+                                .all(|field| matches!(field.as_str(), "_Color" | "_EmissionColor"))
+                            && keywords.is_empty()
+                            && !material.enable_instancing
+                            && material.condition.is_none()
+                            && material.properties.defaults.is_empty()
+                            && material.properties.exclusions.is_empty()
+                            && state.alpha_mode == AlphaMode::Mask
+                            && state.cull == 2
+                            && state.z_write
+                            && state.z_test == 4
+                            && state.src_blend == 1
+                            && state.dst_blend == 0
+                            && state.render_queue == -1,
+                        &format!("{label}: player contract"),
+                    )?;
+                    active.extend(["_MainTex", "_BumpMap"]);
+                    for texture in &material.properties.textures {
+                        let expected = match (material.source.path_id, texture.slot.as_str()) {
+                            (57, "_MainTex") => 346,
+                            (59, "_MainTex") => 284,
+                            (61, "_MainTex") => 219,
+                            (75, "_MainTex") => 212,
+                            (75, "_BumpMap") => 225,
+                            (_, "_BumpMap") => 168,
+                            _ => 0,
+                        };
+                        require(
+                            texture.source.file == "sharedassets0.assets"
+                                && texture.source.path_id == expected
+                                && expected != 0
+                                && texture.uv_channel == 0
+                                && texture.color_space
+                                    == if texture.slot == "_BumpMap" {
+                                        TextureColorSpace::Linear
+                                    } else {
+                                        TextureColorSpace::Srgb
+                                    }
+                                && texture.source_encoding
+                                    == if texture.slot == "_BumpMap" {
+                                        TextureEncoding::Rag
+                                    } else {
+                                        TextureEncoding::Rgba
+                                    },
+                            &format!("{label}: player texture"),
+                        )?;
+                    }
+                }
                 ShaderFamily::StainedGlass => {
                     active.extend(["_MainTex", "_BumpMap"]);
                     require(
@@ -399,7 +529,9 @@ impl RenderingRecord {
                     &field,
                 )?;
                 require(
-                    source(&texture.source)
+                    (texture.source_encoding != TextureEncoding::Rag
+                        || material.shader_family == ShaderFamily::PlayerModel)
+                        && source(&texture.source)
                         && safe_path(&texture.file)
                         && texture.uv_channel <= 1
                         && finite(&texture.scale)

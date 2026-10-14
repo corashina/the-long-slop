@@ -305,12 +305,27 @@ pub fn load_materials(
     commands: &mut Commands,
     server: &AssetServer,
     rendering: &RenderingRecord,
+    assets: &[source::AssetRecord],
     plates: &source::PlateMaterialReference,
 ) {
+    let records: Vec<_> = rendering
+        .materials
+        .iter()
+        .filter(|record| {
+            !assets.iter().any(|asset| {
+                asset.id == record.asset && asset.usage == source::AssetUsage::PlayerPrototype
+            })
+        })
+        .cloned()
+        .collect();
+    for record in &records {
+        record
+            .validate_active_use()
+            .expect("validated active material usage");
+    }
     let mut textures = Vec::new();
     let mut texture_indices = HashMap::new();
-    for texture in rendering
-        .materials
+    for texture in records
         .iter()
         .flat_map(|r| &r.properties.textures)
         .chain(&plates.textures)
@@ -343,7 +358,7 @@ pub fn load_materials(
     let mut material_ids = HashMap::<String, u32>::new();
     let mut shader_ids = HashMap::<String, i32>::new();
     let mut sort_identities = HashMap::new();
-    for record in &rendering.materials {
+    for record in &records {
         if !transparent_record(record) {
             continue;
         }
@@ -360,7 +375,7 @@ pub fn load_materials(
     }
     commands.insert_resource(SourceMaterials {
         standard_records: HashMap::new(),
-        records: rendering.materials.clone(),
+        records,
         sort_identities,
         textures,
         texture_indices,
@@ -690,6 +705,9 @@ fn make_material(
     mask: u32,
     source: &SourceMaterials,
 ) -> SourceMaterial {
+    record
+        .validate_active_use()
+        .expect("unsupported active source material");
     if record.shader_family == ShaderFamily::AmplifyRope {
         // Retain the master rope surface. Source vertex sway remains deferred.
         return generated::from_base(
@@ -764,6 +782,9 @@ fn make_material(
                 ShaderFamily::UnlitColor => 1,
                 ShaderFamily::StainedGlass => 2,
                 ShaderFamily::AmplifyRope => unreachable!("rope uses its master surface"),
+                ShaderFamily::PlayerModel => {
+                    unreachable!("player active use rejected before construction")
+                }
             },
             factor("_UVSec", 0.) as u32,
         ),

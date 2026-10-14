@@ -7,25 +7,29 @@ from .source import source_id
 
 
 def decode_normal_rgba(pixel: tuple[int, int, int, int], encoding: str) -> tuple[float, float, float]:
-    if encoding not in {'ag', 'rg', 'rgb'}:
+    if encoding not in {'ag', 'rg', 'rag', 'rgb'}:
         raise ValueError(f'Unknown normal encoding: {encoding}')
-    x = pixel[3 if encoding == 'ag' else 0] * 2 / 255 - 1
+    red = pixel[0] * pixel[3] / 255 if encoding == 'rag' else pixel[3 if encoding == 'ag' else 0]
+    x = red * 2 / 255 - 1
     y = pixel[1] * 2 / 255 - 1
     z = pixel[2] * 2 / 255 - 1 if encoding == 'rgb' else math.sqrt(max(0., 1 - x*x - y*y))
     return x, y, z
 
 
 def decode_normal_image(image: Image.Image, encoding: str) -> Image.Image:
-    if encoding not in {'ag', 'rg', 'rgb'}:
+    if encoding not in {'ag', 'rg', 'rag', 'rgb'}:
         raise ValueError(f'Unknown normal encoding: {encoding}')
     red, green, blue, alpha = image.convert('RGBA').split()
     if encoding == 'rgb':
         return Image.merge('RGB', (red, green, blue))
     red = alpha if encoding == 'ag' else red
+    if encoding == 'rag':
+        red = ImageMath.lambda_eval(lambda p: p['r'] * p['a'] / 255, r=red.convert('F'), a=alpha.convert('F'))
     x = red.point(lambda value: value * 2 / 255 - 1, mode='F')
     y = green.point(lambda value: value * 2 / 255 - 1, mode='F')
     z = ImageMath.lambda_eval(lambda p: p['max'](1 - p['x']**2 - p['y']**2, 0)**0.5, x=x, y=y)
     blue = z.point(lambda value: (value + 1) * 127.5 + 0.5).convert('L')
+    if encoding == 'rag': red = red.point(lambda value: value + .5).convert('L')
     return Image.merge('RGB', (red, green, blue))
 
 
@@ -33,11 +37,11 @@ def normal_encoding(texture, shader, shader_name: str, identity: dict) -> str:
     # Unity 2021.3.18f1 uses UnpackNormal/UnpackScaleNormal on D3D11.
     # DXT5nm stores X in alpha; BC5 stores X in red. Both store Y in green.
     platforms = shader['platforms'] if shader else []
-    if shader_name in {'Standard', 'FX/Glass/Stained BumpDistort'} and set(platforms) == {4}:
+    if shader_name in {'Standard', 'FX/Glass/Stained BumpDistort', 'Custom/playermodelshader'} and set(platforms) == {4}:
         from UnityPy.enums import TextureFormat
         formats = {TextureFormat.DXT5: 'ag', TextureFormat.DXT5Crunched: 'ag', TextureFormat.BC5: 'rg'}
         if texture['m_TextureFormat'] in formats:
-            return formats[texture['m_TextureFormat']]
+            return 'rag' if shader_name == 'Custom/playermodelshader' else formats[texture['m_TextureFormat']]
     raise ValueError(f'Unresolved normal encoding: {identity} _BumpMap; '
                      f'shader={shader_name}, platforms={platforms}, format={texture['m_TextureFormat']}')
 
@@ -53,10 +57,40 @@ TEXTURE_DEFAULTS = {'_MainTex': 'white', '_BumpMap': 'bump',
     '_ParallaxMap': 'black'}
 NORMAL_SLOTS = {'_BumpMap', '_DetailNormalMap'}
 FAMILIES = {'Standard': 'standard', 'Unlit/Color': 'unlit_color',
-            'FX/Glass/Stained BumpDistort': 'stained_glass', 'AmplifyRope': 'amplify_rope'}
+            'FX/Glass/Stained BumpDistort': 'stained_glass', 'AmplifyRope': 'amplify_rope',
+            'Custom/playermodelshader': 'player_model'}
 KEYWORDS = {'_NORMALMAP', '_DETAIL_MULX2', '_METALLICGLOSSMAP', '_EMISSION',
     '_PARALLAXMAP', '_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A', '_SPECULARHIGHLIGHTS_OFF',
     '_GLOSSYREFLECTIONS_OFF', '_ALPHATEST_ON', '_ALPHABLEND_ON', '_ALPHAPREMULTIPLY_ON'}
+
+
+PLAYER_FLOATS = {'_BumpStrength', '_Glossiness', '_Metallic', '_Dist', '_Cutoff'}
+PLAYER_PROPERTIES = {'_Color': 0, '_MainTex': 4, '_BumpMap': 4,
+    **{name: 3 for name in PLAYER_FLOATS}}
+
+
+def validate_player_source(reader, shader_reader, data, shader):
+    identity = source_id(reader)
+    if identity['file'] != 'sharedassets0.assets' or identity['path_id'] not in (57, 59, 61, 75):
+        raise ValueError(f'{identity}: unsupported player material')
+    if source_id(shader_reader) != {'file': 'sharedassets0.assets', 'path_id': 719}:
+        raise ValueError(f'{identity}: player shader source')
+    properties = shader['m_ParsedForm']['m_PropInfo']['m_Props']
+    if {p['m_Name']: p['m_Type'] for p in properties} != PLAYER_PROPERTIES or len(properties) != 8:
+        raise ValueError(f'{identity}: unsupported player shader properties')
+    saved = data['m_SavedProperties']
+    expected = set(STANDARD_FLOATS) | PLAYER_FLOATS | ({'_Red'} if identity['path_id'] == 61 else set())
+    if set(dict(saved['m_Floats'])) - expected:
+        raise ValueError(f'{identity}: unsupported player properties')
+    for field in expected:
+        if field not in dict(saved['m_Floats']):
+            raise ValueError(f'{identity}: missing {field}')
+    if '_Color' not in dict(saved['m_Colors']):
+        raise ValueError(f'{identity}: missing _Color')
+    if data['m_EnableInstancingVariants'] or data['m_CustomRenderQueue'] != -1:
+        raise ValueError(f'{identity}: unsupported player state')
+    if data['m_ValidKeywords'] or data['disabledShaderPasses']:
+        raise ValueError(f'{identity}: unsupported player keyword or disabled pass')
 
 
 def required_pointer(source, owner, pointer, property_name):
@@ -92,6 +126,9 @@ def recover_material(source, reader, color_override=None, condition=None):
     shader_name = shader['m_Name'] or shader['m_ParsedForm']['m_Name']
     family = FAMILIES.get(shader_name)
     if family is None: raise ValueError(f'{source_id(reader)} required shader: {shader_name}')
+    if source_id(reader)['file'] == 'sharedassets0.assets' and reader.path_id in (57, 59, 61, 75) and family != 'player_model':
+        raise ValueError(f'{source_id(reader)}: player shader family')
+    if family == 'player_model': validate_player_source(reader, shader_reader, data, shader)
     keywords = sorted(data.get('m_ValidKeywords', data.get('m_ShaderKeywords', '').split()))
     if family == 'standard' and set(keywords) - KEYWORDS:
         raise ValueError(f'{source_id(reader)} {shader_name}: unsupported keywords {set(keywords) - KEYWORDS}')
@@ -116,7 +153,7 @@ def recover_material(source, reader, color_override=None, condition=None):
         for keyword, slot in [('_METALLICGLOSSMAP', '_MetallicGlossMap'),
                               ('_EMISSION', '_EmissionMap'), ('_PARALLAXMAP', '_ParallaxMap')]:
             if keyword in keywords: active.append(slot)
-    elif family == 'stained_glass': active = ['_MainTex', '_BumpMap']
+    elif family in {'stained_glass', 'player_model'}: active = ['_MainTex', '_BumpMap']
     environments = dict(saved.get('m_TexEnvs', []))
     identity_uv = {'m_Scale': {'x': 1., 'y': 1.}, 'm_Offset': {'x': 0., 'y': 0.}}
     textures = []; active_defaults = {}; exclusions = []
@@ -125,6 +162,7 @@ def recover_material(source, reader, color_override=None, condition=None):
         pointer = env['m_Texture'] if env else {'m_PathID': 0}
         texture_reader = required_pointer(source, reader, pointer, slot)
         if texture_reader is None:
+            if family == 'player_model': raise ValueError(f'{source_id(reader)} {slot}: required source texture')
             active_defaults[slot] = defaults[slot]; continue
         if texture_reader.type.name == 'RenderTexture':
             raise ValueError(f'{source_id(reader)} {slot}: unsupported RenderTexture {source_id(texture_reader)}')
@@ -139,7 +177,7 @@ def recover_material(source, reader, color_override=None, condition=None):
         color_space = 'srgb' if stored_space == 1 else 'linear'
         if encoding and color_space != 'linear':
             raise ValueError(f'{source_id(texture_reader)} unresolved normal color space')
-        uv_env = env if family == 'stained_glass' else environments.get(
+        uv_env = env if family in {'stained_glass', 'player_model'} else environments.get(
             '_DetailAlbedoMap' if slot in {'_DetailAlbedoMap', '_DetailNormalMap'} else '_MainTex', identity_uv)
         uv_channel = int(floats['_UVSec'] != 0) if family == 'standard' and slot in {
             '_DetailAlbedoMap', '_DetailNormalMap'} else 0
@@ -167,6 +205,7 @@ def recover_material(source, reader, color_override=None, condition=None):
         alpha = ('premultiply' if '_ALPHAPREMULTIPLY_ON' in keywords else
                  'blend' if '_ALPHABLEND_ON' in keywords else 'mask' if '_ALPHATEST_ON' in keywords else 'opaque')
     elif family == 'stained_glass': alpha = 'refract'
+    elif family == 'player_model': alpha = 'mask'
     state = {'alpha_mode': alpha, 'cull': 2, 'z_write': bool(floats.get('_ZWrite', 1)),
         'z_test': 4, 'src_blend': int(floats.get('_SrcBlend', 1)),
         'dst_blend': int(floats.get('_DstBlend', 0)), 'render_queue': data.get('m_CustomRenderQueue', -1)}
@@ -253,6 +292,11 @@ def material_source_evidence(source, reader, record):
             '_MainTex': 'RGBA times grab sample and Color; independent MainTex ST',
             '_BumpMap': 'source R*A,G unpack; XY times BumpAmt and GrabTexelSize; depth scale; project by clip W',
         }
+    if record['shader_family'] == 'player_model':
+        channels = {
+            '_MainTex': 'RGB times _Color.rgb; A times _Color.a; independent _MainTex_ST',
+            '_BumpMap': 'R*A,G unpack XY; reconstruct Z; lerp((0.5,0.5,1),normal,_BumpStrength); TBN then normalize; independent _BumpMap_ST',
+        }
     source.material_evidence[identity] = {
         'source': source_id(reader), 'sha256': hashlib.sha256(source.raw_data(reader)).hexdigest(),
         'shader': source_id(shader_reader), 'shader_sha256': hashlib.sha256(source.raw_data(shader_reader)).hexdigest(),
@@ -263,7 +307,7 @@ def material_source_evidence(source, reader, record):
         'passes': [{'subshader': index, 'active': index == 0, 'type': p['m_Type'],
                     'state': p['m_State'], 'tags': p['m_Tags']}
                    for index, sub in enumerate(shader['m_ParsedForm']['m_SubShaders']) for p in sub['m_Passes']],
-        'channel_samples': SOURCE_CHANNEL_SAMPLES,
+        'channel_samples': [] if record['shader_family'] == 'player_model' else SOURCE_CHANNEL_SAMPLES,
         'state': record['state'], 'channels': {slot: channels[slot] for slot in
             [*record['properties']['defaults'], *[t['slot'] for t in record['properties']['textures']]]},
         'textures': record['properties']['textures'], 'defaults': record['properties']['defaults'],
@@ -273,6 +317,34 @@ def material_source_evidence(source, reader, record):
             ['Base glTF does not apply layered shader operations.',
              'Final binding must upload authored mips, source anisotropy and mip bias.']),
     }
+    if record['shader_family'] == 'player_model':
+        evidence = source.material_evidence[identity]
+        evidence['required_operations'] = [
+            {'operation': 'camera_distance_clip', 'discard': 'length(world_position - _WorldSpaceCameraPos) < _Dist',
+             'passes': ['FORWARDBASE', 'FORWARDADD', 'DEFERRED', 'SHADOWCASTER', 'META']},
+            {'operation': 'alpha_clip', 'discard': '_Cutoff >= sample(_MainTex).a * _Color.a',
+             'after': 'camera_distance_clip'},
+            {'operation': 'normal', 'equation': 'q.xy=2*(R*A,G)-1; q.z=sqrt(1-min(dot(q.xy,q.xy),1)); normalize(TBN*lerp((0.5,0.5,1),q,_BumpStrength))'},
+            {'operation': 'surface', 'albedo': 'sample(_MainTex).rgb * _Color.rgb',
+             'metallic': '_Metallic', 'smoothness': '_Glossiness', 'occlusion': 1, 'emission': [0,0,0]},
+            {'operation': 'camera_distance_override', 'source': {'file':'level1','path_id':70544},
+             'before_render': 0.3499999940395355, 'after_render': 0,
+             'methods': ['playermodeloutfitscript.SetDistance', 'playermodeloutfitscript.ReSetDistance',
+                         'setsubshaderplayercamscript.OnPreRender', 'setsubshaderplayercamscript.OnPostRender']},
+        ]
+        from .library.reader import checked
+        evidence['compiled_data'] = shader['compressedBlob']['$byte_array']
+        checked(source.library.records_root, evidence['compiled_data'])
+        evidence['programs'] = dict(zip(['FORWARDBASE','FORWARDADD','DEFERRED','SHADOWCASTER','META'], [
+            '3fc44d0503ebfefe950bbbf1421d05dd64635c58ba85250e409c50a94bf93138',
+            'c416560da4519a8f1efd5c2a76729c4718f4cbada13081fb481f4ff4c333877a',
+            '3a6dc70fae785e22a66269ba660c7960e87975db890f97b08e2bfaedd6108768',
+            'a873c329305fc3f24007c8c1708b58a26652825b2e8c5a10b68113510b6d2432',
+            'fbc1da7ea386966e3bff8eb51930af5135fe88313aebb3f729b7262a8b9df30e']))
+        evidence['unused_saved_properties'] = sorted(set(record['properties']['floats']) - PLAYER_FLOATS)
+        evidence['transport_limits'] = ['Inactive source contract. Active player material preparation is rejected.',
+            'Camera distance clipping, custom normal blending, and matched game views are not implemented or measured.']
+
 
 
 # UnityStandardInput.cginc Albedo and MetallicGloss; retain inputs for GPU probes.

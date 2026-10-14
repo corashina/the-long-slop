@@ -105,6 +105,7 @@ pub enum AssetUsage {
     SkyPrototype,
     FoodPrototype,
     ItemPrototype,
+    PlayerPrototype,
     StationPrototype,
 }
 
