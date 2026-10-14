@@ -3,7 +3,7 @@ use rapier3d::math::{Pose, Rotation, Vector};
 pub use rapier3d::prelude::ColliderHandle;
 use rapier3d::prelude::{
     ColliderBuilder, Group, InteractionGroups, InteractionTestMode, QueryFilter, QueryPipeline,
-    QueryPipelineMut, RigidBodyBuilder, RigidBodyHandle,
+    QueryPipelineMut, RigidBodyBuilder, RigidBodyHandle, SharedShape,
 };
 
 use crate::reference::{
@@ -738,6 +738,16 @@ impl PhysicsWorld {
                 .translation(Vector::from_array(center))
                 .friction(0.8),
         );
+        self.refresh_queries();
+        handle
+    }
+
+    /// Fixed shape. The shape stays shared with its source.
+    pub fn insert_shape(&mut self, shape: SharedShape, pose: Pose) -> ColliderHandle {
+        let handle = self
+            .physics
+            .colliders
+            .insert(ColliderBuilder::new(shape).position(pose).friction(0.8));
         self.refresh_queries();
         handle
     }

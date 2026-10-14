@@ -188,7 +188,7 @@ fn setup(
         &reference.0.rendering,
         &reference.0.plates.material,
     );
-    presentation::lighting::load_lighting(&mut commands, &server, &reference.0.lighting);
+    presentation::lighting::load_lighting(&mut commands, &server, &reference.0);
     presentation::lighting_assets::load_lighting(
         &mut commands,
         &server,

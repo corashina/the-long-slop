@@ -21,8 +21,10 @@ Source-world changes shared startup, collision, save identities, and renderer pa
 | Portable flashlight | Source bindings, carried controls, storage restrictions, and shared light rendering |
 | Save/load | Browser storage, fleet state, fluids, item state, and scene replacement |
 | Performance | Reduced camera light clustering and depth/shadow material bindings |
+| Roadside stations | Source fuel station models, static collision, and ground alignment on the current procedural road |
 
 We added left-button door dragging and suppress view movement during a drag.
+The station models come from the concurrent remote master update. The complete source road generator remains separate.
 
 ### Deferred source-world changes
 

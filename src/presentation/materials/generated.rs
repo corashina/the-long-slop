@@ -9,8 +9,6 @@ pub enum GeneratedWorldMaterial {
     Rock,
     Cactus,
     Post,
-    Wall,
-    Roof,
     Pump,
 }
 impl GeneratedWorldMaterial {
@@ -21,8 +19,6 @@ impl GeneratedWorldMaterial {
             Self::Rock => Color::srgb(0.44, 0.32, 0.22),
             Self::Cactus => Color::srgb(0.25, 0.34, 0.19),
             Self::Post => Color::srgb(0.80, 0.75, 0.63),
-            Self::Wall => Color::srgb(0.69, 0.61, 0.45),
-            Self::Roof => Color::srgb(0.49, 0.25, 0.16),
             Self::Pump => Color::srgb(0.67, 0.18, 0.10),
         };
         // Preserve the former StandardMaterial inputs, including its dependency-owned default roughness.

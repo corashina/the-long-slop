@@ -105,6 +105,7 @@ pub struct AuthoredMaterial {
 pub struct SourceLighting {
     pub sky: super::sky::SkyState,
     pub(crate) road_lamps: super::world::RoadLamps,
+    pub(crate) stations: super::world::StationModels,
     pub materials: Vec<AuthoredMaterial>,
     material_loads: Option<SourceMaterialCapture>,
     pub materials_ready: bool,
@@ -127,6 +128,7 @@ impl SourceLighting {
     pub(crate) fn prepare_copy(&self) -> Self {
         let mut copy = self.clone();
         copy.road_lamps.clear_owned();
+        copy.stations.clear_owned();
         copy.lights.retain(|light| !light.road);
         for light in self.lights.iter().filter(|light| light.road) {
             copy.uniform.lights[light.index] = GpuLight::default();
@@ -139,6 +141,7 @@ impl SourceLighting {
     /// Replace owned light instances. Retain loaded scenes and prepared assets.
     pub fn reset_instances(&mut self, commands: &mut Commands) {
         self.road_lamps.reset_instances(commands);
+        self.stations.reset_instances(commands);
         self.sky.reset_views();
         for light in self.lights.drain(..) {
             commands.entity(light.entity).despawn();
@@ -194,6 +197,7 @@ impl Plugin for SourceLightingPlugin {
                 (
                     bind_materials,
                     super::world::prepare_road_lamp,
+                    super::world::prepare_stations,
                     super::instruments::prepare_instruments,
                     super::materials::prepare_lamp_materials,
                     super::materials::sync_lamp_materials,
@@ -202,7 +206,8 @@ impl Plugin for SourceLightingPlugin {
             );
         app.add_systems(
             PostUpdate,
-            super::world::sync_road_lamps.before(bevy::transform::TransformSystems::Propagate),
+            (super::world::sync_road_lamps, super::world::sync_stations)
+                .before(bevy::transform::TransformSystems::Propagate),
         );
         let render_app = app.sub_app_mut(RenderApp);
         render_app
@@ -216,7 +221,12 @@ impl Plugin for SourceLightingPlugin {
             .add_systems(Render, check_pipelines.in_set(RenderSystems::Cleanup));
     }
 }
-pub fn load_lighting(commands: &mut Commands, server: &AssetServer, lighting: &LightingRecord) {
+pub fn load_lighting(
+    commands: &mut Commands,
+    server: &AssetServer,
+    reference: &crate::reference::ReferenceManifest,
+) {
+    let lighting = &reference.lighting;
     let textures = lighting
         .textures
         .iter()
@@ -250,7 +260,11 @@ pub fn load_lighting(commands: &mut Commands, server: &AssetServer, lighting: &L
         .collect();
     commands.insert_resource(SourceLighting {
         sky: super::sky::SkyState::new(server, lighting),
-        road_lamps: super::world::RoadLamps::new(lighting.road_lamp.spacing_meters as f64),
+        road_lamps: super::world::RoadLamps::new(
+            lighting.road_lamp.asset,
+            lighting.road_lamp.spacing_meters as f64,
+        ),
+        stations: super::world::StationModels::new(&reference.stations),
         materials: Vec::new(),
         material_loads: None,
         materials_ready: false,
@@ -980,6 +994,7 @@ pub fn lighting_readiness(
                 commands.entity(entity).despawn();
             }
             super::world::finish_road_lamp_warmup(&mut commands, &mut source);
+            source.stations.finish_warmup(&mut commands);
             source.warming = false;
             return;
         }

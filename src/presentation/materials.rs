@@ -481,6 +481,7 @@ pub fn bind_authored_materials(
         || !visuals.bound
         || !renderer_meshes.bound
         || master.road_lamps.recipe.is_none()
+        || !master.stations.ready()
         || source
             .textures
             .iter()
@@ -635,7 +636,8 @@ pub fn bind_authored_materials(
     pending.requests.extend(requests);
     pending.shadow_capacity = primitives.iter().count()
         + super::world::source_shadow_capacity()
-        + master.road_lamps.source_mesh_capacity();
+        + master.road_lamps.source_mesh_capacity()
+        + master.stations.source_mesh_capacity();
     // The checked plate contract owns exactly two retained glyph meshes.
     pending.transparent_pass_capacity = transparent_pass_capacity + 2;
     pending.sealed = false;
@@ -1692,6 +1694,7 @@ pub(crate) fn prepare_lamp_materials(
         || source.materials_prepared
         || !source.materials_ready
         || source.road_lamps.recipe.is_none()
+        || !source.stations.ready()
     {
         return;
     }
