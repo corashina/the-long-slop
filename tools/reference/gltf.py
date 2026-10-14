@@ -282,11 +282,11 @@ class GltfExporter(GltfBuilder):
                 node.extras['receive_shadows'] = bool(renderer_data['m_ReceiveShadows'])
                 owner = mesh_filter or renderer
                 mesh_reader = getattr(self.source, 'condition_meshes', {}).get(key(renderer)) or self.source.resolve(owner, self.source.read(owner)['m_Mesh'])
-                if mesh_reader and (record['active'] or identity in getattr(self.source,'food_geometry_nodes',set()) or identity in getattr(self.source,'flashlight_inactive_nodes',set())) and render_enabled:
+                if mesh_reader and (record['active'] or identity in getattr(self.source,'food_geometry_nodes',set()) or identity in getattr(self.source,'flashlight_inactive_nodes',set()) or identity in getattr(self.source,'condition_geometry_nodes',set())) and render_enabled:
                     materials=[self.source.resolve(renderer,p) for p in renderer_data['m_Materials']]
                     selected=getattr(self.source,'lighting_startup_materials',{}).get(key(renderer)) or getattr(self.source,'condition_materials',{}).get(key(renderer))
                     if selected:materials=[selected for _ in materials]
-                    color=getattr(self.source,'condition_colors',{}).get(key(renderer))
+                    color=getattr(self.source,'condition_colors',{}).get(key(renderer)) or getattr(self.source,'cleaning_colors',{}).get(key(renderer))
                     condition=getattr(self.source,'condition_renderers',{}).get(key(renderer))
                     if condition:node.extras['condition']=condition
                     mirror = getattr(self.source, 'mirror_renderers', {}).get(key(renderer))
@@ -339,6 +339,8 @@ class GltfExporter(GltfBuilder):
         if self.asset_id == 2:
             for reader in (self.source.mirror_live_material, self.source.mirror_disabled_material):
                 self.material(reader)
+        from .conditions import export_condition_variants
+        export_condition_variants(self, records, mapping)
         self.document.scenes.append(gl.Scene(nodes=root_nodes))
         self.document.scene = 0
         self.document.buffers.append(gl.Buffer(uri=self.output.with_suffix('.bin').name,byteLength=len(self.binary)))

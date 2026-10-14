@@ -87,6 +87,7 @@ def lighting_resources(manifest):
             for child in value: collect(child)
     collect(manifest.get('lighting', {}))
     collect(manifest.get('weather', {}))
+    collect(manifest.get('conditions', {}))
     for item in manifest.get('render_lighting', {}).get('dependencies', []):
         collect({'path':item['file'],'sha256':item['sha256']})
     return list(resources.values())
@@ -190,7 +191,14 @@ def verify_reference(output: Path, library) -> None:
         raise ValueError('Unsupported runtime provenance')
     validate_runtime_manifest(content)
     validate_runtime_paths(manifest)
-    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json','plate-evidence.json','flashlights-evidence.json'}
+    selection=json.loads((output/'library-selection.json').read_bytes())
+    evidence_receipts=selection.get('evidence',[])
+    if [record['file'] for record in evidence_receipts]!=['conditions-evidence.json']:
+        raise ValueError('Missing condition evidence receipt')
+    for record in evidence_receipts:checked(output,record)
+    if json.loads((output/'conditions-evidence.json').read_bytes())['conditions']!=manifest['conditions']:
+        raise ValueError('Condition evidence differs from runtime records')
+    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json','plate-evidence.json','flashlights-evidence.json','conditions-evidence.json'}
     for asset in manifest['assets']:
         for record in [asset, *asset['dependencies']]:
             name = record.get('file', record.get('path')).removeprefix('reference/')
@@ -229,7 +237,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from .source import key
     from .parameters import recover_parameters
     from .manifest import build_manifest
-    from .conditions import prepare_conditions
+    from .conditions import prepare_conditions, prepare_cleaning_roots, bind_condition_audio
     from .visibility import recover_camera_visibility
     from .ui import export_ui
     from .instruments import recover_instruments
@@ -243,6 +251,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     spare=source.get('level1',71403)
     from .flashlights import prepare_flashlight_roots, validate_flashlight_mesh_export
     prepare_flashlight_roots(source, roots)
+    prepare_cleaning_roots(source, roots)
     roots['items'].append(source.transform_for(source.resolve(spare,source.read(spare)['m_GameObject'])))
     roots['items'].append(transform(3542))
     from .survival import prepare_food, recover_survival, bind_survival
@@ -326,6 +335,10 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     for index,name in enumerate(CARS):
         manifest['vehicles'][index]['instruments']=recover_instruments(source,manifest,report,name,roots[name][0])
     manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if (name not in CARS or name == 'lada') and name not in STATIONS},manifest,library,output)
+    bind_condition_audio(manifest['conditions'],manifest['audio'])
+    evidence=json.loads((output/'conditions-evidence.json').read_bytes())
+    evidence['conditions']=manifest['conditions']
+    (output/'conditions-evidence.json').write_text(json.dumps(evidence,indent=2,allow_nan=False),encoding='utf-8')
     validate_lighting_export(manifest,output)
     (output/'lighting-evidence.json').write_text(json.dumps({'lighting':manifest['lighting'],'render_lighting':manifest['render_lighting'],'byte_checks':source.evidence,'native_engine':native_engine,'fog_setting':source.lighting_fog_evidence,'library':manifest['library']},indent=2,allow_nan=False),encoding='utf-8')
     parameters['controls']={
@@ -344,6 +357,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     selection = {name:[asdict(v) for v in sorted(values)] for name,values in (
         ('records',library.selected_records),('meshes',library.selected_meshes),
         ('textures',library.selected_textures),('sprites',library.selected_sprites),('audio',library.selected_audio))}
+    evidence_path=output/'conditions-evidence.json'
+    selection['evidence']=[{'file':evidence_path.name,'bytes':evidence_path.stat().st_size,'sha256':hashlib.sha256(evidence_path.read_bytes()).hexdigest()}]
     (output/'library-selection.json').write_text(json.dumps(selection,indent=2),encoding='utf-8')
     print(f'Exported manifest: {len(manifest["colliders"])} colliders, {len(manifest["items"])} items',flush=True)
 

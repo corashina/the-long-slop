@@ -4151,7 +4151,8 @@
           "file": "reference/lighting-sharedassets1.assets-481.bin",
           "sha256": "ae63f0fae4d9857b89924e6f8862e3ddbbff7ea752e6066a21c3a9e3b9ee29df"
         }
-      ]
+      ],
+      "mesh_count": 58
     },
     {
       "id": 2,
@@ -6396,7 +6397,8 @@
           "file": "reference/plate-sharedassets0.assets-366.png",
           "sha256": "2009c85f3706ca3afbb6f46be7b511e216c6a3239a2de668e75b193a6cc38d05"
         }
-      ]
+      ],
+      "mesh_count": 140
     },
     {
       "id": 3,
@@ -8469,7 +8471,8 @@
           "file": "reference/texture-sharedassets1.assets-1345-srgb-mip-10.png",
           "sha256": "a14274e6d79b884219cfd598b5e2722dd77c90332da83be8462d6921d17baeef"
         }
-      ]
+      ],
+      "mesh_count": 158
     },
     {
       "id": 4,
@@ -10026,7 +10029,8 @@
           "file": "reference/texture-sharedassets1.assets-986-srgb-mip-9.png",
           "sha256": "c26cd78f8b849ed49bb8b661f5c108b8075ebdbb9e86697c8ccd1b6b79c00647"
         }
-      ]
+      ],
+      "mesh_count": 27
     },
     {
       "id": 5,
@@ -10355,7 +10359,8 @@
           "file": "reference/texture-sharedassets0.assets-294-srgb-mip-11.png",
           "sha256": "6174d7c79234491ca20923eb631f2046f37389e096b30dc0802ef0ca87db383e"
         }
-      ]
+      ],
+      "mesh_count": 3
     },
     {
       "id": 6,
@@ -10372,7 +10377,8 @@
           "file": "reference/sky.bin",
           "sha256": "8fd8f29bc9aa4258adcb11003afcc9104c89c6a456f4b8863ffedef1f8a7c033"
         }
-      ]
+      ],
+      "mesh_count": 2
     },
     {
       "id": 7,
@@ -10501,7 +10507,8 @@
           "file": "reference/texture-sharedassets0.assets-259-linear-normal-ag-mip-9.png",
           "sha256": "f015a955e740b5496f12a7f2038748352b9ae8049e84bd3dfe1344710de6ed5a"
         }
-      ]
+      ],
+      "mesh_count": 12
     },
     {
       "id": 8,
@@ -11162,7 +11169,8 @@
           "file": "reference/texture-sharedassets0.assets-311-srgb-mip-10.png",
           "sha256": "7dd8d3fc09b13bd1b0f02cbea6481748eb3a5b6b1e4465c71a3f3298c7fcf043"
         }
-      ]
+      ],
+      "mesh_count": 8
     },
     {
       "id": 9,
@@ -12167,7 +12175,8 @@
           "file": "reference/texture-sharedassets1.assets-1288-srgb-mip-10.png",
           "sha256": "56717fa59f51696dc249f9afe3bad50b7cb173c2631f52c7808a6185804320ad"
         }
-      ]
+      ],
+      "mesh_count": 16
     },
     {
       "id": 10,
@@ -13680,7 +13689,8 @@
           "file": "reference/texture-sharedassets0.assets-195-linear-normal-ag-mip-9.png",
           "sha256": "8654793cf44e226a20efdf100202fd0b162e6110b3833b2b8d6aa49033b640dc"
         }
-      ]
+      ],
+      "mesh_count": 29
     }
   ],
   "nodes": [
@@ -76987,7 +76997,7 @@
       }
     },
     {
-      "id": 2026,
+      "id": 2043,
       "source": {
         "file": "sharedassets1.assets",
         "path_id": 73515
@@ -77018,7 +77028,7 @@
       }
     },
     {
-      "id": 2027,
+      "id": 2044,
       "source": {
         "file": "sharedassets1.assets",
         "path_id": 64442
@@ -77049,7 +77059,7 @@
       }
     },
     {
-      "id": 2028,
+      "id": 2045,
       "source": {
         "file": "sharedassets1.assets",
         "path_id": 83471
@@ -236438,7 +236448,7 @@
         },
         "kind": 4,
         "asset": 8,
-        "root": 2026,
+        "root": 2043,
         "sides": [
           {
             "lateral_meters": [
@@ -236511,7 +236521,7 @@
         },
         "kind": 6,
         "asset": 9,
-        "root": 2027,
+        "root": 2044,
         "sides": [
           {
             "lateral_meters": [
@@ -236584,7 +236594,7 @@
         },
         "kind": 8,
         "asset": 10,
-        "root": 2028,
+        "root": 2045,
         "sides": [
           {
             "lateral_meters": [
@@ -407407,5 +407417,582 @@
         ]
       }
     }
+  },
+  "conditions": {
+    "surfaces": [
+      {
+        "id": 1,
+        "source": {
+          "file": "fixture.conditions",
+          "path_id": 1
+        },
+        "node": 1,
+        "item": 1,
+        "startup": {
+          "state": 0,
+          "state2": 0,
+          "state3": 0,
+          "repair_progress": 0.0,
+          "color": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "permission_index": 2,
+        "selected_type": "ladapaint",
+        "material_type": "",
+        "use_material_type": false,
+        "disable_color": false,
+        "force_color": false,
+        "use_mat_list": false,
+        "dont_use_worn": false,
+        "shared_mat_list": false,
+        "use_mesh_list": false,
+        "use_object_list": false,
+        "objects": [],
+        "children": [],
+        "is_child": false,
+        "no_inherit_state": false,
+        "same_state_as_parent": false,
+        "child_new_color": false,
+        "random_start_state3": false,
+        "loaded": false,
+        "renderers": [
+          {
+            "source": {
+              "file": "fixture.conditions",
+              "path_id": 2
+            },
+            "node": 1,
+            "states": [
+              {
+                "materials": [
+                  {
+                    "asset": 1,
+                    "gltf_material": 0,
+                    "source": {
+                      "file": "sharedassets0.assets",
+                      "path_id": 86
+                    }
+                  }
+                ],
+                "color": [
+                  1.0,
+                  1.0,
+                  1.0,
+                  1.0
+                ]
+              },
+              {
+                "materials": [
+                  {
+                    "asset": 1,
+                    "gltf_material": 0,
+                    "source": {
+                      "file": "sharedassets0.assets",
+                      "path_id": 86
+                    }
+                  }
+                ],
+                "color": [
+                  1.0,
+                  1.0,
+                  1.0,
+                  1.0
+                ]
+              },
+              {
+                "materials": [
+                  {
+                    "asset": 1,
+                    "gltf_material": 0,
+                    "source": {
+                      "file": "sharedassets0.assets",
+                      "path_id": 86
+                    }
+                  }
+                ],
+                "color": [
+                  1.0,
+                  1.0,
+                  1.0,
+                  1.0
+                ]
+              },
+              {
+                "materials": [
+                  {
+                    "asset": 1,
+                    "gltf_material": 0,
+                    "source": {
+                      "file": "sharedassets0.assets",
+                      "path_id": 86
+                    }
+                  }
+                ],
+                "color": [
+                  1.0,
+                  1.0,
+                  1.0,
+                  1.0
+                ]
+              },
+              {
+                "materials": [
+                  {
+                    "asset": 1,
+                    "gltf_material": 0,
+                    "source": {
+                      "file": "sharedassets0.assets",
+                      "path_id": 86
+                    }
+                  }
+                ],
+                "color": [
+                  1.0,
+                  1.0,
+                  1.0,
+                  1.0
+                ]
+              }
+            ],
+            "meshes": [
+              {
+                "asset": 1,
+                "gltf_mesh": 0,
+                "source": {
+                  "file": "sharedassets1.assets",
+                  "path_id": 2034
+                }
+              }
+            ]
+          }
+        ],
+        "colors": []
+      }
+    ],
+    "brushes": [],
+    "sprays": [],
+    "washes": [],
+    "collider_bindings": [],
+    "repair_tables": [
+      [
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ]
+      ],
+      [
+        [
+          true,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          true,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          true,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          true,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          true,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ]
+      ],
+      [
+        [
+          true,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          true,
+          false,
+          true,
+          false,
+          false,
+          true,
+          false
+        ],
+        [
+          true,
+          false,
+          true,
+          false,
+          false,
+          true,
+          false
+        ],
+        [
+          false,
+          true,
+          false,
+          false,
+          false,
+          true,
+          false
+        ],
+        [
+          false,
+          true,
+          false,
+          false,
+          false,
+          false,
+          false
+        ]
+      ],
+      [
+        [
+          true,
+          false,
+          false,
+          true,
+          false,
+          false,
+          false
+        ],
+        [
+          true,
+          false,
+          true,
+          true,
+          false,
+          true,
+          false
+        ],
+        [
+          true,
+          false,
+          true,
+          true,
+          false,
+          true,
+          false
+        ],
+        [
+          true,
+          false,
+          true,
+          true,
+          false,
+          true,
+          false
+        ],
+        [
+          true,
+          false,
+          true,
+          false,
+          false,
+          true,
+          false
+        ]
+      ],
+      [
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          true,
+          false,
+          false,
+          true,
+          false
+        ],
+        [
+          false,
+          true,
+          false,
+          false,
+          false,
+          true,
+          false
+        ],
+        [
+          false,
+          true,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          true,
+          false,
+          false,
+          false,
+          false,
+          false
+        ]
+      ],
+      [
+        [
+          false,
+          false,
+          false,
+          true,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          true,
+          true,
+          false,
+          true,
+          false
+        ],
+        [
+          false,
+          false,
+          true,
+          true,
+          false,
+          true,
+          false
+        ],
+        [
+          false,
+          false,
+          true,
+          true,
+          false,
+          true,
+          false
+        ],
+        [
+          false,
+          false,
+          true,
+          false,
+          false,
+          true,
+          false
+        ]
+      ],
+      [
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          true,
+          true,
+          false,
+          false,
+          true,
+          false
+        ],
+        [
+          false,
+          true,
+          true,
+          false,
+          false,
+          true,
+          false
+        ],
+        [
+          false,
+          true,
+          true,
+          false,
+          false,
+          true,
+          false
+        ],
+        [
+          false,
+          true,
+          true,
+          false,
+          false,
+          true,
+          false
+        ]
+      ],
+      [
+        [
+          false,
+          false,
+          false,
+          true,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          true,
+          false,
+          true,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          true,
+          false,
+          true,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          true,
+          false,
+          true,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false,
+          false,
+          true,
+          false
+        ]
+      ]
+    ],
+    "clean_tables": [
+      [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      [
+        false,
+        false,
+        true,
+        false,
+        false,
+        true,
+        false
+      ],
+      [
+        false,
+        false,
+        true,
+        false,
+        true,
+        true,
+        true
+      ],
+      [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true
+      ]
+    ],
+    "repair_rate": 0.5
   }
 }

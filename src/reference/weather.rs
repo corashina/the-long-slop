@@ -147,7 +147,7 @@ pub(super) fn valid_geometry(g: &ColliderGeometry) -> bool {
         }
     }
 }
-fn gradient_valid(g: &GradientReference) -> bool {
+pub(super) fn gradient_valid(g: &GradientReference) -> bool {
     g.mode <= 1
         && !g.colors.is_empty()
         && !g.alphas.is_empty()
@@ -160,7 +160,7 @@ fn gradient_valid(g: &GradientReference) -> bool {
         && g.colors.windows(2).all(|w| w[0].time <= w[1].time)
         && g.alphas.windows(2).all(|w| w[0].time <= w[1].time)
 }
-fn curve_valid(c: &TorqueCurve) -> bool {
+pub(super) fn curve_valid(c: &TorqueCurve) -> bool {
     c.keys.iter().all(|k| {
         finite(&[
             k.time,

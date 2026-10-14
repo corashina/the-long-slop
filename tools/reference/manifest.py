@@ -16,7 +16,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     assets=[]
     for asset_id,(name,readers) in enumerate(roots.items(),1):
         report=reports[name]
-        assets.append({'id':asset_id,'material_count':report['material_count'],'usage':'food_prototype' if name=='food' else 'station_prototype' if name.startswith('station_') else 'road_lamp_prototype' if name=='road_lamp' else 'sky_prototype' if name=='sky' else 'unique_scene','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
+        assets.append({'id':asset_id,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'food_prototype' if name=='food' else 'station_prototype' if name.startswith('station_') else 'road_lamp_prototype' if name=='road_lamp' else 'sky_prototype' if name=='sky' else 'unique_scene','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
         records=[]
         for root in readers:records.extend(source.hierarchy(root,activate_root=True))
         for entry,record in zip(report['nodes'],records):
@@ -150,7 +150,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         if 'wheelscript' in group or 'gumiscript' in group:wheel_parts_source.append((node,part,part_data,identities))
     for node,group in components.items():
         food_geometry=key(node_readers[node]) in source.food_geometry_nodes
-        if not nodes[node-1]['active'] and not food_geometry and key(node_readers[node]) not in getattr(source,'flashlight_inactive_nodes',set()) and not any(key(reader) in detachable_colliders for readers in group.values() for reader in readers):continue
+        if not nodes[node-1]['active'] and not food_geometry and key(node_readers[node]) not in getattr(source,'flashlight_inactive_nodes',set()) and key(node_readers[node]) not in getattr(source,'condition_geometry_nodes',set()) and not any(key(reader) in detachable_colliders for readers in group.values() for reader in readers):continue
         layer=source.read(objects[node]['game_object'])['m_Layer']
         for class_name in ('BoxCollider','SphereCollider','CapsuleCollider','MeshCollider'):
             for reader in group.get(class_name,[]):
@@ -425,6 +425,14 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         controller['aim_colliders']=[collider_ids[old_colliders[i]] for i in controller['aim_colliders'] if old_colliders[i] in collider_ids]
     from .flashlights import recover_flashlights
     result['flashlights']=recover_flashlights(source,roots,pointer_node,item_nodes,result['lighting']['controllers'],colliders,output,part_slots)
+    from .conditions import recover_conditions
+    source.condition_bodies=bodies
+    source.condition_items=items
+    source.condition_part_slots=part_slots
+    source.condition_wheel_slots=wheel_slots
+    source.condition_wheel_parts=wheel_parts
+    source.condition_anchors=anchors
+    result['conditions']=recover_conditions(source,nodes,components,pointer_node,item_nodes,colliders,output)
     from .export import lighting_resources
     assets[0]['dependencies'].extend({'file':item['path'],'sha256':item['sha256']} for item in lighting_resources(result))
     return result

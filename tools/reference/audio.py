@@ -360,6 +360,11 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
             'parent_door':control_reader(source.resolve(r,d['parentDoor'])), 'parent_slot':parent_slot_id,
             'method':method('interiorscript','GetValue')})
     for r,cls,d in mono:
+        if cls=='objSlideOnColliderScript' and d['hasSound']:
+            voice(source.resolve(r,d['SSource']),[method(cls,'Update'),method(cls,'Disable')])
+        elif cls=='sprayscript':
+            voice(source.resolve(r,d['Saudio']),[method(cls,'Update'),method(cls,'Fire')])
+    for r,cls,d in mono:
         if cls!='audioBasedOnInteriorsensscript':continue
         route_voices=[voice(source.resolve(r,p),[method(cls,'Update'),method(cls,'SetSources')]) for p in d['Sources']]
         default_interiors=[]

@@ -25,6 +25,8 @@ use std::{
     fmt,
 };
 
+pub mod conditions;
+pub use conditions::*;
 pub mod flashlights;
 pub use flashlights::*;
 pub mod plates;
@@ -56,6 +58,8 @@ macro_rules! id {
 }
 id!(MechanismId, u32);
 id!(ItemId, u32);
+id!(ConditionId, u32);
+id!(WashId, u32);
 id!(AssetId, u32);
 id!(NodeId, u32);
 id!(BodyId, u32);
@@ -104,6 +108,7 @@ pub enum AssetUsage {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssetRecord {
+    pub mesh_count: u32,
     pub material_count: u32,
     pub usage: AssetUsage,
     pub id: AssetId,
@@ -797,6 +802,7 @@ pub struct LibraryProvenance {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
+    pub conditions: ConditionRecord,
     pub audio: serde_json::Value,
     pub survival: SurvivalReference,
     pub sleep: SleepReference,
@@ -1928,6 +1934,7 @@ impl ReferenceManifest {
         }
         require(a.driveway_height.is_finite(), "driveway height")?;
         self.flashlights.validate(self)?;
+        self.conditions.validate(self)?;
         Ok(())
     }
 }
