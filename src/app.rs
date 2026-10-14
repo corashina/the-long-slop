@@ -277,9 +277,6 @@ fn check_ready(
         visuals.failed = true;
         return;
     }
-    if !particles.prepared() {
-        return;
-    }
     if drive.ready {
         *readiness = 0;
         return;
@@ -365,6 +362,9 @@ fn check_ready(
                 return;
             }
             if source_lighting.state != presentation::materials::RenderingState::Ready {
+                return;
+            }
+            if !particles.prepared() {
                 return;
             }
             *readiness += 1;
