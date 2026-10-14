@@ -487,9 +487,9 @@ impl InteractionState {
                 } else if self.mechanisms.turn_state(target.item).is_some() {
                     "E: switch"
                 } else if self.held().is_none() && aim.grab_target.is_some() {
-                    "Hold E + mouse: move · F: remove"
+                    "Hold LMB + mouse: move · F: remove"
                 } else {
-                    "Hold E + mouse: move"
+                    "Hold LMB + mouse: move"
                 };
             }
             if self.seats.iter().any(|seat| seat.item == target.item) && self.held().is_none() {

@@ -841,12 +841,16 @@ impl InteractionState {
         let filling_target = aim.filling_target.filter(|target| valid(*target));
         self.mechanisms.sync(physics, false);
         let released_mechanism = input.released & keys::USE != 0 && self.use_consumed;
-        if input.held & keys::USE == 0 || input.released & keys::USE != 0 {
+        let primary_use = availability.lmb_use && self.held_light_control().is_none();
+        let mechanism_held =
+            input.held & keys::USE != 0 || (input.held & keys::PRIMARY != 0 && primary_use);
+        if !mechanism_held {
             self.latched_mechanism = None;
             self.use_consumed = false;
         } else if self.latched_mechanism.is_none()
             && let Some(target) = target
             && self.mechanisms.contains(target.item)
+            && (input.held & keys::USE != 0 || self.mechanisms.drag_eligible(target.item))
             && let Some(&body_id) = self.mechanism_bodies.get(&target.item)
             && let Some(body) = self
                 .bodies
@@ -984,8 +988,9 @@ impl InteractionState {
                         && availability.lmb_use)
                     || input.held & keys::USE != 0
                     || (input.held & keys::PRIMARY != 0
-                        && self.mechanisms.radio_tunable(target.item)
-                        && availability.lmb_use)
+                        && (self.mechanisms.radio_tunable(target.item)
+                            || self.mechanisms.drag_eligible(target.item))
+                        && primary_use)
                     || (input.wheel != 0.0 && self.mechanisms.scroll_eligible(target.item)))
             {
                 let mut mechanism_input = input;

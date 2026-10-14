@@ -59,7 +59,7 @@ Development availability does not add further vehicles, audio, animation playbac
 | Shift / Ctrl | Run / crouch | — |
 | Space | Jump | Toggle handbrake |
 | E | Use cap, switch, or seat | Use control or leave seat |
-| Hold E + mouse | Move an aimed mechanism | Move an aimed mechanism |
+| Hold LMB + mouse | Move an aimed mechanism | Move an aimed mechanism |
 | F | Carry or remove a part; release to install; tap to drop | - |
 | Hold F, then release | Charge and throw a held item | - |
 | Hold F at the car body | Push while held | - |
