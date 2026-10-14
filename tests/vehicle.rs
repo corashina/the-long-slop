@@ -118,37 +118,67 @@ fn source_springs_keep_their_force_when_vehicle_mass_changes() {
 
 #[test]
 fn automatic_shift_retains_selection_when_curve_candidates_are_zero() {
+    use my_summer_slop::simulation::{
+        drivetrain::DrivetrainState, engine::EngineOutput, input::DrivingControls,
+    };
     let mut reference = common::reference();
+    let mut drivetrain = DrivetrainState::new(&reference.vehicles[0]);
+    let controls = DrivingControls {
+        throttle: 1.,
+        ..Default::default()
+    };
+    let selected = drivetrain.step(
+        controls,
+        0,
+        reference.driving.default_assists,
+        EngineOutput::default(),
+        100.,
+        0.,
+        &reference.vehicles[0],
+        &reference.driving,
+        true,
+    );
+    assert_eq!(selected.gear, 2);
     reference.vehicles[0]
         .engine
         .torque_curve
         .keys
         .iter_mut()
         .for_each(|key| {
-            key.value = 0.0;
-            key.in_tangent = 0.0;
-            key.out_tangent = 0.0;
+            key.value = 0.;
+            key.in_tangent = 0.;
+            key.out_tangent = 0.;
         });
     assert_eq!(
-        my_summer_slop::vehicle::select_gear(
-            0.0,
-            false,
-            true,
-            2,
-            &reference.vehicles[0].engine,
-            &reference.vehicles[0]
-        ),
+        drivetrain
+            .step(
+                controls,
+                0,
+                reference.driving.default_assists,
+                EngineOutput::default(),
+                0.,
+                0.,
+                &reference.vehicles[0],
+                &reference.driving,
+                true
+            )
+            .gear,
         2
     );
     assert_eq!(
-        my_summer_slop::vehicle::select_gear(
-            0.0,
-            false,
-            false,
-            2,
-            &reference.vehicles[0].engine,
-            &reference.vehicles[0]
-        ),
+        drivetrain
+            .step(
+                DrivingControls::default(),
+                0,
+                reference.driving.default_assists,
+                EngineOutput::default(),
+                0.,
+                0.,
+                &reference.vehicles[0],
+                &reference.driving,
+                true
+            )
+            .gear,
         1
     );
 }

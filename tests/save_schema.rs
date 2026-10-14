@@ -129,8 +129,8 @@ fn snapshot_for(r: ReferenceManifest) -> (ReferenceManifest, SourceStamp, SaveSn
             "pose": pose, "linear_velocity": [0.,0.,0.], "angular_velocity": [0.,0.,0.], "sleeping": false},
             "engine": {"ignition": false, "rpm": 0., "temperature": v.engine.initial_temperature,
                 "elapsed": 0., "last_run_time": -1., "last_start_chance_time": 0., "random_start": 1.,
-                "supplied_fuel": 0., "fan_on": false}, "auto_gear": 0, "handbrake": true, "trip_m": 0., "requested_headlights": 0})).collect();
-    let value = json!({"schema_version": 1, "saved_at": "2026-10-12T10:00:00.000Z", "source": source,
+                "supplied_fuel": 0., "fan_on": false}, "gear": 0, "handbrake": true, "trip_m": 0., "requested_headlights": 0})).collect();
+    let value = json!({"schema_version": 2, "driving_assists": r.driving.default_assists, "saved_at": "2026-10-12T10:00:00.000Z", "source": source,
         "world": {"seed": "18446744073709551615", "records": []},
         "player": {"pose": pose, "yaw": 0., "pitch": 0., "seat": null, "crouched": false,
             "vertical_velocity": 0., "recoil_velocity": [0.,0.,0.], "running": false, "carry": null},
@@ -149,7 +149,7 @@ fn schema_rejects_version_source_and_invalid_links() {
     let (reference, source, snapshot) = fixture();
     snapshot.validate(&reference, &source).unwrap();
     let mut bad = snapshot.clone();
-    bad.schema_version = 2;
+    bad.schema_version = 1;
     assert!(bad.validate(&reference, &source).is_err());
     let value = serde_json::to_value(&snapshot).unwrap();
     for field in ["unknown", "survival", "weather"] {
@@ -402,4 +402,13 @@ fn authored_startup_rotation_can_precede_drag_limits() {
         .unwrap();
     record.degrees[1] = 89.;
     assert!(snapshot.validate(&reference, &source).is_err());
+}
+
+#[test]
+fn obsolete_save_schema_is_rejected_before_reading_vehicle_fields() {
+    let obsolete = br#"{"schema_version":1,"vehicles":[{"auto_gear":1}]}"#;
+    assert!(matches!(
+        SaveSnapshot::from_json(obsolete),
+        Err(SaveError::IncompatibleSources(_))
+    ));
 }

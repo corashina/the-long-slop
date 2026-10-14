@@ -1,4 +1,5 @@
 import {applyLayout} from './ui-layout.js';
+export function formatGear(gear){return gear<0?'R':gear===0?'N':String(gear);}
 export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,SPLIT:16384,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144,CONSUME:524288,DRINK:1048576,HELD_SWITCH:2097152};
 const FLUIDS=['Gas','Oil','Alcohol','Water','Blood','Diesel'];
 export function formatRadio(r){if(r.context===11&&Number.isFinite(r.radioVolume))return 'Volume: '+Math.round(r.radioVolume*10).toString().padStart(2,'0');if(r.context===12&&Number.isFinite(r.radioFrequency))return (r.radioAm?'AM '+r.radioFrequency.toFixed(0).padStart(3,'0'):'FM '+r.radioFrequency.toFixed(1).padStart(4,'0'));return '';}
@@ -49,6 +50,7 @@ export class FeedbackState {
 }
 export function createFeedback(ui,switchIconUrl) {
  const state=new FeedbackState(),root=document.querySelector('#hud'),icon=document.querySelector('#crosshair'),fluid=document.querySelector('#fluid-text'),carry=document.querySelector('#carry-help'),notice=document.querySelector('#action-notice'),target=document.querySelector('#target-name'),condition=document.querySelector('#target-condition'),charge=document.querySelector('#throw-charge'),level=document.querySelector('#throw-level');
+ const gear=document.querySelector('#driving-gear');let lastGear,wasSeated;
  const rows=[
   [ACTION.USE,'use','[E]: Open/Close'],
   [ACTION.DOOR,'door','[LMB]+[Mouse]: Open/Close'],
@@ -125,5 +127,5 @@ export function createFeedback(ui,switchIconUrl) {
  }
  const key=event=>{if(event.code==='Backspace'&&!event.repeat&&state.active){event.preventDefault();state.toggle();paint();}};
  window.addEventListener('keydown',key);window.addEventListener('resize',resize);resize();paint();
- return {state,update(record){if(state.update(record))paint();},setVisible(value){const before=state.visible;state.setVisible(value);if(before!==state.visible)paint();},dispose(){window.removeEventListener('keydown',key);window.removeEventListener('resize',resize);}};
+ return {state,drivingState(value,seated){if(value!==lastGear){gear.textContent='Gear: '+formatGear(value);lastGear=value;}if(seated!==wasSeated){gear.hidden=!seated;wasSeated=seated;}},update(record){if(state.update(record))paint();},setVisible(value){const before=state.visible;state.setVisible(value);if(before!==state.visible)paint();},dispose(){window.removeEventListener('keydown',key);window.removeEventListener('resize',resize);}};
 }

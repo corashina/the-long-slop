@@ -1,4 +1,5 @@
 pub const FIXED_DT: f32 = 1.0 / 60.0;
+pub mod drivetrain;
 pub mod engine;
 pub mod input;
 pub mod instruments;

@@ -54,9 +54,9 @@ Development availability does not add further vehicles, audio, animation playbac
 
 | Control | On foot | In the driver seat |
 | --- | --- | --- |
-| WASD | Move | Accelerate, brake, reverse, steer |
+| WASD | Move | Accelerate, brake, steer |
 | Mouse | Look | Look |
-| Shift / Ctrl | Run / crouch | — |
+| Shift | Run | — |
 | Space | Jump | Toggle handbrake |
 | E | Use cap, switch, or seat | Use control or leave seat |
 | Hold LMB + mouse | Move an aimed mechanism | Move an aimed mechanism |
@@ -70,6 +70,11 @@ Development availability does not add further vehicles, audio, animation playbac
 | X | Split a wheel | - |
 | Hold LMB | Fill an open container | Use an aimed switch |
 | I | — | Tap ignition; hold starter |
+| Left Ctrl / Right Ctrl / Numpad 0 | Crouch with Ctrl | Clutch |
+| Up arrow / Down arrow | — | Shift up / down |
+| R / Numpad + | — | Select reverse |
+| 0 / Numpad - / N | — | Select neutral |
+| 1–6 / Numpad 1–6 | — | Select a forward gear, when available |
 | L | — | Cycle headlights: off, low beam, high beam |
 | C | — | Switch first person / chase view |
 | Backspace | Hide or show feedback | Hide or show feedback |
@@ -86,6 +91,13 @@ Open containers spill when tilted. Pumps retain unlimited gasoline stock.
 The Lada starts with 0.5 L gasoline, 2.5 L oil, and 3.6 L water.
 Its capacities are 39 L fuel, 5 L oil, and 5 L coolant.
 The Skoda starts with the same fluids. Its capacities are 32 L fuel, 5 L oil, and 5 L coolant.
+
+Controls contains Automatic clutch and Automatic gears. Automatic gears requires Automatic clutch.
+With Automatic gears, S requests reverse after the car stops. W requests forward travel.
+Disable Automatic gears to select gears. Without Automatic clutch, press the clutch past halfway before a shift.
+The gear display shows R, N, or the forward gear number while seated.
+Save stores both cars' gears and engine state, plus the two assist choices. Load restores them.
+New game restores neutral and enables both assists. Recovery and input clearing keep the selected gears.
 
 Use Recover in the pause menu. Use Controls for bindings and Fullscreen.
 Aim at a tire and press F to dismount it. Release F to mount a held tire or rim.

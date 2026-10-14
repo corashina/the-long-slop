@@ -382,6 +382,13 @@ fn read_input(
     mut drive: ResMut<Drive>,
     requests: Res<save::SaveRequests>,
 ) {
+    let runtime = &drive.runtime;
+    let assists = runtime.driving_assists;
+    game_driving_state(
+        runtime.vehicles[runtime.vehicle].drivetrain.gear() as i32 - 1,
+        assists.automatic_clutch as u32 | ((assists.automatic_gears as u32) << 1),
+        runtime.area.player.driving(),
+    );
     let actions = game_actions();
     let frame = FrameInput {
         held: game_keys(),
@@ -410,6 +417,15 @@ fn read_input(
         drive.runtime.recover(&reference.0);
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
         clear_input(&mut drive);
+    }
+    let requested = game_driving_assists();
+    if requested & 4 != 0 && !requests.pending() {
+        let _ = drive
+            .runtime
+            .set_driving_assists(crate::reference::DrivingAssists {
+                automatic_clutch: requested & 1 != 0,
+                automatic_gears: requested & 2 != 0,
+            });
     }
     if !drive.ready || !drive.runtime.started || drive.runtime.paused {
         drive.input.clear();

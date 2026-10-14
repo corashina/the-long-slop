@@ -809,44 +809,6 @@ pub fn collider_builder(geometry: &ColliderGeometry) -> Result<ColliderBuilder, 
     }
 }
 
-pub fn select_gear(
-    wheel_rpm: f32,
-    reverse: bool,
-    throttle: bool,
-    previous: usize,
-    engine: &crate::reference::EngineReference,
-    vehicle: &VehicleReference,
-) -> usize {
-    let neutral = vehicle
-        .gear_ratios
-        .iter()
-        .position(|ratio| *ratio == 0.0)
-        .expect("validated neutral gear");
-    if !throttle {
-        return neutral;
-    }
-    let mut selected = previous;
-    let mut maximum = 0.0;
-    for (index, ratio) in vehicle.gear_ratios.iter().enumerate().rev() {
-        if *ratio == 0.0 || (*ratio < 0.0) != reverse {
-            continue;
-        }
-        let rpm = wheel_rpm.abs() * vehicle.final_drive_ratio * ratio.abs();
-        let mut value = crate::simulation::engine::torque(&engine.torque_curve, rpm);
-        if value == 0.0 {
-            value = crate::simulation::engine::torque(
-                &engine.torque_curve,
-                engine.max_rpm * 0.5 * vehicle.final_drive_ratio * ratio.abs(),
-            );
-        }
-        if value > maximum {
-            maximum = value;
-            selected = index;
-        }
-    }
-    selected
-}
-
 fn refresh_world_queries(physics: &mut rapier3d::prelude::PhysicsWorld) {
     // CollisionPipeline consumes body changes before PhysicsPipeline registers islands.
     // Update query bounds while retaining those changes for the next fixed step.

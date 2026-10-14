@@ -11,6 +11,10 @@ impl SaveSnapshot {
         if self.schema_version != SAVE_SCHEMA_VERSION {
             return Err(SaveError::IncompatibleSources("Schema version".into()));
         }
+        data(
+            !self.driving_assists.automatic_gears || self.driving_assists.automatic_clutch,
+            "Driving assist dependency",
+        )?;
         validate_source(&self.source, expected, reference)?;
         data(timestamp(&self.saved_at), "Save timestamp")?;
         let ids = IdentityMap::new(reference)?;
@@ -119,7 +123,7 @@ impl SaveSnapshot {
             )?;
             body(&vehicle.body)?;
             data(
-                vehicle.auto_gear < reference.vehicles[index].gear_ratios.len(),
+                vehicle.gear < reference.vehicles[index].gear_ratios.len(),
                 "Vehicle gear",
             )?;
             let e = &vehicle.engine;
@@ -132,8 +136,7 @@ impl SaveSnapshot {
                     e.last_start_chance_time,
                     e.random_start,
                     e.supplied_fuel,
-                ]) && e.rpm >= 0.
-                    && e.elapsed >= 0.
+                ]) && e.elapsed >= 0.
                     && e.last_run_time >= -1.
                     && e.last_run_time <= e.elapsed
                     && e.last_start_chance_time >= 0.

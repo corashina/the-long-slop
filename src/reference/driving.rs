@@ -18,7 +18,7 @@ pub enum DrivingAction {
     Gear6,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DrivingAssists {
     pub automatic_clutch: bool,

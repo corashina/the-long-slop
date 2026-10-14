@@ -126,6 +126,10 @@ extern "C" {
     pub fn game_wheel() -> f32;
     #[wasm_bindgen(js_namespace = window, js_name = gameActions)]
     pub fn game_actions() -> u32;
+    #[wasm_bindgen(js_namespace = window, js_name = gameDrivingAssists)]
+    pub fn game_driving_assists() -> u32;
+    #[wasm_bindgen(js_namespace = window, js_name = gameDrivingState)]
+    pub fn game_driving_state(gear: i32, assists: u32, seated: bool);
     #[wasm_bindgen(js_namespace = window, js_name = gameUpdate)]
     pub fn game_update(
         speed: f32,

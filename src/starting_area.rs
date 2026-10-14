@@ -567,7 +567,7 @@ pub struct VehicleRuntime {
     /// Distance this vehicle has driven, in meters.
     pub trip_m: f64,
     ignition_held: bool,
-    auto_gear: usize,
+    pub drivetrain: crate::simulation::drivetrain::DrivetrainState,
     recovery_bounds: crate::reference::Bounds,
     /// Absolute position at the start of the current step.
     previous: [f64; 3],
@@ -603,11 +603,7 @@ impl VehicleRuntime {
             handbrake: vehicle.handbrake,
             trip_m: 0.0,
             ignition_held: false,
-            auto_gear: vehicle
-                .gear_ratios
-                .iter()
-                .position(|ratio| *ratio == 0.0)
-                .expect("validated neutral"),
+            drivetrain: crate::simulation::drivetrain::DrivetrainState::new(vehicle),
             recovery_bounds,
             previous: [0.0; 3],
         })
@@ -617,6 +613,7 @@ impl VehicleRuntime {
 mod save;
 
 pub struct GarageRuntime {
+    pub driving_assists: crate::reference::DrivingAssists,
     pub survival: crate::survival::SurvivalState,
     pub sleep: crate::sleep::SleepState,
     pub weather: crate::weather::WeatherState,
@@ -656,6 +653,18 @@ pub struct GarageRuntime {
 }
 
 impl GarageRuntime {
+    pub fn set_driving_assists(
+        &mut self,
+        mut requested: crate::reference::DrivingAssists,
+    ) -> Result<(), ReferenceError> {
+        if self.started && !self.paused {
+            return Err(ReferenceError("Driving assists require pause".into()));
+        }
+        requested.automatic_gears &= requested.automatic_clutch;
+        self.driving_assists = requested;
+        self.clear_input();
+        Ok(())
+    }
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         Self::new_candidate(reference, true)
     }
@@ -716,6 +725,7 @@ impl GarageRuntime {
             0x70697373,
         );
         let mut runtime = Self {
+            driving_assists: reference.driving.default_assists,
             urine,
             urine_reference,
             urine_emission: [0.; 2],
@@ -1343,31 +1353,26 @@ impl GarageRuntime {
                 .map(|v| v * v)
                 .sum::<f32>()
                 .sqrt();
-        let direction = if direction.abs() < source.auto_move_min {
-            0.0
-        } else {
-            direction
-        };
+        let rolling_rpm = self.physics.driven_wheel_rpm(index);
         let vehicle = &mut self.vehicles[index];
-        let forward = controls.throttle > 0.0;
-        let go_forward = forward && direction >= 0.0;
-        let go_backward = controls.brake > 0.0 && controls.throttle <= 0.25 && direction <= 0.0;
-        let inverse = (source.gear_ratios[vehicle.auto_gear] < 0.0
-            || (!go_forward && direction <= 0.0))
-            && source.gear_ratios.iter().any(|ratio| *ratio < 0.0);
-        let (throttle, brake) = if inverse {
-            (controls.brake, controls.throttle)
-        } else {
-            (controls.throttle, controls.brake)
-        };
-        let shift_requested = throttle > 0.0 || go_forward || go_backward;
+        let drivetrain = vehicle.drivetrain.step(
+            controls,
+            input.pressed,
+            self.driving_assists,
+            vehicle.engine_output,
+            rolling_rpm,
+            direction,
+            source,
+            &reference.driving,
+            driving,
+        );
+        let gear = drivetrain.gear;
+        let throttle = drivetrain.throttle;
+        let brake = drivetrain.brake;
         let car_controls = driving
             || (self.area.player.driving2() && self.area.player.seat_vehicle() == Some(index));
-        let ignition_held = car_controls
-            && (input.held & keys::IGNITION != 0
-                || (!source.dont_ignite_with_throttle_in_automatic
-                    && throttle > 0.25
-                    && !vehicle.engine_output.running));
+        let ignition_held =
+            car_controls && (input.held & keys::IGNITION != 0 || drivetrain.ignition_request);
         let ignition_pressed = (car_controls && input.pressed & keys::IGNITION != 0)
             || (ignition_held && !vehicle.ignition_held);
         let ignition_released = !ignition_held
@@ -1376,32 +1381,6 @@ impl GarageRuntime {
         if ignition_pressed {
             self.attempts = self.attempts.wrapping_add(1);
         }
-        let rolling_rpm = self.physics.driven_wheel_rpm(index);
-        let gear = crate::vehicle::select_gear(
-            rolling_rpm,
-            !forward,
-            shift_requested,
-            vehicle.auto_gear,
-            engine_reference,
-            source,
-        );
-        vehicle.auto_gear = gear;
-        let ratio = source.gear_ratios[gear].abs() * source.final_drive_ratio;
-        let wheel_rpm = rolling_rpm.abs() * ratio;
-        let automatic_engagement = if ratio == 0.0 {
-            0.0
-        } else {
-            ((vehicle.engine.rpm - engine_reference.auto_shift_clutch_rpm
-                + engine_reference.auto_shift_clutch_rpm_range)
-                / engine_reference.auto_shift_clutch_rpm_range)
-                .clamp(0.0, 1.0)
-        };
-        let clutch_pedal = if throttle > 0.0 && brake > 0.0 {
-            controls.clutch.max(brake)
-        } else {
-            controls.clutch
-        };
-        let clutch = automatic_engagement.min(1.0 - clutch_pedal);
         let radiator_condition = ((1.0
             - self
                 .area
@@ -1420,9 +1399,9 @@ impl GarageRuntime {
                 ignition_pressed,
                 ignition_released,
                 throttle,
-                clutch,
-                wheel_rpm,
-                free_run: source.gear_free_run[gear],
+                clutch: drivetrain.engagement,
+                wheel_rpm: drivetrain.wheel_rpm,
+                free_run: drivetrain.free_run,
                 speed_kmh: speed * 3.6,
                 ambient_temperature: self.lighting.cycle.output().ambient_temperature,
                 ambient_heat_modifier: engine_reference.globals.outside_temperature_modifier
@@ -1519,10 +1498,7 @@ impl GarageRuntime {
         self.physics.apply_vehicle_forces(
             index,
             drive,
-            crate::vehicle::DriveTorques {
-                motor_nm: output.torque_nm * source.gear_ratios[gear] * source.final_drive_ratio,
-                engine_brake_nm: output.brake_torque_nm * ratio,
-            },
+            crate::simulation::drivetrain::transmitted_torques(output, source, gear),
         );
     }
 

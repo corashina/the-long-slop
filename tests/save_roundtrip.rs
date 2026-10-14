@@ -818,7 +818,7 @@ fn installed_fleet_roundtrip_preserves_owners_and_selection() {
         wheel.rpm = 30. + index as f32;
     }
     for vehicle in &mut saved.vehicles {
-        vehicle.auto_gear = 1;
+        vehicle.gear = 1;
     }
     let expected = saved.clone();
     saved.vehicles.reverse();
@@ -983,5 +983,61 @@ fn installed_cross_vehicle_wheels_restore_current_owner() {
             loaded.area.items.get(rims[1 - index]).unwrap().body,
             Some(loaded.physics.chassis_handle(index))
         );
+    }
+}
+
+#[test]
+fn driving_save_restores_both_gears_and_assists_without_shift_edges() {
+    let r = common::reference();
+    let mut game = GarageRuntime::new(&r).unwrap();
+    game.paused = true;
+    let assists = DrivingAssists {
+        automatic_clutch: false,
+        automatic_gears: false,
+    };
+    game.set_driving_assists(assists).unwrap();
+    let mut saved = capture(&game, &r);
+    for (index, v) in r.vehicles.iter().enumerate() {
+        saved
+            .vehicles
+            .iter_mut()
+            .find(|record| record.instance == InstanceId::initial(&v.source))
+            .unwrap()
+            .gear = if index == 0 { 0 } else { 3 };
+    }
+    let mut loaded = GarageRuntime::from_save(&r, &stamp(&r), &saved).unwrap();
+    assert_eq!(loaded.driving_assists, assists);
+    assert_eq!(loaded.vehicles[0].drivetrain.gear(), 0);
+    assert_eq!(loaded.vehicles[1].drivetrain.gear(), 3);
+    loaded.clear_input();
+    loaded.paused = false;
+    loaded.started = true;
+    loaded.step(&r, FrameInput::default());
+    assert_eq!(loaded.vehicles[0].drivetrain.gear(), 0);
+    assert_eq!(loaded.vehicles[1].drivetrain.gear(), 3);
+    assert_eq!(
+        GarageRuntime::new(&r).unwrap().driving_assists,
+        r.driving.default_assists
+    );
+}
+#[test]
+fn invalid_driving_save_keeps_active_scene() {
+    let r = common::reference();
+    let game = GarageRuntime::new(&r).unwrap();
+    let before = capture(&game, &r);
+    for case in 0..3 {
+        let mut bad = before.clone();
+        match case {
+            0 => bad.schema_version = 1,
+            1 => bad.vehicles[1].gear = r.vehicles[1].gear_ratios.len(),
+            _ => {
+                bad.driving_assists = DrivingAssists {
+                    automatic_clutch: false,
+                    automatic_gears: true,
+                }
+            }
+        }
+        assert!(GarageRuntime::from_save(&r, &stamp(&r), &bad).is_err());
+        assert_eq!(capture(&game, &r), before);
     }
 }

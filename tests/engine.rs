@@ -319,3 +319,69 @@ fn removed_engine_stops_and_removed_radiator_cannot_cool_or_consume_contents() {
     assert!(disconnected.temperature > connected.temperature);
     assert_eq!(other[2], before[2]);
 }
+
+#[test]
+fn manual_clutch_attenuates_once_and_signed_wheels_can_stall() {
+    let r = common::reference().vehicles.remove(0).engine;
+    let mut tanks = fluids();
+    let mut other = tanks.clone();
+    let mut full = EngineState::new(&r);
+    full.rpm = 1500.;
+    full.ignition = true;
+    let mut half = full.clone();
+    let input = EngineInput {
+        throttle: 1.,
+        clutch: 1.,
+        wheel_rpm: r.max_rpm,
+        ..Default::default()
+    };
+    let a = step(&mut full, input, &mut tanks, &r);
+    let b = step(
+        &mut half,
+        EngineInput {
+            clutch: 0.5,
+            ..input
+        },
+        &mut other,
+        &r,
+    );
+    assert_eq!(a.rpm, b.rpm);
+    assert_eq!(b.torque_nm, a.torque_nm * 0.5);
+    assert!(a.torque_nm > 0.);
+    for _ in 0..120 {
+        step(
+            &mut full,
+            EngineInput {
+                clutch: 1.,
+                wheel_rpm: -1000.,
+                ..Default::default()
+            },
+            &mut tanks,
+            &r,
+        );
+    }
+    assert!(full.rpm < 0.);
+    assert!(!full.running());
+}
+#[test]
+fn source_free_run_disconnects_only_the_checked_branch() {
+    let mut r = common::reference().vehicles.remove(0).engine;
+    r.kickstart = true;
+    for (ignition, expected_connected) in [(true, true), (false, false)] {
+        let mut tanks = fluids();
+        let mut state = EngineState::new(&r);
+        state.ignition = ignition;
+        let out = step(
+            &mut state,
+            EngineInput {
+                clutch: 1.,
+                wheel_rpm: 1000.,
+                free_run: true,
+                ..Default::default()
+            },
+            &mut tanks,
+            &r,
+        );
+        assert_eq!(out.rpm > 0., expected_connected);
+    }
+}

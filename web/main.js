@@ -20,6 +20,8 @@ window.gameSaveResult=(id,kind,payload,error)=>{
 window.gameKeys=()=>{frame=input.takeFrame();return frame.held;};
 window.gamePressed=()=>frame.pressed;window.gameReleased=()=>frame.released;
 window.gameMouseX=()=>frame.mouseX;window.gameMouseY=()=>frame.mouseY;window.gameWheel=()=>frame.wheel;
+window.gameDrivingAssists=()=>menu?.takeDrivingAssists()??0;
+window.gameDrivingState=(gear,assists,seated)=>{window.gameState.gear=gear;window.gameState.drivingAssists=assists;menu?.drivingState(assists);feedback?.drivingState(gear,seated);};
 window.gameActions=()=>{const a=actions;actions=0;return a;};
 window.gameState = { speedKmh: 0, camera: 'First person', x: 0, y: 0, z: 0, contacts: 0,
   frameSteps: 0, totalSteps: 0, activeChunks: 0, colliderCount: 0, absoluteX: 0, absoluteY: 0, absoluteZ: 0,
@@ -79,7 +81,7 @@ async function load(){
  survival=createSurvival(manifest.ui,manifest.sleep.cooldown_seconds);
  audio=createAudio(manifest.audio);installAudioBridge(window,audio);
  window.addEventListener('pagehide',()=>audio.dispose());
- menu=createMenu({canvas,ui:manifest.ui,saveSession,audio,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ menu=createMenu({canvas,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,audio,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  const switchIconUrl='./assets/'+manifest.lighting.switch_icon.path;
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
  feedback=createFeedback(manifest.ui,switchIconUrl);

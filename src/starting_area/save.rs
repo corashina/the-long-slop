@@ -156,10 +156,11 @@ impl GarageRuntime {
                 .find(|v| v.instance == ids.vehicles[index])
                 .expect("validated vehicle");
             vehicle.engine_output = vehicle.engine.restore_save(&record.engine);
-            vehicle.auto_gear = record.auto_gear;
+            vehicle.drivetrain.restore_gear(record.gear);
             vehicle.handbrake = record.handbrake;
             vehicle.trip_m = record.trip_m;
         }
+        candidate.driving_assists = saved.driving_assists;
         candidate.attempts = crate::save::identity::unsigned(&saved.progress.start_attempts)?;
         let mounted: Vec<_> = candidate
             .light_owners
@@ -185,7 +186,7 @@ impl GarageRuntime {
                     && (electronics.electronics_source.is_none()
                         || electronics.electronics_output > electronics.electronics_threshold),
                 brake: 0.,
-                gear_ratio: reference.vehicles[index].gear_ratios[vehicle.auto_gear],
+                gear_ratio: reference.vehicles[index].gear_ratios[vehicle.drivetrain.gear()],
                 electronics_output: electronics.electronics_output,
             });
             headlights.push(
@@ -255,6 +256,7 @@ impl GarageRuntime {
             a.cmp(b)
         });
         let mut snapshot = SaveSnapshot {
+            driving_assists: self.driving_assists,
             schema_version: SAVE_SCHEMA_VERSION,
             saved_at: saved_at.into(),
             source: source.clone(),
@@ -292,7 +294,7 @@ impl GarageRuntime {
                             origin,
                         ),
                         engine: vehicle.engine.capture_save(),
-                        auto_gear: vehicle.auto_gear,
+                        gear: vehicle.drivetrain.gear(),
                         handbrake: vehicle.handbrake,
                         trip_m: vehicle.trip_m,
                         requested_headlights: self.lighting.headlights(index),

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {formatTank,FeedbackState,selectIcon} from '../../web/feedback.js';
+import {formatGear,formatTank,FeedbackState,selectIcon} from '../../web/feedback.js';
 const tank=(amount,capacity=39)=>({amount,capacity,quantities:[amount,0,0,0,0,0],hasName:false,name:'',fluidName:'',noText:false});
 test('empty_full_and_fractional_source_format',()=>{
  assert.equal(formatTank(tank(Math.fround(.05))),'empty');
@@ -61,4 +61,8 @@ test('radio_feedback_uses_source_values_without_playback',async()=>{
  r.radioAm=true;r.radioFrequency=630;m.update(r);assert.equal(m.fluidText,'AM 630');
  r.radioFrequency=undefined;m.update(r);assert.equal(m.fluidText,'');
  r.context=2;m.update(r);assert.equal(m.targetName,'RadioColVolume');assert.equal(m.fluidText,'');a.dispose();
+});
+
+test('source_gear_display_uses_reverse_neutral_and_forward_numbers',()=>{
+ assert.equal(formatGear(-1),'R');assert.equal(formatGear(0),'N');assert.equal(formatGear(4),'4');
 });

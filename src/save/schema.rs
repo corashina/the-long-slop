@@ -1,7 +1,7 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 1;
+pub const SAVE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -20,6 +20,7 @@ pub struct SourceStamp {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SaveSnapshot {
+    pub driving_assists: crate::reference::DrivingAssists,
     pub schema_version: u32,
     pub saved_at: String,
     pub source: SourceStamp,
@@ -36,6 +37,15 @@ pub struct SaveSnapshot {
 }
 impl SaveSnapshot {
     pub fn from_json(bytes: &[u8]) -> Result<Self, SaveError> {
+        #[derive(Deserialize)]
+        struct Version {
+            schema_version: u32,
+        }
+        let version: Version =
+            serde_json::from_slice(bytes).map_err(|e| SaveError::CorruptData(e.to_string()))?;
+        if version.schema_version != SAVE_SCHEMA_VERSION {
+            return Err(SaveError::IncompatibleSources("Schema version".into()));
+        }
         serde_json::from_slice(bytes).map_err(|e| SaveError::CorruptData(e.to_string()))
     }
 }
@@ -111,7 +121,7 @@ pub struct VehicleSnapshot {
     pub instance: InstanceId,
     pub body: BodySnapshot,
     pub engine: EngineSnapshot,
-    pub auto_gear: usize,
+    pub gear: usize,
     pub handbrake: bool,
     pub trip_m: f64,
     pub requested_headlights: u8,

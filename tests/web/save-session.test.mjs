@@ -6,8 +6,8 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});retur
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 async function record(payload){const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(payload)));return {version:1,payload,checksum:Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('')};}
 function setup(overrides={}){
- const calls={commit:[],discard:[],write:[],status:[]};const runtime={capture:async()=>({schema_version:1}),prepare:async()=>7,commit:async(token,onDispatch)=>{onDispatch();calls.commit.push(token);},discard:token=>calls.discard.push(token),prepareNewGame:async()=>8,...overrides.runtime};
- const storage={read:async()=>await record({schema_version:1}),write:async save=>{calls.write.push(save);},...overrides.storage};
+ const calls={commit:[],discard:[],write:[],status:[]};const runtime={capture:async()=>({schema_version:2}),prepare:async()=>7,commit:async(token,onDispatch)=>{onDispatch();calls.commit.push(token);},discard:token=>calls.discard.push(token),prepareNewGame:async()=>8,...overrides.runtime};
+ const storage={read:async()=>await record({schema_version:2}),write:async save=>{calls.write.push(save);},...overrides.storage};
  const session=createSaveSession({runtime,storage,onStatus:status=>calls.status.push(status)});return {calls,session};
 }
 test('save_load_and_new_game_finish_and_clear_pending',async()=>{

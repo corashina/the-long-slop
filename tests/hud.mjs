@@ -70,3 +70,9 @@ test('unnamed source tank label cannot replace the resolved action owner',()=>{
  assert.equal(elements.get('#target-name').textContent,'Fuel can');
  assert.equal(elements.get('#fluid-text').textContent,'0.5 / 5 L\n100% Gas');
 });
+
+test('gear feedback renders Rust output and hides outside the driver seat',()=>{
+ const {elements,window}=fixture();
+ for(const [gear,text] of [[-1,'R'],[0,'N'],[3,'3']]){window.gameDrivingState(gear,1,true);assert.equal(elements.get('#driving-gear').textContent,'Gear: '+text);assert.equal(elements.get('#driving-gear').hidden,false);}
+ window.gameDrivingState(3,1,false);assert.equal(elements.get('#driving-gear').hidden,true);
+});
