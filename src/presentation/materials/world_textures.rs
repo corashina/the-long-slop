@@ -125,6 +125,7 @@ impl WorldTextures {
         for a in self.arrays.drain(..).flatten() {
             if Arc::strong_count(&a.owner) == 1 {
                 if let Some(h) = a.image {
+                    self.uploaded.lock().unwrap().remove(&h.id());
                     images.remove(h.id());
                 }
             }
