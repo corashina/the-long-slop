@@ -27,8 +27,10 @@ use std::{
 
 pub mod mirrors;
 pub use mirrors::*;
+pub mod stations;
 pub mod survival;
 pub mod weather;
+pub use stations::*;
 pub use survival::*;
 pub use weather::*;
 pub mod instruments;
@@ -91,6 +93,7 @@ pub enum AssetUsage {
     RoadLampPrototype,
     SkyPrototype,
     FoodPrototype,
+    StationPrototype,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -823,6 +826,7 @@ pub struct ReferenceManifest {
     pub seats: Vec<SeatReference>,
     pub vehicles: Vec<VehicleReference>,
     pub area: StartingAreaReference,
+    pub stations: StationsReference,
 }
 
 #[derive(Debug)]
@@ -912,6 +916,7 @@ impl ReferenceManifest {
         AudioGameplayReference::from_value(&self.audio)?;
         self.sleep.validate(self)?;
         self.weather.validate(self)?;
+        self.stations.validate(self)?;
         require(
             self.bodies.iter().all(|b| {
                 self.nodes.iter().any(|n| {

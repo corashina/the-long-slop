@@ -181,7 +181,7 @@ fn setup(
     commands.insert_resource(InstrumentVisuals::default());
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
     presentation::materials::load_materials(&mut commands, &server, &reference.0.rendering);
-    presentation::lighting::load_lighting(&mut commands, &server, &reference.0.lighting);
+    presentation::lighting::load_lighting(&mut commands, &server, &reference.0);
     presentation::lighting_assets::load_lighting(
         &mut commands,
         &server,

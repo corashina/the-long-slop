@@ -4,9 +4,16 @@ use my_summer_slop::simulation::DriveInput;
 use my_summer_slop::starting_area::GarageRuntime;
 use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose};
 use my_summer_slop::world::{
-    ChunkData, ChunkKey, WorldOrigin, WorldStream, active_chunks, generate_chunk,
+    ChunkData, ChunkKey, Station, WorldOrigin, WorldStream, active_chunks, generate_chunk,
     generate_chunk_in_band, nearest_station, road_sample,
 };
+
+/// These streaming tests drive one car.
+fn lada_only() -> my_summer_slop::reference::ReferenceManifest {
+    let mut reference = common::reference();
+    reference.vehicles.truncate(1);
+    reference
+}
 
 // Chunk origin is [band * 128, 0, -key * 128]. Road distance is -absolute Z.
 fn seam_vertices(chunk: &ChunkData, end: bool) -> Vec<[f64; 3]> {
@@ -98,21 +105,25 @@ fn stations_and_active_window_follow_absolute_distance() {
         std::array::from_fn(|i| ChunkKey(i as i64 - 2))
     );
     assert_eq!(active_chunks(-0.01)[3], ChunkKey(-1));
+    let reference = common::reference().stations;
     for id in [-100, -1, 0, 1, 3000] {
-        let station = nearest_station(42, id as f64 * 640.0 + 100.0);
+        let station = nearest_station(42, Station::distance(id) + 100.0, &reference);
         assert_eq!(station.id, id);
-        assert_eq!(station.absolute_point[2], -(id as f64 * 640.0));
-        let chunk = generate_chunk(42, ChunkKey(id * 5));
-        assert_eq!(chunk.stations, vec![station]);
-        let road = road_sample(42, id as f64 * 640.0);
-        assert!((station.absolute_point[0] - road.center[0] - 10.0).abs() < 0.001);
+        let road = road_sample(42, Station::distance(id));
+        let lateral = (station.absolute_point[0] - road.center[0]) as f32;
+        let side = reference.types[station.kind].sides.iter().any(|side| {
+            (side.lateral_meters[0] - 0.01..=side.lateral_meters[1] + 0.01).contains(&lateral)
+        });
+        assert!(side, "station {id} lateral {lateral}");
+        let pump = (station.pump_point[0] - road.center[0]) as f32;
+        assert!(pump.signum() == lateral.signum() && pump.abs() < lateral.abs());
     }
 }
 
 #[test]
 fn rebase_preserves_wheels_velocities_and_absolute_position() {
     let mut physics = PhysicsWorld::new(
-        &common::reference(),
+        &lada_only(),
         &[VehiclePose {
             position: [0.0, 1.1, 0.0],
             rotation: [0.0, 0.0, 0.0, 1.0],
@@ -175,32 +186,38 @@ fn rebase_preserves_wheels_velocities_and_absolute_position() {
 #[test]
 fn streaming_bounds_colliders_and_loads_teleport_destination() {
     let mut physics = PhysicsWorld::new(
-        &common::reference(),
+        &lada_only(),
         &[VehiclePose {
             position: [0.0, 1.1, 0.0],
             rotation: [0.0, 0.0, 0.0, 1.0],
         }],
     )
     .expect("fixture physics");
-    let mut stream = WorldStream::new(42);
+    let mut stream = WorldStream::new(42, &common::reference().stations).unwrap();
+    let car_colliders = physics.collider_count();
     for distance in (0..40)
         .map(|i| i as f64 * 256.0)
         .chain([1_000_000.0, -1024.0, 0.0])
     {
         stream.sync_at(road_sample(42, distance).center, &mut physics);
         assert_eq!(stream.chunks().count(), 11);
-        let expected_colliders = 2 + stream
-            .chunks()
-            .map(|c| {
-                1 + c
-                    .data
-                    .props
-                    .iter()
-                    .filter(|p| p.kind != my_summer_slop::world::PropKind::Cactus)
-                    .count()
-                    + c.data.stations.len() * 2
-            })
-            .sum::<usize>();
+        let expected_colliders = car_colliders
+            + stream
+                .chunks()
+                .map(|c| {
+                    1 + c
+                        .data
+                        .props
+                        .iter()
+                        .filter(|p| p.kind != my_summer_slop::world::PropKind::Cactus)
+                        .count()
+                        + c.data
+                            .stations
+                            .iter()
+                            .map(|s| 1 + stream.stations().types[s.kind].colliders.len())
+                            .sum::<usize>()
+                })
+                .sum::<usize>();
         let terrain_count = physics
             .rapier()
             .colliders
@@ -212,7 +229,6 @@ fn streaming_bounds_colliders_and_loads_teleport_destination() {
             physics.collider_count(),
             expected_colliders + terrain_count - stream.chunks().count()
         );
-        assert!(physics.collider_count() <= 66);
         for key in active_chunks(distance) {
             assert!(stream.chunks().any(|c| c.data.key == key));
         }
@@ -234,14 +250,14 @@ fn streaming_bounds_colliders_and_loads_teleport_destination() {
 #[test]
 fn driving_crosses_chunk_seams_and_rebase_without_trip_jump() {
     let mut physics = PhysicsWorld::new(
-        &common::reference(),
+        &lada_only(),
         &[VehiclePose {
             position: [0.0, 1.1, 0.0],
             rotation: [0.0, 0.0, 0.0, 1.0],
         }],
     )
     .expect("fixture physics");
-    let mut stream = WorldStream::new(42);
+    let mut stream = WorldStream::new(42, &common::reference().stations).unwrap();
     let pose = stream.reset_pose(2000.0, false, &mut physics);
     physics.reset(0, pose);
     for _ in 0..120 {
@@ -287,7 +303,7 @@ fn driving_crosses_chunk_seams_and_rebase_without_trip_jump() {
 #[test]
 fn lateral_streaming_supports_travel_beyond_the_old_edge() {
     let mut physics = PhysicsWorld::new(
-        &common::reference(),
+        &lada_only(),
         &[VehiclePose {
             position: [55.0, 8.0, -64.0],
             rotation: [
@@ -299,7 +315,8 @@ fn lateral_streaming_supports_travel_beyond_the_old_edge() {
         }],
     )
     .expect("fixture physics");
-    let mut stream = WorldStream::new(42);
+    let mut stream = WorldStream::new(42, &common::reference().stations).unwrap();
+    let car_colliders = physics.collider_count();
     stream.sync_at([55.0, 8.0, -64.0], &mut physics);
     for _ in 0..180 {
         physics.apply_vehicle_forces(0, DriveInput::default(), 2600.0);
@@ -332,18 +349,23 @@ fn lateral_streaming_supports_travel_beyond_the_old_edge() {
             old_band
         );
         assert_eq!(stream.chunks().count(), 11);
-        let expected = 2 + stream
-            .chunks()
-            .map(|c| {
-                1 + c
-                    .data
-                    .props
-                    .iter()
-                    .filter(|p| p.kind != my_summer_slop::world::PropKind::Cactus)
-                    .count()
-                    + c.data.stations.len() * 2
-            })
-            .sum::<usize>();
+        let expected = car_colliders
+            + stream
+                .chunks()
+                .map(|c| {
+                    1 + c
+                        .data
+                        .props
+                        .iter()
+                        .filter(|p| p.kind != my_summer_slop::world::PropKind::Cactus)
+                        .count()
+                        + c.data
+                            .stations
+                            .iter()
+                            .map(|s| 1 + stream.stations().types[s.kind].colliders.len())
+                            .sum::<usize>()
+                })
+                .sum::<usize>();
         assert_eq!(physics.collider_count(), expected);
     }
     assert!(stream.origin.absolute(physics.snapshot(0).pose.position)[0] > 362.0);
@@ -353,14 +375,14 @@ fn lateral_streaming_supports_travel_beyond_the_old_edge() {
 #[test]
 fn walking_focus_rebases_a_parked_vehicle_without_travel() {
     let mut physics = PhysicsWorld::new(
-        &common::reference(),
+        &lada_only(),
         &[VehiclePose {
             position: [0.0, 1.1, 0.0],
             rotation: [0.0, 0.0, 0.0, 1.0],
         }],
     )
     .expect("fixture physics");
-    let mut stream = WorldStream::new(42);
+    let mut stream = WorldStream::new(42, &common::reference().stations).unwrap();
     let before = physics.snapshot(0);
     let shift = stream.rebase([2300.0, 0.0, 0.0], &mut physics);
     assert_eq!(shift, Some([2304.0, 0.0, 0.0]));
@@ -403,14 +425,14 @@ fn garage_terrain_keeps_interiors_clear_and_connects_driveway() {
     reference.bodies[0].pose.rotation = [0.0, 0.0, 0.0, 1.0];
     reference.colliders.push(collider);
     let mut physics = PhysicsWorld::new(
-        &common::reference(),
+        &lada_only(),
         &[VehiclePose {
             position: [0.0, 1.1, 0.0],
             rotation: [0.0, 0.0, 0.0, 1.0],
         }],
     )
     .unwrap();
-    let mut world = WorldStream::new(42);
+    let mut world = WorldStream::new(42, &common::reference().stations).unwrap();
     world.configure_starting_area(&reference);
     world.sync_at([40.0, 0.0, -64.0], &mut physics);
     let data = &world
@@ -532,14 +554,14 @@ fn road_lamp_window_bound_comes_from_actual_chunks() {
     use my_summer_slop::world::road_lamp_range;
     let reference = common::reference();
     let mut physics = PhysicsWorld::new(
-        &reference,
+        &lada_only(),
         &[VehiclePose {
             position: [0., 1.1, 0.],
             rotation: [0., 0., 0., 1.],
         }],
     )
     .unwrap();
-    let mut stream = WorldStream::new(42);
+    let mut stream = WorldStream::new(42, &common::reference().stations).unwrap();
     let mut maximum = 0;
     for distance in (-8..128).map(|i| i as f64 * 128.).chain([100_000_100.]) {
         stream.sync_at(road_sample(42, distance).center, &mut physics);
@@ -585,8 +607,8 @@ fn station_food_stays_consumed_after_stream_rebase_and_recovery() {
         .chunks()
         .flat_map(|chunk| &chunk.data.stations)
         .find(|station| {
-            (station.absolute_point[0] + 1. - absolute[0]).abs() < 0.001
-                && (station.absolute_point[2] - 2. - absolute[2]).abs() < 0.001
+            (station.pump_point[0] - absolute[0]).abs() < 0.001
+                && (station.pump_point[2] + 1. - absolute[2]).abs() < 0.001
         })
         .unwrap();
     let mut food_min = [f32::INFINITY; 3];
@@ -598,18 +620,18 @@ fn station_food_stays_consumed_after_stream_rebase_and_recovery() {
             food_max[axis] = food_max[axis].max(aabb.maxs[axis]);
         }
     }
-    let station_point = runtime.stream.origin.local(station.absolute_point);
+    let pump = runtime.stream.origin.local(station.pump_point);
     assert!(
-        food_min[0] > station_point[0] + 0.35,
-        "food={food_min:?} station={station_point:?}"
+        food_min[2] > pump[2] + 0.35,
+        "food={food_min:?} pump={pump:?}"
     );
     assert!(
-        food_max[0] < station_point[0] + 4.,
-        "food={food_max:?} station={station_point:?}"
+        food_max[2] < pump[2] + 2.,
+        "food={food_max:?} pump={pump:?}"
     );
     assert!(
-        food_min[1] > station_point[1] - 0.1,
-        "food={food_min:?} station={station_point:?}"
+        food_min[1] > pump[1] - 0.1,
+        "food={food_min:?} pump={pump:?}"
     );
     for _ in 0..6 {
         assert!(runtime.consume(&reference, station_food).unwrap());

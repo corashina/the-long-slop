@@ -1,14 +1,20 @@
-use crate::reference::{Bounds, ColliderGeometry, ReferenceManifest, StartingAreaReference};
+use crate::reference::{
+    Bounds, ColliderGeometry, ReferenceError, ReferenceManifest, StartingAreaReference,
+    StationsReference,
+};
 use crate::vehicle::{ColliderHandle, PhysicsWorld, VehiclePose};
 
 mod lamps;
+mod stations;
 mod terrain;
 pub use lamps::{RoadLampId, RoadLampPlacement, road_lamp_placement, road_lamp_range};
+pub use stations::{Station, nearest_station, station};
 
 // At 2^45 meters, f64 spacing is 1/128 meter; chunk and band indices fit i64.
 pub const MAX_ABSOLUTE_COORDINATE: f64 = (1_u64 << 45) as f64;
 pub const CHUNK_LENGTH: f64 = 128.0;
 pub const STATION_SPACING: f64 = 640.0;
+pub const PUMP_HALF_SIZE: [f32; 3] = [0.35, 0.7, 0.35];
 pub const REBASE_LIMIT: f32 = 2048.0;
 pub const DEFAULT_SEED: u64 = 42;
 pub const LATERAL_BAND_WIDTH: f64 = 128.0;
@@ -41,12 +47,6 @@ pub struct ChunkKey(pub i64);
 pub struct RoadSample {
     pub center: [f64; 3],
     pub tangent: [f32; 3],
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Station {
-    pub id: i64,
-    pub absolute_point: [f64; 3],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -173,12 +173,6 @@ pub fn generate_chunk_in_band(seed: u64, key: ChunkKey, lateral_band: i64) -> Ch
             indices.extend([[a, b, c], [b, d, c]]);
         }
     }
-    let stations =
-        if key.0.rem_euclid(5) == 0 && (10.0 - band_center).abs() < TERRAIN_HALF_WIDTH - 8.0 {
-            vec![station(seed, key.0 / 5)]
-        } else {
-            Vec::new()
-        };
     let mut props = Vec::with_capacity(5);
     for i in 0..2 {
         let bits = hash(seed ^ (key.0 as u64).wrapping_mul(17) ^ i);
@@ -234,7 +228,7 @@ pub fn generate_chunk_in_band(seed: u64, key: ChunkKey, lateral_band: i64) -> Ch
         lateral_samples,
         vertices,
         indices,
-        stations,
+        stations: Vec::new(),
         props,
     }
 }
@@ -322,21 +316,6 @@ fn prepare_terrain(
     terrain::carve_rooms(data, interiors);
     data.props
         .retain(|prop| !inside(prop.absolute_point.map(|x| x as f32), home, 4.0));
-    data.stations
-        .retain(|station| !inside(station.absolute_point.map(|x| x as f32), home, 10.0));
-}
-
-fn station(seed: u64, id: i64) -> Station {
-    let mut point = road_sample(seed, id as f64 * STATION_SPACING).center;
-    point[0] += 10.0;
-    Station {
-        id,
-        absolute_point: point,
-    }
-}
-
-pub fn nearest_station(seed: u64, distance_m: f64) -> Station {
-    station(seed, (distance_m / STATION_SPACING).round() as i64)
 }
 
 pub struct LoadedChunk {
@@ -352,6 +331,9 @@ pub struct WorldStream {
     lateral_band: i64,
     pub focus: [f64; 3],
     starting_area: Option<StartingAreaReference>,
+    stations: StationsReference,
+    /// Root-local static shapes per station type.
+    station_shapes: Vec<Vec<(rapier3d::math::Pose, rapier3d::prelude::SharedShape)>>,
     interiors: Vec<Bounds>,
     station_items: Vec<(i64, crate::reference::ItemId)>,
     station_foods: Vec<(i64, crate::reference::ItemId)>,
@@ -362,21 +344,51 @@ pub struct WorldStream {
 }
 
 impl WorldStream {
-    pub fn new(seed: u64) -> Self {
-        Self {
+    pub fn new(seed: u64, stations: &StationsReference) -> Result<Self, ReferenceError> {
+        let station_shapes = stations
+            .types
+            .iter()
+            .map(|t| {
+                t.colliders
+                    .iter()
+                    .map(|c| {
+                        let collider = crate::vehicle::collider_builder(&c.geometry)?.build();
+                        Ok((*collider.position(), collider.shared_shape().clone()))
+                    })
+                    .collect()
+            })
+            .collect::<Result<_, ReferenceError>>()?;
+        Ok(Self {
             seed,
             origin: WorldOrigin::default(),
             chunks: Vec::with_capacity(11),
             lateral_band: 0,
             focus: [0.; 3],
             starting_area: None,
+            stations: stations.clone(),
+            station_shapes,
             interiors: Vec::new(),
             station_items: Vec::new(),
             vehicle_support: Vec::with_capacity(6),
             support_cells: Vec::with_capacity(6),
             station_foods: Vec::new(),
             next_dynamic_item: 0x8000_0000,
+        })
+    }
+
+    pub fn stations(&self) -> &StationsReference {
+        &self.stations
+    }
+
+    /// Terrain, home ground, and stations for one cell.
+    fn generate(&self, key: ChunkKey, lateral_band: i64) -> ChunkData {
+        let mut data = generate_chunk_in_band(self.seed, key, lateral_band);
+        if let Some(area) = &self.starting_area {
+            prepare_terrain(&mut data, self.seed, area, &self.interiors);
         }
+        let home = self.starting_area.as_ref().map(|area| &area.home_bounds);
+        stations::place(&mut data, self.seed, &self.stations, home);
+        data
     }
 
     pub fn capture_save(
@@ -534,10 +546,7 @@ impl WorldStream {
             if self.chunks.iter().any(|c| c.data.key == key) {
                 continue;
             }
-            let mut data = generate_chunk_in_band(self.seed, key, self.lateral_band);
-            if let Some(area) = &self.starting_area {
-                prepare_terrain(&mut data, self.seed, area, &self.interiors);
-            }
+            let data = self.generate(key, self.lateral_band);
             let mut colliders = Vec::with_capacity(7);
             let mut pumps = Vec::new();
             colliders.push(physics.insert_mesh_at(
@@ -553,14 +562,16 @@ impl WorldStream {
                 }
             }
             for station in &data.stations {
-                let mut center = station.absolute_point;
-                center[0] += 6.0;
-                center[1] += 1.5;
-                colliders.push(physics.insert_box(self.origin.local(center), [2.0, 1.5, 3.0]));
-                let mut pump = station.absolute_point;
-                pump[1] += 0.7;
-                pump[2] -= 3.0;
-                let handle = physics.insert_box(self.origin.local(pump), [0.35, 0.7, 0.35]);
+                let root = rapier3d::math::Pose::from_parts(
+                    rapier3d::math::Vector::from_array(self.origin.local(station.absolute_point)),
+                    rapier3d::math::Rotation::from_array(station.rotation),
+                );
+                for (pose, shape) in &self.station_shapes[station.kind] {
+                    colliders.push(physics.insert_shape(shape.clone(), root * *pose));
+                }
+                let mut pump = station.pump_point;
+                pump[1] += PUMP_HALF_SIZE[1] as f64;
+                let handle = physics.insert_box(self.origin.local(pump), PUMP_HALF_SIZE);
                 colliders.push(handle);
                 pumps.push((station.id, handle));
             }
@@ -616,10 +627,7 @@ impl WorldStream {
             {
                 continue;
             }
-            let mut data = generate_chunk_in_band(self.seed, key, band);
-            if let Some(area) = &self.starting_area {
-                prepare_terrain(&mut data, self.seed, area, &self.interiors);
-            }
+            let data = self.generate(key, band);
             let handle = physics.insert_mesh_at(
                 &data.vertices,
                 &data.indices,
@@ -659,18 +667,15 @@ impl WorldStream {
         }
     }
 
+    /// A station stop parks on the road beside the station.
     pub fn recovery_destination(&self, distance: f64, at_station: bool) -> ([f64; 3], [f32; 4]) {
-        let sample_distance = if at_station {
-            nearest_station(self.seed, distance).id as f64 * STATION_SPACING
+        let distance = if at_station {
+            Station::distance(nearest_station(self.seed, distance, &self.stations).id)
         } else {
             distance
         };
-        let road = road_sample(self.seed, sample_distance);
-        let mut point = if at_station {
-            nearest_station(self.seed, distance).absolute_point
-        } else {
-            road.center
-        };
+        let road = road_sample(self.seed, distance);
+        let mut point = road.center;
         point[1] += 1.1;
         let yaw = (-road.tangent[0]).atan2(-road.tangent[2]);
         (point, [0.0, (yaw * 0.5).sin(), 0.0, (yaw * 0.5).cos()])
@@ -741,12 +746,12 @@ pub fn sync_station_food(
         for station_index in 0..stream.chunks[chunk_index].data.stations.len() {
             let station = &stream.chunks[chunk_index].data.stations[station_index];
             let station_id = station.id;
-            let point = station.absolute_point;
+            let point = station.pump_point;
             if stream.station_foods.iter().any(|(id, _)| *id == station_id) {
                 continue;
             }
             let id = stream.allocate_consumable_id(&area.items);
-            let absolute = [point[0] + 1., point[1] + 0.5, point[2] - 2.];
+            let absolute = [point[0], point[1] + 0.5, point[2] + 1.];
             let pose = crate::vehicle::VehiclePose {
                 position: stream.origin.local(absolute),
                 rotation: [0., 0., 0., 1.],

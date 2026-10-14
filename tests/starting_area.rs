@@ -863,17 +863,17 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
             .stream
             .origin
             .absolute(runtime.physics.snapshot(0).pose.position)[2],
+        &reference.stations,
     );
     let car = runtime
         .stream
         .origin
         .absolute(runtime.physics.snapshot(0).pose.position);
-    assert!(
-        ((car[0] - station.absolute_point[0]).powi(2)
-            + (car[2] - station.absolute_point[2]).powi(2))
-        .sqrt()
-            < 0.01
+    let road = my_summer_slop::world::road_sample(
+        runtime.stream.seed,
+        my_summer_slop::world::Station::distance(station.id),
     );
+    assert!(((car[0] - road.center[0]).powi(2) + (car[2] - road.center[2]).powi(2)).sqrt() < 0.01);
     // Stage the same source can as trunk cargo. Recovery must preserve its car-relative pose.
     let body = runtime.area.items.get(can).unwrap().body.unwrap();
     let mut cargo = my_summer_slop::vehicle::to_rapier(runtime.physics.snapshot(0).pose);
@@ -915,7 +915,11 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
 #[test]
 fn walking_far_keeps_a_parked_road_car_supported() {
     let mut physics = common::world();
-    let mut stream = my_summer_slop::world::WorldStream::new(my_summer_slop::world::DEFAULT_SEED);
+    let mut stream = my_summer_slop::world::WorldStream::new(
+        my_summer_slop::world::DEFAULT_SEED,
+        &common::reference().stations,
+    )
+    .unwrap();
     let pose = stream.reset_pose(640.0, false, &mut physics);
     physics.reset(0, pose);
     for _ in 0..180 {

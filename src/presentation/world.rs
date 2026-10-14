@@ -4,7 +4,7 @@ use bevy::ecs as bevy_ecs;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
-use crate::world::{ChunkData, ChunkKey, PropKind, WorldStream, road_sample};
+use crate::world::{ChunkData, ChunkKey, PUMP_HALF_SIZE, PropKind, WorldStream, road_sample};
 
 #[derive(Component)]
 pub struct ChunkVisual(pub [f64; 3]);
@@ -26,8 +26,6 @@ pub struct WorldVisuals {
     rock: Handle<SourceMaterial>,
     cactus: Handle<SourceMaterial>,
     post: Handle<SourceMaterial>,
-    wall: Handle<SourceMaterial>,
-    roof: Handle<SourceMaterial>,
     pump: Handle<SourceMaterial>,
 }
 
@@ -48,8 +46,6 @@ impl WorldVisuals {
             ("rock", &self.rock),
             ("cactus", &self.cactus),
             ("post", &self.post),
-            ("wall", &self.wall),
-            ("roof", &self.roof),
             ("pump", &self.pump),
         ] {
             if !materials.contains(handle.id()) {
@@ -102,8 +98,6 @@ impl WorldVisuals {
             rock: materials.add(GeneratedWorldMaterial::Rock.material()),
             cactus: materials.add(GeneratedWorldMaterial::Cactus.material()),
             post: materials.add(GeneratedWorldMaterial::Post.material()),
-            wall: materials.add(GeneratedWorldMaterial::Wall.material()),
-            roof: materials.add(GeneratedWorldMaterial::Roof.material()),
             pump: materials.add(GeneratedWorldMaterial::Pump.material()),
         }
     }
@@ -207,41 +201,17 @@ impl WorldVisuals {
                         }
                     }
                 }
+                // The source stations have no pump. This one keeps the roadside refuel stop.
                 for station in &data.stations {
-                    let point = chunk_local(data, station.absolute_point);
-                    for (offset, scale, material, identity) in [
-                        (
-                            Vec3::new(6.0, 1.5, 0.0),
-                            Vec3::new(4.0, 3.0, 6.0),
-                            &self.wall,
-                            GeneratedWorldMaterial::Wall,
-                        ),
-                        (
-                            Vec3::new(6.0, 3.05, 0.0),
-                            Vec3::new(4.4, 0.15, 6.4),
-                            &self.roof,
-                            GeneratedWorldMaterial::Roof,
-                        ),
-                        (
-                            Vec3::new(0.0, 0.7, -3.0),
-                            Vec3::new(0.7, 1.4, 0.7),
-                            &self.pump,
-                            GeneratedWorldMaterial::Pump,
-                        ),
-                        (
-                            Vec3::new(0.0, 1.0, -2.64),
-                            Vec3::new(0.4, 0.3, 0.02),
-                            &self.post,
-                            GeneratedWorldMaterial::Post,
-                        ),
-                    ] {
-                        root.spawn((
-                            Mesh3d(self.cube.clone()),
-                            MeshMaterial3d(material.clone()),
-                            identity,
-                            Transform::from_translation(point + offset).with_scale(scale),
-                        ));
-                    }
+                    root.spawn((
+                        Mesh3d(self.cube.clone()),
+                        MeshMaterial3d(self.pump.clone()),
+                        GeneratedWorldMaterial::Pump,
+                        Transform::from_translation(
+                            chunk_local(data, station.pump_point) + Vec3::Y * PUMP_HALF_SIZE[1],
+                        )
+                        .with_scale(Vec3::from_array(PUMP_HALF_SIZE) * 2.0),
+                    ));
                 }
             });
             self.chunks.push(ChunkAssets {
@@ -293,18 +263,21 @@ fn terrain_mesh(chunk: &ChunkData) -> Mesh {
     generated_mesh(mesh)
 }
 
-/// Upper bound from this generator: terrain, stripes, rocks, posts, cactus parts, station parts.
-/// A station includes its sign/Post. Source imported primitives have a separate capacity.
+/// Upper bound from this generator: terrain, stripes, rocks, posts, cactus parts, pumps.
+/// Source imported primitives have a separate capacity.
 pub fn source_shadow_capacity() -> usize {
     const TERRAIN: usize = 1;
     const STRIPES: usize = 16;
     const ROCKS: usize = 2;
     const POSTS: usize = 2;
     const CACTUS_PARTS: usize = 1 + 2 * 2;
-    const STATION_PARTS: usize = 4;
+    const PUMPS: usize = 1;
     crate::world::active_chunks(0.).len()
-        * (TERRAIN + STRIPES + ROCKS + POSTS + CACTUS_PARTS + STATION_PARTS)
+        * (TERRAIN + STRIPES + ROCKS + POSTS + CACTUS_PARTS + PUMPS)
 }
 
 pub(crate) mod lamps;
+mod prototype;
+mod stations;
 pub(crate) use lamps::{RoadLamps, finish_road_lamp_warmup, prepare_road_lamp, sync_road_lamps};
+pub(crate) use stations::{StationModels, prepare_stations, sync_stations};

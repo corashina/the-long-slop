@@ -169,6 +169,7 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
         || !source.materials_ready
         || source.warming
         || source.road_lamps.recipe.is_none()
+        || !source.stations.ready()
     {
         return Err(fail("Lighting assets are not ready".into()));
     }
@@ -218,6 +219,9 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
     source
         .road_lamps
         .validate_assets(road_path, meshes, authored, standard)?;
+    source
+        .stations
+        .validate_assets("station prototypes", meshes, authored, standard)?;
     for lamp in &source.lamp_materials {
         for choice in &lamp.choices {
             choice.validate_assets(authored, standard)?;
@@ -284,11 +288,13 @@ impl PreparedPresentation {
             .expect("loaded lighting");
         world.insert_resource(self.lighting);
         old_lighting.road_lamps.release(world);
+        old_lighting.stations.release(world);
     }
     pub fn discard(mut self, world: &mut World) {
         // Materialize reserved entities only within this boundary, then release all of them.
         self.commands.apply(world);
         self.chunks.release(world);
         self.lighting.road_lamps.release(world);
+        self.lighting.stations.release(world);
     }
 }
