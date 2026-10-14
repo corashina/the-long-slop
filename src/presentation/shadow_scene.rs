@@ -82,6 +82,7 @@ pub fn prepare_scene(
     if frame.views[..MIRROR_START].iter().any(Option::is_none)
         || source.state != RenderingState::Ready
         || master.road_lamps.recipe.is_none()
+        || !master.stations.ready()
         || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
     {
         return;
@@ -95,7 +96,9 @@ pub fn prepare_scene(
             return;
         }
         scene.reserve(
-            imported + master.road_lamps.source_mesh_capacity(),
+            imported
+                + master.road_lamps.source_mesh_capacity()
+                + master.stations.source_mesh_capacity(),
             super::world::source_shadow_capacity(),
         );
     }

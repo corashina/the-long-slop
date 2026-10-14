@@ -637,7 +637,7 @@ impl GarageRuntime {
         let mut physics = PhysicsWorld::new(reference, &initial_vehicle_poses(reference)?)?;
 
         let mut area = StartingArea::new(reference, &mut physics, [0.0; 3])?;
-        let mut stream = WorldStream::new(DEFAULT_SEED);
+        let mut stream = WorldStream::new(DEFAULT_SEED, &reference.stations)?;
         stream.configure_starting_area(reference);
         if stream_world {
             stream.sync_at(
