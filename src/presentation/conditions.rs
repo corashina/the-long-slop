@@ -597,7 +597,7 @@ impl ConditionVisuals {
             for &entity in objects {
                 result.push((
                     entity,
-                    if state.active && state.on && !state.destroyed {
+                    if state.visible() {
                         Visibility::Inherited
                     } else {
                         Visibility::Hidden
@@ -636,7 +636,7 @@ impl ConditionVisuals {
             let state = *world.resource::<Drive>().runtime.area.conditions.wash(*id);
             for &entity in objects {
                 if let Some(mut v) = world.get_mut::<Visibility>(entity) {
-                    v.set_if_neq(if state.active && state.on && !state.destroyed {
+                    v.set_if_neq(if state.visible() {
                         Visibility::Inherited
                     } else {
                         Visibility::Hidden

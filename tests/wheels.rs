@@ -54,14 +54,44 @@ fn assert_slot_aim(
 fn reference() -> my_summer_slop::reference::ReferenceManifest {
     let mut reference = common::reference();
     reference.area.player_spawn.translation = [20.0, 1.0, 20.0];
+    let rim = reference.wheel_slots[0].rim;
+    common::add_condition_owner(&mut reference, rim);
     reference
+}
+
+fn world(reference: &my_summer_slop::reference::ReferenceManifest) -> PhysicsWorld {
+    let mut poses = my_summer_slop::starting_area::initial_vehicle_poses(reference).unwrap();
+    poses[0] = VehiclePose {
+        position: [0., 1.1, 0.],
+        rotation: [0., 0., 0., 1.],
+    };
+    PhysicsWorld::new(reference, &poses).unwrap()
+}
+
+fn remove_cover(area: &mut StartingArea, physics: &mut PhysicsWorld, rim: ItemId) {
+    let cover = area.interaction.parts.covering_item(rim).unwrap();
+    area.interaction
+        .parts
+        .remove(cover, &mut area.items, physics)
+        .unwrap();
+    area.interaction
+        .parts
+        .detach_mechanism(cover, &mut area.interaction.mechanisms, physics);
+    area.interaction
+        .sync_parts(&mut area.items, physics)
+        .unwrap();
+    let body = area.items.get(cover).unwrap().body.unwrap();
+    let off = physics.rapier().bodies[body].translation() + Vector::Y * 20.;
+    physics.rapier_mut().bodies[body].set_translation(off, true);
+    physics.refresh_queries();
 }
 
 #[test]
 fn wheel_sensors_are_unparented_and_keep_aim_after_rebase() {
     let reference = reference();
-    let mut physics = common::world();
+    let mut physics = world(&reference);
     let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
+    remove_cover(&mut area, &mut physics, reference.wheel_slots[0].rim);
     let mut wheels = WheelAssemblies::new(&reference).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
     let slot = reference.vehicles[0].wheel_slots[0];
@@ -85,9 +115,10 @@ fn wheel_sensors_are_unparented_and_keep_aim_after_rebase() {
 #[test]
 fn removed_wheel_has_no_support() {
     let reference = reference();
-    let mut physics = common::world();
+    let mut physics = world(&reference);
     physics.insert_box([0.0, -0.25, 0.0], [100.0, 0.25, 100.0]);
     let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
+    remove_cover(&mut area, &mut physics, reference.wheel_slots[0].rim);
     let mut wheels = WheelAssemblies::new(&reference).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
     for _ in 0..120 {
@@ -102,7 +133,12 @@ fn removed_wheel_has_no_support() {
         .find(|wheel| wheel.id == slot)
         .unwrap();
     assert!(physics.snapshot(0).wheels_contact[0]);
-    let condition = area.conditions.item_quality(mounted.rim);
+    common::set_condition(&mut area, &reference, mounted.rim, 3);
+    let condition = area
+        .conditions
+        .item_quality(mounted.rim)
+        .expect("rim condition owner");
+    assert_eq!(condition, 0.25);
     let count = area.items.len();
     let id = wheels.remove(slot, &mut area.items, &mut physics).unwrap();
     assert_eq!(id, mounted.rim);
@@ -112,7 +148,7 @@ fn removed_wheel_has_no_support() {
     assert!(!physics.snapshot(0).wheels_contact[0]);
     let part = area.items.get(id).unwrap();
     assert_eq!(part.location, ItemLocation::World);
-    assert_eq!(area.conditions.item_quality(id), condition);
+    assert_eq!(area.conditions.item_quality(id), Some(condition));
     assert!(physics.rapier().bodies[part.body.unwrap()].is_dynamic());
     let body = part.body.unwrap();
     let rotation = *physics.rapier().bodies[body].rotation();
@@ -124,7 +160,7 @@ fn removed_wheel_has_no_support() {
         .unwrap();
     assert_eq!(physics.wheel_support_count(0), 4);
     assert_eq!(area.items.len(), count);
-    assert_eq!(area.conditions.item_quality(id), condition);
+    assert_eq!(area.conditions.item_quality(id), Some(condition));
     assert!(
         wheels
             .install(id, slot, &mut area.items, &mut physics)
@@ -135,8 +171,9 @@ fn removed_wheel_has_no_support() {
 #[test]
 fn split_and_assembly_conserve_parts_and_mass() {
     let reference = reference();
-    let mut physics = common::world();
+    let mut physics = world(&reference);
     let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
+    remove_cover(&mut area, &mut physics, reference.wheel_slots[0].rim);
     let mut wheels = WheelAssemblies::new(&reference).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
     let mounted = &reference.wheel_slots[0];
@@ -181,9 +218,10 @@ fn split_and_assembly_conserve_parts_and_mass() {
 #[test]
 fn rebase_and_reattachment_keep_contact_and_identity() {
     let reference = reference();
-    let mut physics = common::world();
+    let mut physics = world(&reference);
     physics.insert_box([0.0, -0.25, 0.0], [100.0, 0.25, 100.0]);
     let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
+    remove_cover(&mut area, &mut physics, reference.wheel_slots[0].rim);
     let mut wheels = WheelAssemblies::new(&reference).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
     let slot = reference.vehicles[0].wheel_slots[0];
@@ -270,7 +308,7 @@ fn production_wheel_bindings_detach_and_restore() {
 #[test]
 fn mounted_tire_dismount_preserves_rim_and_vehicle_mass() {
     let r = reference();
-    let mut physics = common::world();
+    let mut physics = world(&r);
     let mut area = StartingArea::new(&r, &mut physics, [0.; 3]).unwrap();
     let mut wheels = WheelAssemblies::new(&r).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
@@ -365,9 +403,20 @@ fn removed_wheel_is_held_with_the_same_identity() {
         .translation[1] = 1.1;
     let slot = reference.vehicles[0].wheel_slots[0];
     let mut runtime = runtime_aiming_at_wheel(&reference, slot);
+    remove_cover(
+        &mut runtime.area,
+        &mut runtime.physics,
+        reference.wheel_slots[0].rim,
+    );
     let rim = reference.wheel_slots[0].rim;
     let tire = reference.wheel_slots[0].tire;
-    let condition_before = runtime.area.conditions.item_quality(rim);
+    common::set_condition(&mut runtime.area, &reference, rim, 3);
+    let condition_before = runtime
+        .area
+        .conditions
+        .item_quality(rim)
+        .expect("rim condition owner");
+    assert_eq!(condition_before, 0.25);
 
     runtime.step(
         &reference,
@@ -384,7 +433,10 @@ fn removed_wheel_is_held_with_the_same_identity() {
         runtime.area.items.get(tire).unwrap().location,
         ItemLocation::Attached(rim)
     );
-    assert_eq!(runtime.area.conditions.item_quality(rim), condition_before);
+    assert_eq!(
+        runtime.area.conditions.item_quality(rim),
+        Some(condition_before)
+    );
     let empty = runtime.area.interaction.resolve(
         &runtime.physics,
         runtime.area.player.view_pose(&runtime.physics),
@@ -421,6 +473,11 @@ fn rejected_wheel_installation_keeps_the_carry_constraint() {
     let slot = reference.vehicles[0].wheel_slots[0];
     let rim = reference.wheel_slots[0].rim;
     let mut runtime = runtime_aiming_at_wheel(&reference, slot);
+    remove_cover(
+        &mut runtime.area,
+        &mut runtime.physics,
+        reference.wheel_slots[0].rim,
+    );
     runtime.step(
         &reference,
         FrameInput {

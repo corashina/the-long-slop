@@ -20,6 +20,12 @@ pub struct WashState {
     pub repair_progress: f32,
 }
 
+impl WashState {
+    pub fn visible(&self) -> bool {
+        self.active && !self.destroyed
+    }
+}
+
 pub struct ConditionStore {
     states: Vec<ConditionState>,
     records: Vec<ConditionSurface>,

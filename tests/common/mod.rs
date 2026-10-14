@@ -223,3 +223,40 @@ pub fn set_condition(
         )
         .unwrap();
 }
+
+/// Add a semantic condition owner for an existing test item.
+pub fn add_condition_owner(
+    reference: &mut ReferenceManifest,
+    item: my_summer_slop::reference::ItemId,
+) -> my_summer_slop::reference::ConditionId {
+    use my_summer_slop::reference::ConditionId;
+    assert!(
+        reference
+            .conditions
+            .surfaces
+            .iter()
+            .all(|s| s.item != Some(item))
+    );
+    let mut owner = reference.conditions.surfaces[0].clone();
+    owner.id = ConditionId(
+        reference
+            .conditions
+            .surfaces
+            .iter()
+            .map(|s| s.id.0)
+            .max()
+            .unwrap()
+            + 1,
+    );
+    owner.source.file = "condition-test-fixture".into();
+    owner.source.path_id = i64::from(owner.id.0);
+    owner.item = Some(item);
+    owner.node = reference.items.iter().find(|i| i.id == item).unwrap().node;
+    owner.children.clear();
+    owner.renderers.clear();
+    owner.objects.clear();
+    owner.startup.state = 0;
+    let id = owner.id;
+    reference.conditions.surfaces.push(owner);
+    id
+}

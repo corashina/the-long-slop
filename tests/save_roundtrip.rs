@@ -226,6 +226,8 @@ fn driven_rebased_roundtrip_preserves_logic_and_resumes() {
 #[test]
 fn removed_part_split_wheel_and_held_item_rebuild() {
     let mut r = fixture();
+    let engine = r.vehicles[0].engine.item;
+    let engine_condition = common::add_condition_owner(&mut r, engine);
     let portable = r
         .tanks
         .iter()
@@ -263,7 +265,6 @@ fn removed_part_split_wheel_and_held_item_rebuild() {
     for _ in 0..120 {
         g.step(&r, FrameInput::default());
     }
-    let engine = r.vehicles[0].engine.item;
     g.area
         .interaction
         .parts
@@ -274,7 +275,8 @@ fn removed_part_split_wheel_and_held_item_rebuild() {
         &mut g.area.interaction.mechanisms,
         &mut g.physics,
     );
-    g.area.conditions.wear(r.conditions.surfaces[0].id);
+    common::set_condition(&mut g.area, &r, engine, 3);
+    assert_eq!(g.area.conditions.item_quality(engine), Some(0.25));
     g.area
         .items
         .get_mut(portable)
@@ -339,6 +341,8 @@ fn removed_part_split_wheel_and_held_item_rebuild() {
     let saved = capture(&g, &r);
     let mut loaded = GarageRuntime::from_save(&r, &stamp(&r), &saved).unwrap();
     assert_logical_equal(&saved, &capture(&loaded, &r));
+    assert_eq!(loaded.area.conditions.item_quality(engine), Some(0.25));
+    assert_eq!(loaded.area.conditions.get(engine_condition).state, 3);
     assert_eq!(loaded.physics.wheel_support_count(0), 3);
     assert_eq!(loaded.area.interaction.held(), Some(tire));
     assert_eq!(
@@ -1054,4 +1058,27 @@ fn source_conditions_round_trip_and_reject_invalid_candidates() {
         c.washes.pop();
     });
     assert_eq!(capture(&g, &r).conditions.surfaces[0].color, [1.; 4]);
+}
+
+#[test]
+fn active_wash_without_on_stays_visible_through_save() {
+    let mut r = fixture();
+    r.conditions.washes[0].active = true;
+    r.conditions.washes[0].on = false;
+    let id = r.conditions.washes[0].id;
+    let game = GarageRuntime::new(&r).unwrap();
+    let wash = game.area.conditions.wash(id);
+    assert!(wash.visible());
+    assert!(!wash.on);
+    assert!(!wash.destroyed);
+    let saved = capture(&game, &r);
+    let loaded = GarageRuntime::from_save(&r, &stamp(&r), &saved).unwrap();
+    let restored = loaded.area.conditions.wash(id);
+    assert!(restored.visible());
+    assert!(!restored.on);
+    assert!(!restored.destroyed);
+    assert_eq!(
+        capture(&loaded, &r).conditions.washes,
+        saved.conditions.washes
+    );
 }
