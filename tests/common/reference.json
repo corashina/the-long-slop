@@ -223075,20 +223075,20 @@
       "drive": false,
       "brake": true,
       "handbrake": true,
-      "forward_friction": [
-        0.800000011920929,
-        0.5,
-        0.4000000059604645,
-        1.0,
-        0.9850000143051147
-      ],
-      "sideways_friction": [
-        0.5,
-        0.75,
-        0.20000000298023224,
-        1.0,
-        0.8500000238418579
-      ],
+      "forward_friction": {
+        "extremum_slip": 0.4000000059604645,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.800000011920929,
+        "asymptote_value": 0.5,
+        "stiffness": 0.9850000143051147
+      },
+      "sideways_friction": {
+        "extremum_slip": 0.20000000298023224,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.5,
+        "asymptote_value": 0.75,
+        "stiffness": 0.8500000238418579
+      },
       "tire_condition_range": [
         1,
         4
@@ -223103,7 +223103,17 @@
       ],
       "rim_types": [
         "felni"
-      ]
+      ],
+      "wheel_mass_kg": 20.0,
+      "rotational_damping": 0.25,
+      "force_application_distance_m": 0.0,
+      "sideways_stiffness_modifier": 0.0,
+      "hub": {
+        "radius_m": 0.03999999910593033,
+        "mass_kg": 5.0,
+        "forward_stiffness": 0.10000000149011612,
+        "sideways_stiffness": 1.0
+      }
     },
     {
       "id": 1,
@@ -223129,20 +223139,20 @@
       "drive": true,
       "brake": true,
       "handbrake": false,
-      "forward_friction": [
-        0.800000011920929,
-        0.5,
-        0.4000000059604645,
-        1.0,
-        0.9850000143051147
-      ],
-      "sideways_friction": [
-        0.5,
-        0.75,
-        0.20000000298023224,
-        1.0,
-        0.8500000238418579
-      ],
+      "forward_friction": {
+        "extremum_slip": 0.4000000059604645,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.800000011920929,
+        "asymptote_value": 0.5,
+        "stiffness": 0.9850000143051147
+      },
+      "sideways_friction": {
+        "extremum_slip": 0.20000000298023224,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.5,
+        "asymptote_value": 0.75,
+        "stiffness": 0.8500000238418579
+      },
       "tire_condition_range": [
         1,
         4
@@ -223157,7 +223167,17 @@
       ],
       "rim_types": [
         "felni"
-      ]
+      ],
+      "wheel_mass_kg": 20.0,
+      "rotational_damping": 0.25,
+      "force_application_distance_m": 0.0,
+      "sideways_stiffness_modifier": 0.0,
+      "hub": {
+        "radius_m": 0.03999999910593033,
+        "mass_kg": 5.0,
+        "forward_stiffness": 0.10000000149011612,
+        "sideways_stiffness": 1.0
+      }
     },
     {
       "id": 2,
@@ -223183,20 +223203,20 @@
       "drive": true,
       "brake": true,
       "handbrake": false,
-      "forward_friction": [
-        0.800000011920929,
-        0.5,
-        0.4000000059604645,
-        1.0,
-        0.9850000143051147
-      ],
-      "sideways_friction": [
-        0.5,
-        0.75,
-        0.20000000298023224,
-        1.0,
-        0.8500000238418579
-      ],
+      "forward_friction": {
+        "extremum_slip": 0.4000000059604645,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.800000011920929,
+        "asymptote_value": 0.5,
+        "stiffness": 0.9850000143051147
+      },
+      "sideways_friction": {
+        "extremum_slip": 0.20000000298023224,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.5,
+        "asymptote_value": 0.75,
+        "stiffness": 0.8500000238418579
+      },
       "tire_condition_range": [
         1,
         4
@@ -223211,7 +223231,17 @@
       ],
       "rim_types": [
         "felni"
-      ]
+      ],
+      "wheel_mass_kg": 20.0,
+      "rotational_damping": 0.25,
+      "force_application_distance_m": 0.0,
+      "sideways_stiffness_modifier": 0.0,
+      "hub": {
+        "radius_m": 0.03999999910593033,
+        "mass_kg": 5.0,
+        "forward_stiffness": 0.10000000149011612,
+        "sideways_stiffness": 1.0
+      }
     },
     {
       "id": 3,
@@ -223237,20 +223267,20 @@
       "drive": false,
       "brake": true,
       "handbrake": true,
-      "forward_friction": [
-        0.800000011920929,
-        0.5,
-        0.4000000059604645,
-        1.0,
-        0.9850000143051147
-      ],
-      "sideways_friction": [
-        0.5,
-        0.75,
-        0.20000000298023224,
-        1.0,
-        0.8500000238418579
-      ],
+      "forward_friction": {
+        "extremum_slip": 0.4000000059604645,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.800000011920929,
+        "asymptote_value": 0.5,
+        "stiffness": 0.9850000143051147
+      },
+      "sideways_friction": {
+        "extremum_slip": 0.20000000298023224,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.5,
+        "asymptote_value": 0.75,
+        "stiffness": 0.8500000238418579
+      },
       "tire_condition_range": [
         1,
         4
@@ -223265,7 +223295,17 @@
       ],
       "rim_types": [
         "felni"
-      ]
+      ],
+      "wheel_mass_kg": 20.0,
+      "rotational_damping": 0.25,
+      "force_application_distance_m": 0.0,
+      "sideways_stiffness_modifier": 0.0,
+      "hub": {
+        "radius_m": 0.03999999910593033,
+        "mass_kg": 5.0,
+        "forward_stiffness": 0.10000000149011612,
+        "sideways_stiffness": 1.0
+      }
     },
     {
       "id": 4,
@@ -223291,20 +223331,20 @@
       "drive": false,
       "brake": true,
       "handbrake": true,
-      "forward_friction": [
-        0.800000011920929,
-        0.5,
-        0.4000000059604645,
-        1.0,
-        0.9850000143051147
-      ],
-      "sideways_friction": [
-        0.5,
-        0.75,
-        0.20000000298023224,
-        1.0,
-        0.8500000238418579
-      ],
+      "forward_friction": {
+        "extremum_slip": 0.4000000059604645,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.800000011920929,
+        "asymptote_value": 0.5,
+        "stiffness": 0.9850000143051147
+      },
+      "sideways_friction": {
+        "extremum_slip": 0.20000000298023224,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.5,
+        "asymptote_value": 0.75,
+        "stiffness": 0.8500000238418579
+      },
       "tire_condition_range": [
         1,
         4
@@ -223319,7 +223359,17 @@
       ],
       "rim_types": [
         "felni"
-      ]
+      ],
+      "wheel_mass_kg": 20.0,
+      "rotational_damping": 0.25,
+      "force_application_distance_m": 0.0,
+      "sideways_stiffness_modifier": 0.0,
+      "hub": {
+        "radius_m": 0.03999999910593033,
+        "mass_kg": 5.0,
+        "forward_stiffness": 0.10000000149011612,
+        "sideways_stiffness": 1.0
+      }
     },
     {
       "id": 5,
@@ -223345,20 +223395,20 @@
       "drive": true,
       "brake": true,
       "handbrake": false,
-      "forward_friction": [
-        0.800000011920929,
-        0.5,
-        0.4000000059604645,
-        1.0,
-        0.9850000143051147
-      ],
-      "sideways_friction": [
-        0.5,
-        0.75,
-        0.20000000298023224,
-        1.0,
-        0.8500000238418579
-      ],
+      "forward_friction": {
+        "extremum_slip": 0.4000000059604645,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.800000011920929,
+        "asymptote_value": 0.5,
+        "stiffness": 0.9850000143051147
+      },
+      "sideways_friction": {
+        "extremum_slip": 0.20000000298023224,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.5,
+        "asymptote_value": 0.75,
+        "stiffness": 0.8500000238418579
+      },
       "tire_condition_range": [
         1,
         4
@@ -223373,7 +223423,17 @@
       ],
       "rim_types": [
         "felni"
-      ]
+      ],
+      "wheel_mass_kg": 20.0,
+      "rotational_damping": 0.25,
+      "force_application_distance_m": 0.0,
+      "sideways_stiffness_modifier": 0.0,
+      "hub": {
+        "radius_m": 0.03999999910593033,
+        "mass_kg": 5.0,
+        "forward_stiffness": 0.10000000149011612,
+        "sideways_stiffness": 1.0
+      }
     },
     {
       "id": 6,
@@ -223399,20 +223459,20 @@
       "drive": true,
       "brake": true,
       "handbrake": false,
-      "forward_friction": [
-        0.800000011920929,
-        0.5,
-        0.4000000059604645,
-        1.0,
-        0.9850000143051147
-      ],
-      "sideways_friction": [
-        0.5,
-        0.75,
-        0.20000000298023224,
-        1.0,
-        0.8500000238418579
-      ],
+      "forward_friction": {
+        "extremum_slip": 0.4000000059604645,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.800000011920929,
+        "asymptote_value": 0.5,
+        "stiffness": 0.9850000143051147
+      },
+      "sideways_friction": {
+        "extremum_slip": 0.20000000298023224,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.5,
+        "asymptote_value": 0.75,
+        "stiffness": 0.8500000238418579
+      },
       "tire_condition_range": [
         1,
         4
@@ -223427,7 +223487,17 @@
       ],
       "rim_types": [
         "felni"
-      ]
+      ],
+      "wheel_mass_kg": 20.0,
+      "rotational_damping": 0.25,
+      "force_application_distance_m": 0.0,
+      "sideways_stiffness_modifier": 0.0,
+      "hub": {
+        "radius_m": 0.03999999910593033,
+        "mass_kg": 5.0,
+        "forward_stiffness": 0.10000000149011612,
+        "sideways_stiffness": 1.0
+      }
     },
     {
       "id": 7,
@@ -223453,20 +223523,20 @@
       "drive": false,
       "brake": true,
       "handbrake": true,
-      "forward_friction": [
-        0.800000011920929,
-        0.5,
-        0.4000000059604645,
-        1.0,
-        0.9850000143051147
-      ],
-      "sideways_friction": [
-        0.5,
-        0.75,
-        0.20000000298023224,
-        1.0,
-        0.8500000238418579
-      ],
+      "forward_friction": {
+        "extremum_slip": 0.4000000059604645,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.800000011920929,
+        "asymptote_value": 0.5,
+        "stiffness": 0.9850000143051147
+      },
+      "sideways_friction": {
+        "extremum_slip": 0.20000000298023224,
+        "extremum_value": 1.0,
+        "asymptote_slip": 0.5,
+        "asymptote_value": 0.75,
+        "stiffness": 0.8500000238418579
+      },
       "tire_condition_range": [
         1,
         4
@@ -223481,7 +223551,17 @@
       ],
       "rim_types": [
         "felni"
-      ]
+      ],
+      "wheel_mass_kg": 20.0,
+      "rotational_damping": 0.25,
+      "force_application_distance_m": 0.0,
+      "sideways_stiffness_modifier": 0.0,
+      "hub": {
+        "radius_m": 0.03999999910593033,
+        "mass_kg": 5.0,
+        "forward_stiffness": 0.10000000149011612,
+        "sideways_stiffness": 1.0
+      }
     }
   ],
   "wheel_parts": [
@@ -235618,6 +235698,11 @@
         "low_oil": 2.0,
         "oil_test_rpm": 300.0,
         "battery_test_rpm": 800.0
+      },
+      "driving": {
+        "initial_gear": 1,
+        "force_automatic": false,
+        "play_shift_sounds_in_automatic": false
       }
     },
     {
@@ -236336,6 +236421,11 @@
         "low_oil": 2.0,
         "oil_test_rpm": 300.0,
         "battery_test_rpm": 800.0
+      },
+      "driving": {
+        "initial_gear": 1,
+        "force_automatic": false,
+        "play_shift_sounds_in_automatic": false
       }
     }
   ],
@@ -407407,5 +407497,97 @@
         ]
       }
     }
+  },
+  "driving": {
+    "source": {
+      "file": "level0",
+      "path_id": 16865
+    },
+    "pedal_rate": 5.0,
+    "force_manual": false,
+    "min_motor_torque_nm": 0.0,
+    "default_assists": {
+      "automatic_clutch": true,
+      "automatic_gears": true
+    },
+    "bindings": [
+      {
+        "action": "clutch",
+        "codes": [
+          "ControlLeft",
+          "Numpad0",
+          "ControlRight"
+        ]
+      },
+      {
+        "action": "shift_up",
+        "codes": [
+          "ArrowUp"
+        ]
+      },
+      {
+        "action": "shift_down",
+        "codes": [
+          "ArrowDown"
+        ]
+      },
+      {
+        "action": "reverse",
+        "codes": [
+          "KeyR",
+          "NumpadAdd"
+        ]
+      },
+      {
+        "action": "neutral",
+        "codes": [
+          "Digit0",
+          "NumpadSubtract",
+          "KeyN"
+        ]
+      },
+      {
+        "action": "gear1",
+        "codes": [
+          "Digit1",
+          "Numpad1"
+        ]
+      },
+      {
+        "action": "gear2",
+        "codes": [
+          "Digit2",
+          "Numpad2"
+        ]
+      },
+      {
+        "action": "gear3",
+        "codes": [
+          "Digit3",
+          "Numpad3"
+        ]
+      },
+      {
+        "action": "gear4",
+        "codes": [
+          "Digit4",
+          "Numpad4"
+        ]
+      },
+      {
+        "action": "gear5",
+        "codes": [
+          "Digit5",
+          "Numpad5"
+        ]
+      },
+      {
+        "action": "gear6",
+        "codes": [
+          "Digit6",
+          "Numpad6"
+        ]
+      }
+    ]
   }
 }

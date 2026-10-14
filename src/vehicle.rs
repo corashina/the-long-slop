@@ -218,7 +218,7 @@ impl VehicleBody {
                 suspension_compression: wheel.damper / vehicle.mass_kg,
                 suspension_damping: wheel.damper / vehicle.mass_kg,
                 max_suspension_travel: rest_length.min(wheel.suspension_distance - rest_length),
-                friction_slip: wheel.sideways_friction[4],
+                friction_slip: wheel.sideways_friction.stiffness,
                 max_suspension_force: wheel.spring * wheel.suspension_distance,
                 ..Default::default()
             };

@@ -190,7 +190,7 @@ def verify_reference(output: Path, library) -> None:
         raise ValueError('Unsupported runtime provenance')
     validate_runtime_manifest(content)
     validate_runtime_paths(manifest)
-    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json','plate-evidence.json','flashlights-evidence.json'}
+    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json','plate-evidence.json','flashlights-evidence.json','driving-evidence.json'}
     for asset in manifest['assets']:
         for record in [asset, *asset['dependencies']]:
             name = record.get('file', record.get('path')).removeprefix('reference/')
@@ -312,6 +312,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     hashes=[{'file':record.file.removeprefix('TheLongDrive_Data/'),'sha256':record.sha256}
             for record in snapshot.files if record.file.startswith('TheLongDrive_Data/')]
     manifest=build_manifest(source,roots,report,hashes,library,list(CARS),output)
+    (output/'driving-evidence.json').write_text(json.dumps(source.driving_evidence,indent=2,allow_nan=False),encoding='utf-8')
     from .plates import plate_source_evidence
     (output/'plate-evidence.json').write_text(json.dumps(plate_source_evidence(source,manifest['plates']),indent=2,allow_nan=False),encoding='utf-8')
     from .mirrors import mirror_source_evidence

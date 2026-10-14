@@ -1,5 +1,8 @@
 //! Validated installed-build data. Geometry uses converted body-local meters.
 
+pub mod driving;
+pub use driving::*;
+
 pub mod audio;
 pub use audio::*;
 
@@ -664,8 +667,13 @@ pub struct WheelSlotReference {
     pub drive: bool,
     pub brake: bool,
     pub handbrake: bool,
-    pub forward_friction: [f32; 5],
-    pub sideways_friction: [f32; 5],
+    pub forward_friction: WheelFrictionCurve,
+    pub sideways_friction: WheelFrictionCurve,
+    pub wheel_mass_kg: f32,
+    pub rotational_damping: f32,
+    pub force_application_distance_m: f32,
+    pub sideways_stiffness_modifier: f32,
+    pub hub: WheelHubReference,
     pub tire_condition_range: [u8; 2],
     pub rim_condition_range: [u8; 2],
     pub rim_main_types: Vec<String>,
@@ -740,6 +748,7 @@ pub struct WheelPartReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VehicleReference {
+    pub driving: DrivingVehicleReference,
     pub engine: EngineReference,
     pub instruments: InstrumentReference,
     pub handbrake: bool,
@@ -797,6 +806,7 @@ pub struct LibraryProvenance {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
+    pub driving: DrivingReference,
     pub audio: serde_json::Value,
     pub survival: SurvivalReference,
     pub sleep: SleepReference,
@@ -905,6 +915,7 @@ impl ReferenceManifest {
     }
 
     fn validate_gameplay(&self) -> Result<(), ReferenceError> {
+        self.driving.validate(self)?;
         require(
             self.library.schema_version == 1
                 && hash(&self.library.manifest_sha256)
@@ -1832,8 +1843,26 @@ impl ReferenceManifest {
                     r.damper,
                     r.target_position,
                 ]) && finite(&r.center)
-                    && finite(&r.forward_friction)
-                    && finite(&r.sideways_friction)
+                    && r.forward_friction.valid()
+                    && r.sideways_friction.valid()
+                    && finite(&[
+                        r.wheel_mass_kg,
+                        r.rotational_damping,
+                        r.force_application_distance_m,
+                        r.sideways_stiffness_modifier,
+                        r.hub.radius_m,
+                        r.hub.mass_kg,
+                        r.hub.forward_stiffness,
+                        r.hub.sideways_stiffness,
+                    ])
+                    && r.wheel_mass_kg > 0.0
+                    && r.rotational_damping >= 0.0
+                    && r.force_application_distance_m >= 0.0
+                    && r.sideways_stiffness_modifier >= 0.0
+                    && r.hub.radius_m > 0.0
+                    && r.hub.mass_kg > 0.0
+                    && r.hub.forward_stiffness >= 0.0
+                    && r.hub.sideways_stiffness >= 0.0
                     && r.radius > 0.0
                     && r.suspension_distance > 0.0,
                 "wheel parameters",
