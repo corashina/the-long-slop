@@ -6,6 +6,7 @@ pub mod lod;
 pub mod primary;
 pub mod specular;
 pub mod terrain;
+mod upload_receipt;
 mod world_texture_upload;
 pub mod world_textures;
 use crate::reference::{
@@ -122,6 +123,7 @@ fn blend_factor(value: u8) -> BlendFactor {
 #[derive(Clone)]
 struct SourceTexture {
     owner: Arc<()>,
+    upload: upload_receipt::UploadReceipt,
     failed: bool,
     eager: bool,
     users: usize,
@@ -336,6 +338,8 @@ impl Plugin for SourceMaterialPlugin {
                 material_readiness,
                 bind_authored_materials
                     .after(bind_materials)
+                    // Apply material commands before lighting removes its prototype.
+                    .before(super::lighting::lighting_readiness)
                     .before(super::world::prepare_road_lamp),
             )
                 .chain(),
@@ -452,6 +456,7 @@ pub fn load_materials(
             texture_indices.insert(texture.file.clone(), textures.len());
             textures.push(SourceTexture {
                 owner: Arc::new(()),
+                upload: default(),
                 failed: false,
                 eager: true,
                 users: 0,
@@ -487,6 +492,7 @@ pub fn load_materials(
         texture_indices.insert(texture.file.clone(), textures.len());
         textures.push(SourceTexture {
             owner: Arc::new(()),
+            upload: default(),
             failed: false,
             eager: true,
             users: 0,

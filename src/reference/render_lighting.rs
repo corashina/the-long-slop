@@ -207,7 +207,7 @@ impl RendererRecord {
                 && finite(&self.bounds_center)
                 && finite(&self.bounds_extents)
                 && self.bounds_extents.iter().all(|v| *v >= 0.)
-                && matches!(self.cast_shadows, 0 | 1 | 3)
+                && self.cast_shadows <= 3
                 && self.reflection_probe_usage <= 1
                 && self.motion_vectors <= 2
                 && self.sorting_layer == 0

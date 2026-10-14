@@ -8,6 +8,7 @@ const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRun
 import {createInput} from './input.js';
 import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
+import {createLoading} from './loading.js';
 import {loadUiAssets} from './ui-layout.js';
 import {admitWorldAssets,preflightWorldPrototype,verifyWorldBytes,cancelWorldPrototype,worldBootstrapMeasurements,worldInputBytes,worldPrototypeStaging,worldDependencyReserve,worldInputMetadataBytes} from './world-assets.js';
 window.sourcePrototypePlan=preflightWorldPrototype;
@@ -18,6 +19,9 @@ window.sourceInputMetadataBytes=worldInputMetadataBytes;
 window.sourceVerifyBytes=verifyWorldBytes;
 window.sourcePrototypeCancel=cancelWorldPrototype;
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
+const loading=createLoading();
+window.gameLoadingProgress=(roads,total,rendering,world)=>loading.progress(roads,total,rendering,world);
+window.gameLoadingBudget=(name,used,limit,unit)=>loading.budget(name,used,limit,unit);
 const bootStarted=performance.now();
 let wasmMemory,initialReadyMs=null,peakFrameMs=0,lastFrameTime=null,measureRequested=false;
 const measurementWaiters=[];
@@ -31,7 +35,7 @@ window.gameMeasurements=json=>{
   initialStartReadyMs:initialReadyMs,peakFrameIntervalMs:peakFrameMs,bootstrap};
  for(const resolve of measurementWaiters.splice(0))resolve(snapshot);
 };
-let input,survival,dead=false,sleeping=false,audio,menu,feedback,failed=false,worldAdmitted=false,timeout,actions=0,frame,renderFailure;
+let input,survival,dead=false,sleeping=false,audio,menu,feedback,failed=false,worldAdmitted=false,actions=0,frame,renderFailure;
 const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',condition:-1,held:'',throwCharge:0,throwActive:false,radioVolume:undefined,radioFrequency:undefined,radioAm:false,quantities:[0,0,0,0,0,0]};
 const settleSave=window.gameSaveResult;
 window.gameSaveResult=(id,kind,payload,error)=>{
@@ -84,10 +88,10 @@ const sleep={phase:0,eligible:false,charge:0,cooldownRemaining:0,progress:0,held
 window.gameSleep=(phase,eligible,charge,cooldownRemaining,progress)=>{
  sleep.phase=phase;sleep.eligible=eligible;sleep.charge=charge;sleep.cooldownRemaining=cooldownRemaining;sleep.progress=progress;sleep.held=(input.state.held&262144)!==0;sleep.dead=dead;sleeping=phase===2;survival?.updateSleep(sleep,feedback?.state.enabled);
 };
-function fail(message,notifyRenderer=true){if(failed)return;failed=true;clearTimeout(timeout);const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
+function fail(message,notifyRenderer=true){if(failed)return;failed=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
 window.gameFailure=message=>fail(message,false);
-window.gameLoading=()=>{if(failed)return;menu.loading();clearTimeout(timeout);timeout=setTimeout(()=>fail('The garage did not load within 120 seconds.'),120000);};
-window.gameReady=()=>{if(failed||!worldAdmitted)return;clearTimeout(timeout);if(initialReadyMs===null)initialReadyMs=performance.now()-bootStarted;menu.ready();};
+window.gameLoading=()=>{if(failed)return;loading.start();loading.stage('Loading the garage...');menu.loading();};
+window.gameReady=()=>{if(failed||!worldAdmitted)return;if(initialReadyMs===null)initialReadyMs=performance.now()-bootStarted;loading.finish();menu.ready();};
 window.addEventListener('error',event=>fail(event.message||'The runtime stopped.'));
 window.addEventListener('unhandledrejection',event=>fail(event.reason?.message||String(event.reason)));
 canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();fail('The graphics context was lost.');});
@@ -102,6 +106,7 @@ async function load(){
  input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas,manifest.driving.bindings);
  bootstrap.manifestUtf16PayloadBytes=text.length*2;
  status.textContent='Loading interface assets...';
+ loading.stage(status.textContent);
  await loadUiAssets(manifest.ui);
  survival=createSurvival(manifest.ui,manifest.sleep.cooldown_seconds);
  audio=createAudio(manifest.audio);installAudioBridge(window,audio);
@@ -111,11 +116,13 @@ async function load(){
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
  feedback=createFeedback(manifest.ui,switchIconUrl);
  status.textContent='Checking world assets...';
- await admitWorldAssets(manifest);worldAdmitted=true;
+ loading.stage(status.textContent);
+ await admitWorldAssets(manifest,(done,total)=>loading.stage('Checking world assets...',done,total));worldAdmitted=true;
  status.textContent='Loading game code...';
+ loading.stage(status.textContent);
  const {default:init,run,source_render_failure}=await import('./pkg/my_summer_slop.js');
  const wasm=await fetch('./pkg/my_summer_slop_bg.wasm');if(!wasm.ok)throw Error('Cannot load game code (HTTP '+wasm.status+').');
- const exports=await init({module_or_path:wasm});wasmMemory=exports.memory;if(failed)return;renderFailure=source_render_failure;status.textContent='Loading the garage...';
- timeout=setTimeout(()=>fail('The garage did not load within 120 seconds.'),120000);run(text,manifestHash);
+ const exports=await init({module_or_path:wasm});wasmMemory=exports.memory;if(failed)return;renderFailure=source_render_failure;status.textContent='Loading the garage...';loading.stage(status.textContent);
+ run(text,manifestHash);
 }
-load().catch(error=>fail(error.message));
+load().catch(error=>fail(error?.message??String(error)));

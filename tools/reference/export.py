@@ -7,6 +7,7 @@ import re
 import subprocess
 from pathlib import Path
 from .library.types import Snapshot, LibraryReceipt
+from .plates import plate_resources
 
 APP_ID = 1017180
 BUILD_ID = 11140890
@@ -139,7 +140,8 @@ def validate_runtime_paths(manifest):
     expected.update(a['path'] for a in manifest['assets'] if a['id'] in prototype_ids and a['usage']=='world_prototype')
     if {a['path'] for a in assets} != expected or len(assets) != len(expected):
         raise ValueError('Runtime must contain only selected scenes and world prototypes')
-    resources = {item['path']:item['sha256'] for item in runtime_resources(manifest)}
+    resources = {item['path']:item['sha256'] for item in
+                 [*runtime_resources(manifest), *plate_resources(manifest['plates'])]}
     for asset in assets:
         for item in [asset, *asset['dependencies']]:
             name = item.get('file', item.get('path'))
@@ -210,11 +212,13 @@ def verify_reference(output: Path, library) -> None:
         scene = output / asset['path'].removeprefix('reference/')
         document = json.loads(scene.read_bytes())
         uris = {entry['uri'] for entry in [*document.get('buffers', []), *document.get('images', [])]}
-        resources = {item['path'] for item in runtime_resources(manifest)}
-        declared = {entry['file'].removeprefix('reference/') for entry in asset['dependencies'] if entry['file'] not in resources}
+        resources = {item['path'].removeprefix('reference/') for item in
+                     [*runtime_resources(manifest), *plate_resources(manifest['plates'])]}
+        declared = {entry['file'].removeprefix('reference/') for entry in asset['dependencies']}
         material_mips = {Path(mip['file']).name for material in manifest['rendering']['materials']
             if material['asset'] == asset['id'] for texture in material['properties']['textures'] for mip in texture['mips']}
-        if uris | material_mips != declared:
+        required = uris | material_mips
+        if not required <= declared or declared - required - resources:
             raise ValueError('Runtime scene dependencies differ from selected receipts')
         validate_gltf(scene)
     for sprite in [*manifest.get('ui', {}).get('sprites', []), *manifest.get('audio', {}).get('clips', [])]:

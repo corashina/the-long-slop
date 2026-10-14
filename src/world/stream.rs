@@ -571,55 +571,117 @@ impl WorldStream {
         &mut self,
         next: PresentationAllocation,
     ) -> Result<(), ReferenceError> {
-        let current = self.metrics();
-        let old = self.presentation;
-        let exceeds = current
-            .active_cpu_bytes
-            .saturating_sub(old.active_cpu)
-            .saturating_add(next.active_cpu)
-            > ACTIVE_CPU
-            || current
-                .active_gpu_bytes
-                .saturating_sub(old.active_gpu)
-                .saturating_add(next.active_gpu)
-                > ACTIVE_GPU
-            || current
-                .prototype_cpu_bytes
-                .saturating_sub(old.prototype_cpu)
-                .saturating_add(next.prototype_cpu)
-                > PROTOTYPE_CPU
-            || current
-                .prototype_gpu_bytes
-                .saturating_sub(old.prototype_gpu)
-                .saturating_add(next.prototype_gpu)
-                > PROTOTYPE_GPU
-            || current
-                .generated_objects
-                .saturating_sub(old.objects)
-                .saturating_add(next.objects)
-                > MAX_OBJECTS
-            || current
-                .pending_work
-                .saturating_sub(old.pending)
-                .saturating_add(next.pending)
-                > 32
-            || next.staging_bytes + self.generation_pending_bytes() + self.overlap.pending_bytes
-                > 32 * MIB
-            || next.dependency_staging_bytes > next.staging_bytes
-            || self.generation_pending_bytes() - self.binding_reserved
-                > 32 * MIB - self.dependency_staging_reserve
-            || next.jobs
-                + self.overlap.generation_jobs
-                + usize::from(self.terrain_work.is_some())
-                + usize::from(self.contents.has_replay())
-                > 2;
-        if exceeds {
-            return Err(ReferenceError(
-                "Source presentation admission exceeds its resource budget".into(),
-            ));
+        for budget in self.presentation_budgets(next) {
+            if budget.used > budget.limit {
+                return Err(ReferenceError(format!(
+                    "{} budget exceeded: requested {} {}, limit {} {}.",
+                    budget.name, budget.used, budget.unit, budget.limit, budget.unit,
+                )));
+            }
         }
         self.presentation = next;
         Ok(())
+    }
+
+    pub(crate) fn presentation_budgets(
+        &self,
+        next: PresentationAllocation,
+    ) -> [super::metrics::ResourceBudget; 10] {
+        use super::metrics::ResourceBudget;
+        let current = self.metrics();
+        let old = self.presentation;
+        let active_cpu = current
+            .active_cpu_bytes
+            .saturating_sub(old.active_cpu)
+            .saturating_add(next.active_cpu);
+        let active_gpu = current
+            .active_gpu_bytes
+            .saturating_sub(old.active_gpu)
+            .saturating_add(next.active_gpu);
+        let prototype_cpu = current
+            .prototype_cpu_bytes
+            .saturating_sub(old.prototype_cpu)
+            .saturating_add(next.prototype_cpu);
+        let prototype_gpu = current
+            .prototype_gpu_bytes
+            .saturating_sub(old.prototype_gpu)
+            .saturating_add(next.prototype_gpu);
+        let objects = current
+            .generated_objects
+            .saturating_sub(old.objects)
+            .saturating_add(next.objects);
+        let pending = current
+            .pending_work
+            .saturating_sub(old.pending)
+            .saturating_add(next.pending);
+        let staging =
+            next.staging_bytes + self.generation_pending_bytes() + self.overlap.pending_bytes;
+        let jobs = next.jobs
+            + self.overlap.generation_jobs
+            + usize::from(self.terrain_work.is_some())
+            + usize::from(self.contents.has_replay());
+        [
+            ResourceBudget {
+                name: "World CPU",
+                used: active_cpu,
+                limit: ACTIVE_CPU,
+                unit: "bytes",
+            },
+            ResourceBudget {
+                name: "World GPU",
+                used: active_gpu,
+                limit: ACTIVE_GPU,
+                unit: "bytes",
+            },
+            ResourceBudget {
+                name: "Asset CPU",
+                used: prototype_cpu,
+                limit: PROTOTYPE_CPU,
+                unit: "bytes",
+            },
+            ResourceBudget {
+                name: "Asset GPU",
+                used: prototype_gpu,
+                limit: PROTOTYPE_GPU,
+                unit: "bytes",
+            },
+            ResourceBudget {
+                name: "Objects",
+                used: objects,
+                limit: MAX_OBJECTS,
+                unit: "objects",
+            },
+            ResourceBudget {
+                name: "Pending work",
+                used: pending,
+                limit: 32,
+                unit: "requests",
+            },
+            ResourceBudget {
+                name: "Staging",
+                used: staging,
+                limit: 32 * MIB,
+                unit: "bytes",
+            },
+            ResourceBudget {
+                name: "Dependency staging",
+                used: next.dependency_staging_bytes,
+                limit: next.staging_bytes,
+                unit: "bytes",
+            },
+            ResourceBudget {
+                name: "Generation staging",
+                used: self.generation_pending_bytes() - self.binding_reserved,
+                limit: 32 * MIB - self.dependency_staging_reserve,
+                unit: "bytes",
+            },
+            ResourceBudget {
+                name: "Jobs",
+                used: jobs,
+                limit: 2,
+                unit: "jobs",
+            },
+        ]
     }
     fn generation_pending_bytes(&self) -> usize {
         self.binding_reserved
@@ -693,6 +755,14 @@ impl WorldStream {
                 + usize::from(self.contents.has_replay()),
         )
     }
+    pub(crate) fn startup_job_audit(&self) -> serde_json::Value {
+        serde_json::json!({
+            "presentation": self.presentation.jobs,
+            "terrain": self.terrain_work.is_some(),
+            "contents": self.contents.has_replay(),
+            "available": self.available_external_jobs(),
+        })
+    }
     /// A completed renderer job uses the same frame publication slot as collision work.
     pub fn take_presentation_publication(&mut self) -> bool {
         if self.failure.is_some() {
@@ -708,9 +778,11 @@ impl WorldStream {
         } else {
             super::metrics::map_insert_bytes(&self.admissions) + source.file.capacity()
         };
-        PROTOTYPE_CPU
-            .saturating_sub(self.metrics().prototype_cpu_bytes)
-            .saturating_sub(owner)
+        self.available_prototype_cpu_bytes().saturating_sub(owner)
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn available_prototype_cpu_bytes(&self) -> usize {
+        PROTOTYPE_CPU.saturating_sub(self.metrics().prototype_cpu_bytes)
     }
     /// Reserve decoded bytes before loading an admitted prototype or terrain material.
     pub fn reserve_prototype(
@@ -875,11 +947,11 @@ impl WorldStream {
             let slots = 2usize.saturating_sub(self.presentation.jobs);
             let before = self.roads.prepared_segments();
             let road_work = usize::from(before < super::ROAD_SEGMENTS);
-            let road_ready = self.roads.prepare(if slots > 0 { 8 } else { 0 });
+            let road_ready = self.roads.prepare(if slots > 0 { 256 } else { 0 });
             self.last_road_work = (self.roads.prepared_segments() - before) as usize;
             let placement_ready = self
                 .placements
-                .prepare(if slots > road_work { 8 } else { 0 });
+                .prepare(if slots > road_work { 256 } else { 0 });
             self.indices_ready = road_ready && placement_ready;
             return;
         }

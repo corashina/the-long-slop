@@ -25,7 +25,7 @@ async function checkedBytes(response,maxBytes=MAX_FILE_BYTES){
 }
 
 // Check catalog bytes without decoding meshes or textures into resident assets.
-export async function admitWorldAssets(manifest){
+export async function admitWorldAssets(manifest,onProgress){
  if(!manifest.world||!manifest.world.prototypes?.length)throw Error('Missing required world contract.');
  const files=new Map(),pngMips=new Map(),prototypeInputs=new Map();
  const prototypePaths=new Set(manifest.assets.filter(a=>a.usage==='world_prototype').map(a=>a.path));
@@ -40,6 +40,7 @@ export async function admitWorldAssets(manifest){
   }
  }
  if(!files.size)throw Error('Missing required world prototype assets.');
+ let completed=0;onProgress(completed,files.size);
  const pending=files.values(),controller=new AbortController();
  async function worker(){
   for(let next=pending.next();!next.done;next=pending.next()){
@@ -63,6 +64,7 @@ export async function admitWorldAssets(manifest){
       return {file:'reference/'+buffer.uri,bytes:buffer.byteLength};
      }));
     }
+    onProgress(++completed,files.size);
    }catch(error){throw Error('Cannot load dependencies for '+entry.owner+': '+entry.file+' ('+error.message+').');}
   }
  }

@@ -25,6 +25,10 @@ struct TerrainUniform {
 @group(#{MATERIAL_BIND_GROUP}) @binding(7) var bank3: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(8) var sampler3: sampler;
 #endif
+#if TERRAIN_ARRAYS > 4
+@group(#{MATERIAL_BIND_GROUP}) @binding(9) var bank4: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(10) var sampler4: sampler;
+#endif
 struct TerrainVertex {
     @builtin(instance_index) instance: u32,
     @location(0) position: vec3<f32>,
@@ -78,7 +82,10 @@ fn sample_terrain(slot:u32,uv_in:vec2<f32>)->vec4<f32> {
         case 1u:{return textureSampleBias(bank1,sampler1,uv,i32(binding.y),sampling.x);}
         case 2u:{return textureSampleBias(bank2,sampler2,uv,i32(binding.y),sampling.x);}
 #if TERRAIN_ARRAYS > 3
-        default:{return textureSampleBias(bank3,sampler3,uv,i32(binding.y),sampling.x);}
+        case 3u:{return textureSampleBias(bank3,sampler3,uv,i32(binding.y),sampling.x);}
+#endif
+#if TERRAIN_ARRAYS > 4
+        default:{return textureSampleBias(bank4,sampler4,uv,i32(binding.y),sampling.x);}
 #else
         default:{return textureSampleBias(bank0,sampler0,uv,i32(binding.y),sampling.x);}
 #endif

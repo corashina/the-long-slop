@@ -54,6 +54,18 @@ pub struct SourceWorldVisuals {
     terrain_shadow_modes: [u8; 3],
 }
 impl SourceWorldVisuals {
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn startup_audit(&self) -> serde_json::Value {
+        serde_json::json!({
+            "road_bindings": self.road_materials.len(),
+            "terrain_bindings": self.terrain.each_ref().map(|h| h.is_some()),
+            "pending_surface": self.pending.as_ref().map(|p| serde_json::json!({
+                "layer": format!("{:?}", p.key.layer), "meshes": p.meshes.len(),
+                "tickets": p.tickets.iter().map(|t| t.as_ref().map(|t| format!("{:?}", t.state()))).collect::<Vec<_>>(),
+            })),
+        })
+    }
+
     pub fn ready(&self, stream: &WorldStream) -> bool {
         self.pending.is_none() && self.surfaces.len() == stream.frame().surfaces.len()
     }

@@ -9,6 +9,7 @@ use bevy::{
         render_resource::*,
         renderer::{RenderContext, RenderDevice, RenderQueue},
     },
+    shader::ShaderCacheError,
 };
 use std::{
     collections::HashMap,
@@ -394,8 +395,15 @@ fn draw_one(pass: &WriterPass, gpu: &GrassGpu, cache: &PipelineCache, context: &
         return;
     };
     let Some(pipeline) = cache.get_render_pipeline(pass.pipeline) else {
-        if let CachedPipelineState::Err(error) = cache.get_render_pipeline_state(pass.pipeline) {
-            *pass.status.lock().unwrap() = Some(Err(error.to_string()));
+        match cache.get_render_pipeline_state(pass.pipeline) {
+            CachedPipelineState::Err(
+                ShaderCacheError::ShaderNotLoaded(_)
+                | ShaderCacheError::ShaderImportNotYetAvailable,
+            ) => {}
+            CachedPipelineState::Err(error) => {
+                *pass.status.lock().unwrap() = Some(Err(error.to_string()));
+            }
+            _ => {}
         }
         return;
     };

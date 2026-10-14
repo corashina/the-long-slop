@@ -1,5 +1,13 @@
 //! Retained world ownership and logical allocation reservations.
 //! These charges are not process memory or driver residency measurements.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ResourceBudget {
+    pub name: &'static str,
+    pub used: usize,
+    pub limit: usize,
+    pub unit: &'static str,
+}
+
 #[derive(Clone, Copy, Debug, Default, serde::Serialize)]
 pub struct WorldMetrics {
     pub shared_input_cpu_bytes: usize,
@@ -224,6 +232,7 @@ pub(crate) mod browser {
         session: u64,
         revision: u64,
         world: super::WorldMetrics,
+        startup: serde_json::Value,
         assets: AssetGroups,
         physics_bodies: usize,
         physics_colliders: usize,
@@ -247,6 +256,8 @@ pub(crate) mod browser {
         instances: Res<SourceInstances>,
         grass: Res<GrassJobs>,
         materials: Res<SourceMaterials>,
+        server: Res<AssetServer>,
+        pipelines: Res<crate::presentation::world::pipelines::WorldPipelines>,
     ) {
         if !crate::browser::game_measure_requested() {
             return;
@@ -321,6 +332,15 @@ pub(crate) mod browser {
             session: frame.request.session,
             revision: frame.request.revision,
             world: frame.metrics,
+            startup: serde_json::json!({
+                "supported": runtime.world_supported(),
+                "window_ready": runtime.stream.window_ready(),
+                "failure": frame.failure,
+                "surfaces": surfaces.startup_audit(),
+                "textures": materials.world_textures.startup_audit(&images, &server),
+                "jobs": runtime.stream.startup_job_audit(),
+                "pipelines": pipelines.startup_audit(),
+            }),
             assets: groups,
             physics_bodies: runtime.physics.rapier().bodies.len(),
             physics_colliders: runtime.physics.collider_count(),

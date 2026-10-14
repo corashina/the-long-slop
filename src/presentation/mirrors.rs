@@ -18,6 +18,7 @@ use bevy::render::{
     extract_resource::{ExtractResource, ExtractResourcePlugin},
     render_resource::*,
 };
+use bevy::shader::ShaderCacheError;
 use bevy::{ecs as bevy_ecs, prelude::*, render as bevy_render};
 use std::{
     collections::{HashMap, HashSet},
@@ -1292,7 +1293,13 @@ fn finish_capture_frame(
     for id in &captures.sources {
         match pipelines.get_render_pipeline_state(*id) {
             CachedPipelineState::Ok(_) => {}
-            CachedPipelineState::Err(error) => {
+            CachedPipelineState::Err(error)
+                if !matches!(
+                    error,
+                    ShaderCacheError::ShaderNotLoaded(_)
+                        | ShaderCacheError::ShaderImportNotYetAvailable
+                ) =>
+            {
                 status.failure = Some(format!("Mirror capture pipeline: {error}"));
                 status.ready = false;
                 return;

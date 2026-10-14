@@ -7,7 +7,7 @@ use bevy::{
     ecs as bevy_ecs,
     material::key::{ErasedMaterialPipelineKey, ErasedMeshPipelineKey},
     pbr::{
-        LightKeyCache, MeshPipelineKey, PreparedMaterial, ViewKeyCache, alpha_mode_pipeline_key,
+        MeshPipelineKey, PreparedMaterial, ViewKeyCache, alpha_mode_pipeline_key,
         base_specialize,
     },
     prelude::*,
@@ -28,8 +28,10 @@ struct PipelineJob {
     mesh: AssetId<Mesh>,
     motion_mesh: AssetId<Mesh>,
     material: UntypedAssetId,
+    material_type: &'static str,
     shadows: bool,
     state: RenderingState,
+    waiting: &'static str,
     ids: Vec<CachedRenderPipelineId>,
 }
 #[derive(Clone)]
@@ -76,6 +78,23 @@ impl Plugin for WorldPipelinePlugin {
     }
 }
 impl WorldPipelines {
+    pub(crate) fn startup_audit(&self) -> serde_json::Value {
+        let jobs = self.jobs.lock().unwrap();
+        serde_json::json!({
+            "retained": jobs.len(),
+            "pending": jobs.iter().filter_map(|ticket| {
+                let job = ticket.0.lock().unwrap();
+                (job.state != RenderingState::Ready).then(|| serde_json::json!({
+                    "material": job.material_type,
+                    "shadows": job.shadows,
+                    "state": format!("{:?}", job.state),
+                    "waiting": job.waiting,
+                    "pipelines": job.ids.len(),
+                }))
+            }).collect::<Vec<_>>(),
+        })
+    }
+
     pub fn reserve_cache(&mut self, stream: &mut WorldStream) -> Result<(), ReferenceError> {
         if !self.cache_reserved {
             let mut allocation = stream.presentation_allocation();
@@ -133,8 +152,10 @@ impl WorldPipelines {
             mesh: mesh.id(),
             motion_mesh: mesh.id(),
             material: material.id().untyped(),
+            material_type: std::any::type_name::<M>(),
             shadows,
             state: RenderingState::Loading,
+            waiting: "queued",
             ids: Vec::with_capacity(32),
         })));
         self.jobs.lock().unwrap().push(ticket.clone());
@@ -194,16 +215,19 @@ fn compile(world: &mut World) {
                 == std::any::TypeId::of::<crate::presentation::materials::SourceMaterial>()
                 && !crate::presentation::caster_material::ready(world, job.material.typed())
             {
+                job.waiting = "caster material";
                 continue;
             }
             if job.ids.is_empty() {
                 let Some(mesh) = world.resource::<RenderAssets<RenderMesh>>().get(job.mesh) else {
+                    job.waiting = "mesh";
                     continue;
                 };
                 let Some(material) = world
                     .resource::<ErasedRenderAssets<PreparedMaterial>>()
                     .get(job.material)
                 else {
+                    job.waiting = "material";
                     continue;
                 };
                 let layout = mesh.layout.clone();
@@ -215,6 +239,7 @@ fn compile(world: &mut World) {
                     .copied()
                     .collect::<Vec<_>>();
                 if view_keys.is_empty() {
+                    job.waiting = "view keys";
                     continue;
                 }
                 let mut keys = Vec::with_capacity(32);
@@ -232,12 +257,15 @@ fn compile(world: &mut World) {
                     }
                 }
                 if job.shadows && properties.shadows_enabled {
-                    let light_keys = world.resource::<LightKeyCache>();
-                    if light_keys.is_empty() {
-                        continue;
-                    }
-                    for light_key in light_keys.values() {
-                        let mut key = *light_key | mesh_bits;
+                    // Match Bevy's shadow keys, including when all lamps are off.
+                    for light_key in [
+                        MeshPipelineKey::DEPTH_PREPASS
+                            | MeshPipelineKey::VIEW_PROJECTION_ORTHOGRAPHIC
+                            | MeshPipelineKey::UNCLIPPED_DEPTH_ORTHO,
+                        MeshPipelineKey::DEPTH_PREPASS
+                            | MeshPipelineKey::VIEW_PROJECTION_PERSPECTIVE,
+                    ] {
+                        let mut key = light_key | mesh_bits;
                         if properties.alpha_mode != AlphaMode::Opaque {
                             key |= MeshPipelineKey::MAY_DISCARD;
                         }
@@ -359,6 +387,7 @@ fn compile(world: &mut World) {
             }
             let published = world.resource::<PipelineCache>().pipelines().count();
             if job.ids.iter().any(|id| id.id() >= published) {
+                job.waiting = "pipeline publication";
                 continue;
             }
             let candidate_owner = (bank != 0).then(|| {
@@ -370,6 +399,7 @@ fn compile(world: &mut World) {
                     .clone()
             });
             let mut ready = true;
+            let mut waiting = "motion pipeline";
             let mut motion_failure = None;
             for id in &job.ids {
                 match crate::presentation::motion_draw::prepare_world_motion(
@@ -398,7 +428,10 @@ fn compile(world: &mut World) {
                         failure = Some(format!("Source material shader: {error}"));
                         break;
                     }
-                    _ => ready = false,
+                    _ => {
+                        waiting = "shader";
+                        ready = false;
+                    }
                 }
             }
             for id in &job.ids {
@@ -407,7 +440,10 @@ fn compile(world: &mut World) {
                     .companion_state(*id, cache)
                 {
                     match result {
-                        Ok(value) => ready &= value,
+                        Ok(value) => {
+                            if !value { waiting = "caster pipeline"; }
+                            ready &= value;
+                        }
                         Err(error) => {
                             failure = Some(error);
                             break;
@@ -419,7 +455,10 @@ fn compile(world: &mut World) {
                     .companion_state(*id, cache)
                 {
                     match result {
-                        Ok(value) => ready &= value,
+                        Ok(value) => {
+                            if !value { waiting = "surface pipeline"; }
+                            ready &= value;
+                        }
                         Err(error) => {
                             failure = Some(error);
                             break;
@@ -427,8 +466,9 @@ fn compile(world: &mut World) {
                     }
                 }
                 let descriptor = cache.get_render_pipeline_descriptor(*id);
-                if descriptor.fragment.as_ref().is_some_and(|fragment|fragment.shader_defs.iter().any(|def|matches!(def,bevy::shader::ShaderDefVal::Bool(name,true) if name=="SOURCE_SURFACE" || name=="SOURCE_WORLD"))) && !world.resource::<crate::presentation::caster::CasterPasses>().classified(*id) {ready=false;}
+                if descriptor.fragment.as_ref().is_some_and(|fragment|fragment.shader_defs.iter().any(|def|matches!(def,bevy::shader::ShaderDefVal::Bool(name,true) if name=="SOURCE_SURFACE" || name=="SOURCE_WORLD"))) && !world.resource::<crate::presentation::caster::CasterPasses>().classified(*id) {waiting="caster classification";ready=false;}
             }
+            job.waiting = waiting;
             if let Some(error) = failure {
                 job.state = RenderingState::Failed(error);
             } else if ready {

@@ -47,7 +47,7 @@ pub struct TerrainMaterial {
     uploaded:
         std::sync::Arc<std::sync::Mutex<std::collections::HashSet<bevy::asset::AssetId<Image>>>>,
     pub uniform: TerrainUniform,
-    pub arrays: [Handle<Image>; 4],
+    pub arrays: [Handle<Image>; 5],
     pub array_count: u8,
     pub receiver_mask: u32,
 }
@@ -97,7 +97,7 @@ impl TerrainMaterial {
                 0.,
             );
         }
-        let mut banks = Vec::with_capacity(4);
+        let mut banks = Vec::with_capacity(5);
         let mut bindings = [UVec4::ZERO; 12];
         let mut sampling = [Vec4::ZERO; 12];
         for (index, slot) in SLOTS.iter().enumerate() {
@@ -110,9 +110,9 @@ impl TerrainMaterial {
                 banks.push((binding.array, image.clone()));
                 banks.len() - 1
             };
-            if bank >= 4 {
+            if bank >= 5 {
                 return Err(ReferenceError(
-                    "TerrainBiome exceeds four exact texture arrays".into(),
+                    "TerrainBiome exceeds five exact texture arrays".into(),
                 ));
             }
             bindings[index] = UVec4::new(bank as u32, binding.layer, 0, 0);
@@ -318,6 +318,8 @@ impl AsBindGroup for TerrainMaterial {
                 ShaderStages::VERTEX_FRAGMENT,
                 (
                     uniform_buffer::<TerrainUniform>(false),
+                    texture_2d_array(TextureSampleType::Float { filterable: true }),
+                    sampler(SamplerBindingType::Filtering),
                     texture_2d_array(TextureSampleType::Float { filterable: true }),
                     sampler(SamplerBindingType::Filtering),
                     texture_2d_array(TextureSampleType::Float { filterable: true }),

@@ -253,7 +253,7 @@ def recover_renderer(source, reader, mesh):
               'sorting_layer':data['m_SortingLayer'], 'sorting_order':data['m_SortingOrder']}
     if data['m_SortingLayerID'] != 0 or fields['sorting_layer'] != 0 or fields['sorting_order'] != 0:
         raise ValueError(f'{source_id(reader)} unsupported source sorting state')
-    if fields['cast_shadows'] not in (0,1,3) or fields['reflection_probe_usage'] not in (0,1):
+    if fields['cast_shadows'] not in (0,1,2,3) or fields['reflection_probe_usage'] not in (0,1):
         raise ValueError(f'{source_id(reader)} unsupported source renderer flags')
     if data['m_ReceiveShadows'] not in (0,1):
         raise ValueError(f'{source_id(reader)} unsupported shadow receiver state')

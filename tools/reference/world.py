@@ -64,6 +64,12 @@ class Selection:
         self.receipts = {}
         self.records = {}
 
+    def transform_chain(self, owner):
+        while owner is not None:
+            self.record(owner)
+            data = required_record(self.source, owner, ('m_Father',))
+            owner = self.source.resolve(owner, data['m_Father'])
+
     def receipt(self, owner):
         identity=key(owner)
         if identity not in self.receipts:
@@ -74,7 +80,10 @@ class Selection:
         return source_id(owner)
 
     def component_record(self, owner):
-        """Retain type and owner evidence without expanding unselected component rules."""
+        """Retain bounds and lamp inputs, and owner evidence for other components."""
+        class_name = self.source.class_name(owner) if owner.type.name == 'MonoBehaviour' else owner.type.name
+        if class_name in {'LODGroup', 'Light', 'kozlampa'}:
+            return self.record(owner)
         identity=key(owner)
         if identity in self.records:return self.records[identity]
         data=required_record(self.source,owner,('m_GameObject',))
@@ -82,7 +91,7 @@ class Selection:
         if game_object is None:raise ValueError(f'{identity} m_GameObject: missing component owner')
         target=self.receipt(game_object)
         result={'source':self.receipt(owner),
-                'class_name':self.source.class_name(owner) if owner.type.name=='MonoBehaviour' else owner.type.name,
+                'class_name':class_name,
                 'fields':{'m_GameObject':{'kind':'link','value':target}},
                 'links':[{'field':'m_GameObject','target':target}]}
         self.records[identity]=result
@@ -231,6 +240,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) ->
         for pointer in settings[field]:
             root=source.resolve(settings_owner,pointer)
             startup.append({'group':field,'source':source_id(root),'pose':world_pose(source,root)})
+            selected.transform_chain(root)
     for pid in (79970,68463,72657,77620):
         component=source.get('level1',pid)
         selected.record(component)

@@ -805,7 +805,7 @@ pub struct LibraryProvenance {
     pub source_manifest_sha256: String,
 }
 
-pub const MAX_MANIFEST_BYTES: usize = 128 * 1024 * 1024;
+pub const MAX_MANIFEST_BYTES: usize = 256 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -906,7 +906,7 @@ impl ReferenceManifest {
     }
 
     pub fn from_runtime_json(bytes: &[u8]) -> Result<Self, ReferenceError> {
-        require(bytes.len() <= 64 * 1024 * 1024, "manifest size")?;
+        require(bytes.len() <= MAX_MANIFEST_BYTES, "manifest size")?;
         let manifest: Self =
             serde_json::from_slice(bytes).map_err(|e| ReferenceError(e.to_string()))?;
         manifest.validate_gameplay()?;

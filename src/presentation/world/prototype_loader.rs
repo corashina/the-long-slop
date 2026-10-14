@@ -18,6 +18,7 @@ pub struct SourceGltf {
     pub mesh_bytes: usize,
     pub skin_bytes: usize,
 }
+/// Typed loads select this loader. Leave glTF labels to Bevy's loader.
 #[derive(Default, TypePath)]
 pub struct SourceGltfLoader;
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -281,8 +282,5 @@ impl AssetLoader for SourceGltfLoader {
             result.joints.push(joints);
         }
         Ok(result)
-    }
-    fn extensions(&self) -> &[&str] {
-        &["gltf"]
     }
 }

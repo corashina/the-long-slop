@@ -26,6 +26,17 @@ fn pixels(texture: &TextureRecord) -> usize {
         .map(|m| m.width as usize * m.height as usize * 4)
         .sum()
 }
+fn texture_cpu_reservation(texture: &SourceTexture) -> usize {
+    // Reserve assembly overlap and both loader slots before starting the first mip.
+    // Holding this window lets later mips finish even when other assets are admitted.
+    pixels(&texture.record) * 2 + texture.input_staging.iter().copied().max().unwrap_or(0) * 2
+}
+fn pending_texture_cpu(texture: &SourceTexture) -> usize {
+    texture.upload.cpu_bytes(
+        texture_cpu_reservation(texture),
+        !texture.levels.is_empty() || texture.image.is_some(),
+    )
+}
 pub(super) fn texture_metadata(texture: &TextureRecord) -> usize {
     use std::mem::size_of;
     4096 + size_of::<TextureRecord>()
@@ -116,7 +127,7 @@ impl SourceMaterials {
             .textures
             .iter()
             .filter(|t| !t.eager)
-            .map(|t| pixels(&t.record) * 2 + texture_metadata(&t.record))
+            .map(|t| pending_texture_cpu(t) + texture_metadata(&t.record))
             .sum::<usize>()
             + self
                 .records
@@ -221,7 +232,6 @@ impl SourceMaterials {
                     let bytes = pixels(texture);
                     added_gpu += bytes;
                     added_cpu += 4096
-                        + bytes * 2
                         + std::mem::size_of::<SourceTexture>()
                         + texture.file.len() * 2
                         + texture.source.file.len()
@@ -252,6 +262,7 @@ impl SourceMaterials {
                         .insert(texture.file.clone(), self.textures.len());
                     self.textures.push(SourceTexture {
                         owner: Arc::new(()),
+                        upload: default(),
                         failed: false,
                         eager: false,
                         users: 0,
@@ -282,9 +293,10 @@ impl SourceMaterials {
     }
     pub fn world_asset_ready(&self, asset: SourceAssetId) -> bool {
         self.world_primary.assets.get(&asset).is_some_and(|paths| {
-            paths
-                .iter()
-                .all(|path| self.textures[self.texture_indices[path]].image.is_some())
+            paths.iter().all(|path| {
+                let texture = &self.textures[self.texture_indices[path]];
+                texture.image.is_some() && (texture.eager || pending_texture_cpu(texture) == 0)
+            })
         })
     }
     pub fn prepare_world_primary(
@@ -342,7 +354,7 @@ impl SourceMaterials {
             }
         }
         let (cpu, gpu) = self.primary_bytes();
-        self.account_primary(stream, cpu + staging, gpu, jobs, staging)?;
+        self.account_primary(stream, cpu, gpu, jobs, staging)?;
         for index in 0..self.textures.len() {
             if stream.available_external_jobs() == 0 {
                 break;
@@ -364,9 +376,24 @@ impl SourceMaterials {
             if staging > stream.available_dependency_staging_bytes() {
                 continue;
             }
+            let decoded = if texture.levels.is_empty() {
+                texture_cpu_reservation(texture)
+            } else {
+                0
+            };
+            if decoded > stream.available_prototype_cpu_bytes()
+                && (self
+                    .textures
+                    .iter()
+                    .any(|t| !t.eager && pending_texture_cpu(t) != 0)
+                    || self.world_primary.jobs < stream.presentation_allocation().jobs)
+            {
+                // Let admitted decodes and GPU uploads drain before starting another texture.
+                continue;
+            }
             self.account_primary(
                 stream,
-                self.world_primary.cpu + staging,
+                self.world_primary.cpu + decoded,
                 gpu,
                 self.world_primary.jobs + 1,
                 self.world_primary.staging + staging,
@@ -405,7 +432,7 @@ impl SourceMaterials {
             }
         }
         let (cpu, gpu) = self.primary_bytes();
-        self.account_primary(stream, cpu + staging, gpu, jobs, staging)?;
+        self.account_primary(stream, cpu, gpu, jobs, staging)?;
         if let Some(error) = failure {
             return Err(error);
         }
@@ -421,11 +448,14 @@ impl SourceMaterials {
             paths.iter().all(|path| {
                 let t = &self.textures[self.texture_indices[path]];
                 t.eager
-                    || t.image.is_some()
-                    || t.levels.iter().all(|h| {
-                        images.contains(h.id())
-                            || matches!(server.load_state(h.id()), LoadState::Failed(_))
-                    })
+                    || if t.image.is_some() {
+                        pending_texture_cpu(t) == 0
+                    } else {
+                        t.levels.iter().all(|h| {
+                            images.contains(h.id())
+                                || matches!(server.load_state(h.id()), LoadState::Failed(_))
+                        })
+                    }
             })
         })
     }

@@ -160,6 +160,7 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
                 presentation::lighting::sync_control_visuals,
                 update_camera,
                 presentation::frame_graph::sync_stack_cameras,
+                publish_loading,
                 update_hud,
             )
                 .chain(),
@@ -736,6 +737,45 @@ fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveC
         *transform = active_camera(&drive);
     }
 }
+fn publish_loading(
+    drive: Res<Drive>,
+    visuals: Res<ReferenceVisuals>,
+    materials: Res<presentation::materials::SourceMaterials>,
+    lighting: Res<presentation::lighting::SourceLighting>,
+    source_lighting: Res<presentation::source_lighting::SourceLighting>,
+    mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
+    plates: Res<presentation::plates::PlateTextStatus>,
+    time: Res<Time<Real>>,
+    mut last: Local<f64>,
+) {
+    let now = time.elapsed_secs_f64();
+    if drive.ready || visuals.failed || now - *last < 0.5 {
+        return;
+    }
+    *last = now;
+    let stream = &drive.runtime.stream;
+    let rendering = visuals.bound
+        && materials.state == presentation::materials::RenderingState::Ready
+        && lighting.state == presentation::lighting::RenderingState::Ready
+        && source_lighting.state == presentation::materials::RenderingState::Ready
+        && mirrors.ready()
+        && plates.ready();
+    game_loading_progress(
+        stream.metrics().prepared_roads,
+        crate::world::ROAD_SEGMENTS,
+        rendering,
+        drive.runtime.world_supported() && stream.window_ready(),
+    );
+    for budget in stream.presentation_budgets(stream.presentation_allocation()) {
+        game_loading_budget(
+            budget.name,
+            budget.used as f64,
+            budget.limit as f64,
+            budget.unit,
+        );
+    }
+}
+
 fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let needs = drive.runtime.needs_output();
     game_survival(

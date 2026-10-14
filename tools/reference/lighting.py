@@ -445,7 +445,7 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
     assets={a['id']:a for a in manifest['assets']};textures={t['id']:t for t in lighting['textures']}
     lights={l['id']:l for l in lighting['lights']};controls={c['id']:c for c in lighting['controllers']}
     if len(lights)!=len(lighting['lights']) or len(controls)!=len(lighting['controllers']):raise ValueError('Duplicate lighting ID')
-    documents={a['id']:json.loads((output/Path(a['path']).name).read_text()) for a in manifest['assets']}
+    documents={a['id']:json.loads((output/Path(a['path']).name).read_bytes()) for a in manifest['assets']}
     def fail(source,field):raise ValueError(f"{source['file']}:{source['path_id']} {field}")
     icon=lighting['switch_icon'];icon_path=output/Path(icon['path']).name
     if (icon['source']!={'file':'sharedassets1.assets','path_id':4594} or icon['crop']!=[0.,0.,160.,160.]
@@ -538,7 +538,7 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
                 and flare['flare']['source']=={'file':'sharedassets1.assets','path_id':4516}
                 and atlas and atlas['source']=={'file':'sharedassets1.assets','path_id':744}):
             fail(flare['source'],'sun flare resource links')
-        payload=json.loads((output/Path(flare['flare']['path']).name).read_text())
+        payload=json.loads((output/Path(flare['flare']['path']).name).read_bytes())
         if payload['m_FlareTexture']!={'m_FileID':0,'m_PathID':atlas['source']['path_id']}:
             fail(flare['source'],'sun flare atlas link')
         expected_elements=[{'image':e['m_ImageIndex'],'position':e['m_Position'],'size':e['m_Size'],'color':rgba(e['m_Color']),

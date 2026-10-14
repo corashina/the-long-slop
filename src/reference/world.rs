@@ -646,10 +646,32 @@ impl WorldReference {
                 "buildingscript" => &["newRandomStuff"],
                 "terrainHeightAlignToBuildingScript" => &["helpPosCoords"],
                 "digholescript2" => &["notAtStart"],
+                "LODGroup" => &[
+                    "m_GameObject",
+                    "m_LocalReferencePoint",
+                    "m_Size",
+                    "m_LODs",
+                    "m_FadeMode",
+                    "m_AnimateCrossFading",
+                ],
                 _ => &[],
             };
             for name in required {
                 require(r.fields.get(name).is_some(), &field(&r.source, name))?;
+            }
+            if r.class_name == "LODGroup" {
+                require(
+                    matches!(r.fields.get("m_LocalReferencePoint"), Some(WorldValue::Record(point))
+                        if ["x", "y", "z"].iter().all(|axis|
+                            matches!(point.get(axis), Some(WorldValue::Number(value))
+                                if (*value as f32).is_finite()))),
+                    &field(&r.source, "LOD reference point"),
+                )?;
+                require(
+                    matches!(r.fields.get("m_Size"), Some(WorldValue::Number(size))
+                        if *size >= 0. && (*size as f32).is_finite()),
+                    &field(&r.source, "LOD size"),
+                )?;
             }
         }
         let collision = checked_record(
@@ -1115,6 +1137,15 @@ impl WorldReference {
                 source_valid(&frame.source, &self.source_hashes) && transform(&frame.pose),
                 &field(&frame.source, "startup pose"),
             )?;
+            let mut node = checked_record(&record_map, &frame.source, &["Transform"])?;
+            let mut ancestors = HashSet::new();
+            while let Some(parent) = record_link(node, "m_Father") {
+                require(
+                    ancestors.insert(&node.source),
+                    &field(&frame.source, "startup transform cycle"),
+                )?;
+                node = checked_record(&record_map, parent, &["Transform"])?;
+            }
         }
         require(
             records.contains(&self.catalog.source),

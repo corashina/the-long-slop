@@ -104,6 +104,34 @@ pub struct WorldTextures {
     gpu_reserved: usize,
 }
 impl WorldTextures {
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn startup_audit(
+        &self,
+        images: &Assets<Image>,
+        server: &AssetServer,
+    ) -> serde_json::Value {
+        let queue = self.uploads.lock().unwrap();
+        serde_json::json!({
+            "arrays": self.arrays.iter().flatten().map(|a| {
+                let layer = a.layers.get(a.next_layer);
+                serde_json::json!({
+                    "layers": a.layers.len(), "next_layer": a.next_layer,
+                    "next_chunk": a.next_chunk, "cpu_live": a.cpu_live,
+                    "pending_upload": a.pending_upload, "failed": a.failed,
+                    "path": layer.and_then(|l| l.chunks.get(a.next_chunk)).map(|c| &c.data.path),
+                    "loaded": layer.and_then(|l| l.load.as_ref()).map(|h| images.contains(h.id())),
+                    "load_state": layer.and_then(|l| l.load.as_ref()).map(|h| format!("{:?}", server.load_state(h.id()))),
+                })
+            }).collect::<Vec<_>>(),
+            "completed": queue.completed.is_some(),
+            "job": queue.job.as_ref().map(|j| serde_json::json!({
+                "finished": j.finished, "submitted": j.submitted,
+                "callback_registered": j.callback_registered,
+                "completion": j.completion.load(std::sync::atomic::Ordering::Acquire),
+            })),
+        })
+    }
+
     pub(crate) fn owns_image(&self, id: AssetId<Image>) -> bool {
         self.arrays.iter().flatten().any(|a| {
             Arc::strong_count(&a.owner) == 1 && a.image.as_ref().is_some_and(|h| h.id() == id)

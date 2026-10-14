@@ -63,7 +63,26 @@ fn extract(
     source: Extract<Option<Res<super::SourceMaterials>>>,
     requests: Extract<Res<crate::app::save::SaveRequests>>,
     mut uploads: ResMut<RenderUploads>,
+    images: Res<RenderAssets<GpuImage>>,
+    queue: Res<RenderQueue>,
 ) {
+    for materials in source
+        .as_deref()
+        .into_iter()
+        .chain(requests.hidden().map(|p| &p.materials))
+    {
+        for texture in materials.textures.iter().filter(|t| !t.eager) {
+            if texture
+                .image
+                .as_ref()
+                .is_some_and(|h| images.get(h.id()).is_some())
+                && texture.upload.register()
+            {
+                let receipt = texture.upload.clone();
+                queue.on_submitted_work_done(move || receipt.complete());
+            }
+        }
+    }
     uploads.0[0] = source.as_ref().map(|s| {
         (
             Arc::clone(s.world_textures.upload_queue()),
