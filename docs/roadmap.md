@@ -4,10 +4,11 @@ Updated: 2026-10-14.
 
 ## Current status
 
-Master is at `4de050b`. Source-world implementation is at `44c45ad`.
-We completed nine source-world implementation layers, their reviews, and the final correction review.
-We are merging source-world with current master in `codex/source-world-merge`.
-The merge is open. Master does not yet contain source-world.
+Master retains the accepted game features and local door-control changes.
+We keep the complete source-world integration on `codex/world-integration-deferred`, based on `05bdc507`.
+We completed nine source-world implementation layers and two integration merges in that separate branch.
+The user deferred integration into master. Master does not contain the source generator or Bevy ownership patch.
+Source-world changes shared startup, collision, save identities, and renderer paths. It requires the later integration work.
 
 ### Changes in master
 
@@ -21,10 +22,9 @@ The merge is open. Master does not yet contain source-world.
 | Save/load | Browser storage, fleet state, fluids, item state, and scene replacement |
 | Performance | Reduced camera light clustering and depth/shadow material bindings |
 
-The local door-control changes add left-button dragging and suppress view movement during a drag.
-These changes remain uncommitted. We will preserve them during the merge.
+We added left-button door dragging and suppress view movement during a drag.
 
-### Source-world changes
+### Deferred source-world changes
 
 | Layer | Implemented changes |
 | --- | --- |
@@ -43,11 +43,10 @@ Changed-object records have no fixed count limit. Source checkpoints and first-c
 Active CPU/GPU limits remain 128 MiB each. Prototype limits remain 256 MiB CPU and 512 MiB GPU.
 Generation and presentation share 32 MiB of pending storage.
 
-See the [source-world design](superpowers/specs/2026-10-12-source-world-design.md),
-[implementation plan](superpowers/plans/2026-10-12-source-world.md), and
-[source research](research/2026-10-12-world-reference.md).
+The separate branch contains the source-world design, implementation plan, source research, and checked input provenance.
+The new worktree also retains exported runtime files and implementation reports.
 
-### Merge changes
+### Deferred integration changes
 
 We replaced station save identities with canonical generated identities, change records, and source spawn history.
 We added save schema 2 and reject incompatible schema 1 saves. Browser database version remains separate.
@@ -57,17 +56,22 @@ We preserve imported fleet state, dormant absolute poses, recovery, and cross-ow
 Vehicle selection updates future source spawn context. Stored first-call boundaries retain their original context.
 We connect existing sausage and turd item definitions to generated state and source-owned geometry.
 
-Native integration compiled. We are completing hidden renderer preparation before scene replacement.
-This includes candidate failure handling, shared asset ownership, GPU readiness, and combined memory limits.
-Generated meshes now require checked renderer bounds and flags. Final input publication remains pending.
-We must retain master's latest depth/shadow change before promotion.
+We completed hidden renderer preparation before scene replacement.
+We preserve active scene owners until candidate uploads, pipelines, collision, and restored bindings are ready.
+We added scoped GPU errors, completion receipts, separate mesh buffers, and combined memory charges.
+We patched the existing Bevy 0.19.1 pipeline cache to own candidate preparation, cancellation, and retries.
+We retain the original crate licenses and source provenance. The patch changes one upstream file.
+Generated meshes require checked renderer bounds and flags. Selected ShadowsOnly meshes skip visible and motion passes.
+We published 365 asset entries and recorded hashes for 7,890 runtime files, including the WASM package.
+We retained master's latest depth/shadow bindings and connected candidate caster ownership.
+The final native/WASM builds, packaging, 22 shader variants, JavaScript syntax, and scoped whitespace checks passed.
+We preserved existing WASM warnings and unchanged upstream whitespace.
 
-Remaining merge work:
+Remaining deferred work:
 
-1. Finish renderer preparation and compile the current native/WASM product.
-2. Publish merged source inputs and resolve the remaining conflicts.
-3. Include master `4de050b`, then build and review the final integration.
-4. Update both branches and restore local changes.
+1. Resolve the reported hidden grass write and generated attachment owner restore issues.
+2. Complete the interrupted integration review and repeat builds after required fixes.
+3. Perform runtime acceptance when authorized. Merge into master requires a later user instruction.
 
 ### Verification limits
 
@@ -82,14 +86,14 @@ We added no new storage engine, save migration, multiplayer, or deployment work.
 ## Full-game feature gaps
 
 Reference: installed Steam build `11140890`. This backlog records gaps beyond the implemented layers above.
-Source-world integration is already underway. Its roads, terrain, biomes, and placement need merge acceptance.
+We keep source-world integration separate. Its roads, terrain, biomes, and placement need acceptance before a later merge.
 Missing means no gameplay implementation. Partial means the current implementation covers selected behavior or content.
 The backlog does not expand approved implementation scope. Each new feature needs a source-based specification.
 
 | Feature | Status | Remaining work |
 | --- | --- | --- |
-| Source world generation | Merge pending | Integrate seeded roads, terrain, biomes, and placement; verify source samples and runtime behavior. |
-| Buildings and exploration | Merge pending | Integrate source buildings, interiors, landmarks, and placement; check content coverage and collision. |
+| Source world generation | Deferred branch | Resolve integration findings; verify source samples and runtime behavior before merging. |
+| Buildings and exploration | Deferred branch | Check source buildings, interiors, landmarks, placement, content coverage, and collision before merging. |
 | World population | Partial | Integrate source loot placement; add excluded abandoned vehicles, items, and encounters. |
 | Full vehicle range | Partial | Add vehicles beyond the Lada and Skoda, including diesel, two-stroke, automatic, bus, and bike mechanics. |
 | Driving physics | Partial | Add manual gears and clutch; match throttle ramps, tire friction, bare-rim behavior, suspension, and combined braking. |
