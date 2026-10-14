@@ -33,8 +33,6 @@ pub struct ItemState {
     pub location: ItemLocation,
     pub pose: VehiclePose,
     pub local_pose: VehiclePose,
-    /// One is new; zero is the most worn source state.
-    pub condition: f32,
     pub temperature: Option<f32>,
     pub fluid: Option<FluidContainer>,
     pub food: Option<FoodState>,
@@ -71,7 +69,6 @@ impl ItemStore {
                 }
             };
             state.local_pose = crate::save::local_pose(&record.local_pose);
-            state.condition = record.condition;
             state.temperature = record.temperature;
             if let (Some(fluid), Some(quantities)) = (&mut state.fluid, record.fluids) {
                 fluid.mixture.quantities_liters = quantities;
@@ -119,7 +116,6 @@ impl ItemStore {
                     .map_or(ItemLocation::World, ItemLocation::Attached),
                 pose,
                 local_pose,
-                condition: item.condition,
                 temperature: reference
                     .vehicles
                     .iter()
@@ -268,7 +264,6 @@ impl ItemStore {
                     rotation: item.local_pose.rotation,
                 },
                 location,
-                condition: item.condition,
                 temperature: item.temperature,
                 fluids: item.fluid.as_ref().map(capture_fluids).transpose()?,
             });
@@ -321,7 +316,6 @@ impl ItemStore {
                 position: [0.0; 3],
                 rotation: [0.0, 0.0, 0.0, 1.0],
             },
-            condition: 1.0,
             temperature: None,
             fluid: Some(FluidContainer::new(
                 1000.0,
@@ -360,7 +354,6 @@ impl ItemStore {
                 position: [0.; 3],
                 rotation: [0., 0., 0., 1.],
             },
-            condition: 1.,
             temperature: None,
             fluid: None,
             inactive_pose: None,

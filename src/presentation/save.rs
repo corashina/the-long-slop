@@ -16,6 +16,7 @@ pub struct PreparedPresentation {
     updates: Vec<(Entity, Transform, Visibility)>,
     chunks: WorldVisuals,
     lighting: lighting::SourceLighting,
+    conditions: Option<super::conditions::PreparedConditions>,
 }
 
 pub fn prepare_presentation(
@@ -101,6 +102,7 @@ pub fn prepare_presentation(
         updates,
         chunks: world.resource::<WorldVisuals>().empty_copy(),
         lighting: world.resource::<lighting::SourceLighting>().prepare_copy(),
+        conditions: None,
     };
     world.resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
         let mut commands = Commands::new(&mut prepared.commands, world);
@@ -126,6 +128,19 @@ pub fn prepare_presentation(
     {
         prepared.discard(world);
         return Err(error);
+    }
+    match world.resource_scope(|world, visuals: Mut<super::conditions::ConditionVisuals>| {
+        visuals.prepare_candidate(
+            &candidate.area.conditions,
+            &candidate.area.interaction.cleaning,
+            world,
+        )
+    }) {
+        Ok(conditions) => prepared.conditions = Some(conditions),
+        Err(error) => {
+            prepared.discard(world);
+            return Err(error);
+        }
     }
     Ok(prepared)
 }
@@ -176,6 +191,9 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
     if materials.state != materials::RenderingState::Ready {
         return Err(fail("Material assets are not ready".into()));
     }
+    world
+        .resource::<super::conditions::ConditionVisuals>()
+        .validate_assets(world)?;
     let instruments = world.resource::<super::instruments::InstrumentVisuals>();
     if !instruments.bound || !instruments.prepared {
         return Err(fail("Instrument bindings are not ready".into()));
@@ -278,6 +296,10 @@ impl PreparedPresentation {
         for (entity, pose, visibility) in self.updates {
             world.entity_mut(entity).insert((pose, visibility));
         }
+        self.conditions
+            .take()
+            .expect("prepared conditions")
+            .commit(world);
         let old_chunks = world
             .remove_resource::<WorldVisuals>()
             .expect("loaded chunks");

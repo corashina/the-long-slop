@@ -12,6 +12,7 @@ pub struct ConditionRecord {
     pub repair_tables: Vec<[[bool; 7]; 5]>,
     pub clean_tables: Vec<[bool; 7]>,
     pub repair_rate: f32,
+    pub repair_decay_rate: f32,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -209,7 +210,10 @@ impl ConditionRecord {
             "condition permission tables",
         )?;
         require(
-            self.repair_rate.is_finite() && self.repair_rate > 0.,
+            self.repair_rate.is_finite()
+                && self.repair_rate > 0.
+                && self.repair_decay_rate.is_finite()
+                && self.repair_decay_rate >= 0.,
             "condition repair_rate",
         )?;
         let nodes: HashSet<_> = r.nodes.iter().map(|n| n.id).collect();

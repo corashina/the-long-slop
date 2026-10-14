@@ -385,7 +385,12 @@ fn bind(world: &mut World) -> Result<(), String> {
                 sort,
                 bevy::render::batching::NoAutomaticBatching,
             ));
-            super::materials::warm_plate_material(world, handle.id(), material.id().untyped());
+            super::materials::warm_retained_material(
+                world,
+                handle.id(),
+                material.id().untyped(),
+                "source plate text".into(),
+            );
             bindings.push(Binding {
                 item,
                 mesh: handle,

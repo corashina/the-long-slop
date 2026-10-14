@@ -102,7 +102,7 @@ fn removed_wheel_has_no_support() {
         .find(|wheel| wheel.id == slot)
         .unwrap();
     assert!(physics.snapshot(0).wheels_contact[0]);
-    let condition = area.items.get(mounted.rim).unwrap().condition;
+    let condition = area.conditions.item_quality(mounted.rim);
     let count = area.items.len();
     let id = wheels.remove(slot, &mut area.items, &mut physics).unwrap();
     assert_eq!(id, mounted.rim);
@@ -112,7 +112,7 @@ fn removed_wheel_has_no_support() {
     assert!(!physics.snapshot(0).wheels_contact[0]);
     let part = area.items.get(id).unwrap();
     assert_eq!(part.location, ItemLocation::World);
-    assert_eq!(part.condition, condition);
+    assert_eq!(area.conditions.item_quality(id), condition);
     assert!(physics.rapier().bodies[part.body.unwrap()].is_dynamic());
     let body = part.body.unwrap();
     let rotation = *physics.rapier().bodies[body].rotation();
@@ -124,7 +124,7 @@ fn removed_wheel_has_no_support() {
         .unwrap();
     assert_eq!(physics.wheel_support_count(0), 4);
     assert_eq!(area.items.len(), count);
-    assert_eq!(area.items.get(id).unwrap().condition, condition);
+    assert_eq!(area.conditions.item_quality(id), condition);
     assert!(
         wheels
             .install(id, slot, &mut area.items, &mut physics)
@@ -367,7 +367,7 @@ fn removed_wheel_is_held_with_the_same_identity() {
     let mut runtime = runtime_aiming_at_wheel(&reference, slot);
     let rim = reference.wheel_slots[0].rim;
     let tire = reference.wheel_slots[0].tire;
-    let condition_before = runtime.area.items.get(rim).unwrap().condition;
+    let condition_before = runtime.area.conditions.item_quality(rim);
 
     runtime.step(
         &reference,
@@ -384,10 +384,7 @@ fn removed_wheel_is_held_with_the_same_identity() {
         runtime.area.items.get(tire).unwrap().location,
         ItemLocation::Attached(rim)
     );
-    assert_eq!(
-        runtime.area.items.get(rim).unwrap().condition,
-        condition_before
-    );
+    assert_eq!(runtime.area.conditions.item_quality(rim), condition_before);
     let empty = runtime.area.interaction.resolve(
         &runtime.physics,
         runtime.area.player.view_pose(&runtime.physics),
@@ -497,7 +494,7 @@ fn production_wheel_removal_acquires_the_source_rim() {
     let mut runtime = runtime_aiming_at_wheel(&reference, slot);
     let rim = reference.wheel_slots[0].rim;
     let tire = reference.wheel_slots[0].tire;
-    let condition = runtime.area.items.get(rim).unwrap().condition;
+    let condition = runtime.area.conditions.item_quality(rim);
     let cover = runtime.area.interaction.parts.covering_item(rim).unwrap();
     runtime.step(
         &reference,
@@ -531,6 +528,6 @@ fn production_wheel_removal_acquires_the_source_rim() {
         runtime.area.items.get(tire).unwrap().location,
         ItemLocation::Attached(rim)
     );
-    assert_eq!(runtime.area.items.get(rim).unwrap().condition, condition);
+    assert_eq!(runtime.area.conditions.item_quality(rim), condition);
     assert_eq!(runtime.physics.wheel_support_count(0), 3);
 }

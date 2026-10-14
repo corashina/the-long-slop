@@ -22,6 +22,7 @@ struct Input {
     revision: u64,
     data: SourceUniform,
     texture: Option<AssetId<Image>>,
+    color: Option<super::materials::RetainedColor>,
 }
 #[derive(Resource, Default)]
 struct Inputs {
@@ -30,6 +31,7 @@ struct Inputs {
 }
 struct Material {
     revision: u64,
+    color_revision: u64,
     image: (TextureViewId, SamplerId),
     uniform: UniformBuffer<SourceUniform>,
     group: BindGroup,
@@ -70,6 +72,7 @@ fn extract(
                     Input {
                         revision,
                         data: material.caster_data(),
+                        color: material.retained_color.clone(),
                         texture: material.base.base_color_texture.as_ref().map(Handle::id),
                     },
                 );
@@ -108,20 +111,25 @@ fn prepare(
             None => &white.d2,
         };
         let identity = (image.texture_view.id(), image.sampler.id());
+        let (color_revision, data) = input.color.as_ref().map_or((0, input.data), |c| {
+            let (revision, color) = c.revision_color();
+            (revision, input.data.with_color(color))
+        });
         if let Some(material) = output.materials.get_mut(&id) {
-            if material.revision != input.revision {
-                material.uniform.set(input.data);
+            if material.revision != input.revision || material.color_revision != color_revision {
+                material.uniform.set(data);
                 material.uniform.write_buffer(&device, &queue);
                 material.revision = input.revision;
+                material.color_revision = color_revision;
             }
             if material.image == identity {
                 continue;
             }
         }
-        let mut uniform = output.materials.remove(&id).map_or_else(
-            || UniformBuffer::from(input.data),
-            |material| material.uniform,
-        );
+        let mut uniform = output
+            .materials
+            .remove(&id)
+            .map_or_else(|| UniformBuffer::from(data), |material| material.uniform);
         uniform.write_buffer(&device, &queue);
         let group = device.create_bind_group(
             "source_caster_material",
@@ -136,6 +144,7 @@ fn prepare(
             id,
             Material {
                 revision: input.revision,
+                color_revision,
                 image: identity,
                 uniform,
                 group,

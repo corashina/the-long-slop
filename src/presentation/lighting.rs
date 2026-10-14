@@ -200,7 +200,7 @@ impl Plugin for SourceLightingPlugin {
                     super::world::prepare_stations,
                     super::instruments::prepare_instruments,
                     super::materials::prepare_lamp_materials,
-                    super::materials::sync_lamp_materials,
+                    super::materials::sync_lamp_materials.after(super::conditions::sync_conditions),
                 )
                     .chain(),
             );
@@ -902,6 +902,7 @@ pub(crate) fn sync_lighting(
     }
 }
 pub fn lighting_readiness(
+    conditions: Res<super::conditions::ConditionVisuals>,
     mut commands: Commands,
     server: Res<AssetServer>,
     mut source: ResMut<SourceLighting>,
@@ -982,7 +983,7 @@ pub fn lighting_readiness(
             RenderingState::Failed(format!("Cannot load shaders/source_sky.wgsl: {error}"));
         return;
     }
-    if source.bound && source.materials_prepared {
+    if source.bound && source.materials_prepared && conditions.prepared {
         let state = source.status.lock().unwrap().clone();
         if source.warming && state == RenderingState::Ready {
             for light in &source.lights {
@@ -1098,13 +1099,14 @@ fn capture_gpu_errors(device: &RenderDevice, status: Arc<Mutex<RenderingState>>)
 }
 fn extract_lighting(
     source: Extract<Option<Res<SourceLighting>>>,
+    conditions: Extract<Res<super::conditions::ConditionVisuals>>,
     mut output: ResMut<ExtractedLighting>,
 ) {
     if let Some(source) = source.as_ref() {
         output.uniform = source.uniform;
-        output.prepared = source.materials_prepared;
+        output.prepared = source.materials_prepared && conditions.prepared;
         output.warming = source.warming;
-        if source.warming && source.materials_prepared && output.warmups.is_empty() {
+        if source.warming && output.prepared && output.warmups.is_empty() {
             output.warmups.extend(
                 source
                     .warmups

@@ -115,6 +115,7 @@ fn wrong_or_occupied_slot_keeps_held_part_and_contents() {
         )
         .unwrap();
     g.area.items.sync_poses(&g.physics);
+    let conditions_before = g.area.conditions.capture_save(&r).unwrap();
     let before = g.area.items.get(engine).unwrap().clone();
     assert_eq!(
         g.area
@@ -206,7 +207,10 @@ fn wrong_or_occupied_slot_keeps_held_part_and_contents() {
     assert_eq!(after.location, before.location);
     assert_eq!(after.pose, before.pose);
     assert_eq!(after.fluid, before.fluid);
-    assert_eq!(after.condition, before.condition);
+    assert_eq!(
+        g.area.conditions.capture_save(&r).unwrap(),
+        conditions_before
+    );
 }
 #[test]
 #[ignore = "requires installed source export"]
@@ -613,6 +617,7 @@ fn failed_carry_acquisition_keeps_part_mounted() {
     let r = installed();
     let mut g = GarageRuntime::new(&r).unwrap();
     let item = part(&r, "coolanttank");
+    let conditions_before = g.area.conditions.capture_save(&r).unwrap();
     let before = g.area.items.get(item).unwrap().clone();
     let source = r.parts.iter().find(|p| p.item == item).unwrap();
     let handle = g
@@ -654,7 +659,10 @@ fn failed_carry_acquisition_keeps_part_mounted() {
     assert_eq!(after.location, before.location);
     assert_eq!(after.pose, before.pose);
     assert_eq!(after.fluid, before.fluid);
-    assert_eq!(after.condition, before.condition);
+    assert_eq!(
+        g.area.conditions.capture_save(&r).unwrap(),
+        conditions_before
+    );
     assert_eq!(
         g.physics.rapier().colliders[handle].parent(),
         collider_parent
@@ -832,7 +840,7 @@ fn detached_door_children_survive_rebase_and_recovery() {
     assert!(window_value.unwrap() > 0.);
     detach(&mut g, door);
     detach(&mut g, radiator);
-    g.area.items.get_mut(mirror).unwrap().condition = 0.37;
+    common::set_condition(&mut g.area, &r, mirror, 2);
     g.area
         .items
         .get_mut(radiator)
@@ -846,6 +854,7 @@ fn detached_door_children_survive_rebase_and_recovery() {
         .interaction
         .sync_parts(&mut g.area.items, &mut g.physics)
         .unwrap();
+    let conditions_before = g.area.conditions.capture_save(&r).unwrap();
     let before = [door, window, mirror, radiator].map(|id| g.area.items.get(id).unwrap().clone());
     let source_handles: Vec<_> = r
         .parts
@@ -959,7 +968,10 @@ fn detached_door_children_survive_rebase_and_recovery() {
     for (id, old) in [door, window, mirror, radiator].into_iter().zip(before) {
         let state = g.area.items.get(id).unwrap();
         assert_eq!(state.location, old.location);
-        assert_eq!(state.condition, old.condition);
+        assert_eq!(
+            g.area.conditions.capture_save(&r).unwrap(),
+            conditions_before
+        );
         assert_eq!(state.fluid, old.fluid);
         if id == window || id == mirror {
             assert_eq!(state.body, g.area.items.get(door).unwrap().body);
@@ -1033,6 +1045,7 @@ fn detached_door_children_survive_rebase_and_recovery() {
 fn new_game_clears_constraints_and_restores_source_parts() {
     let r = installed();
     let mut g = GarageRuntime::new(&r).unwrap();
+    let initial_conditions = g.area.conditions.capture_save(&r).unwrap();
     let initial: Vec<_> = g
         .area
         .items
@@ -1061,8 +1074,22 @@ fn new_game_clears_constraints_and_restores_source_parts() {
             )
             .unwrap();
         assert!(!g.physics.rapier().impulse_joints.is_empty());
+        let (mut surfaces, washes) = g.area.conditions.capture_save(&r).unwrap();
+        for s in &mut surfaces {
+            s.state = 4;
+        }
+        g.area
+            .conditions
+            .restore_save(
+                &r,
+                &my_summer_slop::save::ConditionSnapshot {
+                    surfaces,
+                    washes,
+                    tools: Vec::new(),
+                },
+            )
+            .unwrap();
         for i in g.area.items.iter_mut() {
-            i.condition = 0.1;
             if let Some(f) = &mut i.fluid {
                 f.mixture.quantities_liters = [0.; 6];
             }
@@ -1088,7 +1115,10 @@ fn new_game_clears_constraints_and_restores_source_parts() {
             let item = g.area.items.get(old.id).unwrap();
             assert_eq!(item.location, old.location);
             assert_eq!(item.fluid, old.fluid);
-            assert_eq!(item.condition, old.condition);
+            assert_eq!(
+                g.area.conditions.capture_save(&r).unwrap(),
+                initial_conditions
+            );
         }
         for &(id, value) in &controls {
             assert_eq!(g.area.interaction.mechanisms.value(id, false), value);

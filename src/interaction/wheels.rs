@@ -17,6 +17,7 @@ struct Part {
     item: ItemId,
     rim: bool,
     radius: f32,
+    quality: f32,
     mass: f32,
     last_mass: f32,
     rotation: Rotation,
@@ -55,6 +56,13 @@ pub struct WheelAssemblies {
 }
 
 impl WheelAssemblies {
+    pub fn refresh_conditions(&mut self, conditions: &crate::conditions::ConditionStore) {
+        for part in &mut self.parts {
+            if let Some(quality) = conditions.item_quality(part.item) {
+                part.quality = quality;
+            }
+        }
+    }
     pub(crate) fn restore_save(
         &mut self,
         ids: &crate::save::IdentityMap,
@@ -175,6 +183,7 @@ impl WheelAssemblies {
                 item: item.id,
                 rim,
                 radius: record.radius,
+                quality: item.condition,
                 mass: item.mass_kg,
                 last_mass: f32::NAN,
                 rotation: Rotation::from_array(record.local_rotation_after_mount),
@@ -901,7 +910,7 @@ impl WheelAssemblies {
                     tire_state.local_pose = from_rapier(&(inverse * tire_pose));
                     tire_state.pose = from_rapier(&tire_pose);
                     tire_state.location = ItemLocation::Attached(part.item);
-                    (tire_part.radius, tire_state.condition)
+                    (tire_part.radius, tire_part.quality)
                 } else {
                     (part.radius, 1.0)
                 };

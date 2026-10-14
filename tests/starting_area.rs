@@ -294,9 +294,23 @@ fn new_game_after_carry_detach_rebase() {
 fn recovery_preserves_state() {
     let (reference, mut runtime) = initial();
     runtime.vehicles[0].trip_m = 256.0;
-    for item in runtime.area.items.iter_mut() {
-        item.condition *= 0.5;
+    let (mut surfaces, washes) = runtime.area.conditions.capture_save(&reference).unwrap();
+    for surface in &mut surfaces {
+        surface.state = 2;
     }
+    runtime
+        .area
+        .conditions
+        .restore_save(
+            &reference,
+            &my_summer_slop::save::ConditionSnapshot {
+                surfaces,
+                washes,
+                tools: Vec::new(),
+            },
+        )
+        .unwrap();
+    let condition_state = runtime.area.conditions.capture_save(&reference).unwrap();
     runtime
         .area
         .items
@@ -312,17 +326,21 @@ fn recovery_preserves_state() {
         .area
         .items
         .iter()
-        .map(|item| (item.id, item.location, item.condition))
+        .map(|item| (item.id, item.location))
         .collect();
     let body_count = runtime.physics.rapier().bodies.len();
     runtime.recover(&reference);
+    assert_eq!(
+        runtime.area.conditions.capture_save(&reference).unwrap(),
+        condition_state
+    );
     assert_eq!(fluids(&runtime), quantities);
     assert_eq!(
         runtime
             .area
             .items
             .iter()
-            .map(|item| (item.id, item.location, item.condition))
+            .map(|item| (item.id, item.location))
             .collect::<Vec<_>>(),
         parts
     );

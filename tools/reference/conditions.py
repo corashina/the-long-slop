@@ -297,7 +297,8 @@ def recover_conditions(source, nodes, components, pointer_node, item_nodes, coll
     import json
     repair,clean,managed=permission_tables(source)
     result={'surfaces':[],'brushes':[],'sprays':[],'washes':[],'collider_bindings':[],
-            'repair_tables':repair,'clean_tables':clean,'repair_rate':source.read(source.get('level1',64919))['repairValueIncrease']}
+            'repair_tables':repair,'clean_tables':clean,'repair_rate':source.read(source.get('level1',64919))['repairValueIncrease'],
+            'repair_decay_rate':source.read(source.get('level1',64919))['repairValueDecrease']}
     surface_ids={identity:i+1 for i,identity in enumerate(source.condition_readers)}
     node_sources={(n['source']['file'],n['source']['path_id']):n['id'] for n in nodes}
     def linked(reader,pointer):return source.resolve(reader,pointer) if pointer['m_PathID'] else None

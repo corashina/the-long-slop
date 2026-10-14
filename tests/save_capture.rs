@@ -246,7 +246,9 @@ fn capture_covers_drive_parts_fluids_and_carry() {
         .items
         .get_mut(r.vehicles[0].engine.fuel_tank)
         .unwrap();
-    fuel.condition = 0.42;
+    g.area
+        .conditions
+        .paint(r.conditions.surfaces[0].id, [0.42, 0.2, 0.1, 1.]);
     fuel.fluid.as_mut().unwrap().mixture.quantities_liters = [1., 0.2, 0.3, 0.4, 0.5, 0.6];
     let saved = g
         .capture_save(&r, &source, CameraSave::Chase, "2026-10-12T10:00:00Z")
@@ -319,7 +321,7 @@ fn capture_covers_drive_parts_fluids_and_carry() {
                 )
         })
         .unwrap();
-    assert_eq!(fuel.condition, 0.42);
+    assert_eq!(saved.conditions.surfaces[0].color, [0.42, 0.2, 0.1, 1.]);
     assert_eq!(fuel.fluids, Some([1., 0.2, 0.3, 0.4, 0.5, 0.6]));
     assert_eq!(saved.mechanisms.openings.len(), r.openings.len());
     assert_eq!(saved.mechanisms.openings[0].valve, 0.37);

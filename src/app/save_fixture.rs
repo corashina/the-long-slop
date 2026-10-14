@@ -161,7 +161,15 @@ pub(super) fn process(world: &mut World, kind: &str) -> Result<String, SaveError
             let cycle = &reference.lighting.cycle;
             let total = f64::from(cycle.day_seconds + cycle.night_seconds);
             let current = g.lighting.cycle.capture_save().cycle_seconds;
-            g.lighting.cycle.advance(cycle, total - current - 0.05);
+            g.lighting.cycle.advance(
+                cycle,
+                crate::lighting::CycleAdvance {
+                    simulation_delta: (total - current - 0.05) as f32,
+                    cycle_extra: 0.,
+                    cloud_scale: 1.,
+                    sleep_progress: None,
+                },
+            );
             let controller = reference
                 .lighting
                 .controllers

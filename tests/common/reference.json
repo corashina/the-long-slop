@@ -407571,11 +407571,187 @@
           }
         ],
         "colors": []
+      },
+      {
+        "id": 2,
+        "source": {
+          "file": "fixture.conditions",
+          "path_id": 3
+        },
+        "node": 552,
+        "item": 43,
+        "startup": {
+          "state": 0,
+          "state2": 0,
+          "state3": 0,
+          "repair_progress": 0.0,
+          "color": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "permission_index": 2,
+        "selected_type": "ladapaint",
+        "material_type": "",
+        "use_material_type": false,
+        "disable_color": false,
+        "force_color": false,
+        "use_mat_list": false,
+        "dont_use_worn": false,
+        "shared_mat_list": false,
+        "use_mesh_list": false,
+        "use_object_list": false,
+        "objects": [],
+        "children": [],
+        "is_child": false,
+        "no_inherit_state": false,
+        "same_state_as_parent": false,
+        "child_new_color": false,
+        "random_start_state3": false,
+        "loaded": false,
+        "renderers": [],
+        "colors": []
       }
     ],
-    "brushes": [],
-    "sprays": [],
-    "washes": [],
+    "brushes": [
+      {
+        "source": {
+          "file": "fixture.conditions",
+          "path_id": 10
+        },
+        "item": 43,
+        "body": 2,
+        "pickup": {
+          "file": "level1",
+          "path_id": 65329
+        },
+        "save": {
+          "file": "level1",
+          "path_id": 72522
+        },
+        "slide": {
+          "file": "level1",
+          "path_id": 68227
+        },
+        "own_condition": 2,
+        "cleaning_type": 1,
+        "can_ruin": true,
+        "repair_modifier": 1.0,
+        "min_force": 0.10000000149011612,
+        "wash_radius": 0.10000000149011612,
+        "wash_mask": 0,
+        "text": 186,
+        "show_text": true,
+        "disabled_model": null,
+        "model": 552,
+        "model_equip": 552,
+        "model_default": 552,
+        "distance": 2.0,
+        "mask": 8552449,
+        "position_lerp": 16.0,
+        "rotation_lerp": 8.0,
+        "contact_offset": 0.05000000074505806,
+        "minimum_displacement": 0.009999999776482582,
+        "maximum_displacement": 0.10000000149011612,
+        "disabled": false,
+        "both_work": false,
+        "sound_when_disabled": false,
+        "has_sound": false,
+        "max_volume": 0.5,
+        "volume_lerp": 10.0,
+        "voice_source": null,
+        "voice": null,
+        "particles": []
+      }
+    ],
+    "sprays": [
+      {
+        "source": {
+          "file": "fixture.conditions",
+          "path_id": 11
+        },
+        "item": 44,
+        "body": 2,
+        "pickup": {
+          "file": "level1",
+          "path_id": 73562
+        },
+        "save": {
+          "file": "level1",
+          "path_id": 72516
+        },
+        "startup_palette": null,
+        "startup_color_index": null,
+        "ammo": {
+          "file": "level1",
+          "path_id": 78225
+        },
+        "color_source": {
+          "file": "level1",
+          "path_id": 73209
+        },
+        "float_quantity": true,
+        "startup_quantity": 100.0,
+        "maximum_quantity": 100.0,
+        "startup_color": [
+          0.6509804129600525,
+          0.125490203499794,
+          0.11764706671237946,
+          1.0
+        ],
+        "authored_color_set": true,
+        "color_types": [],
+        "color_palettes": {},
+        "colors": [],
+        "nozzle": 556,
+        "renderer": {
+          "file": "level1",
+          "path_id": 42384
+        },
+        "renderer_node": 556,
+        "distance": 3.0,
+        "mask": 8552449,
+        "color_lerp": 0.25,
+        "paint_loss": 4.5,
+        "valve_speed": 10.0,
+        "startup_valve": 0.0,
+        "rate": 250.0,
+        "max_volume": 0.5,
+        "text": 189,
+        "start_speed": 1.0,
+        "voice_source": {
+          "file": "level1",
+          "path_id": 56384
+        },
+        "voice": 1,
+        "particles": []
+      }
+    ],
+    "washes": [
+      {
+        "id": 1,
+        "source": {
+          "file": "fixture.conditions",
+          "path_id": 12
+        },
+        "node": 1,
+        "colliders": [],
+        "objects": [
+          1
+        ],
+        "permission_index": 2,
+        "repair_progress": 0.0,
+        "active": true,
+        "on": true,
+        "never_repair": false,
+        "destroy_on_repair": true,
+        "wash_on_shoot": true,
+        "chance_to_start_disabled": 0.5,
+        "particles": []
+      }
+    ],
     "collider_bindings": [],
     "repair_tables": [
       [
@@ -407993,6 +408169,7 @@
         true
       ]
     ],
-    "repair_rate": 0.5
+    "repair_rate": 0.5,
+    "repair_decay_rate": 0.012500000186264515
   }
 }

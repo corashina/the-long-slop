@@ -14,7 +14,19 @@ impl GarageRuntime {
         saved.validate(reference, expected)?;
         let ids = IdentityMap::new(reference)?;
         let mut candidate = Self::new_candidate(reference, false)?;
+        candidate
+            .area
+            .conditions
+            .restore_save(reference, &saved.conditions)?;
+        candidate
+            .area
+            .interaction
+            .cleaning
+            .restore_save(reference, &saved.conditions.tools)?;
         candidate.area.items.restore_save(&ids, &saved.items)?;
+        candidate
+            .wheels
+            .refresh_conditions(&candidate.area.conditions);
         candidate.wheels.restore_save(
             &ids,
             &saved.attachments,
@@ -254,7 +266,14 @@ impl GarageRuntime {
             let WorldRecord::Pump { instance: b, .. } = b;
             a.cmp(b)
         });
+        let (surfaces, washes) = self.area.conditions.capture_save(reference)?;
+        let tools = self.area.interaction.cleaning.capture_save(reference)?;
         let mut snapshot = SaveSnapshot {
+            conditions: ConditionSnapshot {
+                surfaces,
+                washes,
+                tools,
+            },
             schema_version: SAVE_SCHEMA_VERSION,
             saved_at: saved_at.into(),
             source: source.clone(),

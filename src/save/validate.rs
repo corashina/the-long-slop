@@ -37,7 +37,6 @@ impl SaveSnapshot {
             links(items.insert(id, item).is_none(), "Duplicate item")?;
             absolute(&item.pose)?;
             local(&item.local_pose)?;
-            data(unit(item.condition), "Item condition")?;
             data(
                 item.temperature.is_none_or(f32::is_finite),
                 "Item temperature",
@@ -69,6 +68,32 @@ impl SaveSnapshot {
         self.validate_bodies(reference, &ids, &items)?;
         self.validate_mechanisms(reference, &ids)?;
         self.validate_lighting(reference, &ids)?;
+        crate::conditions::validate_surfaces(reference, &self.conditions)?;
+        crate::interaction::cleaning::validate_tools(reference, &self.conditions.tools)?;
+        for brush in &reference.conditions.brushes {
+            let tool = self
+                .conditions
+                .tools
+                .iter()
+                .find(|t| t.source == SourceKey::from(&brush.source))
+                .unwrap();
+            let owner = reference
+                .conditions
+                .surfaces
+                .iter()
+                .find(|s| s.id == brush.own_condition)
+                .unwrap();
+            let surface = self
+                .conditions
+                .surfaces
+                .iter()
+                .find(|s| s.source == SourceKey::from(&owner.source))
+                .unwrap();
+            data(
+                tool.disabled == (surface.state == 5 || brush.disabled),
+                "Tool disabled condition",
+            )?;
+        }
         Ok(())
     }
 

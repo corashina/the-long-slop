@@ -1,5 +1,6 @@
 pub mod attachments;
 pub mod carry;
+pub mod cleaning;
 pub mod consumption;
 pub mod feedback;
 pub mod fluid_contact;
@@ -149,6 +150,7 @@ struct SeatState {
 }
 
 pub struct InteractionState {
+    pub cleaning: cleaning::CleaningTools,
     sounds: [Option<InteractionSound>; 64],
     sound_count: usize,
     light_controls: HashMap<ColliderId, LightControlId>,
@@ -455,6 +457,7 @@ impl InteractionState {
             })
             .collect();
         Ok(Self {
+            cleaning: cleaning::CleaningTools::new(reference)?,
             light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
             light_controls,
             held_controls: reference

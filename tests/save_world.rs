@@ -114,14 +114,22 @@ fn saved_coordinates_reject_extreme_finite_positions() {
 fn distant_dropped_assembly_survives_stream_out_and_restore() {
     use my_summer_slop::save::{CameraSave, SourceHash, SourceStamp};
     use rapier3d::math::{Pose, Vector};
-    let reference = common::reference();
+    let mut reference = common::reference();
+    let rim = reference.wheel_slots[0].rim;
+    let mut condition = reference.conditions.surfaces[0].clone();
+    condition.id.0 = 900;
+    condition.source.path_id = 900;
+    condition.item = Some(rim);
+    condition.node = reference.items.iter().find(|i| i.id == rim).unwrap().node;
+    condition.renderers.clear();
+    reference.conditions.surfaces.push(condition);
     let mut game = GarageRuntime::new(&reference).unwrap();
     let slot = reference.vehicles[0].wheel_slots[0];
     let rim = game
         .wheels
         .remove(slot, &mut game.area.items, &mut game.physics)
         .unwrap();
-    game.area.items.get_mut(rim).unwrap().condition = 0.37;
+    common::set_condition(&mut game.area, &reference, rim, 2);
     let handle = game.area.items.get(rim).unwrap().body.unwrap();
     game.physics.rapier_mut().bodies[handle]
         .set_position(Pose::from_translation(Vector::new(40., 5., -20.)), true);
@@ -188,6 +196,7 @@ fn distant_dropped_assembly_survives_stream_out_and_restore() {
         .unwrap();
     assert_eq!(before.bodies, away.bodies);
     assert_eq!(before.items, away.items);
+    assert_eq!(before.conditions, away.conditions);
     assert_eq!(before.attachments, away.attachments);
     let ids = my_summer_slop::save::IdentityMap::new(&reference).unwrap();
     let mut restored = GarageRuntime::new(&reference).unwrap();
@@ -201,7 +210,6 @@ fn distant_dropped_assembly_survives_stream_out_and_restore() {
             .items
             .get_mut(ids.item(&saved.instance).unwrap())
             .unwrap();
-        item.condition = saved.condition;
         item.temperature = saved.temperature;
         item.local_pose = my_summer_slop::vehicle::VehiclePose {
             position: saved.local_pose.position,
@@ -211,6 +219,11 @@ fn distant_dropped_assembly_survives_stream_out_and_restore() {
             fluid.mixture.quantities_liters = quantities;
         }
     }
+    restored
+        .area
+        .conditions
+        .restore_save(&reference, &away.conditions)
+        .unwrap();
     restored.persistent_world =
         my_summer_slop::save::PersistentWorld::restore(&away, &ids).unwrap();
     restored.stream.sync_at(focus, &mut restored.physics);
@@ -490,6 +503,7 @@ fn installed_world_hibernation_preserves_source_inventory() {
         )
         .unwrap();
     assert_eq!(before.items, away.items);
+    assert_eq!(before.conditions, away.conditions);
     assert_eq!(before.bodies, away.bodies);
     assert_eq!(before.mechanisms, away.mechanisms);
     game.stream.sync_at(

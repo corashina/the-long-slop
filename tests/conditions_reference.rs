@@ -33,6 +33,15 @@ fn invalid_variant_is_rejected() {
 }
 
 #[test]
+fn invalid_decay_rate_is_rejected() {
+    for value in [-0.01, f32::INFINITY, f32::NAN] {
+        let mut r = common::reference();
+        r.conditions.repair_decay_rate = value;
+        assert!(r.validate().is_err());
+    }
+}
+
+#[test]
 fn invalid_material_and_mesh_bindings_are_rejected() {
     let mut r = common::reference();
     r.conditions.surfaces[0].renderers[0].states[0].materials[0].gltf_material = u32::MAX;
@@ -91,6 +100,8 @@ fn invalid_palette_is_rejected() {
 #[test]
 fn invalid_spray_palette_index_and_empty_choices_are_rejected() {
     let mut r = common::reference();
+    r.conditions.sprays.clear();
+    r.conditions.brushes.clear();
     let item = r.items.iter().find(|item| item.pickup.is_some()).unwrap();
     let identity = &item.source;
     let tool: my_summer_slop::reference::SprayReference =

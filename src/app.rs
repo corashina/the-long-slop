@@ -122,6 +122,7 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
             presentation::lighting::SourceLightingPlugin,
             presentation::materials::SourceMaterialPlugin,
             presentation::plates::PlateTextPlugin,
+            presentation::conditions::ConditionPlugin,
             presentation::mirrors::SourceMirrorPlugin,
             presentation::source_lighting::SourceLightingPlugin,
             presentation::frame_graph::SourceFramePlugin,
@@ -452,6 +453,8 @@ fn advance_physics(
             .radio
             .calendar((calendar / 100) as u8, (calendar % 100) as u8);
     }
+    let delta = time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale;
+    drive.runtime.area.conditions.update(delta, true);
     drive.clock.accept_frame(time.delta_secs_f64());
     loop {
         let scale = drive.runtime.clock_factors(&reference.0).time_scale;
@@ -690,8 +693,8 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             });
     let condition = available
         .item
-        .and_then(|id| runtime.area.items.get(id))
-        .map_or(-1.0, |item| item.condition);
+        .and_then(|id| runtime.area.conditions.item_quality(id))
+        .unwrap_or(-1.0);
     let held = runtime.area.interaction.held();
     let notice = if !runtime.notice.is_empty() {
         runtime.notice

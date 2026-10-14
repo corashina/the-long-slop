@@ -7,6 +7,7 @@ pub mod audio;
 #[cfg(target_arch = "wasm32")]
 pub mod browser;
 
+pub mod conditions;
 pub mod fluids;
 pub mod interaction;
 pub mod lighting;

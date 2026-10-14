@@ -1,70 +1,8 @@
 mod common;
 use my_summer_slop::{reference::*, save::*, simulation::FrameInput, starting_area::GarageRuntime};
 use rapier3d::math::Vector;
-use serde_json::json;
 fn fixture() -> ReferenceManifest {
     let mut r = common::reference();
-    let engine = r
-        .items
-        .iter()
-        .find(|i| i.id == r.vehicles[0].engine.item)
-        .unwrap()
-        .clone();
-    let mut node = r
-        .nodes
-        .iter()
-        .find(|n| n.id == engine.node)
-        .unwrap()
-        .clone();
-    node.id = NodeId(190);
-    node.source.path_id = 90090;
-    node.parent = Some(r.vehicles[0].root);
-    node.transform.translation = [2., 1., 0.];
-    r.nodes.push(node);
-    let mut body = r
-        .bodies
-        .iter()
-        .find(|b| b.id == r.vehicles[0].body)
-        .unwrap()
-        .clone();
-    body.id = BodyId(90);
-    body.source.path_id = 90091;
-    body.node = NodeId(190);
-    body.parent_body = Some(r.vehicles[0].body);
-    body.pose.translation = [2., 1., 0.];
-    r.bodies.push(body);
-    let item = r.items.iter_mut().find(|i| i.id == engine.id).unwrap();
-    item.node = NodeId(190);
-    item.body = BodyId(90);
-    r.parts.push(serde_json::from_value(json!({
-        "scan_radius": 1., "usable": null, "item": engine.id, "source": {"file":"fixture", "path_id":90001},
-        "node":190, "main_types":["lada"], "part_types":["engine"], "cover_slot":null,
-        "local_rotation_after_mount":[0.,0.,0.,1.], "colliders":[], "linear_damping":0., "angular_damping":0.,
-        "enable_if_mounted":[], "enable_if_dismounted":[], "disable_if_mounted":[], "disable_if_dismounted":[]
-    })).unwrap());
-    r.part_slots.push(serde_json::from_value(json!({
-        "id":1, "source":{"file":"fixture","path_id":90002}, "node":190,
-        "owner":null, "part":engine.id, "mount_anchor":r.anchors[0].id, "detach_anchor":null,
-        "fixed_detach":false, "detach_position":[0.,0.,0.], "detach_rotation":[0.,0.,0.,1.],
-        "main_types":["lada"], "part_types":["engine"], "cant_craft":false, "cant_uncraft":false,
-        "disable_colliders_on_craft":false, "colliders":[]
-    })).unwrap());
-    let child_id = ItemId(5);
-    let mut child_node = r
-        .nodes
-        .iter()
-        .find(|n| n.id == r.vehicles[0].root)
-        .unwrap()
-        .clone();
-    child_node.id = NodeId(191);
-    child_node.source.path_id = 90092;
-    child_node.parent = Some(NodeId(190));
-    child_node.transform.translation = [0.25, 0.5, 0.75];
-    r.nodes.push(child_node);
-    let child = r.items.iter_mut().find(|i| i.id == child_id).unwrap();
-    child.node = NodeId(191);
-    child.body = BodyId(90);
-    child.attached_to = Some(engine.id);
     r.openings[0].valve = 0.37;
     r.vehicles[0].engine.start_chance = 0.5;
     r
@@ -190,7 +128,14 @@ fn starter_boundary(steps: usize, engaged: bool) {
     original.step(&r, FrameInput::default());
     loaded.step(&r, FrameInput::default());
     assert_eq!(
-        original.vehicles[0].engine.ignition, saved.vehicles[0].engine.ignition,
+        original.vehicles[0].engine.ignition,
+        saved
+            .vehicles
+            .iter()
+            .find(|v| v.instance == InstanceId::initial(&r.vehicles[0].source))
+            .unwrap()
+            .engine
+            .ignition,
         "neutral input released a canceled short hold"
     );
     assert_eq!(
@@ -266,12 +211,33 @@ fn driven_rebased_roundtrip_preserves_logic_and_resumes() {
     assert_logical_equal(&saved, &capture(&loaded, &r));
     loaded.paused = false;
     loaded.step(&r, FrameInput::default());
-    assert!((loaded.vehicles[0].trip_m - saved.vehicles[0].trip_m).abs() < 1.);
+    assert!(
+        (loaded.vehicles[0].trip_m
+            - saved
+                .vehicles
+                .iter()
+                .find(|v| v.instance == InstanceId::initial(&r.vehicles[0].source))
+                .unwrap()
+                .trip_m)
+            .abs()
+            < 1.
+    );
 }
 #[test]
 fn removed_part_split_wheel_and_held_item_rebuild() {
     let mut r = fixture();
-    let portable = ItemId(18);
+    let portable = r
+        .tanks
+        .iter()
+        .find(|t| t.role == TankRole::Portable && t.capacity_liters >= 69.)
+        .unwrap()
+        .item;
+    let cap = r.openings.iter().find(|o| o.tank == portable).unwrap().cap;
+    r.tanks
+        .iter_mut()
+        .find(|t| t.item == portable)
+        .unwrap()
+        .quantities_liters = [0., 0., 0., 69., 0., 0.];
     let node = r.items.iter().find(|i| i.id == portable).unwrap().node;
     let mut body = r.bodies[1].clone();
     body.id = BodyId(91);
@@ -284,7 +250,7 @@ fn removed_part_split_wheel_and_held_item_rebuild() {
     let node = r.nodes.iter_mut().find(|n| n.id == node).unwrap();
     node.parent = None;
     node.transform.translation = [10., 5., 0.];
-    for id in [portable, ItemId(19)] {
+    for id in [portable, cap] {
         r.items.iter_mut().find(|i| i.id == id).unwrap().body = BodyId(91);
     }
     r.tanks
@@ -308,7 +274,7 @@ fn removed_part_split_wheel_and_held_item_rebuild() {
         &mut g.area.interaction.mechanisms,
         &mut g.physics,
     );
-    g.area.items.get_mut(engine).unwrap().condition = 0.42;
+    g.area.conditions.wear(r.conditions.surfaces[0].id);
     g.area
         .items
         .get_mut(portable)
@@ -334,6 +300,9 @@ fn removed_part_split_wheel_and_held_item_rebuild() {
         .total();
     assert!(portable_mass < 75. && (portable_mass - 6. - portable_volume).abs() < 1e-5);
     let slot = r.wheel_slots[0].id;
+    if let Some(cover) = g.area.interaction.parts.covering_item(r.wheel_slots[0].rim) {
+        common::detach(&mut g, cover);
+    }
     let rim = g
         .wheels
         .remove(slot, &mut g.area.items, &mut g.physics)
@@ -382,7 +351,13 @@ fn removed_part_split_wheel_and_held_item_rebuild() {
             .area
             .interaction
             .parts
-            .slot_item(r.part_slots[0].id)
+            .slot_item(
+                r.part_slots
+                    .iter()
+                    .find(|s| s.part == Some(engine))
+                    .unwrap()
+                    .id
+            )
             .is_none()
     );
     let new = loaded.area.items.get(rim).unwrap().body.unwrap();
@@ -452,7 +427,20 @@ fn fluid_mechanism_lighting_roundtrip_resumes() {
     body.source.path_id = 90090;
     body.parent_body = Some(r.vehicles[0].body);
     r.bodies.push(body);
+    let mechanism_id = MechanismId(r.mechanisms.iter().map(|m| m.id.0).max().unwrap() + 1);
     common::add_rotation(&mut r, 1, 90, [-30., 40.]);
+    r.mechanisms.last_mut().unwrap().id = mechanism_id;
+    for surface in &mut r.conditions.surfaces {
+        if let Some(item) = surface.item {
+            surface.node = r.items.iter().find(|i| i.id == item).unwrap().node;
+        }
+    }
+    let supply_id = r
+        .tanks
+        .iter()
+        .find(|t| t.role == TankRole::Portable && t.quantities_liters[0] >= 0.25)
+        .unwrap()
+        .item;
     // The helper shares source keys; this save fixture needs unique stable identities.
     for (i, n) in r.nodes.iter_mut().enumerate() {
         n.source.path_id = 100000 + i as i64;
@@ -461,7 +449,7 @@ fn fluid_mechanism_lighting_roundtrip_resumes() {
     let mut supply = g
         .area
         .items
-        .get(ItemId(18))
+        .get(supply_id)
         .unwrap()
         .fluid
         .as_ref()
@@ -479,8 +467,8 @@ fn fluid_mechanism_lighting_roundtrip_resumes() {
         my_summer_slop::fluids::transfer(&mut supply, destination, 0.25),
         0.25
     );
-    g.area.items.get_mut(ItemId(18)).unwrap().fluid = Some(supply);
-    let control = r.mechanisms[0].item;
+    g.area.items.get_mut(supply_id).unwrap().fluid = Some(supply);
+    let control = r.mechanisms.last().unwrap().item;
     let view = g.area.player.view_pose(&g.physics);
     g.area.interaction.mechanisms.step(
         control,
@@ -498,10 +486,20 @@ fn fluid_mechanism_lighting_roundtrip_resumes() {
         g.area.interaction.mechanisms.rotation_degrees(control),
         Some([0.; 2])
     );
-    g.lighting.cycle.advance(&r.lighting.cycle, 18.25);
+    g.lighting.cycle.advance(
+        &r.lighting.cycle,
+        my_summer_slop::lighting::CycleAdvance {
+            simulation_delta: 18.25,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     g.lighting.cycle_headlights(&r.lighting, 0);
     for c in &r.lighting.controllers {
-        if c.kind == LightControllerKind::House || c.kind == LightControllerKind::Cabin {
+        if (c.kind == LightControllerKind::Switch && c.usable_source.is_some())
+            || c.kind == LightControllerKind::Cabin
+        {
             g.lighting.use_control(&r.lighting, c.id);
         }
     }
@@ -681,6 +679,9 @@ fn instruments_initialize_without_time_step() {
 fn distant_world_and_dormant_car_roundtrip() {
     let r = fixture();
     let mut g = GarageRuntime::new(&r).unwrap();
+    if let Some(cover) = g.area.interaction.parts.covering_item(r.wheel_slots[0].rim) {
+        common::detach(&mut g, cover);
+    }
     let rim = g
         .wheels
         .remove(r.wheel_slots[0].id, &mut g.area.items, &mut g.physics)
@@ -715,8 +716,13 @@ fn seated_relation_survives_large_absolute_coordinates() {
     invalid.player.seat.as_mut().unwrap().local_pose.position[0] = f32::MAX;
     assert!(invalid.validate(&r, &stamp(&r)).is_err());
     let offset = my_summer_slop::world::MAX_ABSOLUTE_COORDINATE - 100.;
-    saved.vehicles[0].body.pose.position[0] += offset;
-    saved.vehicles[0].body.pose.position[2] -= offset;
+    let vehicle = saved
+        .vehicles
+        .iter_mut()
+        .find(|v| v.instance == saved.player.seat.as_ref().unwrap().vehicle)
+        .unwrap();
+    vehicle.body.pose.position[0] += offset;
+    vehicle.body.pose.position[2] -= offset;
     saved.player.pose.position[0] += offset;
     saved.player.pose.position[2] -= offset;
     let mut loaded = GarageRuntime::from_save(&r, &stamp(&r), &saved).unwrap();
@@ -976,4 +982,76 @@ fn installed_cross_vehicle_wheels_restore_current_owner() {
             Some(loaded.physics.chassis_handle(index))
         );
     }
+}
+
+#[test]
+fn source_conditions_round_trip_and_reject_invalid_candidates() {
+    let r = common::reference();
+    let g = GarageRuntime::new(&r).unwrap();
+    let mut saved = capture(&g, &r);
+    assert_eq!(saved.schema_version, 2);
+    saved.conditions.surfaces[0].color = [0.2, 0.4, 0.7, 1.];
+    saved.conditions.surfaces[0].repair_progress = -0.5;
+    saved.conditions.surfaces[1].color = [0.7, 0.3, 0.1, 1.];
+    saved.conditions.surfaces[1].state = 5;
+    saved.conditions.tools[0].disabled = true;
+    saved.conditions.tools[1].quantity = Some(37.5);
+    saved.conditions.washes[0].active = false;
+    saved.conditions.washes[0].on = false;
+    saved.conditions.washes[0].destroyed = true;
+    let loaded = GarageRuntime::from_save(&r, &saved.source, &saved).unwrap();
+    assert_eq!(capture(&loaded, &r).conditions, saved.conditions);
+    let reject = |mut value: SaveSnapshot, edit: fn(&mut ConditionSnapshot)| {
+        edit(&mut value.conditions);
+        assert!(GarageRuntime::from_save(&r, &saved.source, &value).is_err());
+    };
+    reject(saved.clone(), |c| {
+        c.surfaces[0].color[0] = f32::NAN;
+    });
+    reject(saved.clone(), |c| {
+        c.surfaces[0].state2 = u32::MAX;
+    });
+    reject(saved.clone(), |c| {
+        c.surfaces[0].state3 = u32::MAX;
+    });
+    reject(saved.clone(), |c| {
+        c.surfaces[0].state = 5;
+    });
+    reject(saved.clone(), |c| {
+        c.surfaces[0].repair_progress = f32::NAN;
+    });
+    reject(saved.clone(), |c| {
+        c.surfaces[0].repair_progress = -1.;
+    });
+    reject(saved.clone(), |c| {
+        c.surfaces[0].repair_progress = 1.;
+    });
+    let mut wash_boundary = saved.clone();
+    wash_boundary.conditions.washes[0].repair_progress = 1.;
+    assert!(GarageRuntime::from_save(&r, &saved.source, &wash_boundary).is_ok());
+    reject(saved.clone(), |c| {
+        c.tools[1].quantity = Some(f32::INFINITY);
+    });
+    reject(saved.clone(), |c| {
+        c.tools[1].quantity = Some(-1.);
+    });
+    reject(saved.clone(), |c| {
+        c.tools[1].quantity = Some(1e10);
+    });
+    reject(saved.clone(), |c| {
+        c.tools[0].disabled = false;
+    });
+    reject(saved.clone(), |c| {
+        c.surfaces[1] = c.surfaces[0].clone();
+    });
+    reject(saved.clone(), |c| {
+        c.surfaces.pop();
+    });
+    reject(saved.clone(), |c| {
+        c.tools.pop();
+    });
+    reject(saved.clone(), |c| {
+        c.washes.pop();
+    });
+    assert_eq!(capture(&g, &r).conditions.surfaces[0].color, [1.; 4]);
 }

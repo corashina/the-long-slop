@@ -1,7 +1,7 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 1;
+pub const SAVE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,6 +32,7 @@ pub struct SaveSnapshot {
     pub mechanisms: MechanismsSnapshot,
     pub progress: ProgressSnapshot,
     pub lighting: LightingSnapshot,
+    pub conditions: ConditionSnapshot,
     pub view: ViewSnapshot,
 }
 impl SaveSnapshot {
@@ -137,7 +138,6 @@ pub struct ItemSnapshot {
     /// Offset in the owning body or attachment frame.
     pub local_pose: LocalPose,
     pub location: ItemLocationSave,
-    pub condition: f32,
     pub temperature: Option<f32>,
     pub fluids: Option<[f32; 6]>,
 }
@@ -257,4 +257,38 @@ pub enum CameraSave {
 pub struct SwitchPoseSnapshot {
     pub node: SourceKey,
     pub pose: LocalPose,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConditionSnapshot {
+    pub surfaces: Vec<SurfaceSnapshot>,
+    pub washes: Vec<WashSnapshot>,
+    pub tools: Vec<ToolSnapshot>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SurfaceSnapshot {
+    pub source: SourceKey,
+    pub state: u8,
+    pub state2: u32,
+    pub state3: u32,
+    pub color: [f32; 4],
+    pub repair_progress: f32,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WashSnapshot {
+    pub source: SourceKey,
+    pub active: bool,
+    pub on: bool,
+    pub destroyed: bool,
+    pub repair_progress: f32,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolSnapshot {
+    pub source: SourceKey,
+    pub quantity: Option<f32>,
+    pub color: Option<[f32; 4]>,
+    pub disabled: bool,
 }

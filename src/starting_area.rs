@@ -43,6 +43,7 @@ impl CompoundCollider {
 }
 
 pub struct StartingArea {
+    pub conditions: crate::conditions::ConditionStore,
     pub plates: crate::plates::PlateState,
     _plate_draw: crate::plates::StartupDraw,
     pub bodies: HashMap<BodyId, RigidBodyHandle>,
@@ -66,6 +67,7 @@ impl StartingArea {
         let mut plate_draw = crate::plates::StartupDraw::new(DEFAULT_SEED);
         let plates =
             crate::plates::PlateState::new(&reference.plates, &mut |a, b| plate_draw.draw(a, b))?;
+        let conditions = crate::conditions::ConditionStore::new(reference)?;
         let mut items = ItemStore::new(reference)?;
         let mut interaction = InteractionState::new(reference)?;
         let mut bodies = HashMap::with_capacity(reference.bodies.len());
@@ -363,6 +365,7 @@ impl StartingArea {
             })
             .collect();
         Ok(Self {
+            conditions,
             bodies,
             items,
             interaction,
@@ -682,6 +685,7 @@ impl GarageRuntime {
             );
         }
         let mut wheels = crate::interaction::wheels::WheelAssemblies::new(reference)?;
+        wheels.refresh_conditions(&area.conditions);
         wheels.sync(&mut area.items, &mut physics)?;
         physics.refresh_queries();
         area.items.sync_poses(&physics);
@@ -795,6 +799,7 @@ impl GarageRuntime {
     }
 
     pub fn step(&mut self, reference: &ReferenceManifest, mut input: FrameInput) {
+        self.wheels.refresh_conditions(&self.area.conditions);
         if !self.started || self.paused {
             self.clear_input();
             return;
@@ -1388,9 +1393,9 @@ impl GarageRuntime {
         let radiator_condition = ((1.0
             - self
                 .area
-                .items
-                .get(engine_reference.coolant_tank)
-                .map_or(1.0, |item| item.condition))
+                .conditions
+                .item_quality(engine_reference.coolant_tank)
+                .unwrap_or(1.0))
             * 4.0)
             .round() as u8;
         let was_ignition = vehicle.engine_output.ignition;

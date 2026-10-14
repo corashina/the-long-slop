@@ -129,6 +129,11 @@ pub fn add_rotation(reference: &mut ReferenceManifest, item: u32, body: u32, lim
         .unwrap();
     owner.body = BodyId(body);
     owner.node = node;
+    for surface in &mut reference.conditions.surfaces {
+        if surface.item == Some(ItemId(item)) {
+            surface.node = node;
+        }
+    }
     reference.mechanisms.push(MechanismReference {
         id: MechanismId(item),
         source: reference.player.source.clone(),
@@ -186,5 +191,35 @@ pub fn detach(
     g.area
         .interaction
         .sync_parts(&mut g.area.items, &mut g.physics)
+        .unwrap();
+}
+
+pub fn set_condition(
+    area: &mut my_summer_slop::starting_area::StartingArea,
+    reference: &ReferenceManifest,
+    item: my_summer_slop::reference::ItemId,
+    state: u8,
+) {
+    let owner = reference
+        .conditions
+        .surfaces
+        .iter()
+        .find(|s| s.item == Some(item))
+        .expect("source condition owner");
+    let (mut surfaces, washes) = area.conditions.capture_save(reference).unwrap();
+    surfaces
+        .iter_mut()
+        .find(|s| s.source == my_summer_slop::save::SourceKey::from(&owner.source))
+        .unwrap()
+        .state = state;
+    area.conditions
+        .restore_save(
+            reference,
+            &my_summer_slop::save::ConditionSnapshot {
+                surfaces,
+                washes,
+                tools: Vec::new(),
+            },
+        )
         .unwrap();
 }
