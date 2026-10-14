@@ -80,8 +80,8 @@ Aim at an empty wheel slot to install a wheel.
 Some source items, including the fuel can, cannot rotate.
 
 Carry a fuel can. Open the fuel cap. Aim at the opening and hold LMB to fill it.
-Open carried containers before filling them at roadside pumps.
-Open containers spill when tilted. Pumps retain unlimited gasoline stock.
+Open carried containers before filling them at a supported supply.
+Open containers spill when tilted. Supplies retain their checked fluid types and current stock.
 The Lada starts with 0.5 L gasoline, 2.5 L oil, and 3.6 L water.
 Its capacities are 39 L fuel, 5 L oil, and 5 L coolant.
 
@@ -89,7 +89,8 @@ Use Recover in the pause menu. Use Controls for bindings and Fullscreen.
 Aim at a tire and press F to dismount it. Release F to mount a held tire or rim.
 Focus loss pauses play and clears input. Continue captures the mouse again.
 Recovery preserves fluids, parts, condition, trip distance, cycle time, and lamp state.
-An empty fuel tank moves recovery to a station.
+An empty fuel tank requests the nearest supported physical supply. Water supplies do not provide gasoline.
+Recovery waits for destination geometry, materials, collision, and clearance before moving the car.
 Restart restores the garage, supplies, car, origin, trip distance, source cycle time, and lamp state.
 Close the driver door before reversing through the garage exit.
 Keyboard steering reaches full lock in 0.8 seconds. Release the key to return to center.
@@ -118,3 +119,19 @@ The menus use self-hosted [Liberation Sans 2.1.5](https://github.com/liberationf
 Its license and provenance are in web/fonts/. Gameplay text uses Arial.
 Source feedback replaces the persistent vehicle status card.
 The Lada shows speed, fuel, temperature, warning lights, and distance on its imported instruments.
+
+## Source world
+
+The current world uses the checked 5,000-metre saved settings profile and seed 42.
+The source road ends after 50,000 segments. Off-road source grids have no finite extent.
+Road, terrain, structures, props, and pole geometry use one source generation path.
+The runtime retains changed objects for this session. Restart clears those changes.
+Nested content also retains bounded first-call source history. This history can fill before all road segments are visited.
+
+World admission keeps accepted support when a resource limit prevents new publication.
+Native and WASM compilation do not establish source, driving, rebase, recovery, or revisit parity.
+Read the current [world evidence and memory limits](docs/verification.md#source-world-implementation-2026-10-13).
+
+Development tools can request `await window.measureWorld()` in the browser console.
+This returns ownership counters, unique asset handles, timing, and available browser memory values.
+The snapshot adds no player interface. Process and driver memory remain unavailable.

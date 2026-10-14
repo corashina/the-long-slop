@@ -56,7 +56,7 @@ impl RoadLamps {
         self.preflight_ready = false;
         self.origin = [f64::INFINITY; 3];
     }
-    pub fn new(_spacing: f64) -> Self {
+    pub fn new() -> Self {
         let capacity = crate::presentation::lighting::MAX_LIGHTS;
         Self {
             source_proxies: Vec::with_capacity(crate::presentation::lighting::MAX_LIGHTS),

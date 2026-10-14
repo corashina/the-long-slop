@@ -100,6 +100,16 @@ pub struct WorldTextures {
     gpu_reserved: usize,
 }
 impl WorldTextures {
+    pub(crate) fn measurement_images(&self) -> impl Iterator<Item = AssetId<Image>> + '_ {
+        self.arrays.iter().flatten().flat_map(|a| {
+            a.image.iter().map(Handle::id).chain(
+                a.layers
+                    .iter()
+                    .filter_map(|l| l.load.as_ref().map(Handle::id)),
+            )
+        })
+    }
+
     pub(super) fn upload_queue(&self) -> &Arc<Mutex<super::world_texture_upload::UploadQueue>> {
         &self.uploads
     }

@@ -411,8 +411,7 @@ impl SourcePrototypes {
                 .iter()
                 .find(|a| a.id == prototype.asset)
                 .ok_or_else(|| ReferenceError("Missing prototype asset".into()))?;
-            let budget = PREFLIGHT_RESERVATION
-                .min((256 * 1024 * 1024usize).saturating_sub(stream.metrics().prototype_cpu_bytes));
+            let budget = PREFLIGHT_RESERVATION.min(stream.prototype_headroom(&entry.source));
             if budget < 18 {
                 return Err(ReferenceError(
                     "No source prototype metadata admission capacity".into(),

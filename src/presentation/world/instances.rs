@@ -63,6 +63,14 @@ pub struct SourceInstances {
     pending: Option<Placement>,
 }
 impl SourceInstances {
+    pub(crate) fn measurement_meshes(
+        &self,
+    ) -> impl Iterator<Item = (bevy::asset::AssetId<Mesh>, bool)> + '_ {
+        self.instances
+            .iter()
+            .flat_map(|i| i.renderers.iter().map(move |r| (r.mesh.id(), !i.ready)))
+    }
+
     pub fn prepare(
         &mut self,
         stream: &mut WorldStream,

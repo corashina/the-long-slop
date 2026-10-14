@@ -846,53 +846,6 @@ impl InteractionState {
             });
         binding.use_owner = Some(cap);
     }
-    pub fn register_pump(&mut self, item: ItemId, flow: f32) -> Result<(), ReferenceError> {
-        if !flow.is_finite() || flow <= 0.0 {
-            return Err(ReferenceError("Invalid pump flow".into()));
-        }
-        if let Some(opening) = self
-            .openings
-            .iter_mut()
-            .find(|opening| opening.reference.cap == item)
-        {
-            if !self.supplies.contains(&item) {
-                return Err(ReferenceError("Pump ID overlaps another opening".into()));
-            }
-            opening.reference.flow_liters_per_second = flow;
-            return Ok(());
-        }
-        self.kinds.insert(item, ItemKind::Cap);
-        self.filling_items.insert(item);
-        self.tank_rules.insert(
-            item,
-            TankRules {
-                no_drink: true,
-                no_fill_this: true,
-                no_fill_from: false,
-                slow_oil: false,
-            },
-        );
-        self.supplies.insert(item);
-        self.openings.push(OpeningState {
-            reference: OpeningRules {
-                id: OpeningId(item.0),
-                tank: item,
-                cap: item,
-                flow_liters_per_second: flow,
-                tilt_degrees: 0.0,
-                angle_disabled: true,
-                spill_disabled: true,
-                tube_connected: false,
-                can_toggle: false,
-                can_tune: false,
-                tune_rate: 0.0,
-            },
-            local_pose: Pose::IDENTITY,
-            tilt_axis: Vector::Y,
-            valve: 1.0,
-        });
-        Ok(())
-    }
     pub fn opening_is_open(&self, id: OpeningId) -> bool {
         self.opening_valve(id) > 0.0
     }

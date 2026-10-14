@@ -1,44 +1,10 @@
-//! Source pole placement on the current procedural road.
-use super::{SourceRandom, road_sample};
+//! Checked source pole tilt, shared by source road placement.
+use super::SourceRandom;
 use crate::reference::RoadLampReference;
 use rapier3d::math::{Rotation, Vector};
-use std::ops::Range;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RoadLampId(pub i64);
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct RoadLampPlacement {
-    pub id: RoadLampId,
-    pub absolute_point: [f64; 3],
-    pub rotation: [f32; 4],
-}
-
-/// Each source index belongs to one half-open interval. The source starts at zero.
-pub fn road_lamp_range(start_m: f64, end_m: f64, spacing_m: f64) -> Range<i64> {
-    assert!(spacing_m.is_finite() && spacing_m > 0.);
-    let start = (start_m / spacing_m).ceil().max(0.) as i64;
-    let end = (end_m / spacing_m).ceil().max(0.) as i64;
-    start..end.max(start)
-}
-
-pub fn road_lamp_placement(
-    seed: u64,
-    id: RoadLampId,
-    reference: &RoadLampReference,
-) -> RoadLampPlacement {
-    let road = road_sample(seed, id.0 as f64 * reference.spacing_meters as f64);
-    let yaw = (-road.tangent[0]).atan2(-road.tangent[2]);
-    let pitch = road.tangent[1].asin();
-    let rotation = Rotation::from_rotation_y(yaw) * Rotation::from_rotation_x(pitch);
-    let offset = rotation * Vector::from_array(reference.road_pose.translation);
-    let incoming = rotation * Rotation::from_array(reference.road_pose.rotation).normalize();
-    RoadLampPlacement {
-        id,
-        absolute_point: std::array::from_fn(|axis| road.center[axis] + offset[axis] as f64),
-        rotation: flatten_then_tilt(incoming, source_angles(seed, id, reference)).to_array(),
-    }
-}
+pub(crate) struct RoadLampId(pub i64);
 
 pub(crate) fn flatten_then_tilt(incoming: Rotation, angles: [i32; 3]) -> Rotation {
     let forward = incoming * Vector::NEG_Z;

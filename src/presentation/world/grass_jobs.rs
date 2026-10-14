@@ -97,6 +97,20 @@ fn pending_allocation(
     stream.set_presentation_allocation(next)
 }
 impl GrassJobs {
+    pub(crate) fn measurement_meshes(
+        &self,
+    ) -> impl Iterator<Item = (bevy::asset::AssetId<Mesh>, bool)> + '_ {
+        self.instances.iter().flat_map(|i| {
+            i.accepted
+                .iter()
+                .map(|g| (g.mesh.id(), false))
+                .chain(i.pending.iter().filter_map(|p| match p {
+                    Pending::Upload { mesh, .. } => Some((mesh.id(), true)),
+                    _ => None,
+                }))
+        })
+    }
+
     pub fn release_domains(&mut self) {
         if self.instances.is_empty() {
             self.domains = None;

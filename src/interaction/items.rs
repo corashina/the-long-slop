@@ -486,30 +486,6 @@ impl ItemStore {
         true
     }
 
-    pub fn insert_supply(&mut self, id: ItemId, pose: VehiclePose) {
-        assert!(!self.indices.contains_key(&id), "Duplicate station supply");
-        self.indices.insert(id, self.states.len());
-        self.body_ids.push(BodyId(u32::MAX));
-        self.names.push("Gasoline pump".into());
-        self.states.push(ItemState {
-            id,
-            body: None,
-            location: ItemLocation::World,
-            pose,
-            local_pose: VehiclePose {
-                position: [0.0; 3],
-                rotation: [0.0, 0.0, 0.0, 1.0],
-            },
-            condition: 1.0,
-            temperature: None,
-            fluid: Some(FluidContainer {
-                capacity_liters: 1000.0,
-                mixture: crate::fluids::FluidMixture {
-                    quantities_liters: [1000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                },
-            }),
-        });
-    }
     pub fn is_empty(&self) -> bool {
         self.states.is_empty()
     }

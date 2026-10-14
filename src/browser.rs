@@ -1,6 +1,13 @@
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(js_namespace = window, js_name = gameNow)]
+    pub fn game_now() -> f64;
+    #[wasm_bindgen(js_namespace = window, js_name = gameMeasureRequested)]
+    pub fn game_measure_requested() -> bool;
+    #[wasm_bindgen(js_namespace = window, js_name = gameMeasurements)]
+    pub fn game_measurements(json: &str);
+
     #[wasm_bindgen(js_namespace = window, js_name = gameReady)]
     pub fn game_ready();
     #[wasm_bindgen(js_namespace = window, js_name = gameFailure)]

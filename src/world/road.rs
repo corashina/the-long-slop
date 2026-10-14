@@ -329,6 +329,8 @@ pub struct RoadIndex {
     buffer_first: u32,
     replay_end: u32,
     replay_work: usize,
+    replay_ms: f64,
+    peak_replay_ms: f64,
 }
 impl RoadIndex {
     pub fn new(sequence: RoadSequence, terrain: TerrainEvaluator) -> Self {
@@ -348,6 +350,8 @@ impl RoadIndex {
             buffer_first: 0,
             replay_end: 0,
             replay_work: 0,
+            replay_ms: 0.,
+            peak_replay_ms: 0.,
         }
     }
 
@@ -394,12 +398,17 @@ impl RoadIndex {
     /// Advance replay by a bounded number of source segments.
     pub fn prepare_segment(&mut self, index: u32, limit: usize) -> Option<RoadSegment> {
         self.replay_work = 0;
+        self.replay_ms = 0.;
         if index >= self.sequence.state.next_segment {
             return None;
         }
         if (self.buffer_first..self.buffer_first + self.buffer.len() as u32).contains(&index) {
             return Some(self.buffer[(index - self.buffer_first) as usize]);
         }
+        #[cfg(target_arch = "wasm32")]
+        let replay_started = crate::browser::game_now();
+        #[cfg(not(target_arch = "wasm32"))]
+        let replay_started = std::time::Instant::now();
         let block = self.blocks[(index / ROAD_CHECKPOINT_INTERVAL) as usize];
         if self.buffer_first != block.first || self.replay_end == 0 {
             self.replay
@@ -417,6 +426,15 @@ impl RoadIndex {
             self.replay_end += 1;
             self.replay_work += 1;
         }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.replay_ms = crate::browser::game_now() - replay_started;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.replay_ms = replay_started.elapsed().as_secs_f64() * 1000.;
+        }
+        self.peak_replay_ms = self.peak_replay_ms.max(self.replay_ms);
         (self.replay_end > index).then(|| self.buffer[(index - self.buffer_first) as usize])
     }
 
@@ -428,6 +446,13 @@ impl RoadIndex {
         );
         self.prepare_segment(index, ROAD_CHECKPOINT_INTERVAL as usize)
             .unwrap()
+    }
+
+    pub fn replay_ms(&self) -> f64 {
+        self.replay_ms
+    }
+    pub fn peak_replay_ms(&self) -> f64 {
+        self.peak_replay_ms
     }
 
     pub fn replay_work(&self) -> usize {

@@ -1684,3 +1684,21 @@ pub fn authored_caster_material(
     base.depth_map = None;
     base
 }
+
+impl SourceMaterials {
+    pub(crate) fn measurement_images(&self) -> impl Iterator<Item = (AssetId<Image>, bool)> + '_ {
+        self.textures
+            .iter()
+            .flat_map(|t| {
+                t.image
+                    .iter()
+                    .chain(&t.levels)
+                    .map(move |h| (h.id(), !t.eager))
+            })
+            .chain(
+                self.world_textures
+                    .measurement_images()
+                    .map(|id| (id, true)),
+            )
+    }
+}

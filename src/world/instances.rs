@@ -38,6 +38,7 @@ impl StructureRecipe {
     pub fn reservation(prototype: &WorldPrototypeReference) -> usize {
         use crate::reference::ColliderGeometry::*;
         std::mem::size_of::<Self>()
+            + prototype.source.file.len()
             + prototype.bodies.len() * std::mem::size_of::<BodyRecipe>()
             + prototype
                 .colliders
@@ -58,6 +59,8 @@ impl StructureRecipe {
     }
     pub fn instance_bytes(&self) -> usize {
         std::mem::size_of::<StructureInstance>()
+            + self.bodies.len() * std::mem::size_of::<RigidBodyHandle>()
+            + self.colliders.len() * std::mem::size_of::<(SourceId, ColliderHandle)>()
             + self.bodies.len() * (std::mem::size_of::<rapier3d::prelude::RigidBody>() + 512)
             + self
                 .colliders
@@ -236,7 +239,7 @@ impl StructureRecipe {
         }
         physics.refresh_queries();
         Ok(StructureInstance {
-            cpu_bytes: self.instance_bytes(),
+            cpu_bytes: self.instance_bytes() + super::contents::placement_heap(&placement),
             placement,
             bodies,
             colliders,

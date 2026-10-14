@@ -219,9 +219,28 @@ Their TerrainBiome shader, textures, mip levels, and parameters remain available
 Dormant LOD bindings retain their original shaders, parameters, textures, mip levels, and render target descriptors.
 Explicit null material slots and zero-vertex meshes remain distinct from unresolved links.
 Later rendering work must admit each visible source binding before its LOD appears.
-This export adds data. Later tasks connect the world generator and runtime instances.
+The current source generator consumes this contract and admits selected runtime instances.
 
 Startup checks every world prototype file and dependency before Start becomes available.
-Two workers check bounded file buffers and release them after SHA-256 validation.
-Only the five existing scene, lamp, and sky assets load into Bevy at startup.
-World prototype records remain available for later bounded loading.
+One worker checks bounded dependency buffers and releases them after SHA-256 validation.
+Five existing scene, lamp, and sky assets keep eager Bevy loading.
+World prototypes decode after selected runtime admission, including required startup surfaces.
+
+The runtime projection uses compact immutable source tables and checked receipt links.
+The original records and receipts remain in ignored provenance sidecars.
+See `.cache/world-source/task-7-input-provenance/` for immutable originals and the completion report for hashes.
+Texture arrays use checked row chunks, each at most 1 MiB plus its 16-byte header.
+Each chunk retains its payload hash, source receipt, mip, layer, row, dimensions, and complete coverage order.
+The loader admits one chunk through upload completion before the next chunk starts.
+
+Bootstrap dependency verification has a separate lifetime from admitted world jobs.
+`checkedBytes` can hold input chunks and one contiguous copy together.
+Serial verification limits the visible payload overlap to twice one dependency's byte length, at most 64 MiB.
+Backing ArrayBuffers can exceed their views. This payload bound does not measure those allocations.
+SHA-256 work, fetch buffers, parser objects, and browser allocator overhead remain outside that copy bound.
+The JavaScript manifest text and parsed object can overlap Rust manifest decoding.
+The 128 MiB manifest input limit does not establish a bootstrap or process memory bound.
+
+The final implementation used static tracing and product compilation under the user's Ignore tests instruction.
+No final fixture, source comparison, browser, or driving acceptance ran.
+Current evidence lives in `.cache/world-source/completion/2026-10-13/` and [verification](../../docs/verification.md#source-world-implementation-2026-10-13).

@@ -744,3 +744,91 @@ Package and export hashes:
 - `web/pkg/my_summer_slop.js`: `23b8f17a3a62954cfe5a59a30450c060c899af451adc51ca815840db57c15abd`; 103747 bytes.
 - `web/pkg/my_summer_slop_bg.wasm`: `02c9c4a33f9f3e2b5c96b22155c4187fef9a3977f8e1f8a98b31408f0fc71451`; 53733353 bytes.
 - `web/assets/reference/manifest.json`: `d62630828b68c154c9351203b11f67427916390bd9a3eac1b911fda8efb5c74e`; 5712654 bytes.
+
+## Source-world implementation: 2026-10-13
+
+The source-world branch replaces the old sine road, fixed stations, chunk bands, simple props, and lamp sampling.
+It keeps one generator and one required world contract. Startup randomness retains its existing arithmetic in `starting_area.rs`.
+The checked context uses build 11140890, Unity 2021.3.18f1, seed 42, and saved 5,000-metre default settings.
+Generation and replay retain the frozen checked initialization frame. Runtime rebasing does not change that frame.
+The road contains 50,000 segments. Off-road grids have no finite extent.
+
+The final layer uses static source tracing and native/WASM product compilation.
+Current-source native compilation passed in 3.81 seconds on 2026-10-14, without warnings.
+Release WASM compilation passed in 2m02s. `scripts/build.ps1` also completed wasm-bindgen packaging with exit code 0.
+Final logs are `.cache/world-source/task-9-resume-final-native.log` and `.cache/world-source/task-9-resume-final-package.log`.
+The earlier Task 9 final logs predate two source edits and do not cover the committed source.
+The user directed Ignore tests. No final tests, fixtures, captures, source comparisons, browser checks, or traversal ran.
+No 100-kilometre route, full-extent traversal, continuous drive, seam, rebase, recovery, restart, or revisit acceptance ran.
+Historical browser evidence above describes earlier layers. It does not validate the current source-world runtime.
+Task 2's historical startup capture still contains an unresolved 404 URL and GPU warnings.
+The accepted qualification remains in the retained Task 2 report. No recapture ran.
+
+World numeric, runtime, visual, and physics parity remain unverified.
+The supported initialization order does not prove Unity scheduling or original game-wide random timing.
+Terrain uses the accepted shared illumination API. Global reflection and SH-volume contributions remain outside this world layer.
+Canonical grass ordering does not prove source-device primitive ordering.
+
+### Ownership and bounds
+
+| Owner | Limit |
+| --- | ---: |
+| Active geometry, CPU and logical GPU | 128 MiB each |
+| Shared world prototypes, CPU / logical GPU | 256 MiB / 512 MiB |
+| Pending world work | 32 MiB, two jobs, 32 requests |
+| Checkpoints, spatial indices, and first-call source history | 16 MiB |
+| Road / near terrain / each distant tier | 512 / 512 / 256 |
+| Generated object instances | 8192 |
+| Registered light proxies, including fixed lights | 32 |
+| Shadow slots | 100 |
+| Actual change records | No fixed cap |
+
+Road checkpoints occur every 256 segments. Building checkpoints occur every 32 selections.
+First-call source history stores parent/caller identity, random state, phase, and required cursor inputs.
+This history grows with first encounters and can exhaust its limit before full-extent travel.
+Actual changed identities have a separate map and byte counter. Physics motion counts as a change.
+
+Task 7's decoded world, catalog, and material ownership was 132,704,763 bytes.
+Its conservative static selected-owner peak was 227,638,888 bytes before Task 9's additional owner-table and identity charges.
+Those figures describe allocation formulas for the checked inputs. They are not process, WASM, driver, or route measurements.
+Task 9 also charges stream maps, supply metadata, structure handle buffers, and retained placement identities.
+Runtime admission remains required for each selected region.
+
+Pending staging overlaps active/prototype reservations. Do not add those counters as disjoint process memory.
+The JavaScript bootstrap has separate text, parse, fetch, and hash lifetimes.
+One dependency verifier replaces the earlier two workers.
+Input chunk views and their contiguous copy can overlap by twice the dependency length, at most 64 MiB.
+This bounds visible payload bytes. Chunk backing buffers and hash copies can require more memory.
+The 32 MiB world staging limit does not bound JavaScript bootstrap memory.
+The full manifest text and JavaScript object can overlap Rust input and decoded ownership.
+Browser internals, allocator high-water memory, and driver overhead remain unavailable.
+
+### Development snapshots
+
+Call `await window.measureWorld()` from development tools after the runtime starts.
+The next application frame returns the snapshot. No technical player interface was added.
+`world` contains capacity charges, reservations, source history, changes, preparation counts, and road replay call timings.
+`assets` counts unique mesh/image handles across imported baseline, prototypes, active world, pending world, and other renderer assets.
+Shared caster and instance handles count once. Mesh byte metadata survives CPU extraction and retires with its asset.
+Texture bytes include complete mip/layer dimensions. CPU payload counts use retained vector capacities.
+Logical handle bytes do not prove GPU upload completion, allocator storage, or resident VRAM.
+Missing mesh metadata or unsupported texture formats increment `unknown_gpu_handles`.
+The imported baseline covers asset payloads. It excludes complete imported reference, ECS, physics, skins, and uniform ownership.
+The snapshot names those limits and keeps process and driver fields null.
+Measurement-cache capacity has its own counter. Requested snapshot maps and JSON are transient development allocations.
+
+Browser fields include WASM linear memory, available JavaScript heap data, initial Start readiness, and peak application-frame interval.
+WASM linear memory is committed capacity. JavaScript heap data depends on browser support.
+Frame intervals include pauses and background scheduling. Replay timings cover road checkpoint replay calls only.
+No snapshot values were collected during this task.
+
+### Durable evidence
+
+Completion evidence remains ignored under `.cache/world-source/completion/2026-10-13/`.
+The `sdd` copy preserves the ledger, task briefs, reports, review records, and rulings with their recorded costs.
+The same directory keeps copies of the approved specification and plan.
+The Task 9 report records final commands, package hashes, deleted coverage, static review, and unperformed acceptance.
+Immutable original records and receipts remain under `.cache/world-source/task-7-input-provenance/`.
+The original receipt sidecar SHA256 is `2c20e3d2c2d62a4123eeb0e1208c806ae9e0f0c7cdf4094699110321d02e6a8c`.
+The original record sidecar SHA256 is `65a0309fa1fca84d78a8d4051e3c8a0fb54d5ef70745a675a4eea8f076c20b96`.
+Recovered assets, source, captures, and local completion evidence stay outside Git.

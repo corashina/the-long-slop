@@ -240,7 +240,7 @@ pub fn load_lighting(commands: &mut Commands, server: &AssetServer, lighting: &L
         .collect();
     commands.insert_resource(SourceLighting {
         sky: super::sky::SkyState::new(server, lighting),
-        road_lamps: super::world::RoadLamps::new(lighting.road_lamp.spacing_meters as f64),
+        road_lamps: super::world::RoadLamps::new(),
         materials: Vec::new(),
         material_loads: None,
         materials_ready: false,

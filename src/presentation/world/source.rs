@@ -50,6 +50,19 @@ pub struct SourceWorldVisuals {
     terrain_shadow_modes: [u8; 3],
 }
 impl SourceWorldVisuals {
+    pub(crate) fn measurement_meshes(
+        &self,
+    ) -> impl Iterator<Item = (bevy::asset::AssetId<Mesh>, bool)> + '_ {
+        self.surfaces
+            .iter()
+            .flat_map(|s| s.meshes.iter().map(|m| (m.id(), false)))
+            .chain(
+                self.pending
+                    .iter()
+                    .flat_map(|s| s.meshes.iter().map(|m| (m.id(), true))),
+            )
+    }
+
     pub fn retire_session(&mut self, commands: &mut Commands, meshes: &mut Assets<Mesh>) {
         for visual in self.surfaces.drain(..) {
             commands.entity(visual.root).despawn();

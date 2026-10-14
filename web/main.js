@@ -2,11 +2,24 @@ import {createInput} from './input.js';
 import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
 import {loadUiAssets} from './ui-layout.js';
-import {admitWorldAssets,preflightWorldPrototype,verifyWorldBytes,cancelWorldPrototype} from './world-assets.js';
+import {admitWorldAssets,preflightWorldPrototype,verifyWorldBytes,cancelWorldPrototype,worldBootstrapMeasurements} from './world-assets.js';
 window.sourcePrototypePlan=preflightWorldPrototype;
 window.sourceVerifyBytes=verifyWorldBytes;
 window.sourcePrototypeCancel=cancelWorldPrototype;
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
+const bootStarted=performance.now();
+let wasmMemory,initialReadyMs=null,peakFrameMs=0,lastFrameTime=null,measureRequested=false;
+const measurementWaiters=[];
+const bootstrap={manifestUtf16PayloadBytes:0,dependencyGate:worldBootstrapMeasurements};
+window.gameNow=()=>performance.now();
+window.measureWorld=()=>new Promise(resolve=>{measurementWaiters.push(resolve);measureRequested=true;});
+window.gameMeasureRequested=()=>{const requested=measureRequested;measureRequested=false;return requested;};
+window.gameMeasurements=json=>{
+ const snapshot=JSON.parse(json);
+ snapshot.browser={wasmLinearBytes:wasmMemory?.buffer.byteLength??null,jsHeapBytes:performance.memory?.usedJSHeapSize??null,
+  initialStartReadyMs:initialReadyMs,peakFrameIntervalMs:peakFrameMs,bootstrap};
+ for(const resolve of measurementWaiters.splice(0))resolve(snapshot);
+};
 let menu,feedback,failed=false,worldAdmitted=false,timeout,actions=0,frame;
 const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',condition:-1,held:'',throwCharge:0,throwActive:false,quantities:[0,0,0,0,0,0]};
 const input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas);
@@ -20,6 +33,9 @@ window.gameState = { speedKmh: 0, camera: 'First person', x: 0, y: 0, z: 0, cont
   paused: false, started: false, target: '', targetAction: 0, carrying:false, heldItem:'', rpm:0, ignition:false, running:false, starter:false, seated:false, handbrake:true, throwCharge:0, throwActive:false, fluidVolumes:record.quantities };
 window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, surfaces, colliders, absoluteX, absoluteY, absoluteZ,
   originX, originY, originZ, rebases, travelM, preparedRoads, fuelLiters, paused, started) => {
+  const now=performance.now();
+  if(lastFrameTime!==null)peakFrameMs=Math.max(peakFrameMs,now-lastFrameTime);
+  lastFrameTime=now;
   const state = window.gameState;
   state.speedKmh = kmh; state.camera = mode ? 'First person' : 'Chase';
   state.x = x; state.y = y; state.z = z; state.contacts = contacts;
@@ -43,7 +59,7 @@ window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,n
 };
 function fail(message){failed=true;clearTimeout(timeout);const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}}
 window.gameFailure=fail;
-window.gameReady=()=>{if(failed||!worldAdmitted)return;clearTimeout(timeout);menu.ready();};
+window.gameReady=()=>{if(failed||!worldAdmitted)return;clearTimeout(timeout);if(initialReadyMs===null)initialReadyMs=performance.now()-bootStarted;menu.ready();};
 window.addEventListener('error',event=>fail(event.message||'The runtime stopped.'));
 window.addEventListener('unhandledrejection',event=>fail(event.reason?.message||String(event.reason)));
 canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();fail('The graphics context was lost.');});
@@ -53,7 +69,8 @@ async function load(){
  graphics.getExtension('WEBGL_lose_context')?.loseContext();
  const response=await fetch('./assets/reference/manifest.json');
  if(!response.ok)throw Error('Cannot load reference manifest (HTTP '+response.status+').');
- const text=await response.text(),manifest=JSON.parse(text);
+ const text=await response.text();bootstrap.manifestUtf16PayloadBytes=text.length*2;
+ const manifest=JSON.parse(text);
  status.textContent='Loading interface assets...';
  await loadUiAssets(manifest.ui);
  menu=createMenu({canvas,ui:manifest.ui,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
@@ -65,7 +82,7 @@ async function load(){
  status.textContent='Loading game code...';
  const {default:init,run}=await import('./pkg/my_summer_slop.js');
  const wasm=await fetch('./pkg/my_summer_slop_bg.wasm');if(!wasm.ok)throw Error('Cannot load game code (HTTP '+wasm.status+').');
- await init({module_or_path:wasm});status.textContent='Loading the garage...';
+ const exports=await init({module_or_path:wasm});wasmMemory=exports.memory;status.textContent='Loading the garage...';
  timeout=setTimeout(()=>fail('The garage did not load within 120 seconds.'),120000);run(text);
 }
 load().catch(error=>fail(error.message));

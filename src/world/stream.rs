@@ -2,7 +2,7 @@
 use super::{
     AbsolutePose, Placement, PlacementIndex, RoadIndex, RoadSegment, RoadSequence, StartupTerrain,
     TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainRoadPoint, TerrainSurfaceJob,
-    TerrainTile, WorldBounds, WorldLayer, WorldOrigin, WorldSurface, deform_road,
+    TerrainTile, WorldBounds, WorldLayer, WorldMetrics, WorldOrigin, WorldSurface, deform_road,
 };
 use crate::reference::{ReferenceError, ReferenceManifest, SourceId, WorldReference};
 use crate::vehicle::{ColliderHandle, PhysicsWorld};
@@ -31,30 +31,6 @@ pub struct WorldRequest {
     pub revision: u64,
     pub player: [f64; 3],
     pub vehicle: [f64; 3],
-}
-#[derive(Clone, Copy, Debug, Default)]
-pub struct WorldMetrics {
-    pub road_segments: usize,
-    pub near_tiles: usize,
-    pub distant_tiles: [usize; 2],
-    pub generated_objects: usize,
-    pub pending_work: usize,
-    pub pending_bytes: usize,
-    pub active_cpu_bytes: usize,
-    pub active_gpu_bytes: usize,
-    pub prototype_cpu_bytes: usize,
-    pub prototype_gpu_bytes: usize,
-    pub checkpoint_bytes: usize,
-    pub changed_record_bytes: usize,
-    pub changed_objects: usize,
-    pub spawn_parents: usize,
-    pub spawn_boundaries: usize,
-    pub spawn_boundary_bytes: usize,
-    pub prepared_roads: u32,
-    pub prepared_buildings: u32,
-    pub indices_ready: bool,
-    pub last_road_work: usize,
-    pub last_terrain_work: usize,
 }
 /// Renderer-owned allocations, including accepted/pending overlap and loader staging.
 #[derive(Clone, Copy, Debug, Default)]
@@ -441,6 +417,18 @@ impl WorldStream {
         }
         std::mem::take(&mut self.publication_available)
     }
+    /// Decoded headroom excludes the table and key needed to own a new prototype.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn prototype_headroom(&self, source: &SourceId) -> usize {
+        let owner = if self.admissions.contains_key(source) {
+            0
+        } else {
+            super::metrics::map_insert_bytes(&self.admissions) + source.file.capacity()
+        };
+        PROTOTYPE_CPU
+            .saturating_sub(self.metrics().prototype_cpu_bytes)
+            .saturating_sub(owner)
+    }
     /// Reserve decoded bytes before loading an admitted prototype or terrain material.
     pub fn reserve_prototype(
         &mut self,
@@ -452,9 +440,11 @@ impl WorldStream {
             return Ok(());
         }
         let current = self.metrics();
+        let owner_bytes =
+            super::metrics::map_insert_bytes(&self.admissions) + source.file.capacity();
         if current
             .prototype_cpu_bytes
-            .checked_add(cpu)
+            .checked_add(cpu.saturating_add(owner_bytes))
             .is_none_or(|v| v > PROTOTYPE_CPU)
             || current
                 .prototype_gpu_bytes
@@ -503,14 +493,11 @@ impl WorldStream {
                 "Prototype allocation exceeds its resource budget".into(),
             ));
         }
-        self.admissions.insert(
-            source.clone(),
-            PrototypeAllocation {
-                cpu,
-                gpu,
-                ready: old.ready,
-            },
-        );
+        *self.admissions.get_mut(source).unwrap() = PrototypeAllocation {
+            cpu,
+            gpu,
+            ready: old.ready,
+        };
         Ok(())
     }
     pub fn presentation_allocation(&self) -> PresentationAllocation {
@@ -1871,7 +1858,14 @@ impl WorldStream {
             .find(|prototype| &prototype.source == source)
             .ok_or_else(|| ReferenceError("Missing structure prototype".into()))?;
         let bytes = super::StructureRecipe::reservation(prototype);
-        if self.metrics().prototype_cpu_bytes.saturating_add(bytes) > PROTOTYPE_CPU {
+        let owner_bytes = super::metrics::map_insert_bytes(&self.recipes) + source.file.len();
+        if self
+            .metrics()
+            .prototype_cpu_bytes
+            .saturating_add(bytes)
+            .saturating_add(owner_bytes)
+            > PROTOTYPE_CPU
+        {
             return Err(ReferenceError(
                 "Source collision recipe exceeds prototype CPU budget".into(),
             ));
@@ -1940,6 +1934,7 @@ impl WorldStream {
             .metrics()
             .active_cpu_bytes
             .saturating_add(self.recipes[&placement.prototype].instance_bytes())
+            .saturating_add(super::contents::placement_heap(placement))
             > ACTIVE_CPU
         {
             return Err(ReferenceError(
@@ -1960,6 +1955,7 @@ impl WorldStream {
                 .active_cpu_bytes
                 .saturating_add(binding_reservation)
                 .saturating_add(self.recipes[&placement.prototype].instance_bytes())
+                .saturating_add(super::contents::placement_heap(placement))
                 > ACTIVE_CPU
             || self
                 .metrics()
@@ -2454,7 +2450,23 @@ impl WorldStream {
         }
     }
     pub fn metrics(&self) -> WorldMetrics {
+        let imported_snapshot_bytes = self.imported_baselines.capacity()
+            * std::mem::size_of::<(crate::reference::ItemId, super::ObjectSnapshot)>()
+            + self
+                .imported_baselines
+                .iter()
+                .map(|(_, s)| s.heap_bytes())
+                .sum::<usize>();
         let mut metrics = WorldMetrics {
+            shared_input_cpu_bytes: self.shared_cpu_bytes.unwrap_or(0),
+            imported_snapshot_bytes,
+            road_checkpoints: self.roads.checkpoint_count(),
+            building_checkpoints: self.placements.checkpoint_count(),
+            road_replay_ms: self.roads.replay_ms(),
+            peak_road_replay_ms: self.roads.peak_replay_ms(),
+            generation_jobs: self.presentation.jobs
+                + usize::from(self.terrain_work.is_some())
+                + usize::from(self.contents.has_replay()),
             pending_bytes: self.presentation.staging_bytes + self.generation_pending_bytes(),
             pending_work: self
                 .replay_roots
@@ -2472,7 +2484,24 @@ impl WorldStream {
             checkpoint_bytes: self.contents.state.retained_bytes()
                 + self.roads.retained_index_bytes()
                 + self.placements.retained_index_bytes(),
-            prototype_cpu_bytes: self.road_light.retained_bytes()
+            prototype_cpu_bytes: super::metrics::map_bytes(
+                self.admissions.capacity(),
+                std::mem::size_of::<(SourceId, PrototypeAllocation)>(),
+            ) + self
+                .admissions
+                .keys()
+                .map(|id| id.file.capacity())
+                .sum::<usize>()
+                + super::metrics::map_bytes(
+                    self.recipes.capacity(),
+                    std::mem::size_of::<(SourceId, super::StructureRecipe)>(),
+                )
+                + self
+                    .recipes
+                    .keys()
+                    .map(|id| id.file.capacity())
+                    .sum::<usize>()
+                + self.road_light.retained_bytes()
                 + self.contents.rules.retained_bytes()
                 + self.structure_helpers.retained_bytes()
                 + self.shared_cpu_bytes.unwrap_or(0)
@@ -2486,13 +2515,8 @@ impl WorldStream {
             active_gpu_bytes: self.presentation.active_gpu,
             changed_record_bytes: self.changes.retained_bytes(),
             changed_objects: self.changes.len(),
-            active_cpu_bytes: self.imported_baselines.capacity()
-                * std::mem::size_of::<(crate::reference::ItemId, super::ObjectSnapshot)>()
-                + self
-                    .imported_baselines
-                    .iter()
-                    .map(|(_, s)| s.heap_bytes())
-                    .sum::<usize>()
+            active_cpu_bytes: std::mem::size_of::<Self>()
+                + imported_snapshot_bytes
                 + self.replay_roots.capacity() * std::mem::size_of::<Placement>()
                 + self
                     .replay_roots
@@ -2586,14 +2610,36 @@ impl WorldStream {
                 WorldLayer::DistantTerrain2 => metrics.distant_tiles[1] += 1,
                 _ => {}
             }
-            let bytes = surface_bytes(&surface.surface);
+            let bytes = surface_bytes(&surface.surface)
+                + surface
+                    .prototype
+                    .as_ref()
+                    .map_or(0, |id| id.file.capacity());
             let render_bytes = surface_render_bytes(&surface.surface);
             metrics.active_cpu_bytes +=
                 bytes + surface_render_cpu(&surface.surface) + surface.collision_bytes;
             metrics.active_gpu_bytes += render_bytes;
         }
+        metrics.active_cpu_bytes += self.failure.as_ref().map_or(0, String::capacity);
+        for supply in &self.supplies {
+            metrics.active_cpu_bytes += super::contents::identity_heap(&supply.key)
+                + supply.definition.tank.file.capacity()
+                + supply.definition.cap.file.capacity()
+                + supply.definition.fluids.capacity() * std::mem::size_of::<super::SupplyFluid>()
+                + supply.baselines.as_ref().map_or(0, |values| {
+                    values
+                        .iter()
+                        .map(super::ObjectSnapshot::heap_bytes)
+                        .sum::<usize>()
+                });
+        }
         if let Some(work) = &self.ready {
-            metrics.active_cpu_bytes += work.pending_bytes;
+            metrics.active_cpu_bytes += work.pending_bytes
+                + work
+                    .published
+                    .prototype
+                    .as_ref()
+                    .map_or(0, |id| id.file.capacity());
             if work.renderer_reserved {
                 metrics.active_cpu_bytes += surface_render_cpu(&work.published.surface);
                 metrics.active_gpu_bytes += surface_render_bytes(&work.published.surface);

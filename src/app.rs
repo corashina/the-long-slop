@@ -113,6 +113,15 @@ pub fn run(reference_json: &str) -> Result<(), JsValue> {
         .init_resource::<presentation::world::instances::SourceInstances>()
         .init_resource::<presentation::world::grass_jobs::GrassJobs>()
         .init_resource::<presentation::world::runtime::SourcePresentationAllocation>()
+        .init_resource::<crate::world::metrics::browser::MeshMeasurements>()
+        .add_systems(
+            Last,
+            (
+                crate::world::metrics::browser::collect_mesh_bytes,
+                crate::world::metrics::browser::publish,
+            )
+                .chain(),
+        )
         .add_systems(Startup, setup)
         .add_systems(
             Update,

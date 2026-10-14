@@ -249,7 +249,7 @@ impl SourceRoadLight {
             frame.rotation,
             super::lamps::source_angles(
                 self.seed as u64,
-                super::RoadLampId(segment.index as i64),
+                super::lamps::RoadLampId(segment.index as i64),
                 &recipe.reference,
             ),
         );

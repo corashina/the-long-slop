@@ -1,4 +1,5 @@
 const MAX_FILE_BYTES=32*1024*1024;
+export const worldBootstrapMeasurements={dependencyWorkers:1,maxDependencyBytes:0,dependencyPayloadCopyBytes:0};
 
 async function checkedBytes(response,maxBytes=MAX_FILE_BYTES){
  const reader=response.body.getReader(),chunks=[];
@@ -12,7 +13,8 @@ async function checkedBytes(response,maxBytes=MAX_FILE_BYTES){
   }
  }finally{await reader.cancel();reader.releaseLock();}
  const bytes=new Uint8Array(length);let offset=0;
- for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}
+ for(let i=0;i<chunks.length;i++){const chunk=chunks[i];bytes.set(chunk,offset);offset+=chunk.byteLength;chunks[i]=null;}
+ chunks.length=0;
  return bytes;
 }
 
@@ -37,13 +39,15 @@ export async function admitWorldAssets(manifest){
     const response=await fetch('./assets/'+entry.file,{signal:controller.signal});
     if(!response.ok)throw Error('HTTP '+response.status);
     const bytes=await checkedBytes(response);
+    worldBootstrapMeasurements.maxDependencyBytes=Math.max(worldBootstrapMeasurements.maxDependencyBytes,bytes.byteLength);
+    worldBootstrapMeasurements.dependencyPayloadCopyBytes=2*worldBootstrapMeasurements.maxDependencyBytes;
     const digest=await crypto.subtle.digest('SHA-256',bytes);
     const hash=Array.from(new Uint8Array(digest),v=>v.toString(16).padStart(2,'0')).join('');
     if(hash!==entry.sha256)throw Error('SHA-256 mismatch');
    }catch(error){throw Error('Cannot load dependencies for '+entry.owner+': '+entry.file+' ('+error.message+').');}
   }
  }
- try{await Promise.all([worker(),worker()]);}finally{controller.abort();}
+ try{await worker();}finally{controller.abort();}
 }
 
 export async function verifyWorldBytes(bytes,expected){

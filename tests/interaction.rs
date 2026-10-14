@@ -1327,69 +1327,6 @@ fn empty_slot_does_not_pick_up_a_remote_rim_and_tire_targets_its_assembly() {
 }
 
 #[test]
-fn runtime_pump_stays_open_and_fills_the_held_container() {
-    let (mut interaction, mut items, mut physics, mut player) = fixture();
-    let pump = ItemId(90);
-    items.insert_supply(pump, pose([10.0, 2.0, -1.0]));
-    interaction.register_pump(pump, 0.5).unwrap();
-    interaction.step(
-        input(keys::GRAB, keys::GRAB),
-        common::resolved(target(1)),
-        &mut player,
-        &mut items,
-        &mut physics,
-        1.0 / 60.0,
-    );
-    interaction.step(
-        input(keys::USE, keys::USE),
-        common::resolved(target(1)),
-        &mut player,
-        &mut items,
-        &mut physics,
-        1.0 / 60.0,
-    );
-    interaction.step(
-        input(keys::USE, keys::USE),
-        common::resolved(target(pump.0)),
-        &mut player,
-        &mut items,
-        &mut physics,
-        1.0 / 60.0,
-    );
-    assert!(interaction.opening_is_open(OpeningId(pump.0)));
-    let before = items
-        .get(ItemId(1))
-        .unwrap()
-        .fluid
-        .as_ref()
-        .unwrap()
-        .mixture
-        .total();
-    interaction.step(
-        input(keys::FILL, 0),
-        common::resolved(target(pump.0)),
-        &mut player,
-        &mut items,
-        &mut physics,
-        0.1,
-    );
-    assert!(
-        (items
-            .get(ItemId(1))
-            .unwrap()
-            .fluid
-            .as_ref()
-            .unwrap()
-            .mixture
-            .total()
-            - before
-            - 0.05)
-            .abs()
-            < 1e-6
-    );
-}
-
-#[test]
 fn faucet_tuning_controls_fractional_fill_and_clamps() {
     let (mut interaction, mut items, mut physics, mut player) = fixture_with(|reference| {
         reference.items[0].kind = my_summer_slop::reference::ItemKind::Cap;
