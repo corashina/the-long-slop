@@ -1,7 +1,7 @@
 # Inventory and clothing
 
 Date: 2026-10-14, Europe/Warsaw.
-Status: The user approved this written specification on 2026-10-14. Implementation awaits plan review and an execution choice.
+Status: The user approved this specification and selected subagent execution on 2026-10-14.
 Base: local master `36ba94b05ff6679af733aa2f36bd014bc23b92f6`.
 Worktree: `C:/Users/Corashina/.codex/worktrees/inventory-clothing/the-long-drive-wasm`.
 Branch: `codex/inventory-clothing`.

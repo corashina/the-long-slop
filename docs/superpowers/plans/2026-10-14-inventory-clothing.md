@@ -12,7 +12,7 @@ Connect them through `StartingArea` and `GarageRuntime`. Reuse current rendering
 
 **Spec:** [Approved specification](../specs/2026-10-14-inventory-clothing-design.md).
 
-**Status:** The user approved the written specification on 2026-10-14. This plan awaits review and an execution choice.
+**Status:** The user approved the specification and selected subagent execution on 2026-10-14.
 **Branch:** `codex/inventory-clothing`, starting from design commit `a475d86`.
 **Worktree:** `C:/Users/Corashina/.codex/worktrees/inventory-clothing/the-long-drive-wasm`.
 **Recommendation:** Native execution. Most tasks share item, save, input, and renderer ownership.
