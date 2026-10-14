@@ -210,8 +210,15 @@ fn extract(
                 writers: HashMap::new(),
             });
         }
-        let _scope = candidate.materials.preparation.scope(&device);
-        extract_one(input, hidden.0.as_mut().unwrap(), &mut gpu, &device, &queue);
+        if !candidate.materials.preparation.cancelled()
+            && input.status.lock().unwrap().is_none()
+            && !input.pending_gpu.load(Ordering::Acquire)
+        {
+            let _scope = candidate.materials.preparation.scope(&device);
+            extract_one(input, hidden.0.as_mut().unwrap(), &mut gpu, &device, &queue);
+            queue.submit([]);
+            candidate.materials.preparation.submitted(&queue);
+        }
     } else {
         hidden.0 = None;
     }
@@ -323,6 +330,7 @@ fn draw(
         if !hidden.active
             || hidden.status.lock().unwrap().is_some()
             || hidden.pending_gpu.load(Ordering::Acquire)
+            || candidate.1.as_ref().is_some_and(|owner| owner.cancelled())
         {
             return;
         }
@@ -651,7 +659,7 @@ impl GrassWriters {
                 indices: job.indices.into(),
                 world_from_local: job.pose,
             });
-            *self.status.lock().unwrap() = None;
+            self.invalidate();
             break;
         }
         Ok(())
@@ -674,6 +682,7 @@ impl GrassWriters {
             a.jobs = a.jobs.saturating_sub(usize::from(job.running));
         }
         self.writers.retain(|w| w.entity != entity);
+        self.invalidate();
         stream.set_presentation_allocation(a)
     }
 }

@@ -325,15 +325,24 @@ impl WorldStream {
         key: &super::ObjectKey,
         items: &crate::interaction::items::ItemStore,
     ) -> bool {
-        if items.resolve_key(key).is_none() {
+        let Some(item) = items.resolve_key(key) else {
             return false;
-        }
+        };
         match key {
             super::ObjectKey::Imported(_) => true,
             super::ObjectKey::Generated(_) => self
-                .changes
-                .get(key)
-                .and_then(|c| c.instance.as_ref())
+                .contents
+                .active
+                .iter()
+                .chain(&self.static_controls)
+                .find(|c| c.item == Some(item) || c.bindings.iter().any(|b| b.item == item))
+                .map(|c| &c.content.placement.id)
+                .or_else(|| {
+                    self.supplies
+                        .iter()
+                        .find(|s| s.items.is_some_and(|(a, b)| a == item || b == item))
+                        .map(|s| &s.key)
+                })
                 .is_some_and(|id| self.bindings_ready(id)),
         }
     }
