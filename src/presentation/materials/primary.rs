@@ -4,7 +4,11 @@ use crate::{
     reference::{AssetId as SourceAssetId, ReferenceError},
     world::WorldStream,
 };
-const ENCODED_JOB_BYTES: usize = 32 * 1024 * 1024;
+fn png_staging(mip: &source::TextureMip) -> Result<usize, ReferenceError> {
+    let encoded = crate::presentation::world::preflight::checked_input_bytes(&mip.file)?;
+    // Input copies plus decoder buffer growth, chunk input, scanlines, and inflate state.
+    Ok(3 * encoded + 2 * 1024 * 1024 + 128 * mip.width as usize)
+}
 #[derive(Default)]
 pub struct PrimaryOwnership {
     assets: HashMap<SourceAssetId, Vec<String>>,
@@ -12,6 +16,7 @@ pub struct PrimaryOwnership {
     cpu: usize,
     gpu: usize,
     jobs: usize,
+    staging: usize,
 }
 fn pixels(texture: &TextureRecord) -> usize {
     texture
@@ -43,6 +48,7 @@ impl SourceMaterials {
         self.world_primary.cpu = 0;
         self.world_primary.gpu = 0;
         self.world_primary.jobs = 0;
+        self.world_primary.staging = 0;
         self.world_deferred = DeferredAllocation::default();
     }
 
@@ -56,6 +62,7 @@ impl SourceMaterials {
                     + texture_metadata(&t.record)
                     + t.label.capacity()
                     + t.levels.capacity() * std::mem::size_of::<Handle<Image>>()
+                    + t.input_staging.capacity() * std::mem::size_of::<usize>()
             })
             .sum::<usize>()
             + self
@@ -81,6 +88,7 @@ impl SourceMaterials {
         cpu: usize,
         gpu: usize,
         jobs: usize,
+        staging: usize,
     ) -> Result<(), ReferenceError> {
         let mut allocation = stream.presentation_allocation();
         allocation.prototype_cpu = allocation
@@ -94,12 +102,17 @@ impl SourceMaterials {
         allocation.jobs = allocation.jobs.saturating_sub(self.world_primary.jobs) + jobs;
         allocation.staging_bytes = allocation
             .staging_bytes
-            .saturating_sub(self.world_primary.jobs * ENCODED_JOB_BYTES)
-            + jobs * ENCODED_JOB_BYTES;
+            .saturating_sub(self.world_primary.staging)
+            + staging;
+        allocation.dependency_staging_bytes = allocation
+            .dependency_staging_bytes
+            .saturating_sub(self.world_primary.staging)
+            + staging;
         stream.set_presentation_allocation(allocation)?;
         self.world_primary.cpu = cpu;
         self.world_primary.gpu = gpu;
         self.world_primary.jobs = jobs;
+        self.world_primary.staging = staging;
         Ok(())
     }
     pub fn admit_world_asset(
@@ -158,7 +171,9 @@ impl SourceMaterials {
                         + std::mem::size_of::<SourceTexture>()
                         + texture.file.len() * 2
                         + texture.source.file.len()
-                        + texture.mips.len() * std::mem::size_of::<source::TextureMip>()
+                        + texture.mips.len()
+                            * (std::mem::size_of::<source::TextureMip>()
+                                + std::mem::size_of::<usize>())
                         + texture.mips.iter().map(|m| m.file.len()).sum::<usize>()
                         + 128;
                 }
@@ -169,10 +184,16 @@ impl SourceMaterials {
             self.world_primary.cpu + added_cpu,
             self.world_primary.gpu + added_gpu,
             self.world_primary.jobs,
+            self.world_primary.staging,
         )?;
         for record in records {
             for texture in &record.properties.textures {
                 if !self.texture_indices.contains_key(&texture.file) {
+                    let input_staging = texture
+                        .mips
+                        .iter()
+                        .map(png_staging)
+                        .collect::<Result<Vec<_>, _>>()?;
                     self.texture_indices
                         .insert(texture.file.clone(), self.textures.len());
                     self.textures.push(SourceTexture {
@@ -181,6 +202,7 @@ impl SourceMaterials {
                         users: 0,
                         record: texture.clone(),
                         levels: Vec::with_capacity(texture.mips.len()),
+                        input_staging,
                         image: None,
                         label: format!(
                             "source material {}:{} {}",
@@ -230,16 +252,6 @@ impl SourceMaterials {
                     texture.failed = true;
                 }
             }
-            if texture.failed {
-                texture.levels.retain(|h| {
-                    if matches!(server.load_state(h.id()), LoadState::Failed(_)) {
-                        images.remove(h.id());
-                        false
-                    } else {
-                        true
-                    }
-                });
-            }
         }
         let retired: Vec<_> = self
             .world_primary
@@ -257,19 +269,26 @@ impl SourceMaterials {
                 self.release_world_asset(asset, images, materials, server)?;
             }
         }
-        let jobs = self
+        let mut jobs = 0;
+        let mut staging = 0;
+        for texture in self
             .textures
             .iter()
             .filter(|t| !t.eager && t.image.is_none())
-            .flat_map(|t| &t.levels)
-            .filter(|h| !images.contains(h.id()))
-            .count();
+        {
+            for (handle, bytes) in texture.levels.iter().zip(&texture.input_staging) {
+                if !images.contains(handle.id())
+                    && !matches!(server.load_state(handle.id()), LoadState::Failed(_))
+                {
+                    jobs += 1;
+                    staging += bytes;
+                }
+            }
+        }
         let (cpu, gpu) = self.primary_bytes();
-        self.account_primary(stream, cpu + jobs * ENCODED_JOB_BYTES, gpu, jobs)?;
+        self.account_primary(stream, cpu + staging, gpu, jobs, staging)?;
         for index in 0..self.textures.len() {
-            if stream.available_external_jobs() == 0
-                || stream.available_staging_bytes() < ENCODED_JOB_BYTES
-            {
+            if stream.available_external_jobs() == 0 {
                 break;
             }
             let texture = &self.textures[index];
@@ -280,11 +299,21 @@ impl SourceMaterials {
             {
                 continue;
             }
+            let staging = texture.input_staging[texture.levels.len()];
+            if staging > 32 * 1024 * 1024 {
+                return Err(ReferenceError(
+                    "PNG input overlap exceeds staging cap".into(),
+                ));
+            }
+            if staging > stream.available_dependency_staging_bytes() {
+                continue;
+            }
             self.account_primary(
                 stream,
-                self.world_primary.cpu + ENCODED_JOB_BYTES,
+                self.world_primary.cpu + staging,
                 gpu,
                 self.world_primary.jobs + 1,
+                self.world_primary.staging + staging,
             )?;
             let texture = &mut self.textures[index];
             let mip = &texture.record.mips[texture.levels.len()];
@@ -303,15 +332,24 @@ impl SourceMaterials {
         if let Ok(bytes) = &assembled {
             self.texture_bytes += bytes;
         }
-        let jobs = self
+        let mut jobs = 0;
+        let mut staging = 0;
+        for texture in self
             .textures
             .iter()
             .filter(|t| !t.eager && t.image.is_none())
-            .flat_map(|t| &t.levels)
-            .filter(|h| !images.contains(h.id()))
-            .count();
+        {
+            for (handle, bytes) in texture.levels.iter().zip(&texture.input_staging) {
+                if !images.contains(handle.id())
+                    && !matches!(server.load_state(handle.id()), LoadState::Failed(_))
+                {
+                    jobs += 1;
+                    staging += bytes;
+                }
+            }
+        }
         let (cpu, gpu) = self.primary_bytes();
-        self.account_primary(stream, cpu + jobs * ENCODED_JOB_BYTES, gpu, jobs)?;
+        self.account_primary(stream, cpu + staging, gpu, jobs, staging)?;
         if let Some(error) = failure {
             return Err(error);
         }
@@ -418,6 +456,10 @@ impl SourceMaterials {
             .staging_bytes
             .saturating_sub(self.world_deferred.staging)
             + staging;
+        allocation.dependency_staging_bytes = allocation
+            .dependency_staging_bytes
+            .saturating_sub(self.world_deferred.staging)
+            + staging;
         stream.set_presentation_allocation(allocation)?;
         self.world_deferred = DeferredAllocation {
             cpu,
@@ -472,8 +514,9 @@ impl SourceMaterials {
         // Reserve shared work slots before scheduling source image loaders.
         let mut allocation = stream.presentation_allocation();
         allocation.jobs += free;
-        let staging_available = stream.available_staging_bytes();
+        let staging_available = stream.available_dependency_staging_bytes();
         allocation.staging_bytes += staging_available;
+        allocation.dependency_staging_bytes += staging_available;
         stream.set_presentation_allocation(allocation)?;
         self.world_deferred.jobs += free;
         self.world_deferred.staging += staging_available;

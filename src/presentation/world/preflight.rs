@@ -5,6 +5,14 @@ use std::sync::{Arc, Mutex};
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(catch,js_namespace=window,js_name=sourceInputBytes)]
+    fn input_bytes(path: &str) -> Result<u32, JsValue>;
+    #[wasm_bindgen(catch,js_namespace=window,js_name=sourcePrototypeStaging)]
+    fn prototype_staging(path: &str) -> Result<u32, JsValue>;
+    #[wasm_bindgen(catch,js_namespace=window,js_name=sourceDependencyReserve)]
+    fn dependency_reserve() -> Result<u32, JsValue>;
+    #[wasm_bindgen(catch,js_namespace=window,js_name=sourceInputMetadataBytes)]
+    fn metadata_bytes() -> Result<u32, JsValue>;
     #[wasm_bindgen(catch,js_namespace=window,js_name=sourcePrototypePlan)]
     async fn source_plan(
         path: &str,
@@ -15,7 +23,28 @@ extern "C" {
     #[wasm_bindgen(js_namespace=window,js_name=sourcePrototypeCancel)]
     fn cancel_plan(key: &str);
 }
-pub const PREFLIGHT_RESERVATION: usize = 128 * 1024 * 1024;
+pub fn checked_input_bytes(path: &str) -> Result<usize, ReferenceError> {
+    input_bytes(path)
+        .map(|bytes| bytes as usize)
+        .map_err(|e| ReferenceError(format!("World input size: {e:?}")))
+}
+pub fn checked_prototype_staging(path: &str) -> Result<usize, ReferenceError> {
+    prototype_staging(path)
+        .map(|bytes| bytes as usize)
+        .map_err(|e| ReferenceError(format!("Prototype input size: {e:?}")))
+}
+pub fn configure_staging(stream: &mut crate::world::WorldStream) -> Result<(), ReferenceError> {
+    if stream.dependency_staging_configured() {
+        return Ok(());
+    }
+    let reserve = dependency_reserve()
+        .map_err(|e| ReferenceError(format!("World dependency admission: {e:?}")))?
+        as usize;
+    let metadata = metadata_bytes()
+        .map_err(|e| ReferenceError(format!("World input metadata: {e:?}")))?
+        as usize;
+    stream.configure_dependency_staging(reserve, metadata)
+}
 #[derive(Deserialize)]
 pub struct PrototypePlan {
     pub json_bytes: usize,
@@ -113,7 +142,7 @@ pub struct PrototypePreflight {
     result: Arc<Mutex<Option<Result<PrototypePlan, ReferenceError>>>>,
 }
 impl PrototypePreflight {
-    /// Caller reserves PREFLIGHT_RESERVATION and one shared work slot before this call.
+    /// Caller reserves the checked input overlap and one shared work slot.
     pub fn start(session: u64, request: u64, path: String, hash: String, budget: usize) -> Self {
         let result = Arc::new(Mutex::new(None));
         let writer = Arc::clone(&result);

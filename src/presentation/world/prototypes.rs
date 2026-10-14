@@ -1,6 +1,8 @@
 //! Selected prototype ownership. Reservations precede every accessor or scene allocation.
 use super::{
-    preflight::{PREFLIGHT_RESERVATION, PrototypePlan, PrototypePreflight},
+    preflight::{
+        PrototypePlan, PrototypePreflight, checked_input_bytes, checked_prototype_staging,
+    },
     prototype_loader::{SourceGltf, SourceGltfLoader, SourceGltfSettings},
 };
 use crate::{
@@ -31,6 +33,7 @@ struct Entry {
     retired: bool,
     cpu: usize,
     gpu: usize,
+    staging: usize,
     state: State,
 }
 #[derive(Resource, Default)]
@@ -78,6 +81,7 @@ impl SourcePrototypes {
             retired: false,
             cpu: 0,
             gpu: 0,
+            staging: 0,
             state: State::Queued,
         });
         Ok(())
@@ -203,8 +207,7 @@ impl SourcePrototypes {
             .entries
             .iter()
             .map(|entry| match &entry.state {
-                State::Preflight(_) => 32 * 1024 * 1024,
-                State::Loading { plan, .. } => 2 * (plan.json_bytes + plan.buffer_bytes),
+                State::Preflight(_) | State::Loading { .. } => entry.staging,
                 _ => 0,
             })
             .sum::<usize>();
@@ -215,6 +218,10 @@ impl SourcePrototypes {
             allocation.prototype_gpu.saturating_sub(self.stale_gpu) + stale_gpu;
         allocation.staging_bytes = allocation
             .staging_bytes
+            .saturating_sub(self.accounted_staging)
+            + staging;
+        allocation.dependency_staging_bytes = allocation
+            .dependency_staging_bytes
             .saturating_sub(self.accounted_staging)
             + staging;
         allocation.jobs = allocation.jobs.saturating_sub(self.accounted_jobs) + jobs;
@@ -282,7 +289,7 @@ impl SourcePrototypes {
                     stream.resize_prototype(&entry.source, cpu, gpu)?;
                     entry.cpu = cpu;
                     entry.gpu = gpu;
-                    if 2 * (plan.json_bytes + plan.buffer_bytes) > 32 * 1024 * 1024 {
+                    if 2 * (plan.json_bytes + plan.buffer_bytes) > entry.staging {
                         return Err(ReferenceError(
                             "Source prototype exceeds shared staging cap".into(),
                         ));
@@ -390,9 +397,7 @@ impl SourcePrototypes {
             }
         }
         self.account(stream)?;
-        if stream.available_external_jobs() == 0
-            || stream.available_staging_bytes() < 32 * 1024 * 1024
-        {
+        if stream.available_external_jobs() == 0 {
             return Ok(());
         }
         if let Some(entry) = self
@@ -411,8 +416,18 @@ impl SourcePrototypes {
                 .iter()
                 .find(|a| a.id == prototype.asset)
                 .ok_or_else(|| ReferenceError("Missing prototype asset".into()))?;
-            let budget = PREFLIGHT_RESERVATION.min(stream.prototype_headroom(&entry.source));
-            if budget < 18 {
+            let json_bytes = checked_input_bytes(&record.path)?;
+            let staging = checked_prototype_staging(&record.path)?;
+            if staging == 0 || staging > 32 * 1024 * 1024 {
+                return Err(ReferenceError(
+                    "Prototype input overlap exceeds staging cap".into(),
+                ));
+            }
+            if staging > stream.available_dependency_staging_bytes() {
+                return Ok(());
+            }
+            let budget = 18 * json_bytes;
+            if budget > stream.prototype_headroom(&entry.source) {
                 return Err(ReferenceError(
                     "No source prototype metadata admission capacity".into(),
                 ));
@@ -422,10 +437,12 @@ impl SourcePrototypes {
             entry.gpu = 0;
             let mut allocation = stream.presentation_allocation();
             allocation.jobs += 1;
-            allocation.staging_bytes += 32 * 1024 * 1024;
+            allocation.staging_bytes += staging;
+            allocation.dependency_staging_bytes += staging;
             stream.set_presentation_allocation(allocation)?;
             self.accounted_jobs += 1;
-            self.accounted_staging += 32 * 1024 * 1024;
+            self.accounted_staging += staging;
+            entry.staging = staging;
             entry.state = State::Preflight(PrototypePreflight::start(
                 entry.session,
                 entry.request,

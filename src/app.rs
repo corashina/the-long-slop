@@ -448,7 +448,7 @@ fn sync_world(
         clip_planes: planes,
     };
     let lod_view = presentation::world::lod::LodView {
-        position,
+        position: camera_transform.translation(),
         fov_degrees: reference.0.player.field_of_view_degrees,
         ortho_size: match projection {
             Projection::Orthographic(p) => Some(p.area.height() * 0.5),

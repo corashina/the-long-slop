@@ -1,4 +1,10 @@
 const MAX_FILE_BYTES=32*1024*1024;
+const inputSizes=new Map(),prototypeStaging=new Map();
+let dependencyReserve=0,inputMetadataBytes=0;
+export function worldInputBytes(path){const bytes=inputSizes.get(path);if(!bytes)throw Error("Missing checked world input size: "+path);return bytes;}
+export function worldPrototypeStaging(path){const bytes=prototypeStaging.get(path);if(!bytes)throw Error("Missing checked prototype size: "+path);return bytes;}
+export function worldDependencyReserve(){if(!dependencyReserve)throw Error("Missing world dependency reservation.");return dependencyReserve;}
+export function worldInputMetadataBytes(){return inputMetadataBytes;}
 export const worldBootstrapMeasurements={dependencyWorkers:1,maxDependencyBytes:0,dependencyPayloadCopyBytes:0};
 
 async function checkedBytes(response,maxBytes=MAX_FILE_BYTES){
@@ -21,8 +27,11 @@ async function checkedBytes(response,maxBytes=MAX_FILE_BYTES){
 // Check catalog bytes without decoding meshes or textures into resident assets.
 export async function admitWorldAssets(manifest){
  if(!manifest.world||!manifest.world.prototypes?.length)throw Error('Missing required world contract.');
- const files=new Map();
- for(const asset of manifest.assets.filter(asset=>asset.usage==='world_prototype')){
+ const files=new Map(),pngMips=new Map(),prototypeInputs=new Map();
+ const prototypePaths=new Set(manifest.assets.filter(a=>a.usage==='world_prototype').map(a=>a.path));
+ const dynamic=new Set(manifest.assets.filter(a=>a.usage==='world_prototype'||a.usage==='world_material').map(a=>a.id));
+ for(const material of manifest.rendering.materials.filter(m=>dynamic.has(m.asset)))for(const texture of material.properties.textures)for(const mip of texture.mips)pngMips.set(mip.file,mip);
+ for(const asset of manifest.assets.filter(asset=>asset.usage==='world_prototype'||asset.usage==='world_material')){
   for(const entry of [{file:asset.path,sha256:asset.sha256},...asset.dependencies]){
    if(!/^reference\/[a-zA-Z0-9_.-]+$/.test(entry.file)||!/^[a-f0-9]{64}$/.test(entry.sha256))throw Error('Invalid world dependency receipt.');
    const previous=files.get(entry.file);
@@ -44,10 +53,41 @@ export async function admitWorldAssets(manifest){
     const digest=await crypto.subtle.digest('SHA-256',bytes);
     const hash=Array.from(new Uint8Array(digest),v=>v.toString(16).padStart(2,'0')).join('');
     if(hash!==entry.sha256)throw Error('SHA-256 mismatch');
+    const mip=pngMips.get(entry.file);
+    if(mip)checkPngInput(bytes,mip);
+    inputSizes.set(entry.file,bytes.byteLength);
+    if(prototypePaths.has(entry.file)){
+     const gltf=JSON.parse(new TextDecoder().decode(bytes));
+     prototypeInputs.set(entry.file,(gltf.buffers??[]).map(buffer=>{
+      if(!/^[a-zA-Z0-9_.-]+$/.test(buffer.uri)||!Number.isSafeInteger(buffer.byteLength)||buffer.byteLength<0)throw Error('Invalid checked prototype buffer.');
+      return {file:'reference/'+buffer.uri,bytes:buffer.byteLength};
+     }));
+    }
    }catch(error){throw Error('Cannot load dependencies for '+entry.owner+': '+entry.file+' ('+error.message+').');}
   }
  }
  try{await worker();}finally{controller.abort();}
+ // One dependency can always advance while generation retains its own bounded share.
+ dependencyReserve=5*(1024*1024+16);
+ for(const [path,buffers] of prototypeInputs){
+  let bytes=worldInputBytes(path);
+  for(const buffer of buffers){
+   if(worldInputBytes(buffer.file)!==buffer.bytes)throw Error('Checked prototype buffer size differs: '+buffer.file);
+   bytes+=buffer.bytes;
+  }
+  prototypeStaging.set(path,2*bytes);
+  dependencyReserve=Math.max(dependencyReserve,2*bytes);
+ }
+ for(const material of manifest.rendering.materials.filter(m=>dynamic.has(m.asset)))for(const texture of material.properties.textures)for(const mip of texture.mips){
+  // Fetch buffer, VecReader, loader input; bounded PNG decoder growth and scanlines.
+  dependencyReserve=Math.max(dependencyReserve,3*worldInputBytes(mip.file)+2*1024*1024+128*mip.width);
+ }
+ if(dependencyReserve>=MAX_FILE_BYTES)throw Error('World input overlap leaves no generation capacity.');
+ inputMetadataBytes=0;
+ for(const path of inputSizes.keys())inputMetadataBytes+=256+path.length*2;
+ for(const path of prototypeStaging.keys())inputMetadataBytes+=256+path.length*2;
+ worldBootstrapMeasurements.inputMetadataBytes=inputMetadataBytes;
+ worldBootstrapMeasurements.dependencyStagingReserve=dependencyReserve;
 }
 
 export async function verifyWorldBytes(bytes,expected){
@@ -63,9 +103,9 @@ export async function preflightWorldPrototype(path,sha256,budget,key){
  try{
  if(!/^reference\/[a-zA-Z0-9_.-]+\.gltf$/.test(path)||!/^[a-f0-9]{64}$/.test(sha256))throw Error('Invalid prototype receipt.');
  const response=await fetch('./assets/'+path,{signal:controller.signal});if(!response.ok)throw Error('Prototype HTTP '+response.status);
- const bytes=await checkedBytes(response,Math.min(MAX_FILE_BYTES,Math.floor(budget/18)));
+ const bytes=await checkedBytes(response,worldInputBytes(path));
  // Input chunks, contiguous input, decoded text, parser nodes, and returned metadata overlap.
- if(bytes.byteLength*18>budget)throw Error('Prototype metadata exceeds its staging reservation.');
+ if(bytes.byteLength!==worldInputBytes(path)||bytes.byteLength*18>budget)throw Error('Prototype metadata exceeds its staging reservation.');
  const digest=await crypto.subtle.digest('SHA-256',bytes);
  const hash=Array.from(new Uint8Array(digest),v=>v.toString(16).padStart(2,'0')).join('');
  if(hash!==sha256)throw Error('Prototype SHA-256 mismatch.');
@@ -102,4 +142,16 @@ export async function preflightWorldPrototype(path,sha256,budget,key){
  const sceneBytes=nodes.length*2048+primitives.length*2048+skinBytes;
  return JSON.stringify({json_bytes:bytes.byteLength,buffer_bytes:bufferBytes,mesh_bytes:meshBytes,scene_bytes:sceneBytes,nodes,primitives});
  }finally{prototypeRequests.delete(key);}
+}
+
+// The checked export uses RGB/RGBA8, bounded IDAT chunks, and no auxiliary PNG payloads.
+function checkPngInput(bytes,mip){
+ const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+ if(bytes.length<45||view.getUint32(0)!==0x89504e47||view.getUint32(4)!==0x0d0a1a0a||view.getUint32(8)!==13||view.getUint32(12)!==0x49484452||view.getUint32(16)!==mip.width||view.getUint32(20)!==mip.height||bytes[24]!==8||![2,6].includes(bytes[25])||bytes[26]||bytes[27]||bytes[28])throw Error('Unsupported checked PNG layout.');
+ for(let offset=8;offset<bytes.length;){
+  if(offset+12>bytes.length)throw Error('Truncated checked PNG chunk.');
+  const size=view.getUint32(offset),type=view.getUint32(offset+4);
+  if(![0x49484452,0x49444154,0x49454e44].includes(type)||size>65536||offset+12+size>bytes.length)throw Error('Unsupported checked PNG chunk.');
+  offset+=12+size;
+ }
 }

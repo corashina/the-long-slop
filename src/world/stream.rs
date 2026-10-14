@@ -42,6 +42,7 @@ pub struct PresentationAllocation {
     pub jobs: usize,
     pub pending: usize,
     pub staging_bytes: usize,
+    pub dependency_staging_bytes: usize,
     pub objects: usize,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -126,6 +127,7 @@ pub struct WorldStream {
     structure_helpers: super::structure_helpers::StructureHelpers,
     reference: Arc<WorldReference>,
     presentation: PresentationAllocation,
+    dependency_staging_reserve: usize,
     changes: super::ChangeRecords,
     replay_roots: Vec<Placement>,
     replay_keys: Vec<super::ObjectKey>,
@@ -264,6 +266,7 @@ impl WorldStream {
             seed,
             structure_helpers,
             presentation: PresentationAllocation::default(),
+            dependency_staging_reserve: 0,
             terrain_layer: *terrain_layer as u8,
             road_layers,
             reference: Arc::clone(world),
@@ -364,6 +367,9 @@ impl WorldStream {
                 .saturating_add(next.pending)
                 > 32
             || next.staging_bytes + self.generation_pending_bytes() > 32 * MIB
+            || next.dependency_staging_bytes > next.staging_bytes
+            || self.generation_pending_bytes() - self.binding_reserved
+                > 32 * MIB - self.dependency_staging_reserve
             || next.jobs
                 + usize::from(self.terrain_work.is_some())
                 + usize::from(self.contents.has_replay())
@@ -391,14 +397,45 @@ impl WorldStream {
             })
     }
     fn admit_generation(&mut self, bytes: usize) -> bool {
-        if bytes > 32 * MIB || self.metrics().active_cpu_bytes.saturating_add(bytes) > ACTIVE_CPU {
+        if bytes > 32 * MIB - self.dependency_staging_reserve
+            || self.metrics().active_cpu_bytes.saturating_add(bytes) > ACTIVE_CPU
+        {
             self.failure = Some("Source generation allocation exceeds its resource budget".into());
             return false;
         }
         bytes <= self.available_staging_bytes()
     }
+    // Retained generation may wait for resources. Keep one checked input window free.
+    // Grass and synchronous published bindings drain without further resource loads.
     pub fn available_staging_bytes(&self) -> usize {
+        self.available_dependency_staging_bytes().min(
+            (32 * MIB - self.dependency_staging_reserve)
+                .saturating_sub(self.generation_pending_bytes() - self.binding_reserved),
+        )
+    }
+    pub fn available_dependency_staging_bytes(&self) -> usize {
         (32 * MIB).saturating_sub(self.presentation.staging_bytes + self.generation_pending_bytes())
+    }
+    pub fn dependency_staging_configured(&self) -> bool {
+        self.dependency_staging_reserve != 0
+    }
+    pub fn configure_dependency_staging(
+        &mut self,
+        reserve: usize,
+        metadata: usize,
+    ) -> Result<(), ReferenceError> {
+        if reserve == 0 || reserve >= 32 * MIB {
+            return Err(ReferenceError(
+                "Invalid dependency staging reservation".into(),
+            ));
+        }
+        if self.dependency_staging_configured() {
+            return Ok(());
+        }
+        self.dependency_staging_reserve = reserve;
+        let mut allocation = self.presentation;
+        allocation.prototype_cpu += metadata;
+        self.set_presentation_allocation(allocation)
     }
     pub fn available_external_jobs(&self) -> usize {
         if !self.indices_ready {
@@ -1949,7 +1986,7 @@ impl WorldStream {
             .unwrap();
         let (binding_reservation, binding_objects) =
             self.binding_reservation(prototype, &placement.id)?;
-        if binding_reservation > self.available_staging_bytes()
+        if binding_reservation > self.available_dependency_staging_bytes()
             || self
                 .metrics()
                 .active_cpu_bytes
@@ -1975,7 +2012,7 @@ impl WorldStream {
         } else {
             let extra = super::StructureRecipe::reservation(prototype);
             if self.metrics().active_cpu_bytes.saturating_add(extra * 2) > ACTIVE_CPU
-                || extra > self.available_staging_bytes()
+                || extra + binding_reservation > self.available_dependency_staging_bytes()
             {
                 return Err(ReferenceError(
                     "Source scaled collision exceeds allocation budget".into(),

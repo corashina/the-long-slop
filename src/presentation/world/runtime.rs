@@ -67,6 +67,7 @@ impl WorldPresentation<'_, '_> {
         receivers: &[WorldBounds],
         enabled: bool,
     ) -> Result<(), ReferenceError> {
+        super::preflight::configure_staging(stream)?;
         if self.allocation.session != stream.frame().request.session {
             self.allocation.session = stream.frame().request.session;
             self.allocation.lamps = (0, 0, 0);
@@ -342,15 +343,15 @@ impl WorldPresentation<'_, '_> {
             }
         }
         self.writers.prepare(stream, &self.meshes)?;
-        if self.writers.ready()? {
-            self.grass.prepare(
-                stream,
-                &mut self.commands,
-                &mut self.meshes,
-                &mut self.materials.grass,
-                &mut self.pipelines,
-            )?;
-        }
+        // Existing expansions must release their slots even when a new writer is pending.
+        self.grass.prepare(
+            stream,
+            self.writers.ready()?,
+            &mut self.commands,
+            &mut self.meshes,
+            &mut self.materials.grass,
+            &mut self.pipelines,
+        )?;
         self.instances
             .request_grass(stream, &mut self.grass, view)?;
         stream.capture_changes(reference, &mut area.items, &area.interaction, physics);

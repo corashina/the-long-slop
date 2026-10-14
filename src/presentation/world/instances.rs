@@ -15,6 +15,7 @@ use crate::{
     reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
     world::{Placement, WorldStream},
 };
+use bevy::math::{DMat4, DVec3};
 use bevy::{
     camera::visibility::RenderLayers,
     ecs as bevy_ecs,
@@ -47,7 +48,10 @@ struct Instance {
     root: Entity,
     nodes: Vec<Entity>,
     active_nodes: Vec<bool>,
-    worlds: Vec<Mat4>,
+    // Local render frame; retain double precision across distant rebases.
+    worlds: Vec<DMat4>,
+    // Frozen source frame for procedural color, wind, and Grass inputs only.
+    source_worlds: Vec<Mat4>,
     renderers: Vec<Renderer>,
     lods: Vec<LodGroup>,
     ready: bool,
@@ -63,6 +67,25 @@ pub struct SourceInstances {
     pending: Option<Placement>,
 }
 impl SourceInstances {
+    fn rebase(&mut self, origin: crate::world::WorldOrigin, commands: &mut Commands) {
+        for instance in &mut self.instances {
+            if instance.origin == origin.offset {
+                continue;
+            }
+            let shift = DVec3::from_array(std::array::from_fn(|axis| {
+                instance.origin[axis] - origin.offset[axis]
+            }));
+            for world in &mut instance.worlds {
+                world.w_axis += shift.extend(0.);
+            }
+            commands.entity(instance.root).insert(Transform {
+                translation: Vec3::from_array(origin.local(instance.placement.pose.position)),
+                rotation: Quat::from_array(instance.placement.pose.rotation),
+                scale: Vec3::from_array(instance.placement.scale),
+            });
+            instance.origin = origin.offset;
+        }
+    }
     pub(crate) fn measurement_meshes(
         &self,
     ) -> impl Iterator<Item = (bevy::asset::AssetId<Mesh>, bool)> + '_ {
@@ -84,6 +107,7 @@ impl SourceInstances {
         commands: &mut Commands,
         view: GrassView,
     ) -> Result<(), ReferenceError> {
+        self.rebase(stream.origin, commands);
         if self.pending.as_ref().is_some_and(|p| {
             !stream
                 .pending_structures()
@@ -137,7 +161,8 @@ impl SourceInstances {
                             })
                             .sum::<usize>();
                         // Reservations include ECS storage, transforms, material bind groups, and LOD membership.
-                        let mut cpu = count * 2048 + primitives * 8192;
+                        let mut cpu =
+                            count * (2048 + std::mem::size_of::<DMat4>()) + primitives * 8192;
                         let mut gpu = primitives * 2048;
                         let objects = count + primitives;
                         let mut a = stream.presentation_allocation();
@@ -146,25 +171,23 @@ impl SourceInstances {
                         a.objects += objects;
                         a.pending += 1;
                         stream.set_presentation_allocation(a)?;
-                        let root_pose = Mat4::from_scale_rotation_translation(
-                            Vec3::from_array(placement.scale),
-                            Quat::from_array(placement.pose.rotation),
-                            Vec3::from_array(placement.pose.position.map(|v| v as f32)),
-                        );
+                        let root_pose = local_root(placement, stream.origin);
                         let root = commands
                             .spawn((
-                                Transform::from_matrix(
-                                    Mat4::from_translation(-Vec3::from_array(
-                                        stream.origin.offset.map(|v| v as f32),
-                                    )) * root_pose,
-                                ),
+                                Transform::from_matrix(root_pose.as_mat4()),
                                 Visibility::Hidden,
                             ))
                             .id();
                         let mut owned_bindings = Vec::with_capacity(primitives);
                         let construction = (|| -> Result<Instance, ReferenceError> {
                             let mut nodes = Vec::with_capacity(count);
-                            let mut worlds = vec![Mat4::IDENTITY; count];
+                            let mut worlds = vec![DMat4::IDENTITY; count];
+                            let mut source_worlds = vec![Mat4::IDENTITY; count];
+                            let source_root = Mat4::from_scale_rotation_translation(
+                                Vec3::from_array(placement.scale),
+                                Quat::from_array(placement.pose.rotation),
+                                Vec3::from_array(placement.pose.position.map(|v| v as f32)),
+                            );
                             for node in &loaded.plan.nodes {
                                 let local = if let Some(matrix) = node.matrix {
                                     Mat4::from_cols_array(&matrix)
@@ -191,7 +214,7 @@ impl SourceInstances {
                                         local = transform.to_matrix();
                                     }
                                 }
-                                worlds[node.index as usize] = local;
+                                worlds[node.index as usize] = local.as_dmat4();
                                 nodes.push(
                                     commands
                                         .spawn((
@@ -213,7 +236,7 @@ impl SourceInstances {
                             }
                             // Parent traversal preserves glTF order without assuming topological node indices.
                             for node in &loaded.plan.nodes {
-                                let mut matrix = worlds[node.index as usize];
+                                let mut matrix = worlds[node.index as usize].as_mat4();
                                 let mut current = node.index;
                                 for _ in 0..count {
                                     let Some(parent) = loaded
@@ -252,7 +275,8 @@ impl SourceInstances {
                                     matrix = local * matrix;
                                     current = parent.index;
                                 }
-                                worlds[node.index as usize] = root_pose * matrix;
+                                worlds[node.index as usize] = root_pose * matrix.as_dmat4();
+                                source_worlds[node.index as usize] = source_root * matrix;
                             }
                             for (i, node) in prototype.nodes.iter().enumerate() {
                                 commands.entity(nodes[node.gltf_node as usize]).insert(
@@ -301,9 +325,10 @@ impl SourceInstances {
                                             )
                                         })?;
                                     let mesh = asset.meshes[index].clone();
-                                    let world = worlds[node.index as usize];
+                                    let world = worlds[node.index as usize].as_mat4();
                                     let source_position =
-                                        world.w_axis.truncate() * Vec3::new(1., 1., -1.);
+                                        source_worlds[node.index as usize].w_axis.truncate()
+                                            * Vec3::new(1., 1., -1.);
                                     let appearance =
                                         stream.appearance(&placement.id).iter().rev().find(|a| {
                                             a.node == source_node.source
@@ -556,7 +581,8 @@ impl SourceInstances {
                                         a.active_cpu += patch_bytes;
                                         stream.set_presentation_allocation(a)?;
                                         cpu += patch_bytes;
-                                        let patches = grass_patches(mesh_data, world)?;
+                                        let source_world = source_worlds[node.index as usize];
+                                        let patches = grass_patches(mesh_data, source_world)?;
                                         let settings = GrassSettings::from_source(record)?;
                                         if let InstanceMaterial::Grass(handle) = &binding.visible {
                                             let caster = (shadow != 0).then(|| {
@@ -574,7 +600,7 @@ impl SourceInstances {
                                             });
                                             let bounds = grass_bounds(
                                                 &patches,
-                                                world,
+                                                source_world,
                                                 materials
                                                     .grass
                                                     .get(handle)
@@ -627,6 +653,7 @@ impl SourceInstances {
                                     .collect(),
                                 nodes,
                                 worlds,
+                                source_worlds,
                                 renderers,
                                 lods,
                                 ready: false,
@@ -731,6 +758,7 @@ impl SourceInstances {
         transforms: &mut Query<&mut Transform>,
         materials: &mut InstanceMaterials,
     ) -> Result<(), ReferenceError> {
+        self.rebase(stream.origin, commands);
         let frame = stream.frame();
         for instance in &mut self.instances {
             if !stream.bindings_ready(&instance.placement.id) {
@@ -750,13 +778,6 @@ impl SourceInstances {
             if !instance.visible {
                 commands.entity(instance.root).insert(Visibility::Inherited);
                 instance.visible = true;
-            }
-            if instance.origin != frame.origin.offset {
-                if let Ok(mut root) = transforms.get_mut(instance.root) {
-                    root.translation =
-                        Vec3::from_array(frame.origin.local(instance.placement.pose.position));
-                }
-                instance.origin = frame.origin.offset;
             }
             let prototype = reference
                 .world
@@ -844,18 +865,28 @@ impl SourceInstances {
             for (body, handle) in prototype.bodies.iter().zip(&published.bodies) {
                 let pose = physics.rapier().bodies[*handle].position();
                 let rotation = Quat::from_array(pose.rotation.to_array());
-                let absolute = frame.origin.absolute(pose.translation.to_array());
                 let world = Mat4::from_rotation_translation(
                     rotation,
-                    Vec3::from_array(absolute.map(|v| v as f32)),
+                    Vec3::from_array(pose.translation.to_array()),
                 );
                 let node = &prototype.nodes[body.node as usize];
                 let index = node.gltf_node as usize;
                 let scale =
                     Vec3::from_array(body.pose.scale) * Vec3::from_array(instance.placement.scale);
-                let world = world * Mat4::from_scale(scale);
+                let world = (world * Mat4::from_scale(scale)).as_dmat4();
+                let source_world = Mat4::from_rotation_translation(
+                    rotation,
+                    Vec3::from_array(
+                        frame
+                            .origin
+                            .absolute(pose.translation.to_array())
+                            .map(|v| v as f32),
+                    ),
+                ) * Mat4::from_scale(scale);
                 if instance.worlds[index] != world {
                     let delta = world * instance.worlds[index].inverse();
+                    let source_changed = source_world != instance.source_worlds[index];
+                    let source_delta = source_world * instance.source_worlds[index].inverse();
                     for descendant in &prototype.nodes {
                         let mut cursor = descendant.parent;
                         let mut belongs = descendant.gltf_node == node.gltf_node;
@@ -870,19 +901,19 @@ impl SourceInstances {
                         if belongs {
                             let target = descendant.gltf_node as usize;
                             instance.worlds[target] = delta * instance.worlds[target];
+                            if source_changed {
+                                instance.source_worlds[target] =
+                                    source_delta * instance.source_worlds[target];
+                            }
                         }
                     }
                     let parent = if let Some(parent) = node.parent {
                         instance.worlds[prototype.nodes[parent as usize].gltf_node as usize]
                     } else {
-                        Mat4::from_scale_rotation_translation(
-                            Vec3::from_array(instance.placement.scale),
-                            Quat::from_array(instance.placement.pose.rotation),
-                            Vec3::from_array(instance.placement.pose.position.map(|v| v as f32)),
-                        )
+                        local_root(&instance.placement, frame.origin)
                     };
                     if let Ok(mut transform) = transforms.get_mut(instance.nodes[index]) {
-                        *transform = Transform::from_matrix(parent.inverse() * world);
+                        *transform = Transform::from_matrix((parent.inverse() * world).as_mat4());
                     }
                 }
             }
@@ -892,29 +923,38 @@ impl SourceInstances {
                     continue;
                 };
                 let index = node.gltf_node as usize;
-                let (scale, _, _) = instance.worlds[index].to_scale_rotation_translation();
+                let (scale, _, _) = instance.worlds[index]
+                    .as_mat4()
+                    .to_scale_rotation_translation();
                 let world = Mat4::from_scale_rotation_translation(
                     scale,
                     Quat::from_array(pose.rotation),
+                    Vec3::from_array(pose.position),
+                )
+                .as_dmat4();
+                instance.worlds[index] = world;
+                let (source_scale, _, _) =
+                    instance.source_worlds[index].to_scale_rotation_translation();
+                instance.source_worlds[index] = Mat4::from_scale_rotation_translation(
+                    source_scale,
+                    Quat::from_array(pose.rotation),
                     Vec3::from_array(frame.origin.absolute(pose.position).map(|v| v as f32)),
                 );
-                instance.worlds[index] = world;
                 let parent = if let Some(parent) = node.parent {
                     instance.worlds[prototype.nodes[parent as usize].gltf_node as usize]
                 } else {
-                    Mat4::from_scale_rotation_translation(
-                        Vec3::from_array(instance.placement.scale),
-                        Quat::from_array(instance.placement.pose.rotation),
-                        Vec3::from_array(instance.placement.pose.position.map(|v| v as f32)),
-                    )
+                    local_root(&instance.placement, frame.origin)
                 };
                 if let Ok(mut transform) = transforms.get_mut(instance.nodes[index]) {
-                    transform.set_if_neq(Transform::from_matrix(parent.inverse() * world));
+                    transform
+                        .set_if_neq(Transform::from_matrix((parent.inverse() * world).as_mat4()));
                 }
             }
             for renderer in &instance.renderers {
                 let node = &prototype.nodes[renderer.node];
-                let position = instance.worlds[node.gltf_node as usize].w_axis.truncate()
+                let position = instance.source_worlds[node.gltf_node as usize]
+                    .w_axis
+                    .truncate()
                     * Vec3::new(1., 1., -1.);
                 if let InstanceMaterial::Impostor(handle) = &renderer.binding.visible {
                     if let Some(mut material) = materials.impostors.get_mut(handle) {
@@ -955,7 +995,7 @@ impl SourceInstances {
                     };
                     let node = prototype.nodes[group.node].gltf_node as usize;
                     let selected = group.select(
-                        instance.worlds[node],
+                        instance.worlds[node].as_mat4(),
                         view,
                         reference.world.lod.lod_bias,
                         reference.world.lod.maximum_lod as usize,
@@ -982,7 +1022,7 @@ impl SourceInstances {
                 } else {
                     Visibility::Hidden
                 });
-                let source_position = instance.worlds
+                let source_position = instance.source_worlds
                     [prototype.nodes[renderer.node].gltf_node as usize]
                     .w_axis
                     .truncate()
@@ -999,8 +1039,6 @@ impl SourceInstances {
         writers: &mut crate::presentation::materials::grass::writers::GrassWriters,
         meshes: &Assets<Mesh>,
     ) -> Result<(), ReferenceError> {
-        let offset =
-            Mat4::from_translation(-Vec3::from_array(stream.origin.offset.map(|v| v as f32)));
         for instance in &self.instances {
             let prototype = reference
                 .world
@@ -1021,7 +1059,7 @@ impl SourceInstances {
                         stream,
                         renderer.entity,
                         renderer.mesh.clone(),
-                        offset * instance.worlds[node.gltf_node as usize],
+                        instance.worlds[node.gltf_node as usize].as_mat4(),
                         meshes,
                     )?;
                 }
@@ -1163,4 +1201,18 @@ fn grass_bounds(
         + inverse.z_axis.truncate().abs())
         * radius;
     bevy::camera::primitives::Aabb::from_min_max(min - padding, max + padding)
+}
+
+fn local_root(placement: &Placement, origin: crate::world::WorldOrigin) -> DMat4 {
+    let mut root = Mat4::from_scale_rotation_translation(
+        Vec3::from_array(placement.scale),
+        Quat::from_array(placement.pose.rotation),
+        Vec3::ZERO,
+    )
+    .as_dmat4();
+    root.w_axis = DVec3::from_array(std::array::from_fn(|axis| {
+        placement.pose.position[axis] - origin.offset[axis]
+    }))
+    .extend(1.);
+    root
 }

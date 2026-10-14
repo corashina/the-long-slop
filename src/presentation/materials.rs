@@ -119,6 +119,7 @@ struct SourceTexture {
     users: usize,
     record: TextureRecord,
     levels: Vec<Handle<Image>>,
+    input_staging: Vec<usize>,
     image: Option<Handle<Image>>,
     label: String,
 }
@@ -199,7 +200,12 @@ pub fn load_materials(
     let eager_assets: HashSet<_> = reference
         .assets
         .iter()
-        .filter(|asset| asset.usage != AssetUsage::WorldPrototype)
+        .filter(|asset| {
+            matches!(
+                asset.usage,
+                AssetUsage::UniqueScene | AssetUsage::RoadLampPrototype | AssetUsage::SkyPrototype
+            )
+        })
         .map(|asset| asset.id)
         .collect();
     let records: Vec<_> = reference
@@ -237,6 +243,7 @@ pub fn load_materials(
                 users: 0,
                 record: texture.clone(),
                 levels,
+                input_staging: Vec::new(),
                 image: None,
                 label: format!(
                     "material {}:{} {}",

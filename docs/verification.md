@@ -832,3 +832,37 @@ Immutable original records and receipts remain under `.cache/world-source/task-7
 The original receipt sidecar SHA256 is `2c20e3d2c2d62a4123eeb0e1208c806ae9e0f0c7cdf4094699110321d02e6a8c`.
 The original record sidecar SHA256 is `65a0309fa1fca84d78a8d4051e3c8a0fb54d5ef70745a675a4eea8f076c20b96`.
 Recovered assets, source, captures, and local completion evidence stay outside Git.
+
+## Source-world final review fixes: 2026-10-14
+
+The Task 9 evidence above covers the 2026-10-13 implementation before final review fixes.
+This section records the later F1, F2, and F3 corrections.
+
+- Resource admission now uses verified glTF input sizes and bounded PNG decode overlap.
+  Retained generation protects 19,826,124 bytes for resource preparation within the shared 32 MiB cap.
+  Replay keeps that headroom. Existing grass work can release its slot while displacement writers wait.
+  Synchronous collision and binding work can use total free staging after dependencies are ready.
+- Generated render transforms subtract the double-precision origin before float conversion.
+  Retained local matrices handle bodies, parent transforms, nodes, rebases, and displacement writers.
+  Separate source matrices preserve procedural shader inputs.
+- Both startup loaders and scene spawning select the three imported asset usages explicitly.
+  Painting materials load for selected variants and release with their last dynamic owner.
+
+The final native build passed with `native_exit=0` in 0.21 seconds.
+The final `scripts/build.ps1` run passed with `package_exit=0`; release compilation took 2 minutes 6 seconds.
+That script built release WASM and ran wasm-bindgen browser packaging.
+Both JavaScript files passed syntax parsing. Git whitespace validation passed.
+These builds cover every final code edit. No shader source changed.
+
+Final logs and package hashes remain ignored under `.cache/world-source/`:
+
+- `final-fix-complete-native.log`
+- `final-fix-complete-package.log`
+- `final-fix-js-parse.log`
+- `final-fix-input-metadata.json`
+- `final-fix-package-evidence.json`
+
+The full fix report remains at `.superpowers/sdd/2026-10-12-source-world/final-fix-report.md`.
+Earlier failed and intermediate logs remain historical evidence.
+No tests, simulations, captures, browser checks, or driving checks ran under the current user instruction.
+Runtime parity, memory plateau, long travel, restart, revisit, and rebase acceptance remain unverified.

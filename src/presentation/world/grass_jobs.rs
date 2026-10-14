@@ -223,6 +223,7 @@ impl GrassJobs {
     pub fn prepare(
         &mut self,
         stream: &mut WorldStream,
+        writers_ready: bool,
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
         materials: &mut Assets<GrassMaterial>,
@@ -232,7 +233,8 @@ impl GrassJobs {
             if instance.session != stream.frame().request.session {
                 continue;
             }
-            if matches!(instance.pending, Some(Pending::Queued))
+            if writers_ready
+                && matches!(instance.pending, Some(Pending::Queued))
                 && stream.available_external_jobs() > 0
             {
                 self.revision = self.revision.wrapping_add(1);
@@ -306,7 +308,7 @@ impl GrassJobs {
                         RenderingState::Loading => continue,
                         RenderingState::Ready => {}
                     }
-                    if !stream.take_presentation_publication() {
+                    if !writers_ready || !stream.take_presentation_publication() {
                         continue;
                     }
                     let Some(Pending::Upload {

@@ -66,11 +66,12 @@ pub fn load(commands: &mut Commands, server: &AssetServer, reference: &Reference
         expected_instances: reference.expected_instances(),
         ..Default::default()
     };
-    for asset in reference
-        .assets
-        .iter()
-        .filter(|asset| asset.usage != AssetUsage::WorldPrototype)
-    {
+    for asset in reference.assets.iter().filter(|asset| {
+        matches!(
+            asset.usage,
+            AssetUsage::UniqueScene | AssetUsage::RoadLampPrototype | AssetUsage::SkyPrototype
+        )
+    }) {
         let handle = server
             .load_builder()
             .with_settings(source_gltf_settings)
@@ -90,7 +91,12 @@ pub fn spawn_scenes(
     for (asset, (_, handle)) in reference
         .assets
         .iter()
-        .filter(|asset| asset.usage != AssetUsage::WorldPrototype)
+        .filter(|asset| {
+            matches!(
+                asset.usage,
+                AssetUsage::UniqueScene | AssetUsage::RoadLampPrototype | AssetUsage::SkyPrototype
+            )
+        })
         .zip(&visuals.handles)
     {
         if asset.usage != AssetUsage::UniqueScene {
