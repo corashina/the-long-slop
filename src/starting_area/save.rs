@@ -5,7 +5,182 @@ use crate::vehicle::{PhysicsWorld, capture_body_save};
 use crate::world::WorldOrigin;
 use std::collections::HashSet;
 
+pub(super) struct PendingRestore {
+    items: Vec<ItemSnapshot>,
+    carry: Option<CarrySnapshot>,
+    ids: IdentityMap,
+    ready: bool,
+    motion: Vec<BodySnapshot>,
+}
 impl GarageRuntime {
+    pub fn restore_pending(&self) -> bool {
+        self.pending_restore.as_ref().is_some_and(|p| !p.ready)
+    }
+    pub fn has_deferred_save_links(&self) -> bool {
+        self.pending_restore.is_some()
+    }
+
+    /// Poll after bounded source publication and binding. Never advance physics here.
+    pub fn advance_saved_restore(
+        &mut self,
+        reference: &ReferenceManifest,
+    ) -> Result<bool, SaveError> {
+        let Some(pending) = &mut self.pending_restore else {
+            return Ok(true);
+        };
+        let ids = &mut pending.ids;
+        let before = pending.items.len();
+        let mut index = 0;
+        // Imported edges are bounded by the immutable imported item set.
+        while index < pending.items.len() {
+            let item = &pending.items[index];
+            let ItemLocationSave::GeneratedAttachment { attachment } = &item.location else {
+                unreachable!()
+            };
+            if attachment
+                .owner
+                .as_ref()
+                .is_some_and(|key| !self.stream.save_owner_ready(key, &self.area.items))
+            {
+                index += 1;
+                continue;
+            }
+            let snapshot = crate::world::ObjectSnapshot {
+                pose: crate::world::AbsolutePose {
+                    position: item.pose.position,
+                    rotation: item.pose.rotation,
+                },
+                condition: item.condition,
+                food: self
+                    .area
+                    .items
+                    .get(ids.item(&item.instance)?)
+                    .and_then(|i| i.food)
+                    .map(|food| crate::world::changes::FoodSnapshot {
+                        source: reference.survival.foods[food.prototype_index]
+                            .source
+                            .clone(),
+                        bite: food.bite,
+                    }),
+                temperature: item.temperature,
+                fluid_quantities: item.fluids,
+                valve: None,
+                lamp: None,
+                linear_velocity: [0.; 3],
+                angular_velocity: [0.; 3],
+                sleeping: false,
+                held: false,
+                attachment: Some(attachment.clone()),
+                mechanism: None,
+            };
+            if crate::world::stream::content_bindings::restore_item(
+                ids.item(&item.instance)?,
+                &snapshot,
+                reference,
+                &mut self.area.items,
+                &mut self.area.interaction,
+                &mut self.physics,
+                &mut self.wheels,
+            )? {
+                pending.items.swap_remove(index);
+            } else {
+                index += 1;
+            }
+        }
+        if pending
+            .items
+            .iter()
+            .any(|item| self.stream.save_link_required(item.pose.position))
+        {
+            pending.ready = false;
+            return Ok(false);
+        }
+        if pending.ready && before == pending.items.len() {
+            return Ok(true);
+        }
+        if !self.stream.saved_bindings_ready(&self.area.items) {
+            return Ok(false);
+        }
+        if let Some(carry) = &pending.carry {
+            ids.bind_generated(&self.area.items);
+            let Ok(id) = ids.item(&carry.item) else {
+                return Ok(false);
+            };
+            if self.area.items.get(id).and_then(|i| i.body).is_none() {
+                return Ok(false);
+            }
+            self.area.interaction.restore_carry_save(
+                carry,
+                &ids,
+                &self.area.items,
+                &mut self.physics,
+            )?;
+        }
+        self.persistent_world.sync(
+            reference,
+            &mut self.area,
+            &mut self.wheels,
+            &self.stream,
+            &mut self.physics,
+        )?;
+        self.area
+            .interaction
+            .sync_parts(&mut self.area.items, &mut self.physics)?;
+        self.wheels.sync(&mut self.area.items, &mut self.physics)?;
+        self.area.items.sync_poses(&self.physics);
+        self.area.commit_poses(&self.physics, true);
+        let world = self.physics.rapier_mut();
+        for (_, body) in world.bodies.iter_mut() {
+            if body.is_dynamic() {
+                body.recompute_mass_properties_from_colliders(&world.colliders);
+            }
+        }
+        for record in &pending.motion {
+            let handle = match &record.identity {
+                BodyIdentity::Source { source } => {
+                    self.area.bodies.get(&ids.bodies[source]).copied()
+                }
+                BodyIdentity::Assembly { root } => {
+                    self.area.items.get(ids.item(root)?).and_then(|i| i.body)
+                }
+            };
+            if let Some(handle) = handle.filter(|h| self.physics.body_active(*h)) {
+                let body = &mut self.physics.rapier_mut().bodies[handle];
+                body.set_linvel(record.linear_velocity.into(), false);
+                body.set_angvel(record.angular_velocity.into(), false);
+                if record.sleeping {
+                    body.sleep();
+                } else {
+                    body.wake_up(true);
+                }
+            }
+        }
+        if !pending.motion.is_empty() {
+            for (key, change) in self.stream.changes().iter() {
+                if let (Some(id), Some(snapshot)) =
+                    (self.area.items.resolve_key(key), &change.snapshot)
+                {
+                    if snapshot.attachment.is_none() {
+                        crate::world::changes::restore_motion(
+                            id,
+                            snapshot,
+                            &self.area.items,
+                            &mut self.physics,
+                        );
+                    }
+                }
+            }
+        }
+        pending.motion.clear();
+        self.physics.refresh_queries();
+        pending.carry = None;
+        pending.ready = true;
+        if pending.items.is_empty() {
+            self.pending_restore = None;
+        }
+        self.sync_weather_bindings(reference);
+        Ok(true)
+    }
     pub fn from_save(
         reference: &ReferenceManifest,
         expected: &SourceStamp,
@@ -13,7 +188,7 @@ impl GarageRuntime {
     ) -> Result<Self, SaveError> {
         saved.validate(reference, expected)?;
         let ids = IdentityMap::new(reference)?;
-        let mut candidate = Self::new_candidate(reference, false)?;
+        let mut candidate = Self::new_candidate(reference, false, saved.world.seed)?;
         candidate.area.items.restore_save(&ids, &saved.items)?;
         candidate.wheels.restore_save(
             &ids,
@@ -38,10 +213,17 @@ impl GarageRuntime {
             .sync_parts(&mut candidate.area.items, &mut candidate.physics)?;
         // Assembly setup may change local poses. The snapshot owns their saved frames.
         candidate.area.items.restore_save(&ids, &saved.items)?;
-        candidate.stream.seed = crate::save::identity::unsigned(&saved.world.seed)?;
+        candidate.stream.restore_save(&saved.world)?;
         candidate.stream.origin.offset = saved.player.pose.position;
-        candidate.stream.focus = saved.player.pose.position;
-        candidate.area.origin = candidate.stream.origin.offset;
+        candidate.area.sync_origin(candidate.stream.origin.offset);
+        let vehicle = saved
+            .vehicles
+            .iter()
+            .find(|v| v.instance == saved.progress.selected_vehicle)
+            .unwrap();
+        candidate
+            .stream
+            .request_at(saved.player.pose.position, vehicle.body.pose.position);
         candidate.persistent_world = PersistentWorld::restore(saved, &ids)?;
         candidate.persistent_world.sync(
             reference,
@@ -50,25 +232,6 @@ impl GarageRuntime {
             &candidate.stream,
             &mut candidate.physics,
         )?;
-        candidate
-            .stream
-            .sync_at(saved.player.pose.position, &mut candidate.physics);
-        crate::world::sync_station_supplies(
-            &mut candidate.stream,
-            &mut candidate.area.items,
-            &mut candidate.area.interaction,
-            &mut candidate.physics,
-        );
-        candidate.persistent_world.sync(
-            reference,
-            &mut candidate.area,
-            &mut candidate.wheels,
-            &candidate.stream,
-            &mut candidate.physics,
-        )?;
-        candidate
-            .persistent_world
-            .sync_pumps(&candidate.stream, &mut candidate.area.interaction);
         candidate
             .area
             .interaction
@@ -136,7 +299,12 @@ impl GarageRuntime {
             &candidate.stream.origin,
             &mut candidate.physics,
         )?;
-        if let Some(carry) = &saved.player.carry {
+        if let Some(carry) = saved
+            .player
+            .carry
+            .as_ref()
+            .filter(|c| matches!(c.item, InstanceId::Initial { .. }))
+        {
             candidate.area.interaction.restore_carry_save(
                 carry,
                 &ids,
@@ -211,12 +379,28 @@ impl GarageRuntime {
             audio.bind_game(reference, &candidate.area, &candidate.physics);
             audio.sync_lamps(&reference.lighting, &candidate.lighting);
         }
-        crate::world::sync_station_food(
-            &mut candidate.stream,
-            reference,
-            &mut candidate.area,
-            &mut candidate.physics,
-        )?;
+        candidate.startup_aligned = true;
+        candidate.pending_restore = Some(PendingRestore {
+            items: saved
+                .items
+                .iter()
+                .filter(|i| matches!(i.location, ItemLocationSave::GeneratedAttachment { .. }))
+                .cloned()
+                .collect(),
+            carry: saved
+                .player
+                .carry
+                .clone()
+                .filter(|c| matches!(c.item, InstanceId::Generated { .. })),
+            ids: IdentityMap::new(reference)?,
+            ready: false,
+            motion: saved
+                .bodies
+                .iter()
+                .chain(saved.vehicles.iter().map(|v| &v.body))
+                .cloned()
+                .collect(),
+        });
         candidate.sync_weather_bindings(reference);
         candidate.clear_input();
         candidate.paused = true;
@@ -230,31 +414,34 @@ impl GarageRuntime {
         view: CameraSave,
         saved_at: &str,
     ) -> Result<SaveSnapshot, SaveError> {
-        let ids = IdentityMap::new(reference)?;
+        if self.restore_pending() {
+            return Err(SaveError::ReconstructionFailure(
+                "Save restore is pending".into(),
+            ));
+        }
+        let mut ids = IdentityMap::new(reference)?;
+        ids.bind_generated(&self.area.items);
         let origin = &self.stream.origin;
         let (wheels, tires) = self.wheels.capture_save(&ids, &self.physics)?;
-        let mut world = self
-            .persistent_world
-            .capture(&self.area, &self.physics, origin, &ids)?;
-        for record in self.stream.capture_save(&self.area.interaction).records {
-            let WorldRecord::Pump { instance, .. } = &record;
-            if let Some(old) = world.records.iter_mut().find(|old| {
-                let WorldRecord::Pump {
-                    instance: other, ..
-                } = old;
-                instance == other
-            }) {
-                *old = record;
-            } else {
-                world.records.push(record);
-            }
-        }
-        world.seed = self.stream.seed.to_string();
-        world.records.sort_by(|a, b| {
-            let WorldRecord::Pump { instance: a, .. } = a;
-            let WorldRecord::Pump { instance: b, .. } = b;
-            a.cmp(b)
-        });
+        let required: Vec<_> = self
+            .pending_restore
+            .iter()
+            .flat_map(|p| &p.items)
+            .filter_map(|i| {
+                if let ItemLocationSave::GeneratedAttachment { attachment } = &i.location {
+                    attachment.owner.clone()
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let world = self.stream.capture_save(
+            reference,
+            &self.area.items,
+            &self.area.interaction,
+            &self.physics,
+            &required,
+        );
         let mut snapshot = SaveSnapshot {
             driving_assists: self.driving_assists,
             schema_version: SAVE_SCHEMA_VERSION,
@@ -265,16 +452,7 @@ impl GarageRuntime {
                 &ids,
                 origin,
                 &self.physics,
-                if self
-                    .area
-                    .interaction
-                    .held()
-                    .is_some_and(|id| !reference.items.iter().any(|r| r.id == id))
-                {
-                    None
-                } else {
-                    self.area.interaction.capture_carry_save(&ids)?
-                },
+                self.area.interaction.capture_carry_save(&ids)?,
             )?,
             vehicles: self
                 .vehicles
@@ -308,7 +486,13 @@ impl GarageRuntime {
                 &self.physics,
                 &self.persistent_world,
             )?,
-            items: self.area.items.capture_save(&ids, origin, &self.physics)?,
+            items: self.area.items.capture_save(
+                &ids,
+                origin,
+                &self.physics,
+                &self.area.interaction,
+                reference,
+            )?,
             attachments: AttachmentsSnapshot {
                 parts: self.area.interaction.parts.capture_save(&ids)?,
                 wheels,
@@ -322,6 +506,17 @@ impl GarageRuntime {
             lighting: self.lighting.capture_save(&reference.lighting, &ids)?,
             view: ViewSnapshot { camera: view },
         };
+        if let Some(pending) = &self.pending_restore {
+            for saved in &pending.items {
+                let target = snapshot
+                    .items
+                    .iter_mut()
+                    .find(|i| i.instance == saved.instance)
+                    .unwrap();
+                *target = saved.clone();
+                snapshot.bodies.retain(|b| !matches!(&b.identity, BodyIdentity::Assembly { root } if root == &saved.instance));
+            }
+        }
         for (index, vehicle) in snapshot.vehicles.iter_mut().enumerate() {
             if let Some(body) = self.persistent_world.body_snapshot(
                 self.physics.chassis_handle(index),

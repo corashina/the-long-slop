@@ -130,8 +130,8 @@ fn snapshot_for(r: ReferenceManifest) -> (ReferenceManifest, SourceStamp, SaveSn
             "engine": {"ignition": false, "rpm": 0., "temperature": v.engine.initial_temperature,
                 "elapsed": 0., "last_run_time": -1., "last_start_chance_time": 0., "random_start": 1.,
                 "supplied_fuel": 0., "fan_on": false}, "gear": 0, "handbrake": true, "trip_m": 0., "requested_headlights": 0})).collect();
-    let value = json!({"schema_version": 2, "driving_assists": r.driving.default_assists, "saved_at": "2026-10-12T10:00:00.000Z", "source": source,
-        "world": {"seed": "18446744073709551615", "records": []},
+    let value = json!({"schema_version": 3, "driving_assists": r.driving.default_assists, "saved_at": "2026-10-12T10:00:00.000Z", "source": source,
+        "world": {"seed": 42, "changes": my_summer_slop::world::ChangeRecords::default(), "spawn": my_summer_slop::world::spawn_state::SourceSpawnState::supplied_controlled_startup(&r.world.spawn_context, my_summer_slop::world::spawn_state::SpawnContext { current_car: r.vehicles[0].spawn_car_id, peaceful_enemies: 0, date: r.world.spawn_context.date, chance_bits: None }).capture_history()},
         "player": {"pose": pose, "yaw": 0., "pitch": 0., "seat": null, "crouched": false,
             "vertical_velocity": 0., "recoil_velocity": [0.,0.,0.], "running": false, "carry": null},
         "vehicles": vehicles,
@@ -318,14 +318,20 @@ fn identity_preserves_large_signed_values() {
     };
     let restored: SourceKey = serde_json::from_slice(&serde_json::to_vec(&key).unwrap()).unwrap();
     assert_eq!(restored, key);
-    let id = InstanceId::Station {
-        seed: "18446744073709551615".into(),
-        index: "-9223372036854775808".into(),
-        role: "pump".into(),
+    let id = InstanceId::Generated {
+        id: my_summer_slop::world::GeneratedId {
+            layer: my_summer_slop::world::WorldLayer::Building,
+            generator: SourceId {
+                file: "fixture".into(),
+                path_id: i64::MIN,
+            },
+            unit: [i64::MIN, i64::MAX],
+            ordinal: u32::MAX,
+            children: vec![],
+        },
     };
     let restored: InstanceId = serde_json::from_slice(&serde_json::to_vec(&id).unwrap()).unwrap();
     assert_eq!(restored, id);
-    assert_eq!(restored.station().unwrap(), (u64::MAX, i64::MIN));
     let (mut reference, _, _) = fixture();
     reference.items[0].source.path_id = i64::MIN;
     reference.items[0].source.file = key.file.clone();
@@ -406,9 +412,11 @@ fn authored_startup_rotation_can_precede_drag_limits() {
 
 #[test]
 fn obsolete_save_schema_is_rejected_before_reading_vehicle_fields() {
-    let obsolete = br#"{"schema_version":1,"vehicles":[{"auto_gear":1}]}"#;
-    assert!(matches!(
-        SaveSnapshot::from_json(obsolete),
-        Err(SaveError::IncompatibleSources(_))
-    ));
+    for version in [1, 2] {
+        let obsolete = format!(r#"{{"schema_version":{version},"vehicles":[{{"auto_gear":1}}]}}"#);
+        assert!(matches!(
+            SaveSnapshot::from_json(obsolete.as_bytes()),
+            Err(SaveError::IncompatibleSources(_))
+        ));
+    }
 }

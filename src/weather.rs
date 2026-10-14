@@ -195,7 +195,7 @@ impl WeatherState {
         now: f64,
         dt: f32,
         player_absolute: [f64; 3],
-        world_seed: u64,
+        mut terrain: impl FnMut([f64; 3]) -> (f32, [f32; 4]),
     ) {
         if !now.is_finite()
             || !dt.is_finite()
@@ -221,12 +221,12 @@ impl WeatherState {
         for storm in &mut self.storms {
             storm.life_strength = storm.size * storm.life.clamp(0., 1.);
             storm.scan_position = storm.absolute_position;
-            let height = crate::world::terrain_height(world_seed, storm.absolute_position);
+            let (height, biome) = terrain(storm.absolute_position);
             storm.absolute_position[0] += (storm.direction[0] * storm.speed * dt) as f64;
             storm.absolute_position[1] = height as f64;
             storm.absolute_position[2] += (storm.direction[1] * storm.speed * dt) as f64;
-            // The current procedural desert maps to source biome zero.
-            if r.biome != 0 || storm.previous_distance >= r.destroy_dist {
+            let source_biome = crate::world::biome(biome, None);
+            if r.biome != source_biome || storm.previous_distance >= r.destroy_dist {
                 storm.life = (storm.life - dt * r.life_loss_on_other_biome).clamp(0., 1.);
             } else {
                 storm.life = (storm.life + dt * r.life_gain).clamp(0., 1.);

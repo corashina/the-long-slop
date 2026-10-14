@@ -4,11 +4,16 @@ Updated: 2026-10-14.
 
 ## Current status
 
-Master retains the accepted game features and local door-control changes.
-We keep the complete source-world integration on `codex/world-integration-deferred`, based on `05bdc507`.
-We completed nine source-world implementation layers and two integration merges in that separate branch.
-The user deferred integration into master. Master does not contain the source generator or Bevy ownership patch.
-Source-world changes shared startup, collision, save identities, and renderer paths. It requires the later integration work.
+Master contains the source-world integration and retained Bevy ownership patch after merge `79765e3`.
+The deferred worktree retains implementation reports and recovery files.
+We completed nine source-world implementation layers and three integration merges.
+The final scoped review passed with no findings. Checked runtime inputs and the WASM package are installed in master.
+We reconciled master `6423b062` with source-world startup, collision, save identities, and renderer paths.
+We fixed hidden grass preparation and generated attachment readiness in `8d4341f`.
+We fixed the final review's texture receipt cleanup finding in `103bee7`.
+The full integration review and scoped re-review have no open Critical or Important findings.
+We preserved local transparent sorting and warmup filtering through the replacement renderer.
+We added no features or dependencies during the final merge.
 
 ### Changes in master
 
@@ -21,12 +26,12 @@ Source-world changes shared startup, collision, save identities, and renderer pa
 | Portable flashlight | Source bindings, carried controls, storage restrictions, and shared light rendering |
 | Save/load | Browser storage, fleet state, fluids, item state, and scene replacement |
 | Performance | Reduced camera light clustering and depth/shadow material bindings |
-| Roadside stations | Source fuel station models, static collision, and ground alignment on the current procedural road |
+| Roadside stations | Checked source placement, selected prototypes, static collision, and terrain alignment |
 
 We added left-button door dragging and suppress view movement during a drag.
-The station models come from the concurrent remote master update. The complete source road generator remains separate.
+The integration replaces the obsolete station generator with checked source-world placement and selected prototypes.
 
-### Deferred source-world changes
+### Source-world changes
 
 | Layer | Implemented changes |
 | --- | --- |
@@ -45,13 +50,13 @@ Changed-object records have no fixed count limit. Source checkpoints and first-c
 Active CPU/GPU limits remain 128 MiB each. Prototype limits remain 256 MiB CPU and 512 MiB GPU.
 Generation and presentation share 32 MiB of pending storage.
 
-The separate branch contains the source-world design, implementation plan, source research, and checked input provenance.
-The new worktree also retains exported runtime files and implementation reports.
+Master contains the source-world design, implementation plan, source research, and checked input provenance.
+The retained worktree also contains exported runtime files and implementation reports.
 
-### Deferred integration changes
+### Integration changes
 
 We replaced station save identities with canonical generated identities, change records, and source spawn history.
-We added save schema 2 and reject incompatible schema 1 saves. Browser database version remains separate.
+Source-world introduced save schema 2. The driving integration now uses schema 3. Browser database version remains separate.
 We preserve source integer identities as decimal strings at the browser save boundary.
 We apply the saved seed before generation and restore supported object state before physics participation.
 We preserve imported fleet state, dormant absolute poses, recovery, and cross-owner attachments.
@@ -69,15 +74,13 @@ We retained master's latest depth/shadow bindings and connected candidate caster
 The final native/WASM builds, packaging, 22 shader variants, JavaScript syntax, and scoped whitespace checks passed.
 We preserved existing WASM warnings and unchanged upstream whitespace.
 
-Remaining deferred work:
-
-1. Resolve the reported hidden grass write and generated attachment owner restore issues.
-2. Complete the interrupted integration review and repeat builds after required fixes.
-3. Perform runtime acceptance when authorized. Merge into master requires a later user instruction.
+The final merged native and release WASM builds, packaging, JavaScript syntax, and scoped whitespace checks passed.
+Master's source matches the reviewed build. All 7,890 installed runtime file hashes match their receipts.
+Runtime acceptance remains open. Tests and runtime checks remain skipped.
 
 ### Verification limits
 
-The source-world branch passed native and release WASM builds, packaging, and static review.
+The merged source-world implementation passed native and release WASM builds, packaging, and static review.
 These results establish compilation and reviewed structure. They do not establish source runtime parity.
 The user skipped tests and further runtime checks. Earlier rendering checks below describe earlier revisions.
 Fixed source samples, collision seams, long drives, rebasing, revisits, and memory plateau remain unverified.
@@ -85,43 +88,48 @@ We have not measured retained objects or runtime memory for the merged world.
 We removed obsolete generator paths from the integration. Acceptance of the replacement remains open.
 We added no new storage engine, save migration, multiplayer, or deployment work.
 
-## Driving branch: partial acceptance
+## Driving integration: partial acceptance
 
-The separate `codex/correct-driving-physics` branch implements source pedal ramps, manual gears, clutch, and two saved driving assists.
-The final fix follows review base `6f8118162ece6d9ee24c811719c0935af433487a`. Master does not contain this branch.
-It clears seat-transition input, validates suspension bounds, and gates automatic rules on mounted-engine presence.
-The controller owns the scoped re-review. Earlier full-suite results describe `05bbf7b`.
-Tasks 1-3 passed code review. Their normal driving acceptance remains open.
-The native suite retains 108 known failures. The aggregate check stops at the existing global format failure.
-The exporter gate also fails. Three installed-source physical checks remain unresolved outside the native baseline comparison.
+We merged the driving work into local master with the source-world implementation.
+The integration includes source pedal ramps, manual gears, clutch, and two saved driving assists.
+Controls show the source keyboard bindings. Feedback shows the selected gear.
+Seat changes clear transient driving input. Automatic rules require a mounted engine.
+Suspension validation accepts source endpoints and rejects invalid values.
+We retain both cars, source-world placement, generated identities, and renderer ownership.
+Save schema 3 combines world records with selected gears and driving assists.
+We reject schema 1 and both earlier schema 2 contracts before reading their vehicle fields.
 
-The controller verified assist choices, dependency, paused save, full reload, restore, and visible New game assist defaults.
+Tasks 1-3 passed the earlier code review. Normal driving acceptance remains open.
+The merge check report records current compiler failures, test results, and package identities.
+Earlier counts, including 108 native failures, describe older commits.
+
+The controller previously verified assist choices, dependency, paused save, reload, restore, and New game defaults.
 IAB refused pointer capture. Normal launch, both-car driving, and 30/60/120 FPS routes remain unverified.
-At exact zero wheel RPM, the port can retain neutral. Source curve extrapolation remains unverified.
-Normal launch needs accepted input evidence. The failing Skoda Rust route passes its movement assertions.
+At zero wheel RPM, the port can retain neutral. Source curve extrapolation remains unverified.
 
 Task 4 cannot pass. The repository audit found no qualifying source measurements. The user confirmed none are available.
-Task 5 remains unscheduled. Keep tire/rim grip, empty hubs, suspension, wheel spin, and combined-brake response incomplete.
-The adapter supplies summed brake inputs. The stock solver still excludes simultaneous motor force and brake impulse per wheel.
+Task 5 remains unscheduled. Tire/rim grip, empty hubs, suspension, wheel spin, and combined-brake response remain incomplete.
+The adapter supplies summed brake inputs. The stock solver excludes simultaneous motor force and brake impulse per wheel.
 
-Read the [driving verification](verification.md#driving-branch-verification-2026-10-14) and
-[source gate audit](../.superpowers/sdd/2026-10-14-correct-driving-physics/source-measurement-audit.md).
-Merging and pushing require a separate request.
+Read the [driving verification](verification.md#driving-branch-verification-2026-10-14),
+[source gate audit](../.superpowers/sdd/2026-10-14-correct-driving-physics/source-measurement-audit.md), and
+[merge check report](../.superpowers/sdd/2026-10-14-correct-driving-physics/task-7-report.md).
+No push was requested.
 
 ## Full-game feature gaps
 
 Reference: installed Steam build `11140890`. This backlog records gaps beyond the implemented layers above.
-We keep source-world integration separate. Its roads, terrain, biomes, and placement need acceptance before a later merge.
+The source-world integration is in master. Its runtime acceptance remains open.
 Missing means no gameplay implementation. Partial means the current implementation covers selected behavior or content.
 The backlog does not expand approved implementation scope. Each new feature needs a source-based specification.
 
 | Feature | Status | Remaining work |
 | --- | --- | --- |
-| Source world generation | Deferred branch | Resolve integration findings; verify source samples and runtime behavior before merging. |
-| Buildings and exploration | Deferred branch | Check source buildings, interiors, landmarks, placement, content coverage, and collision before merging. |
+| Source world generation | Implemented; runtime unverified | Verify source samples and runtime behavior when authorized. |
+| Buildings and exploration | Implemented; runtime unverified | Check source buildings, interiors, landmarks, placement, content coverage, and collision when authorized. |
 | World population | Partial | Integrate source loot placement; add excluded abandoned vehicles, items, and encounters. |
 | Full vehicle range | Partial | Add vehicles beyond the Lada and Skoda, including diesel, two-stroke, automatic, bus, and bike mechanics. |
-| Driving physics | Partial branch | Verify launch and both-car driving; collect native source measurements before wheel, rim, hub, suspension, and combined-brake work. |
+| Driving physics | Partial | Verify launch and both-car driving; collect native source measurements before wheel, rim, hub, suspension, and combined-brake work. |
 | Inventory and clothing | Missing | Add inventory slots, equipped items, wearables, and player customization. |
 | Cleaning and painting | Missing | Add brushes, sponges, spray paint, and source condition changes. |
 | Cargo and towing | Partial | Add general cargo locking, attachment objects, towing hooks, and trailers. Current storage locking covers flashlights. |

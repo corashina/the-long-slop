@@ -73,14 +73,14 @@ def provenance(library):
             'catalog_sha256':library.catalog_sha256, 'source_manifest_sha256':library.source_manifest_sha256}
 
 
-def lighting_resources(manifest):
+def runtime_resources(manifest):
     resources = {}
     def collect(value):
         if isinstance(value, dict):
             if 'path' in value and 'sha256' in value:
                 path = value['path']
                 if path in resources and resources[path]['sha256'] != value['sha256']:
-                    raise ValueError('Conflicting lighting resource hashes')
+                    raise ValueError('Conflicting source resource hashes')
                 resources[path] = value
             for child in value.values(): collect(child)
         elif isinstance(value, list):
@@ -89,6 +89,10 @@ def lighting_resources(manifest):
     collect(manifest.get('weather', {}))
     for item in manifest.get('render_lighting', {}).get('dependencies', []):
         collect({'path':item['file'],'sha256':item['sha256']})
+    world=manifest.get('world', {})
+    collect(world.get('terrain', {}))
+    collect(world.get('material_textures', []))
+    for prototype in world.get('prototypes', []):collect(prototype.get('deferred_materials', []))
     return list(resources.values())
 
 
@@ -125,11 +129,17 @@ def relocate(source, transform, position, yaw_degrees):
 
 def validate_runtime_paths(manifest):
     assets = manifest.get('assets', [])
-    from .stations import STATIONS
-    if {a['path'] for a in assets} != {f'reference/{name}.gltf' for name in ('home',*CARS,'items','road_lamp','sky','food',*STATIONS)} or len(assets) != 5+len(CARS)+len(STATIONS):
-        raise ValueError('Runtime must contain only the selected scenes')
-    from .plates import plate_resources
-    resources = {item['path']:item['sha256'] for item in [*lighting_resources(manifest), *plate_resources(manifest['plates'])]}
+    world = manifest.get('world')
+    if not world or not world.get('prototypes'):
+        raise ValueError('Missing required source world dependency')
+    expected = {f'reference/{name}.gltf' for name in ('home',*CARS,'items','road_lamp','sky','food')}
+    prototype_ids={p['asset'] for p in world['prototypes']}
+    material_ids={p['asset'] for p in world['painting_materials']}
+    expected.update(a['path'] for a in manifest['assets'] if a['id'] in material_ids and a['usage']=='world_material')
+    expected.update(a['path'] for a in manifest['assets'] if a['id'] in prototype_ids and a['usage']=='world_prototype')
+    if {a['path'] for a in assets} != expected or len(assets) != len(expected):
+        raise ValueError('Runtime must contain only selected scenes and world prototypes')
+    resources = {item['path']:item['sha256'] for item in runtime_resources(manifest)}
     for asset in assets:
         for item in [asset, *asset['dependencies']]:
             name = item.get('file', item.get('path'))
@@ -139,7 +149,7 @@ def validate_runtime_paths(manifest):
                 continue
             if not name.startswith('reference/') or len(Path(name).parts) != 2 or Path(name).suffix not in ('.gltf','.bin','.png'):
                 raise ValueError('Invalid selected runtime dependency')
-    for item in lighting_resources(manifest):
+    for item in runtime_resources(manifest):
         name = item['path']
         valid_prefix=name.startswith(('reference/lighting-','reference/texture-','reference/source-cloud.','reference/source-caster-dither-','reference/weather-' ))
         if not valid_prefix or len(Path(name).parts) != 2 or Path(name).suffix not in ('.gltf','.bin','.png','.smip','.txt','.json'):
@@ -200,8 +210,7 @@ def verify_reference(output: Path, library) -> None:
         scene = output / asset['path'].removeprefix('reference/')
         document = json.loads(scene.read_bytes())
         uris = {entry['uri'] for entry in [*document.get('buffers', []), *document.get('images', [])]}
-        from .plates import plate_resources
-        resources = {item['path'] for item in [*lighting_resources(manifest), *plate_resources(manifest['plates'])]}
+        resources = {item['path'] for item in runtime_resources(manifest)}
         declared = {entry['file'].removeprefix('reference/') for entry in asset['dependencies'] if entry['file'] not in resources}
         material_mips = {Path(mip['file']).name for material in manifest['rendering']['materials']
             if material['asset'] == asset['id'] for texture in material['properties']['textures'] for mip in texture['mips']}
@@ -218,7 +227,7 @@ def verify_reference(output: Path, library) -> None:
     names.update(c['path'].removeprefix('reference/') for c in manifest['audio']['clips'])
     from .lighting import validate_lighting_export
     validate_lighting_export(manifest, output)
-    names.update(Path(item['path']).name for item in lighting_resources(manifest))
+    names.update(Path(item['path']).name for item in runtime_resources(manifest))
     if {p.relative_to(output).as_posix() for p in output.rglob('*') if p.is_file()} != names:
         raise ValueError('Unselected files in runtime')
 
@@ -288,10 +297,6 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     roots['sky']=[clouds]
     roots['food']=food_roots
     source.lighting_prototype_roots.update(key(root) for root in food_roots)
-    from .stations import STATIONS, station_roots, recover_stations
-    stations=station_roots(source)
-    roots.update(stations)
-    source.lighting_prototype_roots.update(key(readers[0]) for readers in stations.values())
     recover_survival(source,roots,output)
     recover_weather(source,output)
     report = {}
@@ -317,16 +322,21 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     (output/'plate-evidence.json').write_text(json.dumps(plate_source_evidence(source,manifest['plates']),indent=2,allow_nan=False),encoding='utf-8')
     from .mirrors import mirror_source_evidence
     (output/'mirror-evidence.json').write_text(json.dumps(mirror_source_evidence(source,manifest['mirrors']),indent=2,allow_nan=False),encoding='utf-8')
+    from .world import recover_world
+    from .manifest import attach_world
+    attach_world(manifest,recover_world(source,library,output))
+    report['world']=[{'source':p['source'],'asset':p['asset'],'node_count':len(p['nodes']),'body_count':len(p['bodies']),'collider_count':len(p['colliders']),'control_count':len(p['controls']),'skin_bone_counts':[len(s['bones']) for s in p['skins']]} for p in manifest['world']['prototypes']]
+    (output/'geometry-evidence.json').write_text(json.dumps(report,indent=2,allow_nan=False),encoding='utf-8')
+    (output/'material-evidence.json').write_text(json.dumps(list(source.material_evidence.values()),indent=2,allow_nan=False),encoding='utf-8')
     manifest['library']=provenance(library.receipt)
     bind_survival(source,manifest)
     bind_weather(source,manifest)
-    recover_stations(source,roots,manifest)
     resources={entry['file'] for entry in manifest['assets'][0]['dependencies']}
     manifest['assets'][0]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in lighting_resources(manifest) if r['path'] not in resources)
     manifest['ui']=export_ui(source,output,library)
     for index,name in enumerate(CARS):
         manifest['vehicles'][index]['instruments']=recover_instruments(source,manifest,report,name,roots[name][0])
-    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if (name not in CARS or name == 'lada') and name not in STATIONS},manifest,library,output)
+    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if name not in CARS or name == 'lada'},manifest,library,output)
     validate_lighting_export(manifest,output)
     (output/'lighting-evidence.json').write_text(json.dumps({'lighting':manifest['lighting'],'render_lighting':manifest['render_lighting'],'byte_checks':source.evidence,'native_engine':native_engine,'fog_setting':source.lighting_fog_evidence,'library':manifest['library']},indent=2,allow_nan=False),encoding='utf-8')
     parameters['controls']={
@@ -340,7 +350,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     }
     parameters['player_markers']=[{'source':{'file':'level1','path_id':pid},'fields':source.read(source.get('level1',pid))} for pid in (39823,23339)]
     (output/'parameter-evidence.json').write_text(json.dumps(parameters,indent=2,allow_nan=False),encoding='utf-8')
-    (output/'manifest.json').write_text(json.dumps(manifest,indent=2,allow_nan=False),encoding='utf-8')
+    (output/'manifest.json').write_text(json.dumps(manifest,separators=(',',':'),allow_nan=False),encoding='utf-8')
     from dataclasses import asdict
     selection = {name:[asdict(v) for v in sorted(values)] for name,values in (
         ('records',library.selected_records),('meshes',library.selected_meshes),
@@ -546,6 +556,7 @@ def stage_library(steam_root: Path | None, output: Path, verify: bool = False):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--steam-root', type=Path)
+    parser.add_argument('--library-root', type=Path)
     parser.add_argument('--output', type=Path, default=Path('web/assets/reference'))
     parser.add_argument('--stage', choices=('runtime', 'source', 'catalog', 'library'), default='runtime')
     parser.add_argument('--verify', action='store_true')
@@ -555,6 +566,8 @@ def main(argv=None):
         destinations = (arguments.output.resolve(), (arguments.output.parent / 'library').resolve())
         if any(path.is_relative_to(steam) or steam.is_relative_to(path) for path in destinations):
             parser.error('Keep runtime and library output separate from the Steam installation')
+    if arguments.library_root and arguments.stage != 'runtime':
+        parser.error('--library-root requires --stage runtime')
     if arguments.stage == 'source':
         stage_source(arguments.steam_root, verify=arguments.verify)
     elif arguments.stage == 'catalog':
@@ -562,14 +575,23 @@ def main(argv=None):
     elif arguments.stage == 'library':
         stage_library(arguments.steam_root, arguments.output, verify=arguments.verify)
     else:
-        library_path = arguments.output.parent / 'library/manifest.json'
-        receipt = stage_library(arguments.steam_root, arguments.output,
-                                verify=arguments.verify or library_path.is_file())
+        if arguments.library_root:
+            from .library.validation import verify_library
+            root=arguments.library_root.resolve()
+            header=json.loads((root/'manifest.json').read_bytes())
+            records=(root/header['records_root']).resolve()
+            receipt=verify_library(root,records.parent/'source')
+            source_work=records.parent
+        else:
+            library_path = arguments.output.parent / 'library/manifest.json'
+            receipt = stage_library(arguments.steam_root, arguments.output,
+                                    verify=arguments.verify or library_path.is_file())
+            source_work=SOURCE_WORK_ROOT
         if arguments.verify:
             verify_reference(arguments.output, receipt)
         else:
             from .library.archive import load_snapshot
-            derive_reference(load_snapshot(SOURCE_WORK_ROOT), receipt, arguments.output)
+            derive_reference(load_snapshot(source_work), receipt, arguments.output)
 
 
 if __name__ == '__main__':

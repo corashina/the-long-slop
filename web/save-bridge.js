@@ -1,9 +1,22 @@
 export function createSaveBridge(host=window){
  let sequence=0;
  const queue=[],pending=new Map(),committing=new Set();
- function request(kind,payload,onDispatch){
+ function request(kind,payload,onDispatch,signal){
   const id=++sequence;
-  return new Promise((resolve,reject)=>{pending.set(id,{kind,resolve,reject,onDispatch});queue.push({id,kind,payload});});
+  return new Promise((resolve,reject)=>{
+   const cancel=()=>{
+    if(!pending.has(id))return;
+    pending.delete(id);
+    const index=queue.findIndex(item=>item.id===id);
+    if(index!==-1)queue.splice(index,1);
+    else if(kind==='Prepare'||kind==='PrepareNewGame'){
+     request('Discard',id).catch(()=>{});queue.unshift(queue.pop());
+    }
+    reject(new DOMException('Save operation canceled.','AbortError'));
+   };
+   if(signal?.aborted){reject(new DOMException('Save operation canceled.','AbortError'));return;}
+   pending.set(id,{kind,resolve,reject,onDispatch,signal,cancel});queue.push({id,kind,payload});signal?.addEventListener('abort',cancel,{once:true});
+  });
  }
  host.gameHasSaveRequest=()=>queue.length!==0;
  host.gameSaveRequest=()=>{
@@ -17,13 +30,14 @@ export function createSaveBridge(host=window){
   const operation=pending.get(id);
   if(!operation||operation.kind!==kind)return;
   pending.delete(id);
+  operation.signal?.removeEventListener('abort',operation.cancel);
   if(error){operation.reject(new Error(error));return;}
   try{operation.resolve(payload?JSON.parse(payload):undefined);}catch(error){operation.reject(error);}
  };
  return {
   capture:()=>request('Capture',new Date().toISOString()),
-  prepare:save=>request('Prepare',save),
-  prepareNewGame:()=>request('PrepareNewGame'),
+  prepare:(save,signal)=>request('Prepare',save,undefined,signal),
+  prepareNewGame:signal=>request('PrepareNewGame',undefined,undefined,signal),
   commit(token,onDispatch){return request('Commit',token,onDispatch).finally(()=>committing.delete(token));},
   discard(token){
    if(committing.has(token))return;

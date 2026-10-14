@@ -18,21 +18,7 @@ impl SaveSnapshot {
         validate_source(&self.source, expected, reference)?;
         data(timestamp(&self.saved_at), "Save timestamp")?;
         let ids = IdentityMap::new(reference)?;
-        let seed = identity::unsigned(&self.world.seed)?;
-        let mut stations = HashSet::new();
-        for WorldRecord::Pump { instance, valve } in &self.world.records {
-            let (record_seed, index) = instance.station()?;
-            data(
-                (index as f64 * crate::world::STATION_SPACING).abs()
-                    <= crate::world::MAX_ABSOLUTE_COORDINATE,
-                "Station position",
-            )?;
-            links(
-                record_seed == seed && stations.insert(instance),
-                "Duplicate or mismatched station",
-            )?;
-            data(unit(*valve), "Pump valve")?;
-        }
+        self.validate_world(reference)?;
         identity::unsigned(&self.progress.start_attempts)?;
         self.validate_vehicle(reference, &ids)?;
         let mut items = HashMap::new();
@@ -387,7 +373,9 @@ impl SaveSnapshot {
                     }
                     parents.insert(id, owner);
                 }
-                ItemLocationSave::World | ItemLocationSave::Held => (),
+                ItemLocationSave::GeneratedAttachment { .. }
+                | ItemLocationSave::World
+                | ItemLocationSave::Held => (),
             }
         }
         for &start in items.keys() {
@@ -463,6 +451,32 @@ impl SaveSnapshot {
             .collect();
         match &p.carry {
             Some(carry) => {
+                if let InstanceId::Generated { id } = &carry.item {
+                    links(held.is_empty(), "Multiple held owners")?;
+                    let state = self
+                        .world
+                        .changes
+                        .get(crate::world::ObjectKey::Generated(id.clone()))
+                        .and_then(|c| c.snapshot.as_ref())
+                        .ok_or_else(|| invalid("Missing generated carry state"))?;
+                    links(
+                        state.held && state.attachment.is_none(),
+                        "Generated carry ownership",
+                    )?;
+                    data(
+                        state
+                            .pose
+                            .position
+                            .iter()
+                            .zip(p.pose.position)
+                            .all(|(a, b)| (*a - b).abs() <= f64::from(crate::world::REBASE_LIMIT)),
+                        "Held relative position",
+                    )?;
+                    data(bounded_local(&carry.offset), "Carry offset")?;
+                    quaternion(&carry.rotation)?;
+                    local(&carry.local_grip)?;
+                    return Ok(());
+                }
                 let id = ids.item(&carry.item)?;
                 links(
                     held.len() == 1 && held[0].instance == carry.item,
@@ -904,3 +918,6 @@ fn timestamp(value: &str) -> bool {
                 && bytes[19] == b'.'
                 && bytes[20..bytes.len() - 1].iter().all(u8::is_ascii_digit)))
 }
+
+#[path = "validate_world.rs"]
+mod world;

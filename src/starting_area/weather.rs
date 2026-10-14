@@ -151,7 +151,7 @@ impl GarageRuntime {
             self.simulation_seconds,
             dt,
             player,
-            self.stream.seed,
+            |point| self.stream.terrain_sample(point),
         );
         // WaitForSeconds resumes after Update: apply cached targets before later rescans.
         self.weather

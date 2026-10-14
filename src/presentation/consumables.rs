@@ -88,13 +88,9 @@ pub(crate) fn sync(
             }
         }
     }
-    for item in drive
-        .runtime
-        .area
-        .items
-        .iter()
-        .filter(|item| item.food.is_some() && item.id != starter)
-    {
+    for item in drive.runtime.area.items.iter().filter(|item| {
+        item.food.is_some() && item.id != starter && !drive.runtime.area.items.is_generated(item.id)
+    }) {
         if item.removed {
             if let Some(instance) = food.instances.remove(&item.id) {
                 commands.entity(instance.root).despawn();

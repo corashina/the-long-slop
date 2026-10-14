@@ -70,13 +70,15 @@ pub struct CycleState {
     reference: CycleReference,
     sky_sample_time: f64,
     sampled_sky: [f32; 4],
+    terrain_color: [f32; 4],
+    next_biome_refresh: f64,
 }
 
 impl CycleState {
     /// Initialize from a validated cycle reference.
     pub fn new(reference: &CycleReference) -> Self {
         let cycle_seconds = f64::from(reference.startup_offset_seconds);
-        let output = evaluate(reference, cycle_seconds, 0., 0., 0.);
+        let output = evaluate(reference, cycle_seconds, 0., 0., 0., [0.; 4]);
         Self {
             elapsed_seconds: 0.,
             cycle_seconds,
@@ -88,6 +90,8 @@ impl CycleState {
             output,
             reference: reference.clone(),
             sky_sample_time: 0.,
+            terrain_color: [0.; 4],
+            next_biome_refresh: reference.biome_refresh_seconds as f64,
         }
     }
 
@@ -126,6 +130,7 @@ impl CycleState {
             active,
             self.cloud_coordinate,
             self.star_rotation,
+            self.terrain_color,
         );
         self.set_sleep_progress(reference, advance.sleep_progress);
         self.clear_output = self.output.clone();
@@ -157,6 +162,7 @@ impl CycleState {
             saved.elapsed_seconds,
             saved.cloud_coordinate,
             saved.star_rotation,
+            self.terrain_color,
         );
         self.clear_output = self.output.clone();
         self.sampled_sky = self.output.sky_tint;
@@ -278,6 +284,16 @@ impl CycleState {
         };
     }
 
+    pub fn needs_terrain_color(&self, dt: f64) -> bool {
+        self.elapsed_seconds + dt >= self.next_biome_refresh
+    }
+    pub fn set_terrain_color(&mut self, reference: &CycleReference, color: &[f32; 4], dt: f64) {
+        if self.needs_terrain_color(dt) {
+            self.terrain_color = *color;
+            self.next_biome_refresh =
+                self.elapsed_seconds + dt + reference.biome_refresh_seconds as f64;
+        }
+    }
     pub fn reset(&mut self, reference: &CycleReference) {
         *self = Self::new(reference);
     }
@@ -298,6 +314,7 @@ fn evaluate(
     active: f64,
     cloud_x: f32,
     star_rotation: f32,
+    biome: [f32; 4],
 ) -> CycleOutput {
     let t = seconds as f32;
     let (phase, p) = if t > r.day_seconds {
@@ -355,12 +372,6 @@ fn evaluate(
             r.max_exposure,
             1.,
         ),
-    };
-    // SetBiome waits one second before its first desert-color assignment.
-    let biome = if active >= f64::from(r.biome_refresh_seconds) {
-        r.desert_color
-    } else {
-        [0.; 4]
     };
     let day_temp = biome_float(&r.temp_days, biome);
     let night_temp = biome_float(&r.temp_nights, biome);

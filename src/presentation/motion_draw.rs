@@ -1,7 +1,7 @@
 //! Rigid motion reuses each prepared opaque instance and its original draw ID.
 use super::{
     lighting_scene::SourceWorldOrigin,
-    materials::{GeneratedWorldMaterial, MaterialLoading, RenderingState, SourceMaterial},
+    materials::{MaterialLoading, RenderingState},
     motion_vectors::{MotionMode, MotionModelHistory, MotionObjectParams, SourceMotionPass},
     renderers::SourceRenderer,
     source_lighting::{SetSourceViewCamera, SourceLightingStatus},
@@ -13,8 +13,17 @@ use bevy::ecs::{
     query::ROQueryItem,
     system::{SystemParamItem, lifetimeless::SRes},
 };
-use bevy::pbr::{DrawMesh, RenderMeshInstances, SetMeshBindGroup};
+use bevy::pbr::{RenderMeshInstances, SetMeshBindGroup};
 use bevy::prelude::*;
+use bevy::{
+    asset::AssetId,
+    render::{
+        mesh::{RenderMesh, RenderMeshBufferInfo, allocator::MeshAllocator},
+        render_asset::RenderAssets,
+    },
+};
+#[derive(Component, Clone)]
+pub struct AuthoredMotionMesh(pub Handle<Mesh>);
 use bevy::render::{
     Extract, ExtractSchedule, Render, RenderApp, RenderSystems,
     render_phase::*,
@@ -35,7 +44,9 @@ use std::{
 struct ModelSnapshot {
     entity: Entity,
     model: Mat4,
+    mesh: AssetId<Mesh>,
     mode: MotionMode,
+    camera_visible: bool,
 }
 #[derive(Resource, Default)]
 pub struct MotionScene {
@@ -55,10 +66,15 @@ fn snapshot_models(
         (
             Entity,
             &GlobalTransform,
-            Option<&SourceRenderer>,
-            Option<&GeneratedWorldMaterial>,
+            &SourceRenderer,
+            &Mesh3d,
+            Option<&AuthoredMotionMesh>,
         ),
-        With<MeshMaterial3d<SourceMaterial>>,
+        (
+            With<SourceRenderer>,
+            Without<super::materials::SourceMaterialWarmup>,
+            Without<super::save::HiddenWorld>,
+        ),
     >,
 ) {
     output.frame = 0;
@@ -70,16 +86,15 @@ fn snapshot_models(
     {
         return;
     }
-    if output.rows.capacity() == 0 {
-        let warmups = master.warmups.iter().filter(|(_, caster)| !caster).count();
-        output.rows.reserve_exact(shadow.capacity() + warmups);
+    if output.rows.capacity() < shadow.capacity() {
+        let count = shadow.capacity().saturating_sub(output.rows.len());
+        output.rows.reserve_exact(count);
     }
-    for (entity, model, source, generated) in &models {
-        let mode = match source.map(|source| source.0.motion_vectors) {
-            Some(0) => MotionMode::Camera,
-            Some(1) => MotionMode::Object,
-            Some(2) => MotionMode::ForceNoMotion,
-            None if generated.is_some() => MotionMode::Object,
+    for (entity, model, source, mesh, authored) in &models {
+        let mode = match source.0.motion_vectors {
+            0 => MotionMode::Camera,
+            1 => MotionMode::Object,
+            2 => MotionMode::ForceNoMotion,
             _ => {
                 *status.0.lock().unwrap() =
                     RenderingState::Failed("Source motion renderer metadata is missing".into());
@@ -94,7 +109,9 @@ fn snapshot_models(
         output.rows.push(ModelSnapshot {
             entity,
             model: model.to_matrix(),
+            mesh: authored.map_or(mesh.0.id(), |m| m.0.id()),
             mode,
+            camera_visible: source.0.cast_shadows != 3,
         });
     }
     output.frame = frame.frame;
@@ -102,8 +119,9 @@ fn snapshot_models(
     output.origin = origin.0;
 }
 fn extract_models(input: Extract<Res<MotionScene>>, mut output: ResMut<MotionScene>) {
-    if output.rows.capacity() == 0 {
-        output.rows.reserve_exact(input.rows.capacity());
+    if output.rows.capacity() < input.rows.capacity() {
+        let count = input.rows.capacity().saturating_sub(output.rows.len());
+        output.rows.reserve_exact(count);
     }
     assert!(
         input.rows.len() <= output.rows.capacity(),
@@ -117,6 +135,7 @@ fn extract_models(input: Extract<Res<MotionScene>>, mut output: ResMut<MotionSce
 }
 struct MotionObject {
     entity: Option<Entity>,
+    mesh: AssetId<Mesh>,
     history: Mutex<MotionModelHistory>,
     uniform: UniformBuffer<MotionObjectParams>,
     binding: BindGroup,
@@ -246,8 +265,8 @@ fn prepare_models(
     if scene.frame == 0 {
         return;
     }
-    if objects.slots.is_empty() {
-        let capacity = scene.rows.capacity();
+    if objects.slots.len() < scene.rows.capacity() {
+        let capacity = scene.rows.capacity() - objects.slots.len();
         objects.slots.reserve_exact(capacity);
         objects.lookup.reserve(capacity);
         let layout = cache.get_bind_group_layout(&SourceMotionPass::object_layout());
@@ -262,6 +281,7 @@ fn prepare_models(
             );
             objects.slots.push(MotionObject {
                 entity: None,
+                mesh: AssetId::default(),
                 history: Mutex::new(history),
                 uniform,
                 binding,
@@ -301,8 +321,9 @@ fn prepare_models(
         if recreate {
             *history = MotionModelHistory::new(row.model, scene.token);
         }
+        object.mesh = row.mesh;
         history.update(scene.token, row.model);
-        object.eligible = history.eligible(scene.token, row.mode);
+        object.eligible = row.camera_visible && history.eligible(scene.token, row.mode);
         if object.eligible {
             object.uniform.set(history.params(scene.token, row.mode));
             object.uniform.write_buffer(&device, &queue);
@@ -317,22 +338,166 @@ struct MotionShader(Handle<Shader>);
 #[derive(Resource, Default)]
 pub struct MotionPipelines {
     inspected: usize,
+    isolated: std::collections::HashSet<CachedRenderPipelineId>,
+    world_variants: HashMap<
+        (
+            CachedRenderPipelineId,
+            bevy::mesh::MeshVertexBufferLayoutRef,
+        ),
+        CachedRenderPipelineId,
+    >,
     variants: HashMap<CachedRenderPipelineId, CachedRenderPipelineId>,
 }
 impl MotionPipelines {
+    pub fn revisit(&mut self, id: CachedRenderPipelineId) {
+        self.inspected = self.inspected.min(id.id());
+    }
     pub fn ready(&self, cache: &PipelineCache) -> bool {
         !self.variants.is_empty()
             && self
                 .variants
-                .values()
+                .iter()
+                .filter(|(base, _)| !self.isolated.contains(base))
+                .map(|(_, id)| id)
+                .chain(
+                    self.world_variants
+                        .iter()
+                        .filter(|((base, _), _)| !self.isolated.contains(base))
+                        .map(|(_, id)| id),
+                )
+                .filter(|id| !cache.render_pipeline_is_held(**id))
                 .all(|id| cache.get_render_pipeline(*id).is_some())
     }
     pub fn failure(&self, cache: &PipelineCache) -> Option<String> {
         self.variants
-            .values()
+            .iter()
+            .filter(|(base, _)| !self.isolated.contains(base))
+            .map(|(_, id)| id)
+            .chain(
+                self.world_variants
+                    .iter()
+                    .filter(|((base, _), _)| !self.isolated.contains(base))
+                    .map(|(_, id)| id),
+            )
+            .filter(|id| !cache.render_pipeline_is_held(**id))
             .find_map(|id| super::postprocessing::pipeline_failure(cache, &[*id]))
     }
 }
+/// Compile the source replacement motion pass against the retained authored stream.
+pub fn prepare_world_motion(
+    world: &mut World,
+    base: CachedRenderPipelineId,
+    mesh: AssetId<Mesh>,
+    owner: Option<super::gpu_prepare::GpuPreparation>,
+) -> Result<bool, String> {
+    if owner.as_ref().is_some_and(|o| o.cancelled()) {
+        return Ok(false);
+    }
+    let cache = world.resource::<PipelineCache>();
+    let original = cache.get_render_pipeline_descriptor(base);
+    let Some(fragment) = &original.fragment else {
+        return Ok(true);
+    };
+    if !source_flag(&fragment.shader_defs, "SOURCE_WORLD") {
+        if !source_flag(&fragment.shader_defs, "SOURCE_SURFACE") {
+            return Ok(true);
+        }
+        let pipelines = world.resource::<MotionPipelines>();
+        if pipelines.inspected <= base.id() {
+            return Ok(false);
+        }
+        return match pipelines.variants.get(&base) {
+            None => Ok(true),
+            Some(id) => match super::postprocessing::pipeline_failure(cache, &[*id]) {
+                Some(error) => Err(error),
+                None => Ok(cache.get_render_pipeline(*id).is_some()),
+            },
+        };
+    }
+    let Some(mesh) = world.resource::<RenderAssets<RenderMesh>>().get(mesh) else {
+        return Ok(false);
+    };
+    let key = (base, mesh.layout.clone());
+    if !world
+        .resource::<MotionPipelines>()
+        .world_variants
+        .contains_key(&key)
+    {
+        let owners = world.resource::<super::pipeline_ownership::PipelineOwners>();
+        let _queue = if owner.is_some() {
+            Some(super::pipeline_ownership::queue_scope(cache).map_err(str::to_owned)?)
+        } else {
+            None
+        };
+        let mut descriptor = original.clone();
+        descriptor.label = Some("source_world_authored_motion".into());
+        descriptor.layout[1] = SourceMotionPass::object_camera_layout();
+        descriptor.layout[3] = SourceMotionPass::object_layout();
+        descriptor.multisample = MultisampleState::default();
+        descriptor.vertex.buffers = vec![
+            mesh.layout
+                .0
+                .get_layout(&[Mesh::ATTRIBUTE_POSITION.at_shader_location(0)])
+                .map_err(|e| e.to_string())?,
+        ];
+        let shader = world.resource::<MotionShader>().0.clone();
+        descriptor.vertex.shader = shader.clone();
+        descriptor.vertex.entry_point = Some("object_vertex".into());
+        let fragment = descriptor.fragment.as_mut().unwrap();
+        fragment.shader = shader;
+        fragment.entry_point = Some("object_fragment".into());
+        fragment.targets = vec![Some(ColorTargetState {
+            format: TextureFormat::Rg16Float,
+            blend: None,
+            write_mask: ColorWrites::ALL,
+        })];
+        for defs in [
+            &mut descriptor.vertex.shader_defs,
+            &mut fragment.shader_defs,
+        ] {
+            defs.retain(|d| !matches!(d,ShaderDefVal::Bool(name,_) if name=="SOURCE_WORLD"));
+        }
+        descriptor.primitive.cull_mode = Some(Face::Back);
+        descriptor.depth_stencil = Some(DepthStencilState {
+            format: TextureFormat::Depth24PlusStencil8,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(CompareFunction::GreaterEqual),
+            stencil: default(),
+            bias: default(),
+        });
+        let id = cache.queue_render_pipeline(descriptor);
+        if let Some(owner) = &owner {
+            owners.claim(cache, id, owner);
+        }
+        world
+            .resource_mut::<MotionPipelines>()
+            .world_variants
+            .insert(key.clone(), id);
+    }
+    let pipelines = world.resource::<MotionPipelines>();
+    let Some(id) = pipelines.world_variants.get(&key) else {
+        return Ok(true);
+    };
+    let id = *id;
+    if let Some(owner) = &owner {
+        world
+            .resource::<super::pipeline_ownership::PipelineOwners>()
+            .claim(world.resource::<PipelineCache>(), id, owner);
+    } else {
+        world.resource_scope(
+            |world, owners: Mut<super::pipeline_ownership::PipelineOwners>| {
+                owners.reclaim_active(&mut world.resource_mut::<PipelineCache>(), id)
+            },
+        );
+    }
+    let cache = world.resource::<PipelineCache>();
+    if let Some(error) = super::postprocessing::pipeline_failure(cache, &[id]) {
+        Err(error)
+    } else {
+        Ok(cache.get_render_pipeline(id).is_some())
+    }
+}
+
 fn source_flag(defs: &[ShaderDefVal], name: &str) -> bool {
     defs.iter()
         .any(|d| matches!(d,ShaderDefVal::Bool(key,true) if key==name))
@@ -343,7 +508,10 @@ fn prepare_pipelines(
     cache: Res<PipelineCache>,
     loading: Res<MaterialLoading>,
     status: Res<SourceLightingStatus>,
+    isolation: Res<super::world::pipelines::PipelineIsolation>,
+    owners: Res<super::pipeline_ownership::PipelineOwners>,
 ) {
+    pipelines.isolated.clone_from(&isolation.0);
     if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
         return;
     }
@@ -358,6 +526,12 @@ fn prepare_pipelines(
     let first = pipelines.inspected;
     for (index, pipeline) in cache.pipelines().enumerate().skip(first) {
         pipelines.inspected = index + 1;
+        let base_id = CachedRenderPipelineId::new(index);
+        if pipelines.variants.contains_key(&base_id)
+            || owners.owner(base_id).is_some_and(|o| o.cancelled())
+        {
+            continue;
+        }
         let PipelineDescriptor::RenderPipelineDescriptor(base) = &pipeline.descriptor else {
             continue;
         };
@@ -371,10 +545,20 @@ fn prepare_pipelines(
             continue;
         }
         if pipelines.variants.len() == pipelines.variants.capacity() {
-            *status.0.lock().unwrap() =
-                RenderingState::Failed("Source motion pipeline capacity was exceeded".into());
-            return;
+            pipelines.variants.reserve(1);
         }
+        let base_id = CachedRenderPipelineId::new(index);
+        let _queue = if let Some(owner) = owners.owner(base_id) {
+            match super::pipeline_ownership::queue_scope(&cache) {
+                Ok(scope) => Some(scope),
+                Err(error) => {
+                    owner.fail(error.into());
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
         let mut descriptor = base.clone();
         descriptor.label = Some("source_motion_object".into());
         descriptor.layout[0] = super::source_lighting::source_camera_layout();
@@ -406,6 +590,7 @@ fn prepare_pipelines(
             bias: default(),
         });
         let id = cache.queue_render_pipeline(*descriptor);
+        owners.companion(&cache, base_id, id);
         pipelines
             .variants
             .insert(CachedRenderPipelineId::new(index), id);
@@ -471,6 +656,7 @@ impl<P: CachedRenderPipelinePhaseItem> RenderCommand<P> for SelectMotion {
         SRes<MotionPipelines>,
         SRes<PipelineCache>,
         SRes<MotionObjects>,
+        SRes<RenderAssets<RenderMesh>>,
     );
     type ViewQuery = &'static MotionDrawView;
     type ItemQuery = ();
@@ -478,7 +664,7 @@ impl<P: CachedRenderPipelinePhaseItem> RenderCommand<P> for SelectMotion {
         item: &P,
         view: ROQueryItem<'w, '_, Self::ViewQuery>,
         _: Option<()>,
-        (pipelines, cache, objects): SystemParamItem<'w, '_, Self::Param>,
+        (pipelines, cache, objects, meshes): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let objects = objects.into_inner();
@@ -488,7 +674,14 @@ impl<P: CachedRenderPipelinePhaseItem> RenderCommand<P> for SelectMotion {
         if !object.eligible || object.frame != objects.frame {
             return RenderCommandResult::Skip;
         }
-        let Some(id) = pipelines.variants.get(&item.cached_pipeline()) else {
+        let Some(mesh) = meshes.get(object.mesh) else {
+            return RenderCommandResult::Skip;
+        };
+        let Some(id) = pipelines
+            .world_variants
+            .get(&(item.cached_pipeline(), mesh.layout.clone()))
+            .or_else(|| pipelines.variants.get(&item.cached_pipeline()))
+        else {
             return RenderCommandResult::Failure("Source motion pipeline is missing");
         };
         let Some(pipeline) = cache.into_inner().get_render_pipeline(*id) else {
@@ -523,12 +716,59 @@ impl<P: PhaseItem, const DONE: bool> RenderCommand<P> for MotionMark<DONE> {
         RenderCommandResult::Success
     }
 }
+pub(crate) struct DrawAuthoredMotion;
+impl<P: PhaseItem> RenderCommand<P> for DrawAuthoredMotion {
+    type Param = (
+        SRes<MotionObjects>,
+        SRes<RenderAssets<RenderMesh>>,
+        SRes<MeshAllocator>,
+    );
+    type ViewQuery = ();
+    type ItemQuery = ();
+    fn render<'w>(
+        item: &P,
+        _: (),
+        _: Option<()>,
+        (objects, meshes, allocator): SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let Some(object) = objects.into_inner().get(item.main_entity().id()) else {
+            return RenderCommandResult::Failure("Source authored motion owner missing");
+        };
+        let Some(mesh) = meshes.into_inner().get(object.mesh) else {
+            return RenderCommandResult::Skip;
+        };
+        let allocator = allocator.into_inner();
+        let Some(vertex) = allocator.mesh_vertex_slice(&object.mesh) else {
+            return RenderCommandResult::Skip;
+        };
+        pass.set_vertex_buffer(0, vertex.buffer.slice(..));
+        match &mesh.buffer_info {
+            RenderMeshBufferInfo::Indexed {
+                index_format,
+                count,
+            } => {
+                let Some(index) = allocator.mesh_index_slice(&object.mesh) else {
+                    return RenderCommandResult::Skip;
+                };
+                pass.set_index_buffer(index.buffer.slice(..), *index_format);
+                pass.draw_indexed(
+                    index.range.start..index.range.start + *count,
+                    vertex.range.start as i32,
+                    0..1,
+                );
+            }
+            RenderMeshBufferInfo::NonIndexed => pass.draw(vertex.range.clone(), 0..1),
+        }
+        RenderCommandResult::Success
+    }
+}
 pub(crate) type DrawMotion = (
     SelectMotion,
     MotionMark<false>,
     SetSourceViewCamera,
     SetMeshBindGroup<2>,
-    DrawMesh,
+    DrawAuthoredMotion,
     MotionMark<true>,
 );
 
