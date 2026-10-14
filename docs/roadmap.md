@@ -112,8 +112,7 @@ Task 4 cannot pass. The repository audit found no qualifying source measurements
 Task 5 remains unscheduled. Tire/rim grip, empty hubs, suspension, wheel spin, and combined-brake response remain incomplete.
 The adapter supplies summed brake inputs. The stock solver excludes simultaneous motor force and brake impulse per wheel.
 
-Read the [driving verification](verification.md#driving-branch-verification-2026-10-14),
-[source gate audit](../.superpowers/sdd/2026-10-14-correct-driving-physics/source-measurement-audit.md), and
+Read the [driving verification](verification.md#driving-branch-verification-2026-10-14) and
 [merge check report](../.superpowers/sdd/2026-10-14-correct-driving-physics/task-7-report.md).
 No push was requested.
 
