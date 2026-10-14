@@ -29,8 +29,17 @@ House switches use E or eligible LMB. Cabin controls follow source modes and doo
 Pause freezes cycle time, fades, and switch movement. Recovery preserves these states.
 Restart restores the garage and source startup state at 240 seconds.
 
-Portable flashlights, survival, sleep, weather events, weapons, further vehicles, multiplayer, saves, audio, and deployment remain outside this stage.
-Engine heat and fluid rules retain their current behavior.
+Adjustable mirrors show live views. The renderer covers source shadows, sky, reflections, post effects, and stained glass.
+Source audio covers ignition, engine, horn, interaction sounds, and the Lada radio.
+One manual browser save slot stores both cars, items, mechanisms, pumps, and lamps.
+
+Survival includes health, food, water, bladder, bowel, sausage, toilet actions, healing, starvation, and death.
+Sleep follows source eligibility, hold progress, wake, and clock rules.
+Source sandstorms add movement, fog, light, wind, and particles.
+Engine heat follows the source cycle's ambient temperature.
+
+Portable flashlights, license plate text, fatigue, beds, rain, snow, creatures, weapons, and further vehicles remain outside this stage.
+Saved needs and weather, autosave, settings, control rebinding, multiplayer, and deployment also remain outside this stage.
 The build does not claim identical Unity physics or full-game parity.
 
 ## Development assets
