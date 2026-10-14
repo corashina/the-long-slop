@@ -87,3 +87,19 @@ class ItemPrototypeTests(unittest.TestCase):
         for mutate in mutations:
             m=copy.deepcopy(original);p=m['item_prototypes'];mutate(p,m)
             with self.subTest(mutation=mutate), self.assertRaises(ValueError):validate_item_prototypes(p,m)
+
+    def test_rejects_appended_variants_and_active_prototype_collider(self):
+        original=self.fixture()
+        for node in (999999,1,original['item_prototypes'][0]['variants'][0]['nodes'][0]):
+            m=copy.deepcopy(original)
+            m['item_prototypes'][0]['variants'][0]['nodes'].append(node)
+            with self.subTest(node=node),self.assertRaises((ValueError,KeyError)):
+                validate_item_prototypes(m['item_prototypes'],m)
+        m=copy.deepcopy(original)
+        collider=copy.deepcopy(m['item_prototypes'][0]['colliders'][0])
+        collider.update(id=max(c['id'] for c in m['colliders'])+1,body=m['bodies'][0]['id'])
+        m['colliders'].append(collider)
+        binding=copy.deepcopy(m['action_bindings'][0]);binding['collider']=collider['id']
+        for field in ('use_owner','pickup_owner','removal_owner','push_owner'):binding[field]=None
+        m['action_bindings'].append(binding)
+        with self.assertRaises(ValueError):validate_item_prototypes(m['item_prototypes'],m)

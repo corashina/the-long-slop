@@ -192,4 +192,6 @@ def validate_item_prototypes(prototypes, manifest) -> None:
             if len(p['variants'])!=1 or [nodes[n]['source']['path_id'] for n in p['variants'][0]['nodes']]!=[56803,56801,56802]:raise ValueError('Missing pack variants')
         elif p['variants']:raise ValueError('Unexpected prototype variants')
         if p['item_id'] is None and p['behavior']['gib_children']!=[x['node'] for x in p['pickups']]:raise ValueError('Missing debris child owners')
-        if any(within(b['node']) for b in manifest['bodies']) or any(within(i['node']) for i in manifest['items']):raise ValueError('Prototype entered active tables')
+        if (any(within(b['node']) for b in manifest['bodies']) or any(within(i['node']) for i in manifest['items'])
+            or any(nodes.get(c['node'],{}).get('asset')==p['asset'] for c in manifest['colliders'])):
+            raise ValueError('Prototype entered active tables')

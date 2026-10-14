@@ -364,18 +364,21 @@ impl ItemPrototype {
         if item_id == Some(74) {
             require(self.variants.len() == 1, "pack selector")?;
             let v = &self.variants[0];
+            ids(v.nodes.iter().copied(), "duplicate pack variant node")?;
             require(
                 checked(&v.source, 140392)
                     && v.node == self.root
                     && v.authored_index == 0
                     && v.random_start
+                    && v.nodes.len() == 3
                     && v.nodes
                         .iter()
-                        .filter_map(|id| {
-                            m.nodes.iter().find(|n| n.id == *id && self.within(m, n.id))
-                        })
-                        .map(|n| n.source.path_id)
-                        .eq([56803, 56801, 56802]),
+                        .zip([56803, 56801, 56802])
+                        .all(|(id, source)| {
+                            m.nodes.iter().any(|n| {
+                                n.id == *id && checked(&n.source, source) && self.within(m, n.id)
+                            })
+                        }),
                 "pack variant branches",
             )?;
         } else {
@@ -494,7 +497,12 @@ impl ItemPrototype {
         )?;
         require(
             m.bodies.iter().all(|b| !self.within(m, b.node))
-                && m.items.iter().all(|i| !self.within(m, i.node)),
+                && m.items.iter().all(|i| !self.within(m, i.node))
+                && m.colliders.iter().all(|c| {
+                    !m.nodes
+                        .iter()
+                        .any(|n| n.id == c.node && n.asset == self.asset)
+                }),
             "prototype active publication",
         )
     }

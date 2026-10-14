@@ -112,3 +112,58 @@ fn strict_and_runtime_reject_missing_contract_and_broken_owners() {
     assert!(ReferenceManifest::from_json(&bytes).is_err());
     assert!(ReferenceManifest::from_runtime_json(&bytes).is_err());
 }
+
+fn reject_prototype_manifest(m: &Value) {
+    let bytes = serde_json::to_vec(m).unwrap();
+    assert!(
+        ReferenceManifest::from_json(&bytes).is_err(),
+        "strict rejection"
+    );
+    assert!(
+        ReferenceManifest::from_runtime_json(&bytes).is_err(),
+        "runtime rejection"
+    );
+}
+
+#[test]
+fn strict_and_runtime_reject_appended_variant_nodes() {
+    let original: Value = serde_json::from_slice(include_bytes!("common/reference.json")).unwrap();
+    for node in [
+        json!(999999),
+        json!(1),
+        original["item_prototypes"][0]["variants"][0]["nodes"][0].clone(),
+    ] {
+        let mut m = original.clone();
+        m["item_prototypes"][0]["variants"][0]["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(node);
+        reject_prototype_manifest(&m);
+    }
+}
+
+#[test]
+fn strict_and_runtime_reject_active_prototype_collider() {
+    let original: Value = serde_json::from_slice(include_bytes!("common/reference.json")).unwrap();
+    let mut m = original.clone();
+    let mut collider = m["item_prototypes"][0]["colliders"][0].clone();
+    collider["id"] = json!(
+        m["colliders"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["id"].as_u64().unwrap())
+            .max()
+            .unwrap()
+            + 1
+    );
+    collider["body"] = m["bodies"][0]["id"].clone();
+    let mut binding = m["action_bindings"][0].clone();
+    binding["collider"] = collider["id"].clone();
+    for field in ["use_owner", "pickup_owner", "removal_owner", "push_owner"] {
+        binding[field] = Value::Null;
+    }
+    m["colliders"].as_array_mut().unwrap().push(collider);
+    m["action_bindings"].as_array_mut().unwrap().push(binding);
+    reject_prototype_manifest(&m);
+}
