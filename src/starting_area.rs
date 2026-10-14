@@ -650,7 +650,7 @@ pub struct GarageRuntime {
     pub notice: &'static str,
     pub aim: ResolvedAim,
     pub wheels: crate::interaction::wheels::WheelAssemblies,
-    steering: crate::simulation::input::KeyboardSteering,
+    driving_input: crate::simulation::input::KeyboardDriving,
     recovery_bodies: Vec<RigidBodyHandle>,
     light_owners: Vec<Option<ItemId>>,
 }
@@ -751,8 +751,9 @@ impl GarageRuntime {
             notice: "",
             aim: ResolvedAim::default(),
             wheels,
-            steering: crate::simulation::input::KeyboardSteering::new(
+            driving_input: crate::simulation::input::KeyboardDriving::new(
                 reference.vehicles[0].keyboard_steering_rate,
+                reference.driving.pedal_rate,
             ),
             recovery_bodies: Vec::with_capacity(reference.items.len()),
             light_owners: reference
@@ -1119,7 +1120,7 @@ impl GarageRuntime {
             self.vehicle = vehicle;
         }
         let driving = self.area.player.driving();
-        let steering = self.steering.step(
+        let controls = self.driving_input.step(
             if driving {
                 self.area.player.seat()
             } else {
@@ -1146,7 +1147,7 @@ impl GarageRuntime {
                 index,
                 input,
                 driving && index == self.vehicle,
-                steering,
+                controls,
             );
         }
         self.advance_urine(reference, FIXED_DT);
@@ -1320,7 +1321,7 @@ impl GarageRuntime {
         index: usize,
         input: FrameInput,
         driving: bool,
-        steering: f32,
+        controls: crate::simulation::input::DrivingControls,
     ) {
         if !self.physics.body_active(self.physics.chassis_handle(index)) {
             return;
@@ -1330,8 +1331,11 @@ impl GarageRuntime {
         let engine_reference = &source.engine;
         let snapshot = self.physics.snapshot(index);
         let speed = snapshot.speed_mps;
-        let axis = ((driving && input.held & keys::FORWARD != 0) as u8 as f32)
-            - ((driving && input.held & keys::BACK != 0) as u8 as f32);
+        let controls = if driving {
+            controls
+        } else {
+            Default::default()
+        };
         let direction = speed
             * snapshot
                 .linear_velocity
@@ -1339,15 +1343,30 @@ impl GarageRuntime {
                 .map(|v| v * v)
                 .sum::<f32>()
                 .sqrt();
-        let throttle =
-            axis != 0.0 && (direction.abs() <= source.auto_move_min || direction * axis > 0.0);
+        let direction = if direction.abs() < source.auto_move_min {
+            0.0
+        } else {
+            direction
+        };
         let vehicle = &mut self.vehicles[index];
+        let forward = controls.throttle > 0.0;
+        let go_forward = forward && direction >= 0.0;
+        let go_backward = controls.brake > 0.0 && controls.throttle <= 0.25 && direction <= 0.0;
+        let inverse = (source.gear_ratios[vehicle.auto_gear] < 0.0
+            || (!go_forward && direction <= 0.0))
+            && source.gear_ratios.iter().any(|ratio| *ratio < 0.0);
+        let (throttle, brake) = if inverse {
+            (controls.brake, controls.throttle)
+        } else {
+            (controls.throttle, controls.brake)
+        };
+        let shift_requested = throttle > 0.0 || go_forward || go_backward;
         let car_controls = driving
             || (self.area.player.driving2() && self.area.player.seat_vehicle() == Some(index));
         let ignition_held = car_controls
             && (input.held & keys::IGNITION != 0
                 || (!source.dont_ignite_with_throttle_in_automatic
-                    && throttle
+                    && throttle > 0.25
                     && !vehicle.engine_output.running));
         let ignition_pressed = (car_controls && input.pressed & keys::IGNITION != 0)
             || (ignition_held && !vehicle.ignition_held);
@@ -1357,27 +1376,19 @@ impl GarageRuntime {
         if ignition_pressed {
             self.attempts = self.attempts.wrapping_add(1);
         }
-        let radius = reference
-            .wheel_slots
-            .iter()
-            .find(|slot| slot.id == source.wheel_slots[0])
-            .expect("validated wheel slot")
-            .radius;
         let rolling_rpm = self.physics.driven_wheel_rpm(index);
         let gear = crate::vehicle::select_gear(
             rolling_rpm,
-            axis < 0.0,
-            throttle,
+            !forward,
+            shift_requested,
             vehicle.auto_gear,
             engine_reference,
             source,
         );
-        if throttle {
-            vehicle.auto_gear = gear;
-        }
+        vehicle.auto_gear = gear;
         let ratio = source.gear_ratios[gear].abs() * source.final_drive_ratio;
         let wheel_rpm = rolling_rpm.abs() * ratio;
-        let clutch = if ratio == 0.0 {
+        let automatic_engagement = if ratio == 0.0 {
             0.0
         } else {
             ((vehicle.engine.rpm - engine_reference.auto_shift_clutch_rpm
@@ -1385,6 +1396,12 @@ impl GarageRuntime {
                 / engine_reference.auto_shift_clutch_rpm_range)
                 .clamp(0.0, 1.0)
         };
+        let clutch_pedal = if throttle > 0.0 && brake > 0.0 {
+            controls.clutch.max(brake)
+        } else {
+            controls.clutch
+        };
+        let clutch = automatic_engagement.min(1.0 - clutch_pedal);
         let radiator_condition = ((1.0
             - self
                 .area
@@ -1402,7 +1419,7 @@ impl GarageRuntime {
                 ignition_held,
                 ignition_pressed,
                 ignition_released,
-                throttle: throttle as u8 as f32,
+                throttle,
                 clutch,
                 wheel_rpm,
                 free_run: source.gear_free_run[gear],
@@ -1474,10 +1491,10 @@ impl GarageRuntime {
             .filter(|(body, _)| self.physics.vehicle_of(*body) == Some(index))
             .map(|(_, steer)| steer);
         let drive = DriveInput {
-            accelerate: driving && input.held & keys::FORWARD != 0,
-            brake_reverse: driving && input.held & keys::BACK != 0,
-            steer: pushed.unwrap_or(if driving { steering } else { 0.0 }),
-            handbrake: self.vehicles[index].handbrake,
+            throttle,
+            brake,
+            steer: pushed.unwrap_or(controls.steer),
+            handbrake: self.vehicles[index].handbrake as u8 as f32,
         };
         let electronics = reference
             .lighting
@@ -1494,21 +1511,18 @@ impl GarageRuntime {
             index,
             crate::lighting::VehicleLightSample {
                 local_ignition: output.ignition && electronics_fine,
-                brake: crate::simulation::braking(drive, direction, source.auto_move_min) as u8
-                    as f32,
+                brake,
                 gear_ratio: source.gear_ratios[gear],
                 electronics_output: electronics.electronics_output,
             },
         );
-        let drive_count = self.physics.driven_wheel_count(index);
-        self.physics.set_engine_brake(
-            index,
-            output.brake_torque_nm * ratio / (drive_count.max(1) as f32 * radius),
-        );
         self.physics.apply_vehicle_forces(
             index,
             drive,
-            crate::vehicle::drive_force(output, source, gear, radius, drive_count),
+            crate::vehicle::DriveTorques {
+                motor_nm: output.torque_nm * source.gear_ratios[gear] * source.final_drive_ratio,
+                engine_brake_nm: output.brake_torque_nm * ratio,
+            },
         );
     }
 
@@ -1530,7 +1544,7 @@ impl GarageRuntime {
 
     pub fn clear_input(&mut self) {
         self.sleep.cancel_charge();
-        self.steering.clear();
+        self.driving_input.clear();
         for vehicle in &mut self.vehicles {
             vehicle.ignition_held = false;
             vehicle.engine.clear_input();

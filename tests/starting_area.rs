@@ -926,10 +926,10 @@ fn walking_far_keeps_a_parked_road_car_supported() {
         physics.apply_vehicle_forces(
             0,
             my_summer_slop::simulation::DriveInput {
-                handbrake: true,
+                handbrake: 1.0,
                 ..Default::default()
             },
-            0.0,
+            Default::default(),
         );
         physics.step_physics();
     }
@@ -940,10 +940,10 @@ fn walking_far_keeps_a_parked_road_car_supported() {
         physics.apply_vehicle_forces(
             0,
             my_summer_slop::simulation::DriveInput {
-                handbrake: true,
+                handbrake: 1.0,
                 ..Default::default()
             },
-            0.0,
+            Default::default(),
         );
         physics.step_physics();
     }

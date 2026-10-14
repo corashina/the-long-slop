@@ -28,6 +28,17 @@ pub mod keys {
     pub const SLEEP: u32 = 1 << 18;
     pub const URINATE: u32 = 1 << 19;
     pub const BURP: u32 = 1 << 20;
+    pub const CLUTCH: u32 = 1 << 21;
+    pub const SHIFT_UP: u32 = 1 << 22;
+    pub const SHIFT_DOWN: u32 = 1 << 23;
+    pub const REVERSE: u32 = 1 << 24;
+    pub const NEUTRAL: u32 = 1 << 25;
+    pub const GEAR_1: u32 = 1 << 26;
+    pub const GEAR_2: u32 = 1 << 27;
+    pub const GEAR_3: u32 = 1 << 28;
+    pub const GEAR_4: u32 = 1 << 29;
+    pub const GEAR_5: u32 = 1 << 30;
+    pub const GEAR_6: u32 = 1 << 31;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -70,15 +81,10 @@ impl FrameInput {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DriveInput {
-    pub accelerate: bool,
-    pub brake_reverse: bool,
     pub steer: f32,
-    pub handbrake: bool,
-}
-
-pub fn braking(input: DriveInput, direction: f32, auto_move_min: f32) -> bool {
-    (input.brake_reverse && direction > auto_move_min)
-        || (input.accelerate && direction < -auto_move_min)
+    pub throttle: f32,
+    pub brake: f32,
+    pub handbrake: f32,
 }
 
 /// Stores accepted real time. Each step spends its sampled scale once.

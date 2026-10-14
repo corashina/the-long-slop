@@ -1,7 +1,9 @@
 mod common;
 
+// The fixture axle has two driven wheels with a 0.3 m radius.
+
 use my_summer_slop::simulation::{DriveInput, StepClock};
-use my_summer_slop::vehicle::{PhysicsWorld, VehicleSnapshot};
+use my_summer_slop::vehicle::{DriveTorques, PhysicsWorld, VehicleSnapshot};
 
 fn flat_track() -> PhysicsWorld {
     let mut world = common::world();
@@ -15,7 +17,7 @@ fn flat_track() -> PhysicsWorld {
         &[[0, 2, 1], [0, 3, 2]],
     );
     for _ in 0..120 {
-        world.apply_vehicle_forces(0, DriveInput::default(), 2600.0);
+        world.apply_vehicle_forces(0, DriveInput::default(), Default::default());
         world.step_physics();
     }
     world
@@ -45,7 +47,7 @@ fn settles_on_four_wheels() {
     );
     assert!(snapshot.linear_velocity[1].abs() < 0.1, "{snapshot:?}");
     for _ in 0..120 {
-        world.apply_vehicle_forces(0, DriveInput::default(), 2600.0);
+        world.apply_vehicle_forces(0, DriveInput::default(), Default::default());
         world.step_physics();
     }
     assert!((world.snapshot(0).pose.position[1] - snapshot.pose.position[1]).abs() < 0.01);
@@ -60,7 +62,7 @@ fn removed_slot_has_no_raycast_support_and_restores_without_duplicates() {
     world.set_wheel(slot, None).unwrap();
     assert_eq!(world.wheel_support_count(0), 3);
     for _ in 0..30 {
-        world.apply_vehicle_forces(0, DriveInput::default(), 0.0);
+        world.apply_vehicle_forces(0, DriveInput::default(), Default::default());
         world.step_physics();
     }
     assert!(!world.snapshot(0).wheels_contact[0]);
@@ -80,12 +82,12 @@ fn removed_slot_has_no_raycast_support_and_restores_without_duplicates() {
         .unwrap();
     assert_eq!(world.wheel_support_count(0), 4);
     for _ in 0..120 {
-        world.apply_vehicle_forces(0, DriveInput::default(), 0.0);
+        world.apply_vehicle_forces(0, DriveInput::default(), Default::default());
         world.step_physics();
     }
     assert!(world.snapshot(0).wheels_contact[0]);
     world.rebase([128.0, 0.0, -128.0]);
-    world.apply_vehicle_forces(0, DriveInput::default(), 0.0);
+    world.apply_vehicle_forces(0, DriveInput::default(), Default::default());
     world.step_physics();
     assert!(world.snapshot(0).wheels_contact[0]);
 }
@@ -97,7 +99,7 @@ fn source_springs_keep_their_force_when_vehicle_mass_changes() {
     let before = world.snapshot(0).pose.position[1];
     world.set_vehicle_mass(0, reference.vehicles[0].mass_kg * 0.5);
     for _ in 0..180 {
-        world.apply_vehicle_forces(0, DriveInput::default(), 0.0);
+        world.apply_vehicle_forces(0, DriveInput::default(), Default::default());
         world.step_physics();
     }
     let after = world.snapshot(0).pose.position[1];
@@ -111,36 +113,6 @@ fn source_springs_keep_their_force_when_vehicle_mass_changes() {
             .wheels_contact
             .iter()
             .all(|contact| *contact)
-    );
-}
-
-#[test]
-fn drivetrain_converts_running_torque_with_source_ratio_radius_and_drive_count() {
-    use my_summer_slop::simulation::engine::EngineOutput;
-    let reference = common::reference();
-    let output = EngineOutput {
-        running: true,
-        torque_nm: 87.0,
-        ..EngineOutput::default()
-    };
-    let force = my_summer_slop::vehicle::drive_force(output, &reference.vehicles[0], 2, 0.3, 2);
-    let expected =
-        87.0 * reference.vehicles[0].gear_ratios[2].abs() * reference.vehicles[0].final_drive_ratio
-            / 0.6;
-    assert!((force - expected).abs() < 0.001);
-    assert_eq!(
-        my_summer_slop::vehicle::drive_force(
-            EngineOutput::default(),
-            &reference.vehicles[0],
-            2,
-            0.3,
-            2
-        ),
-        0.0
-    );
-    assert_eq!(
-        my_summer_slop::vehicle::drive_force(output, &reference.vehicles[0], 1, 0.3, 2),
-        0.0
     );
 }
 
@@ -188,10 +160,13 @@ fn accelerates_brakes_and_reverses() {
         world.apply_vehicle_forces(
             0,
             DriveInput {
-                accelerate: true,
+                throttle: 1.0,
                 ..Default::default()
             },
-            2600.0,
+            DriveTorques {
+                motor_nm: 2600.0 * 2.0 * 0.3,
+                ..Default::default()
+            },
         );
         world.step_physics();
     }
@@ -203,10 +178,10 @@ fn accelerates_brakes_and_reverses() {
         world.apply_vehicle_forces(
             0,
             DriveInput {
-                brake_reverse: true,
+                brake: 1.0,
                 ..Default::default()
             },
-            2600.0,
+            Default::default(),
         );
         world.step_physics();
     }
@@ -215,10 +190,13 @@ fn accelerates_brakes_and_reverses() {
         world.apply_vehicle_forces(
             0,
             DriveInput {
-                brake_reverse: true,
+                throttle: 1.0,
                 ..Default::default()
             },
-            2600.0,
+            DriveTorques {
+                motor_nm: -2600.0 * 2.0 * 0.3,
+                ..Default::default()
+            },
         );
         world.step_physics();
     }
@@ -232,11 +210,18 @@ fn reset_stops_the_chassis() {
     let mut world = flat_track();
     let start = world.snapshot(0).pose;
     let input = DriveInput {
-        accelerate: true,
+        throttle: 1.0,
         ..DriveInput::default()
     };
     for _ in 0..180 {
-        world.apply_vehicle_forces(0, input, 2600.0);
+        world.apply_vehicle_forces(
+            0,
+            input,
+            DriveTorques {
+                motor_nm: 2600.0 * 2.0 * 0.3,
+                ..Default::default()
+            },
+        );
         world.step_physics();
     }
     assert!(world.snapshot(0).speed_mps.abs() > 1.0);
@@ -257,10 +242,10 @@ fn disabled_engine_produces_no_thrust() {
         world.apply_vehicle_forces(
             0,
             DriveInput {
-                accelerate: true,
+                throttle: 1.0,
                 ..Default::default()
             },
-            0.0,
+            Default::default(),
         );
         world.step_physics();
     }
@@ -274,10 +259,13 @@ fn handbrake_slows_the_car() {
         world.apply_vehicle_forces(
             0,
             DriveInput {
-                accelerate: true,
+                throttle: 1.0,
                 ..Default::default()
             },
-            2600.0,
+            DriveTorques {
+                motor_nm: 2600.0 * 2.0 * 0.3,
+                ..Default::default()
+            },
         );
         world.step_physics();
     }
@@ -287,10 +275,10 @@ fn handbrake_slows_the_car() {
         world.apply_vehicle_forces(
             0,
             DriveInput {
-                handbrake: true,
+                handbrake: 1.0,
                 ..Default::default()
             },
-            2600.0,
+            Default::default(),
         );
         world.step_physics();
     }
@@ -315,17 +303,17 @@ fn removed_ground_cannot_support_wheels() {
         &[[0, 2, 1], [0, 3, 2]],
     );
     for _ in 0..120 {
-        world.apply_vehicle_forces(0, DriveInput::default(), 2600.0);
+        world.apply_vehicle_forces(0, DriveInput::default(), Default::default());
         world.step_physics();
     }
     for _ in 0..600 {
-        world.apply_vehicle_forces(0, DriveInput::default(), 0.0);
+        world.apply_vehicle_forces(0, DriveInput::default(), Default::default());
         world.step_physics();
     }
     assert!(world.rapier().bodies[world.chassis_handle(0)].is_sleeping());
     world.remove_collider(ground);
     for _ in 0..60 {
-        world.apply_vehicle_forces(0, DriveInput::default(), 2600.0);
+        world.apply_vehicle_forces(0, DriveInput::default(), Default::default());
         world.step_physics();
     }
     assert_eq!(world.snapshot(0).wheels_contact, [false; 4]);
@@ -353,11 +341,14 @@ fn steering_turns_the_car_left() {
         world.apply_vehicle_forces(
             0,
             DriveInput {
-                accelerate: true,
+                throttle: 1.0,
                 steer: 1.0,
                 ..Default::default()
             },
-            2600.0,
+            DriveTorques {
+                motor_nm: 2600.0 * 2.0 * 0.3,
+                ..Default::default()
+            },
         );
         world.step_physics();
     }
@@ -383,10 +374,13 @@ fn chassis_collides_with_static_wall() {
         world.apply_vehicle_forces(
             0,
             DriveInput {
-                accelerate: true,
+                throttle: 1.0,
                 ..Default::default()
             },
-            2600.0,
+            DriveTorques {
+                motor_nm: 2600.0 * 2.0 * 0.3,
+                ..Default::default()
+            },
         );
         world.step_physics();
     }
@@ -403,10 +397,13 @@ fn force_application_does_not_step_the_body() {
     world.apply_vehicle_forces(
         0,
         DriveInput {
-            accelerate: true,
+            throttle: 1.0,
             ..Default::default()
         },
-        2600.0,
+        DriveTorques {
+            motor_nm: 2600.0 * 2.0 * 0.3,
+            ..Default::default()
+        },
     );
     assert_eq!(world.snapshot(0).pose, before);
     world.step_physics();
@@ -439,4 +436,42 @@ fn query_refresh_preserves_new_kinematic_body_registration() {
             .is_finite()
     );
     finite(world.snapshot(0));
+}
+
+#[test]
+fn signed_axle_torque_drives_without_second_pedal_scale() {
+    for sign in [-1.0, 1.0] {
+        let mut low = flat_track();
+        let mut high = flat_track();
+        for _ in 0..30 {
+            low.apply_vehicle_forces(
+                0,
+                DriveInput {
+                    throttle: 0.25,
+                    ..Default::default()
+                },
+                DriveTorques {
+                    motor_nm: sign * 1500.0,
+                    engine_brake_nm: 0.0,
+                },
+            );
+            high.apply_vehicle_forces(
+                0,
+                DriveInput {
+                    throttle: 1.0,
+                    ..Default::default()
+                },
+                DriveTorques {
+                    motor_nm: sign * 1500.0,
+                    engine_brake_nm: 0.0,
+                },
+            );
+            low.step_physics();
+            high.step_physics();
+        }
+        let a = low.snapshot(0);
+        let b = high.snapshot(0);
+        assert_eq!(a.pose, b.pose);
+        assert!(a.speed_mps * sign > 0.5, "{a:?}");
+    }
 }

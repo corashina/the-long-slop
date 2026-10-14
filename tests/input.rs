@@ -107,43 +107,112 @@ fn lifecycle_boundary_discards_the_sampled_frame() {
 }
 
 #[test]
-fn steering_clears_between_seats_and_capture_sessions() {
+fn driving_ramps_are_independent_and_clear_at_input_boundaries() {
     use my_summer_slop::reference::SeatId;
-    use my_summer_slop::simulation::input::KeyboardSteering;
-    let mut steering = KeyboardSteering::new(1.25);
-    for _ in 0..24 {
-        steering.step(Some(SeatId(1)), keys::LEFT);
+    use my_summer_slop::simulation::input::{DrivingControls, KeyboardDriving};
+    let mut input = KeyboardDriving::new(1.25, 5.0);
+    let seat = Some(SeatId(1));
+    let mut sample = DrivingControls::default();
+    for _ in 0..6 {
+        sample = input.step(seat, keys::FORWARD | keys::BACK | keys::CLUTCH | keys::LEFT);
     }
-    assert!((steering.step(Some(SeatId(2)), keys::RIGHT) + 1.25 / 60.0).abs() < 0.00001);
-    assert_eq!(steering.step(None, keys::LEFT), 0.0);
-    assert_eq!(steering.step(Some(SeatId(1)), 0), 0.0);
-    for _ in 0..24 {
-        steering.step(Some(SeatId(1)), keys::LEFT);
-    }
-    steering.clear();
-    assert_eq!(steering.step(Some(SeatId(1)), 0), 0.0);
+    assert!((sample.throttle - 0.5).abs() < 1e-5);
+    assert!((sample.brake - 0.5).abs() < 1e-5);
+    assert!((sample.clutch - 0.5).abs() < 1e-5);
+    assert!((sample.steer - 0.125).abs() < 1e-5);
+    sample = input.step(seat, keys::BACK);
+    assert!((sample.throttle - 5.0 / 12.0).abs() < 1e-5);
+    assert!((sample.brake - 7.0 / 12.0).abs() < 1e-5);
+    assert!((sample.clutch - 5.0 / 12.0).abs() < 1e-5);
+    assert!((sample.steer - 1.25 / 12.0).abs() < 1e-5);
+    sample = input.step(Some(SeatId(2)), keys::RIGHT | keys::CLUTCH);
+    assert!((sample.steer + 1.25 / 60.0).abs() < 1e-5);
+    assert_eq!(sample.throttle, 0.0);
+    assert_eq!(sample.brake, 0.0);
+    assert!((sample.clutch - 5.0 / 60.0).abs() < 1e-5);
+    assert_eq!(input.step(None, u32::MAX), DrivingControls::default());
+    assert_eq!(input.step(seat, 0), DrivingControls::default());
+    input.step(seat, u32::MAX);
+    input.clear();
+    assert_eq!(input.step(seat, 0), DrivingControls::default());
 }
 
 #[test]
-fn steering_is_equal_at_different_render_rates() {
+fn driving_is_equal_at_different_render_rates() {
     use my_summer_slop::reference::SeatId;
     use my_summer_slop::simulation::StepClock;
-    use my_summer_slop::simulation::input::KeyboardSteering;
-    for fps in [30, 60, 144] {
+    use my_summer_slop::simulation::input::{DrivingControls, KeyboardDriving};
+    let mut expected = Vec::new();
+    for fps in [30, 60, 120] {
         let mut clock = StepClock::default();
-        let mut steering = KeyboardSteering::new(1.25);
-        let mut value = 0.0;
-        let mut steps = 0;
+        let mut input = KeyboardDriving::new(1.25, 5.0);
+        let mut samples = Vec::new();
         for _ in 0..fps / 2 {
             clock.accept_frame(1.0 / fps as f64);
             while clock.take_step(1.) {
-                value = steering.step(Some(SeatId(1)), keys::LEFT);
-                steps += 1;
+                let held = if samples.len() < 6 {
+                    keys::LEFT | keys::FORWARD | keys::BACK | keys::CLUTCH
+                } else {
+                    keys::LEFT
+                };
+                samples.push(input.step(Some(SeatId(1)), held));
             }
         }
-        assert_eq!(steps, 30);
-        assert!((value - 0.625).abs() < 0.00001);
+        assert_eq!(samples.len(), 30);
+        assert!((samples[29].steer - 0.625).abs() < 1e-5);
+        assert_eq!(
+            samples[29],
+            DrivingControls {
+                steer: samples[29].steer,
+                ..Default::default()
+            }
+        );
+        if expected.is_empty() {
+            expected = samples;
+        } else {
+            assert_eq!(samples, expected);
+        }
     }
+}
+
+#[test]
+fn driving_edges_survive_no_step_and_run_once_during_catch_up() {
+    use my_summer_slop::simulation::StepClock;
+    let actions = keys::CLUTCH
+        | keys::SHIFT_UP
+        | keys::SHIFT_DOWN
+        | keys::REVERSE
+        | keys::NEUTRAL
+        | keys::GEAR_1
+        | keys::GEAR_2
+        | keys::GEAR_3
+        | keys::GEAR_4
+        | keys::GEAR_5
+        | keys::GEAR_6;
+    assert_eq!(keys::GEAR_6, 2147483648);
+    let mut pending = FrameInput::default();
+    let mut clock = StepClock::default();
+    pending.merge(FrameInput {
+        held: actions,
+        pressed: actions,
+        ..Default::default()
+    });
+    clock.accept_frame(1.0 / 120.0);
+    assert!(!clock.take_step(1.));
+    pending.merge(FrameInput {
+        released: actions,
+        ..Default::default()
+    });
+    clock.accept_frame(5.0 / 60.0);
+    let mut steps = 0;
+    while clock.take_step(1.) {
+        let sample = pending.take_step();
+        assert_eq!(sample.held, 0);
+        assert_eq!(sample.pressed, if steps == 0 { actions } else { 0 });
+        assert_eq!(sample.released, if steps == 0 { actions } else { 0 });
+        steps += 1;
+    }
+    assert_eq!(steps, 5);
 }
 
 mod common;
@@ -696,4 +765,48 @@ fn installed_driving2_matches_source_seats() {
         );
     }
     assert!(game.seats.iter().any(|s| s.driving2 && !s.driver));
+}
+
+#[test]
+fn automatic_pedal_threshold_and_pause_reset_apply_to_both_cars() {
+    use my_summer_slop::starting_area::GarageRuntime;
+    let mut reference = common::reference();
+    for vehicle in &mut reference.vehicles {
+        vehicle.dont_ignite_with_throttle_in_automatic = false;
+    }
+    for index in 0..reference.vehicles.len() {
+        let seat = reference
+            .seats
+            .iter()
+            .find(|s| s.driver && s.vehicle == index)
+            .unwrap()
+            .id;
+        let mut runtime = GarageRuntime::new(&reference).unwrap();
+        runtime.started = true;
+        let pose = runtime.physics.snapshot(index).pose;
+        assert!(runtime.area.player.enter(seat, pose, &mut runtime.physics));
+        for sample in 1..=6 {
+            runtime.step(
+                &reference,
+                FrameInput {
+                    held: keys::FORWARD | keys::BACK | keys::CLUTCH,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(runtime.attempts, if sample <= 3 { 0 } else { 1 });
+        }
+        runtime.paused = true;
+        runtime.step(&reference, FrameInput::default());
+        runtime.paused = false;
+        for sample in 1..=4 {
+            runtime.step(
+                &reference,
+                FrameInput {
+                    held: keys::FORWARD,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(runtime.attempts, if sample <= 3 { 1 } else { 2 });
+        }
+    }
 }

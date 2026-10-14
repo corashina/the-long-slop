@@ -172,13 +172,15 @@ fn capture_covers_drive_parts_fluids_and_carry() {
         },
     );
     for _ in 0..120 {
-        g.physics.apply_vehicle_forces(0, Default::default(), 0.);
+        g.physics
+            .apply_vehicle_forces(0, Default::default(), Default::default());
         g.physics.step_physics();
     }
 
     g.physics.rapier_mut().bodies[chassis].set_linvel(Vector::new(3., 0., -7.), true);
     g.physics.rapier_mut().bodies[chassis].set_angvel(Vector::new(0., 0.2, 0.), true);
-    g.physics.apply_vehicle_forces(0, Default::default(), 0.);
+    g.physics
+        .apply_vehicle_forces(0, Default::default(), Default::default());
     assert!(g.physics.driven_wheel_rpm(0).abs() > 0.);
     g.wheels.sync(&mut g.area.items, &mut g.physics).unwrap();
     let ids = IdentityMap::new(&r).unwrap();

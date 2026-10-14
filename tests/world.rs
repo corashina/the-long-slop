@@ -1,8 +1,10 @@
 mod common;
 
+// The fixture axle has two driven wheels with a 0.3 m radius.
+
 use my_summer_slop::simulation::DriveInput;
 use my_summer_slop::starting_area::GarageRuntime;
-use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose};
+use my_summer_slop::vehicle::{DriveTorques, PhysicsWorld, VehiclePose};
 use my_summer_slop::world::{
     ChunkData, ChunkKey, Station, WorldOrigin, WorldStream, active_chunks, generate_chunk,
     generate_chunk_in_band, nearest_station, road_sample,
@@ -143,11 +145,14 @@ fn rebase_preserves_wheels_velocities_and_absolute_position() {
         physics.apply_vehicle_forces(
             0,
             DriveInput {
-                accelerate: true,
+                throttle: 1.0,
                 steer: 0.05,
                 ..Default::default()
             },
-            2600.0,
+            DriveTorques {
+                motor_nm: 2600.0 * 2.0 * 0.3,
+                ..Default::default()
+            },
         );
         physics.step_physics();
     }
@@ -177,7 +182,7 @@ fn rebase_preserves_wheels_velocities_and_absolute_position() {
             assert!((relative_before - relative_after).abs() < 0.001);
         }
     }
-    physics.apply_vehicle_forces(0, DriveInput::default(), 2600.0);
+    physics.apply_vehicle_forces(0, DriveInput::default(), Default::default());
     physics.step_physics();
     assert!(physics.snapshot(0).wheels_contact.into_iter().all(|c| c));
     assert!(physics.snapshot(0).speed_mps > 1.0);
@@ -241,7 +246,7 @@ fn streaming_bounds_colliders_and_loads_teleport_destination() {
     );
     physics.reset(0, pose);
     for _ in 0..120 {
-        physics.apply_vehicle_forces(0, DriveInput::default(), 0.0);
+        physics.apply_vehicle_forces(0, DriveInput::default(), Default::default());
         physics.step_physics();
     }
     assert!(physics.snapshot(0).wheels_contact.into_iter().all(|c| c));
@@ -261,7 +266,7 @@ fn driving_crosses_chunk_seams_and_rebase_without_trip_jump() {
     let pose = stream.reset_pose(2000.0, false, &mut physics);
     physics.reset(0, pose);
     for _ in 0..120 {
-        physics.apply_vehicle_forces(0, DriveInput::default(), 2600.0);
+        physics.apply_vehicle_forces(0, DriveInput::default(), Default::default());
         physics.step_physics();
     }
     let mut previous = stream.origin.absolute(physics.snapshot(0).pose.position);
@@ -272,10 +277,13 @@ fn driving_crosses_chunk_seams_and_rebase_without_trip_jump() {
         physics.apply_vehicle_forces(
             0,
             DriveInput {
-                accelerate,
+                throttle: accelerate as u8 as f32,
                 ..Default::default()
             },
-            2600.0,
+            DriveTorques {
+                motor_nm: if accelerate { 2600.0 * 2.0 * 0.3 } else { 0.0 },
+                ..Default::default()
+            },
         );
         physics.step_physics();
         if stream
@@ -319,7 +327,7 @@ fn lateral_streaming_supports_travel_beyond_the_old_edge() {
     let car_colliders = physics.collider_count();
     stream.sync_at([55.0, 8.0, -64.0], &mut physics);
     for _ in 0..180 {
-        physics.apply_vehicle_forces(0, DriveInput::default(), 2600.0);
+        physics.apply_vehicle_forces(0, DriveInput::default(), Default::default());
         physics.step_physics();
     }
     let mut band_changes = 0;
@@ -335,10 +343,13 @@ fn lateral_streaming_supports_travel_beyond_the_old_edge() {
         physics.apply_vehicle_forces(
             0,
             DriveInput {
-                accelerate,
+                throttle: accelerate as u8 as f32,
                 ..Default::default()
             },
-            2600.0,
+            DriveTorques {
+                motor_nm: if accelerate { 2600.0 * 2.0 * 0.3 } else { 0.0 },
+                ..Default::default()
+            },
         );
         physics.step_physics();
         let snapshot = physics.snapshot(0);

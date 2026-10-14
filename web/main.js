@@ -10,9 +10,8 @@ import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
 import {loadUiAssets} from './ui-layout.js';
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
-let survival,dead=false,sleeping=false,audio,menu,feedback,failed=false,timeout,actions=0,frame,renderFailure;
+let input,survival,dead=false,sleeping=false,audio,menu,feedback,failed=false,timeout,actions=0,frame,renderFailure;
 const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',condition:-1,held:'',throwCharge:0,throwActive:false,radioVolume:undefined,radioFrequency:undefined,radioAm:false,quantities:[0,0,0,0,0,0]};
-const input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas);
 const settleSave=window.gameSaveResult;
 window.gameSaveResult=(id,kind,payload,error)=>{
  if(kind==='Commit'&&!error){input.clear();actions=0;}
@@ -74,6 +73,7 @@ async function load(){
  if(!response.ok)throw Error('Cannot load reference manifest (HTTP '+response.status+').');
  const bytes=await response.arrayBuffer(),text=new TextDecoder().decode(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
+ input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas,manifest.driving.bindings);
  status.textContent='Loading interface assets...';
  await loadUiAssets(manifest.ui);
  survival=createSurvival(manifest.ui,manifest.sleep.cooldown_seconds);
