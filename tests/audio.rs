@@ -820,7 +820,7 @@ fn installed_lamp_turn_updates_source_hum_voices() {
                 .find(|c| c.id == lamp.control)
                 .unwrap()
                 .kind,
-            my_summer_slop::reference::LightControllerKind::House
+            my_summer_slop::reference::LightControllerKind::Switch
         );
         state.action(InteractionAction::LightControl(lamp.control), 1.);
         let e = state.pop_event().unwrap();
@@ -866,6 +866,8 @@ fn cap_steps_preserve_completed_source_order() {
             &mut run.area.items,
             &mut run.physics,
             1. / 60.,
+            Default::default(),
+            1.,
         );
         assert!(matches!(
             action,
@@ -930,6 +932,8 @@ fn actual_spill_uses_source_speed_gain_and_empty_tank_stops() {
         &mut run.area.items,
         &mut run.physics,
         1. / 60.,
+        Default::default(),
+        1.,
     );
     assert_eq!(
         run.area.interaction.opening_flow(opening),
@@ -966,6 +970,8 @@ fn actual_spill_uses_source_speed_gain_and_empty_tank_stops() {
         &mut run.area.items,
         &mut run.physics,
         1. / 60.,
+        Default::default(),
+        1.,
     );
     audio.fixed_step(&run.area, &run.physics, 1. / 60.);
     let rule = &audio.reference.fluids[0];
@@ -1050,7 +1056,7 @@ fn actual_fill_targets_one_cap_and_preserves_non_looping_pour() {
     };
     let action = run.area.interaction.step(
         FrameInput {
-            held: keys::FILL,
+            held: keys::PRIMARY,
             ..Default::default()
         },
         common::resolved(Some(target)),
@@ -1058,6 +1064,8 @@ fn actual_fill_targets_one_cap_and_preserves_non_looping_pour() {
         &mut run.area.items,
         &mut run.physics,
         1. / 60.,
+        Default::default(),
+        1.,
     );
     assert!(
         matches!(action,Some(my_summer_slop::interaction::InteractionAction::Fill{liters,..}) if liters>0.)
@@ -1091,6 +1099,8 @@ fn actual_fill_targets_one_cap_and_preserves_non_looping_pour() {
             &mut run.area.items,
             &mut run.physics,
             1. / 60.,
+            Default::default(),
+            1.,
         );
         audio.fixed_step(&run.area, &run.physics, 1. / 60.);
         assert_eq!(
@@ -1123,6 +1133,8 @@ fn actual_fill_targets_one_cap_and_preserves_non_looping_pour() {
         &mut run.area.items,
         &mut run.physics,
         1. / 60.,
+        Default::default(),
+        1.,
     );
     assert!(
         matches!(run.area.interaction.opening_flow(OpeningId(1)),Some((false,speed)) if speed>0.)

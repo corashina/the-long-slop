@@ -402,6 +402,8 @@ fn installed_plate_aim_and_release_controls() {
             &mut g.area.items,
             &mut g.physics,
             0.02,
+            Default::default(),
+            1.,
         );
         assert_eq!(action, Some(InteractionAction::PlateRemove(p.item)));
         g.area.interaction.step(
@@ -414,6 +416,8 @@ fn installed_plate_aim_and_release_controls() {
             &mut g.area.items,
             &mut g.physics,
             0.02,
+            Default::default(),
+            1.,
         );
         let aim = g
             .area
@@ -434,6 +438,8 @@ fn installed_plate_aim_and_release_controls() {
             &mut g.area.items,
             &mut g.physics,
             0.02,
+            Default::default(),
+            1.,
         );
         let action = g.area.interaction.step(
             FrameInput {
@@ -445,6 +451,8 @@ fn installed_plate_aim_and_release_controls() {
             &mut g.area.items,
             &mut g.physics,
             0.02,
+            Default::default(),
+            1.,
         );
         assert_eq!(action, Some(InteractionAction::PlateMount(p.item)));
     }
@@ -495,10 +503,13 @@ fn installed_empty_target_keeps_loose_bumper_pickup() {
         .resolve(&g.physics, from_rapier(&view), &g.area.items);
     assert_eq!(aim.grab_target.map(|t| t.item), Some(owner));
     assert_eq!(aim.grab_target.and_then(|t| t.slot), None);
-    let actions =
-        g.area
-            .interaction
-            .available_actions(&aim, &g.area.player, &g.area.items, &g.physics);
+    let actions = g.area.interaction.available_actions(
+        &aim,
+        &g.area.player,
+        &g.area.items,
+        &g.physics,
+        Default::default(),
+    );
     assert_ne!(
         actions.actions.0 & my_summer_slop::interaction::feedback::ActionMask::PICKUP,
         0
@@ -513,7 +524,7 @@ fn installed_rear_plate_remove_remount_updates_chassis_mass() {
     let mut g = GarageRuntime::new(&r).unwrap();
     let p = &r.plates.plates[1];
     g.wheels.sync(&mut g.area.items, &mut g.physics).unwrap();
-    let chassis = g.physics.chassis_handle();
+    let chassis = g.physics.chassis_handle(0);
     let mass_before = g.physics.rapier().bodies[chassis].mass();
     let point = g.area.items.get(p.item).unwrap().pose.position;
     g.area

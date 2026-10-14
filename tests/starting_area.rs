@@ -2231,8 +2231,22 @@ fn active_cycle_is_independent_of_physics_cap() {
     let (reference, mut runtime) = initial();
     runtime.started = true;
     let mut clock = my_summer_slop::simulation::StepClock::default();
-    runtime.advance_lighting(&reference, 1.0);
-    let steps = clock.advance(1.0);
+    if !runtime.paused {
+        runtime.lighting.cycle.advance(
+            &reference.lighting.cycle,
+            my_summer_slop::lighting::CycleAdvance {
+                simulation_delta: (1.0) as f32,
+                cycle_extra: 0.,
+                cloud_scale: 1.,
+                sleep_progress: None,
+            },
+        );
+    }
+    clock.accept_frame(1.0);
+    let mut steps = 0;
+    while clock.take_step(1.) {
+        steps += 1;
+    }
     for _ in 0..steps {
         runtime.step(&reference, FrameInput::default());
     }
@@ -2249,14 +2263,34 @@ fn lighting_lifecycle_preserves_and_resets_owned_state() {
         &reference.lighting,
         my_summer_slop::reference::LightControlId(1),
     );
-    runtime.advance_lighting(&reference, 1100.);
-    runtime.advance_light_fades(&reference, 0.001);
-    runtime.advance_light_fades(&reference, 0.01);
+    if !runtime.paused {
+        runtime.lighting.cycle.advance(
+            &reference.lighting.cycle,
+            my_summer_slop::lighting::CycleAdvance {
+                simulation_delta: (1100.) as f32,
+                cycle_extra: 0.,
+                cloud_scale: 1.,
+                sleep_progress: None,
+            },
+        );
+    }
+    runtime.lighting.advance_fades(&reference.lighting, 0.001);
+    runtime.lighting.advance_fades(&reference.lighting, 0.01);
     let active = lighting_snapshot(&runtime);
     assert_ne!(active, startup);
     runtime.paused = true;
-    runtime.advance_lighting(&reference, 20.);
-    runtime.advance_light_fades(&reference, 20.);
+    if !runtime.paused {
+        runtime.lighting.cycle.advance(
+            &reference.lighting.cycle,
+            my_summer_slop::lighting::CycleAdvance {
+                simulation_delta: (20.) as f32,
+                cycle_extra: 0.,
+                cloud_scale: 1.,
+                sleep_progress: None,
+            },
+        );
+    }
+    runtime.lighting.advance_fades(&reference.lighting, 20.);
     runtime.step(
         &reference,
         FrameInput {
@@ -2268,7 +2302,7 @@ fn lighting_lifecycle_preserves_and_resets_owned_state() {
     runtime.paused = false;
     runtime.recover(&reference);
     assert_eq!(lighting_snapshot(&runtime), active);
-    runtime.advance_light_fades(&reference, 0.005);
+    runtime.lighting.advance_fades(&reference.lighting, 0.005);
     assert_ne!(
         lighting_snapshot(&runtime),
         active,

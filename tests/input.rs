@@ -226,9 +226,19 @@ fn frame_fade_uses_active_elapsed_once_after_catch_up() {
     for _ in 0..6 {
         runtime.step(&r, FrameInput::default());
     }
-    runtime.advance_lighting(&r, 0.5);
+    if !runtime.paused {
+        runtime.lighting.cycle.advance(
+            &r.lighting.cycle,
+            my_summer_slop::lighting::CycleAdvance {
+                simulation_delta: (0.5) as f32,
+                cycle_extra: 0.,
+                cloud_scale: 1.,
+                sleep_progress: None,
+            },
+        );
+    }
     assert_eq!(runtime.lighting.cycle.elapsed_seconds(), 0.5);
-    runtime.advance_light_fades(&r, 0.1);
+    runtime.lighting.advance_fades(&r.lighting, 0.1);
     assert!(
         !runtime
             .lighting
@@ -239,7 +249,7 @@ fn frame_fade_uses_active_elapsed_once_after_catch_up() {
             .enabled
     );
     runtime.paused = true;
-    runtime.advance_light_fades(&r, 0.1);
+    runtime.lighting.advance_fades(&r.lighting, 0.1);
     assert!(
         !runtime
             .lighting
@@ -250,7 +260,7 @@ fn frame_fade_uses_active_elapsed_once_after_catch_up() {
             .enabled
     );
     runtime.paused = false;
-    runtime.advance_light_fades(&r, 0.1);
+    runtime.lighting.advance_fades(&r.lighting, 0.1);
     assert!(
         !runtime
             .lighting
@@ -260,7 +270,7 @@ fn frame_fade_uses_active_elapsed_once_after_catch_up() {
             .unwrap()
             .enabled
     );
-    runtime.advance_light_fades(&r, 0.1);
+    runtime.lighting.advance_fades(&r.lighting, 0.1);
     assert!(
         runtime
             .lighting
@@ -307,11 +317,11 @@ fn exported_driver_lights_use_real_edges() {
         for _ in 0..6 {
             runtime.step(&r, input.take_step());
         }
-        runtime.advance_light_fades(&r, 0.1);
+        runtime.lighting.advance_fades(&r.lighting, 0.1);
     }
     assert!(runtime.lighting.high_beam(0));
     for _ in 0..3 {
-        runtime.advance_light_fades(&r, 0.1);
+        runtime.lighting.advance_fades(&r.lighting, 0.1);
     }
     let rlight = runtime
         .lighting
@@ -344,8 +354,18 @@ fn exported_low_startup_keeps_source_outputs_through_pause() {
     runtime.started = true;
     for _ in 0..132 {
         runtime.step(&r, FrameInput::default());
-        runtime.advance_lighting(&r, 1. / 60.);
-        runtime.advance_light_fades(&r, 1. / 60.);
+        if !runtime.paused {
+            runtime.lighting.cycle.advance(
+                &r.lighting.cycle,
+                my_summer_slop::lighting::CycleAdvance {
+                    simulation_delta: (1. / 60.) as f32,
+                    cycle_extra: 0.,
+                    cloud_scale: 1.,
+                    sleep_progress: None,
+                },
+            );
+        }
+        runtime.lighting.advance_fades(&r.lighting, 1. / 60.);
     }
     for c in r
         .lighting
@@ -412,7 +432,7 @@ fn exported_low_startup_keeps_source_outputs_through_pause() {
             ..Default::default()
         },
     );
-    runtime.advance_light_fades(&r, 0.5);
+    runtime.lighting.advance_fades(&r.lighting, 0.5);
     assert_eq!(
         lights,
         runtime
@@ -454,7 +474,7 @@ fn car_and_headlight_electronics_keep_their_source_owners() {
     runtime.started = true;
     runtime.vehicles[0].engine.ignition = true;
     runtime.step(&r, FrameInput::default());
-    runtime.advance_light_fades(&r, 0.1);
+    runtime.lighting.advance_fades(&r.lighting, 0.1);
     assert!(!runtime.lighting.high_beam(0));
     for c in r
         .lighting

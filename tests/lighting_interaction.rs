@@ -607,7 +607,7 @@ fn exported_cabin_and_headlight_controls_work_from_driver_seat() {
         );
         assert_eq!(runtime.area.player.seat(), seat);
         for _ in 0..3 {
-            runtime.advance_light_fades(&r, 0.1);
+            runtime.lighting.advance_fades(&r.lighting, 0.1);
         }
         let light = c.states[1].lights[0];
         assert!(

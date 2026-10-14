@@ -29,7 +29,7 @@ fn settle_lamps(g: &mut GarageRuntime, reference: &ReferenceManifest) {
     g.started = true;
     for _ in 0..20 {
         g.step(reference, FrameInput::default());
-        g.advance_light_fades(reference, 0.02);
+        g.lighting.advance_fades(&reference.lighting, 0.02);
     }
 }
 fn node_belongs_to(

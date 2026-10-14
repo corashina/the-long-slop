@@ -67,6 +67,7 @@ fn fixture_with(
             spill_disabled: false,
             tube_connected: false,
             flow_radius: 0.02,
+            particles: reference.openings[0].particles.clone(),
             can_toggle: true,
         });
         reference.tanks[(tank - 1) as usize]
