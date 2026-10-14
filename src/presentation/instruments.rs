@@ -344,6 +344,8 @@ pub(crate) fn prepare_instruments(
             &GlobalTransform,
             Option<&SourceShadowMode>,
             Option<&Children>,
+            &super::renderers::SourceRenderer,
+            &bevy::gltf::GltfExtras,
         ),
         Without<SourceCaster>,
     >,
@@ -373,7 +375,8 @@ pub(crate) fn prepare_instruments(
         .flat_map(|d| d.lamps.iter_mut().chain(&mut d.digit_materials))
     {
         for &entity in &visual.entities {
-            let (mesh, receiver, global, mode, children) = receivers.get(entity).unwrap();
+            let (mesh, receiver, global, mode, children, renderer, primitive) =
+                receivers.get(entity).unwrap();
             let mask = materials.get(&receiver.0).unwrap().extension.receiver_mask;
             let inverted = global.affine().matrix3.determinant() < 0.;
             let mut prepare = |handle: &Handle<StandardMaterial>| {
@@ -420,18 +423,20 @@ pub(crate) fn prepare_instruments(
                         ))
                     })
                     .clone();
-                let warm = commands
-                    .spawn((
-                        mesh.clone(),
-                        MeshMaterial3d(material.clone()),
-                        crate::presentation::materials::SourceMaterialWarmup,
-                        far,
-                        Visibility::Visible,
-                        bevy::light::NotShadowCaster,
-                        NoFrustumCulling,
-                    ))
-                    .id();
-                source.warmups.push((warm, false));
+                let sort = authored.sort_data(key, &renderer.0, primitive)?;
+                let mut warm = commands.spawn((
+                    mesh.clone(),
+                    MeshMaterial3d(material.clone()),
+                    crate::presentation::materials::SourceMaterialWarmup,
+                    far,
+                    Visibility::Visible,
+                    bevy::light::NotShadowCaster,
+                    NoFrustumCulling,
+                ));
+                if let Some(sort) = sort {
+                    warm.insert((sort, bevy::render::batching::NoAutomaticBatching));
+                }
+                source.warmups.push((warm.id(), false));
                 if mode.is_some_and(|mode| mode.0 != 0) {
                     let warm = commands
                         .spawn((
@@ -446,10 +451,22 @@ pub(crate) fn prepare_instruments(
                         .id();
                     source.warmups.push((warm, true));
                 }
-                (material, caster)
+                Ok::<_, String>((material, caster))
             };
-            let (on, lit_caster) = prepare(&visual.on);
-            let (off, dark_caster) = prepare(&visual.off);
+            let (on, lit_caster) = match prepare(&visual.on) {
+                Ok(value) => value,
+                Err(error) => {
+                    source.state = super::lighting::RenderingState::Failed(error);
+                    return;
+                }
+            };
+            let (off, dark_caster) = match prepare(&visual.off) {
+                Ok(value) => value,
+                Err(error) => {
+                    source.state = super::lighting::RenderingState::Failed(error);
+                    return;
+                }
+            };
             let casters = children
                 .into_iter()
                 .flat_map(|children| children.iter())

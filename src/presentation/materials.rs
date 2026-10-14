@@ -114,6 +114,7 @@ struct SourceTexture {
 pub struct SourceMaterials {
     pub standard_records: HashMap<AssetId<StandardMaterial>, (source::AssetId, u32)>,
     records: Vec<MaterialRecord>,
+    sort_ids: HashMap<(source::AssetId, u32), (u32, i32)>,
     textures: Vec<SourceTexture>,
     texture_indices: HashMap<String, usize>,
     pub handles: HashMap<(source::AssetId, u32, bool, u32), Handle<SourceMaterial>>,
@@ -330,6 +331,7 @@ pub fn load_materials(
     commands.insert_resource(SourceMaterials {
         standard_records: HashMap::new(),
         records: rendering.materials.clone(),
+        sort_ids: sort_identities(&rendering.materials),
         textures,
         texture_indices,
         handles: HashMap::new(),
@@ -445,10 +447,87 @@ fn wrap(value: u8) -> ImageAddressMode {
     }
 }
 
+fn sort_identities(records: &[MaterialRecord]) -> HashMap<(source::AssetId, u32), (u32, i32)> {
+    let mut materials = HashMap::new();
+    let mut shaders = HashMap::new();
+    let mut result = HashMap::new();
+    for record in records {
+        if !matches!(
+            record.state.alpha_mode,
+            source::AlphaMode::Blend | source::AlphaMode::Premultiply | source::AlphaMode::Refract
+        ) {
+            continue;
+        }
+        let mut identity = serde_json::to_value(record).expect("validated material");
+        identity.as_object_mut().unwrap().remove("asset");
+        identity.as_object_mut().unwrap().remove("gltf_material");
+        let next = materials.len() as u32 + 1;
+        let material = *materials.entry(identity.to_string()).or_insert(next);
+        let next = shaders.len() as i32 + 1;
+        let shader = *shaders
+            .entry(format!("{:?}", record.shader_family))
+            .or_insert(next);
+        result.insert((record.asset, record.gltf_material), (material, shader));
+    }
+    result
+}
+
+impl SourceMaterials {
+    /// Startup receivers and prototype recipes share one authored sort identity table.
+    pub(crate) fn sort_data(
+        &self,
+        key: (source::AssetId, u32),
+        renderer: &source::render_lighting::RendererRecord,
+        primitive: &GltfExtras,
+    ) -> Result<Option<super::transparent::SourceSortData>, String> {
+        let record = self
+            .records
+            .iter()
+            .find(|r| (r.asset, r.gltf_material) == key)
+            .ok_or_else(|| format!("Missing sort material {}:{}", key.0.0, key.1))?;
+        let Some(&(material, shader)) = self.sort_ids.get(&key) else {
+            return Ok(None);
+        };
+        #[derive(serde::Deserialize)]
+        struct PrimitiveIdentity {
+            submesh: u16,
+        }
+        let slot = match serde_json::from_str::<PrimitiveIdentity>(&primitive.value) {
+            Ok(value) if value.submesh <= 0x7fff => value.submesh << 1,
+            _ => return Err("Source transparent material slot is invalid".into()),
+        };
+        let layer = u32::from((i32::from(renderer.sorting_layer) + 0x8000) as u16);
+        let order = u32::from((i32::from(renderer.sorting_order) + 0x8000) as u16);
+        Ok(Some(super::transparent::SourceSortData {
+            material_identity: material,
+            glass_source: if record.shader_family == ShaderFamily::StainedGlass {
+                record.source.path_id
+            } else {
+                0
+            },
+            material_key: crate::reference::sorting::material_sort_key(
+                material,
+                record.enable_instancing,
+                0,
+            ),
+            shader_identity: shader,
+            source_material_index: slot,
+            layer_and_order: (layer << 16) | order,
+            queue: if record.state.render_queue < 0 {
+                3000
+            } else {
+                record.state.render_queue as i16
+            },
+            additive: record.shader_family == ShaderFamily::Standard,
+            glass: record.shader_family == ShaderFamily::StainedGlass,
+        }))
+    }
+}
+
 #[derive(serde::Deserialize)]
-struct MaterialIdentity {
-    asset: source::AssetId,
-    gltf_material: u32,
+pub(crate) struct MaterialIdentity {
+    pub asset: source::AssetId,
+    pub gltf_material: u32,
 }
 pub fn bind_authored_materials(
     mut commands: Commands,
@@ -493,8 +572,6 @@ pub fn bind_authored_materials(
     let mut requests = Vec::new();
     let mut variants = HashSet::new();
     let mut transparent_pass_capacity = 0;
-    let mut sort_identities = HashMap::<String, u32>::new();
-    let mut shader_identities = HashMap::<String, i32>::new();
     for (entity, extras, mesh, transform, layers, primitive, renderer) in &primitives {
         let mask = layers.map_or(1, |layers| {
             layers.iter().fold(0u32, |bits, layer| {
@@ -531,56 +608,21 @@ pub fn bind_authored_materials(
                 record.shader_family,
                 ShaderFamily::Standard | ShaderFamily::StainedGlass
             ));
-            #[derive(serde::Deserialize)]
-            struct PrimitiveIdentity {
-                submesh: u16,
-            }
-            let slot = match serde_json::from_str::<PrimitiveIdentity>(&primitive.value) {
-                Ok(value) if value.submesh <= 0x7fff => value.submesh << 1,
-                _ => {
-                    source.state = RenderingState::Failed(
-                        "Source transparent material slot is invalid".into(),
-                    );
+            let data = match source.sort_data(
+                (identity.asset, identity.gltf_material),
+                &renderer.0,
+                primitive,
+            ) {
+                Ok(Some(data)) => data,
+                Ok(None) => unreachable!("checked transparent material"),
+                Err(error) => {
+                    source.state = RenderingState::Failed(error);
                     return;
                 }
             };
-            let mut identity = serde_json::to_value(record).expect("validated material");
-            identity.as_object_mut().unwrap().remove("asset");
-            identity.as_object_mut().unwrap().remove("gltf_material");
-            let next = sort_identities.len() as u32 + 1;
-            let runtime_material = *sort_identities.entry(identity.to_string()).or_insert(next);
-            let next = shader_identities.len() as i32 + 1;
-            let runtime_shader = *shader_identities
-                .entry(format!("{:?}", record.shader_family))
-                .or_insert(next);
-            let layer = u32::from((i32::from(renderer.0.sorting_layer) + 0x8000) as u16);
-            let order = u32::from((i32::from(renderer.0.sorting_order) + 0x8000) as u16);
-            commands.entity(entity).insert((
-                bevy::render::batching::NoAutomaticBatching,
-                super::transparent::SourceSortData {
-                    material_identity: runtime_material,
-                    glass_source: if record.shader_family == ShaderFamily::StainedGlass {
-                        record.source.path_id
-                    } else {
-                        0
-                    },
-                    material_key: crate::reference::sorting::material_sort_key(
-                        runtime_material,
-                        record.enable_instancing,
-                        0,
-                    ),
-                    shader_identity: runtime_shader,
-                    source_material_index: slot,
-                    layer_and_order: (layer << 16) | order,
-                    queue: if record.state.render_queue < 0 {
-                        3000
-                    } else {
-                        record.state.render_queue as i16
-                    },
-                    additive: record.shader_family == ShaderFamily::Standard,
-                    glass: record.shader_family == ShaderFamily::StainedGlass,
-                },
-            ));
+            commands
+                .entity(entity)
+                .insert((bevy::render::batching::NoAutomaticBatching, data));
         }
         let handle = if let Some(handle) = source.handles.get(&key) {
             handle.clone()
@@ -1683,6 +1725,8 @@ pub(crate) fn prepare_lamp_materials(
             &GlobalTransform,
             Option<&SourceShadowMode>,
             Option<&Children>,
+            &super::renderers::SourceRenderer,
+            &GltfExtras,
         ),
         Without<SourceCaster>,
     >,
@@ -1756,7 +1800,7 @@ pub(crate) fn prepare_lamp_materials(
                 receivers: Vec::with_capacity(target.receivers.len()),
             };
             for &entity in &target.receivers {
-                let (mesh, receiver, global, shadow_mode, children) =
+                let (mesh, receiver, global, shadow_mode, children, renderer, primitive) =
                     receivers.get(entity).unwrap();
                 let mask = materials.get(&receiver.0).unwrap().extension.receiver_mask;
                 let inverted = global.affine().matrix3.determinant() < 0.;
@@ -1796,18 +1840,26 @@ pub(crate) fn prepare_lamp_materials(
                         materials.add(authored_material(key, inverted, mask, &authored_materials))
                     })
                     .clone();
-                let warm = commands
-                    .spawn((
-                        mesh.clone(),
-                        MeshMaterial3d(material.clone()),
-                        SourceMaterialWarmup,
-                        far,
-                        Visibility::Visible,
-                        bevy::light::NotShadowCaster,
-                        bevy::camera::visibility::NoFrustumCulling,
-                    ))
-                    .id();
-                source.warmups.push((warm, false));
+                let sort = match authored_materials.sort_data(key, &renderer.0, primitive) {
+                    Ok(sort) => sort,
+                    Err(error) => {
+                        source.state = super::lighting::RenderingState::Failed(error);
+                        return;
+                    }
+                };
+                let mut warm = commands.spawn((
+                    mesh.clone(),
+                    MeshMaterial3d(material.clone()),
+                    SourceMaterialWarmup,
+                    far,
+                    Visibility::Visible,
+                    bevy::light::NotShadowCaster,
+                    bevy::camera::visibility::NoFrustumCulling,
+                ));
+                if let Some(sort) = sort {
+                    warm.insert((sort, bevy::render::batching::NoAutomaticBatching));
+                }
+                source.warmups.push((warm.id(), false));
                 let mut binding = LampReceiverChoice {
                     entity,
                     material,

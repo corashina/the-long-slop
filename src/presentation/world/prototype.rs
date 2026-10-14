@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use crate::presentation::materials::{SourceCaster, SourceMaterial, SourceShadowMode};
 use crate::reference::{AssetId, NodeId, ReferenceManifest, SourceId};
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
-use bevy::gltf::GltfExtras;
+use bevy::gltf::{GltfExtras, GltfMaterialExtras};
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 
 type Receiver = (
@@ -20,6 +20,8 @@ type Receiver = (
     Option<&'static Children>,
     &'static crate::presentation::renderers::SourceRenderer,
     &'static bevy::camera::primitives::Aabb,
+    &'static GltfMaterialExtras,
+    &'static GltfExtras,
 );
 
 /// Imported scene entities that prototypes bind and capture.
@@ -43,6 +45,7 @@ struct MeshRecipe {
     caster: Option<Handle<StandardMaterial>>,
     renderer: crate::presentation::renderers::SourceRenderer,
     bounds: bevy::camera::primitives::Aabb,
+    sort: Option<crate::presentation::transparent::SourceSortData>,
 }
 
 #[derive(Clone)]
@@ -121,6 +124,9 @@ impl Recipe {
                 ));
                 if !mesh.receive_shadows {
                     primitive.insert(bevy::light::NotShadowReceiver);
+                }
+                if let Some(sort) = mesh.sort {
+                    primitive.insert((sort, bevy::render::batching::NoAutomaticBatching));
                 }
                 let primitive = primitive.id();
                 if let Some(caster) = &mesh.caster {
@@ -253,7 +259,8 @@ impl Prototype {
             if !self.nodes.iter().any(|(_, node)| *node == parent.parent()) {
                 return true;
             }
-            let Ok((_, _, _, _, _, mode, _, children, _, _)) = scene.receivers.get(entity) else {
+            let Ok((_, _, _, _, _, mode, _, children, _, _, _, _)) = scene.receivers.get(entity)
+            else {
                 return false;
             };
             mode.0 == 0
@@ -269,6 +276,7 @@ impl Prototype {
         manifest: &ReferenceManifest,
         scene: &SceneQueries,
         warmups: &mut Vec<(Entity, bool)>,
+        source_materials: &crate::presentation::materials::SourceMaterials,
     ) -> Result<Recipe, String> {
         let far = Transform::from_translation(Vec3::splat(1_000_000.));
         let mut nodes: Vec<NodeRecipe> = Vec::with_capacity(self.nodes.len());
@@ -299,24 +307,35 @@ impl Prototype {
                     children,
                     renderer,
                     bounds,
+                    material_extras,
+                    primitive_extras,
                 ) = scene.receivers.get(primitive).unwrap();
                 let caster = children.and_then(|children| {
                     children
                         .iter()
                         .find_map(|child| scene.casters.get(child).ok().map(|m| m.0.clone()))
                 });
-                let warm = commands
-                    .spawn((
-                        mesh.clone(),
-                        material.clone(),
-                        crate::presentation::materials::SourceMaterialWarmup,
-                        far,
-                        Visibility::Visible,
-                        bevy::light::NotShadowCaster,
-                        NoFrustumCulling,
-                    ))
-                    .id();
-                warmups.push((warm, false));
+                let identity: crate::presentation::materials::MaterialIdentity =
+                    serde_json::from_str(&material_extras.value)
+                        .map_err(|error| format!("Prototype sort material: {error}"))?;
+                let sort = source_materials.sort_data(
+                    (identity.asset, identity.gltf_material),
+                    &renderer.0,
+                    primitive_extras,
+                )?;
+                let mut warm = commands.spawn((
+                    mesh.clone(),
+                    material.clone(),
+                    crate::presentation::materials::SourceMaterialWarmup,
+                    far,
+                    Visibility::Visible,
+                    bevy::light::NotShadowCaster,
+                    NoFrustumCulling,
+                ));
+                if let Some(sort) = sort {
+                    warm.insert((sort, bevy::render::batching::NoAutomaticBatching));
+                }
+                warmups.push((warm.id(), false));
                 if let Some(caster) = &caster {
                     let warm = commands
                         .spawn((
@@ -342,6 +361,7 @@ impl Prototype {
                     caster,
                     renderer: renderer.clone(),
                     bounds: *bounds,
+                    sort,
                 });
             }
             nodes.push(NodeRecipe {

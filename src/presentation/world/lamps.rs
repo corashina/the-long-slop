@@ -109,6 +109,7 @@ pub(crate) fn prepare_road_lamp(
     gltfs: Res<Assets<bevy::gltf::Gltf>>,
     mut source: ResMut<SourceLighting>,
     scene: SceneQueries,
+    source_materials: Res<crate::presentation::materials::SourceMaterials>,
 ) {
     if !source.bound
         || source.road_lamps.recipe.is_some()
@@ -181,6 +182,7 @@ pub(crate) fn prepare_road_lamp(
         manifest,
         &scene,
         &mut source.warmups,
+        &source_materials,
     ) {
         Ok(recipe) => recipe,
         Err(error) => {

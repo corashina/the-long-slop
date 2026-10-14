@@ -109,6 +109,7 @@ pub(crate) fn prepare_stations(
     gltfs: Res<Assets<bevy::gltf::Gltf>>,
     mut source: ResMut<SourceLighting>,
     scene: SceneQueries,
+    source_materials: Res<crate::presentation::materials::SourceMaterials>,
 ) {
     if !source.bound || source.stations.ready() || matches!(source.state, RenderingState::Failed(_))
     {
@@ -146,7 +147,13 @@ pub(crate) fn prepare_stations(
         if !prototype.materials_ready(&scene) {
             continue;
         }
-        match prototype.capture(&mut commands, manifest, &scene, &mut source.warmups) {
+        match prototype.capture(
+            &mut commands,
+            manifest,
+            &scene,
+            &mut source.warmups,
+            &source_materials,
+        ) {
             Ok(recipe) => {
                 info!(
                     "Source station cache {index}: {} nodes, {} meshes",
