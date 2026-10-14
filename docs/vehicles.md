@@ -65,7 +65,10 @@ The serialized infinity value does not establish the public WrapMode mapping. So
 Normal browser launch in both cars remains unverified.
 
 The save stores each car's selected gear and engine state, plus both shared assist choices.
-Load restores those values. Pause, capture loss, seat exit, and recovery clear input while keeping selected gears.
+Load restores those values. Pause, capture loss, seat changes, and recovery clear input while keeping selected gears.
+Seat entry suppresses pending shift edges. Seat exit clears ignition holds without a release toggle.
+Automatic rules require a mounted engine; manual selection retains its source conditions.
+Suspension validation accepts target `[0,1]` and nonnegative spring and damping values.
 The gear display uses R, N, or a forward number. Browser acceptance of the seated display remains open.
 
 ## Wheel adapter limits
@@ -82,7 +85,8 @@ Task 4 lacks qualifying source observations. Task 5 remains unscheduled.
 
 ## Verification
 
-Reviewed driving code: `05bbf7bf5726d91bc1a0cdec2adf900753028dc9` on `codex/correct-driving-physics`.
+The final fix on `codex/correct-driving-physics` follows review base `6f8118162ece6d9ee24c811719c0935af433487a`.
+The controller owns its scoped re-review. Earlier full-suite results describe `05bbf7b`.
 Native critical checks cover shift rules, clutch attenuation, signed RPM/stall, both-car seat transitions, and saved gears/assists.
 The full native suite retains 108 known failures. These checks do not establish source handling parity.
 

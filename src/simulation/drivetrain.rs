@@ -47,7 +47,7 @@ impl DrivetrainState {
         controls: DrivingControls,
         edges: u32,
         assists: DrivingAssists,
-        engine: EngineOutput,
+        engine: Option<EngineOutput>,
         wheel_rpm: f32,
         direction: f32,
         vehicle: &VehicleReference,
@@ -65,7 +65,10 @@ impl DrivetrainState {
         let automatic =
             (vehicle.driving.force_automatic || assists.automatic_gears) && !driving.force_manual;
         let mut ignition_request = false;
-        if controlled && automatic {
+        if controlled
+            && automatic
+            && let Some(engine) = engine
+        {
             // AutoShift: direction and input inversion precede torque selection.
             let direction =
                 if direction > -vehicle.auto_move_min && direction < vehicle.auto_move_min {

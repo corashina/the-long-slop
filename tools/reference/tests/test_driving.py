@@ -103,3 +103,17 @@ class DrivingSourceTests(unittest.TestCase):
             return value
         with patch.object(source,'read',side_effect=unresolved_graphic):
             with self.assertRaises(ValueError):recover_driving(source,self.cars,self.wheels)
+
+
+class SuspensionContractTests(unittest.TestCase):
+    def test_exporter_uses_game_suspension_contract_for_current_cars(self):
+        from tools.reference.export import validate_runtime_manifest
+        content = Path('web/assets/reference/manifest.json').read_bytes()
+        validate_runtime_manifest(content)
+        manifest = json.loads(content)
+        self.assertEqual(len(manifest['vehicles']), 2)
+        for vehicle in manifest['vehicles']:
+            invalid = deepcopy(manifest)
+            invalid['wheel_slots'][vehicle['wheel_slots'][0]]['target_position'] = -0.01
+            with self.assertRaisesRegex(ValueError, 'wheel parameters'):
+                validate_runtime_manifest(json.dumps(invalid).encode())

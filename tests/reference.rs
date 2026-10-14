@@ -648,3 +648,47 @@ fn driving_reference_rejects_nonfinite_values_and_unresolved_bindings() {
     manifest.wheel_slots[0].forward_friction.asymptote_slip = 0.1;
     assert!(manifest.validate().is_err());
 }
+
+#[test]
+fn suspension_bounds_accept_endpoints_and_zero_coefficients() {
+    let original =
+        ReferenceManifest::from_json(include_bytes!("../web/assets/reference/manifest.json"))
+            .unwrap();
+    assert_eq!(original.vehicles.len(), 2);
+    let mut cases = vec![
+        (0, -0.01, false),
+        (0, 1.01, false),
+        (0, 0., true),
+        (0, 1., true),
+        (1, -1., false),
+        (1, 0., true),
+        (2, -1., false),
+        (2, 0., true),
+        (3, 0., false),
+        (4, 0., false),
+    ];
+    for field in 0..5 {
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            cases.push((field, value, false));
+        }
+    }
+    for vehicle in &original.vehicles {
+        for &(field, value, valid) in &cases {
+            let mut manifest = original.clone();
+            let wheel = &mut manifest.wheel_slots[vehicle.wheel_slots[0].0 as usize];
+            match field {
+                0 => wheel.target_position = value,
+                1 => wheel.spring = value,
+                2 => wheel.damper = value,
+                3 => wheel.radius = value,
+                _ => wheel.suspension_distance = value,
+            }
+            assert_eq!(
+                manifest.validate().is_ok(),
+                valid,
+                "vehicle {:?}, field {field}, value {value}",
+                vehicle.source
+            );
+        }
+    }
+}

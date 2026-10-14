@@ -864,7 +864,8 @@ impl GarageRuntime {
             self.notice = "";
         }
         self.aim = aim;
-        let seated = self.area.player.seat().is_some();
+        let previous_seat = self.area.player.seat();
+        let seated = previous_seat.is_some();
         let availability = self.area.interaction.available_actions(
             &aim,
             &self.area.player,
@@ -1129,6 +1130,12 @@ impl GarageRuntime {
         if let Some(vehicle) = self.area.player.seat_vehicle() {
             self.vehicle = vehicle;
         }
+        let vehicle_input = if previous_seat != self.area.player.seat() {
+            self.clear_driving_input();
+            FrameInput::default()
+        } else {
+            input
+        };
         let driving = self.area.player.driving();
         let controls = self.driving_input.step(
             if driving {
@@ -1136,7 +1143,7 @@ impl GarageRuntime {
             } else {
                 None
             },
-            input.held,
+            vehicle_input.held,
         );
         if driving && input.pressed & keys::LIGHTS != 0 {
             if let Some(audio) = &mut self.audio
@@ -1155,7 +1162,7 @@ impl GarageRuntime {
             self.step_vehicle(
                 reference,
                 index,
-                input,
+                vehicle_input,
                 driving && index == self.vehicle,
                 controls,
             );
@@ -1354,12 +1361,13 @@ impl GarageRuntime {
                 .sum::<f32>()
                 .sqrt();
         let rolling_rpm = self.physics.driven_wheel_rpm(index);
+        let engine_present = self.area.items.mounted(engine_reference.item);
         let vehicle = &mut self.vehicles[index];
         let drivetrain = vehicle.drivetrain.step(
             controls,
             input.pressed,
             self.driving_assists,
-            vehicle.engine_output,
+            engine_present.then_some(vehicle.engine_output),
             rolling_rpm,
             direction,
             source,
@@ -1393,7 +1401,7 @@ impl GarageRuntime {
         let was_running = vehicle.engine_output.running;
         vehicle.engine_output = vehicle.engine.step(
             EngineInput {
-                engine_present: self.area.items.mounted(engine_reference.item),
+                engine_present,
                 radiator_present: self.area.items.mounted(engine_reference.coolant_tank),
                 ignition_held,
                 ignition_pressed,
@@ -1520,13 +1528,17 @@ impl GarageRuntime {
 
     pub fn clear_input(&mut self) {
         self.sleep.cancel_charge();
+        self.clear_driving_input();
+        self.area.interaction.cancel_input();
+    }
+
+    fn clear_driving_input(&mut self) {
         self.driving_input.clear();
         for vehicle in &mut self.vehicles {
             vehicle.ignition_held = false;
             vehicle.engine.clear_input();
             vehicle.engine_output.starter = false;
         }
-        self.area.interaction.cancel_input();
     }
 
     /// Moves the current vehicle, its cargo, and a walking player back to the road.
@@ -1779,3 +1791,6 @@ fn transport_body(
 fn start_sample(seed: u64, attempt: u64) -> f32 {
     (crate::world::hash(seed ^ attempt) >> 40) as f32 / 16_777_216.0
 }
+
+#[cfg(test)]
+mod transition_tests;

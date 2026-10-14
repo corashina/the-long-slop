@@ -27,7 +27,7 @@ fn manual_shift_requires_source_clutch_threshold() {
                 },
                 keys::GEAR_1,
                 MANUAL,
-                EngineOutput::default(),
+                Some(EngineOutput::default()),
                 0.,
                 0.,
                 v,
@@ -43,7 +43,7 @@ fn manual_shift_requires_source_clutch_threshold() {
             },
             keys::GEAR_6,
             MANUAL,
-            EngineOutput::default(),
+            Some(EngineOutput::default()),
             0.,
             0.,
             v,
@@ -70,7 +70,7 @@ fn reverse_neutral_and_clutch_route_signed_torque_once() {
             },
             keys::REVERSE,
             MANUAL,
-            engine,
+            Some(engine),
             100.,
             0.,
             v,
@@ -98,7 +98,7 @@ fn reverse_neutral_and_clutch_route_signed_torque_once() {
             },
             keys::NEUTRAL,
             MANUAL,
-            engine,
+            Some(engine),
             100.,
             0.,
             v,
@@ -130,7 +130,7 @@ fn assists_keep_simultaneous_pedals_and_source_direction_rules() {
             },
             keys::REVERSE,
             r.driving.default_assists,
-            engine,
+            Some(engine),
             100.,
             0.,
             v,
@@ -146,7 +146,7 @@ fn assists_keep_simultaneous_pedals_and_source_direction_rules() {
             },
             0,
             r.driving.default_assists,
-            engine,
+            Some(engine),
             100.,
             0.,
             v,
@@ -162,7 +162,7 @@ fn assists_keep_simultaneous_pedals_and_source_direction_rules() {
             },
             0,
             MANUAL,
-            engine,
+            Some(engine),
             -100.,
             0.,
             v,
@@ -187,7 +187,7 @@ fn release_and_seat_exit_keep_selected_gear() {
             },
             keys::GEAR_2,
             MANUAL,
-            EngineOutput::default(),
+            Some(EngineOutput::default()),
             0.,
             0.,
             v,
@@ -249,7 +249,7 @@ fn source_assist_thresholds_force_manual_and_unoccupied_rules() {
                 },
                 0,
                 r.driving.default_assists,
-                EngineOutput::default(),
+                Some(EngineOutput::default()),
                 100.,
                 0.,
                 vehicle,
@@ -267,7 +267,7 @@ fn source_assist_thresholds_force_manual_and_unoccupied_rules() {
             DrivingControls::default(),
             keys::GEAR_2,
             auto_clutch,
-            EngineOutput::default(),
+            Some(EngineOutput::default()),
             -100.,
             0.,
             vehicle,
@@ -286,7 +286,7 @@ fn source_assist_thresholds_force_manual_and_unoccupied_rules() {
             },
             keys::REVERSE,
             r.driving.default_assists,
-            EngineOutput::default(),
+            Some(EngineOutput::default()),
             100.,
             0.,
             vehicle,
@@ -301,7 +301,7 @@ fn source_assist_thresholds_force_manual_and_unoccupied_rules() {
             DrivingControls::default(),
             keys::REVERSE,
             auto_clutch,
-            EngineOutput::default(),
+            Some(EngineOutput::default()),
             100.,
             0.,
             vehicle,
@@ -316,7 +316,7 @@ fn source_assist_thresholds_force_manual_and_unoccupied_rules() {
             },
             keys::REVERSE,
             auto_clutch,
-            EngineOutput::default(),
+            Some(EngineOutput::default()),
             100.,
             0.,
             vehicle,
@@ -341,4 +341,53 @@ fn paused_assist_changes_normalize_dependency_and_keep_gears() {
     .unwrap();
     assert_eq!(g.driving_assists, MANUAL);
     assert!(g.vehicles.iter().all(|v| v.drivetrain.gear() == 1));
+}
+
+#[test]
+fn absent_engine_skips_automatic_rules_but_keeps_manual_selection() {
+    let mut r = common::reference();
+    for v in &mut r.vehicles {
+        v.dont_ignite_with_throttle_in_automatic = false;
+        let mut d = DrivetrainState::new(v);
+        let manual = DrivingAssists {
+            automatic_clutch: true,
+            automatic_gears: false,
+        };
+        let out = d.step(
+            DrivingControls::default(),
+            keys::GEAR_2,
+            manual,
+            None,
+            100.,
+            0.,
+            v,
+            &r.driving,
+            true,
+        );
+        assert_eq!(out.gear, 3, "manual selection without engine");
+        for (throttle, brake) in [(1., 0.), (0., 1.), (0.5, 0.75), (0., 0.)] {
+            let out = d.step(
+                DrivingControls {
+                    throttle,
+                    brake,
+                    clutch: 0.2,
+                    ..Default::default()
+                },
+                0,
+                r.driving.default_assists,
+                None,
+                100.,
+                0.,
+                v,
+                &r.driving,
+                true,
+            );
+            assert_eq!(out.gear, 3, "absent engine must retain selected gear");
+            assert_eq!(
+                (out.throttle, out.brake, out.engagement),
+                (throttle, brake, 0.8)
+            );
+            assert!(!out.ignition_request);
+        }
+    }
 }

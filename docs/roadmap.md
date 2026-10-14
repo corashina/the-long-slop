@@ -88,7 +88,9 @@ We added no new storage engine, save migration, multiplayer, or deployment work.
 ## Driving branch: partial acceptance
 
 The separate `codex/correct-driving-physics` branch implements source pedal ramps, manual gears, clutch, and two saved driving assists.
-Reviewed product code: `05bbf7bf5726d91bc1a0cdec2adf900753028dc9`. Master does not contain this branch.
+The final fix follows review base `6f8118162ece6d9ee24c811719c0935af433487a`. Master does not contain this branch.
+It clears seat-transition input, validates suspension bounds, and gates automatic rules on mounted-engine presence.
+The controller owns the scoped re-review. Earlier full-suite results describe `05bbf7b`.
 Tasks 1-3 passed code review. Their normal driving acceptance remains open.
 The native suite retains 108 known failures. The aggregate check stops at the existing global format failure.
 The exporter gate also fails. Three installed-source physical checks remain unresolved outside the native baseline comparison.

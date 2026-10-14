@@ -1864,7 +1864,10 @@ impl ReferenceManifest {
                     && r.hub.forward_stiffness >= 0.0
                     && r.hub.sideways_stiffness >= 0.0
                     && r.radius > 0.0
-                    && r.suspension_distance > 0.0,
+                    && r.suspension_distance > 0.0
+                    && r.spring >= 0.0
+                    && r.damper >= 0.0
+                    && (0.0..=1.0).contains(&r.target_position),
                 "wheel parameters",
             )?;
         }

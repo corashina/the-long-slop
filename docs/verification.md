@@ -3,10 +3,36 @@
 ## Driving branch verification: 2026-10-14
 
 Status: partial acceptance on `codex/correct-driving-physics`.
-Reviewed code: `05bbf7bf5726d91bc1a0cdec2adf900753028dc9`.
-Reviewed tree: `be156d38886e62c60180c5a948db30e923631e53`.
-Task 6 changes documentation. The product code and final Task 3 package remain unchanged.
+The final fix follows review base `6f8118162ece6d9ee24c811719c0935af433487a`.
+The whole-branch review required seat-transition and suspension-bound fixes.
+The controller also traced missing-engine ownership and required an automatic-control fix.
+The implementation addresses these findings. Scoped re-review and current-package browser checks remain with the controller.
+The earlier full suite ran on `05bbf7bf5726d91bc1a0cdec2adf900753028dc9`, tree `be156d38886e62c60180c5a948db30e923631e53`.
+Final-fix checks cover the changed behavior; they do not replace that full-suite record.
 Earlier entries below describe their named revisions. The current driving save schema is 2.
+
+### Final fix checks
+
+Seat changes clear pedal ramps, pending shift edges, and ignition holds before vehicle input routing.
+The engine clears its input without a release event. Selected gears and mechanical state remain per car.
+The transition path retains the existing push-grip owner.
+`DrivetrainState::step` takes `Option<EngineOutput>` from the existing mounted-engine check.
+`None` skips automatic gear, pedal inversion, ignition, and RPM clutch rules. Manual rules keep their source conditions.
+Rust rejects suspension targets outside `[0,1]` and negative spring or damping values.
+It accepts both target endpoints and zero coefficients. Radius and travel must remain positive.
+The exporter calls this same validator before accepting runtime output.
+The feedback test captures its expected invalid-audio warning during setup and restores `console.warn` in `finally`.
+
+Fresh logs and exact commands reside in [final-fix evidence](../.cache/driving-physics/acceptance/final-fix/commands.jsonl).
+Red checks reproduce pending entry shifts, an exit ignition toggle, invalid suspension acceptance, and automatic shifts without an engine.
+Green checks cover both cars through real `GarageRuntime::step` entry and exit, plus normal engine-part removal.
+The lifecycle fixture isolates collisions and door access. It does not establish native driving or garage access parity.
+The suspension table validates both current exported cars through the public manifest contract.
+Three Python checks pass, including accepted exports and rejection through the exporter's Rust validation path.
+The audio and feedback selection passes 37 tests. Production warnings remain enabled.
+Full native compilation and the release package checks use the final fix; see the final-fix command receipt.
+The earlier full native result remains 261 passed, 108 failed, and 66 ignored on `05bbf7b`.
+The final fix does not repeat that suite or classify its unresolved failures.
 
 ### Gameplay rules
 
@@ -99,7 +125,8 @@ We cannot claim Unity WheelCollider behavior, matched stopping distances, or sou
 
 ### Browser input and lifecycle
 
-Controller route: Codex IAB `browser2/tab2`, loopback port 4187, final package below.
+Earlier controller route: Codex IAB `browser2/tab2`, loopback port 4187, Task 3 package.
+These observations predate the final fix. The controller owns the current-package browser check.
 The tool did not provide an exact browser version.
 Desktop viewport: 1280x720. Narrow viewport: 800x600. The controller restored the default viewport afterward.
 The controller used normal UI actions and the existing read-only render audit. The controller injected no product state.
@@ -127,8 +154,14 @@ The schema 2 test save remains in localhost:4187 storage.
 
 ### Code and artifact identities
 
-Task 6 rechecked all twelve artifact hashes and byte lengths against the Task 3 package.
-All match. The [full hash receipt](../.cache/driving-physics/acceptance/hashes-checked.json) identifies each file.
+The final fix rebuilds WASM: 60,419,042 bytes, SHA256 `c271113f1d771898216832d9ea3e1edb560e8f580c07d8ffc5525d230963906f`.
+The bindings remain 109,237 bytes, SHA256 `eb7ebf28feb5c37de871cd76d6255ba4ba851a4f894867697a884db894b0662f`.
+Eleven of the twelve artifact hashes match Task 3; only WASM changed. The current package receipt is [final-fix hashes](../.cache/driving-physics/acceptance/final-fix/hashes.json).
+Its [source receipt check](../.cache/driving-physics/acceptance/final-fix/source-receipts.json) retains the accepted inputs.
+We reuse the unchanged 262,784-record source archive scan.
+
+The following table records the earlier Task 3 package. Task 6 rechecked its twelve hashes and byte lengths.
+They matched at that revision. The [full hash receipt](../.cache/driving-physics/acceptance/hashes-checked.json) identifies each file.
 Four accepted source/library receipts also remain unchanged; see
 [source receipts](../.cache/driving-physics/acceptance/source-receipts-checked.json).
 
@@ -141,8 +174,8 @@ Four accepted source/library receipts also remain unchanged; see
 | `web/pkg/my_summer_slop.js` | 109237 | `eb7ebf28feb5c37de871cd76d6255ba4ba851a4f894867697a884db894b0662f` |
 | `web/pkg/my_summer_slop_bg.wasm` | 60418464 | `f2585cc290d6e3b3a377c4367c006e33a8884e2d8e98b92c8bf6bf7126d658b1` |
 
-The controller owns the fresh whole-branch review after the documentation commit.
-This task records scoped reviews and a documentation self-review. It does not complete that review or driving acceptance.
+The whole-branch review reported changes required. The final fix addresses its confirmed findings.
+The controller owns one scoped re-review. Driving acceptance remains incomplete.
 Retain the isolated worktree and evidence. Merge and push remain outside this task.
 
 ## Rendering merge: 2026-10-12

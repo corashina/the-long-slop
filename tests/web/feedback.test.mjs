@@ -53,7 +53,14 @@ test('light_switch_uses_source_icon_without_changing_mechanism_feedback',()=>{
 
 test('radio_feedback_uses_source_values_without_playback',async()=>{
  const {createAudio,installAudioBridge}=await import('../../web/audio.js');
- const a=createAudio({}),bridge={};installAudioBridge(bridge,a);
+ const warnings=[],originalWarn=console.warn;
+ let a;
+ console.warn=message=>warnings.push(message);
+ try{
+  a=createAudio({});
+  assert.deepEqual(warnings,['Audio disabled: Invalid audio data']);
+ }finally{console.warn=originalWarn;}
+ const bridge={};installAudioBridge(bridge,a);
  bridge.gameAudioRadio(false,false,94.5,.3,0,0,0,0,0,0,0,0,0);
  const m=new FeedbackState(),r={...tank(0),noText:true,name:'RadioColVolume',actions:128,context:11,radioVolume:a.radioFrame.volume};
  assert.equal(m.update(r),true);assert.equal(m.fluidText,'Volume: 03');assert.equal(m.targetName,'Volume +/-');assert.equal(m.update(r),false);

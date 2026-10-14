@@ -12,6 +12,12 @@ REA 6.4.0 identifies this assembly, but its public member reader cannot complete
 ## Driving branch update: 2026-10-14
 
 Reviewed code `05bbf7bf5726d91bc1a0cdec2adf900753028dc9` implements source pedal ramps, manual gears, clutch, and saved assists.
+The final fix follows review base `6f8118162ece6d9ee24c811719c0935af433487a`; the controller owns its scoped re-review.
+It clears transient input on seat changes and enforces the suspension bounds through the shared runtime/exporter validator.
+The controller traced `carscript.cs:1252-1269`: the car fills or clears `Engine` from `EngineSlot.part`.
+`AutoShift` at lines 2081-2086 returns when `Engine` is null.
+The port now supplies `Option<EngineOutput>` from the existing mounted-engine owner and skips automatic rules for `None`.
+Manual shift and push-grip rules keep their owners. Source reference-refresh timing remains unmeasured.
 The exporter records required controls, startup rules, wheel fields, and source method hashes.
 Primary evidence: [driving receipt](../../web/assets/reference/driving-evidence.json),
 [recovery code](../../tools/reference/driving.py), and [drivetrain owner](../../src/simulation/drivetrain.rs).
