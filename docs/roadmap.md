@@ -13,13 +13,14 @@ We fixed hidden grass preparation and generated attachment readiness in `8d4341f
 We fixed the final review's texture receipt cleanup finding in `103bee7`.
 The full integration review and scoped re-review have no open Critical or Important findings.
 We preserved local transparent sorting and warmup filtering through the replacement renderer.
-We added no features or dependencies during the final merge.
+We added no features or dependencies during the final source-world merge.
 
 ### Changes in master
 
 | Area | Implemented changes |
 | --- | --- |
 | Vehicles and interaction | Two imported cars, vehicle selection, carry, parts, mechanisms, and source recovery |
+| Driving controls and transmission | Source pedal ramps, manual gears, clutch, two saved assists, control help, and gear feedback |
 | Rendering | Shared lighting, shadows, probes, camera effects, transparent glass, live mirrors, and source plates |
 | Audio | Source vehicle, interaction, weather, and Lada radio audio |
 | Survival and weather | Existing consumables, survival state, sleep, weather, storm lighting, and particles |
