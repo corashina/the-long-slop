@@ -1,5 +1,150 @@
 # Verification record
 
+## Driving branch verification: 2026-10-14
+
+Status: partial acceptance on `codex/correct-driving-physics`.
+Reviewed code: `05bbf7bf5726d91bc1a0cdec2adf900753028dc9`.
+Reviewed tree: `be156d38886e62c60180c5a948db30e923631e53`.
+Task 6 changes documentation. The product code and final Task 3 package remain unchanged.
+Earlier entries below describe their named revisions. The current driving save schema is 2.
+
+### Gameplay rules
+
+Tasks 1–3 passed their scoped code reviews.
+The branch adds required source controls/wheel records, fixed-step pedal ramps, manual gears, clutch, and two saved assists.
+The engine owner applies clutch engagement once. The drivetrain applies gear and final-drive ratios once.
+The wheel owner distributes final axle torque by active driven-wheel count and installed radius.
+Ordinary wheel updates add no allocation or physics object creation.
+The branch removes obsolete gear/force APIs and adds no old save reader or migration.
+
+Critical native checks cover engine/stall rules, transmission order, both-car seat transitions, saved gears/assists, and obsolete-save rejection.
+Rust validates a save before candidate creation and scene publication.
+The browser Prepare decoder rejects obsolete fields through strict decoding before candidate creation.
+That browser path bypasses `SaveSnapshot::from_json`'s version preflight; the independent native check covers the preflight.
+See [source controls and adapter limits](vehicles.md#driving-controls) and the
+[Task 3 review](../.superpowers/sdd/2026-10-14-correct-driving-physics/task-3-review.md).
+
+At exact zero driven-wheel RPM, the endpoint-clamped port can retain neutral.
+Its fallback samples exceed both cars' curve endpoints. The native direction check uses 100 RPM.
+Source `CalcTorque` calls `torqueCurve.Evaluate(_wrpm)` without a clamp or floor wrapper.
+Serialized `m_PreInfinity` and `m_PostInfinity` values of 2 do not establish the public `WrapMode` mapping.
+We have no measured native curve behavior outside the source key times. Source boundary parity remains conditional.
+The Skoda Rust test passes movement assertions within a failing test. We observed no launch deadlock.
+Normal-input browser launch for both cars remains unverified.
+
+### Commands and exits
+
+Workdir: `C:/Users/Corashina/.codex/worktrees/correct-driving-physics/the-long-drive-wasm`.
+Fresh outputs and retained Task 3 evidence reside under `.cache/driving-physics/acceptance/`.
+The [exact commands](../.cache/driving-physics/acceptance/commands.md) record Docker mounts, toolchain identity, and bounded concurrency.
+The [gate receipt](../.cache/driving-physics/acceptance/gates.json) records each fresh command and exit.
+
+| Gate | Exit | Result | Evidence under acceptance/ |
+| --- | ---: | --- | --- |
+| `./scripts/check.ps1` | 1 | 96 web checks pass; existing module-order format failure stops native/build stages | `check.log` |
+| Python exporter discovery | 1 | 194 run: 181 pass, four failures, eight errors, one skip | `exporter.log`, `exporter-triage.md` |
+| Source archive `--stage source --verify` | 0 | Accepted archive verifies without a source receipt change | `source-verify.log` |
+| Runtime `--stage runtime --verify` | 0 | Full library and runtime contract verify; 798.635 seconds | `runtime-verify.log` |
+| Installed-source ignored selection | 101 | Initial 13 pass/five fail; two mount retries pass; three physical failures remain | `installed-source.log` |
+| Two mount-blocked source checks, corrected read-only mounts | 0 each | Both pass; original selection remains failed | `mount-retry.json`, two retry logs |
+| Full native compile and suite, reused final code | 101 | Compile passes; 261 pass, 108 fail, 66 ignored | `reused-layer-3/native-full.log` |
+| Critical driving sequence and WASM check, reused final code | 0 | Engine nine, drivetrain six, driving saves two, obsolete schema one pass | `reused-layer-3/critical-green.log` |
+| Full web/HUD, reused final code | 0 | 97 pass | `reused-layer-3/web-full.log` |
+| Release build and wasm-bindgen, reused final package | 0 | Same `scripts/build.ps1` command body, with two compiler jobs | `reused-layer-3/package.log` |
+| Documentation links, fragments, scope, and whitespace | 0 | New links/fragments, five-file scope, and whitespace pass | `docs-check.log`, `diff-check.log` |
+
+The 108 native failure names match the retained Task 0 inventory through the Task 2/3 comparisons.
+The [native comparison](../.cache/driving-physics/acceptance/reused-layer-3/native-comparison.json) has empty added/removed lists.
+The aggregate check remains unmet. Focused checks do not replace its failed format/native gates.
+
+The exporter suite has no complete Task 0 baseline.
+Its failures concern audio fixture data, resource hashes, selected scenes, fleet counts, a switch link, and shelter validation.
+The failing test files and error-producing validator functions are unchanged across the branch.
+Relevant shared fixture sections also match the pre-task values.
+These facts do not establish an unchanged full exporter baseline.
+The [exporter triage](../.cache/driving-physics/acceptance/exporter-triage.md) preserves all twelve names and causes.
+The installed-source selection ran eighteen Rust cases using exported assets.
+Two checks passed after corrected read-only mounts for external Windows junction targets.
+The initial aggregate exit remains 101; fifteen test cases pass across the run and affected retries.
+Three physical cases remain unresolved: parked drift, failure to sleep before the exit route, and inactive Lada trip accumulation.
+The Skoda test passes its movement assertions before failing the inactive Lada bound.
+These ignored cases have no complete prior source-test baseline. They remain separate from the 108-name native comparison.
+Read the [source-test triage](../.cache/driving-physics/acceptance/installed-source-triage.md) for names, values, and retry commands.
+Task 6 changes no product code or failing assertion.
+
+### Source and physical comparison
+
+Reference: Steam build `11140890`, Unity `2021.3.18f1`.
+Primary evidence: [driving receipt](../web/assets/reference/driving-evidence.json),
+[source recovery](../tools/reference/driving.py), and [driving research](research/2026-10-11-rea-driving-audit.md#driving-branch-update-2026-10-14).
+Accepted source identities:
+
+| Input | SHA256 |
+| --- | --- |
+| `Assembly-CSharp.dll` | `9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e` |
+| `Assembly-CSharp.cs` | `22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee` |
+
+The [source measurement audit](../.superpowers/sdd/2026-10-14-correct-driving-physics/source-measurement-audit.md)
+found zero qualifying repeated native observations for each required metric, for both cars.
+The user confirmed that no source measurements are available.
+Acceleration, coast-down, service braking, combined braking, turning, suspension settling, tire/rim changes, and empty hubs lack measured intervals.
+Static fields, formula probes, Rust fixtures, and browser audits supply no native repeatability or measurement resolution.
+Task 4 cannot pass. Task 5 remains unscheduled. Measured source deltas are unavailable.
+The retained [audit copy](../.cache/driving-physics/acceptance/source-measurement-audit.md) records inspected locations and source gate gaps.
+
+The adapter supplies eligible summed brake inputs.
+The stock solver excludes simultaneous motor force and brake impulse on one wheel.
+Tire/rim friction, hub support, suspension, and wheel spin remain incomplete.
+We cannot claim Unity WheelCollider behavior, matched stopping distances, or source handling parity.
+
+### Browser input and lifecycle
+
+Controller route: Codex IAB `browser2/tab2`, loopback port 4187, final package below.
+The tool did not provide an exact browser version.
+Desktop viewport: 1280x720. Narrow viewport: 800x600. The controller restored the default viewport afterward.
+The controller used normal UI actions and the existing read-only render audit. The controller injected no product state.
+Read the [route log](../.cache/driving-physics/acceptance/reused-layer-3/controller-browser.md) and retained screenshots.
+
+| Check | Observed result |
+| --- | --- |
+| Reload and New game | Ready garage; both visible assists true |
+| Obsolete schema 1 Load | Rejected before candidate publication; paused scene retained |
+| Disable Automatic clutch | Both choices false; Automatic gears disabled |
+| Paused Save and full reload Load | Save complete; Game loaded; false/false restored |
+| Desktop and narrow Controls | Controls fit; source key help wraps within the scroll area |
+| Pause-menu New game after Load | Visible assists reset from false/false to true/true |
+| Recover | Selected once; no visible result proved recovery |
+| Continue | IAB refused real pointer capture |
+| Read-only render audit | Ready, scene 2, master state 1; warmup false, mirrors true, motion validated |
+
+Capture error: `The root document of this element is not valid for pointer lock`.
+The read-only motion flag describes renderer readiness. It does not establish a driving route.
+No normal launch, both-car continuous driving, manual/assisted shifts, pedal releases, neutral coast, reverse, or live stall/restart route passed.
+The 30/60/120 FPS checks cover fixed-step input samples in native tests. Browser handling routes remain unavailable.
+Live gear feedback, lights/instruments/audio during driving, part exchange, seat switching, recovery, restart, and rebasing remain unverified here.
+The old-save error persists when Controls opens until another menu action resets it; the controller retained that screenshot.
+The schema 2 test save remains in localhost:4187 storage.
+
+### Code and artifact identities
+
+Task 6 rechecked all twelve artifact hashes and byte lengths against the Task 3 package.
+All match. The [full hash receipt](../.cache/driving-physics/acceptance/hashes-checked.json) identifies each file.
+Four accepted source/library receipts also remain unchanged; see
+[source receipts](../.cache/driving-physics/acceptance/source-receipts-checked.json).
+
+| File | Bytes | SHA256 |
+| --- | ---: | --- |
+| `web/assets/reference/manifest.json` | 15962156 | `ac34fccde1d23e0ae773d1aa22ec6134d0822670c81518b0ea6125c63a238bf4` |
+| `web/assets/reference/driving-evidence.json` | 19734 | `8cebfdc2b0c040437c2cfc9e490b929b565500ea9f0ea3fb6d13d6b918d1d04c` |
+| `web/assets/reference/library-selection.json` | 1214615 | `7ea4d10cd024fedb66d89330ce8ad3eb375560d3f8eb918e789133552ecda666` |
+| `tests/common/reference.json` | 10534215 | `c81a1900e641854d8ff3cfd74b1a983d56b89992a1e0cc92578f47209bcc0e50` |
+| `web/pkg/my_summer_slop.js` | 109237 | `eb7ebf28feb5c37de871cd76d6255ba4ba851a4f894867697a884db894b0662f` |
+| `web/pkg/my_summer_slop_bg.wasm` | 60418464 | `f2585cc290d6e3b3a377c4367c006e33a8884e2d8e98b92c8bf6bf7126d658b1` |
+
+The controller owns the fresh whole-branch review after the documentation commit.
+This task records scoped reviews and a documentation self-review. It does not complete that review or driving acceptance.
+Retain the isolated worktree and evidence. Merge and push remain outside this task.
+
 ## Rendering merge: 2026-10-12
 
 The user authorized a local merge of rendering commit `67798ec` into master `a5b9778`.

@@ -9,6 +9,39 @@ Source input smoothing is the best first change. It does not require a new physi
 Keep ILSpy, dnfile/dncil, and UnityPy as the main research tools.
 REA 6.4.0 identifies this assembly, but its public member reader cannot complete the inspection.
 
+## Driving branch update: 2026-10-14
+
+Reviewed code `05bbf7bf5726d91bc1a0cdec2adf900753028dc9` implements source pedal ramps, manual gears, clutch, and saved assists.
+The exporter records required controls, startup rules, wheel fields, and source method hashes.
+Primary evidence: [driving receipt](../../web/assets/reference/driving-evidence.json),
+[recovery code](../../tools/reference/driving.py), and [drivetrain owner](../../src/simulation/drivetrain.rs).
+The source assembly hash remains `9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e`.
+The accepted decompilation hash is `22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee`.
+
+The physical comparison gate remains incomplete.
+The [source measurement audit](../../.superpowers/sdd/2026-10-14-correct-driving-physics/source-measurement-audit.md)
+found zero qualifying repeated native observations for both cars across eight required metrics.
+The user confirmed no source measurements are available.
+Installed asset reads and formula probes supply static evidence. They supply no measured native behavior or tolerance intervals.
+Task 4 cannot pass. Task 5 remains unscheduled.
+
+The adapter now sums eligible engine, service, and handbrake inputs.
+The stock solver still excludes simultaneous motor force and brake impulse per wheel.
+Tire/rim response, empty hubs, suspension, and wheel spin remain incomplete.
+
+The endpoint-clamped port can retain neutral at exact zero driven-wheel RPM.
+Both cars' fallback samples exceed their torque-curve endpoints. The native direction check uses 100 RPM.
+Source `CalcTorque` calls `torqueCurve.Evaluate(_wrpm)` without a clamp or floor wrapper.
+Serialized `m_PreInfinity` and `m_PostInfinity` values of 2 do not prove the public `WrapMode` mapping.
+Native curve extrapolation remains unmeasured. Source boundary parity stays conditional.
+The Skoda Rust test passes movement assertions within a failing route. We observed no launch deadlock.
+The controller could not verify normal launch because IAB refused pointer capture.
+
+Read [current verification](../verification.md#driving-branch-verification-2026-10-14) for package identities, command exits, browser conditions, and remaining gaps.
+Current exported-asset Rust checks retain three physical failures: parked drift, preparation sleep, and inactive-car trip accumulation.
+The Skoda test passes movement assertions before its inactive-car failure. No complete earlier installed-source baseline classifies these failures.
+The sections below retain the 2026-10-11 audit and its later steering checkpoint.
+
 ## Tool results
 
 REA ran from `.cache/rea-audit/runtime/`. Node was `24.18.0`; npm was `11.16.0`.
@@ -22,7 +55,7 @@ Installation used `--ignore-scripts`. No agent registration or product dependenc
 | Targeted internal reader probe | 136 method bodies present; no reported decode issues |
 | Independent dnfile/dncil comparison | All 136 selected methods passed |
 | Fresh ILSpy reconstruction | Eight selected types recovered |
-| Live Unity parameter reads | Selected car, global grip values, and steering sliders recovered |
+| Installed asset parameter reads | Selected car, global grip values, and steering sliders recovered |
 
 The public member command returned exit code zero and `ok: true`, despite unavailable coverage.
 Check coverage and issues before using an REA result.
@@ -52,7 +85,7 @@ Selected types: `carscript`, `inputscript`, `wheelgraphicsscript`, `enginescript
 ILSpy reads the installed assembly with cached `ICSharpCode.Decompiler` version `11.1.0.9782`.
 Its C# reconstruction remains an interpretation, separate from the bytecode checks.
 
-## Confirmed differences
+## Historical differences at 7e333eb
 
 ### Keyboard input
 
@@ -103,7 +136,7 @@ It discards other contributions when more than one applies.
 The exported Lada has four service-brake wheels, two handbrake wheels, and two driven wheels.
 Preserve source wheel eligibility when correcting this combination.
 
-## First change to design
+## Historical first change
 
 Add source keyboard input smoothing before drivetrain and steering updates.
 Recover the default steering rate through the exporter. Carry it in the typed manifest.
@@ -155,7 +188,7 @@ The runtime rejects missing, nonpositive, or nonfinite rates. Regenerate older e
 `simulation/input.rs` keeps steering state and advances it at 60 Hz without allocation.
 The runtime resets that state on seat changes, pause, capture loss, recovery, and restart.
 Walking and push-grip steering retain their existing input paths.
-Throttle ramps, bare-rim grip, and combined braking remain separate changes.
+At that checkpoint, throttle ramps, bare-rim grip, and combined braking remained separate changes.
 
 Verification passed: 162 native tests, 32 installed-source checks, 20 browser unit tests, and 19 exporter tests.
 The release WASM package and isolated Linux browser startup check passed.

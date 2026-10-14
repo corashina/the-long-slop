@@ -85,6 +85,27 @@ We have not measured retained objects or runtime memory for the merged world.
 We removed obsolete generator paths from the integration. Acceptance of the replacement remains open.
 We added no new storage engine, save migration, multiplayer, or deployment work.
 
+## Driving branch: partial acceptance
+
+The separate `codex/correct-driving-physics` branch implements source pedal ramps, manual gears, clutch, and two saved driving assists.
+Reviewed product code: `05bbf7bf5726d91bc1a0cdec2adf900753028dc9`. Master does not contain this branch.
+Tasks 1-3 passed code review. Their normal driving acceptance remains open.
+The native suite retains 108 known failures. The aggregate check stops at the existing global format failure.
+The exporter gate also fails. Three installed-source physical checks remain unresolved outside the native baseline comparison.
+
+The controller verified assist choices, dependency, paused save, full reload, restore, and visible New game assist defaults.
+IAB refused pointer capture. Normal launch, both-car driving, and 30/60/120 FPS routes remain unverified.
+At exact zero wheel RPM, the port can retain neutral. Source curve extrapolation remains unverified.
+Normal launch needs accepted input evidence. The failing Skoda Rust route passes its movement assertions.
+
+Task 4 cannot pass. The repository audit found no qualifying source measurements. The user confirmed none are available.
+Task 5 remains unscheduled. Keep tire/rim grip, empty hubs, suspension, wheel spin, and combined-brake response incomplete.
+The adapter supplies summed brake inputs. The stock solver still excludes simultaneous motor force and brake impulse per wheel.
+
+Read the [driving verification](verification.md#driving-branch-verification-2026-10-14) and
+[source gate audit](../.superpowers/sdd/2026-10-14-correct-driving-physics/source-measurement-audit.md).
+Merging and pushing require a separate request.
+
 ## Full-game feature gaps
 
 Reference: installed Steam build `11140890`. This backlog records gaps beyond the implemented layers above.
@@ -98,7 +119,7 @@ The backlog does not expand approved implementation scope. Each new feature need
 | Buildings and exploration | Deferred branch | Check source buildings, interiors, landmarks, placement, content coverage, and collision before merging. |
 | World population | Partial | Integrate source loot placement; add excluded abandoned vehicles, items, and encounters. |
 | Full vehicle range | Partial | Add vehicles beyond the Lada and Skoda, including diesel, two-stroke, automatic, bus, and bike mechanics. |
-| Driving physics | Partial | Add manual gears and clutch; match throttle ramps, tire friction, bare-rim behavior, suspension, and combined braking. |
+| Driving physics | Partial branch | Verify launch and both-car driving; collect native source measurements before wheel, rim, hub, suspension, and combined-brake work. |
 | Inventory and clothing | Missing | Add inventory slots, equipped items, wearables, and player customization. |
 | Cleaning and painting | Missing | Add brushes, sponges, spray paint, and source condition changes. |
 | Cargo and towing | Partial | Add general cargo locking, attachment objects, towing hooks, and trailers. Current storage locking covers flashlights. |
