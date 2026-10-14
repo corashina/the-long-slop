@@ -113,3 +113,39 @@ class WearableReferenceTests(unittest.TestCase):
         for data,kind in [(raw[:-1],3),(raw+b'\x00',3),(raw,999)]:
             invalid=SimpleNamespace(m_TextureFormat=kind,m_Width=obj.m_Width,m_Height=obj.m_Height,m_MipCount=obj.m_MipCount,get_image_data=lambda:data)
             with self.assertRaises(ValueError):decoded_mips(invalid)
+
+    def test_rejects_unknown_cigarette_operations(self):
+        from tools.reference.item_prototypes import validate_item_prototypes
+        original=json.loads(Path('tests/common/reference.json').read_bytes())
+        for field in ('ShapeModule.type','ShapeModule.arc.mode','ShapeModule.radius.mode','ShapeModule.m_MeshSpawn.mode',
+                      'ShapeModule.placementMode','ShapeModule.m_TextureClipChannel','ShapeModule.m_TextureUVChannel',
+                      'renderer.m_RenderMode','renderer.m_RenderAlignment','renderer.m_SortMode',
+                      'cullingMode','emitterVelocityMode','ringBufferMode','scalingMode','stopAction','moveWithTransform'):
+            m=copy.deepcopy(original)
+            m['item_prototypes'][-1]['consumable']['ember']['particle']['scalars'][field]=999
+            with self.subTest(field=field),self.assertRaises(ValueError):validate_item_prototypes(m['item_prototypes'],m)
+
+    def test_rejects_incomplete_typed_payloads(self):
+        from tools.reference.item_prototypes import validate_item_prototypes
+        original=json.loads(Path('tests/common/reference.json').read_bytes())
+        mutations=[
+            lambda m:m['clothing']['glasses_profiles'][0]['effects'][0]['parameters']['blueCurve'].pop('value'),
+            lambda m:m['clothing']['glasses_profiles'][0]['effects'][0]['parameters']['blueCurve']['value']['curve']['keys'][0].pop('in_weight'),
+            lambda m:m['clothing']['glasses_profiles'][0]['effects'][0]['parameters']['blueCurve']['value'].update(cached_data=[]),
+            lambda m:m['clothing']['glasses_profiles'][0]['effects'][0]['parameters']['colorFilter'].update(value=[1,1,1]),
+            lambda m:m['clothing']['glasses_profiles'][0]['effects'][0]['parameters']['brightness'].update(value='1'),
+            lambda m:m['item_prototypes'][-1]['consumable']['ember'].pop('colors'),
+            lambda m:m['item_prototypes'][-1]['consumable']['ember'].update(colors=[[1,1,1,1]]),
+            lambda m:m['item_prototypes'][-1]['consumable']['ember']['light'].pop('color'),
+            lambda m:m['item_prototypes'][-1]['consumable']['ember']['particle']['curves'].update({'InitialModule.startLifetime':{}}),
+            lambda m:m['item_prototypes'][-1]['consumable']['ember']['particle']['curves']['SizeModule.curve']['max_curve']['keys'][0].pop('out_tangent'),
+            lambda m:m['item_prototypes'][-1]['consumable']['ember']['particle']['colors']['ColorModule.gradient'].update(min_gradient={}),
+            lambda m:m['item_prototypes'][-1]['consumable']['ember']['particle']['vectors'].update({'renderer.m_Pivot':[0,0]}),
+            lambda m:m['item_prototypes'][-1]['consumable']['ember']['particle']['materials'][0]['shader'].pop('compiled_data'),
+            lambda m:m['item_prototypes'][-1]['consumable']['ember']['particle']['materials'][0]['textures'][0].pop('scale'),
+            lambda m:m['item_prototypes'][-1]['consumable']['ember']['particle'].pop('duration'),
+        ]
+        for index,mutate in enumerate(mutations):
+            m=copy.deepcopy(original);mutate(m)
+            with self.subTest(case=index),self.assertRaises(ValueError):
+                validate_clothing(m['clothing'],m);validate_item_prototypes(m['item_prototypes'],m)

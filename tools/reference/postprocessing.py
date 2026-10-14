@@ -221,6 +221,21 @@ def recover_glasses_profiles(source,manifest,output):
 
 def validate_glasses_profiles(profiles,manifest):
     from .survival import finite_record
+    from .validation import record,array,number,u32,boolean,string,source,optional
+    from .weather import validate_curve
+    def spline(c):
+        record(c,{'curve':validate_curve,'cached_data':array(number,128),'loop':boolean,'range':number,'zero_value':number})
+    def parameters(d):
+        if not isinstance(d,dict) or set(d)!=GLASSES_PARAMETERS:raise ValueError('Incomplete glasses parameters')
+        for name,p in d.items():
+            if name in ('ldrLut','externalLut'):
+                record(p,{'override_state':boolean,'value':optional(source),'default_state':u32,'texture':optional(u32)})
+            else:
+                value=spline if name.endswith('Curve') else array(number,4) if name in ('colorFilter','gain','gamma','lift') else boolean if name=='enabled' else u32 if name in ('gradingMode','tonemapper') else number
+                record(p,{'override_state':boolean,'value':value})
+    def effect(e):record(e,{'kind':string,'source':source,'active':boolean,'parameters':parameters})
+    def profile(p):record(p,{'source':source,'effects':array(effect,1)})
+    array(profile,6)(profiles)
     finite_record(profiles)
     if [p['source'] for p in profiles]!=[{'file':'sharedassets1.assets','path_id':i} for i in range(130128,130134)]:raise ValueError('Selected glasses profiles')
     for i,p in enumerate(profiles):

@@ -795,6 +795,39 @@ impl CigaretteConsumptionReference {
             particle.links.len() == 1 && particle.links.get("m_GameObject") == Some(&sid(37823)),
             "cigarette particle source links",
         )?;
+        // Checked local emitter and renderer operation selectors.
+        for (name, value) in [
+            ("ShapeModule.type", 0.),
+            ("ShapeModule.arc.mode", 0.),
+            ("ShapeModule.radius.mode", 0.),
+            ("ShapeModule.m_MeshSpawn.mode", 0.),
+            ("ShapeModule.placementMode", 0.),
+            ("ShapeModule.m_TextureClipChannel", 3.),
+            ("ShapeModule.m_TextureUVChannel", 0.),
+            ("renderer.m_RenderMode", 0.),
+            ("renderer.m_RenderAlignment", 0.),
+            ("renderer.m_SortMode", 0.),
+            ("cullingMode", 0.),
+            ("emitterVelocityMode", 1.),
+            ("ringBufferMode", 0.),
+            ("scalingMode", 1.),
+            ("stopAction", 0.),
+            ("moveWithTransform", 1.),
+            ("EmissionModule.m_BurstCount", 0.),
+        ] {
+            require(
+                particle.scalars.get(name) == Some(&value),
+                &format!("cigarette particle operation {name}"),
+            )?;
+        }
+        require(
+            particle.curves.values().all(|c| {
+                [&c.min_curve, &c.max_curve]
+                    .iter()
+                    .all(|c| c.pre_wrap_mode == 2 && c.post_wrap_mode == 2)
+            }),
+            "cigarette particle curve wrap operation",
+        )?;
         particle.validate_data(1)?;
         require(
             !m.lighting.lights.iter().any(|l| l.source == e.light.source)

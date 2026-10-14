@@ -131,3 +131,63 @@ fn local_cigarette_effects_cannot_enter_active_tables() {
         assert!(ReferenceManifest::from_runtime_json(&bytes).is_err());
     }
 }
+
+#[test]
+fn strict_and_runtime_reject_unknown_cigarette_operations_and_missing_payloads() {
+    let original: Value = serde_json::from_slice(include_bytes!("common/reference.json")).unwrap();
+    let prefix = "/item_prototypes/10/consumable/ember/particle/scalars/";
+    for field in [
+        "ShapeModule.type",
+        "ShapeModule.arc.mode",
+        "ShapeModule.radius.mode",
+        "ShapeModule.m_MeshSpawn.mode",
+        "ShapeModule.placementMode",
+        "ShapeModule.m_TextureClipChannel",
+        "ShapeModule.m_TextureUVChannel",
+        "renderer.m_RenderMode",
+        "renderer.m_RenderAlignment",
+        "renderer.m_SortMode",
+        "cullingMode",
+        "emitterVelocityMode",
+        "ringBufferMode",
+        "scalingMode",
+        "stopAction",
+        "moveWithTransform",
+    ] {
+        let mut m = original.clone();
+        *m.pointer_mut(&format!("{prefix}{field}")).unwrap() = json!(999);
+        let bytes = serde_json::to_vec(&m).unwrap();
+        assert!(ReferenceManifest::from_json(&bytes).is_err(), "{field}");
+        assert!(
+            ReferenceManifest::from_runtime_json(&bytes).is_err(),
+            "{field}"
+        );
+    }
+    for (path, field) in [
+        (
+            "/clothing/glasses_profiles/0/effects/0/parameters/blueCurve",
+            "value",
+        ),
+        ("/item_prototypes/10/consumable/ember", "colors"),
+        (
+            "/item_prototypes/10/consumable/ember/particle/curves/InitialModule.startLifetime",
+            "scalar",
+        ),
+    ] {
+        let mut m = original.clone();
+        m.pointer_mut(path)
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        let bytes = serde_json::to_vec(&m).unwrap();
+        assert!(
+            ReferenceManifest::from_json(&bytes).is_err(),
+            "{path}/{field}"
+        );
+        assert!(
+            ReferenceManifest::from_runtime_json(&bytes).is_err(),
+            "{path}/{field}"
+        );
+    }
+}
