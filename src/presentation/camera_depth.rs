@@ -90,6 +90,7 @@ impl<P: PhaseItem, const DONE: bool> RenderCommand<P> for DepthMark<DONE> {
     }
 }
 type DrawCameraDepth = (
+    super::renderers::SourceCameraVisible,
     SetCameraDepth,
     DepthMark<false>,
     SetSourceViewCamera,
@@ -177,26 +178,35 @@ fn wrap<P>(world: &mut World) -> Result<(), String>
 where
     P: super::motion_draw::MotionBatchItem,
 {
-    let depth = Box::new(RenderCommandState::<P, DrawCameraDepth>::new(world));
-    let motion = Box::new(RenderCommandState::<P, super::motion_draw::DrawMotion>::new(world));
-    let Some(functions) = world.get_resource::<DrawFunctions<P>>() else {
-        return Err("Source camera-depth draw table is missing".into());
-    };
-    let mut table = functions.write();
-    let id = table
-        .get_id::<DrawSourceMaterial>()
+    let mut routes = Vec::with_capacity(2);
+    for source_world in [false, true] {
+        let depth = Box::new(RenderCommandState::<P, DrawCameraDepth>::new(world));
+        let motion = Box::new(RenderCommandState::<P, super::motion_draw::DrawMotion>::new(world));
+        let functions = world
+            .get_resource::<DrawFunctions<P>>()
+            .ok_or("Source camera-depth draw table is missing")?;
+        let mut table = functions.write();
+        let id = if source_world {
+            table.get_id::<super::source_lighting::DrawSourceWorld>()
+        } else {
+            table.get_id::<DrawSourceMaterial>()
+        }
         .ok_or("Source material draw is not registered")?;
-    let surface = std::mem::replace(
-        &mut table.draw_functions[id.0 as usize],
-        Box::new(Installing),
-    );
-    table.draw_functions[id.0 as usize] = Box::new(Route {
-        surface,
-        depth,
-        motion,
-    });
+        let surface = std::mem::replace(
+            &mut table.draw_functions[id.0 as usize],
+            Box::new(Installing),
+        );
+        table.draw_functions[id.0 as usize] = Box::new(Route {
+            surface,
+            depth,
+            motion,
+        });
+        routes.push(id.0 as usize);
+    }
+    let functions = world.resource::<DrawFunctions<P>>();
+    let mut table = functions.write();
     for (index, function) in table.draw_functions.iter_mut().enumerate() {
-        if index == id.0 as usize {
+        if routes.contains(&index) {
             continue;
         }
         let original = std::mem::replace(function, Box::new(Installing));

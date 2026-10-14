@@ -160,9 +160,9 @@ fn rejects_invalid_seat_hit_nodes_and_empty_use_mask() {
 fn production_export_matches_installed_contract() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let manifest = ReferenceManifest::from_json(&bytes).unwrap();
-    fn digest(path: &str) -> String {
+    fn digest(path: impl AsRef<std::path::Path>) -> String {
         let output = std::process::Command::new("sha256sum")
-            .arg(path)
+            .arg(path.as_ref())
             .output()
             .unwrap();
         assert!(output.status.success());
@@ -173,18 +173,41 @@ fn production_export_matches_installed_contract() {
             .unwrap()
             .to_owned()
     }
+    let library_root = std::env::var_os("REFERENCE_LIBRARY_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("web/assets/library"));
+    let library: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(library_root.join("manifest.json")).unwrap())
+            .unwrap();
+    let records = library_root.join(library["records_root"].as_str().unwrap());
+    let stage = records.parent().unwrap();
     assert_eq!(
         manifest.library.manifest_sha256,
-        digest("web/assets/library/manifest.json")
+        digest(library_root.join("manifest.json"))
     );
     assert_eq!(
         manifest.library.catalog_sha256,
-        digest(".cache/reference-library/catalog.json")
+        digest(stage.join("catalog.json"))
     );
     assert_eq!(
         manifest.library.source_manifest_sha256,
-        digest(".cache/reference-library/source-manifest.json")
+        digest(stage.join("source-manifest.json"))
     );
+    assert_eq!(manifest.world.generators.len(), 4);
+    assert_eq!(manifest.world.buildings.types.len(), 11);
+    assert_eq!(manifest.world.catalog.items.len(), 402);
+    assert_eq!(manifest.world.catalog.categories.len(), 90);
+    for prototype in manifest
+        .world
+        .prototypes
+        .iter()
+        .filter(|p| p.role == my_summer_slop::reference::WorldPrototypeRole::Road)
+    {
+        assert_eq!(prototype.controls.len(), 10);
+        assert_eq!(prototype.skins[0].positions.len(), 88);
+        assert_eq!(prototype.skins[0].bones.len(), 11);
+        assert_eq!(prototype.skins[0].bind_poses.len(), 11);
+    }
     for asset in &manifest.assets {
         assert_eq!(asset.sha256, digest(&format!("web/assets/{}", asset.path)));
         for dependency in &asset.dependencies {

@@ -46,9 +46,9 @@ export function createSaveSession({storage,runtime,onStatus=()=>{}}){
    if(!current(operation))return;
    if(record===null)throw new Error('No saved game.');
    const save=await verifyRecord(record);
-   if(current(operation))await prepare(operation,()=>runtime.prepare(save));
+   if(current(operation))await prepare(operation,()=>runtime.prepare(save,operation.controller.signal));
   });},
-  newGame(){return run('newGame',operation=>prepare(operation,()=>runtime.prepareNewGame()));},
+  newGame(){return run('newGame',operation=>prepare(operation,()=>runtime.prepareNewGame(operation.controller.signal)));},
   cancel(){
    if(!active||active.committing)return;
    const operation=active;active=null;sequence++;

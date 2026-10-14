@@ -13,10 +13,20 @@ struct CasterView {
 
 // Same typed material block and offsets as SourceSurface; only MainTex and scalar alpha controls are active.
 struct CasterMaterial {
-    color: vec4<f32>, emission: vec4<f32>, factors: vec4<f32>, scales: vec4<f32>, flags: vec4<u32>, banks: array<vec4<u32>, 3>,
+    color: vec4<f32>, emission: vec4<f32>, specular:vec4<f32>, factors: vec4<f32>, scales: vec4<f32>, flags: vec4<u32>, banks: array<vec4<u32>, 3>, layers:array<vec4<u32>,3>,
     uv: array<vec4<f32>, 9>, sampling: array<vec4<f32>, 9>, defaults: array<vec4<f32>, 9>,
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(120) var<uniform> material: CasterMaterial;
+#ifdef WORLD_TEXTURE_ARRAYS
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var array0:texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var sampler0:sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var array1:texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(4) var sampler1:sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(5) var array2:texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(6) var sampler2:sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(7) var array3:texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(8) var sampler3:sampler;
+#endif
 struct CasterOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -44,7 +54,17 @@ fn fragment(input: CasterOutput) {
     var main_alpha = material.defaults[0].a;
     if (material.flags.y & 1u) != 0u {
         let uv = select(input.uv, abs(input.uv), material.sampling[0].zw > vec2(0.5));
+#ifdef WORLD_TEXTURE_ARRAYS
+        let layer=i32(material.layers[0].x);let bias=material.sampling[0].y;
+        switch material.banks[0].x {
+            case 0u:{main_alpha=textureSampleBias(array0,sampler0,uv,layer,bias).a;}
+            case 1u:{main_alpha=textureSampleBias(array1,sampler1,uv,layer,bias).a;}
+            case 2u:{main_alpha=textureSampleBias(array2,sampler2,uv,layer,bias).a;}
+            default:{main_alpha=textureSampleBias(array3,sampler3,uv,layer,bias).a;}
+        }
+#else
         main_alpha = textureSampleBias(pbr_bindings::base_color_texture, pbr_bindings::base_color_sampler, uv, material.sampling[0].y).a;
+#endif
     }
     if (material.flags.x & (1u << 9u)) != 0u {
         if caster_cutout_margin(main_alpha, material.color.a, material.factors.w) < 0.0 { discard; }

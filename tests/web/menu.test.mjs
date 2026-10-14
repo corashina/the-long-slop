@@ -124,3 +124,11 @@ test('scene_failure_rejects_late_save_completion_and_readiness',async()=>{
  assert.equal(m.state,'error');assert.equal(m.error,'GPU failed');assert.equal(m.readyFlag,false);
  assert.equal(m.pending,false);assert.equal(m.operation,'');assert.equal(m.started,false);
 });
+
+test('world_dependency_failure_keeps_start_disabled',()=>{
+ const model=new MenuState();
+ model.fail('Missing required source world dependency');
+ model.ready();
+ assert.equal(model.readyFlag,false);
+ assert.equal(model.state,'error');
+});

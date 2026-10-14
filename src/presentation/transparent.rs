@@ -173,6 +173,10 @@ pub(crate) fn prepare_pass_order(
         let Some(phase) = phases.get(&view.retained_view_entity) else {
             continue;
         };
+        let required = phase.items.len() * 2;
+        if order.entries.capacity() < required {
+            order.entries.reserve_exact(required);
+        }
         let camera = view.world_from_view.translation().to_array();
         for (index, item) in phase.items.values().enumerate() {
             if materials

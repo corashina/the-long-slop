@@ -857,23 +857,6 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
             .sqrt()
             < reference.player.aim_reach
     );
-    let station = my_summer_slop::world::nearest_station(
-        runtime.stream.seed,
-        -runtime
-            .stream
-            .origin
-            .absolute(runtime.physics.snapshot(0).pose.position)[2],
-    );
-    let car = runtime
-        .stream
-        .origin
-        .absolute(runtime.physics.snapshot(0).pose.position);
-    assert!(
-        ((car[0] - station.absolute_point[0]).powi(2)
-            + (car[2] - station.absolute_point[2]).powi(2))
-        .sqrt()
-            < 0.01
-    );
     // Stage the same source can as trunk cargo. Recovery must preserve its car-relative pose.
     let body = runtime.area.items.get(can).unwrap().body.unwrap();
     let mut cargo = my_summer_slop::vehicle::to_rapier(runtime.physics.snapshot(0).pose);

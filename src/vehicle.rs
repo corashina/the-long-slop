@@ -699,6 +699,64 @@ impl PhysicsWorld {
         handle
     }
 
+    /// Fallible source mesh publication leaves existing collision untouched on failure.
+    pub fn insert_source_mesh(
+        &mut self,
+        surface: &crate::world::WorldSurface,
+        position: [f32; 3],
+        layer: u8,
+        filter: u32,
+        friction: f32,
+        restitution: f32,
+        available_cpu: usize,
+    ) -> Result<(ColliderHandle, usize), ReferenceError> {
+        // Reserve vertices, indices, BVH construction and retained collider storage before allocation.
+        let reservation = surface
+            .vertices
+            .len()
+            .saturating_mul(48)
+            .saturating_add(surface.triangles.len().saturating_mul(256))
+            .saturating_add(std::mem::size_of::<rapier3d::prelude::Collider>());
+        if reservation > available_cpu {
+            return Err(ReferenceError(format!(
+                "Source collision reservation exceeds budget: {reservation}"
+            )));
+        }
+        let mesh = ColliderBuilder::trimesh(
+            surface
+                .vertices
+                .iter()
+                .copied()
+                .map(Vector::from_array)
+                .collect(),
+            surface.triangles.clone(),
+        )
+        .map_err(|error| ReferenceError(format!("Source collision mesh: {error}")))?
+        .friction(friction)
+        .restitution(restitution)
+        .translation(Vector::from_array(position))
+        .collision_groups(InteractionGroups::new(
+            Group::from_bits_truncate(1u32 << layer),
+            Group::from_bits_truncate(filter),
+            InteractionTestMode::And,
+        ))
+        .build();
+        let bytes = std::mem::size_of::<rapier3d::prelude::Collider>()
+            + mesh
+                .shape()
+                .as_trimesh()
+                .expect("source triangle mesh")
+                .total_memory_size();
+        if bytes > available_cpu {
+            return Err(ReferenceError(format!(
+                "Source collision allocation exceeds budget: {bytes}"
+            )));
+        }
+        let handle = self.physics.colliders.insert(mesh);
+        self.refresh_queries();
+        Ok((handle, bytes))
+    }
+
     pub fn remove_collider(&mut self, handle: ColliderHandle) {
         for vehicle in &self.vehicles {
             if vehicle

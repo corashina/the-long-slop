@@ -153,7 +153,7 @@ impl GarageRuntime {
             .iter()
             .position(|food| food.kind == crate::reference::FoodKind::Turd)
             .ok_or_else(|| ReferenceError("Missing turd prototype".into()))?;
-        let id = self.stream.allocate_consumable_id(&self.area.items);
+        let id = self.area.items.allocate_item_id()?;
         let mut pose = self.area.player.body_pose(&self.physics);
         pose.rotation = [0., 0., 0., 1.];
         spawn_consumable(
@@ -201,7 +201,15 @@ impl GarageRuntime {
             state.food.as_mut().unwrap().bite += 1;
             state.food.unwrap().bite
         };
-        sync_consumable_colliders(reference, &self.area, &mut self.physics, item);
+        if matches!(
+            self.area.items.object_key(item),
+            crate::world::ObjectKey::Generated(_)
+        ) {
+            self.stream
+                .sync_generated_food(reference, &self.area.items, &mut self.physics);
+        } else {
+            sync_consumable_colliders(reference, &self.area, &mut self.physics, item);
+        }
         if bite == prototype.bites && prototype.destroy_on_end {
             self.remove_consumable(item)?;
         }
@@ -374,6 +382,17 @@ impl GarageRuntime {
                 .drop_held(&mut self.area.items, &mut self.physics);
         }
         self.area.interaction.remove_consumable(item, body);
+        if matches!(
+            self.area.items.object_key(item),
+            crate::world::ObjectKey::Generated(_)
+        ) {
+            self.physics.rapier_mut().bodies[body].set_enabled(false);
+            let state = self.area.items.get_mut(item).unwrap();
+            state.location = ItemLocation::World;
+            state.removed = true;
+            self.physics.refresh_queries();
+            return Ok(());
+        }
         let body_id = self.area.items.body_id(item).unwrap();
         self.physics.rapier_mut().remove_body(body);
         self.physics.refresh_queries();

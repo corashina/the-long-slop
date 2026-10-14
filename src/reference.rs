@@ -7,6 +7,8 @@ pub mod lighting_scene;
 pub mod postprocessing;
 pub mod reflections;
 pub mod render_lighting;
+pub mod world;
+pub use world::*;
 pub mod rendering;
 pub mod shadow_candidates;
 pub mod shadow_frame;
@@ -67,7 +69,7 @@ id!(AttachmentTargetId, u32);
 id!(LightId, u32);
 id!(LightControlId, u32);
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceId {
     pub file: String,
@@ -96,6 +98,8 @@ pub enum AssetUsage {
     RoadLampPrototype,
     SkyPrototype,
     FoodPrototype,
+    WorldPrototype,
+    WorldMaterial,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -737,6 +741,7 @@ pub struct WheelPartReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VehicleReference {
+    pub spawn_car_id: i32,
     pub engine: EngineReference,
     pub instruments: InstrumentReference,
     pub handbrake: bool,
@@ -791,6 +796,8 @@ pub struct LibraryProvenance {
     pub source_manifest_sha256: String,
 }
 
+pub const MAX_MANIFEST_BYTES: usize = 128 * 1024 * 1024;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
@@ -798,6 +805,7 @@ pub struct ReferenceManifest {
     pub survival: SurvivalReference,
     pub sleep: SleepReference,
     pub weather: WeatherReference,
+    pub world: std::sync::Arc<WorldReference>,
     pub ui: UiReference,
     pub library: LibraryProvenance,
     pub lighting: LightingRecord,
@@ -880,7 +888,7 @@ impl ReferenceManifest {
             .count()
     }
     pub fn from_json(bytes: &[u8]) -> Result<Self, ReferenceError> {
-        require(bytes.len() <= 64 * 1024 * 1024, "manifest size")?;
+        require(bytes.len() <= MAX_MANIFEST_BYTES, "manifest size")?;
         let manifest: Self =
             serde_json::from_slice(bytes).map_err(|e| ReferenceError(e.to_string()))?;
         manifest.validate()?;
@@ -912,6 +920,7 @@ impl ReferenceManifest {
             self.app_id == APP_ID && self.build_id == BUILD_ID,
             "app/build",
         )?;
+        self.world.validate(self)?;
         self.lighting.validate(self)?;
         self.mirrors.validate(self)?;
         self.render_lighting.validate(&self.nodes)?;
@@ -1885,6 +1894,16 @@ impl ReferenceManifest {
                     && v.wheel_slots.iter().all(|id| wheel_ids.contains(id))
                     && v.colliders.iter().all(|id| collider_ids.contains(id)),
                 "vehicle bindings",
+            )?;
+            require(
+                v.spawn_car_id >= 0
+                    && self
+                        .world
+                        .catalog
+                        .items
+                        .iter()
+                        .any(|i| i.index == v.spawn_car_id as u32),
+                "Source vehicle spawn selector",
             )?;
             require(
                 v.wheel_slots.iter().collect::<HashSet<_>>().len() == 4 && !v.colliders.is_empty(),

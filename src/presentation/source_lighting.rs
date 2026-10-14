@@ -173,6 +173,7 @@ impl<P: PhaseItem, const ADD: bool, const DONE: bool> RenderCommand<P>
 }
 
 pub(crate) type DrawSourceMaterial = (
+    super::renderers::SourceCameraVisible,
     SourceDrawMark<false, false>,
     super::surface_pass::SourcePairReady,
     SetItemPipeline,
@@ -190,6 +191,7 @@ pub(crate) type DrawSourceMaterial = (
 
 /// Transparent passes are dispatched separately through the source comparator.
 pub(crate) type DrawSourceBase = (
+    super::renderers::SourceCameraVisible,
     SourceDrawMark<false, false>,
     super::surface_pass::SourcePairReady,
     SetItemPipeline,
@@ -200,6 +202,16 @@ pub(crate) type DrawSourceBase = (
     DrawMesh,
     SourceDrawMark<false, true>,
 );
+pub(crate) type DrawSourceWorld = (
+    super::renderers::SourceCameraVisible,
+    SetItemPipeline,
+    SetSourceViewCamera,
+    SetSourceViewLighting,
+    SetMeshBindGroup<2>,
+    bevy::pbr::SetMaterialBindGroup<3>,
+    DrawMesh,
+);
+
 pub(crate) type DrawSourcePlate = (
     SourceDrawMark<false, false>,
     SetItemPipeline,
@@ -211,6 +223,7 @@ pub(crate) type DrawSourcePlate = (
     SourceDrawMark<false, true>,
 );
 pub(crate) type DrawSourceGlass = (
+    super::renderers::SourceCameraVisible,
     SourceDrawMark<false, false>,
     super::surface_pass::SourcePairReady,
     SetItemPipeline,
@@ -223,6 +236,7 @@ pub(crate) type DrawSourceGlass = (
 );
 
 pub(crate) type DrawSourceAdd = (
+    super::renderers::SourceCameraVisible,
     SourceDrawMark<true, false>,
     super::surface_pass::SourcePairReady,
     super::surface_pass::SetSourceAdditivePipeline,
@@ -487,6 +501,10 @@ impl Plugin for SourceLightingPlugin {
                         .chain()
                         .in_set(RenderSystems::Prepare),
                 )
+                .add_render_command::<Opaque3d, DrawSourceWorld>()
+                .add_render_command::<AlphaMask3d, DrawSourceWorld>()
+                .add_render_command::<Transmissive3d, DrawSourceWorld>()
+                .add_render_command::<Transparent3d, DrawSourceWorld>()
                 .add_render_command::<Opaque3d, DrawSourceMaterial>()
                 .add_render_command::<AlphaMask3d, DrawSourceMaterial>()
                 .add_render_command::<Transmissive3d, DrawSourceMaterial>()
@@ -545,6 +563,35 @@ fn prepare_source_draws(
         ),
     ];
     for (id, material) in materials.iter_mut() {
+        let world_material = [
+            TypeId::of::<super::materials::terrain::TerrainMaterial>(),
+            TypeId::of::<super::materials::impostor::ImpostorMaterial>(),
+            TypeId::of::<super::materials::grass::material::GrassMaterial>(),
+        ]
+        .contains(&id.type_id());
+        let specular = id.type_id() == TypeId::of::<super::materials::specular::SpecularMaterial>();
+        let draws = if world_material {
+            [
+                (
+                    MainPassOpaqueDrawFunction.intern(),
+                    opaque.read().id::<DrawSourceWorld>(),
+                ),
+                (
+                    MainPassAlphaMaskDrawFunction.intern(),
+                    masked.read().id::<DrawSourceWorld>(),
+                ),
+                (
+                    MainPassTransmissiveDrawFunction.intern(),
+                    transmissive.read().id::<DrawSourceWorld>(),
+                ),
+                (
+                    MainPassTransparentDrawFunction.intern(),
+                    transparent.read().id::<DrawSourceWorld>(),
+                ),
+            ]
+        } else {
+            draws
+        };
         if id.type_id() == TypeId::of::<super::plates::PlateTextMaterial>() {
             let label = MainPassTransparentDrawFunction.intern();
             let draw = transparent.read().id::<DrawSourcePlate>();
@@ -569,7 +616,7 @@ fn prepare_source_draws(
             }
             continue;
         }
-        if id.type_id() != TypeId::of::<SourceMaterial>() {
+        if id.type_id() != TypeId::of::<SourceMaterial>() && !world_material && !specular {
             continue;
         }
         let needs_update = draws.iter().any(|(label, draw)| {

@@ -23,7 +23,9 @@ use bevy::render::{
 };
 
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
-struct SourceShadowPass;
+pub(crate) struct SourceShadowPass;
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct DrawSourceShadows;
 struct Slot {
     entity: Entity,
     key: Option<RetainedViewEntity>,
@@ -65,7 +67,7 @@ impl Plugin for SourceShadowPlugin {
                     .after(bevy::pbr::queue_shadows)
                     .in_set(RenderSystems::QueueMeshes),
             )
-            .add_systems(SourceShadowPass, draw_atlas);
+            .add_systems(SourceShadowPass, draw_atlas.in_set(DrawSourceShadows));
     }
 }
 fn init_views(mut commands: Commands) {

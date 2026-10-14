@@ -3,7 +3,7 @@ use super::surface_views::{MIRROR_START, VIEW_COUNT};
 use super::{
     lighting_assets::LightingAssets,
     lighting_scene::SourceSceneLighting,
-    materials::{GeneratedWorldMaterial, RenderingState, SourceMaterial, SourceMaterials},
+    materials::{RenderingState, SourceMaterial, SourceMaterials},
     renderers::SourceRenderer,
     source_lighting::SourceLightingStatus,
     view_frame::SourceViewFrame,
@@ -42,10 +42,12 @@ impl ShadowScene {
         self.imported_capacity = imported;
         self.generated_capacity = generated;
         let count = self.capacity();
-        self.entities.reserve_exact(count);
-        self.casters.reserve_exact(count);
+        self.entities
+            .reserve_exact(count.saturating_sub(self.entities.len()));
+        self.casters
+            .reserve_exact(count.saturating_sub(self.casters.len()));
         for masks in &mut self.masks {
-            masks.reserve_exact(count);
+            masks.reserve_exact(count.saturating_sub(masks.len()));
         }
     }
 }
@@ -57,6 +59,10 @@ pub fn prepare_scene(
     assets: Option<Res<LightingAssets>>,
     source: Res<SourceMaterials>,
     materials: Res<Assets<SourceMaterial>>,
+    specular: Res<Assets<super::materials::specular::SpecularMaterial>>,
+    terrain: Res<Assets<super::materials::terrain::TerrainMaterial>>,
+    grass: Res<Assets<super::materials::grass::material::GrassMaterial>>,
+    impostors: Res<Assets<super::materials::impostor::ImpostorMaterial>>,
     mut scene: ResMut<ShadowScene>,
     status: Res<SourceLightingStatus>,
     master: Res<super::lighting::SourceLighting>,
@@ -67,10 +73,13 @@ pub fn prepare_scene(
             &GlobalTransform,
             &InheritedVisibility,
             &mut ViewVisibility,
-            &MeshMaterial3d<SourceMaterial>,
-            Option<&SourceRenderer>,
-            Option<&GeneratedWorldMaterial>,
+            Option<&MeshMaterial3d<SourceMaterial>>,
+            &SourceRenderer,
             Option<&RenderLayers>,
+            Option<&MeshMaterial3d<super::materials::specular::SpecularMaterial>>,
+            Option<&MeshMaterial3d<super::materials::terrain::TerrainMaterial>>,
+            Option<&MeshMaterial3d<super::materials::grass::material::GrassMaterial>>,
+            Option<&MeshMaterial3d<super::materials::impostor::ImpostorMaterial>>,
         ),
         Without<super::materials::SourceMaterialWarmup>,
     >,
@@ -89,15 +98,10 @@ pub fn prepare_scene(
     let (Some(assets), Some(live)) = (assets, live.0) else {
         return;
     };
-    if scene.capacity() == 0 {
-        let imported = meshes.iter().filter(|x| x.6.is_some()).count();
-        if imported == 0 {
-            return;
-        }
-        scene.reserve(
-            imported + master.road_lamps.source_mesh_capacity(),
-            super::world::source_shadow_capacity(),
-        );
+    let imported = meshes.iter().count();
+    let generated = 0;
+    if imported > scene.imported_capacity || generated > scene.generated_capacity {
+        scene.reserve(imported, generated);
     }
     scene.entities.clear();
     scene.casters.clear();
@@ -107,7 +111,7 @@ pub fn prepare_scene(
         *status.0.lock().unwrap() = RenderingState::Failed(message.into());
     };
     let mut imported = 0;
-    let mut generated = 0;
+
     for (
         entity,
         bounds,
@@ -116,25 +120,50 @@ pub fn prepare_scene(
         visible,
         material,
         record,
-        generated_identity,
         layers,
+        specular_handle,
+        terrain_handle,
+        grass_handle,
+        impostor_handle,
     ) in &mut meshes
     {
-        if record.is_some() {
-            imported += 1;
-        } else if generated_identity.is_some() {
-            generated += 1;
-        } else {
-            fail("Source shadow mesh has no source or generated identity");
-            return;
-        }
-        if imported > scene.imported_capacity || generated > scene.generated_capacity {
+        imported += 1;
+        if imported > scene.imported_capacity {
             fail("Source shadow scene capacity was exceeded");
             return;
         }
-        let Some(material) = materials.get(material.0.id()) else {
-            fail("Source shadow material is missing after loading");
-            return;
+        let has_caster = if let Some(handle) = material {
+            let Some(material) = materials.get(handle.0.id()) else {
+                fail("Missing source shadow material");
+                return;
+            };
+            material.extension.has_caster()
+        } else if let Some(handle) = specular_handle {
+            if !specular.contains(handle.0.id()) {
+                fail("Missing source specular material");
+                return;
+            }
+            true
+        } else if let Some(handle) = terrain_handle {
+            if !terrain.contains(handle.0.id()) {
+                fail("Missing source terrain material");
+                return;
+            }
+            true
+        } else if let Some(handle) = grass_handle {
+            if !grass.contains(handle.0.id()) {
+                fail("Missing source grass material");
+                return;
+            }
+            true
+        } else if let Some(handle) = impostor_handle {
+            if !impostors.contains(handle.0.id()) {
+                fail("Missing source impostor material");
+                return;
+            }
+            true
+        } else {
+            continue;
         };
         let layer = if let Some(layers) = layers {
             let mut iter = layers.iter();
@@ -170,7 +199,7 @@ pub fn prepare_scene(
         scene.casters.push(CasterInput {
             bounds: b,
             state: CandidateState {
-                shadow_casting_mode: record.map_or(1, |r| r.0.cast_shadows),
+                shadow_casting_mode: record.0.cast_shadows,
                 layer,
                 renderer_present: true,
                 disabled: !inherited.get(),
@@ -179,7 +208,7 @@ pub fn prepare_scene(
                 lod_index_mask: 0,
                 active_lod: 0,
             },
-            material_has_caster: material.extension.has_caster(),
+            material_has_caster: has_caster,
         });
     }
     let light = &assets.record.lights[0];
@@ -246,7 +275,7 @@ pub fn prepare_scene(
     }
     for (i, entity) in scene.entities.iter().enumerate() {
         if scene.masks.iter().any(|m| m[i] != 0) {
-            if let Ok((_, _, _, _, mut visible, _, _, _, _)) = meshes.get_mut(*entity) {
+            if let Ok((_, _, _, _, mut visible, _, _, _, _, _, _, _)) = meshes.get_mut(*entity) {
                 if !visible.get() {
                     scene.shadow_only += 1;
                 }
@@ -265,7 +294,7 @@ pub fn extract_scene(
         output.frame = 0;
         return;
     }
-    if output.capacity() == 0 {
+    if output.capacity() < input.capacity() {
         output.reserve(input.imported_capacity, input.generated_capacity);
     }
     assert_eq!(

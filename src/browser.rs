@@ -108,6 +108,13 @@ extern "C" {
         cooldown_remaining: f64,
         progress: f32,
     );
+    #[wasm_bindgen(js_namespace = window, js_name = gameNow)]
+    pub fn game_now() -> f64;
+    #[wasm_bindgen(js_namespace = window, js_name = gameMeasureRequested)]
+    pub fn game_measure_requested() -> bool;
+    #[wasm_bindgen(js_namespace = window, js_name = gameMeasurements)]
+    pub fn game_measurements(json: &str);
+
     #[wasm_bindgen(js_namespace = window, js_name = gameReady)]
     pub fn game_ready();
     #[wasm_bindgen(js_namespace = window, js_name = gameFailure)]
@@ -135,7 +142,7 @@ extern "C" {
         z: f32,
         contacts: u32,
         steps: u32,
-        chunks: u32,
+        surfaces: u32,
         colliders: u32,
         absolute_x: f64,
         absolute_y: f64,
@@ -145,7 +152,7 @@ extern "C" {
         origin_z: f64,
         rebases: u32,
         travel: f64,
-        lateral_band: f64,
+        prepared_roads: f64,
         fuel: f32,
         paused: bool,
         started: bool,

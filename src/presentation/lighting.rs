@@ -77,7 +77,15 @@ pub struct SourceLight {
     pub enabled: bool,
 }
 #[derive(Clone)]
+pub struct WorldBoundLight {
+    pub record: crate::reference::LightReference,
+    pub output: crate::lighting::LightOutput,
+    pub shadow_start: usize,
+    pub faces: usize,
+}
+#[derive(Clone)]
 pub struct BoundLight {
+    pub world: Option<WorldBoundLight>,
     pub index: usize,
     pub road: bool,
     pub id: LightId,
@@ -124,11 +132,43 @@ pub struct SourceLighting {
     pub status: Arc<Mutex<RenderingState>>,
 }
 impl SourceLighting {
+    pub(crate) fn clone_bytes(&self) -> usize {
+        use std::mem::size_of;
+        self.sky.materials.capacity() * size_of::<Handle<super::sky::SkyMaterial>>()
+            + self.materials.capacity() * size_of::<AuthoredMaterial>()
+            + self.warmups.capacity() * size_of::<(Entity, bool)>()
+            + self.lamp_materials.capacity() * size_of::<BoundLampMaterial>()
+            + self
+                .lamp_materials
+                .iter()
+                .map(|m| {
+                    m.receivers.capacity() * size_of::<Entity>()
+                        + m.choices.capacity() * size_of::<super::materials::LampMaterialChoice>()
+                })
+                .sum::<usize>()
+            + self.control_poses.capacity() * size_of::<(usize, Entity)>()
+            + self.visibility.capacity() * size_of::<(usize, Entity)>()
+            + self.lights.capacity() * size_of::<BoundLight>()
+            + self
+                .lights
+                .iter()
+                .filter_map(|l| l.world.as_ref())
+                .map(|l| l.record.source.file.capacity())
+                .sum::<usize>()
+            + self.textures.capacity() * size_of::<(u32, String, Handle<Image>)>()
+            + self
+                .textures
+                .iter()
+                .map(|(_, path, _)| path.capacity())
+                .sum::<usize>()
+            + self.road_lamps.clone_bytes()
+    }
     pub(crate) fn prepare_copy(&self) -> Self {
         let mut copy = self.clone();
+        copy.status = Arc::new(Mutex::new(self.state.clone()));
         copy.road_lamps.clear_owned();
-        copy.lights.retain(|light| !light.road);
-        for light in self.lights.iter().filter(|light| light.road) {
+        copy.lights.retain(|light| light.world.is_none());
+        for light in self.lights.iter().filter(|light| light.world.is_some()) {
             copy.uniform.lights[light.index] = GpuLight::default();
         }
         copy.uniform.counts.x = copy.road_lamps.fixed_lights as u32;
@@ -200,10 +240,6 @@ impl Plugin for SourceLightingPlugin {
                 )
                     .chain(),
             );
-        app.add_systems(
-            PostUpdate,
-            super::world::sync_road_lamps.before(bevy::transform::TransformSystems::Propagate),
-        );
         let render_app = app.sub_app_mut(RenderApp);
         render_app
             .init_resource::<ExtractedLighting>()
@@ -235,6 +271,8 @@ pub fn load_lighting(commands: &mut Commands, server: &AssetServer, lighting: &L
                         filter,
                         wrap_u,
                         wrap_v,
+                        main_world_only: false,
+                        decoded_bytes: 0,
                     };
                 })
                 .load(texture.mip_data.path.clone());
@@ -250,7 +288,7 @@ pub fn load_lighting(commands: &mut Commands, server: &AssetServer, lighting: &L
         .collect();
     commands.insert_resource(SourceLighting {
         sky: super::sky::SkyState::new(server, lighting),
-        road_lamps: super::world::RoadLamps::new(lighting.road_lamp.spacing_meters as f64),
+        road_lamps: super::world::RoadLamps::new(),
         materials: Vec::new(),
         material_loads: None,
         materials_ready: false,
@@ -654,6 +692,7 @@ pub(crate) fn bind_lighting(
                 .and_then(|node| node.parent);
         }
         source.lights.push(BoundLight {
+            world: None,
             index,
             road: false,
             item,
@@ -708,6 +747,11 @@ pub(crate) fn bind_lighting(
             usize::from(light.shadows.kind != 0)
         })
         .sum();
+    source.road_lamps.capacity = (MAX_LIGHTS - source.lights.len()).min(if road_faces == 0 {
+        MAX_LIGHTS
+    } else {
+        (SHADOW_SLOTS - shadow_start) / road_faces
+    });
     if road.lights.len() != 1
         || source.lights.len() + source.road_lamps.capacity > MAX_LIGHTS
         || shadow_start + source.road_lamps.capacity * road_faces > SHADOW_SLOTS
@@ -768,6 +812,7 @@ pub(crate) fn sync_lighting(
         .runtime
         .lighting
         .road_lamp_output(&reference.0.lighting);
+    let source = &mut *source;
     for bound_index in 0..source.lights.len() {
         let bound = &source.lights[bound_index];
         let index = bound.index;
@@ -791,8 +836,15 @@ pub(crate) fn sync_lighting(
                         .is_some_and(|handle| drive.runtime.physics.body_active(*handle))
                 })
             });
-        let record = &reference.0.lighting.lights[bound.source_index];
-        let output = if bound.road {
+        let record = bound
+            .world
+            .as_ref()
+            .map_or(&reference.0.lighting.lights[bound.source_index], |w| {
+                &w.record
+            });
+        let output = if let Some(world) = &bound.world {
+            &world.output
+        } else if bound.road {
             &road_output
         } else {
             &drive.runtime.lighting.light_outputs()[bound.source_index]
@@ -1105,7 +1157,11 @@ fn extract_lighting(
             .cookie_handles
             .as_ref()
             .map(|handles| std::array::from_fn(|i| handles[i].id()));
-        if output.status.is_none() {
+        if output
+            .status
+            .as_ref()
+            .is_none_or(|status| !Arc::ptr_eq(status, &source.status))
+        {
             output.status = Some(source.status.clone());
         }
     }
@@ -1148,6 +1204,7 @@ fn upload_lighting(
 }
 fn check_pipelines(
     cache: Res<PipelineCache>,
+    isolation: Res<super::pipeline_ownership::PipelineOwners>,
     gpu: Res<LightingGpu>,
     extracted: Res<ExtractedLighting>,
     material_pipelines: Res<bevy::pbr::SpecializedMaterialPipelineCache>,
@@ -1171,7 +1228,10 @@ fn check_pipelines(
         }
         _ => ready = false,
     };
-    for pipeline in cache.pipelines() {
+    for (index, pipeline) in cache.pipelines().enumerate() {
+        if isolation.isolated(CachedRenderPipelineId::new(index)) {
+            continue;
+        }
         if let PipelineDescriptor::RenderPipelineDescriptor(descriptor) = &pipeline.descriptor {
             if descriptor
                 .fragment
@@ -1277,6 +1337,7 @@ pub(crate) fn register_road_light(
     }
     let entity = entity.id();
     source.lights.push(BoundLight {
+        world: None,
         index,
         road: true,
         item: None,
@@ -1310,6 +1371,112 @@ pub(crate) fn register_road_light(
     entity
 }
 
+pub(crate) fn register_world_light(
+    source: &mut SourceLighting,
+    commands: &mut Commands,
+    light: &crate::world::WorldLight,
+    slot: usize,
+    shadow_start: usize,
+    node: Entity,
+    enabled: bool,
+) -> Entity {
+    let record = &light.record;
+    let index = source.road_lamps.fixed_lights + slot;
+    let faces = if record.shadows.kind == 0 {
+        0
+    } else if record.kind == LightKind::Point {
+        6
+    } else {
+        1
+    };
+    let mut entity = commands.spawn((
+        SourceLight {
+            index,
+            shadow_start,
+            faces,
+            enabled,
+        },
+        Transform::default(),
+        (32..64)
+            .filter(|layer| record.culling_mask & (1 << (layer - 32)) != 0)
+            .collect::<RenderLayers>(),
+    ));
+    if record.kind == LightKind::Point {
+        entity.insert(PointLight {
+            intensity: 0.,
+            range: record.range_meters,
+            shadow_maps_enabled: enabled && faces > 0,
+            shadow_map_near_z: record.shadows.near_plane,
+            shadow_depth_bias: record.shadows.bias,
+            shadow_normal_bias: record.shadows.normal_bias,
+            ..default()
+        });
+    } else {
+        entity.insert(SpotLight {
+            intensity: 0.,
+            range: record.range_meters,
+            outer_angle: record.full_cone_degrees.to_radians() * 0.5,
+            inner_angle: record.inner_cone_degrees.to_radians() * 0.5,
+            shadow_maps_enabled: enabled && faces > 0,
+            shadow_map_near_z: record.shadows.near_plane,
+            shadow_depth_bias: record.shadows.bias,
+            shadow_normal_bias: record.shadows.normal_bias,
+            ..default()
+        });
+    }
+    let entity = entity.id();
+    source.lights.push(BoundLight {
+        body: None,
+        item: None,
+        world: Some(WorldBoundLight {
+            record: record.clone(),
+            output: crate::lighting::LightOutput {
+                id: record.id,
+                enabled,
+                intensity: light.intensity,
+            },
+            shadow_start,
+            faces,
+        }),
+        index,
+        road: light.biome.is_some(),
+        id: record.id,
+        source_index: 0,
+        entity,
+        node: Some(node),
+        pose: Transform::default(),
+    });
+    let half = record.full_cone_degrees.to_radians() * 0.5;
+    source.uniform.lights[index] = GpuLight {
+        cookie_rect: Vec4::new(
+            if record.kind == LightKind::Spot {
+                2.
+            } else {
+                0.
+            },
+            0.,
+            0.,
+            0.,
+        ),
+        shadow: Vec4::new(
+            shadow_start as f32,
+            faces as f32,
+            record.shadows.strength,
+            record.cookie_size,
+        ),
+        mask: UVec4::new(
+            record.culling_mask,
+            (half.cos() / half.sin()).to_bits(),
+            record.shadows.kind as u32,
+            0,
+        ),
+        ..default()
+    };
+    source.uniform.counts.x = source.uniform.counts.x.max(index as u32 + 1);
+    source.uniform.counts.y = source.uniform.counts.y.max((shadow_start + faces) as u32);
+    entity
+}
+
 pub(crate) fn remove_road_light(
     source: &mut SourceLighting,
     commands: &mut Commands,
@@ -1330,7 +1497,9 @@ pub(crate) fn remove_road_light(
         .lights
         .iter()
         .map(|light| {
-            if light.road {
+            if let Some(world) = &light.world {
+                world.shadow_start + world.faces
+            } else if light.road {
                 source.road_lamps.fixed_shadows + light.index - source.road_lamps.fixed_lights + 1
             } else {
                 source.road_lamps.fixed_shadows

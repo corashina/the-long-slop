@@ -1,7 +1,7 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 1;
+pub const SAVE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -69,13 +69,11 @@ pub struct BodySnapshot {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldSnapshot {
-    pub seed: String,
-    pub records: Vec<WorldRecord>,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum WorldRecord {
-    Pump { instance: InstanceId, valve: f32 },
+    pub seed: i32,
+    #[serde(with = "super::identity::lossless")]
+    pub changes: crate::world::ChangeRecords,
+    #[serde(with = "super::identity::lossless")]
+    pub spawn: crate::world::spawn_state::SpawnHistory,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -141,14 +139,24 @@ pub struct ItemSnapshot {
     pub temperature: Option<f32>,
     pub fluids: Option<[f32; 6]>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ItemLocationSave {
     World,
     Held,
-    PartSlot { slot: SourceKey },
-    WheelSlot { slot: SourceKey },
-    Attached { owner: InstanceId },
+    PartSlot {
+        slot: SourceKey,
+    },
+    WheelSlot {
+        slot: SourceKey,
+    },
+    Attached {
+        owner: InstanceId,
+    },
+    GeneratedAttachment {
+        #[serde(with = "super::identity::lossless")]
+        attachment: crate::world::AttachmentSnapshot,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

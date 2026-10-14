@@ -54,7 +54,7 @@ Library-only verification does not use Docker.
 
 The exporter accepts Steam app `1017180`, build `11140890`, with Unity `2021.3.18f1`.
 It preserves the installed tree and complete object graph before converting development assets.
-It derives the garage, Lada, supplies, road pole, and sky from the accepted library.
+It derives the garage, Lada, supplies, road pole, sky, and selected world prototypes from the accepted library.
 Git ignores recovered files and decompiled code. The exporter leaves Steam files unchanged.
 
 ## Stages and storage
@@ -69,7 +69,7 @@ The default stage is `runtime`. It runs missing prerequisites and verifies an ex
 | Source | `--stage source` | `.cache/reference-library/source/`, source hashes, and copied Steam manifest |
 | Catalog | `--stage catalog` | `catalog.json`, complete typed records, schemas, and binary sidecars |
 | Library | `--stage library` | `web/assets/library/`, category indexes, coverage, and acceptance manifest |
-| Runtime | `--stage runtime` | `web/assets/reference/`, five selected scenes and gameplay records |
+| Runtime | `--stage runtime` | `web/assets/reference/`, selected scenes, world prototypes, and gameplay records |
 
 ```powershell
 python -m tools.reference.export --stage library --verify
@@ -191,25 +191,61 @@ It uses the toolchain's `sha256sum` utility. It adds no runtime dependency.
 The validator filters one exact pinned pygltflib provisional notice. Other warnings and validation errors remain visible.
 Keep source recovery, analysis, scenario patches, and captures outside Git.
 
-## Source plate ownership
+## Checked world export
 
-The selected Lada uses two imported plate items and two retained text meshes.
-The manifest requires the recovered plate contract, source font tables, atlas receipt, and separate text material.
-Restart regenerates native labels and replaces each mesh payload under its retained handle.
-Pause, resize, attachment changes, and origin changes keep the labels fixed.
-The renderer shares the checked atlas and material across game instances.
-Keep extracted font data, shader bytes, scenes, browser probes, and captures outside Git.
-See `docs/verification.md` for the current evidence and skipped checks.
+Use an accepted library from another checkout without changing its files:
 
-## Portable flashlight source export
+```powershell
+$referencePython = 'C:/Users/Corashina/Documents/Projects/the-long-drive-wasm/tools/reference/.venv/Scripts/python.exe'
+$libraryRoot = 'C:/Users/Corashina/Documents/Projects/the-long-drive-wasm/web/assets/library'
+& $referencePython -B -m tools.reference.export --library-root $libraryRoot
+& $referencePython -B -m tools.reference.export --library-root $libraryRoot --verify
+```
 
-The selected runtime manifest includes two source flashlight models and their scene links.
-The older object starts in the garage. The newer object stays inactive.
-The exporter keeps their pickup, save, body, controller, collider, mesh, and material links.
-It validates both enabled renderer meshes against the generated `items.gltf` nodes.
-The current inactive model uses mesh 17 for Body and mesh 18 for Light.
+The runtime stage checks the external library before reading selected records.
+It stages files under the current checkout's `.cache/reference-library/work` and promotes only its runtime directory.
+`--library-root` is valid only for the runtime stage.
+The required `world` contract rejects old manifests and unresolved source links.
+Native and browser loaders share a 128 MiB manifest limit.
+All prototype node indices belong to one prototype instance.
+Road control counts and skin bone counts are separate.
 
-The manifest keeps source storage volumes as oriented collider geometry.
-The trunk and hood slots retain their source restrictions.
-The runtime binds eligible flashlight bodies and shapes after physics creation.
-See [portable flashlight verification](../../docs/verification.md#portable-flashlights-2026-10-13) for source values and browser limits.
+The world contract uses the saved 5,000-metre source settings profile.
+It requires Task 1's checked local samples and retained source runs.
+Source captures, managed methods, and exported assets remain outside Git.
+Synthetic fixtures test contract rejection; they do not prove world generation parity.
+
+World selection includes the active object pools, active building types, and supported recursive physical props.
+The catalog retains source weights, recursive category indices, null categories, and invalid source category outcomes.
+Unsupported vehicles, actors, and part behavior have explicit exclusions.
+Physical props retain their source identity when an action, such as eating or firing, is excluded.
+The three terrain prefabs have null source mesh links.
+Their TerrainBiome shader, textures, mip levels, and parameters remain available for generated terrain.
+Dormant LOD bindings retain their original shaders, parameters, textures, mip levels, and render target descriptors.
+Explicit null material slots and zero-vertex meshes remain distinct from unresolved links.
+Later rendering work must admit each visible source binding before its LOD appears.
+The current source generator consumes this contract and admits selected runtime instances.
+
+Startup checks every world prototype file and dependency before Start becomes available.
+One worker checks bounded dependency buffers and releases them after SHA-256 validation.
+Five existing scene, lamp, and sky assets keep eager Bevy loading.
+World prototypes decode after selected runtime admission, including required startup surfaces.
+
+The runtime projection uses compact immutable source tables and checked receipt links.
+The original records and receipts remain in ignored provenance sidecars.
+See `.cache/world-source/task-7-input-provenance/` for immutable originals and the completion report for hashes.
+Texture arrays use checked row chunks, each at most 1 MiB plus its 16-byte header.
+Each chunk retains its payload hash, source receipt, mip, layer, row, dimensions, and complete coverage order.
+The loader admits one chunk through upload completion before the next chunk starts.
+
+Bootstrap dependency verification has a separate lifetime from admitted world jobs.
+`checkedBytes` can hold input chunks and one contiguous copy together.
+Serial verification limits the visible payload overlap to twice one dependency's byte length, at most 64 MiB.
+Backing ArrayBuffers can exceed their views. This payload bound does not measure those allocations.
+SHA-256 work, fetch buffers, parser objects, and browser allocator overhead remain outside that copy bound.
+The JavaScript manifest text and parsed object can overlap Rust manifest decoding.
+The 128 MiB manifest input limit does not establish a bootstrap or process memory bound.
+
+The final implementation used static tracing and product compilation under the user's Ignore tests instruction.
+No final fixture, source comparison, browser, or driving acceptance ran.
+Current evidence lives in `.cache/world-source/completion/2026-10-13/` and [verification](../../docs/verification.md#source-world-implementation-2026-10-13).

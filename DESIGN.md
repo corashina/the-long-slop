@@ -72,7 +72,7 @@ The error panel uses the recorded dark red.
 ### Scene lighting
 
 Use the installed build's material and lighting records for imported objects.
-Keep the existing procedural terrain and road materials.
+Use checked source TerrainBiome equations and source road material bindings.
 Source sky, clouds, stars, ambient light, and fog follow the active cycle.
 Source lamp choices retain authored material links, emission, cookies, and shadow flags.
 Use one `SourceLighting` owner and one shared material cache.
@@ -178,3 +178,17 @@ The library preserves sprite borders, pivots, atlas links, UI layouts, and nativ
 The current UI uses selected source records. Complete library preservation does not establish Unity UI or shader parity.
 Six-face cubemap previews use clipped 8-bit PNGs. Native DDS faces retain BC6H HDR data and mip levels.
 Read [the asset audit](docs/research/2026-10-10-full-asset-audit.md) for measured coverage and support limits.
+
+## World ownership
+
+Use one `WorldStream` and one current source loader contract.
+Keep the frozen source generation frame separate from runtime origin shifts.
+Select bounded windows around the player and current vehicle. Deduplicate shared regions.
+Prepare required render and collision owners before publication or recovery transport.
+Keep the accepted region when admission fails.
+
+Keep imported assets separate from world prototypes, active geometry, pending work, source history, and actual changes.
+Count retained container capacities. Count shared GPU handles once.
+Use the existing `SourceLighting` API for terrain illumination.
+Source global reflection and SH-volume contributions remain outside this world layer.
+Keep technical measurements in the development snapshot. Add no player memory or world-quality controls.

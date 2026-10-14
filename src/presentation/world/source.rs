@@ -1,0 +1,437 @@
+//! Source surfaces retain the same vertices and triangle ranges as collision publication.
+use super::super::materials::{
+    SourceCaster, SourceMaterial, SourceShadowMode, terrain::TerrainMaterial,
+};
+use super::pipelines::{PipelineTicket, WorldPipelines};
+use crate::presentation::materials::RenderingState;
+use crate::world::{WorldRequest, WorldStream};
+use crate::{
+    reference::{ReferenceError, SourceId},
+    world::{SurfaceKey, WorldFrame, WorldLayer, WorldSurface},
+};
+use bevy::ecs as bevy_ecs;
+use bevy::{
+    asset::RenderAssetUsages,
+    camera::visibility::RenderLayers,
+    mesh::{Indices, PrimitiveTopology},
+    prelude::*,
+};
+use std::collections::HashMap;
+
+pub struct SurfaceMaterial {
+    pub renderer: crate::reference::render_lighting::RendererRecord,
+    pub material: Handle<SourceMaterial>,
+    pub caster: Option<Handle<StandardMaterial>>,
+    pub layer: u8,
+    pub shadow_mode: u8,
+    pub receive_shadows: bool,
+}
+struct SurfacePreparation {
+    request: WorldRequest,
+    key: SurfaceKey,
+    meshes: Vec<Handle<Mesh>>,
+    tickets: Vec<Option<PipelineTicket>>,
+    records: Vec<crate::reference::render_lighting::RendererRecord>,
+}
+struct SurfaceVisual {
+    key: SurfaceKey,
+    root: Entity,
+    meshes: Vec<Handle<Mesh>>,
+    _tickets: Vec<Option<PipelineTicket>>,
+}
+/// Material admission precedes collision publication. A missing binding is an explicit failure.
+#[derive(Resource, Default)]
+pub struct SourceWorldVisuals {
+    session: Option<u64>,
+    pending: Option<SurfacePreparation>,
+    surfaces: Vec<SurfaceVisual>,
+    pub(super) road_materials: HashMap<SourceId, Vec<SurfaceMaterial>>,
+    pub(super) terrain: [Option<Handle<TerrainMaterial>>; 3],
+    terrain_layers: [u8; 3],
+    pub(super) terrain_records: [Option<crate::reference::render_lighting::RendererRecord>; 3],
+    terrain_casters: [Option<Handle<StandardMaterial>>; 3],
+    terrain_shadow_modes: [u8; 3],
+}
+impl SourceWorldVisuals {
+    pub fn ready(&self, stream: &WorldStream) -> bool {
+        self.pending.is_none() && self.surfaces.len() == stream.frame().surfaces.len()
+    }
+    pub fn roots(&self) -> impl Iterator<Item = Entity> + '_ {
+        self.surfaces.iter().map(|s| s.root)
+    }
+
+    pub(crate) fn measurement_meshes(
+        &self,
+    ) -> impl Iterator<Item = (bevy::asset::AssetId<Mesh>, bool)> + '_ {
+        self.surfaces
+            .iter()
+            .flat_map(|s| s.meshes.iter().map(|m| (m.id(), false)))
+            .chain(
+                self.pending
+                    .iter()
+                    .flat_map(|s| s.meshes.iter().map(|m| (m.id(), true))),
+            )
+    }
+
+    pub fn retire_session(&mut self, commands: &mut Commands, meshes: &mut Assets<Mesh>) {
+        for visual in self.surfaces.drain(..) {
+            commands.entity(visual.root).despawn();
+            for mesh in visual.meshes {
+                meshes.remove(mesh.id());
+            }
+        }
+        if let Some(pending) = self.pending.take() {
+            for mesh in pending.meshes {
+                meshes.remove(mesh.id());
+            }
+        }
+        self.session = None;
+    }
+
+    pub fn reset_bindings(
+        &mut self,
+        terrain: &mut Assets<TerrainMaterial>,
+        casters: &mut Assets<StandardMaterial>,
+    ) {
+        for (_, bindings) in self.road_materials.drain() {
+            for binding in bindings {
+                if let Some(handle) = binding.caster {
+                    casters.remove(handle.id());
+                }
+            }
+        }
+        for handle in &mut self.terrain {
+            if let Some(handle) = handle.take() {
+                terrain.remove(handle.id());
+            }
+        }
+        for handle in &mut self.terrain_casters {
+            if let Some(handle) = handle.take() {
+                casters.remove(handle.id());
+            }
+        }
+    }
+
+    pub fn bind_road(
+        &mut self,
+        source: SourceId,
+        materials: Vec<SurfaceMaterial>,
+    ) -> Result<(), ReferenceError> {
+        if materials.is_empty() {
+            return Err(ReferenceError(
+                "Source road has no material bindings".into(),
+            ));
+        }
+        self.road_materials.insert(source, materials);
+        Ok(())
+    }
+    pub fn bind_terrain(
+        &mut self,
+        tier: usize,
+        material: Handle<TerrainMaterial>,
+        layer: u8,
+        shadow_mode: u8,
+        caster: Option<Handle<StandardMaterial>>,
+    ) {
+        self.terrain[tier] = Some(material);
+        self.terrain_layers[tier] = layer;
+        self.terrain_casters[tier] = caster;
+        self.terrain_shadow_modes[tier] = shadow_mode;
+    }
+    pub fn prepare_surface(
+        &mut self,
+        stream: &mut WorldStream,
+        meshes: &mut Assets<Mesh>,
+        pipelines: &mut WorldPipelines,
+    ) -> Result<(), ReferenceError> {
+        let matches = |pending: &SurfacePreparation, request: WorldRequest, key: SurfaceKey| {
+            pending.request.session == request.session
+                && pending.request.revision == request.revision
+                && pending.key == key
+        };
+        let current = stream
+            .prepared_surface()
+            .map(|(request, surface)| (request, surface.key));
+        if self.pending.as_ref().is_some_and(|pending| {
+            current.is_none_or(|(request, key)| !matches(pending, request, key))
+        }) {
+            let pending = self.pending.take().unwrap();
+            for mesh in pending.meshes {
+                meshes.remove(mesh.id());
+            }
+        }
+        let Some((request, surface)) = stream.prepared_surface() else {
+            return Ok(());
+        };
+        let key = surface.key;
+        if let Some(source) = &surface.prototype {
+            if !self.road_materials.contains_key(source) {
+                return Ok(());
+            }
+        } else if self.terrain[tier(key.layer)?].is_none() {
+            return Ok(());
+        }
+        if self.pending.is_none() {
+            stream.reserve_surface_renderer(request, key)?;
+            let prepared = stream.prepared_surface().unwrap().1;
+            let source = prepared.prototype.as_ref();
+            let surface = &prepared.surface;
+            let mut handles = Vec::with_capacity(surface.submeshes.len());
+            let mut records = Vec::with_capacity(surface.submeshes.len());
+            for (index, range) in surface.submeshes.iter().enumerate() {
+                let record = if let Some(source) = source {
+                    &self.road_materials[source][index].renderer
+                } else {
+                    self.terrain_records[tier(key.layer)?]
+                        .as_ref()
+                        .ok_or_else(|| ReferenceError("Missing terrain renderer state".into()))?
+                };
+                let (mesh, record) = surface_mesh(surface, range.clone(), record);
+                handles.push(meshes.add(mesh));
+                records.push(record);
+            }
+            let tickets = (0..handles.len() * 2).map(|_| None).collect();
+            self.pending = Some(SurfacePreparation {
+                request,
+                key,
+                meshes: handles,
+                tickets,
+                records,
+            });
+        }
+        let pending = self.pending.as_mut().unwrap();
+        for index in 0..pending.meshes.len() {
+            let source = stream.prepared_surface().unwrap().1.prototype.as_ref();
+            if pending.tickets[index * 2].is_none() {
+                let ticket = if let Some(source) = source {
+                    pipelines.request(
+                        stream,
+                        &pending.meshes[index],
+                        &self.road_materials[source][index].material,
+                        false,
+                    )?
+                } else {
+                    pipelines.request(
+                        stream,
+                        &pending.meshes[index],
+                        self.terrain[tier(key.layer)?].as_ref().unwrap(),
+                        false,
+                    )?
+                };
+                pending.tickets[index * 2] = ticket;
+            }
+            let source = stream.prepared_surface().unwrap().1.prototype.as_ref();
+            let caster = if let Some(source) = source {
+                self.road_materials[source][index].caster.as_ref()
+            } else {
+                self.terrain_casters[tier(key.layer)?].as_ref()
+            };
+            if let Some(caster) = caster {
+                if pending.tickets[index * 2 + 1].is_none() {
+                    pending.tickets[index * 2 + 1] =
+                        pipelines.request(stream, &pending.meshes[index], caster, true)?;
+                }
+            }
+            if pending.tickets[index * 2].is_none()
+                || (caster.is_some() && pending.tickets[index * 2 + 1].is_none())
+            {
+                return Ok(());
+            }
+        }
+        for ticket in pending.tickets.iter().flatten() {
+            match ticket.state() {
+                RenderingState::Loading => return Ok(()),
+                RenderingState::Failed(error) => return Err(ReferenceError(error)),
+                RenderingState::Ready => {}
+            }
+        }
+        stream.accept_surface_renderer(request, key)
+    }
+    pub fn sync(
+        &mut self,
+        frame: &WorldFrame<'_>,
+        commands: &mut Commands,
+        meshes: &mut Assets<Mesh>,
+        roots: &mut Query<&mut Transform>,
+    ) -> Result<(), ReferenceError> {
+        if self.session != Some(frame.request.session) {
+            for old in self.surfaces.drain(..) {
+                commands.entity(old.root).despawn();
+                for mesh in old.meshes {
+                    meshes.remove(mesh.id());
+                }
+            }
+            self.session = Some(frame.request.session);
+        }
+        // Check every new binding before retiring any accepted visual.
+        for published in frame.surfaces {
+            if self.surfaces.iter().any(|old| old.key == published.key) {
+                continue;
+            }
+            if let Some(prototype) = &published.prototype {
+                let bindings = self.road_materials.get(prototype).ok_or_else(|| {
+                    ReferenceError(format!(
+                        "Unbound source road {}:{}",
+                        prototype.file, prototype.path_id
+                    ))
+                })?;
+                if bindings.len() != published.surface.submeshes.len() {
+                    return Err(ReferenceError(
+                        "Source road submesh material count differs".into(),
+                    ));
+                }
+            } else {
+                let tier = tier(published.key.layer)?;
+                if self.terrain[tier].is_none() {
+                    return Err(ReferenceError(format!(
+                        "Unbound source terrain tier {tier}"
+                    )));
+                }
+            }
+        }
+        for published in frame.surfaces {
+            let transform = Transform::from_translation(Vec3::from_array(
+                frame.origin.local(published.surface.origin),
+            ));
+            if let Some(old) = self.surfaces.iter().find(|old| old.key == published.key) {
+                if let Ok(mut current) = roots.get_mut(old.root) {
+                    current.set_if_neq(transform);
+                }
+                continue;
+            }
+            let pending = self
+                .pending
+                .take()
+                .filter(|pending| {
+                    pending.key == published.key && pending.request.session == frame.request.session
+                })
+                .ok_or_else(|| {
+                    ReferenceError("Published source surface has no prepared renderer".into())
+                })?;
+            let root = commands.spawn((transform, Visibility::Inherited)).id();
+            for (index, mesh) in pending.meshes.iter().enumerate() {
+                let record = &pending.records[index];
+                if let Some(prototype) = &published.prototype {
+                    let binding = &self.road_materials[prototype][index];
+                    let mut entity = commands.spawn((
+                        Mesh3d(mesh.clone()),
+                        crate::presentation::renderers::SourceRenderer(record.clone()),
+                        MeshMaterial3d(binding.material.clone()),
+                        Transform::default(),
+                        Visibility::Inherited,
+                        RenderLayers::layer(binding.layer as usize),
+                        SourceShadowMode(binding.shadow_mode),
+                        bevy::light::NotShadowCaster,
+                        ChildOf(root),
+                    ));
+                    if !binding.receive_shadows {
+                        entity.insert(bevy::light::NotShadowReceiver);
+                    }
+                    let entity = entity.id();
+                    if let Some(caster) = &binding.caster {
+                        commands.spawn((
+                            SourceCaster,
+                            Mesh3d(mesh.clone()),
+                            MeshMaterial3d(caster.clone()),
+                            Transform::default(),
+                            Visibility::Inherited,
+                            RenderLayers::layer(binding.layer as usize + 32),
+                            ChildOf(entity),
+                        ));
+                    }
+                } else {
+                    let tier = tier(published.key.layer)?;
+                    commands.spawn((
+                        Mesh3d(mesh.clone()),
+                        crate::presentation::renderers::SourceRenderer(record.clone()),
+                        MeshMaterial3d(self.terrain[tier].as_ref().unwrap().clone()),
+                        Transform::default(),
+                        Visibility::Inherited,
+                        RenderLayers::layer(self.terrain_layers[tier] as usize),
+                        SourceShadowMode(self.terrain_shadow_modes[tier]),
+                        bevy::light::NotShadowCaster,
+                        ChildOf(root),
+                    ));
+                    if let Some(caster) = &self.terrain_casters[tier] {
+                        commands.spawn((
+                            SourceCaster,
+                            Mesh3d(mesh.clone()),
+                            MeshMaterial3d(caster.clone()),
+                            Transform::default(),
+                            Visibility::Inherited,
+                            RenderLayers::layer(self.terrain_layers[tier] as usize + 32),
+                            ChildOf(root),
+                        ));
+                    }
+                }
+            }
+            self.surfaces.push(SurfaceVisual {
+                key: published.key,
+                root,
+                meshes: pending.meshes,
+                _tickets: pending.tickets,
+            });
+        }
+        self.surfaces.retain(|old| {
+            if frame.surfaces.iter().any(|surface| surface.key == old.key) {
+                return true;
+            }
+            commands.entity(old.root).despawn();
+            for mesh in &old.meshes {
+                meshes.remove(mesh.id());
+            }
+            false
+        });
+        Ok(())
+    }
+}
+fn tier(layer: WorldLayer) -> Result<usize, ReferenceError> {
+    match layer {
+        WorldLayer::Terrain => Ok(0),
+        WorldLayer::DistantTerrain => Ok(1),
+        WorldLayer::DistantTerrain2 => Ok(2),
+        _ => Err(ReferenceError("Surface is not source terrain".into())),
+    }
+}
+fn surface_mesh(
+    surface: &WorldSurface,
+    range: std::ops::Range<usize>,
+    record: &crate::reference::render_lighting::RendererRecord,
+) -> (Mesh, crate::reference::render_lighting::RendererRecord) {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, surface.vertices.clone());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, surface.normals.clone());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, surface.uv.clone());
+    if !surface.colors.is_empty() {
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, surface.colors.clone());
+    }
+    if !surface.tangents.is_empty() {
+        mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, surface.tangents.clone());
+    }
+    mesh.insert_indices(Indices::U32(
+        surface.triangles[range].iter().flatten().copied().collect(),
+    ));
+    let mut record = record.clone();
+    let mut min = Vec3::splat(f32::MAX);
+    let mut max = Vec3::splat(f32::MIN);
+    for position in &surface.vertices {
+        let p = Vec3::from_array(*position);
+        min = min.min(p);
+        max = max.max(p);
+    }
+    record.bounds_center = ((min + max) * 0.5).to_array();
+    record.bounds_extents = ((max - min) * 0.5).to_array();
+    let [center, extents] = record.attributes();
+    mesh.insert_attribute(
+        crate::presentation::renderers::SOURCE_BOUNDS_CENTER,
+        vec![center; surface.vertices.len()],
+    );
+    mesh.insert_attribute(
+        crate::presentation::renderers::SOURCE_BOUNDS_EXTENTS,
+        vec![extents; surface.vertices.len()],
+    );
+    (mesh, record)
+}

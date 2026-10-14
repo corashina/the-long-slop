@@ -1,5 +1,7 @@
 pub mod camera;
 pub mod consumables;
+pub mod gpu_prepare;
+mod candidate_upload;
 pub mod instruments;
 pub mod lighting;
 pub mod materials;
@@ -42,6 +44,7 @@ pub mod lighting_assets;
 pub mod lighting_scene;
 pub mod motion_draw;
 pub mod motion_vectors;
+pub mod plates;
 pub mod postprocessing;
 pub mod probes;
 pub mod render_targets;
@@ -63,4 +66,5 @@ pub mod surface_views;
 pub mod transparent;
 pub mod view_frame;
 pub mod weather;
-pub mod plates;
+
+mod pipeline_ownership;

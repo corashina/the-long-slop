@@ -1,4 +1,5 @@
 #define_import_path source_surface
+#import "shaders/source_lod.wgsl"::source_lod_keep
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_fragment::pbr_input_from_vertex_output,
@@ -70,17 +71,31 @@ fn source_shadow(light:SourceLight,position:vec3<f32>,normal:vec3<f32>,view_dept
 struct SourceUniform {
     color: vec4<f32>,
     emission: vec4<f32>,
+    specular: vec4<f32>,
     factors: vec4<f32>,
     scales: vec4<f32>,
     flags: vec4<u32>,
     banks: array<vec4<u32>, 3>,
+    layers: array<vec4<u32>, 3>,
     uv: array<vec4<f32>, 9>,
     sampling: array<vec4<f32>, 9>,
     defaults: array<vec4<f32>, 9>,
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(120) var<uniform> source: SourceUniform;
+#ifdef WORLD_TEXTURE_ARRAYS
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var array0: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var sampler0: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var array1: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(4) var sampler1: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(5) var array2: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(6) var sampler2: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(7) var array3: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(8) var sampler3: sampler;
+#else
 @group(#{MATERIAL_BIND_GROUP}) @binding(121) var bank6_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(122) var bank6_sampler: sampler;
+
+#endif
 
 fn source_flag(bit: u32) -> bool { return (source.flags.x & (1u << bit)) != 0u; }
 fn sample_source(slot: u32, main_uv: vec2<f32>, detail_uv: vec2<f32>, offset: vec2<f32>) -> vec4<f32> {
@@ -92,6 +107,15 @@ fn sample_source(slot: u32, main_uv: vec2<f32>, detail_uv: vec2<f32>, offset: ve
     uv = select(uv, abs(uv), source.sampling[slot].zw > vec2(0.5));
     let bias = source.sampling[slot].y;
     let bank = source.banks[slot / 4u][slot % 4u];
+#ifdef WORLD_TEXTURE_ARRAYS
+    let layer = i32(source.layers[slot / 4u][slot % 4u]);
+    switch bank {
+        case 0u: { return textureSampleBias(array0, sampler0, uv, layer, bias); }
+        case 1u: { return textureSampleBias(array1, sampler1, uv, layer, bias); }
+        case 2u: { return textureSampleBias(array2, sampler2, uv, layer, bias); }
+        default: { return textureSampleBias(array3, sampler3, uv, layer, bias); }
+    }
+#else
     switch bank {
         case 0u: { return textureSampleBias(pbr_bindings::base_color_texture, pbr_bindings::base_color_sampler, uv, bias); }
         case 1u: { return textureSampleBias(pbr_bindings::emissive_texture, pbr_bindings::emissive_sampler, uv, bias); }
@@ -101,9 +125,11 @@ fn sample_source(slot: u32, main_uv: vec2<f32>, detail_uv: vec2<f32>, offset: ve
         case 5u: { return textureSampleBias(pbr_bindings::depth_map_texture, pbr_bindings::depth_map_sampler, uv, bias); }
         default: { return textureSampleBias(bank6_texture, bank6_sampler, uv, bias); }
     }
+#endif
 }
 fn source_normal(sampled: vec4<f32>, scale: f32) -> vec3<f32> {
-    let xy = (sampled.xy * 2.0 - 1.0) * scale;
+    let rg = select(sampled.xy, vec2(sampled.r * sampled.a, sampled.g), source.specular.w > 0.5);
+    let xy = (rg * 2.0 - 1.0) * scale;
     return vec3(xy, sqrt(1.0 - clamp(dot(xy, xy), 0.0, 1.0)));
 }
 fn pow5(value: f32) -> f32 { let square = value * value; return square * square * value; }
@@ -140,6 +166,7 @@ fn fragment(
     @location(11) source_screen: vec4<f32>,
     @builtin(front_facing) is_front: bool,
 ) -> FragmentOutput {
+    if !source_lod_keep(in.position.xy, bitcast<f32>(receiver.y)) { discard; }
     var pbr = pbr_input_from_vertex_output(in, is_front, false);
     var uv = vec2(0.0);
 #ifdef VERTEX_UVS_A
@@ -192,8 +219,13 @@ fn fragment(
     }
     if source_flag(5u) { smoothness = main.a * source.factors.z; }
     let occlusion = mix(1.0, sample_source(3u, uv, detail_uv, offset).g, source.scales.z);
-    let specular = mix(vec3(0.04), albedo, metallic);
-    let one_minus_reflectivity = 0.96 * (1.0 - metallic);
+    var specular = mix(vec3(0.04), albedo, metallic);
+    var one_minus_reflectivity = 0.96 * (1.0 - metallic);
+    if source.specular.w > 0.5 {
+        specular = source.specular.rgb;
+        one_minus_reflectivity = 1.0 - max(specular.r, max(specular.g, specular.b));
+        alpha = 1.0;
+    }
     var diffuse = albedo * one_minus_reflectivity;
     if source_flag(8u) {
         diffuse *= alpha;
