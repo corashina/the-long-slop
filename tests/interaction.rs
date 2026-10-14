@@ -36,6 +36,17 @@ fn fixture_with(
 ) -> (InteractionState, ItemStore, PhysicsWorld, PlayerState) {
     let mut reference = common::reference();
     for (id, tank) in [(100, 1), (101, 2)] {
+        for prefix in ["outlet", "splash"] {
+            let mut particle = reference
+                .weather
+                .particles
+                .iter()
+                .find(|p| p.role == format!("{prefix}_{}", reference.openings[0].id.0))
+                .unwrap()
+                .clone();
+            particle.role = format!("{prefix}_{id}");
+            reference.weather.particles.push(particle);
+        }
         reference.openings.push(OpeningRecord {
             id: OpeningId(id),
             source: reference.player.source.clone(),
@@ -68,6 +79,7 @@ fn fixture_with(
             tube_connected: false,
             flow_radius: 0.02,
             can_toggle: true,
+            particles: reference.openings[0].particles.clone(),
         });
         reference.tanks[(tank - 1) as usize]
             .openings

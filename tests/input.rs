@@ -212,7 +212,7 @@ fn one_light_edge_survives_six_steps_hold_and_release() {
 }
 
 #[test]
-fn frame_fade_uses_active_elapsed_once_after_catch_up() {
+fn fixed_steps_advance_cycle_and_fades_once_and_pause_freezes_both() {
     use my_summer_slop::starting_area::GarageRuntime;
     let mut r = common::reference();
     for c in &mut r.lighting.controllers {
@@ -223,45 +223,7 @@ fn frame_fade_uses_active_elapsed_once_after_catch_up() {
     let mut runtime = GarageRuntime::new(&r).unwrap();
     runtime.started = true;
     runtime.lighting.cycle_headlights(&r.lighting, 0);
-    for _ in 0..6 {
-        runtime.step(&r, FrameInput::default());
-    }
-    runtime.advance_lighting(&r, 0.5);
-    assert_eq!(runtime.lighting.cycle.elapsed_seconds(), 0.5);
-    runtime.advance_light_fades(&r, 0.1);
-    assert!(
-        !runtime
-            .lighting
-            .light_outputs()
-            .iter()
-            .find(|o| o.id.0 == 13)
-            .unwrap()
-            .enabled
-    );
-    runtime.paused = true;
-    runtime.advance_light_fades(&r, 0.1);
-    assert!(
-        !runtime
-            .lighting
-            .light_outputs()
-            .iter()
-            .find(|o| o.id.0 == 13)
-            .unwrap()
-            .enabled
-    );
-    runtime.paused = false;
-    runtime.advance_light_fades(&r, 0.1);
-    assert!(
-        !runtime
-            .lighting
-            .light_outputs()
-            .iter()
-            .find(|o| o.id.0 == 13)
-            .unwrap()
-            .enabled
-    );
-    runtime.advance_light_fades(&r, 0.1);
-    assert!(
+    let low_enabled = |runtime: &GarageRuntime| {
         runtime
             .lighting
             .light_outputs()
@@ -269,7 +231,24 @@ fn frame_fade_uses_active_elapsed_once_after_catch_up() {
             .find(|o| o.id.0 == 13)
             .unwrap()
             .enabled
-    );
+    };
+    for _ in 0..6 {
+        runtime.step(&r, FrameInput::default());
+    }
+    let elapsed = runtime.lighting.cycle.elapsed_seconds();
+    assert!((elapsed - 6. * f64::from(my_summer_slop::simulation::FIXED_DT)).abs() < 1e-9);
+    assert!(!low_enabled(&runtime));
+    runtime.paused = true;
+    for _ in 0..6 {
+        runtime.step(&r, FrameInput::default());
+    }
+    assert_eq!(runtime.lighting.cycle.elapsed_seconds(), elapsed);
+    assert!(!low_enabled(&runtime));
+    runtime.paused = false;
+    runtime.step(&r, FrameInput::default());
+    assert!(!low_enabled(&runtime));
+    runtime.step(&r, FrameInput::default());
+    assert!(low_enabled(&runtime));
 }
 
 #[test]
@@ -307,11 +286,10 @@ fn exported_driver_lights_use_real_edges() {
         for _ in 0..6 {
             runtime.step(&r, input.take_step());
         }
-        runtime.advance_light_fades(&r, 0.1);
     }
     assert!(runtime.lighting.high_beam(0));
-    for _ in 0..3 {
-        runtime.advance_light_fades(&r, 0.1);
+    for _ in 0..18 {
+        runtime.step(&r, FrameInput::default());
     }
     let rlight = runtime
         .lighting
@@ -344,8 +322,6 @@ fn exported_low_startup_keeps_source_outputs_through_pause() {
     runtime.started = true;
     for _ in 0..132 {
         runtime.step(&r, FrameInput::default());
-        runtime.advance_lighting(&r, 1. / 60.);
-        runtime.advance_light_fades(&r, 1. / 60.);
     }
     for c in r
         .lighting
@@ -412,7 +388,6 @@ fn exported_low_startup_keeps_source_outputs_through_pause() {
             ..Default::default()
         },
     );
-    runtime.advance_light_fades(&r, 0.5);
     assert_eq!(
         lights,
         runtime
@@ -454,7 +429,6 @@ fn car_and_headlight_electronics_keep_their_source_owners() {
     runtime.started = true;
     runtime.vehicles[0].engine.ignition = true;
     runtime.step(&r, FrameInput::default());
-    runtime.advance_light_fades(&r, 0.1);
     assert!(!runtime.lighting.high_beam(0));
     for c in r
         .lighting

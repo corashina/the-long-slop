@@ -15,7 +15,7 @@ test('backspace_and_obsolete_controls_are_interface_only',()=>{
 });
 test('toilet_keys_and_primary_release_are_distinct',()=>{
  const i=new InputState();i.code('KeyP',true);i.code('KeyB',true);i.code('Mouse0',true);
- assert.equal(i.takeFrame().pressed,262144|524288|512);
+ assert.equal(i.takeFrame().pressed,524288|1048576|512);
  i.code('Mouse0',false);
  assert.equal(i.takeFrame().released,512);
 });

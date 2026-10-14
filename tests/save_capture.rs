@@ -457,22 +457,38 @@ fn cycle_wrap_and_fade_capture_preserve_next_update() {
     let ids = IdentityMap::new(&r).unwrap();
     let mut original = LightingState::new(&r.lighting);
     let duration = f64::from(r.lighting.cycle.day_seconds + r.lighting.cycle.night_seconds);
-    original.cycle.advance(&r.lighting.cycle, duration + 0.125);
+    original.cycle.advance(
+        &r.lighting.cycle,
+        my_summer_slop::lighting::CycleAdvance {
+            simulation_delta: (duration + 0.125) as f32,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     original.cycle_headlights(&r.lighting, 0);
     for c in &r.lighting.controllers {
-        if c.kind == LightControllerKind::House || c.kind == LightControllerKind::Cabin {
+        if c.kind == LightControllerKind::Switch || c.kind == LightControllerKind::Cabin {
             original.use_control(&r.lighting, c.id);
         }
     }
     assert_eq!(original.cycle.capture_save().cycle_seconds, 0.);
     assert!(original.cycle.capture_save().evaluated_cycle_seconds > duration);
-    let electronics = r
-        .lighting
-        .controllers
-        .iter()
-        .find(|c| c.kind == LightControllerKind::Rear)
-        .unwrap()
-        .electronics_output;
+    let vehicle_lights: Vec<_> = (0..r.vehicles.len())
+        .map(|vehicle| VehicleLightSample {
+            electronics_output: r
+                .lighting
+                .controllers
+                .iter()
+                .find(|c| c.kind == LightControllerKind::Rear && c.vehicle == Some(vehicle))
+                .unwrap()
+                .electronics_output,
+            ..Default::default()
+        })
+        .collect();
+    let headlights: Vec<_> = (0..r.vehicles.len())
+        .map(|vehicle| original.headlights(vehicle))
+        .collect();
     let lights = |s: &LightingState| {
         s.light_outputs()
             .iter()
@@ -515,11 +531,8 @@ fn cycle_wrap_and_fade_capture_preserve_next_update() {
                 &ids,
                 &saved,
                 &vec![true; r.lighting.controllers.len()],
-                &[VehicleLightSample {
-                    electronics_output: electronics,
-                    ..Default::default()
-                }],
-                &[original.headlights(0)],
+                &vehicle_lights,
+                &headlights,
             )
             .unwrap();
         assert_eq!(original.cycle.output(), restored.cycle.output());
@@ -527,8 +540,24 @@ fn cycle_wrap_and_fade_capture_preserve_next_update() {
         assert_eq!(lights(&original), lights(&restored));
         assert_eq!(materials(&original), materials(&restored));
         assert_eq!(visible(&original), visible(&restored));
-        original.cycle.advance(&r.lighting.cycle, 0.02);
-        restored.cycle.advance(&r.lighting.cycle, 0.02);
+        original.cycle.advance(
+            &r.lighting.cycle,
+            my_summer_slop::lighting::CycleAdvance {
+                simulation_delta: 0.02,
+                cycle_extra: 0.,
+                cloud_scale: 1.,
+                sleep_progress: None,
+            },
+        );
+        restored.cycle.advance(
+            &r.lighting.cycle,
+            my_summer_slop::lighting::CycleAdvance {
+                simulation_delta: 0.02,
+                cycle_extra: 0.,
+                cloud_scale: 1.,
+                sleep_progress: None,
+            },
+        );
         original.advance_fades(&r.lighting, 0.02);
         restored.advance_fades(&r.lighting, 0.02);
         assert_eq!(original.cycle.output(), restored.cycle.output());

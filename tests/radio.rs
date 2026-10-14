@@ -166,7 +166,7 @@ fn source_control_nodes_keep_eligibility_and_repeat_gate() {
     mechanisms.step(
         band,
         FrameInput {
-            pressed: keys::FILL,
+            pressed: keys::PRIMARY,
             ..Default::default()
         },
         pose,

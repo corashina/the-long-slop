@@ -1,15 +1,10 @@
 mod common;
 
 use my_summer_slop::simulation::{DriveInput, StepClock};
-use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose, VehicleSnapshot};
-
-const START: VehiclePose = VehiclePose {
-    position: [0.0, 1.1, 0.0],
-    rotation: [0.0, 0.0, 0.0, 1.0],
-};
+use my_summer_slop::vehicle::{PhysicsWorld, VehicleSnapshot};
 
 fn flat_track() -> PhysicsWorld {
-    let mut world = PhysicsWorld::new(&common::reference(), &[START]).expect("fixture physics");
+    let mut world = common::world();
     world.insert_mesh(
         &[
             [-500.0, 0.0, -500.0],
@@ -309,7 +304,7 @@ fn handbrake_slows_the_car() {
 
 #[test]
 fn removed_ground_cannot_support_wheels() {
-    let mut world = PhysicsWorld::new(&common::reference(), &[START]).expect("fixture physics");
+    let mut world = common::world();
     let ground = world.insert_mesh(
         &[
             [-10.0, 0.0, -10.0],
@@ -340,9 +335,15 @@ fn removed_ground_cannot_support_wheels() {
 #[test]
 fn one_second_stall_advances_at_most_six_steps() {
     let mut clock = StepClock::default();
-    assert_eq!(clock.advance(1.0), 6);
-    assert!((0.0..1.0).contains(&clock.alpha()));
-    assert_eq!(clock.advance(0.0), 0);
+    clock.accept_frame(1.0);
+    let mut steps = 0;
+    while clock.take_step(1.) {
+        steps += 1;
+    }
+    assert_eq!(steps, 6);
+    assert!((0.0..1.0).contains(&clock.alpha(1.)));
+    clock.accept_frame(0.0);
+    assert!(!clock.take_step(1.));
 }
 
 #[test]

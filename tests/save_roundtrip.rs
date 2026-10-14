@@ -498,10 +498,18 @@ fn fluid_mechanism_lighting_roundtrip_resumes() {
         g.area.interaction.mechanisms.rotation_degrees(control),
         Some([0.; 2])
     );
-    g.lighting.cycle.advance(&r.lighting.cycle, 18.25);
+    g.lighting.cycle.advance(
+        &r.lighting.cycle,
+        my_summer_slop::lighting::CycleAdvance {
+            simulation_delta: 18.25,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
     g.lighting.cycle_headlights(&r.lighting, 0);
     for c in &r.lighting.controllers {
-        if c.kind == LightControllerKind::House || c.kind == LightControllerKind::Cabin {
+        if c.kind == LightControllerKind::Switch || c.kind == LightControllerKind::Cabin {
             g.lighting.use_control(&r.lighting, c.id);
         }
     }
