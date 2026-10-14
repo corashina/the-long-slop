@@ -4,15 +4,16 @@ Updated: 2026-10-14.
 
 ## Current status
 
-Master retains the accepted game features and committed door-control changes.
-We keep the complete source-world integration on `codex/world-integration-deferred`, based on `05bdc507`.
-We completed nine source-world implementation layers and three integration merges in that separate branch.
-The user authorized the merge and retained Bevy ownership patch. Master promotion awaits the final scoped review.
+Master contains the source-world integration and retained Bevy ownership patch after merge `79765e3`.
+The deferred worktree retains implementation reports and recovery files.
+We completed nine source-world implementation layers and three integration merges.
+The final scoped review passed with no findings. Checked runtime inputs and the WASM package are installed in master.
 We reconciled master `6423b062` with source-world startup, collision, save identities, and renderer paths.
 We fixed hidden grass preparation and generated attachment readiness in `8d4341f`.
 We fixed the final review's texture receipt cleanup finding in `103bee7`.
 The full integration review and scoped re-review have no open Critical or Important findings.
-The branch remains separate from master. We added no features or dependencies during these fixes.
+We preserved local transparent sorting and warmup filtering through the replacement renderer.
+We added no features or dependencies during the final merge.
 
 ### Changes in master
 
@@ -25,12 +26,12 @@ The branch remains separate from master. We added no features or dependencies du
 | Portable flashlight | Source bindings, carried controls, storage restrictions, and shared light rendering |
 | Save/load | Browser storage, fleet state, fluids, item state, and scene replacement |
 | Performance | Reduced camera light clustering and depth/shadow material bindings |
-| Roadside stations | Source fuel station models, static collision, and ground alignment on the current procedural road |
+| Roadside stations | Checked source placement, selected prototypes, static collision, and terrain alignment |
 
 We added left-button door dragging and suppress view movement during a drag.
 The integration replaces the obsolete station generator with checked source-world placement and selected prototypes.
 
-### Deferred source-world changes
+### Source-world changes
 
 | Layer | Implemented changes |
 | --- | --- |
@@ -49,10 +50,10 @@ Changed-object records have no fixed count limit. Source checkpoints and first-c
 Active CPU/GPU limits remain 128 MiB each. Prototype limits remain 256 MiB CPU and 512 MiB GPU.
 Generation and presentation share 32 MiB of pending storage.
 
-The separate branch contains the source-world design, implementation plan, source research, and checked input provenance.
-The new worktree also retains exported runtime files and implementation reports.
+Master contains the source-world design, implementation plan, source research, and checked input provenance.
+The retained worktree also contains exported runtime files and implementation reports.
 
-### Deferred integration changes
+### Integration changes
 
 We replaced station save identities with canonical generated identities, change records, and source spawn history.
 We added save schema 2 and reject incompatible schema 1 saves. Browser database version remains separate.
@@ -73,15 +74,13 @@ We retained master's latest depth/shadow bindings and connected candidate caster
 The final native/WASM builds, packaging, 22 shader variants, JavaScript syntax, and scoped whitespace checks passed.
 We preserved existing WASM warnings and unchanged upstream whitespace.
 
-Remaining integration work:
-
-1. Complete the scoped review of the final master integration. Its native/WASM builds and packaging passed.
-2. Promote the reviewed branch and existing runtime inputs to master.
-3. Perform runtime acceptance when authorized. Tests and runtime checks remain skipped.
+The final merged native and release WASM builds, packaging, JavaScript syntax, and scoped whitespace checks passed.
+Master's source matches the reviewed build. All 7,890 installed runtime file hashes match their receipts.
+Runtime acceptance remains open. Tests and runtime checks remain skipped.
 
 ### Verification limits
 
-The source-world branch passed native and release WASM builds, packaging, and static review.
+The merged source-world implementation passed native and release WASM builds, packaging, and static review.
 These results establish compilation and reviewed structure. They do not establish source runtime parity.
 The user skipped tests and further runtime checks. Earlier rendering checks below describe earlier revisions.
 Fixed source samples, collision seams, long drives, rebasing, revisits, and memory plateau remain unverified.
@@ -92,14 +91,14 @@ We added no new storage engine, save migration, multiplayer, or deployment work.
 ## Full-game feature gaps
 
 Reference: installed Steam build `11140890`. This backlog records gaps beyond the implemented layers above.
-The source-world integration awaits final review and promotion. Its runtime acceptance remains open.
+The source-world integration is in master. Its runtime acceptance remains open.
 Missing means no gameplay implementation. Partial means the current implementation covers selected behavior or content.
 The backlog does not expand approved implementation scope. Each new feature needs a source-based specification.
 
 | Feature | Status | Remaining work |
 | --- | --- | --- |
-| Source world generation | Integration branch | Complete review and promotion; verify source samples and runtime behavior when authorized. |
-| Buildings and exploration | Integration branch | Check source buildings, interiors, landmarks, placement, content coverage, and collision when authorized. |
+| Source world generation | Implemented; runtime unverified | Verify source samples and runtime behavior when authorized. |
+| Buildings and exploration | Implemented; runtime unverified | Check source buildings, interiors, landmarks, placement, content coverage, and collision when authorized. |
 | World population | Partial | Integrate source loot placement; add excluded abandoned vehicles, items, and encounters. |
 | Full vehicle range | Partial | Add vehicles beyond the Lada and Skoda, including diesel, two-stroke, automatic, bus, and bike mechanics. |
 | Driving physics | Partial | Add manual gears and clutch; match throttle ramps, tire friction, bare-rim behavior, suspension, and combined braking. |
