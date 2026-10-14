@@ -180,9 +180,10 @@ impl SourceInstances {
                             })
                             .sum::<usize>();
                         // Reservations include ECS storage, transforms, material bind groups, and LOD membership.
-                        let mut cpu =
-                            count * (2048 + std::mem::size_of::<DMat4>()) + primitives * 8192;
-                        let mut gpu = primitives * 2048;
+                        let mut cpu = count * (2048 + std::mem::size_of::<DMat4>())
+                            + primitives * (8192 + crate::presentation::caster_material::CPU_BYTES);
+                        let mut gpu =
+                            primitives * (2048 + crate::presentation::caster_material::gpu_bytes());
                         let objects = count + primitives;
                         let mut a = stream.presentation_allocation();
                         a.active_cpu += cpu;
@@ -467,8 +468,13 @@ impl SourceInstances {
                                     variant_ids.retain(|id| Some(id) != material_source.as_ref());
                                     let mut variants = Vec::with_capacity(variant_ids.len());
                                     if !variant_ids.is_empty() {
-                                        let extra_cpu = variant_ids.len() * 8192;
-                                        let extra_gpu = variant_ids.len() * 2048;
+                                        let extra_cpu = variant_ids.len()
+                                            * (8192
+                                                + crate::presentation::caster_material::CPU_BYTES);
+                                        let extra_gpu = variant_ids.len()
+                                            * (2048
+                                                + crate::presentation::caster_material::gpu_bytes(
+                                                ));
                                         let mut allocation = stream.presentation_allocation();
                                         allocation.active_cpu += extra_cpu;
                                         allocation.active_gpu += extra_gpu;

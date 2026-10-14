@@ -37,6 +37,7 @@ pub mod sky;
 
 pub mod camera_depth;
 pub mod caster;
+pub(crate) mod caster_material;
 pub mod clouds;
 pub mod frame_copy;
 pub mod frame_graph;

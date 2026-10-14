@@ -49,7 +49,7 @@ pub struct WorldPresentation<'w, 's> {
     pub writers: ResMut<'w, GrassWriters>,
     pub materials: InstanceMaterials<'w>,
     pub terrain: ResMut<'w, Assets<TerrainMaterial>>,
-    pub casters: ResMut<'w, Assets<StandardMaterial>>,
+    pub casters: ResMut<'w, Assets<crate::presentation::materials::lod::SurfaceCasterMaterial>>,
     pub assets: ResMut<'w, Assets<SourceGltf>>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub skins: ResMut<'w, Assets<SkinnedMeshInverseBindposes>>,

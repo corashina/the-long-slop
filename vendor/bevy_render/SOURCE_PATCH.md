@@ -19,3 +19,5 @@ The product owns candidate scopes, cancellation, readiness, promotion, and the p
 The patch does not change the mesh allocator, shader language, renderer backend, or normal active-cache queue.
 
 When upgrading Bevy, review this file against the new PipelineCache API and preserve these ownership rules.
+
+The local .gitattributes disables line-ending conversion within this crate to preserve upstream bytes.

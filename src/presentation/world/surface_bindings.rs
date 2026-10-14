@@ -18,7 +18,7 @@ impl SourceWorldVisuals {
         cache: &mut SourceMaterials,
         materials: &mut Assets<SourceMaterial>,
         terrain: &mut Assets<TerrainMaterial>,
-        casters: &mut Assets<StandardMaterial>,
+        casters: &mut Assets<crate::presentation::materials::lod::SurfaceCasterMaterial>,
     ) -> Result<(), ReferenceError> {
         for source in &reference.world.road.prototypes {
             if self.road_materials.contains_key(source) {
@@ -38,6 +38,18 @@ impl SourceWorldVisuals {
             if !cache.world_asset_ready(prototype.asset) {
                 continue;
             }
+            // Road bindings persist for this bank. Reserve before allocating any binding.
+            let count = prototype
+                .skins
+                .iter()
+                .map(|skin| skin.triangles.len())
+                .sum::<usize>();
+            let mut allocation = stream.presentation_allocation();
+            allocation.prototype_cpu +=
+                count * (8192 + crate::presentation::caster_material::CPU_BYTES);
+            allocation.prototype_gpu +=
+                count * (2048 + crate::presentation::caster_material::gpu_bytes());
+            stream.set_presentation_allocation(allocation)?;
             let mut bindings = Vec::with_capacity(
                 prototype
                     .skins
@@ -89,8 +101,14 @@ impl SourceWorldVisuals {
                         cache.handles.insert(key, handle.clone());
                         handle
                     };
-                    let caster = (shadow_mode != 0)
-                        .then(|| casters.add(authored_caster_material((key.0, key.1), cache)));
+                    let caster = (shadow_mode != 0).then(|| {
+                        casters.add(
+                            crate::presentation::materials::lod::SurfaceCasterMaterial::new(
+                                authored_caster_material((key.0, key.1), cache),
+                                cache.preparation.clone(),
+                            ),
+                        )
+                    });
                     bindings.push(SurfaceMaterial {
                         renderer: extras
                             .source_renderer
@@ -119,8 +137,8 @@ impl SourceWorldVisuals {
             }
             stream.reserve_prototype(
                 record.source.clone(),
-                std::mem::size_of::<TerrainMaterial>() + 256,
-                0,
+                std::mem::size_of::<TerrainMaterial>() + 256 + 8192,
+                2048,
             )?;
             cache.admit_world_material(record, reference, stream)?;
             if !cache.world_textures.ready(&record.source) {
@@ -138,10 +156,15 @@ impl SourceWorldVisuals {
             )?);
             terrain.get_mut(&material).unwrap().preparation = cache.preparation.clone();
             let caster = (shadow_mode != 0).then(|| {
-                casters.add(StandardMaterial {
-                    cull_mode: None,
-                    ..default()
-                })
+                casters.add(
+                    crate::presentation::materials::lod::SurfaceCasterMaterial::new(
+                        StandardMaterial {
+                            cull_mode: None,
+                            ..default()
+                        },
+                        cache.preparation.clone(),
+                    ),
+                )
             });
             self.bind_terrain(tier, material, layer, shadow_mode, caster);
             stream.bind_prototype(&record.source)?;

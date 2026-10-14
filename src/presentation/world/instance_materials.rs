@@ -132,21 +132,24 @@ impl InstanceMaterials<'_> {
                         reflected,
                     )?;
                     if shadow_mode != 0 {
-                        caster = Some(self.casters.add(LodCasterMaterial {
-                            base: StandardMaterial {
-                                cull_mode: if shadow_mode == 2 {
-                                    None
-                                } else {
-                                    Some(if reflected {
-                                        bevy::render::render_resource::Face::Front
+                        caster = Some(self.casters.add(LodCasterMaterial::new(
+                            bevy::pbr::ExtendedMaterial {
+                                base: StandardMaterial {
+                                    cull_mode: if shadow_mode == 2 {
+                                        None
                                     } else {
-                                        bevy::render::render_resource::Face::Back
-                                    })
+                                        Some(if reflected {
+                                            bevy::render::render_resource::Face::Front
+                                        } else {
+                                            bevy::render::render_resource::Face::Back
+                                        })
+                                    },
+                                    ..default()
                                 },
-                                ..default()
+                                extension: LodCaster { fade: Vec4::X },
                             },
-                            extension: LodCaster { fade: Vec4::X },
-                        }));
+                            self.cache.preparation.clone(),
+                        )));
                     }
                     InstanceMaterial::Specular(self.specular.add(material))
                 }
@@ -179,10 +182,13 @@ impl InstanceMaterials<'_> {
                         _ => bevy::render::render_resource::Face::Back,
                     });
                 }
-                caster = Some(self.casters.add(LodCasterMaterial {
-                    base,
-                    extension: LodCaster { fade: Vec4::X },
-                }));
+                caster = Some(self.casters.add(LodCasterMaterial::new(
+                    bevy::pbr::ExtendedMaterial {
+                        base,
+                        extension: LodCaster { fade: Vec4::X },
+                    },
+                    self.cache.preparation.clone(),
+                )));
             }
             InstanceMaterial::Primary(self.primary.add(materials::authored_material(
                 identity,

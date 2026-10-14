@@ -21,7 +21,7 @@ use std::collections::HashMap;
 pub struct SurfaceMaterial {
     pub renderer: crate::reference::render_lighting::RendererRecord,
     pub material: Handle<SourceMaterial>,
-    pub caster: Option<Handle<StandardMaterial>>,
+    pub caster: Option<Handle<crate::presentation::materials::lod::SurfaceCasterMaterial>>,
     pub layer: u8,
     pub shadow_mode: u8,
     pub receive_shadows: bool,
@@ -49,7 +49,8 @@ pub struct SourceWorldVisuals {
     pub(super) terrain: [Option<Handle<TerrainMaterial>>; 3],
     terrain_layers: [u8; 3],
     pub(super) terrain_records: [Option<crate::reference::render_lighting::RendererRecord>; 3],
-    terrain_casters: [Option<Handle<StandardMaterial>>; 3],
+    terrain_casters:
+        [Option<Handle<crate::presentation::materials::lod::SurfaceCasterMaterial>>; 3],
     terrain_shadow_modes: [u8; 3],
 }
 impl SourceWorldVisuals {
@@ -91,7 +92,7 @@ impl SourceWorldVisuals {
     pub fn reset_bindings(
         &mut self,
         terrain: &mut Assets<TerrainMaterial>,
-        casters: &mut Assets<StandardMaterial>,
+        casters: &mut Assets<crate::presentation::materials::lod::SurfaceCasterMaterial>,
     ) {
         for (_, bindings) in self.road_materials.drain() {
             for binding in bindings {
@@ -131,7 +132,7 @@ impl SourceWorldVisuals {
         material: Handle<TerrainMaterial>,
         layer: u8,
         shadow_mode: u8,
-        caster: Option<Handle<StandardMaterial>>,
+        caster: Option<Handle<crate::presentation::materials::lod::SurfaceCasterMaterial>>,
     ) {
         self.terrain[tier] = Some(material);
         self.terrain_layers[tier] = layer;

@@ -134,6 +134,9 @@ pub fn bind_group<M: AsBindGroup>(
     cache: &PipelineCache,
     param: &mut SystemParamItem<'_, '_, M::Param>,
 ) -> Result<PreparedBindGroup, AsBindGroupError> {
+    if owner.cancelled() {
+        return Err(AsBindGroupError::RetryNextUpdate);
+    }
     let _scope = owner.scope(device);
     let layout = cache.get_bind_group_layout(descriptor);
     let UnpreparedBindGroup { bindings } =

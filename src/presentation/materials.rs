@@ -288,6 +288,7 @@ impl Plugin for SourceMaterialPlugin {
             MaterialPlugin::<specular::SpecularMaterial>::default(),
             MaterialPlugin::<impostor::ImpostorMaterial>::default(),
             MaterialPlugin::<lod::LodCasterMaterial>::default(),
+            MaterialPlugin::<lod::SurfaceCasterMaterial>::default(),
             MaterialPlugin::<grass::material::GrassMaterial>::default(),
             grass::writers::GrassDisplacementPlugin,
             world_texture_upload::WorldTextureUploadPlugin,
@@ -1177,6 +1178,11 @@ pub struct SourceMaterial {
     pub(crate) mirror: Option<(u64, usize, bool)>,
     pub base: StandardMaterial,
     pub extension: SourceExtension,
+}
+impl SourceMaterial {
+    pub(crate) fn caster_data(&self) -> SourceUniform {
+        self.extension.surface.data
+    }
 }
 impl AsBindGroup for SourceMaterial {
     type Data = (

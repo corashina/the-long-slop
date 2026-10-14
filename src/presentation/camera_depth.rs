@@ -11,7 +11,7 @@ use bevy::ecs::{
     query::ROQueryItem,
     system::{SystemParamItem, lifetimeless::SRes},
 };
-use bevy::pbr::{DrawMesh, SetMaterialBindGroup, SetMeshBindGroup};
+use bevy::pbr::{DrawMesh, SetMeshBindGroup};
 use bevy::prelude::*;
 use bevy::render::{
     render_phase::*,
@@ -95,7 +95,7 @@ type DrawCameraDepth = (
     DepthMark<false>,
     SetSourceViewCamera,
     SetMeshBindGroup<2>,
-    SetMaterialBindGroup<3>,
+    super::caster_material::SetCasterMaterial,
     DrawMesh,
     DepthMark<true>,
 );

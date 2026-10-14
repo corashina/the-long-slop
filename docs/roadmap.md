@@ -79,6 +79,53 @@ We have not measured retained objects or runtime memory for the merged world.
 We removed obsolete generator paths from the integration. Acceptance of the replacement remains open.
 We added no new storage engine, save migration, multiplayer, or deployment work.
 
+## Full-game feature gaps
+
+Reference: installed Steam build `11140890`. This backlog records gaps beyond the implemented layers above.
+Source-world integration is already underway. Its roads, terrain, biomes, and placement need merge acceptance.
+Missing means no gameplay implementation. Partial means the current implementation covers selected behavior or content.
+The backlog does not expand approved implementation scope. Each new feature needs a source-based specification.
+
+| Feature | Status | Remaining work |
+| --- | --- | --- |
+| Source world generation | Merge pending | Integrate seeded roads, terrain, biomes, and placement; verify source samples and runtime behavior. |
+| Buildings and exploration | Merge pending | Integrate source buildings, interiors, landmarks, and placement; check content coverage and collision. |
+| World population | Partial | Integrate source loot placement; add excluded abandoned vehicles, items, and encounters. |
+| Full vehicle range | Partial | Add vehicles beyond the Lada and Skoda, including diesel, two-stroke, automatic, bus, and bike mechanics. |
+| Driving physics | Partial | Add manual gears and clutch; match throttle ramps, tire friction, bare-rim behavior, suspension, and combined braking. |
+| Inventory and clothing | Missing | Add inventory slots, equipped items, wearables, and player customization. |
+| Cleaning and painting | Missing | Add brushes, sponges, spray paint, and source condition changes. |
+| Cargo and towing | Partial | Add general cargo locking, attachment objects, towing hooks, and trailers. Current storage locking covers flashlights. |
+| Full item range | Partial | Add remaining source food, tools, containers, and their actions. |
+| Animals and enemies | Missing | Add rabbits, human enemies, movement, attacks, and spawn rules. |
+| Weapons | Missing | Add firearms, ammunition, reload actions, melee weapons, and projectiles. |
+| Damage and destruction | Partial | Add wounds, blood loss, combat damage, breakable objects, and death ragdolls. |
+| Complete save state | Partial | Preserve needs, food progress, sleep, storms, toilet state, and radio state; add save slots and autosave. |
+| Settings and game setup | Partial | Add seed entry, source game options, editable controls, graphics, audio, and player settings. |
+| Custom radio music | Missing | Add user music playback through the existing audio owner. Source radio playback already exists. |
+| Multiplayer | Missing | Add the reference build's multiplayer behavior and shared state. |
+| Remaining visual effects | Partial | Add soft storm particles, fluid refraction, and source death effects. |
+
+Generated identities and change records belong to the current merge. Complete save state requires the remaining gameplay owners too.
+Source placement and imported geometry do not provide excluded item actions, vehicle mechanics, or enemy behavior.
+
+Suggested order: finish world integration, complete saves, correct driving, extend items and cargo, expand the fleet, then add combat.
+Add inventory with item use. Add damage with combat. Connect settings, custom music, and effects to their existing owners.
+Keep each layer working before adding the next. Plan multiplayer after the local gameplay and save state are stable.
+
+Evidence: [vehicle coverage](vehicles.md), [driving differences](research/2026-10-11-rea-driving-audit.md),
+[save and survival limits](research/2026-10-12-survival-sleep-weather-completion.md), and
+[flashlight storage scope](superpowers/specs/2026-10-13-portable-flashlights-design.md).
+The selected source has no supported rain scheduler or active snow scheduler. Add neither without source evidence.
+
+## Remaining game comparison
+
+Implemented features still need comparison with matched running source views and inputs.
+Check continuous walking, preparation, seat entry, sustained driving, ordinary aiming, and lifecycle behavior after the merge.
+Check assembled audio on a listening device. Compare rendered frames, particles, and physics under matched source conditions.
+Retain the world sample, seam, rebase, revisit, object-count, and memory checks listed above.
+Existing build, review, and historical test results do not establish full-game parity.
+
 ## Earlier rendering completion
 
 The user approved source rendering completion in an isolated worktree based on `dccd516`.

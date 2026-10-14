@@ -190,6 +190,12 @@ fn compile(world: &mut World) {
             if job.state != RenderingState::Loading {
                 continue;
             }
+            if job.material.type_id()
+                == std::any::TypeId::of::<crate::presentation::materials::SourceMaterial>()
+                && !crate::presentation::caster_material::ready(world, job.material.typed())
+            {
+                continue;
+            }
             if job.ids.is_empty() {
                 let Some(mesh) = world.resource::<RenderAssets<RenderMesh>>().get(job.mesh) else {
                     continue;

@@ -237,6 +237,11 @@ impl CasterPasses {
                 );
                 descriptor.layout[0] = super::source_lighting::source_camera_layout();
                 descriptor.layout[1] = caster_layout();
+                if !world_shader
+                    && flag(&fragment.shader_defs, "WORLD_TEXTURE_ARRAYS") != Some(true)
+                {
+                    descriptor.layout[3] = super::caster_material::layout();
+                }
                 descriptor.multisample = MultisampleState::default();
                 if !world_shader {
                     descriptor.vertex.shader = shader.clone();
