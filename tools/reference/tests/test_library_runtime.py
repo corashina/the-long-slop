@@ -18,7 +18,7 @@ class RuntimeTests(unittest.TestCase):
         from tools.reference.export import validate_runtime_paths
         with self.assertRaises(ValueError): validate_runtime_paths({'assets':[{'path':'library/models/unused.gltf','dependencies':[]}]})
         manifest = {'assets': [{'path': f'reference/{name}.gltf', 'dependencies': []}
-                               for name in ('home', 'lada', 'skoda', 'items', 'road_lamp', 'sky')]}
+                               for name in ('home', 'lada', 'skoda', 'items', 'road_lamp', 'sky', 'food', 'station_benzinkut01', 'station_legjobbbenzinkut', 'station_nagybenzinkut', 'item_pack', 'item_box', 'item_shovel', 'item_box_debris', 'item_box_debris_reduced')]}
         manifest['plates']={'material':{'shader':{'path':'reference/plate-fixture.json','sha256':'a'*64},'compiled_shader':{'path':'reference/plate-fixture.bin','sha256':'a'*64},'resources':[]}}
         validate_runtime_paths(manifest)
         manifest['ui']={'sprites':[{'path':'reference/ui-test-3.png','source':{'file':'test','path_id':3}}]}
@@ -32,7 +32,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_lighting_dependency_receipts_require_matching_typed_hashes(self):
         from tools.reference.export import validate_runtime_paths
-        manifest={'assets':[{'path':f'reference/{name}.gltf','dependencies':[]} for name in ('home','lada','skoda','items','road_lamp','sky')]}
+        manifest={'assets':[{'path':f'reference/{name}.gltf','dependencies':[]} for name in ('home', 'lada', 'skoda', 'items', 'road_lamp', 'sky', 'food', 'station_benzinkut01', 'station_legjobbbenzinkut', 'station_nagybenzinkut', 'item_pack', 'item_box', 'item_shovel', 'item_box_debris', 'item_box_debris_reduced')]}
         resource={'path':'reference/lighting-test-1.smip','sha256':'a'*64}
         manifest['plates']={'material':{'shader':{'path':'reference/plate-fixture.json','sha256':'a'*64},'compiled_shader':{'path':'reference/plate-fixture.bin','sha256':'a'*64},'resources':[]}}
         manifest['lighting']={'textures':[resource]}
@@ -232,37 +232,16 @@ class RuntimeContractTests(unittest.TestCase):
         from tools.reference.export import provenance
         receipt=NS(manifest_sha256='a'*64,catalog_sha256='b'*64,source_manifest_sha256='c'*64)
         manifest=json.loads((Path(__file__).resolve().parents[3]/'tests/common/reference.json').read_bytes())
-        audio=manifest['audio']
-        clip=audio['clips'][0]
-        clip['usages']=['effect','radio']
-        path=root/Path(clip['path']).name
-        with wave.open(str(path),'wb') as stream:
-            stream.setparams((1,2,8000,80,'NONE','not compressed'))
-            stream.writeframes(b'\0'*160)
         from tools.reference.library.audio import validate_wav
-        clip.update(validate_wav(path,{'m_Channels':1,'m_Frequency':8000,'m_BitsPerSample':16,'m_Length':0.01}))
-        clip['bytes']=path.stat().st_size
-        clip['sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
-        audio['clips']=[clip]
-        for voice in audio['voices']:
-            for field in ('clip','authored_clip'):
-                if voice[field] is not None:voice[field]=clip['id']
-        for binding in audio['bindings']:binding['clips']=[clip['id']]
-        for station in audio['radio']['stations']:
-            for field in ('music','talk'):
-                station[field]=[clip['id']]*len(station[field])
+        for clip in manifest['audio']['clips']:
+            path=root/Path(clip['path']).name
+            with wave.open(str(path),'wb') as stream:
+                stream.setparams((1,2,8000,80,'NONE','not compressed'))
+                stream.writeframes(b'\0'*160)
+            clip.update(validate_wav(path,{'m_Channels':1,'m_Frequency':8000,'m_BitsPerSample':16,'m_Length':0.01}))
+            clip['bytes']=path.stat().st_size
+            clip['sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
         manifest['library']=provenance(receipt)
-        manifest['assets'].append({'id':5,'usage':'unique_scene','material_count':1,'path':'reference/items.gltf','sha256':'a'*64,'root':{'file':'fixture','path_id':999},'dependencies':[]})
-        manifest['rendering']['materials'].append({
-            'source':{'file':'fixture','path_id':999},'asset':5,'gltf_material':0,
-            'shader_family':'unlit_color','enable_instancing':False,'color':[1.,1.,1.,1.],'condition':None,'keywords':[],
-            'state':{'alpha_mode':'opaque','cull':2,'z_write':True,'z_test':4,'src_blend':1,'dst_blend':0,'render_queue':-1},
-            'properties':{'floats':{},'colors':{'_Color':[1.,1.,1.,1.]},'textures':[],'defaults':{},'exclusions':[]}})
-        import copy
-        skoda=copy.deepcopy(manifest['assets'][-1]);skoda.update(id=6,path='reference/skoda.gltf',root={'file':'fixture','path_id':1000})
-        manifest['assets'].append(skoda)
-        material=copy.deepcopy(manifest['rendering']['materials'][-1]);material.update(asset=6,source={'file':'fixture','path_id':1000})
-        manifest['rendering']['materials'].append(material)
         for asset in manifest['assets']:
             scene={'asset':{'version':'2.0'},'nodes':[],'scenes':[{'nodes':[]}],'scene':0}
             content=json.dumps(scene).encode()
@@ -288,6 +267,7 @@ class RuntimeContractTests(unittest.TestCase):
                 for child in value.values():update_resource_hashes(child)
             elif isinstance(value,list):
                 for child in value:update_resource_hashes(child)
+        update_resource_hashes(manifest['weather'])
         update_resource_hashes(manifest['lighting'])
         update_resource_hashes(manifest['render_lighting'])
         update_resource_hashes(manifest['plates'])
@@ -299,7 +279,7 @@ class RuntimeContractTests(unittest.TestCase):
             for asset in manifest['assets']:
                 for dependency in asset['dependencies']:
                     if dependency['file']==resource['path']:dependency['sha256']=resource['sha256']
-        for name in ('geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json','plate-evidence.json'):
+        for name in ('geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json','plate-evidence.json','flashlights-evidence.json'):
             (root/name).write_text('{}')
         return manifest,receipt
 
@@ -314,7 +294,7 @@ class RuntimeContractTests(unittest.TestCase):
     def test_runtime_contract_rejects_missing_records(self):
         with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'):
             root=Path(tmp);manifest,receipt=self.runtime(root)
-            for field in ('app_id','build_id','nodes','player','vehicles','colliders'):
+            for field in ('app_id','build_id','nodes','player','vehicles','colliders','item_prototypes'):
                 incomplete=dict(manifest);del incomplete[field];self.save(root,incomplete)
                 with self.subTest(field=field),self.assertRaisesRegex(ValueError,'Runtime manifest contract'):
                     verify_reference(root,receipt)

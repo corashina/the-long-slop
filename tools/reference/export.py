@@ -126,7 +126,8 @@ def relocate(source, transform, position, yaw_degrees):
 def validate_runtime_paths(manifest):
     assets = manifest.get('assets', [])
     from .stations import STATIONS
-    if {a['path'] for a in assets} != {f'reference/{name}.gltf' for name in ('home',*CARS,'items','road_lamp','sky','food',*STATIONS)} or len(assets) != 5+len(CARS)+len(STATIONS):
+    from .item_prototypes import SELECTED
+    if {a['path'] for a in assets} != {f'reference/{name}.gltf' for name in ('home',*CARS,'items','road_lamp','sky','food',*STATIONS,*(p[3] for p in SELECTED))} or len(assets) != 5+len(CARS)+len(STATIONS)+len(SELECTED):
         raise ValueError('Runtime must contain only the selected scenes')
     from .plates import plate_resources
     resources = {item['path']:item['sha256'] for item in [*lighting_resources(manifest), *plate_resources(manifest['plates'])]}
@@ -292,6 +293,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     stations=station_roots(source)
     roots.update(stations)
     source.lighting_prototype_roots.update(key(readers[0]) for readers in stations.values())
+    from .item_prototypes import prepare_item_prototypes, recover_item_prototypes, validate_item_prototypes
+    prepare_item_prototypes(source, roots)
     recover_survival(source,roots,output)
     recover_weather(source,output)
     report = {}
@@ -324,10 +327,12 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     recover_stations(source,roots,manifest)
     resources={entry['file'] for entry in manifest['assets'][0]['dependencies']}
     manifest['assets'][0]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in lighting_resources(manifest) if r['path'] not in resources)
+    manifest['item_prototypes'] = recover_item_prototypes(source, manifest, output)
     manifest['ui']=export_ui(source,output,library)
     for index,name in enumerate(CARS):
         manifest['vehicles'][index]['instruments']=recover_instruments(source,manifest,report,name,roots[name][0])
-    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if (name not in CARS or name == 'lada') and name not in STATIONS},manifest,library,output)
+    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if (name not in CARS or name == 'lada') and name not in STATIONS and not name.startswith('item_')},manifest,library,output)
+    validate_item_prototypes(manifest['item_prototypes'], manifest)
     validate_lighting_export(manifest,output)
     (output/'lighting-evidence.json').write_text(json.dumps({'lighting':manifest['lighting'],'render_lighting':manifest['render_lighting'],'byte_checks':source.evidence,'native_engine':native_engine,'fog_setting':source.lighting_fog_evidence,'library':manifest['library']},indent=2,allow_nan=False),encoding='utf-8')
     parameters['controls']={

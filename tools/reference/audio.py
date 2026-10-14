@@ -418,6 +418,8 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
     for voice_record in audio['voices']:
         if not voice_record['methods']:raise ValueError(f"Audio voice lacks source control flow: {voice_record['source']}")
     validate_audio_export(audio,output)
+    for identity in sorted(getattr(source, 'item_clips', set())):
+        clip(source.get(*identity), 'effect')
     return audio
 
 

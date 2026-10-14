@@ -103,6 +103,16 @@ pub fn containers() -> ReferenceManifest {
                 use_recenter_rotation: false,
                 recenter_rotation: [0., 0., 0., 1.],
                 recenter_distance: -0.5,
+                can_inventory: false,
+                can_hold_right_hand: false,
+                disable_rh_fix: false,
+                right_hand_position: [0.; 3],
+                right_hand_rotation: [0., 0., 0., 1.],
+                right_hand_grip: None,
+                left_hand_grip: None,
+                disable_when_stored: Some(source.clone()),
+                keep_when_stored: None,
+                inventory_icon: None,
             }),
         });
         let collider = ColliderId(id.0);

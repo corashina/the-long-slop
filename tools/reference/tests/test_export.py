@@ -43,7 +43,16 @@ class ReferenceExportTests(unittest.TestCase):
             'noRot': 1, 'moveWithRot': 0, 'useRecenter': 1,
             'recenterPos': {'x': .2, 'y': .4, 'z': .6}, 'useRecenterRot': 1,
             'recenterRot': {'x': 0., 'y': 90., 'z': 0.}, 'recenterDist': -.5}
-        result = recover_pickup(SimpleNamespace(read=lambda r: fields), reader)
+        fields.update(canInventory=1, canHoldRightHand=0, disableRHFix=0,
+            RHP={'x':0.,'y':0.,'z':0.}, RHR={'x':0.,'y':0.,'z':0.},
+            m_GameObject={'m_PathID':20}, **{k:{'m_PathID':0} for k in
+            ('RightHandPos','LeftHandPos','disableThisWhenStored','dontDisableWhenStored','invImg')})
+        owner = SimpleNamespace(assets_file=reader.assets_file,path_id=21)
+        source = SimpleNamespace(read=lambda r:fields, resolve=lambda r,p:owner if p['m_PathID'] else None,
+            transform_for=lambda r:owner)
+        result = recover_pickup(source, reader)
+        self.assertEqual(result['disable_when_stored'], {'file':'fixture','path_id':21})
+        self.assertTrue(result['can_inventory'])
         self.assertEqual(result['source'], {'file': 'fixture', 'path_id': 19})
         self.assertEqual(result['recenter_position'], (.2, .4, -.6))
         self.assertEqual(result['recenter_distance'], -.5)
@@ -54,7 +63,7 @@ class ReferenceExportTests(unittest.TestCase):
             self.assertTrue(result[field])
         del fields['recenterDist']
         with self.assertRaises(KeyError):
-            recover_pickup(SimpleNamespace(read=lambda r: fields), reader)
+            recover_pickup(source, reader)
 
     def test_source_action_masks(self):
         from tools.reference.actions import recover_masks

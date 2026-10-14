@@ -252,7 +252,10 @@ class GltfExporter(GltfBuilder):
             if record['parent'] is None:
                 from .collision import world_pose
                 from .lighting import IDENTITY
-                if key(reader)==getattr(self.source,'lighting_pole_root',None):
+                if identity in getattr(self.source, 'item_geometry_nodes', set()):
+                    transform['translation'] = [0., 0., 0.]
+                    transform['rotation'] = [0., 0., 0., 1.]
+                elif key(reader)==getattr(self.source,'lighting_pole_root',None):
                     transform=IDENTITY.copy()
                 elif key(reader) not in getattr(self.source,'lighting_prototype_roots',set()):
                     transform=world_pose(self.source,reader)
@@ -282,7 +285,7 @@ class GltfExporter(GltfBuilder):
                 node.extras['receive_shadows'] = bool(renderer_data['m_ReceiveShadows'])
                 owner = mesh_filter or renderer
                 mesh_reader = getattr(self.source, 'condition_meshes', {}).get(key(renderer)) or self.source.resolve(owner, self.source.read(owner)['m_Mesh'])
-                if mesh_reader and (record['active'] or identity in getattr(self.source,'food_geometry_nodes',set()) or identity in getattr(self.source,'flashlight_inactive_nodes',set())) and render_enabled:
+                if mesh_reader and ((record['active'] or identity in getattr(self.source,'food_geometry_nodes',set()) or identity in getattr(self.source,'flashlight_inactive_nodes',set()) ) and render_enabled or identity in getattr(self.source,'item_geometry_nodes',set())):
                     materials=[self.source.resolve(renderer,p) for p in renderer_data['m_Materials']]
                     selected=getattr(self.source,'lighting_startup_materials',{}).get(key(renderer)) or getattr(self.source,'condition_materials',{}).get(key(renderer))
                     if selected:materials=[selected for _ in materials]

@@ -31,6 +31,8 @@ pub mod plates;
 pub use plates::*;
 pub mod mirrors;
 pub use mirrors::*;
+pub mod item_prototypes;
+pub use item_prototypes::*;
 pub mod inventory;
 pub mod stations;
 pub mod survival;
@@ -100,6 +102,7 @@ pub enum AssetUsage {
     RoadLampPrototype,
     SkyPrototype,
     FoodPrototype,
+    ItemPrototype,
     StationPrototype,
 }
 
@@ -362,6 +365,16 @@ pub struct PickupReference {
     pub use_recenter_rotation: bool,
     pub recenter_rotation: [f32; 4],
     pub recenter_distance: f32,
+    pub can_inventory: bool,
+    pub can_hold_right_hand: bool,
+    pub disable_rh_fix: bool,
+    pub right_hand_position: [f32; 3],
+    pub right_hand_rotation: [f32; 4],
+    pub right_hand_grip: Option<SourceId>,
+    pub left_hand_grip: Option<SourceId>,
+    pub disable_when_stored: Option<SourceId>,
+    pub keep_when_stored: Option<SourceId>,
+    pub inventory_icon: Option<SourceId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -799,6 +812,7 @@ pub struct LibraryProvenance {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
+    pub item_prototypes: Vec<ItemPrototype>,
     pub inventory: InventoryReference,
     pub audio: serde_json::Value,
     pub survival: SurvivalReference,
@@ -923,7 +937,11 @@ impl ReferenceManifest {
         self.mirrors.validate(self)?;
         self.render_lighting.validate(&self.nodes)?;
         self.survival.validate(self)?;
+        for food in &self.survival.foods {
+            food.pickup.validate_links(self, food.asset)?;
+        }
         self.inventory.validate(self)?;
+        item_prototypes::validate_prototypes(self)?;
         AudioGameplayReference::from_value(&self.audio)?;
         self.sleep.validate(self)?;
         self.weather.validate(self)?;
@@ -1311,6 +1329,13 @@ impl ReferenceManifest {
         }
         for item in &self.items {
             if let Some(pickup) = &item.pickup {
+                let asset = self
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == item.node)
+                    .ok_or_else(|| ReferenceError("pickup node".into()))?
+                    .asset;
+                pickup.validate_links(self, asset)?;
                 require(
                     finite(&pickup.recenter_position)
                         && finite(&pickup.recenter_rotation)
