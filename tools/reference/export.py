@@ -317,6 +317,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from .mirrors import mirror_source_evidence
     (output/'mirror-evidence.json').write_text(json.dumps(mirror_source_evidence(source,manifest['mirrors']),indent=2,allow_nan=False),encoding='utf-8')
     manifest['library']=provenance(library.receipt)
+    from .inventory import recover_inventory
+    manifest['inventory'] = recover_inventory(source, manifest)
     bind_survival(source,manifest)
     bind_weather(source,manifest)
     recover_stations(source,roots,manifest)

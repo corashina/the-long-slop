@@ -31,8 +31,10 @@ pub mod plates;
 pub use plates::*;
 pub mod mirrors;
 pub use mirrors::*;
+pub mod inventory;
 pub mod stations;
 pub mod survival;
+pub use inventory::*;
 pub mod weather;
 pub use stations::*;
 pub use survival::*;
@@ -797,6 +799,7 @@ pub struct LibraryProvenance {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
+    pub inventory: InventoryReference,
     pub audio: serde_json::Value,
     pub survival: SurvivalReference,
     pub sleep: SleepReference,
@@ -920,6 +923,7 @@ impl ReferenceManifest {
         self.mirrors.validate(self)?;
         self.render_lighting.validate(&self.nodes)?;
         self.survival.validate(self)?;
+        self.inventory.validate(self)?;
         AudioGameplayReference::from_value(&self.audio)?;
         self.sleep.validate(self)?;
         self.weather.validate(self)?;
