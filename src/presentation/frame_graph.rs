@@ -246,6 +246,7 @@ impl Plugin for SourceFramePlugin {
         let gate = app.world().resource::<SourceExecutionGate>().clone();
         let _ = SOURCE_DIAGNOSTICS.set(SourceDiagnostics {
             progress: progress.0.clone(),
+            loading: Mutex::new(LoadingProgress::default()),
             status,
             gate,
             mirrors: app
@@ -1087,11 +1088,143 @@ struct ViewAudit {
 }
 struct SourceDiagnostics {
     progress: Arc<Mutex<FrameProgress>>,
+    loading: Mutex<LoadingProgress>,
     status: Arc<Mutex<RenderingState>>,
     gate: SourceExecutionGate,
     mirrors: super::mirrors::MirrorGpuStatus,
 }
 static SOURCE_DIAGNOSTICS: OnceLock<SourceDiagnostics> = OnceLock::new();
+
+#[derive(Default)]
+struct LoadingProgress {
+    scene: u32,
+    mirror_instance: u64,
+    revision: u32,
+    counts: [u64; 7],
+    milestones: [u64; 5],
+}
+
+/// Poll bounded readiness work without serializing the full diagnostic audit.
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn source_loading_progress() -> u32 {
+    let Some(audit) = SOURCE_DIAGNOSTICS.get() else {
+        return 0;
+    };
+    let state = audit.progress.lock().unwrap();
+    let cpu = &state.cpu_boundary;
+    let gpu = &state.gpu_boundary;
+    let prewarm = &gpu.prewarm;
+    let (mirror_instance, mirror_bits) = audit.mirrors.loading_progress();
+    let counts = [
+        cpu.source_texture_bytes,
+        cpu.lighting_texture_bytes,
+        u64::from(prewarm.ready_pipeline_count),
+        u64::from(if prewarm.sealed {
+            prewarm
+                .request_count
+                .saturating_sub(prewarm.missing_mesh_count)
+        } else {
+            0
+        }),
+        u64::from(if prewarm.sealed {
+            prewarm
+                .request_count
+                .saturating_sub(prewarm.missing_material_count)
+        } else {
+            0
+        }),
+        u64::from(gpu.source_lighting_bindings.min(VIEW_COUNT as u32)),
+        u64::from(gpu.source_glass_bindings.min(VIEW_COUNT as u32)),
+    ];
+    let bits = |values: &[bool]| {
+        values
+            .iter()
+            .enumerate()
+            .fold(0u64, |mask, (i, value)| mask | (u64::from(*value) << i))
+    };
+    let probe_bits = |probe: &ProbeAudit| {
+        // Publication proves every prerequisite. Polling can miss intermediate masks;
+        // later capture cycles must not report those missed bits as new loading work.
+        if probe.published {
+            return 0x3f | (0x7f << 8) | (0xf << 16);
+        }
+        u64::from(probe.face_mask)
+            | (u64::from(probe.mip_mask) << 8)
+            | (u64::from(probe.pipelines_ready) << 16)
+            | (u64::from(probe.filter_validation != 0) << 17)
+            | (u64::from(probe.publication_validation != 0) << 18)
+    };
+    let milestones = [
+        bits(&[
+            cpu.lighting_assets_present,
+            cpu.lighting_assets_loaded,
+            cpu.source_materials_present,
+            cpu.source_materials_bound,
+            cpu.source_material_state == 1,
+            cpu.material_loading_ready,
+            cpu.requests_sealed,
+            cpu.master_bound,
+            cpu.master_materials_prepared,
+            cpu.master_cookie_handles,
+            cpu.visuals_bound,
+        ]),
+        bits(&[
+            gpu.master_cookies,
+            gpu.master_uniform,
+            gpu.master_state == 1,
+            gpu.lighting_render_assets,
+            gpu.cloud_gpu_mesh,
+            gpu.source_targets,
+            gpu.frame_resources,
+            gpu.frame_copy_ready,
+            gpu.source_camera_ready,
+            gpu.source_surface_ready,
+            gpu.source_caster_ready,
+            gpu.source_sky_ready,
+            gpu.source_cloud_ready,
+            prewarm.sealed,
+            prewarm.warmed_queued,
+            prewarm.state == 1,
+            state.sky,
+            state.presented,
+            state.mask & 1 != 0,
+            state.mask & 2 != 0,
+            state.mask & 4 != 0,
+            state.validated,
+            state.motion.validated,
+            state.effects.pipelines_ready(),
+            state.effects.complete(state.frame, state.token),
+        ]),
+        probe_bits(&state.probes[0]),
+        probe_bits(&state.probes[1]),
+        mirror_bits,
+    ];
+    let mut progress = audit.loading.lock().unwrap();
+    let mut changed = false;
+    if progress.scene != state.scene || progress.mirror_instance != mirror_instance {
+        progress.scene = state.scene;
+        progress.mirror_instance = mirror_instance;
+        progress.counts.fill(0);
+        progress.milestones.fill(0);
+        changed = true;
+    }
+    for (previous, value) in progress.counts.iter_mut().zip(counts) {
+        if value > *previous {
+            *previous = value;
+            changed = true;
+        }
+    }
+    for (previous, value) in progress.milestones.iter_mut().zip(milestones) {
+        if value & !*previous != 0 {
+            *previous |= value;
+            changed = true;
+        }
+    }
+    if changed {
+        progress.revision = progress.revision.saturating_add(1);
+    }
+    progress.revision
+}
 
 /// Browser graphics failures use the same terminal state as native device errors.
 #[wasm_bindgen::prelude::wasm_bindgen]
@@ -1174,6 +1307,10 @@ struct GpuBoundary {
     opaque_phases: u32,
     masked_phases: u32,
     transparent_phases: u32,
+    #[cfg(feature = "save-fixture")]
+    transparent_storage: [[u32; 5]; VIEW_COUNT],
+    #[cfg(feature = "save-fixture")]
+    sort_index: [u32; 2],
     shadow_phases: u32,
     shadow_scene_frame: u32,
     shadow_queue_frame: u32,
@@ -1333,6 +1470,10 @@ fn gpu_boundaries(
     boundary.source_cloud_ready = world
         .get_resource::<super::clouds::CloudPass>()
         .is_some_and(|p| p.ready(cache));
+    #[cfg(feature = "save-fixture")]
+    if let Some(surfaces) = world.get_resource::<SurfaceResources>() {
+        boundary.transparent_storage = std::array::from_fn(|i| surfaces.transparent[i].audit());
+    }
     for (_, lighting, glass) in &views {
         boundary.source_views += 1;
         boundary.source_lighting_bindings += u32::from(lighting.is_some());
@@ -1344,6 +1485,10 @@ fn gpu_boundaries(
     boundary.masked_phases = world
         .get_resource::<ViewBinnedRenderPhases<AlphaMask3d>>()
         .map_or(0, |p| p.len() as u32);
+    #[cfg(feature = "save-fixture")]
+    if let Some(index) = world.get_resource::<super::transparent::SourceSortIndex>() {
+        boundary.sort_index = index.audit(world);
+    }
     boundary.transparent_phases = world
         .get_resource::<ViewSortedRenderPhases<Transparent3d>>()
         .map_or(0, |p| p.len() as u32);

@@ -17,7 +17,7 @@ use bevy::render::{
 use bevy::{ecs as bevy_ecs, prelude::*};
 use std::ops::Range;
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct SourceSortData {
     pub material_key: u32,
     pub material_identity: u32,
@@ -28,6 +28,11 @@ pub struct SourceSortData {
     pub queue: i16,
     pub additive: bool,
     pub glass: bool,
+}
+impl SourceSortData {
+    pub fn pass_count(&self) -> usize {
+        1 + usize::from(self.additive || self.glass)
+    }
 }
 impl bevy::render::sync_component::SyncComponent for SourceSortData {
     type Target = Self;
@@ -45,6 +50,23 @@ impl ExtractComponent for SourceSortData {
 /// Bevy mesh phases retain main IDs and use a placeholder render entity.
 #[derive(Resource, Default)]
 pub struct SourceSortIndex(bevy::ecs::entity::EntityHashMap<(Entity, SourceSortData)>);
+#[cfg(feature = "save-fixture")]
+impl SourceSortIndex {
+    pub(crate) fn audit(&self, world: &World) -> [u32; 2] {
+        [
+            self.0.len() as u32,
+            self.0
+                .iter()
+                .filter(|(main, (render, data))| {
+                    world
+                        .get::<MainEntity>(*render)
+                        .is_none_or(|value| value.id() != **main)
+                        || world.get::<SourceSortData>(*render) != Some(data)
+                })
+                .count() as u32,
+        ]
+    }
+}
 pub fn update_sort_index(
     changed: Query<
         (Entity, &MainEntity, &SourceSortData),
@@ -70,7 +92,6 @@ struct OrderedPass {
     glass_source: i64,
 }
 /// Allocate during view loading. The fixed scene cannot exceed this capacity.
-#[derive(Component)]
 pub struct SourceTransparentPasses {
     entries: Vec<OrderedPass>,
 }
@@ -79,6 +100,22 @@ impl SourceTransparentPasses {
         Self {
             entries: Vec::with_capacity(maximum_passes),
         }
+    }
+    #[cfg(feature = "save-fixture")]
+    pub(crate) fn audit(&self) -> [u32; 5] {
+        [
+            self.entries.as_ptr() as u32,
+            self.entries.capacity() as u32,
+            self.entries.len() as u32,
+            self.entries
+                .iter()
+                .filter(|entry| entry.key.pass_data == 1 && entry.glass_source == 0)
+                .count() as u32,
+            self.entries
+                .iter()
+                .filter(|entry| entry.key.pass_data == 0x01000000)
+                .count() as u32,
+        ]
     }
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -145,8 +182,13 @@ impl SourceTransparentPasses {
     }
 }
 pub(crate) fn prepare_pass_order(
-    mut views: Query<(&ExtractedView, &mut SourceTransparentPasses)>,
+    views: Query<
+        (&ExtractedView, &super::surface_views::SourceSurfaceView),
+        With<super::surface_graph::SurfaceViewTargets>,
+    >,
+    surfaces: Option<ResMut<super::surface_views::SurfaceResources>>,
     phases: Res<ViewSortedRenderPhases<Transparent3d>>,
+    warmups: Query<&MainEntity, With<super::materials::SourceMaterialWarmup>>,
     metadata: Res<SourceSortIndex>,
     materials: Res<bevy::pbr::RenderMaterialInstances>,
     loading: Res<MaterialLoading>,
@@ -154,18 +196,21 @@ pub(crate) fn prepare_pass_order(
     status: Res<SourceLightingStatus>,
     particles: Res<super::weather::ExtractedParticles>,
 ) {
+    let Some(mut surfaces) = surfaces else {
+        return;
+    };
+    for order in &mut surfaces.transparent {
+        order.entries.clear();
+    }
     if !loading.is_ready() || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
-        for (_, mut order) in &mut views {
-            order.entries.clear();
-        }
         return;
     }
     let functions = functions.read();
     let base = functions.id::<DrawSourceBase>();
     let add = functions.id::<DrawSourceAdd>();
     let glass = functions.id::<DrawSourceGlass>();
-    for (view, mut order) in &mut views {
-        order.entries.clear();
+    for (view, source) in &views {
+        let order = &mut surfaces.transparent[source.index];
         let capacity = loading.transparent_pass_capacity().unwrap_or(0) + particles.uniforms.len();
         if order.entries.capacity() < capacity {
             order.entries.reserve_exact(capacity);
@@ -185,6 +230,22 @@ pub(crate) fn prepare_pass_order(
                 continue;
             }
             let Some((_, data)) = metadata.0.get(&item.main_entity().id()) else {
+                error!(
+                    "Source transparent metadata missing: main={:?}, view={:?}, material={:?}, draw={:?}, batch={:?}, owner={}",
+                    item.main_entity(),
+                    view.retained_view_entity,
+                    materials
+                        .instances
+                        .get(&item.main_entity())
+                        .map(|m| m.asset_id),
+                    item.draw_function(),
+                    item.batch_range(),
+                    if warmups.iter().any(|main| *main == item.main_entity()) {
+                        "source material warmup"
+                    } else {
+                        "unclassified"
+                    },
+                );
                 *status.0.lock().unwrap() =
                     RenderingState::Failed("Source transparent sort metadata is missing".into());
                 return;
@@ -217,7 +278,7 @@ pub(crate) fn prepare_pass_order(
                 );
                 return;
             }
-            let count = 1 + usize::from(data.additive || data.glass);
+            let count = data.pass_count();
             if order.entries.len() + count > order.entries.capacity() {
                 *status.0.lock().unwrap() =
                     RenderingState::Failed("Source transparent pass capacity was exceeded".into());

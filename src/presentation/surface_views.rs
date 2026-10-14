@@ -52,6 +52,7 @@ impl ExtractComponent for SourceSurfaceView {
 pub struct SurfaceResources {
     pub targets: SurfaceTargets,
     pub probes: [ProbeTargets; PROBE_COUNT],
+    pub transparent: [SourceTransparentPasses; VIEW_COUNT],
     probe_sampler: Sampler,
     attenuation_sampler: Sampler,
 }
@@ -61,10 +62,14 @@ impl SurfaceResources {
         queue: &RenderQueue,
         width: u32,
         height: u32,
+        transparent_capacity: usize,
     ) -> Result<Self, String> {
         Ok(Self {
             targets: SurfaceTargets::new(device, width, height)?,
             probes: std::array::from_fn(|_| ProbeTargets::new(device, queue)),
+            transparent: std::array::from_fn(|_| {
+                SourceTransparentPasses::new(transparent_capacity)
+            }),
             probe_sampler: device.create_sampler(&SamplerDescriptor {
                 label: Some("source_probe_sampler"),
                 mag_filter: FilterMode::Linear,
@@ -182,7 +187,7 @@ pub fn prepare_views(
                 }
             }
         } else {
-            match SurfaceResources::new(&device, &queue, main.x, main.y) {
+            match SurfaceResources::new(&device, &queue, main.x, main.y, capacity) {
                 Ok(value) => {
                     commands.insert_resource(value);
                 }
@@ -273,7 +278,6 @@ pub fn prepare_views(
                     &resources.attenuation_sampler,
                 ),
             ),
-            SourceTransparentPasses::new(capacity),
         ));
     }
 }

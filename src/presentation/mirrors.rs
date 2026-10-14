@@ -1198,6 +1198,21 @@ pub(crate) struct MirrorAudit {
 #[derive(Resource, Clone, Default, ExtractResource)]
 pub struct MirrorGpuStatus(Arc<Mutex<MirrorGpuData>>);
 impl MirrorGpuStatus {
+    pub(crate) fn loading_progress(&self) -> (u64, u64) {
+        let status = self.0.lock().unwrap();
+        let mut bits = (1u64 << status.warmup_stage.min(5)) - 1;
+        bits |= u64::from(status.ready) << 5;
+        for (owner, pair) in status.banks.iter().enumerate() {
+            for (live, bank) in pair.iter().enumerate() {
+                bits |= u64::from(bank.is_some()) << (6 + owner * 2 + live);
+            }
+            bits |= u64::from(status.submitted[owner]) << (12 + owner);
+            bits |= u64::from(status.sky_frames[owner] != 0) << (15 + owner);
+            bits |= u64::from(status.validation[owner] != 0) << (18 + owner);
+        }
+        (status.instance, bits)
+    }
+
     pub(crate) fn audit(&self) -> MirrorAudit {
         let status = self.0.lock().unwrap();
         let mut banks_mask = 0;

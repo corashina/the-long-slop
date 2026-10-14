@@ -4,9 +4,11 @@ use bevy::ecs::system::{IntoObserverSystem, SystemParam};
 use bevy::prelude::*;
 
 use crate::presentation::materials::{SourceCaster, SourceMaterial, SourceShadowMode};
+use crate::presentation::transparent::SourceSortData;
 use crate::reference::{AssetId, NodeId, ReferenceManifest, SourceId};
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::gltf::GltfExtras;
+use bevy::render::batching::NoAutomaticBatching;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 
 type Receiver = (
@@ -20,11 +22,13 @@ type Receiver = (
     Option<&'static Children>,
     &'static crate::presentation::renderers::SourceRenderer,
     &'static bevy::camera::primitives::Aabb,
+    Option<&'static SourceSortData>,
 );
 
 /// Imported scene entities that prototypes bind and capture.
 #[derive(SystemParam)]
 pub(crate) struct SceneQueries<'w, 's> {
+    materials: Res<'w, Assets<SourceMaterial>>,
     extras: Query<'w, 's, (Entity, &'static GltfExtras)>,
     primitives: Query<'w, 's, (Entity, &'static ChildOf), With<Mesh3d>>,
     receivers: Query<'w, 's, Receiver, Without<SourceCaster>>,
@@ -43,6 +47,7 @@ struct MeshRecipe {
     caster: Option<Handle<StandardMaterial>>,
     renderer: crate::presentation::renderers::SourceRenderer,
     bounds: bevy::camera::primitives::Aabb,
+    sort: Option<SourceSortData>,
 }
 
 #[derive(Clone)]
@@ -67,6 +72,98 @@ impl Recipe {
 
     pub fn mesh_count(&self) -> usize {
         self.nodes.iter().map(|node| node.meshes.len()).sum()
+    }
+
+    pub fn transparent_pass_count(&self) -> usize {
+        self.nodes
+            .iter()
+            .flat_map(|node| &node.meshes)
+            .filter_map(|mesh| mesh.sort)
+            .map(|sort| sort.pass_count())
+            .sum()
+    }
+
+    #[cfg(feature = "save-fixture")]
+    pub(crate) fn check_spawn(&self, materials: &Assets<SourceMaterial>) -> serde_json::Value {
+        let mut world = World::new();
+        let mut transparent = 0;
+        let mut opaque = 0;
+        let mut copies = Vec::new();
+        for _ in 0..2 {
+            let root = world.spawn(Visibility::Hidden).id();
+            copies.push(self.spawn(&mut world.commands(), root));
+            world.flush();
+        }
+        for copy in &copies {
+            for (recipe, (_, node)) in self.nodes.iter().zip(copy) {
+                let actual: Vec<_> = world
+                    .get::<Children>(*node)
+                    .into_iter()
+                    .flat_map(|children| children.iter())
+                    .filter(|entity| {
+                        world
+                            .get::<MeshMaterial3d<SourceMaterial>>(*entity)
+                            .is_some()
+                    })
+                    .collect();
+                assert_eq!(actual.len(), recipe.meshes.len());
+                for (mesh, entity) in recipe.meshes.iter().zip(actual) {
+                    let alpha = materials
+                        .get(&mesh.material)
+                        .expect("recipe material")
+                        .base
+                        .alpha_mode;
+                    let is_transparent =
+                        matches!(alpha, AlphaMode::Blend | AlphaMode::Premultiplied);
+                    assert_eq!(
+                        mesh.sort.is_some(),
+                        is_transparent,
+                        "capture must retain transparent metadata"
+                    );
+                    assert_eq!(
+                        world.get::<SourceSortData>(entity).copied(),
+                        mesh.sort,
+                        "copy must retain every sort field"
+                    );
+                    assert_eq!(
+                        world.get::<NoAutomaticBatching>(entity).is_some(),
+                        is_transparent
+                    );
+                    assert_eq!(
+                        world
+                            .get::<MeshMaterial3d<SourceMaterial>>(entity)
+                            .unwrap()
+                            .0,
+                        mesh.material
+                    );
+                    assert_eq!(world.get::<Mesh3d>(entity).unwrap().0, mesh.mesh);
+                    assert_eq!(
+                        world
+                            .get::<crate::presentation::renderers::SourceRenderer>(entity)
+                            .unwrap()
+                            .0
+                            .sorting_layer,
+                        mesh.renderer.0.sorting_layer
+                    );
+                    assert_eq!(
+                        world
+                            .get::<crate::presentation::renderers::SourceRenderer>(entity)
+                            .unwrap()
+                            .0
+                            .sorting_order,
+                        mesh.renderer.0.sorting_order
+                    );
+                    if is_transparent {
+                        transparent += 1;
+                    } else {
+                        opaque += 1;
+                    }
+                }
+            }
+        }
+        serde_json::json!({"copies": copies.len(), "transparent": transparent, "opaque": opaque,
+            "recipe_passes":self.transparent_pass_count(),
+            "metadata":self.nodes.iter().flat_map(|node| &node.meshes).filter_map(|mesh|mesh.sort).collect::<Vec<_>>()})
     }
 
     pub fn node_index(&self, id: NodeId) -> Option<usize> {
@@ -119,6 +216,9 @@ impl Recipe {
                     bevy::light::NotShadowCaster,
                     ChildOf(entity),
                 ));
+                if let Some(sort) = mesh.sort {
+                    primitive.insert((sort, NoAutomaticBatching));
+                }
                 if !mesh.receive_shadows {
                     primitive.insert(bevy::light::NotShadowReceiver);
                 }
@@ -253,12 +353,22 @@ impl Prototype {
             if !self.nodes.iter().any(|(_, node)| *node == parent.parent()) {
                 return true;
             }
-            let Ok((_, _, _, _, _, mode, _, children, _, _)) = scene.receivers.get(entity) else {
+            let Ok((_, material, _, _, _, mode, _, children, _, _, sort)) =
+                scene.receivers.get(entity)
+            else {
                 return false;
             };
-            mode.0 == 0
-                || children
-                    .is_some_and(|children| children.iter().any(|c| scene.casters.contains(c)))
+            let Some(material) = scene.materials.get(&material.0) else {
+                return false;
+            };
+            let transparent = matches!(
+                material.base.alpha_mode,
+                AlphaMode::Blend | AlphaMode::Premultiplied
+            );
+            (!transparent || sort.is_some())
+                && (mode.0 == 0
+                    || children
+                        .is_some_and(|children| children.iter().any(|c| scene.casters.contains(c))))
         })
     }
 
@@ -299,6 +409,7 @@ impl Prototype {
                     children,
                     renderer,
                     bounds,
+                    sort,
                 ) = scene.receivers.get(primitive).unwrap();
                 let caster = children.and_then(|children| {
                     children
@@ -316,6 +427,9 @@ impl Prototype {
                         NoFrustumCulling,
                     ))
                     .id();
+                if let Some(sort) = sort {
+                    commands.entity(warm).insert((*sort, NoAutomaticBatching));
+                }
                 warmups.push((warm, false));
                 if let Some(caster) = &caster {
                     let warm = commands
@@ -342,6 +456,7 @@ impl Prototype {
                     caster,
                     renderer: renderer.clone(),
                     bounds: *bounds,
+                    sort: sort.copied(),
                 });
             }
             nodes.push(NodeRecipe {

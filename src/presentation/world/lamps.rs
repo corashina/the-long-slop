@@ -76,6 +76,12 @@ impl RoadLamps {
             .as_ref()
             .map_or(0, |recipe| self.capacity * recipe.recipe.mesh_count())
     }
+    pub fn transparent_pass_capacity(&self) -> usize {
+        // Include one loading warmup for each recipe primitive.
+        self.recipe.as_ref().map_or(0, |recipe| {
+            (self.capacity + 1) * recipe.recipe.transparent_pass_count()
+        })
+    }
     pub fn reset_instances(&mut self, commands: &mut Commands) {
         for instance in self.instances.drain(..) {
             commands.entity(instance.root).despawn();

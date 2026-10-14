@@ -147,6 +147,31 @@ fn process_request(
         }
 
         #[cfg(feature = "save-fixture")]
+        "FixtureTransparent" => {
+            let stations = &world
+                .resource::<presentation::lighting::SourceLighting>()
+                .stations;
+            if !stations.ready() {
+                return Ok(serde_json::json!({"ready": false}).to_string());
+            }
+            Ok(stations.check_transparent(world).to_string())
+        }
+        #[cfg(feature = "save-fixture")]
+        "FixtureStationWindow" => {
+            let distance = request
+                .payload
+                .as_f64()
+                .ok_or_else(|| invalid("Missing fixture distance"))?;
+            let mut drive = world.resource_mut::<Drive>();
+            let g = &mut drive.runtime;
+            if !g.paused {
+                return Err(invalid("Pause before fixture setup"));
+            }
+            let point = crate::world::road_sample(g.stream.seed, distance).center;
+            g.stream.sync_at(point, &mut g.physics);
+            Ok(serde_json::json!({"distance":distance,"point":point}).to_string())
+        }
+        #[cfg(feature = "save-fixture")]
         "FixtureSetupFleet"
         | "FixtureSetupDriving"
         | "FixtureDetachAndCarry"

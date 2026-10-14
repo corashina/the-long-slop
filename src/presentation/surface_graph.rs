@@ -168,12 +168,12 @@ fn transparent(
     view: ViewQuery<(
         &ExtractedView,
         &SurfaceViewTargets,
-        &SourceTransparentPasses,
         &SourceViewLighting,
         &super::stained_glass::SourceGlassView,
         &super::surface_views::SourceSurfaceView,
     )>,
     frame: Res<super::view_frame::SourceViewFrame>,
+    surfaces: Res<super::surface_views::SurfaceResources>,
     phases: Res<ViewSortedRenderPhases<Transparent3d>>,
     pipelines: Res<SurfacePasses>,
     casters: Res<super::caster::CasterPasses>,
@@ -190,7 +190,8 @@ fn transparent(
         return;
     }
     let entity = view.entity();
-    let (view, targets, order, lighting, glass, source_view) = view.into_inner();
+    let (view, targets, lighting, glass, source_view) = view.into_inner();
+    let order = &surfaces.transparent[source_view.index];
     glass.cleanup();
     let Some(phase) = phases.get(&view.retained_view_entity) else {
         return;

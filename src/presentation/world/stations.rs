@@ -57,6 +57,51 @@ impl StationModels {
                 .unwrap_or(0)
     }
 
+    pub fn transparent_pass_capacity(&self) -> usize {
+        let live = self.capacity
+            * self
+                .recipes
+                .iter()
+                .flatten()
+                .map(Recipe::transparent_pass_count)
+                .max()
+                .unwrap_or(0);
+        // Warmups can coexist with imported primitives and live copies during loading.
+        live + self
+            .recipes
+            .iter()
+            .flatten()
+            .map(Recipe::transparent_pass_count)
+            .sum::<usize>()
+    }
+
+    #[cfg(feature = "save-fixture")]
+    pub(crate) fn check_transparent(&self, world: &World) -> serde_json::Value {
+        let materials = world.resource::<Assets<SourceMaterial>>();
+        let recipes: Vec<_> = self
+            .prototypes
+            .iter()
+            .zip(&self.recipes)
+            .map(|(prototype, recipe)| {
+                let recipe = recipe.as_ref().expect("captured station recipe");
+                serde_json::json!({"asset":prototype.asset.0,"check":recipe.check_spawn(materials)})
+            })
+            .collect();
+        let instances: Vec<_> = self.instances.iter().map(|instance| {
+            let mut stack = vec![instance.root];
+            let mut transparent = Vec::new();
+            while let Some(entity) = stack.pop() {
+                if let Some(children) = world.get::<Children>(entity) { stack.extend(children.iter()); }
+                if let Some(sort) = world.get::<crate::presentation::transparent::SourceSortData>(entity) {
+                    assert!(world.get::<bevy::render::batching::NoAutomaticBatching>(entity).is_some());
+                    transparent.push(serde_json::json!({"entity":format!("{entity:?}"),"sort":sort}));
+                }
+            }
+            serde_json::json!({"id":instance.station.id,"kind":instance.station.kind,"asset":self.prototypes[instance.station.kind].asset.0,"root":format!("{:?}",instance.root),"point":instance.station.absolute_point,"transparent":transparent})
+        }).collect();
+        serde_json::json!({"ready":true,"capacity":self.capacity,"pass_capacity":self.transparent_pass_capacity(),"recipes":recipes,"instances":instances})
+    }
+
     pub(crate) fn validate_assets(
         &self,
         path: &str,
