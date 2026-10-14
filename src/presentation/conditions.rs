@@ -11,6 +11,7 @@ use crate::{
     reference::{ConditionId, ConditionSurface, ReferenceManifest},
     save::SaveError,
 };
+use bevy::math::Affine3A;
 use bevy::{
     camera::primitives::{Aabb, MeshAabb},
     ecs as bevy_ecs,
@@ -65,6 +66,7 @@ impl Plugin for ConditionPlugin {
             (prepare_conditions, sync_conditions)
                 .chain()
                 .after(materials::bind_authored_materials)
+                .after(crate::app::advance_tools)
                 .before(super::plates::bind_plate_text),
         );
     }
@@ -349,7 +351,7 @@ fn prepare(
             tool.own_condition,
             tool.model
                 .map(|n| world.resource::<ReferenceVisuals>().nodes[&n]),
-            tool.disabled_model
+            tool.scrub_node
                 .map(|n| world.resource::<ReferenceVisuals>().nodes[&n]),
         ));
     }
@@ -608,22 +610,15 @@ impl ConditionVisuals {
         for (id, model, disabled) in &self.tools {
             let worn = store.get(*id).state == 5;
             if let Some(model) = model {
-                result.push((
-                    *model,
-                    if worn {
-                        Visibility::Hidden
-                    } else {
-                        Visibility::Inherited
-                    },
-                ));
+                result.push((*model, Visibility::Inherited));
             }
             if let Some(disabled) = disabled {
                 result.push((
                     *disabled,
                     if worn {
-                        Visibility::Inherited
-                    } else {
                         Visibility::Hidden
+                    } else {
+                        Visibility::Inherited
                     },
                 ));
             }
@@ -653,7 +648,7 @@ impl ConditionVisuals {
                 .get(*id)
                 .state
                 == 5;
-            for (entity, show) in [(model, !worn), (disabled, worn)] {
+            for (entity, show) in [(model, true), (disabled, !worn)] {
                 if let Some(entity) = entity {
                     if let Some(mut v) = world.get_mut::<Visibility>(*entity) {
                         v.set_if_neq(if show {
@@ -758,6 +753,32 @@ pub(crate) fn sync_conditions(world: &mut World) {
             );
         }
         visuals.apply_visibility(world);
+        for (index, (_, model, _)) in visuals.tools.iter().enumerate() {
+            let Some(model) = model else { continue };
+            let pose = world
+                .resource::<Drive>()
+                .runtime
+                .area
+                .interaction
+                .cleaning
+                .model_pose(index, &world.resource::<Drive>().runtime.area.items);
+            let mut parent = world.get::<ChildOf>(*model).map(|p| p.parent());
+            let mut basis = Affine3A::IDENTITY;
+            while let Some(entity) = parent {
+                if let Some(transform) = world.get::<Transform>(entity) {
+                    basis = transform.compute_affine() * basis;
+                }
+                parent = world.get::<ChildOf>(entity).map(|p| p.parent());
+            }
+            let desired = Transform::from_translation(Vec3::from_array(pose.position))
+                .with_rotation(Quat::from_array(pose.rotation));
+            let local =
+                Transform::from_matrix(Mat4::from(basis.inverse() * desired.compute_affine()));
+            if let Some(mut transform) = world.get_mut::<Transform>(*model) {
+                transform.translation = local.translation;
+                transform.rotation = local.rotation;
+            }
+        }
     });
 }
 

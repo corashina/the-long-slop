@@ -407644,7 +407644,7 @@
         "wash_mask": 0,
         "text": 186,
         "show_text": true,
-        "disabled_model": null,
+        "scrub_node": null,
         "model": 552,
         "model_equip": 552,
         "model_default": 552,

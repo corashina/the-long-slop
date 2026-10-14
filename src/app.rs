@@ -30,6 +30,8 @@ pub(crate) struct Drive {
     /// Gauge state per vehicle.
     instruments: Vec<InstrumentState>,
     input: FrameInput,
+    tool_lmb: bool,
+    tool_delta_seconds: f32,
     pub(crate) clock: StepClock,
     previous: VehiclePose,
     current: VehiclePose,
@@ -87,6 +89,8 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
                 .collect(),
             runtime,
             input: FrameInput::default(),
+            tool_lmb: false,
+            tool_delta_seconds: 0.,
             clock: StepClock::default(),
             previous: current,
             current,
@@ -141,6 +145,7 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
                 advance_physics,
                 sync_world,
                 sync_imported,
+                advance_tools,
                 presentation::consumables::sync,
                 sync_instruments,
                 presentation::lighting::sync_control_visuals,
@@ -238,9 +243,13 @@ fn check_ready(
     ),
     mut materials: ResMut<presentation::materials::SourceMaterials>,
     mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
-    plates: Res<presentation::plates::PlateTextStatus>,
+    plates: (
+        Res<presentation::plates::PlateTextStatus>,
+        Res<presentation::weather::WeatherRender>,
+    ),
 ) {
     let (lighting, source_lighting) = lighting;
+    let (plates, particles) = plates;
     if let Some(error) = mirrors.failure() {
         game_failure(&error);
         visuals.failed = true;
@@ -266,6 +275,9 @@ fn check_ready(
     if let presentation::materials::RenderingState::Failed(error) = &materials.state {
         game_failure(error);
         visuals.failed = true;
+        return;
+    }
+    if !particles.prepared() {
         return;
     }
     if drive.ready {
@@ -371,6 +383,8 @@ fn check_ready(
 
 fn clear_input(drive: &mut Drive) {
     drive.input.clear();
+    drive.tool_lmb = false;
+    drive.tool_delta_seconds = 0.;
     drive.runtime.clear_input();
     drive.clock.reset();
     drive.previous = drive.current;
@@ -394,6 +408,7 @@ fn read_input(
         ],
         wheel: game_wheel(),
     };
+    drive.tool_lmb = frame.held & keys::PRIMARY != 0;
     if requests.pending() {
         return;
     }
@@ -440,6 +455,7 @@ fn advance_physics(
 ) {
     drive.frame_steps = 0;
     drive.render_delta_seconds = 0.;
+    drive.tool_delta_seconds = 0.;
     if !drive.ready || !drive.runtime.started || drive.runtime.paused {
         return;
     }
@@ -454,6 +470,7 @@ fn advance_physics(
             .calendar((calendar / 100) as u8, (calendar % 100) as u8);
     }
     let delta = time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale;
+    drive.tool_delta_seconds = delta;
     drive.runtime.area.conditions.update(delta, true);
     drive.clock.accept_frame(time.delta_secs_f64());
     loop {
@@ -536,6 +553,17 @@ fn sync_imported(
         &mut items,
     );
     presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
+}
+pub(crate) fn advance_tools(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
+    let frame = crate::interaction::cleaning::ToolFrame {
+        held: drive.runtime.area.interaction.held(),
+        lmb: drive.tool_lmb,
+        active: drive.ready && drive.tool_delta_seconds > 0.,
+        dt: drive.tool_delta_seconds,
+        view: drive.rendered,
+        origin: drive.runtime.stream.origin.offset,
+    };
+    drive.runtime.advance_tools(&reference.0, frame);
 }
 fn instrument_sample(
     reference: &ReferenceManifest,

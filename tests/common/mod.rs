@@ -6,6 +6,7 @@ use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose};
 pub fn reference() -> ReferenceManifest {
     let mut reference = ReferenceManifest::from_json(include_bytes!("reference.json"))
         .expect("valid native fixture");
+    separate_tool_owners(&mut reference);
     reference.colliders[0].geometry = ColliderGeometry::Box {
         center: [0.0; 3],
         half_extents: [0.76, 0.24, 1.55],
@@ -259,4 +260,77 @@ pub fn add_condition_owner(
     let id = owner.id;
     reference.conditions.surfaces.push(owner);
     id
+}
+
+// The checked fixture once used a rim and hubcap as tool owners.
+// Synthetic tool identities keep the original part ownership intact.
+fn separate_tool_owners(reference: &mut ReferenceManifest) {
+    use my_summer_slop::reference::*;
+    fn owner(
+        r: &mut ReferenceManifest,
+        original: ItemId,
+        name: &str,
+    ) -> (ItemId, BodyId, NodeId, SourceId) {
+        let mut item = r.items.iter().find(|i| i.id == original).unwrap().clone();
+        item.id = ItemId(r.items.iter().map(|i| i.id.0).max().unwrap() + 1);
+        item.source = SourceId {
+            file: "cleaning-tool-fixture".into(),
+            path_id: i64::from(item.id.0),
+        };
+        let mut node = r.nodes.iter().find(|n| n.id == item.node).unwrap().clone();
+        node.id = NodeId(r.nodes.iter().map(|n| n.id.0).max().unwrap() + 1);
+        node.source = item.source.clone();
+        node.gltf_node = r.nodes.iter().filter(|n| n.asset == node.asset).count() as u32;
+        node.parent = None;
+        node.name = name.into();
+        node.transform = Transform {
+            translation: [10000. + item.id.0 as f32, 100., 10000.],
+            rotation: [0., 0., 0., 1.],
+            scale: [1.; 3],
+        };
+        let mut body = r.bodies.iter().find(|b| b.id == item.body).unwrap().clone();
+        body.id = BodyId(r.bodies.iter().map(|b| b.id.0).max().unwrap() + 1);
+        body.source = item.source.clone();
+        body.node = node.id;
+        body.dynamic = true;
+        body.mass_kg = 1.;
+        body.parent_body = None;
+        body.pose = node.transform.clone();
+        item.node = node.id;
+        item.body = body.id;
+        item.kind = ItemKind::Decoration;
+        item.name = name.into();
+        item.attached_to = None;
+        // These pickup values match checked brush72520 and spray72519 records.
+        let pickup = item.pickup.as_mut().unwrap();
+        pickup.source = item.source.clone();
+        let result = (item.id, body.id, node.id, pickup.source.clone());
+        r.nodes.push(node);
+        r.bodies.push(body);
+        r.items.push(item);
+        result
+    }
+    for index in 0..reference.conditions.brushes.len() {
+        let old = reference.conditions.brushes[index].item;
+        let (item, body, node, pickup) = owner(reference, old, "Brush");
+        let condition = add_condition_owner(reference, item);
+        let tool = &mut reference.conditions.brushes[index];
+        tool.item = item;
+        tool.body = body;
+        tool.pickup = pickup;
+        tool.own_condition = condition;
+        tool.model = Some(node);
+        tool.model_equip = node;
+        tool.model_default = node;
+    }
+    for index in 0..reference.conditions.sprays.len() {
+        let old = reference.conditions.sprays[index].item;
+        let (item, body, node, pickup) = owner(reference, old, "Spray");
+        let tool = &mut reference.conditions.sprays[index];
+        tool.item = item;
+        tool.body = body;
+        tool.pickup = pickup;
+        tool.nozzle = node;
+        tool.renderer_node = node;
+    }
 }

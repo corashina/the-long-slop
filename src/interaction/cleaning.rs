@@ -1,4 +1,66 @@
-use crate::reference::{ItemId, ReferenceError, ReferenceManifest};
+use super::{
+    items::{ItemLocation, ItemStore},
+    parts::PartAttachments,
+};
+use crate::conditions::{ConditionStore, RepairResult};
+use crate::reference::{
+    ColliderId, ConditionColliderBinding, ConditionId, ItemId, ReferenceError, ReferenceManifest,
+    WashId,
+};
+use crate::vehicle::{PhysicsWorld, VehiclePose, from_rapier, to_rapier};
+use crate::weather::ParticleState;
+use rapier3d::{
+    math::{Pose, Rotation, Vector},
+    prelude::{ColliderHandle, QueryFilter, Ray},
+};
+use std::collections::HashMap;
+
+#[derive(Clone, Copy, Debug)]
+pub struct ToolFrame {
+    pub held: Option<ItemId>,
+    pub lmb: bool,
+    pub active: bool,
+    pub dt: f32,
+    pub view: VehiclePose,
+    pub origin: [f64; 3],
+}
+#[derive(Clone, Copy, Debug)]
+pub struct ToolSignals {
+    pub item: ItemId,
+    pub pose: VehiclePose,
+    pub force: f32,
+    pub doing_work: bool,
+    pub playing: bool,
+    pub voice_gain: f32,
+    pub emission: [f32; 2],
+    pub color: [f32; 4],
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Target {
+    Surface(ConditionId),
+    Wash(WashId),
+    Solid(ColliderHandle),
+}
+struct WashEffect {
+    particles: Vec<ParticleState>,
+    durations: Vec<f32>,
+    elapsed: Option<f32>,
+    emitter: [f64; 3],
+}
+struct Contact {
+    target: Option<Target>,
+    collider: Option<ColliderHandle>,
+    relative: Vector,
+    ray_relative: Vector,
+    motion_ready: bool,
+    model: Pose,
+    origin: [f64; 3],
+    sampled: bool,
+    equip: Pose,
+    default: Pose,
+    particles: Vec<ParticleState>,
+}
+
 use crate::save::{SaveError, SourceKey, ToolSnapshot};
 #[derive(Clone, Debug)]
 pub struct ToolState {
@@ -9,11 +71,121 @@ pub struct ToolState {
 }
 pub struct CleaningTools {
     pub states: Vec<ToolState>,
+    contacts: Vec<Contact>,
+    signals: Vec<ToolSignals>,
+    bindings: HashMap<ColliderId, ConditionColliderBinding>,
+    item_conditions: HashMap<ItemId, ConditionId>,
+    texts: HashMap<ItemId, u32>,
+    washes: Vec<WashEffect>,
+    wash_indices: HashMap<WashId, usize>,
+    wash_colliders: Vec<(ColliderHandle, WashId, bool)>,
+    collider_enabled: HashMap<ColliderId, bool>,
 }
 impl CleaningTools {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         reference.conditions.validate(reference)?;
+        let mut contacts = Vec::with_capacity(reference.conditions.brushes.len());
+        let mut signals = Vec::with_capacity(reference.conditions.brushes.len());
+        for b in &reference.conditions.brushes {
+            let item = reference.items.iter().find(|i| i.id == b.item).unwrap();
+            let root = to_rapier(super::items::node_pose(reference, item.node)?);
+            let equip =
+                root.inverse() * to_rapier(super::items::node_pose(reference, b.model_equip)?);
+            let default =
+                root.inverse() * to_rapier(super::items::node_pose(reference, b.model_default)?);
+            let model = b.model.map_or(Ok(root), |n| {
+                super::items::node_pose(reference, n).map(to_rapier)
+            })?;
+            contacts.push(Contact {
+                target: None,
+                collider: None,
+                relative: Vector::ZERO,
+                ray_relative: Vector::ZERO,
+                motion_ready: false,
+                model,
+                origin: [0.; 3],
+                sampled: false,
+                equip,
+                default,
+                particles: b
+                    .particles
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| ParticleState::new(p, b.source.path_id as u64 + i as u64))
+                    .collect(),
+            });
+            signals.push(ToolSignals {
+                item: b.item,
+                pose: from_rapier(&model),
+                force: 0.,
+                doing_work: false,
+                playing: false,
+                voice_gain: 0.,
+                emission: [0.; 2],
+                color: [1.; 4],
+            });
+        }
         Ok(Self {
+            contacts,
+            signals,
+            wash_colliders: Vec::with_capacity(
+                reference
+                    .conditions
+                    .washes
+                    .iter()
+                    .map(|w| w.colliders.len())
+                    .sum(),
+            ),
+            collider_enabled: reference
+                .colliders
+                .iter()
+                .map(|c| (c.id, c.enabled))
+                .collect(),
+            washes: reference
+                .conditions
+                .washes
+                .iter()
+                .map(|w| WashEffect {
+                    particles: w
+                        .particles
+                        .iter()
+                        .enumerate()
+                        .map(|(i, p)| ParticleState::new(p, w.source.path_id as u64 + i as u64))
+                        .collect(),
+                    durations: w.particles.iter().map(|p| p.duration).collect(),
+                    elapsed: None,
+                    emitter: super::items::node_pose(reference, w.node)
+                        .expect("checked wash pose")
+                        .position
+                        .map(f64::from),
+                })
+                .collect(),
+            wash_indices: reference
+                .conditions
+                .washes
+                .iter()
+                .enumerate()
+                .map(|(i, w)| (w.id, i))
+                .collect(),
+            texts: reference
+                .conditions
+                .brushes
+                .iter()
+                .filter(|b| b.show_text)
+                .map(|b| (b.item, b.text))
+                .collect(),
+            bindings: reference
+                .conditions
+                .collider_bindings
+                .iter()
+                .map(|b| (b.collider, b.clone()))
+                .collect(),
+            item_conditions: reference
+                .conditions
+                .surfaces
+                .iter()
+                .filter_map(|s| s.item.map(|i| (i, s.id)))
+                .collect(),
             states: reference
                 .conditions
                 .brushes
@@ -32,6 +204,378 @@ impl CleaningTools {
                 }))
                 .collect(),
         })
+    }
+    pub fn bind_collider(&mut self, id: ColliderId, handle: ColliderHandle) {
+        if let Some(wash) = self.bindings.get(&id).and_then(|b| b.wash) {
+            self.wash_colliders
+                .push((handle, wash, self.collider_enabled[&id]));
+        }
+    }
+    pub fn sync_wash_colliders(&self, conditions: &ConditionStore, physics: &mut PhysicsWorld) {
+        let mut changed = false;
+        for &(handle, wash, authored) in &self.wash_colliders {
+            let active = physics.rapier().colliders[handle]
+                .parent()
+                .is_none_or(|body| {
+                    physics.body_active(body) && physics.rapier().bodies[body].is_enabled()
+                });
+            let collider = &mut physics.rapier_mut().colliders[handle];
+            let enabled = authored && active && conditions.wash(wash).visible();
+            if collider.is_enabled() != enabled {
+                crate::vehicle::set_collider_enabled(collider, enabled);
+                changed = true;
+            }
+        }
+        if changed {
+            physics.refresh_queries();
+        }
+    }
+    pub fn reserves_lmb(&self, held: Option<ItemId>) -> bool {
+        held.is_some_and(|item| self.signals.iter().any(|s| s.item == item))
+    }
+    pub fn prompt(&self, item: ItemId) -> Option<u32> {
+        self.get(item)
+            .filter(|t| !t.disabled)
+            .and_then(|_| self.texts.get(&item).copied())
+    }
+    pub fn signals(&self) -> &[ToolSignals] {
+        &self.signals
+    }
+    pub fn model_pose(&self, index: usize, items: &ItemStore) -> VehiclePose {
+        let c = &self.contacts[index];
+        if c.motion_ready {
+            self.signals[index].pose
+        } else {
+            from_rapier(&(to_rapier(items.get(self.signals[index].item).unwrap().pose) * c.default))
+        }
+    }
+    pub fn particles(&self, tool: usize, particle: usize) -> &[crate::weather::ParticleOutput] {
+        self.contacts[tool].particles[particle].particles()
+    }
+    pub fn wash_particles(
+        &self,
+        wash: usize,
+        particle: usize,
+    ) -> &[crate::weather::ParticleOutput] {
+        self.washes[wash].particles[particle].particles()
+    }
+    pub fn reset_contact(&mut self) {
+        for (c, s) in self.contacts.iter_mut().zip(&mut self.signals) {
+            c.target = None;
+            c.collider = None;
+            c.sampled = false;
+            s.force = 0.;
+            s.doing_work = false;
+            s.playing = false;
+            s.voice_gain = 0.;
+            s.emission = [0.; 2];
+        }
+    }
+    fn target(
+        &self,
+        collider: ColliderId,
+        tool: u8,
+        reference: &ReferenceManifest,
+        conditions: &ConditionStore,
+        items: &ItemStore,
+        parts: &PartAttachments,
+    ) -> Option<Target> {
+        let b = self.bindings.get(&collider)?;
+        if let Some(id) = b.wash.filter(|id| conditions.wash(*id).visible()) {
+            return Some(Target::Wash(id));
+        }
+        let installed = b
+            .installed_part_slot
+            .and_then(|slot| parts.slot_item(slot))
+            .or_else(|| {
+                b.installed_wheel_slot.and_then(|slot| {
+                    items
+                        .iter()
+                        .find(|i| i.location == ItemLocation::WheelSlot(slot))
+                        .map(|i| i.id)
+                })
+            })
+            .or_else(|| {
+                b.installed_tire_slot.and_then(|rim| {
+                    items
+                        .iter()
+                        .find(|i| {
+                            i.location == ItemLocation::Attached(rim)
+                                && reference.items.iter().any(|p| {
+                                    p.id == i.id
+                                        && matches!(p.kind, crate::reference::ItemKind::Tire)
+                                })
+                        })
+                        .map(|i| i.id)
+                })
+            });
+        let condition = installed
+            .and_then(|i| self.item_conditions.get(&i).copied())
+            .filter(|id| conditions.can_repair(*id, tool))
+            .or(b.ancestor_condition)
+            .or(b.forwarded_condition);
+        condition.map(Target::Surface)
+    }
+    pub fn advance(
+        &mut self,
+        frame: ToolFrame,
+        reference: &ReferenceManifest,
+        conditions: &mut ConditionStore,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+        parts: &PartAttachments,
+    ) -> bool {
+        let reserved = self.reserves_lmb(frame.held);
+        if !frame.active || !frame.dt.is_finite() || frame.dt <= 0. {
+            self.reset_contact();
+            return reserved;
+        }
+        let view = to_rapier(frame.view);
+        let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
+        for index in 0..self.contacts.len() {
+            let b = &reference.conditions.brushes[index];
+            let held = frame.held == Some(b.item);
+            let root = items
+                .get(b.item)
+                .map(|i| to_rapier(i.pose))
+                .unwrap_or(self.contacts[index].model);
+            let own_body = items.get(b.item).and_then(|i| i.body);
+            let filter = |_: ColliderHandle, c: &rapier3d::prelude::Collider| {
+                c.is_enabled()
+                    && (!c.is_sensor()
+                        || self
+                            .bindings
+                            .get(&ColliderId((c.user_data >> 64) as u32))
+                            .and_then(|b| b.wash)
+                            .is_some())
+                    && (own_body.is_none() || c.parent() != own_body)
+                    && c.collision_groups().memberships.bits() & b.mask != 0
+                    && !c.shape().contains_point(c.position(), ray.origin)
+            };
+            let hit = if held && frame.lmb {
+                physics
+                    .queries(QueryFilter::default().predicate(&filter))
+                    .cast_ray_and_get_normal(&ray, b.distance, true)
+            } else {
+                None
+            };
+            let mut selected = hit.and_then(|(handle, _)| {
+                self.target(
+                    ColliderId((physics.rapier().colliders[handle].user_data >> 64) as u32),
+                    b.cleaning_type,
+                    reference,
+                    conditions,
+                    items,
+                    parts,
+                )
+            });
+            if let Some((_, hit)) = hit {
+                if !matches!(selected, Some(Target::Wash(_))) && !self.states[index].disabled {
+                    let point = ray.point_at(hit.time_of_impact);
+                    // Only checked wash collider links can participate in the nearby trigger search.
+                    for &(handle, wash, _) in &self.wash_colliders {
+                        let collider = &physics.rapier().colliders[handle];
+                        if !collider.is_enabled()
+                            || collider.collision_groups().memberships.bits() & b.wash_mask == 0
+                            || !conditions.wash(wash).visible()
+                        {
+                            continue;
+                        }
+                        let projected =
+                            collider
+                                .shape()
+                                .project_point(collider.position(), point, true);
+                        if projected.is_inside
+                            || projected.point.distance_squared(point)
+                                <= b.wash_radius * b.wash_radius
+                        {
+                            selected = Some(Target::Wash(wash));
+                            break;
+                        }
+                    }
+                }
+            }
+            let c = &mut self.contacts[index];
+            let s = &mut self.signals[index];
+            s.doing_work = false;
+            s.emission = [0.; 2];
+            if !c.motion_ready {
+                c.model = root * c.default;
+                c.origin = frame.origin;
+            }
+            if c.origin != frame.origin {
+                c.sampled = false;
+                c.target = None;
+                c.model.translation -= Vector::from_array(std::array::from_fn(|j| {
+                    (frame.origin[j] - c.origin[j]) as f32
+                }));
+                c.origin = frame.origin;
+            }
+            if let Some((handle, hit)) = hit {
+                let target = selected.unwrap_or(Target::Solid(handle));
+                let target_position = physics.rapier().colliders[handle].position().translation;
+                let point = ray.point_at(hit.time_of_impact) + hit.normal * b.contact_offset;
+                let forward = -hit.normal;
+                let head_forward = view.rotation * -Vector::Z;
+                let horizontal = Vector::new(head_forward.x, 0., head_forward.z);
+                let up = horizontal.normalize_or_zero();
+                let right = forward.cross(up).normalize_or_zero();
+                let up = right.cross(forward).normalize_or_zero();
+                let rotation = if right.length_squared() > 0. {
+                    Rotation::from_mat3(&rapier3d::math::Matrix::from_cols(right, up, -forward))
+                } else {
+                    Rotation::from_rotation_arc(-Vector::Z, forward)
+                };
+                let reset = !c.sampled || c.target != Some(target) || c.collider != Some(handle);
+                if reset {
+                    s.force = 0.;
+                }
+                c.model.translation = c
+                    .model
+                    .translation
+                    .lerp(point, (b.position_lerp * frame.dt).clamp(0., 1.));
+                c.model.rotation = c
+                    .model
+                    .rotation
+                    .slerp(rotation, (b.rotation_lerp * frame.dt).clamp(0., 1.));
+                let relative = if b.model.is_some() {
+                    c.model.translation
+                } else {
+                    root.translation
+                } - target_position;
+                let ray_relative = point - target_position;
+                // Port invariant: model settling cannot count as rubbing on a stationary contact ray.
+                let force = if reset || ray_relative == c.ray_relative {
+                    0.
+                } else {
+                    ((relative - c.relative).length() - b.minimum_displacement)
+                        / (b.maximum_displacement - b.minimum_displacement)
+                }
+                .clamp(0., 1.);
+                // Use reads the retained force before objSlideOnColliderScript.Update samples this frame.
+                if !reset && s.force > b.min_force && !self.states[index].disabled {
+                    let gain = b.repair_modifier * reference.conditions.repair_rate * frame.dt;
+                    let mut completed = false;
+                    match target {
+                        Target::Surface(id) => {
+                            s.doing_work = conditions.can_repair(id, b.cleaning_type);
+                            completed =
+                                conditions.repair(id, b.cleaning_type, gain) != RepairResult::None;
+                        }
+                        Target::Wash(id) => {
+                            let wi = self.wash_indices[&id];
+                            let w = &reference.conditions.washes[wi];
+                            if reference.conditions.clean_tables[w.permission_index as usize]
+                                [b.cleaning_type as usize]
+                            {
+                                s.doing_work = true;
+                                let state = &mut conditions.washes[wi];
+                                state.repair_progress += gain;
+                                if state.repair_progress > 1. && !w.never_repair {
+                                    state.repair_progress = 0.;
+                                    state.active = false;
+                                    state.on = false;
+                                    state.destroyed = w.destroy_on_repair;
+                                    completed = true;
+                                    if w.destroy_on_repair {
+                                        let effect = &mut self.washes[wi];
+                                        effect.elapsed = Some(0.);
+                                    }
+                                }
+                            }
+                        }
+                        Target::Solid(_) => {}
+                    }
+                    if completed && b.can_ruin {
+                        self.states[index].disabled = conditions.wear(b.own_condition);
+                    }
+                }
+                c.target = Some(target);
+                c.collider = Some(handle);
+                c.relative = relative;
+                c.ray_relative = ray_relative;
+                c.sampled = true;
+                s.force = force;
+                s.playing = b.has_sound && (b.sound_when_disabled || !self.states[index].disabled);
+                if s.playing {
+                    s.voice_gain += (force * b.max_volume - s.voice_gain)
+                        * (b.volume_lerp * frame.dt).clamp(0., 1.);
+                } else {
+                    s.voice_gain = 0.;
+                }
+                if !self.states[index].disabled {
+                    for (pi, p) in b.particles.iter().enumerate() {
+                        let first = p.role.ends_with("-particle");
+                        s.emission[pi] = if (first && (!s.doing_work || b.both_work))
+                            || (!first && s.doing_work)
+                        {
+                            force
+                        } else {
+                            0.
+                        };
+                    }
+                }
+            } else {
+                c.target = None;
+                c.collider = None;
+                c.sampled = false;
+                s.force = 0.;
+                let desired = if held && frame.lmb {
+                    Pose::from_parts(
+                        view.translation + view.rotation * Vector::new(0., -0.25, -0.75),
+                        root.rotation * c.equip.rotation,
+                    )
+                } else {
+                    Pose::from_parts(
+                        (root * c.equip).translation,
+                        (root * if held { c.equip } else { c.default }).rotation,
+                    )
+                };
+                c.model.translation = c.model.translation.lerp(
+                    desired.translation,
+                    (b.position_lerp * frame.dt).clamp(0., 1.),
+                );
+                c.model.rotation = c
+                    .model
+                    .rotation
+                    .slerp(desired.rotation, (b.rotation_lerp * frame.dt).clamp(0., 1.));
+                if held && frame.lmb {
+                    s.voice_gain += (0. - s.voice_gain) * (b.volume_lerp * frame.dt).clamp(0., 1.);
+                } else {
+                    s.playing = false;
+                    s.voice_gain = 0.;
+                }
+            }
+            c.motion_ready = true;
+            s.pose = from_rapier(&c.model);
+            for (pi, p) in c.particles.iter_mut().enumerate() {
+                p.rotation = c.model.rotation;
+                p.advance(
+                    frame.dt,
+                    std::array::from_fn(|j| frame.origin[j] + f64::from(c.model.translation[j])),
+                    s.emission[pi],
+                    &[],
+                );
+            }
+        }
+        for effect in &mut self.washes {
+            if let Some(elapsed) = effect.elapsed.as_mut() {
+                for (index, p) in effect.particles.iter_mut().enumerate() {
+                    p.advance(
+                        frame.dt,
+                        effect.emitter,
+                        if *elapsed < effect.durations[index] {
+                            1.
+                        } else {
+                            0.
+                        },
+                        &[],
+                    );
+                }
+                *elapsed += frame.dt;
+            }
+        }
+        reserved
     }
     pub fn get(&self, item: ItemId) -> Option<&ToolState> {
         self.states.iter().find(|t| t.item == item)
@@ -73,6 +617,10 @@ impl CleaningTools {
         saved: &[ToolSnapshot],
     ) -> Result<(), SaveError> {
         validate_tools(reference, saved)?;
+        self.reset_contact();
+        for c in &mut self.contacts {
+            c.motion_ready = false;
+        }
         for t in &mut self.states {
             let source = reference
                 .conditions

@@ -98,7 +98,7 @@ pub struct BrushReference {
     pub wash_mask: u32,
     pub text: u32,
     pub show_text: bool,
-    pub disabled_model: Option<NodeId>,
+    pub scrub_node: Option<NodeId>,
     pub model: Option<NodeId>,
     pub model_equip: NodeId,
     pub model_default: NodeId,
@@ -391,6 +391,7 @@ impl ConditionRecord {
                 "id/source",
             )?;
             owner(&t.source, t.item, t.body, &t.pickup)?;
+            check(&t.source, t.particles.len() <= 2, "particles channels")?;
             check(
                 &t.source,
                 !t.save.file.is_empty() && t.save.path_id != 0,
@@ -422,7 +423,7 @@ impl ConditionRecord {
                     Some(t.model_equip),
                     Some(t.model_default),
                     t.model,
-                    t.disabled_model,
+                    t.scrub_node,
                 ]
                 .iter()
                 .flatten()

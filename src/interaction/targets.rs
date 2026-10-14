@@ -101,6 +101,7 @@ enum QueryAction {
 
 impl InteractionState {
     pub fn bind_collider(&mut self, id: ColliderId, handle: ColliderHandle) {
+        self.cleaning.bind_collider(id, handle);
         if let Some(binding) = self.source_bindings.get(&id) {
             self.collider_bindings.insert(handle, *binding);
         }

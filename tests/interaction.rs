@@ -28,13 +28,27 @@ fn target(id: u32) -> Option<AimTarget> {
         slot: None,
     })
 }
+fn fixture_reference() -> ReferenceManifest {
+    let mut r = common::reference();
+    if r.items[0].pickup.is_none() {
+        let mut pickup = r.items.iter().find_map(|i| i.pickup.clone()).unwrap();
+        pickup.source = r.items[0].source.clone();
+        r.items[0].pickup = Some(pickup);
+    }
+    r
+}
+fn fixture_world(reference: &ReferenceManifest) -> PhysicsWorld {
+    let mut poses = my_summer_slop::starting_area::initial_vehicle_poses(reference).unwrap();
+    poses[0] = pose([0., 1.1, 0.]);
+    PhysicsWorld::new(reference, &poses).unwrap()
+}
 fn fixture() -> (InteractionState, ItemStore, PhysicsWorld, PlayerState) {
     fixture_with(|_| {})
 }
 fn fixture_with(
     rules: impl FnOnce(&mut ReferenceManifest),
 ) -> (InteractionState, ItemStore, PhysicsWorld, PlayerState) {
-    let mut reference = common::reference();
+    let mut reference = fixture_reference();
     for (id, tank) in [(100, 1), (101, 2)] {
         reference.openings.push(OpeningRecord {
             id: OpeningId(id),
@@ -67,11 +81,23 @@ fn fixture_with(
             spill_disabled: false,
             tube_connected: false,
             flow_radius: 0.02,
+            particles: reference.openings[0].particles.clone(),
             can_toggle: true,
         });
         reference.tanks[(tank - 1) as usize]
             .openings
             .push(OpeningId(id));
+        for prefix in ["outlet", "splash"] {
+            let mut particle = reference
+                .weather
+                .particles
+                .iter()
+                .find(|p| p.role == format!("{prefix}_{}", reference.openings[0].id.0))
+                .unwrap()
+                .clone();
+            particle.role = format!("{prefix}_{id}");
+            reference.weather.particles.push(particle);
+        }
     }
     let mut body = reference.bodies[1].clone();
     body.id = BodyId(90);
@@ -80,7 +106,7 @@ fn fixture_with(
     reference.bodies.push(body);
     reference.items[0].body = BodyId(90);
     rules(&mut reference);
-    let mut physics = common::world();
+    let mut physics = fixture_world(&reference);
     let (handle, _) = physics.rapier_mut().insert(
         RigidBodyBuilder::dynamic().translation(Vector::new(10.0, 2.0, -1.0)),
         ColliderBuilder::ball(0.2).user_data(2),
@@ -138,7 +164,7 @@ fn source_use_mask_skips_hidden_cabin_envelope() {
 
 #[test]
 fn source_seat_hit_node_routes_to_primary_seat() {
-    let mut reference = common::reference();
+    let mut reference = fixture_reference();
     let alias = reference.items[0].node;
     reference.seats[0].hit_nodes = vec![alias];
     assert_eq!(
@@ -644,7 +670,7 @@ fn carry_stops_at_a_solid_wall() {
 #[test]
 fn seat_enters_on_release_and_exits_on_press() {
     let (mut interaction, mut items, mut physics, mut player) = fixture();
-    let reference = common::reference();
+    let reference = fixture_reference();
     player.configure_seats(&reference.seats);
     interaction.step(
         input(keys::USE, keys::USE),
@@ -695,7 +721,7 @@ fn seat_enters_on_release_and_exits_on_press() {
 #[test]
 fn door_release_over_a_seat_does_not_enter() {
     let (mut interaction, mut items, mut physics, mut player) = door_fixture();
-    player.configure_seats(&common::reference().seats);
+    player.configure_seats(&fixture_reference().seats);
     interaction.step(
         FrameInput {
             held: keys::USE,
@@ -733,7 +759,7 @@ fn door_release_over_a_seat_does_not_enter() {
 #[test]
 fn bare_seat_release_can_enter_after_an_empty_target_press() {
     let (mut interaction, mut items, mut physics, mut player) = fixture();
-    player.configure_seats(&common::reference().seats);
+    player.configure_seats(&fixture_reference().seats);
     interaction.step(
         input(keys::USE, keys::USE),
         common::resolved(None),
@@ -763,7 +789,7 @@ fn bare_seat_release_can_enter_after_an_empty_target_press() {
 #[test]
 fn seated_door_drag_keeps_the_player_in_the_seat() {
     let (mut interaction, mut items, mut physics, mut player) = door_fixture();
-    let reference = common::reference();
+    let reference = fixture_reference();
     player.configure_seats(&reference.seats);
     assert!(player.enter(reference.seats[0].id, pose([10.0, 0.25, 0.0]), &mut physics));
     player.step(
@@ -854,7 +880,7 @@ fn seated_cap_tuning_keeps_the_player_in_the_seat() {
         reference.openings[0].can_tune = true;
         reference.openings[0].tune_rate = 0.525;
     });
-    let reference = common::reference();
+    let reference = fixture_reference();
     player.configure_seats(&reference.seats);
     assert!(player.enter(reference.seats[0].id, pose([10.0, 0.25, 0.0]), &mut physics));
     player.step(
@@ -955,7 +981,7 @@ fn aim_slot_flag_does_not_mark_a_loose_rim() {
 #[test]
 fn wheel_intents_preserve_state_for_the_wheel_owner() {
     let (mut interaction, mut items, mut physics, mut player) = fixture();
-    let wheel_id = common::reference().wheel_slots[0].rim;
+    let wheel_id = fixture_reference().wheel_slots[0].rim;
     let action = interaction.step(
         input(keys::GRAB, keys::GRAB),
         common::resolved(target(wheel_id.0)),
@@ -1255,13 +1281,13 @@ fn fill_applies_source_blocks_and_slow_oil() {
 
 #[test]
 fn hinge_clamps_and_moves_its_collider() {
-    let mut reference = common::reference();
+    let mut reference = fixture_reference();
     let mut body = reference.bodies[1].clone();
     body.id = BodyId(90);
     body.parent_body = Some(BodyId(2));
     reference.bodies.push(body);
     common::add_rotation(&mut reference, 4, 90, [-30.0, 0.0]);
-    let mut physics = common::world();
+    let mut physics = fixture_world(&fixture_reference());
     let (handle, collider) = physics.rapier_mut().insert(
         RigidBodyBuilder::kinematic_position_based().translation(Vector::new(0.0, 1.1, 0.0)),
         ColliderBuilder::cuboid(0.1, 0.5, 0.5).translation(Vector::X),
@@ -1382,7 +1408,7 @@ fn hinge_clamps_and_moves_its_collider() {
 #[test]
 fn empty_slot_does_not_pick_up_a_remote_rim_and_tire_targets_its_assembly() {
     let (mut interaction, mut items, mut physics, mut player) = fixture();
-    let reference = common::reference();
+    let reference = fixture_reference();
     let rim = reference.wheel_slots[0].rim;
     let tire = reference.wheel_slots[0].tire;
     let body = items.get(ItemId(1)).unwrap().body;
@@ -1691,7 +1717,7 @@ fn one_f_gesture_does_not_remount_pickup() {
 #[test]
 fn source_mount_occurs_on_release() {
     let (mut interaction, mut items, mut physics, mut player) = fixture();
-    let r = common::reference();
+    let r = fixture_reference();
     let rim = r.wheel_slots[0].rim;
     let body = items.get(ItemId(1)).unwrap().body;
     let part = items.get_mut(rim).unwrap();
@@ -1769,7 +1795,7 @@ fn source_mount_occurs_on_release() {
 
 #[test]
 fn cap_surface_resolves_use_and_carry_owner() {
-    let mut reference = common::reference();
+    let mut reference = fixture_reference();
     reference.openings[0].can_tune = false;
     reference.openings[0].can_toggle = true;
     reference.action_bindings[0].pickup_owner = Some(reference.openings[0].tank);
@@ -1777,7 +1803,7 @@ fn cap_surface_resolves_use_and_carry_owner() {
     let can = reference.openings[0].tank;
     let mut interaction = InteractionState::new(&reference).unwrap();
     let mut items = ItemStore::new(&reference).unwrap();
-    let mut physics = common::world();
+    let mut physics = fixture_world(&fixture_reference());
     let (body, collider) = physics.rapier_mut().insert(
         RigidBodyBuilder::dynamic().translation(Vector::new(10.0, 2.0, -1.0)),
         ColliderBuilder::ball(0.2)
@@ -2417,7 +2443,7 @@ fn seated_window_drag_preserves_seat_and_driver_state() {
             rotations: vec![],
         });
     });
-    let reference = common::reference();
+    let reference = fixture_reference();
     player.configure_seats(&reference.seats);
     assert!(player.enter(reference.seats[0].id, pose([10.0, 0.25, 0.0]), &mut physics));
     let seat_before = player.seat();
@@ -3002,7 +3028,7 @@ fn steering_grip_requires_ground_and_ordinary_push_rejects_support_root() {
     assert!(!interaction.push_gripping());
     assert!(physics.rapier().impulse_joints.is_empty());
     let (mut interaction, mut items, mut physics, _) = fixture();
-    let r = common::reference();
+    let r = fixture_reference();
     let mut player = PlayerState::new(
         &r.player,
         pose([0.0, 1.34 + r.player.standing_height * 0.5, 0.0]),
@@ -3081,7 +3107,7 @@ fn grip_forward_force_uses_car_direction_after_look_change() {
         1.0 / 60.0,
     );
     let chassis = physics.chassis_handle(0);
-    let r = common::reference();
+    let r = fixture_reference();
     for keys in [keys::FORWARD, keys::FORWARD | keys::LEFT, keys::BACK] {
         let before = physics.rapier().bodies[chassis].linvel();
         let steer = if keys & keys::LEFT != 0 { 1.0 } else { 0.0 };
@@ -3344,4 +3370,49 @@ fn throw_hud_state_tracks_release_block_cancel_and_lost_hand() {
             assert_eq!(items.get(ItemId(1)).unwrap().location, ItemLocation::Held);
         }
     }
+}
+
+#[test]
+fn held_cleaning_tool_reserves_primary_before_world_actions() {
+    let (mut interaction, mut items, mut physics, mut player) = fixture_with(|r| {
+        let item = &r.items[0];
+        let b = &mut r.conditions.brushes[0];
+        b.item = item.id;
+        b.body = item.body;
+        b.pickup = item.pickup.as_ref().unwrap().source.clone();
+        let surface = r
+            .conditions
+            .surfaces
+            .iter_mut()
+            .find(|s| s.id == b.own_condition)
+            .unwrap();
+        surface.node = item.node;
+        surface.item = None;
+    });
+    interaction
+        .pickup_item(ItemId(1), [10., 2., -1.], &player, &mut items, &mut physics)
+        .unwrap();
+    let aim = common::resolved(target(1));
+    let available =
+        interaction.available_actions(&aim, &player, &items, &physics, Default::default());
+    assert!(!available.lmb_use);
+    assert!(
+        available.actions.0
+            & (my_summer_slop::interaction::feedback::ActionMask::WASH
+                | my_summer_slop::interaction::feedback::ActionMask::SCRUB)
+            != 0
+    );
+    let action = interaction.step(
+        input(keys::PRIMARY, keys::PRIMARY),
+        aim,
+        &mut player,
+        &mut items,
+        &mut physics,
+        0.02,
+        Default::default(),
+        1.,
+    );
+    assert_eq!(action, None);
+    assert!(!interaction.opening_is_open(OpeningId(100)));
+    assert_eq!(interaction.dragging_mechanism(), None);
 }

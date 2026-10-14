@@ -141,6 +141,11 @@ impl GarageRuntime {
                 }
             }
         }
+        candidate
+            .area
+            .interaction
+            .cleaning
+            .sync_wash_colliders(&candidate.area.conditions, &mut candidate.physics);
         candidate.physics.refresh_queries();
         candidate.area.player.restore_save(
             &saved.player,

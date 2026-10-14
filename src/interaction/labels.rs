@@ -12,6 +12,13 @@ pub fn display_name<'a>(
     let Some(item) = reference.items.iter().find(|item| item.id == id) else {
         return items.name(id).unwrap_or("");
     };
+    if let Some(tool) = reference.conditions.brushes.iter().find(|b| b.item == id) {
+        return if tool.cleaning_type == 1 {
+            "Brush"
+        } else {
+            "Sponge"
+        };
+    }
     let label = match item.name.as_str() {
         "GarageDoorRightCollider" | "GarageDoorLeftCollider"
             if reference.mechanisms.iter().any(|m| m.item == id) =>

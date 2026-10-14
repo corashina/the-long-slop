@@ -363,7 +363,7 @@ def recover_conditions(source, nodes, components, pointer_node, item_nodes, coll
                 'cleaning_type':d['cleaningType'],'can_ruin':bool(d['canRuin']),'repair_modifier':d['repairModifier'],
                 'min_force':d['minForce'],'wash_radius':d['washRadius'],'wash_mask':d['washMask']['m_Bits'],
                 'text':d['text'],'show_text':not bool(d['dontshowtext']),
-                'disabled_model':pointer_node(reader,d['drot']) if d['drot']['m_PathID'] else None,
+                'scrub_node':pointer_node(reader,d['drot']) if d['drot']['m_PathID'] else None,
                 'model':pointer_node(slide,sd['model']) if sd['model']['m_PathID'] else None,
                 'model_equip':pointer_node(slide,sd['modelEquipPos']),'model_default':pointer_node(slide,sd['modelDefPos']),
                 'distance':sd['distance'],'mask':sd['LM']['m_Bits'],'position_lerp':sd['posLerp'],'rotation_lerp':sd['rotLerp'],

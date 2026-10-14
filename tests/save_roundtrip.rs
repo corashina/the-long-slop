@@ -996,8 +996,20 @@ fn source_conditions_round_trip_and_reject_invalid_candidates() {
     assert_eq!(saved.schema_version, 2);
     saved.conditions.surfaces[0].color = [0.2, 0.4, 0.7, 1.];
     saved.conditions.surfaces[0].repair_progress = -0.5;
-    saved.conditions.surfaces[1].color = [0.7, 0.3, 0.1, 1.];
-    saved.conditions.surfaces[1].state = 5;
+    let brush_owner = r
+        .conditions
+        .surfaces
+        .iter()
+        .find(|s| s.id == r.conditions.brushes[0].own_condition)
+        .unwrap();
+    let brush_state = saved
+        .conditions
+        .surfaces
+        .iter_mut()
+        .find(|s| s.source == my_summer_slop::save::SourceKey::from(&brush_owner.source))
+        .unwrap();
+    brush_state.color = [0.7, 0.3, 0.1, 1.];
+    brush_state.state = 5;
     saved.conditions.tools[0].disabled = true;
     saved.conditions.tools[1].quantity = Some(37.5);
     saved.conditions.washes[0].active = false;

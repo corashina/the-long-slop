@@ -737,6 +737,7 @@ impl InteractionState {
         })
     }
     pub fn cancel_input(&mut self) {
+        self.cleaning.reset_contact();
         self.seat_action_latched = false;
         self.fill_opening = None;
         self.f_gesture_consumed = false;
@@ -756,6 +757,7 @@ impl InteractionState {
         physics: &mut PhysicsWorld,
     ) -> Option<ItemId> {
         let item = self.carry.drop(items, physics)?;
+        self.cleaning.reset_contact();
         self.storage.mark_dropped(item);
         Some(item)
     }
@@ -778,6 +780,7 @@ impl InteractionState {
             .filter_map(|o| o.contact.as_ref().map(|c| (o.reference.id, c)))
     }
     pub fn rebase(&mut self, shift: [f32; 3]) {
+        self.cleaning.reset_contact();
         self.mechanisms.rebase(shift);
         self.parts.rebase(shift);
         self.attachments.rebase(shift);
@@ -795,7 +798,7 @@ impl InteractionState {
 
     pub fn step(
         &mut self,
-        input: FrameInput,
+        mut input: FrameInput,
         aim: ResolvedAim,
         player: &mut PlayerState,
         items: &mut ItemStore,
@@ -805,6 +808,11 @@ impl InteractionState {
         fluid_scale: f32,
     ) -> Option<InteractionAction> {
         self.finish_cancelled_input(player, physics);
+        if self.cleaning.reserves_lmb(self.held()) {
+            input.held &= !keys::PRIMARY;
+            input.pressed &= !keys::PRIMARY;
+            input.released &= !keys::PRIMARY;
+        }
         if !dt.is_finite() || dt <= 0.0 {
             return None;
         }

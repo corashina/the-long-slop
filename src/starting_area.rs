@@ -687,6 +687,9 @@ impl GarageRuntime {
         let mut wheels = crate::interaction::wheels::WheelAssemblies::new(reference)?;
         wheels.refresh_conditions(&area.conditions);
         wheels.sync(&mut area.items, &mut physics)?;
+        area.interaction
+            .cleaning
+            .sync_wash_colliders(&area.conditions, &mut physics);
         physics.refresh_queries();
         area.items.sync_poses(&physics);
         area.commit_poses(&physics, true);
@@ -782,6 +785,43 @@ impl GarageRuntime {
         };
         runtime.sync_weather_bindings(reference);
         Ok(runtime)
+    }
+
+    pub fn advance_tools(
+        &mut self,
+        reference: &ReferenceManifest,
+        mut frame: crate::interaction::cleaning::ToolFrame,
+    ) {
+        frame.active &=
+            self.started && !self.paused && !self.needs_output().dead && !self.sleeping();
+        self.area
+            .interaction
+            .cleaning
+            .sync_wash_colliders(&self.area.conditions, &mut self.physics);
+        self.area.interaction.cleaning.advance(
+            frame,
+            reference,
+            &mut self.area.conditions,
+            &self.area.items,
+            &self.physics,
+            &self.area.interaction.parts,
+        );
+        self.area
+            .interaction
+            .cleaning
+            .sync_wash_colliders(&self.area.conditions, &mut self.physics);
+        if let Some(audio) = &mut self.audio {
+            for (b, s) in reference
+                .conditions
+                .brushes
+                .iter()
+                .zip(self.area.interaction.cleaning.signals())
+            {
+                if let Some(voice) = b.voice {
+                    audio.voice(voice, s.playing, s.voice_gain, 1.);
+                }
+            }
+        }
     }
 
     pub fn clock_factors(&self, reference: &ReferenceManifest) -> crate::sleep::ClockFactors {

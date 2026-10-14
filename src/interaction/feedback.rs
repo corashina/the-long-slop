@@ -26,6 +26,8 @@ impl ActionMask {
     pub const CONSUME: u32 = 524288;
     pub const DRINK: u32 = 1048576;
     pub const HELD_SWITCH: u32 = 2097152;
+    pub const WASH: u32 = 4194304;
+    pub const SCRUB: u32 = 8388608;
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[repr(u32)]
@@ -430,7 +432,11 @@ impl InteractionState {
                 .get(held)
                 .is_some_and(|item| item.food.is_some() && !item.removed)
         });
-        a.lmb_use = a.fill_reservation.is_none() && !latched_fill && !drink_guard && !food_guard;
+        a.lmb_use = a.fill_reservation.is_none()
+            && !latched_fill
+            && !drink_guard
+            && !food_guard
+            && !self.cleaning.reserves_lmb(self.held());
         if self.latched_mechanism.is_none()
             && let Some(t) = aim.light_target
             && t.distance.is_finite()
@@ -466,6 +472,21 @@ impl InteractionState {
             a.actions.0 &= !(ActionMask::DROP | ActionMask::THROW);
         }
         a.consumes_mouse = a.actions.0 & (ActionMask::DOOR | ActionMask::TUNE) != 0;
+        if let Some(held) = self
+            .held()
+            .filter(|_| self.cleaning.reserves_lmb(self.held()))
+        {
+            a.item = Some(held);
+            a.actions.0 &= !(ActionMask::DOOR
+                | ActionMask::FILL
+                | ActionMask::PRIMARY_SWITCH
+                | ActionMask::HELD_SWITCH);
+            match self.cleaning.prompt(held) {
+                Some(185) => a.actions.0 |= ActionMask::WASH,
+                Some(186) => a.actions.0 |= ActionMask::SCRUB,
+                _ => {}
+            }
+        }
         a
     }
     pub fn feedback<'a>(
