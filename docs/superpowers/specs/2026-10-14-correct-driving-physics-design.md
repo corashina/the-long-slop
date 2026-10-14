@@ -2,7 +2,7 @@
 
 Date: 2026-10-14, Europe/Warsaw.
 Base: local master `c189df36ade62f04d361083f11f09a219f1cc1be`.
-Status: The user approved the design direction. This written specification awaits review.
+Status: The user approved this written specification in chat on 2026-10-14.
 
 ## Goal and scope
 
@@ -264,4 +264,4 @@ Update the roadmap with measured results and unresolved differences after implem
 This specification covers the approved driving scope for both existing cars.
 The wheel adapter requires measured validation because public Unity properties do not specify its complete solver.
 The implementation plan must establish wheel equations and comparison bounds before scheduling the wheel replacement.
-The user must review this specification before implementation planning starts.
+The user approved this specification before implementation planning started.
