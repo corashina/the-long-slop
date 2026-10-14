@@ -344,6 +344,7 @@ pub(crate) fn prepare_instruments(
             &GlobalTransform,
             Option<&SourceShadowMode>,
             Option<&Children>,
+            &super::renderers::SourceRenderer,
         ),
         Without<SourceCaster>,
     >,
@@ -373,7 +374,7 @@ pub(crate) fn prepare_instruments(
         .flat_map(|d| d.lamps.iter_mut().chain(&mut d.digit_materials))
     {
         for &entity in &visual.entities {
-            let (mesh, receiver, global, mode, children) = receivers.get(entity).unwrap();
+            let (mesh, receiver, global, mode, children, renderer) = receivers.get(entity).unwrap();
             let mask = materials.get(&receiver.0).unwrap().extension.receiver_mask;
             let inverted = global.affine().matrix3.determinant() < 0.;
             let mut prepare = |handle: &Handle<StandardMaterial>| {
@@ -425,6 +426,7 @@ pub(crate) fn prepare_instruments(
                         mesh.clone(),
                         MeshMaterial3d(material.clone()),
                         crate::presentation::materials::SourceMaterialWarmup,
+                        renderer.clone(),
                         far,
                         Visibility::Visible,
                         bevy::light::NotShadowCaster,

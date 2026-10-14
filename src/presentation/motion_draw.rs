@@ -48,6 +48,7 @@ fn snapshot_models(
     frame: Res<SourceViewFrame>,
     origin: Res<SourceWorldOrigin>,
     shadow: Res<super::shadow_scene::ShadowScene>,
+    master: Res<super::lighting::SourceLighting>,
     mut output: ResMut<MotionScene>,
     status: Res<SourceLightingStatus>,
     models: Query<
@@ -57,19 +58,21 @@ fn snapshot_models(
             Option<&SourceRenderer>,
             Option<&GeneratedWorldMaterial>,
         ),
-        (
-            With<MeshMaterial3d<SourceMaterial>>,
-            Without<super::materials::SourceMaterialWarmup>,
-        ),
+        With<MeshMaterial3d<SourceMaterial>>,
     >,
 ) {
     output.frame = 0;
     output.rows.clear();
-    if frame.views[1].is_none() || frame.main_token == 0 || shadow.capacity() == 0 {
+    if !master.materials_prepared
+        || frame.views[1].is_none()
+        || frame.main_token == 0
+        || shadow.capacity() == 0
+    {
         return;
     }
     if output.rows.capacity() == 0 {
-        output.rows.reserve_exact(shadow.capacity());
+        let warmups = master.warmups.iter().filter(|(_, caster)| !caster).count();
+        output.rows.reserve_exact(shadow.capacity() + warmups);
     }
     for (entity, model, source, generated) in &models {
         let mode = match source.map(|source| source.0.motion_vectors) {

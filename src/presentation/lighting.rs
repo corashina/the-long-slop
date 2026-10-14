@@ -182,6 +182,48 @@ struct ExtractedLighting {
     status: Option<Arc<Mutex<RenderingState>>>,
 }
 
+#[derive(Resource, Clone, Copy, Default, serde::Serialize)]
+pub(crate) struct LightingPipelineAudit {
+    cookies: bool,
+    prepared: bool,
+    warming: bool,
+    source_pipelines: u32,
+    sky_pipelines: u32,
+    shadow_pipelines: u32,
+    pending_pipelines: u32,
+    error_pipelines: u32,
+    receiver_warmups: u32,
+    shadow_warmups: u32,
+    missing_receiver_warmups: u32,
+    missing_shadow_warmups: u32,
+    first_missing_entity: Option<u64>,
+    // 0 = none, 1 = receiver, 2 = shadow caster.
+    first_missing_kind: u8,
+    expected_shadow_views: u32,
+    first_missing_observed_views: u32,
+    predicates_ready: bool,
+    required_counts_present: bool,
+}
+impl LightingPipelineAudit {
+    fn missing(
+        &mut self,
+        entity: bevy::render::sync_world::MainEntity,
+        shadow: bool,
+        observed: usize,
+    ) {
+        if shadow {
+            self.missing_shadow_warmups += 1;
+        } else {
+            self.missing_receiver_warmups += 1;
+        }
+        if self.first_missing_entity.is_none() {
+            self.first_missing_entity = Some(entity.id().to_bits());
+            self.first_missing_kind = if shadow { 2 } else { 1 };
+            self.first_missing_observed_views = observed as u32;
+        }
+    }
+}
+
 pub struct SourceLightingPlugin;
 impl Plugin for SourceLightingPlugin {
     fn build(&self, app: &mut App) {
@@ -212,6 +254,7 @@ impl Plugin for SourceLightingPlugin {
         let render_app = app.sub_app_mut(RenderApp);
         render_app
             .init_resource::<ExtractedLighting>()
+            .init_resource::<LightingPipelineAudit>()
             .add_systems(RenderStartup, init_gpu)
             .add_systems(ExtractSchedule, extract_lighting)
             .add_systems(
@@ -1168,7 +1211,17 @@ fn check_pipelines(
     material_pipelines: Res<bevy::pbr::SpecializedMaterialPipelineCache>,
     shadows: Res<bevy::pbr::SpecializedShadowMaterialPipelineCache>,
     mut last: Local<(usize, usize)>,
+    mut audit: ResMut<LightingPipelineAudit>,
 ) {
+    *audit = LightingPipelineAudit {
+        cookies: gpu.cookies.is_some(),
+        prepared: extracted.prepared,
+        warming: extracted.warming,
+        expected_shadow_views: extracted.uniform.counts.y,
+        ..default()
+    };
+    let mut pending_pipelines = 0;
+    let mut error_pipelines = 0;
     let mut ready = gpu.cookies.is_some() && extracted.prepared;
     let mut count = 0;
     let mut sky_count = 0;
@@ -1178,13 +1231,20 @@ fn check_pipelines(
         CachedPipelineState::Err(
             bevy::shader::ShaderCacheError::ShaderNotLoaded(_)
             | bevy::shader::ShaderCacheError::ShaderImportNotYetAvailable,
-        ) => ready = false,
+        ) => {
+            ready = false;
+            pending_pipelines += 1;
+        }
         CachedPipelineState::Err(error) => {
             ready = false;
+            error_pipelines += 1;
             *gpu.status.lock().unwrap() =
                 RenderingState::Failed(format!("Source shader pipeline: {error}"));
         }
-        _ => ready = false,
+        _ => {
+            ready = false;
+            pending_pipelines += 1;
+        }
     };
     for pipeline in cache.pipelines() {
         if let PipelineDescriptor::RenderPipelineDescriptor(descriptor) = &pipeline.descriptor {
@@ -1215,22 +1275,35 @@ fn check_pipelines(
     if extracted.warming {
         for (entity, shadow) in &extracted.warmups {
             if *shadow {
-                if shadows
+                audit.shadow_warmups += 1;
+                let observed = shadows
                     .values()
                     .filter(|view| view.contains_key(entity))
-                    .count()
-                    != extracted.uniform.counts.y as usize
-                {
+                    .count();
+                if observed != extracted.uniform.counts.y as usize {
                     ready = false;
+                    audit.missing(*entity, true, observed);
                 }
-            } else if !material_pipelines
-                .values()
-                .any(|view| view.contains_key(entity))
-            {
-                ready = false;
+            } else {
+                audit.receiver_warmups += 1;
+                let observed = material_pipelines
+                    .values()
+                    .filter(|view| view.contains_key(entity))
+                    .count();
+                if observed == 0 {
+                    ready = false;
+                    audit.missing(*entity, false, observed);
+                }
             }
         }
     }
+    audit.source_pipelines = count as u32;
+    audit.sky_pipelines = sky_count as u32;
+    audit.shadow_pipelines = shadow_count as u32;
+    audit.pending_pipelines = pending_pipelines;
+    audit.error_pipelines = error_pipelines;
+    audit.predicates_ready = ready;
+    audit.required_counts_present = count > 0 && sky_count > 0 && shadow_count > 0;
     if *last != (count, shadow_count) {
         info!("Source pipelines: {count} receiver, {shadow_count} shadow draws");
         *last = (count, shadow_count);

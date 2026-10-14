@@ -277,7 +277,7 @@ pub fn source_shadow_capacity() -> usize {
 }
 
 pub(crate) mod lamps;
-mod prototype;
+pub(crate) mod prototype;
 mod stations;
 pub(crate) use lamps::{RoadLamps, finish_road_lamp_warmup, prepare_road_lamp, sync_road_lamps};
 pub(crate) use stations::{StationModels, prepare_stations, sync_stations};

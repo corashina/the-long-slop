@@ -275,7 +275,9 @@ impl Plugin for SourceMaterialPlugin {
             Update,
             (
                 material_readiness,
-                bind_authored_materials.after(bind_materials),
+                bind_authored_materials
+                    .after(bind_materials)
+                    .before(super::world::prepare_road_lamp),
             )
                 .chain(),
         );
@@ -450,7 +452,7 @@ struct MaterialIdentity {
     asset: source::AssetId,
     gltf_material: u32,
 }
-pub fn bind_authored_materials(
+pub(crate) fn bind_authored_materials(
     mut commands: Commands,
     mut source: ResMut<SourceMaterials>,
     mut materials: ResMut<Assets<SourceMaterial>>,
@@ -475,13 +477,14 @@ pub fn bind_authored_materials(
         (Without<super::sky::SkyMesh>, Without<SourceMaterialWarmup>),
     >,
     loading: Res<MaterialLoading>,
+    scene: super::world::prototype::SceneQueries,
 ) {
     if source.bound
         || source.state != RenderingState::Loading
         || !visuals.bound
         || !renderer_meshes.bound
-        || master.road_lamps.recipe.is_none()
-        || !master.stations.ready()
+        || !master.road_lamps.prototype_materials_ready(&scene)
+        || !master.stations.prototype_materials_ready(&scene)
         || source
             .textures
             .iter()
@@ -636,8 +639,8 @@ pub fn bind_authored_materials(
     pending.requests.extend(requests);
     pending.shadow_capacity = primitives.iter().count()
         + super::world::source_shadow_capacity()
-        + master.road_lamps.source_mesh_capacity()
-        + master.stations.source_mesh_capacity();
+        + master.road_lamps.prototype_mesh_capacity(&scene)
+        + master.stations.prototype_mesh_capacity(&scene);
     // The checked plate contract owns exactly two retained glyph meshes.
     pending.transparent_pass_capacity = transparent_pass_capacity + 2;
     pending.sealed = false;
@@ -1683,6 +1686,7 @@ pub(crate) fn prepare_lamp_materials(
             &GlobalTransform,
             Option<&SourceShadowMode>,
             Option<&Children>,
+            &super::renderers::SourceRenderer,
         ),
         Without<SourceCaster>,
     >,
@@ -1756,7 +1760,7 @@ pub(crate) fn prepare_lamp_materials(
                 receivers: Vec::with_capacity(target.receivers.len()),
             };
             for &entity in &target.receivers {
-                let (mesh, receiver, global, shadow_mode, children) =
+                let (mesh, receiver, global, shadow_mode, children, renderer) =
                     receivers.get(entity).unwrap();
                 let mask = materials.get(&receiver.0).unwrap().extension.receiver_mask;
                 let inverted = global.affine().matrix3.determinant() < 0.;
@@ -1801,6 +1805,7 @@ pub(crate) fn prepare_lamp_materials(
                         mesh.clone(),
                         MeshMaterial3d(material.clone()),
                         SourceMaterialWarmup,
+                        renderer.clone(),
                         far,
                         Visibility::Visible,
                         bevy::light::NotShadowCaster,

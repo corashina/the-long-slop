@@ -4,9 +4,11 @@ use bevy::ecs::system::{IntoObserverSystem, SystemParam};
 use bevy::prelude::*;
 
 use crate::presentation::materials::{SourceCaster, SourceMaterial, SourceShadowMode};
+use crate::presentation::transparent::SourceSortData;
 use crate::reference::{AssetId, NodeId, ReferenceManifest, SourceId};
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::gltf::GltfExtras;
+use bevy::render::batching::NoAutomaticBatching;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 
 type Receiver = (
@@ -20,6 +22,7 @@ type Receiver = (
     Option<&'static Children>,
     &'static crate::presentation::renderers::SourceRenderer,
     &'static bevy::camera::primitives::Aabb,
+    Option<&'static SourceSortData>,
 );
 
 /// Imported scene entities that prototypes bind and capture.
@@ -43,6 +46,7 @@ struct MeshRecipe {
     caster: Option<Handle<StandardMaterial>>,
     renderer: crate::presentation::renderers::SourceRenderer,
     bounds: bevy::camera::primitives::Aabb,
+    sort: Option<SourceSortData>,
 }
 
 #[derive(Clone)]
@@ -119,6 +123,9 @@ impl Recipe {
                     bevy::light::NotShadowCaster,
                     ChildOf(entity),
                 ));
+                if let Some(sort) = mesh.sort {
+                    primitive.insert((sort, NoAutomaticBatching));
+                }
                 if !mesh.receive_shadows {
                     primitive.insert(bevy::light::NotShadowReceiver);
                 }
@@ -247,13 +254,22 @@ impl Prototype {
         Ok(())
     }
 
+    pub fn mesh_count(&self, scene: &SceneQueries) -> usize {
+        scene
+            .primitives
+            .iter()
+            .filter(|(_, parent)| self.nodes.iter().any(|(_, node)| *node == parent.parent()))
+            .count()
+    }
+
     /// True when every shadow caster has its caster child.
     pub fn materials_ready(&self, scene: &SceneQueries) -> bool {
         scene.primitives.iter().all(|(entity, parent)| {
             if !self.nodes.iter().any(|(_, node)| *node == parent.parent()) {
                 return true;
             }
-            let Ok((_, _, _, _, _, mode, _, children, _, _)) = scene.receivers.get(entity) else {
+            let Ok((_, _, _, _, _, mode, _, children, _, _, _)) = scene.receivers.get(entity)
+            else {
                 return false;
             };
             mode.0 == 0
@@ -299,24 +315,34 @@ impl Prototype {
                     children,
                     renderer,
                     bounds,
+                    sort,
                 ) = scene.receivers.get(primitive).unwrap();
                 let caster = children.and_then(|children| {
                     children
                         .iter()
                         .find_map(|child| scene.casters.get(child).ok().map(|m| m.0.clone()))
                 });
-                let warm = commands
-                    .spawn((
-                        mesh.clone(),
-                        material.clone(),
-                        crate::presentation::materials::SourceMaterialWarmup,
-                        far,
-                        Visibility::Visible,
-                        bevy::light::NotShadowCaster,
-                        NoFrustumCulling,
-                    ))
-                    .id();
-                warmups.push((warm, false));
+                let mut warm = commands.spawn((
+                    mesh.clone(),
+                    material.clone(),
+                    crate::presentation::materials::SourceMaterialWarmup,
+                    renderer.clone(),
+                    *bounds,
+                    *mode,
+                    // Warmups use camera layer 0. The material keeps its source receiver mask.
+                    RenderLayers::layer(0),
+                    far,
+                    Visibility::Visible,
+                    bevy::light::NotShadowCaster,
+                    NoFrustumCulling,
+                ));
+                if let Some(sort) = sort {
+                    warm.insert((*sort, NoAutomaticBatching));
+                }
+                if no_receive.is_some() {
+                    warm.insert(bevy::light::NotShadowReceiver);
+                }
+                warmups.push((warm.id(), false));
                 if let Some(caster) = &caster {
                     let warm = commands
                         .spawn((
@@ -342,6 +368,7 @@ impl Prototype {
                     caster,
                     renderer: renderer.clone(),
                     bounds: *bounds,
+                    sort: sort.copied(),
                 });
             }
             nodes.push(NodeRecipe {

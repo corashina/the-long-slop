@@ -46,6 +46,22 @@ impl StationModels {
         self.recipes.iter().all(Option::is_some)
     }
 
+    pub(crate) fn prototype_materials_ready(&self, scene: &SceneQueries) -> bool {
+        self.prototypes
+            .iter()
+            .all(|prototype| prototype.bound && prototype.materials_ready(scene))
+    }
+
+    pub(crate) fn prototype_mesh_capacity(&self, scene: &SceneQueries) -> usize {
+        self.capacity
+            * self
+                .prototypes
+                .iter()
+                .map(|prototype| prototype.mesh_count(scene))
+                .max()
+                .unwrap_or(0)
+    }
+
     pub fn source_mesh_capacity(&self) -> usize {
         self.capacity
             * self
@@ -109,6 +125,7 @@ pub(crate) fn prepare_stations(
     gltfs: Res<Assets<bevy::gltf::Gltf>>,
     mut source: ResMut<SourceLighting>,
     scene: SceneQueries,
+    materials: Res<crate::presentation::materials::SourceMaterials>,
 ) {
     if !source.bound || source.stations.ready() || matches!(source.state, RenderingState::Failed(_))
     {
@@ -143,7 +160,7 @@ pub(crate) fn prepare_stations(
             }
             continue;
         }
-        if !prototype.materials_ready(&scene) {
+        if !materials.bound || !prototype.materials_ready(&scene) {
             continue;
         }
         match prototype.capture(&mut commands, manifest, &scene, &mut source.warmups) {

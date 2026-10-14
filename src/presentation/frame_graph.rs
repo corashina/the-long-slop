@@ -1141,6 +1141,9 @@ struct CpuBoundary {
     transparent_capacity: u32,
     master_bound: bool,
     master_materials_prepared: bool,
+    master_pending_lamp_targets: u32,
+    master_sky_bound: bool,
+    master_warming: bool,
     master_cookie_handles: bool,
     visuals_bound: bool,
 }
@@ -1154,6 +1157,7 @@ struct GpuBoundary {
     master_cookies: bool,
     master_uniform: bool,
     master_state: u8,
+    master_pipeline_audit: super::lighting::LightingPipelineAudit,
     lighting_render_assets: bool,
     lighting_textures: u32,
     lighting_gpu_textures: u32,
@@ -1219,6 +1223,13 @@ fn cpu_boundaries(
     if let Some(master) = master {
         boundary.master_bound = master.bound;
         boundary.master_materials_prepared = master.materials_prepared;
+        boundary.master_pending_lamp_targets = master
+            .lamp_materials
+            .iter()
+            .filter(|target| target.current.is_none())
+            .count() as u32;
+        boundary.master_sky_bound = master.sky.bound();
+        boundary.master_warming = master.warming;
         boundary.master_cookie_handles = master.cookie_handles.is_some();
     }
     boundary.visuals_bound = visuals.is_some_and(|v| v.bound);
@@ -1308,6 +1319,9 @@ fn gpu_boundaries(
             super::lighting::RenderingState::Ready => 1,
             super::lighting::RenderingState::Failed(_) => 2,
         };
+    }
+    if let Some(audit) = world.get_resource::<super::lighting::LightingPipelineAudit>() {
+        boundary.master_pipeline_audit = *audit;
     }
     let cache = world.resource::<PipelineCache>();
     boundary.source_targets = world.contains_resource::<SurfaceResources>();

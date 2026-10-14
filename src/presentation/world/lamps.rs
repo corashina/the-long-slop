@@ -71,6 +71,14 @@ impl RoadLamps {
         }
     }
 
+    pub(crate) fn prototype_materials_ready(&self, scene: &SceneQueries) -> bool {
+        self.prototype.bound && self.prototype.materials_ready(scene)
+    }
+
+    pub(crate) fn prototype_mesh_capacity(&self, scene: &SceneQueries) -> usize {
+        self.capacity * self.prototype.mesh_count(scene)
+    }
+
     pub fn source_mesh_capacity(&self) -> usize {
         self.recipe
             .as_ref()
@@ -109,6 +117,7 @@ pub(crate) fn prepare_road_lamp(
     gltfs: Res<Assets<bevy::gltf::Gltf>>,
     mut source: ResMut<SourceLighting>,
     scene: SceneQueries,
+    materials: Res<crate::presentation::materials::SourceMaterials>,
 ) {
     if !source.bound
         || source.road_lamps.recipe.is_some()
@@ -172,7 +181,7 @@ pub(crate) fn prepare_road_lamp(
         source.road_lamps.prototype_light = Some(entity);
         return;
     }
-    if !source.road_lamps.prototype.materials_ready(&scene) {
+    if !materials.bound || !source.road_lamps.prototype.materials_ready(&scene) {
         return;
     }
     let source = &mut *source;
