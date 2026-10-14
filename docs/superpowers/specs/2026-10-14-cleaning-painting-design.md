@@ -1,7 +1,7 @@
 # Cleaning and Painting Design
 
 Date: 2026-10-14, Europe/Warsaw.
-Status: scope approved in chat. Written specification awaits review.
+Status: written specification approved in chat on 2026-10-14. Implementation awaits plan review.
 Base: c189df3. Implementation requires an isolated worktree and an approved implementation plan.
 
 ## Goal and scope
