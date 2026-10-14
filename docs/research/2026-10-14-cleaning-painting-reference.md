@@ -2,9 +2,10 @@
 
 Date: 2026-10-14. Steam app 1017180, build 11140890, Unity 2021.3.18f1.
 
-This layer exports checked startup records and runtime resources.
-Tool actions and mutable condition state belong to later layers.
-Build checks do not prove native source parity.
+We implemented startup records, live condition state, cleaning, and spray painting on `codex/cleaning-painting`.
+Reviewed code head: `6ba18866f20e00126feafcf4aa1863b3b50bde8c`.
+We retain Partial status until active gameplay and matched source checks pass.
+Build checks do not prove source parity.
 
 ## Source authority
 
@@ -86,7 +87,7 @@ Particle resources enter existing dependency and path checks.
 `conditions-evidence.json` has a byte count and SHA-256 receipt in `library-selection.json`.
 Verification checks this receipt and equality with runtime condition records.
 
-## Checks and limits
+## Historical Task 1 checks and limits
 
 Python source checks passed: three tests.
 Rust condition checks passed: seven tests.
@@ -102,7 +103,7 @@ The renderer prerequisite preserves source sort metadata in streamed recipes.
 That separate fix passed independent review and browser startup checks.
 Active input and source pixel parity need separate browser evidence.
 
-## Final export and package
+## Historical Task 1 export and package
 
 The final release build passed in 6 minutes 12 seconds, exit 0.
 It includes all final validation fixes. The contract is frozen.
@@ -120,4 +121,67 @@ The real export passed final contract and resource verification after those fixe
 
 The controller proved garage and New Game readiness on the preceding package with the same source schema.
 Captured console errors were empty. Individual visible pickup, walking, and driving remain unverified because IAB cannot provide pointer lock.
-The controller will confirm startup on this final package. Source pixel parity remains untested.
+At Task 1, the controller had not checked the final package. Later package evidence follows below.
+
+## Integrated runtime rules
+
+The runtime stores surface, wash, and tool state under checked source identities.
+We removed duplicate scalar ownership. We retain the checked startup initializer.
+Schema 2 stores surface state, state2, state3, color, and partial repair progress.
+It stores wash activation, destruction, progress, tool wear, disabled state, and can quantity/color.
+The loader rejects old schemas, source mismatches, invalid palettes, completed surface steps, and inconsistent disabled tools.
+Load clears contact and valve output. Recovery preserves semantic state; New Game restores exported startup values.
+
+Brushes and sponges use the held hand-use ray and checked cleaning type.
+Minimum force, displacement, repair rate, tool wear, and wash activation follow the checked records.
+We guard stationary contact against progress from visual settling. This port invariant needs matched source comparison.
+Worn tools retain the slide model and hide the source scrub node.
+Wash collider activation follows the source object state and each authored collider enable flag.
+Wash ON and object activation remain separate states.
+
+Carried spray uses the checked nozzle pose. Fire opens the valve, consumes paint, then casts its ray.
+The last shot can paint after depletion. It starts no new sound or particles after quantity reaches zero.
+Spray selects an ancestor condition, a current checked installed-slot owner, or an explicit pickup condition.
+It does not use brush wash lookup. An empty slot cannot paint its former owner.
+Painting checks permission column zero and the clamped distance factor before blending the saved color.
+Part removal and installation keep that part's condition owner.
+
+Both tool rays include enabled source-mask sensors.
+The exporter checks `PhysicsManager globalgamemanagers:10 m_QueriesHitTriggers=true`.
+We found 25 selected non-wash sensors in brush mask 8552449.
+Ammo 78225 and 78223 use hideLookAtCount=false, hideLookAtCountInInventory=true, and noPerShow=true.
+Look-at quantity follows the aimed can, independent of the held tool.
+The HUD displays bare rounded quantity. Its cache follows the same integer boundary.
+Carried cans hide quantity and the native Paint prompt.
+Brush, Sponge, and Paint are port item labels; Wash and Scrub are checked native prompts.
+
+The renderer prepares two retained material banks per owner before readiness.
+Candidates use the inactive bank; failed candidates preserve live state and bindings.
+Color updates write retained receiver and caster buffers through RenderQueue.
+The existing weather and audio owners prepare and update tool effects.
+The implementation adds no frame material, buffer, binding, or effect pool setup.
+
+## Final acceptance package and limits
+
+The final Task 4 fix package uses code head `6ba1886`.
+We reuse its successful release build for documentation changes under the approved build reuse ruling.
+Task 5 checks package hashes before and after source verification.
+See [verification](../verification.md) for final hashes, commands, counts, and baseline failures.
+
+The controller reached garage readiness, New Game, and current-export Load with enabled controls.
+The controller's fresh Continue attempt showed `Mouse capture failed` and retained pause.
+Chrome remains absent from tool inventory; IAB cannot capture the pointer.
+The current error-level log query returned no entries. Startup event capture remains incomplete.
+Bevy can publish warnings at log level; this query does not prove warning-free operation.
+
+Earlier Task 2 diagnostics proved candidate isolation, material isolation, and retained GPU identities on their named packages.
+Across Load and New Game, they retained 1118 meshes, 122 owners, and 168 receivers.
+They retained 1680 condition materials, 2266 source materials, and transparent capacity 5812.
+Those packages predate spray effects. We have no final-package active particle or binding growth measurement.
+We removed cleaning diagnostic routes before the final default package.
+
+The required route remains open: six tools, eligible surfaces on both cars, changed removable parts, and sustained driving.
+It includes wheels, doors, fluids, lights, plates, storage, death gating, recovery, save/load, restart, and origin changes.
+Matched controls, surfaces, tool state, camera, main view, shadows, mirrors, reflections, and audio remain open.
+The fixed build hash color policy does not reproduce Unity's random sequence.
+Whole-branch review and branch integration remain controller-owned gates.

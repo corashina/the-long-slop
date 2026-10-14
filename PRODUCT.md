@@ -33,6 +33,18 @@ Adjustable mirrors show live views. The renderer covers source shadows, sky, ref
 Source audio covers ignition, engine, horn, interaction sounds, and the Lada radio.
 One manual browser save slot stores both cars, items, mechanisms, pumps, and lamps.
 
+The cleaning branch adds two brushes, two sponges, and two spray cans from the authored startup scene.
+Use carried tools with LMB. Rub an eligible surface with a brush or sponge; hold LMB to spray paint.
+Brushes and sponges wear during work. Spray cans use their exported color and lose paint during firing.
+The save contract stores surface state, color, progress, tool wear, paint quantity, and wash state.
+Load preserves these values. Recovery preserves preparation; New Game restores exported startup values.
+Looked-at paint quantity uses a bare rounded count. Carried cans hide that count and the native Paint prompt.
+Brush, Sponge, and Paint are port item labels. Wash and Scrub use checked native prompts.
+
+The isolated cleaning branch passed menu readiness checks on its final package.
+Active tool use, both-car driving, retained effect counts, and matched source views remain unverified.
+The roadmap keeps Cleaning and painting Partial until those checks pass.
+
 Survival includes health, food, water, bladder, bowel, sausage, toilet actions, healing, starvation, and death.
 Sleep follows source eligibility, hold progress, wake, and clock rules.
 Source sandstorms add movement, fog, light, wind, and particles.

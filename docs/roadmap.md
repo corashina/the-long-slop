@@ -4,6 +4,12 @@ Updated: 2026-10-14.
 
 ## Current status
 
+Cleaning and painting remains on `codex/cleaning-painting`, based on the reviewed code head `6ba1886`.
+We implemented authored tools, live condition state, cleaning, spray paint, and strict save schema 2.
+The final package reached garage readiness, New Game, and Load with enabled controls.
+IAB showed `Mouse capture failed` after Continue. Active preparation and driving remain unverified.
+See [cleaning evidence](research/2026-10-14-cleaning-painting-reference.md) and [verification](verification.md).
+
 Master retains the accepted game features and local door-control changes.
 We keep the complete source-world integration on `codex/world-integration-deferred`, based on `05bdc507`.
 We completed nine source-world implementation layers and two integration merges in that separate branch.
@@ -100,7 +106,7 @@ The backlog does not expand approved implementation scope. Each new feature need
 | Full vehicle range | Partial | Add vehicles beyond the Lada and Skoda, including diesel, two-stroke, automatic, bus, and bike mechanics. |
 | Driving physics | Partial | Add manual gears and clutch; match throttle ramps, tire friction, bare-rim behavior, suspension, and combined braking. |
 | Inventory and clothing | Missing | Add inventory slots, equipped items, wearables, and player customization. |
-| Cleaning and painting | Missing | Add brushes, sponges, spray paint, and source condition changes. |
+| Cleaning and painting | Partial | Branch implements startup tools, cleaning, paint, wear, and saved conditions. Verify active use, both-car driving, lifecycle counts, and matched source views. |
 | Cargo and towing | Partial | Add general cargo locking, attachment objects, towing hooks, and trailers. Current storage locking covers flashlights. |
 | Full item range | Partial | Add remaining source food, tools, containers, and their actions. |
 | Animals and enemies | Missing | Add rabbits, human enemies, movement, attacks, and spawn rules. |

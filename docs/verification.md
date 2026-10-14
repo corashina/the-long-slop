@@ -1,5 +1,97 @@
 # Verification record
 
+## Cleaning and painting: 2026-10-14
+
+Branch: `codex/cleaning-painting`. Reviewed code head: `6ba18866f20e00126feafcf4aa1863b3b50bde8c`.
+The [approved specification](superpowers/specs/2026-10-14-cleaning-painting-design.md) governs this feature.
+Read the [source record](research/2026-10-14-cleaning-painting-reference.md) for identities, values, and source rules.
+We keep Cleaning and painting Partial. Implementation and menu readiness do not complete gameplay acceptance.
+
+We implemented six authored startup tools, live surface/wash/tool state, brush wear, and carried-nozzle spray painting.
+We retain colors and condition state through part ownership and save schema 2.
+The loader rejects old schemas and invalid candidates. It preserves live bindings during failed candidate preparation.
+New Game restores exported startup values. Recovery preserves preparation; Load clears transient contact and valve output.
+We removed duplicate scalar ownership and temporary cleaning diagnostic routes. The checked startup initializer remains necessary.
+
+### Fresh integrated checks
+
+We ran the source condition suite once with the primary reference Python executable and `PYTHONPATH=.`.
+Command: `python.exe -m unittest tools.reference.tests.test_conditions`. Result: exit 0; three tests, OK.
+We ran `.cache/retry-cleaning.py` once through that executable.
+It reads the accepted library receipt, then calls `load_snapshot`, `derive_reference`, and `verify_reference`.
+Result: exit 0; 663 colliders, 232 items; `fresh export and verification passed`.
+The exporter checks the production Rust contract, condition evidence, and selected resource receipts.
+It removed its own staging directory after promotion. Steam and accepted library inputs remain unchanged.
+
+We corrected a Windows PowerShell launcher error before the integrated suite began.
+The old launcher lacks `SHA256.HashData`; it stopped in `scripts/cargo-target.ps1:4` before any check.
+We then ran `pwsh -NoProfile -File ./scripts/check.ps1` with the installed PowerShell 7 executable.
+Result: exit 1; 93 web tests, 92 passed, one failed.
+The existing `toilet_keys_and_primary_release_are_distinct` assertion failed at `tests/web/input.test.mjs:18`.
+Actual control bits: 1573376. Expected control bits: 786944.
+This failure matches the recorded baseline input limit. We kept its assertion and production controls unchanged.
+The script stopped before formatting, native tests, and release WASM compilation.
+
+We retain the named Task 4 evidence for unchanged native code:
+
+| Target | Result | Evidence log |
+| --- | --- | --- |
+| cleaning | 25 passed | `task4-final-cleaning.log`, `task4-final-owner-check.log` |
+| conditions / conditions_reference | 5 / 8 passed | `task4-affected-final.log` |
+| save_roundtrip | 12 passed, 4 ignored | `task4-save-final.log` |
+| save_schema / wheels | 4 / 7 passed, 1 / 2 ignored | `task4-affected-final.log` |
+| interaction | 29 passed, 19 failed, 1 ignored | `task4-interaction.log` |
+| full native / audio | Stale test API compile errors | `task4-full.log`, `task4-affected.log` |
+
+The exact interaction failure set matches the Task 3 set and its Task 2 fixture-only counterfactual.
+Full native and audio checks remain open because unchanged tests use removed APIs.
+We did not repeat unchanged broad suites or restore obsolete APIs.
+Task 4 fix1 passed 14 web tests and the WASM library check after the integer count cache correction.
+Those logs are `task4-fix1-web.log` and `task4-fix1-wasm.log`.
+Local logs remain in `.superpowers/sdd/2026-10-14-cleaning-painting/` outside Git.
+
+### Final package identity
+
+The final Task 4 fix1 release build passed: exit 0; release compile 4m47; wasm-bindgen completed.
+Log: `task4-fix1-build.log`. The approved ruling permits reuse for docs-only Task 5.
+We checked the following SHA256 hashes before and after source verification. They match the frozen fix1 package.
+
+| File | SHA256 |
+| --- | --- |
+| `web/pkg/my_summer_slop_bg.wasm` | `d5a554a973f94be9e98fe226f0eefd318c8d25aa8d1a096e45f2f1dc1b258425` |
+| `web/pkg/my_summer_slop.js` | `f9052bc0688392d973daeabbc9ef549684c60e5e6397106f0f245089603a8ec8` |
+| `web/feedback.js` | `5d464dd6adbf5fce3cdedf47c986cfc1625018fbed3d5ec908bafb92b1014328` |
+| `web/assets/reference/manifest.json` | `46db456b73b7d78d4ba532750ce4b39fd6fcc12a89b4cd80a2f03731926d72ac` |
+| `web/assets/reference/conditions-evidence.json` | `f5eb8096ec605346535e7c992a6f5234f490dc4a7f4ec71fd7e574d68f48e03c` |
+
+The final `library-selection.json` hash is `f65428109d326b96f456976de5213868790706141ddd9663d06d9cdf1291a75f`.
+The accepted receipt hash is `a87176a07c287a9c8ccf7ae977c12c46dd1dc811017d965d8b5b44e599d30b41`.
+Generated assets and source receipts remain outside Git.
+
+### Browser evidence and open gates
+
+The controller checked the final package at `http://127.0.0.1:4178/` in IAB tab 2.
+Fresh navigation reached garage readiness. New Game and same-export Load reached enabled pause controls.
+Continue after Load showed `Mouse capture failed` and retained pause. The controller performed no active movement or tool action.
+Fresh browser inventory still omitted Chrome despite the user's connection reports.
+The current error-level query returned no entries. Startup event capture remains incomplete.
+Bevy can publish warnings at log level. The error query does not establish warning-free operation.
+
+Earlier Task 2 diagnostic packages proved retained receiver/caster GPU identities, independent material changes, and candidate isolation.
+They retained 1118 meshes, 122 owners, 168 receivers, 1680 condition materials, 2266 source materials, and capacity 5812.
+Those named packages predate spray effects. They do not prove final can buffers or active particle/binding counts.
+
+Complete the following route before marking the feature complete:
+
+- Use all six tools on eligible surfaces of both cars. Remove and reinstall changed parts, then drive both cars.
+- Check wheels, doors, fluids, lights, plates, storage, and existing save behavior through active input.
+- Check pause, death gating, recovery, save/load, repeated restart, and origin changes during preparation and driving.
+- Compare matched source actions, controls, surfaces, tool state, camera, main view, shadows, mirrors, reflections, and audio.
+- Measure final material, particle, and binding counts after repeated active work and load/restart.
+
+The fixed build hash color policy does not reproduce Unity's random sequence.
+The controller owns independent whole-branch review and branch integration.
+
 ## Rendering merge: 2026-10-12
 
 The user authorized a local merge of rendering commit `67798ec` into master `a5b9778`.
