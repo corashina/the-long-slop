@@ -394,15 +394,14 @@ fn exported_house_controls_use_native_confirmed_poses() {
         ReferenceManifest::from_json(&std::fs::read("web/assets/reference/manifest.json").unwrap())
             .unwrap();
     let source = GarageRuntime::new(&r).unwrap();
-    for c in r
-        .lighting
-        .controllers
-        .iter()
-        .filter(|c| {
-            c.kind == LightControllerKind::Switch
-                && !r.flashlights.instances.iter().any(|item| item.controller == c.id)
-        })
-    {
+    for c in r.lighting.controllers.iter().filter(|c| {
+        c.kind == LightControllerKind::Switch
+            && !r
+                .flashlights
+                .instances
+                .iter()
+                .any(|item| item.controller == c.id)
+    }) {
         let collider = source
             .physics
             .rapier()
