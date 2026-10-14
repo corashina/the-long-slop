@@ -354,7 +354,10 @@ fn occupied_removable_seat_fixture_rejects_the_transaction() {
     use my_summer_slop::reference::*;
     let mut r = common::reference();
     let seat = r.seats[0].clone();
-    let pickup = r.items.iter().find_map(|i| i.pickup.clone()).unwrap();
+    let mut pickup = r.items.iter().find_map(|i| i.pickup.clone()).unwrap();
+    pickup.cant_pickup = false;
+    pickup.cant_pickup_while_mounted = false;
+    pickup.cant_pickup_while_seated = false;
     let item = r.items.iter_mut().find(|i| i.id == seat.item).unwrap();
     item.pickup = Some(pickup);
     let node = item.node;
@@ -395,22 +398,28 @@ fn occupied_removable_seat_fixture_rejects_the_transaction() {
         colliders: vec![],
     });
     let mut g = GarageRuntime::new(&r).unwrap();
-    assert!(
-        g.area
-            .interaction
-            .parts
-            .can_remove(seat.item, &g.area.player, &g.area.items)
-            .is_ok()
-    );
+    g.area
+        .interaction
+        .parts
+        .can_remove(seat.item, &g.area.player, &g.area.items)
+        .unwrap();
     let before = g.area.items.get(seat.item).unwrap().location;
-    assert!(g.area.player.enter(
-        seat.id,
-        my_summer_slop::vehicle::VehiclePose {
-            position: [10., 0.25, 0.],
-            rotation: [0., 0., 0., 1.]
-        },
-        &mut g.physics
-    ));
+    assert!(
+        g.area.player.enter(
+            seat.id,
+            my_summer_slop::vehicle::VehiclePose {
+                position: r
+                    .anchors
+                    .iter()
+                    .find(|a| a.id == seat.anchor)
+                    .unwrap()
+                    .transform
+                    .translation,
+                rotation: [0., 0., 0., 1.]
+            },
+            &mut g.physics
+        )
+    );
     assert_eq!(
         g.area
             .interaction

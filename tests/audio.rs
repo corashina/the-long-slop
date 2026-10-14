@@ -2,10 +2,17 @@ mod common;
 use my_summer_slop::reference::{AudioReference, ReferenceManifest};
 
 #[test]
-fn audio_failure_does_not_reject_gameplay() {
+fn audio_validation_separates_required_timing_from_playback() {
     let mut value = serde_json::to_value(common::reference()).unwrap();
-    value["audio"] = serde_json::json!({"clips": "invalid"});
-    let game = ReferenceManifest::from_json(&serde_json::to_vec(&value).unwrap()).unwrap();
+    value["audio"]["clips"] = serde_json::json!("invalid");
+    let bytes = serde_json::to_vec(&value).unwrap();
+    assert!(ReferenceManifest::from_json(&bytes).is_err());
+    assert!(ReferenceManifest::from_runtime_json(&bytes).is_err());
+    value = serde_json::to_value(common::reference()).unwrap();
+    value["audio"]["voices"] = serde_json::json!("invalid");
+    let bytes = serde_json::to_vec(&value).unwrap();
+    assert!(ReferenceManifest::from_json(&bytes).is_err());
+    let game = ReferenceManifest::from_runtime_json(&bytes).unwrap();
     assert!(AudioReference::from_value(&game.audio, &game).is_err());
 }
 
@@ -494,7 +501,7 @@ fn engine_stop_edge_emits_once() {
 
 fn interaction_audio() -> (ReferenceManifest, my_summer_slop::audio::AudioState) {
     use my_summer_slop::{audio::AudioState, starting_area::GarageRuntime};
-    let mut game = common::reference();
+    let mut game = common::containers();
     let source = AudioReference::from_value(&game.audio, &game)
         .unwrap()
         .bindings
@@ -503,7 +510,21 @@ fn interaction_audio() -> (ReferenceManifest, my_summer_slop::audio::AudioState)
         .unwrap()
         .source
         .clone();
-    game.items[0].pickup.as_mut().unwrap().source = source;
+    let pickup_source = common::item_mut(&mut game, common::CAN)
+        .pickup
+        .as_ref()
+        .unwrap()
+        .source
+        .clone();
+    let binding = game.audio["bindings"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|b| {
+            b["trigger"] == "crafted" && b["source"] == serde_json::to_value(&source).unwrap()
+        })
+        .unwrap();
+    binding["source"] = serde_json::to_value(pickup_source).unwrap();
     let run = GarageRuntime::new(&game).unwrap();
     let mut state = AudioState::new(AudioReference::from_value(&game.audio, &game).unwrap(), 1);
     state.bind_game(&game, &run.area, &run.physics);
@@ -538,18 +559,30 @@ fn failed_attachment_is_silent() {
             .unwrap()
             .source
             .clone();
-        game.items
-            .iter_mut()
+        let pickup_source = game
+            .items
+            .iter()
             .find(|i| i.id == rim)
             .unwrap()
             .pickup
-            .as_mut()
+            .as_ref()
             .unwrap()
-            .source = source;
+            .source
+            .clone();
+        let binding = game.audio["bindings"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|b| {
+                b["trigger"] == "crafted" && b["source"] == serde_json::to_value(&source).unwrap()
+            })
+            .unwrap();
+        binding["source"] = serde_json::to_value(&pickup_source).unwrap();
         if !compatible {
             game.wheel_slots[0].rim_types = vec!["incompatible".into()];
         }
         let mut run = GarageRuntime::new(&game).unwrap();
+        common::uncover_wheel(&mut run, game.wheel_slots[0].rim);
         let center = run.physics.rapier().colliders[run.wheels.sensor(slot).unwrap()].translation();
         let chassis = run.physics.rapier().bodies[run.physics.chassis_handle(0)].translation();
         let outward = Vector::new((center - chassis).x, 0., (center - chassis).z).normalize();
@@ -655,18 +688,18 @@ fn failed_attachment_is_silent() {
 #[test]
 fn silent_pickup_has_no_substitute() {
     use my_summer_slop::interaction::InteractionAction;
-    let (game, mut state) = interaction_audio();
-    state.action(InteractionAction::Pickup(game.items[0].id), 1.);
-    state.action(InteractionAction::Drop(game.items[0].id), 1.);
+    let (_, mut state) = interaction_audio();
+    state.action(InteractionAction::Pickup(common::CAN), 1.);
+    state.action(InteractionAction::Drop(common::CAN), 1.);
     assert_eq!(state.event_count(), 0);
 }
 #[test]
 fn multiple_steps_preserve_actions() {
     use my_summer_slop::interaction::InteractionAction;
-    let (game, mut state) = interaction_audio();
+    let (_, mut state) = interaction_audio();
     for step in 0..6 {
         state.action(
-            InteractionAction::PartInstall(game.items[0].id),
+            InteractionAction::PartInstall(common::CAN),
             step as f64 / 60.,
         );
     }
@@ -680,8 +713,8 @@ fn multiple_steps_preserve_actions() {
 #[test]
 fn removal_discards_pending_owned_events() {
     use my_summer_slop::interaction::InteractionAction;
-    let (game, mut state) = interaction_audio();
-    state.action(InteractionAction::PartInstall(game.items[0].id), 1.);
+    let (_, mut state) = interaction_audio();
+    state.action(InteractionAction::PartInstall(common::CAN), 1.);
     let id = state
         .reference
         .bindings
@@ -690,22 +723,30 @@ fn removal_discards_pending_owned_events() {
         .unwrap()
         .emitter;
     state.remove_owner(id);
-    state.action(InteractionAction::PartInstall(game.items[0].id), 2.);
+    state.action(InteractionAction::PartInstall(common::CAN), 2.);
     assert_eq!(state.event_count(), 0);
 }
 
 #[test]
 fn mechanism_endpoints_emit_once() {
     use my_summer_slop::{audio::AudioState, starting_area::GarageRuntime};
-    let mut game = common::reference();
-    let body = game.bodies[1].id.0;
-    common::add_rotation(&mut game, 1, body, [0., 10.]);
+    let mut game = common::containers();
+    let body = common::CAN.0;
+    common::add_rotation(&mut game, common::CAN.0, body, [0., 10.]);
+    game.mechanisms.last_mut().unwrap().source = game
+        .items
+        .iter()
+        .find(|i| i.id == common::CAN)
+        .unwrap()
+        .source
+        .clone();
+    game.audio["mechanisms"][0]["source"] =
+        serde_json::to_value(&game.mechanisms.last().unwrap().source).unwrap();
     let audio = AudioReference::from_value(&game.audio, &game).unwrap();
-    game.mechanisms[0].source = audio.mechanisms[0].source.clone();
     let run = GarageRuntime::new(&game).unwrap();
     let mut state = AudioState::new(audio, 1);
     state.bind_game(&game, &run.area, &run.physics);
-    let item = game.mechanisms[0].item;
+    let item = game.mechanisms.last_mut().unwrap().item;
     state.mechanism(item, 0., 10., 1. / 60.);
     let e = state.pop_event().unwrap();
     assert_eq!(state.binding(e.binding).unwrap().trigger, "endPosEnd");
@@ -787,13 +828,13 @@ fn room_turn_emits_authored_lamp_edges_only() {
 #[test]
 fn slot_uncraft_uses_crafted_sound() {
     use my_summer_slop::interaction::InteractionAction;
-    let (game, mut state) = interaction_audio();
+    let (_, mut state) = interaction_audio();
     for action in [
-        InteractionAction::PartRemove(game.items[0].id),
-        InteractionAction::WheelRemove(game.items[0].id),
+        InteractionAction::PartRemove(common::CAN),
+        InteractionAction::WheelRemove(common::CAN),
         InteractionAction::WheelJoin {
-            rim: game.items[1].id,
-            tire: game.items[0].id,
+            rim: common::rim(),
+            tire: common::CAN,
         },
     ] {
         state.action(action, 1.);
@@ -993,30 +1034,30 @@ fn actual_fill_targets_one_cap_and_preserves_non_looping_pour() {
         simulation::{FrameInput, keys},
         starting_area::GarageRuntime,
     };
-    let mut game = common::reference();
-    let tank = game.openings[0].tank;
-    let cap = game.openings[0].cap;
-    let source = game.items[0].id;
-    game.tanks.iter_mut().find(|t| t.item == tank).unwrap().role = TankRole::Fixed;
-    let mut body = game.bodies[1].clone();
-    body.id = BodyId(90);
-    body.parent_body = None;
-    body.pose.translation = [10., 2., -1.];
-    game.bodies.push(body);
-    game.items[0].body = BodyId(90);
-    game.openings[0].valve = 1.;
-    game.openings[0].angle_disabled = false;
-    game.openings[0].tilt_degrees = 100.;
-    game.openings[0].spill_disabled = false;
-    let mut other = game.openings[0].clone();
-    other.id = OpeningId(2);
-    other.source = AudioReference::from_value(&game.audio, &game)
+    let mut game = common::containers();
+    game.area.player_spawn.translation = [10., 1., 0.];
+    let tank = common::DESTINATION;
+    let cap = tank;
+    let source = common::CAN;
+    let first_opening = OpeningId(tank.0);
+    let second_opening = OpeningId(common::SUPPLY.0);
+    game.openings
+        .iter_mut()
+        .find(|o| o.tank == source)
         .unwrap()
-        .fluids[1]
-        .source
-        .clone();
-    other.cap = game.items[1].id;
-    game.openings.push(other);
+        .valve = 1.;
+    game.tanks.iter_mut().find(|t| t.item == tank).unwrap().role = TankRole::Fixed;
+    for (index, id) in [first_opening, second_opening].into_iter().enumerate() {
+        let opening = game.openings.iter_mut().find(|o| o.id == id).unwrap();
+        opening.tank = tank;
+        opening.valve = 1.;
+        opening.spill_disabled = false;
+        game.audio["fluids"][index]["source"] = serde_json::to_value(&opening.source).unwrap();
+    }
+    common::tank_mut(&mut game, common::SUPPLY).openings.clear();
+    common::tank_mut(&mut game, tank)
+        .openings
+        .push(second_opening);
     let mut run = GarageRuntime::new(&game).unwrap();
     run.area
         .items
@@ -1068,13 +1109,14 @@ fn actual_fill_targets_one_cap_and_preserves_non_looping_pour() {
         1.,
     );
     assert!(
-        matches!(action,Some(my_summer_slop::interaction::InteractionAction::Fill{liters,..}) if liters>0.)
+        matches!(action,Some(my_summer_slop::interaction::InteractionAction::Fill{liters,..}) if liters>0.),
+        "{action:?}"
     );
     assert_eq!(
-        run.area.interaction.opening_flow(OpeningId(1)),
+        run.area.interaction.opening_flow(first_opening),
         Some((true, 1.))
     );
-    assert_eq!(run.area.interaction.opening_flow(OpeningId(2)), None);
+    assert_eq!(run.area.interaction.opening_flow(second_opening), None);
     let audio = run.audio.as_mut().unwrap();
     audio.fixed_step(&run.area, &run.physics, 1. / 60.);
     let first = audio.reference.fluids[0].fill_voice.unwrap();
@@ -1137,7 +1179,7 @@ fn actual_fill_targets_one_cap_and_preserves_non_looping_pour() {
         1.,
     );
     assert!(
-        matches!(run.area.interaction.opening_flow(OpeningId(1)),Some((false,speed)) if speed>0.)
+        matches!(run.area.interaction.opening_flow(first_opening),Some((false,speed)) if speed>0.)
     );
     audio.fixed_step(&run.area, &run.physics, 1. / 60.);
     assert!(
@@ -1169,16 +1211,15 @@ fn movement_runtime(
     my_summer_slop::reference::ItemId,
 ) {
     use my_summer_slop::{reference::*, starting_area::GarageRuntime};
-    let mut game = common::reference();
-    let body = game.bodies[1].id.0;
-    common::add_rotation(&mut game, 1, body, [0., 10.]);
-    let source = AudioReference::from_value(&game.audio, &game)
-        .unwrap()
-        .mechanisms[0]
-        .source
-        .clone();
-    let mechanism = &mut game.mechanisms[0];
-    mechanism.source = source;
+    let mut game = common::containers();
+    let body = common::CAN.0;
+    common::add_rotation(&mut game, common::CAN.0, body, [0., 10.]);
+    let mechanism = &mut game.mechanisms.last_mut().unwrap();
+    mechanism.source = my_summer_slop::reference::SourceId {
+        file: "test-audio-mechanism".into(),
+        path_id: 50000,
+    };
+    game.audio["mechanisms"][0]["source"] = serde_json::to_value(&mechanism.source).unwrap();
     if axis == "slide" {
         mechanism.rotation = None;
         mechanism.slide = Some(SlideReference {

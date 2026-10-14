@@ -1,3 +1,4 @@
+mod common;
 use my_summer_slop::reference::{ReferenceManifest, SourceId};
 use my_summer_slop::save::{
     IdentityMap, InstanceId, ItemLocationSave, SaveError, SaveSnapshot, SourceKey, SourceStamp,
@@ -11,25 +12,7 @@ fn instance(source: &SourceId) -> Value {
     json!({"kind": "initial", "source": key(source)})
 }
 fn fixture() -> (ReferenceManifest, SourceStamp, SaveSnapshot) {
-    let mut r = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
-    let engine = r
-        .items
-        .iter()
-        .find(|i| i.id == r.vehicles[0].engine.item)
-        .unwrap();
-    r.parts.push(serde_json::from_value(json!({
-        "scan_radius": 1., "usable": null, "item": engine.id, "source": {"file":"fixture", "path_id": 90001},
-        "node": engine.node, "main_types": ["lada"], "part_types": ["engine"], "cover_slot": null,
-        "local_rotation_after_mount": [0.,0.,0.,1.], "colliders": [], "linear_damping": 0., "angular_damping": 0.,
-        "enable_if_mounted": [], "enable_if_dismounted": [], "disable_if_mounted": [], "disable_if_dismounted": []
-    })).unwrap());
-    r.part_slots.push(serde_json::from_value(json!({
-        "id": 1, "source": {"file":"fixture", "path_id": 90002}, "node": engine.node,
-        "owner": null, "part": engine.id, "mount_anchor": r.anchors[0].id, "detach_anchor": null,
-        "fixed_detach": false, "detach_position": [0.,0.,0.], "detach_rotation": [0.,0.,0.,1.],
-        "main_types": ["lada"], "part_types": ["engine"], "cant_craft": false, "cant_uncraft": false,
-        "disable_colliders_on_craft": false, "colliders": []
-    })).unwrap());
+    let r = common::containers();
     snapshot_for(r)
 }
 fn snapshot_for(r: ReferenceManifest) -> (ReferenceManifest, SourceStamp, SaveSnapshot) {
@@ -283,14 +266,29 @@ fn schema_rejects_version_source_and_invalid_links() {
             "Parented source body is not independent".into()
         ))
     );
-    let engine = independent.attachments.parts[0].part.take().unwrap();
+    let engine = InstanceId::initial(
+        &parented
+            .items
+            .iter()
+            .find(|i| i.id == parented.vehicles[0].engine.item)
+            .unwrap()
+            .source,
+    );
+    let slot = independent
+        .attachments
+        .parts
+        .iter_mut()
+        .find(|p| p.part.as_ref() == Some(&engine))
+        .unwrap();
+    slot.part = None;
     independent
         .items
         .iter_mut()
         .find(|i| i.instance == engine)
         .unwrap()
         .location = ItemLocationSave::World;
-    independent.bodies[0].identity = my_summer_slop::save::BodyIdentity::Assembly { root: engine };
+    independent.bodies.last_mut().unwrap().identity =
+        my_summer_slop::save::BodyIdentity::Assembly { root: engine };
     independent.validate(&parented, &source).unwrap();
     let mut cyclic = reference.clone();
     cyclic.part_slots[0].owner = cyclic.part_slots[0].part;
@@ -358,14 +356,27 @@ fn installed_source_identity_and_schema() {
 #[test]
 fn fixed_source_child_cannot_become_an_independent_item() {
     let (mut reference, _, _) = fixture();
-    let owner = reference.items[1].id;
-    let child = reference.items[0].id;
+    let owner = common::HINGE;
+    let child = common::CHILD;
     assert!(!reference.parts.iter().any(|part| part.item == child));
     assert!(!reference.wheel_parts.iter().any(|part| part.item == child));
-    reference.items[0].attached_to = Some(owner);
+    common::item_mut(&mut reference, child).attached_to = Some(owner);
     let (reference, source, mut snapshot) = snapshot_for(reference);
     snapshot.validate(&reference, &source).unwrap();
-    snapshot.items[0].location = ItemLocationSave::World;
+    let child_key = InstanceId::initial(
+        &reference
+            .items
+            .iter()
+            .find(|i| i.id == child)
+            .unwrap()
+            .source,
+    );
+    snapshot
+        .items
+        .iter_mut()
+        .find(|i| i.instance == child_key)
+        .unwrap()
+        .location = ItemLocationSave::World;
     assert_eq!(
         snapshot.validate(&reference, &source),
         Err(SaveError::InvalidLinks(
@@ -377,9 +388,10 @@ fn fixed_source_child_cannot_become_an_independent_item() {
 #[test]
 fn authored_startup_rotation_can_precede_drag_limits() {
     let (mut reference, _, _) = fixture();
-    let node = reference.items[0].node;
+    let item = common::HINGE;
+    let node = common::item_mut(&mut reference, item).node;
     reference.mechanisms.push(serde_json::from_value(json!({
-        "id": 1, "source": {"file":"fixture", "path_id":90003}, "item": reference.items[0].id,
+        "id": 50000, "source": {"file":"fixture", "path_id":90003}, "item": item,
         "parent_item":null,"driven_nodes":[node],"enabled":true,"child":null,"invert_child":false,"invert_value":false,
         "disable_on_craft":false,"disable_on_uncraft":false,
         "drag":{"mode":"direct","node":node,"node2":node,"axis":[0.,0.,0.],"axes2":[[0.,0.,0.],[0.,0.,0.]]},

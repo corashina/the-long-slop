@@ -52,16 +52,43 @@ fn assert_slot_aim(
 }
 
 fn reference() -> my_summer_slop::reference::ReferenceManifest {
-    let mut reference = common::reference();
+    let mut reference = common::physics_reference();
     reference.area.player_spawn.translation = [20.0, 1.0, 20.0];
     reference
+}
+
+fn uncover(
+    area: &mut StartingArea,
+    physics: &mut PhysicsWorld,
+    reference: &my_summer_slop::reference::ReferenceManifest,
+) {
+    for slot in &reference.wheel_slots {
+        if let Some(cover) = area.interaction.parts.covering_item(slot.rim) {
+            area.interaction
+                .parts
+                .remove(cover, &mut area.items, physics)
+                .unwrap();
+            let body = area.items.get(cover).unwrap().body.unwrap();
+            physics.rapier_mut().bodies[body].set_translation(Vector::new(100., 20., 100.), false);
+        }
+    }
+    area.items.sync_poses(physics);
+    physics.refresh_queries();
+}
+fn uncovered_area(
+    reference: &my_summer_slop::reference::ReferenceManifest,
+    physics: &mut PhysicsWorld,
+) -> StartingArea {
+    let mut area = StartingArea::new(reference, physics, [0.; 3]).unwrap();
+    uncover(&mut area, physics, reference);
+    area
 }
 
 #[test]
 fn wheel_sensors_are_unparented_and_keep_aim_after_rebase() {
     let reference = reference();
     let mut physics = common::world();
-    let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
+    let mut area = uncovered_area(&reference, &mut physics);
     let mut wheels = WheelAssemblies::new(&reference).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
     let slot = reference.vehicles[0].wheel_slots[0];
@@ -87,7 +114,7 @@ fn removed_wheel_has_no_support() {
     let reference = reference();
     let mut physics = common::world();
     physics.insert_box([0.0, -0.25, 0.0], [100.0, 0.25, 100.0]);
-    let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
+    let mut area = uncovered_area(&reference, &mut physics);
     let mut wheels = WheelAssemblies::new(&reference).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
     for _ in 0..120 {
@@ -136,7 +163,7 @@ fn removed_wheel_has_no_support() {
 fn split_and_assembly_conserve_parts_and_mass() {
     let reference = reference();
     let mut physics = common::world();
-    let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
+    let mut area = uncovered_area(&reference, &mut physics);
     let mut wheels = WheelAssemblies::new(&reference).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
     let mounted = &reference.wheel_slots[0];
@@ -183,7 +210,7 @@ fn rebase_and_reattachment_keep_contact_and_identity() {
     let reference = reference();
     let mut physics = common::world();
     physics.insert_box([0.0, -0.25, 0.0], [100.0, 0.25, 100.0]);
-    let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
+    let mut area = uncovered_area(&reference, &mut physics);
     let mut wheels = WheelAssemblies::new(&reference).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
     let slot = reference.vehicles[0].wheel_slots[0];
@@ -220,7 +247,7 @@ fn production_wheel_bindings_detach_and_restore() {
         &my_summer_slop::starting_area::initial_vehicle_poses(&reference).unwrap(),
     )
     .unwrap();
-    let mut area = StartingArea::new(&reference, &mut physics, [0.0; 3]).unwrap();
+    let mut area = StartingArea::new(&reference, &mut physics, [0.; 3]).unwrap();
     let mut wheels = WheelAssemblies::new(&reference).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
     let slot = reference.vehicles[0].wheel_slots[0];
@@ -271,7 +298,7 @@ fn production_wheel_bindings_detach_and_restore() {
 fn mounted_tire_dismount_preserves_rim_and_vehicle_mass() {
     let r = reference();
     let mut physics = common::world();
-    let mut area = StartingArea::new(&r, &mut physics, [0.; 3]).unwrap();
+    let mut area = uncovered_area(&r, &mut physics);
     let mut wheels = WheelAssemblies::new(&r).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
     let slot = &r.wheel_slots[0];
@@ -304,6 +331,7 @@ fn runtime_aiming_at_wheel(
     use my_summer_slop::player::PlayerState;
     use my_summer_slop::starting_area::GarageRuntime;
     let mut runtime = GarageRuntime::new(reference).unwrap();
+    uncover(&mut runtime.area, &mut runtime.physics, reference);
     let rim = reference
         .wheel_slots
         .iter()

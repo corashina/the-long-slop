@@ -252,6 +252,7 @@ fn look_clamps_walking_and_seated() {
 #[test]
 fn exit_uses_current_view_and_source_angle() {
     let mut world = common::world();
+    world.reset(0, START);
     let mut player = player(&mut world);
     let driver = common::reference()
         .seats

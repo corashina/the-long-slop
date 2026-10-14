@@ -3,38 +3,12 @@ use my_summer_slop::simulation::{FrameInput, keys};
 use my_summer_slop::starting_area::GarageRuntime;
 
 fn initial() -> (my_summer_slop::reference::ReferenceManifest, GarageRuntime) {
-    let mut reference = common::reference();
-    let item = reference.items[0].id;
-    let node = reference.items[0].node;
-    let mut body = reference.bodies[1].clone();
-    body.id = my_summer_slop::reference::BodyId(90);
-    body.node = node;
-    body.mass_kg = 7.0;
-    body.pose.translation = [10.0, 2.0, -1.0];
-    reference.bodies.push(body);
-    reference.items[0].body = my_summer_slop::reference::BodyId(90);
-    reference.items[0].attached_to = None;
-    reference
-        .nodes
-        .iter_mut()
-        .find(|record| record.id == node)
-        .unwrap()
-        .transform
-        .translation = [10.0, 2.0, -1.0];
-    let mut collider = reference.colliders[0].clone();
-    collider.id = my_summer_slop::reference::ColliderId(90);
-    collider.body = my_summer_slop::reference::BodyId(90);
-    collider.node = node;
-    collider.geometry = my_summer_slop::reference::ColliderGeometry::Sphere {
-        center: [0.0; 3],
-        radius: 0.2,
-    };
-    reference.colliders.push(collider);
-    reference.area.player_spawn.translation = [10.0, 1.0, 0.0];
-    assert_eq!(reference.items[0].id, item);
+    let mut reference = common::containers();
+    reference.area.player_spawn.translation = [10., 1., 0.];
     let runtime = GarageRuntime::new(&reference).expect("garage state");
     (reference, runtime)
 }
+
 fn fluids(runtime: &GarageRuntime) -> Vec<(u32, [f32; 6])> {
     runtime
         .area
@@ -226,7 +200,7 @@ fn new_game_after_carry_detach_rebase() {
             },
             common::resolved(Some(my_summer_slop::interaction::AimTarget {
                 collider: rapier3d::prelude::ColliderHandle::invalid(),
-                item: reference.items[0].id,
+                item: common::CAN,
                 distance: 1.0,
                 point: [10.0, 2.0, -1.0],
                 slot: None,
@@ -238,8 +212,9 @@ fn new_game_after_carry_detach_rebase() {
             Default::default(),
             1.,
         );
-        assert_eq!(runtime.area.interaction.held(), Some(reference.items[0].id));
+        assert_eq!(runtime.area.interaction.held(), Some(common::CAN));
         assert!(!runtime.physics.rapier().impulse_joints.is_empty());
+        common::uncover_wheel(&mut runtime, reference.wheel_slots[0].rim);
         let removed = runtime
             .wheels
             .remove(
@@ -628,7 +603,7 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
         scale: [1.0; 3],
     };
     let mut node = reference.nodes[1].clone();
-    node.id = NodeId(90);
+    node.id = NodeId(59000);
     node.parent = Some(reference.vehicles[0].root);
     node.transform = Transform {
         translation: [0.82, 0.7, 0.0],
@@ -636,8 +611,8 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
     };
     reference.nodes.push(node);
     let mut body = reference.bodies[1].clone();
-    body.id = BodyId(90);
-    body.node = NodeId(90);
+    body.id = BodyId(59000);
+    body.node = NodeId(59000);
     body.dynamic = false;
     body.parent_body = Some(reference.vehicles[0].body);
     body.mass_kg = 0.0;
@@ -647,23 +622,23 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
     };
     reference.bodies.push(body);
     let mut item = reference.items[0].clone();
-    item.id = ItemId(90);
-    item.node = NodeId(90);
-    item.body = BodyId(90);
+    item.id = ItemId(59000);
+    item.node = NodeId(59000);
+    item.body = BodyId(59000);
     item.kind = ItemKind::Door;
     item.attached_to = None;
     reference.items.push(item);
     let mut anchor = reference.anchors[0].clone();
-    anchor.id = AnchorId(90);
-    anchor.node = NodeId(90);
-    anchor.body = BodyId(90);
+    anchor.id = AnchorId(59000);
+    anchor.node = NodeId(59000);
+    anchor.body = BodyId(59000);
     anchor.transform = identity;
     reference.anchors.push(anchor);
-    common::add_rotation(&mut reference, 90, 90, [0.0, 90.0]);
+    common::add_rotation(&mut reference, 59000, 59000, [0.0, 90.0]);
     let mut collider = reference.colliders[0].clone();
-    collider.id = ColliderId(90);
-    collider.node = NodeId(90);
-    collider.body = BodyId(90);
+    collider.id = ColliderId(59000);
+    collider.node = NodeId(59000);
+    collider.body = BodyId(59000);
     collider.sensor = false;
     collider.geometry = my_summer_slop::reference::ColliderGeometry::Box {
         center: [0.3, 0.0, 0.0],
@@ -675,13 +650,15 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
         .build()
         .position();
     reference.colliders.push(collider);
+    reference.area.player_spawn.translation = [0., 1., 2.];
+    reference.area.player_spawn.rotation = [0., 0., 0., 1.];
     let mut runtime = GarageRuntime::new(&reference).unwrap();
     let shape = runtime
         .physics
         .rapier()
         .colliders
         .iter()
-        .find(|(_, shape)| ((shape.user_data >> 64) as u32) == 90)
+        .find(|(_, shape)| ((shape.user_data >> 64) as u32) == 59000)
         .unwrap()
         .0;
     assert_eq!(
@@ -689,7 +666,7 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
         Some(runtime.physics.chassis_handle(0))
     );
     assert!(
-        runtime.physics.rapier().bodies[runtime.area.bodies[&BodyId(90)]]
+        runtime.physics.rapier().bodies[runtime.area.bodies[&BodyId(59000)]]
             .colliders()
             .is_empty()
     );
@@ -703,9 +680,9 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
         },
         common::resolved(Some(my_summer_slop::interaction::AimTarget {
             collider: rapier3d::prelude::ColliderHandle::invalid(),
-            item: ItemId(90),
+            item: ItemId(59000),
             distance: 1.0,
-            point: [0.8, 0.7, 0.0],
+            point: before.translation.to_array(),
             slot: None,
         })),
         &mut runtime.area.player,
@@ -720,14 +697,15 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
             .area
             .interaction
             .mechanisms
-            .rotation_degrees(ItemId(90))
+            .rotation_degrees(ItemId(59000))
             .map(|v| v[0]),
         Some(45.0)
     );
     runtime.area.sync_compound(&mut runtime.physics);
     runtime.physics.refresh_queries();
-    let expected =
-        *runtime.physics.rapier().bodies[runtime.area.bodies[&BodyId(90)]].next_position() * local;
+    let expected = *runtime.physics.rapier().bodies[runtime.area.bodies[&BodyId(59000)]]
+        .next_position()
+        * local;
     let actual = *runtime.physics.rapier().colliders[shape].position();
     assert!((actual.translation - expected.translation).length() < 1.0e-4);
     assert!((actual.translation - before.translation).length() > 0.1);
@@ -747,7 +725,7 @@ fn car_hinge_uses_chassis_compound_and_moves_its_shape() {
 #[test]
 fn dry_recovery_keeps_a_carried_can_reachable() {
     let (reference, mut runtime) = initial();
-    let can = reference.items[0].id;
+    let can = common::CAN;
     runtime.area.interaction.step(
         FrameInput {
             held: keys::GRAB,
@@ -915,6 +893,7 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
 #[test]
 fn walking_far_keeps_a_parked_road_car_supported() {
     let mut physics = common::world();
+    let fleet_colliders = physics.collider_count();
     let mut stream = my_summer_slop::world::WorldStream::new(
         my_summer_slop::world::DEFAULT_SEED,
         &common::reference().stations,
@@ -963,10 +942,33 @@ fn walking_far_keeps_a_parked_road_car_supported() {
         "support halo must retain all four wheel contacts"
     );
     assert_eq!(stream.chunks().count(), 11);
-    assert!(
-        physics.collider_count() <= 66,
-        "support halo exceeded collider bound"
-    );
+    let streamed = |stream: &my_summer_slop::world::WorldStream| {
+        stream
+            .chunks()
+            .map(|chunk| {
+                1 + chunk
+                    .data
+                    .props
+                    .iter()
+                    .filter(|prop| prop.kind != my_summer_slop::world::PropKind::Cactus)
+                    .count()
+                    + chunk
+                        .data
+                        .stations
+                        .iter()
+                        .map(|station| stream.stations().types[station.kind].colliders.len() + 1)
+                        .sum::<usize>()
+            })
+            .sum::<usize>()
+    };
+    let support_budget = 3 * physics.vehicle_count();
+    assert!(physics.collider_count() <= fleet_colliders + streamed(&stream) + support_budget);
+    let away_terrain = physics
+        .rapier()
+        .colliders
+        .iter()
+        .filter(|(_, collider)| collider.shape().as_trimesh().is_some())
+        .count();
     assert_eq!(
         physics
             .rapier()
@@ -974,12 +976,12 @@ fn walking_far_keeps_a_parked_road_car_supported() {
             .iter()
             .filter(|(_, collider)| collider.shape().as_trimesh().is_some())
             .count(),
-        14
+        11 + support_budget
     );
     stream.sync_at(stream.origin.absolute(after), &mut physics);
     let count = physics.collider_count();
     assert!(
-        count <= 63,
+        count <= fleet_colliders + streamed(&stream) + support_budget - 3,
         "returning focus must remove the terrain-only support halo"
     );
     assert_eq!(
@@ -989,7 +991,7 @@ fn walking_far_keeps_a_parked_road_car_supported() {
             .iter()
             .filter(|(_, collider)| collider.shape().as_trimesh().is_some())
             .count(),
-        11
+        away_terrain - 3
     );
     stream.sync_at(stream.origin.absolute(after), &mut physics);
     assert_eq!(
@@ -1518,25 +1520,27 @@ fn production_cap_surface_pickup_uses_source_owner() {
 #[test]
 fn mechanism_compound_pose_stays_exact_when_the_chassis_moves() {
     use my_summer_slop::reference::BodyId;
-    let mut reference = common::reference();
-    let mut body = reference.bodies[1].clone();
-    body.id = BodyId(90);
-    body.parent_body = Some(reference.vehicles[0].body);
-    body.pose.translation = [0.82, 0.7, 0.0];
-    reference.bodies.push(body);
-    common::add_rotation(&mut reference, 1, 90, [-30.0, 0.0]);
-    let mut collider = reference.colliders[0].clone();
-    collider.id = my_summer_slop::reference::ColliderId(90);
-    collider.body = BodyId(90);
-    collider.node = reference.mechanisms[0].driven_nodes[0];
-    reference.colliders.push(collider);
+    let mut reference = common::containers();
+    let chassis = reference.vehicles[0].body;
+    reference
+        .bodies
+        .iter_mut()
+        .find(|b| b.id == BodyId(common::HINGE.0))
+        .unwrap()
+        .parent_body = Some(chassis);
+    common::add_rotation(
+        &mut reference,
+        common::HINGE.0,
+        common::HINGE.0,
+        [-30.0, 0.0],
+    );
     let mut runtime = GarageRuntime::new(&reference).unwrap();
     let shape = runtime
         .physics
         .rapier()
         .colliders
         .iter()
-        .find(|(_, c)| (c.user_data >> 64) as u32 == 90)
+        .find(|(_, c)| (c.user_data >> 64) as u32 == common::HINGE.0)
         .unwrap()
         .0;
     let local = *runtime.physics.rapier().colliders[shape]
@@ -1646,12 +1650,10 @@ fn production_mechanism_nodes_share_physics_and_render_pose() {
 fn aimed_handbrake_uses_the_space_state() {
     use my_summer_slop::reference::*;
     let (mut reference, _) = initial();
-    let item = reference
-        .items
-        .iter()
-        .find(|item| my_summer_slop::starting_area::body_vehicle(&reference, item.body) == Some(0))
-        .unwrap()
-        .clone();
+    let car_body = reference.vehicles[0].body;
+    let item = common::item_mut(&mut reference, common::HINGE);
+    item.body = car_body;
+    let item = item.clone();
     reference.mechanisms.push(MechanismReference {
         id: MechanismId(90),
         source: item.source.clone(),
@@ -1681,7 +1683,11 @@ fn aimed_handbrake_uses_the_space_state() {
     });
     let mut runtime = GarageRuntime::new(&reference).unwrap();
     runtime.started = true;
-    let seat = &reference.seats[0];
+    let seat = reference
+        .seats
+        .iter()
+        .find(|seat| seat.driver && seat.vehicle == 0)
+        .unwrap();
     assert!(runtime.area.player.enter(
         seat.id,
         my_summer_slop::vehicle::VehiclePose {
@@ -1695,7 +1701,7 @@ fn aimed_handbrake_uses_the_space_state() {
         collider: rapier3d::prelude::ColliderHandle::invalid(),
         item: item.id,
         distance: 1.0,
-        point: [10.0, 2.0, -1.0],
+        point: runtime.area.player.body_pose(&runtime.physics).position,
         slot: None,
     };
     runtime.area.interaction.step(
@@ -1742,7 +1748,7 @@ fn focus_loss_cancels_throw_push_and_drag() {
     for recover in [false, true] {
         let (reference, mut runtime) = initial();
         let (_, mut control_runtime) = initial();
-        let item = reference.items[0].id;
+        let item = common::CAN;
         for runtime in [&mut runtime, &mut control_runtime] {
             establish_throw_charge(runtime, item);
         }
@@ -1804,11 +1810,11 @@ fn focus_loss_cancels_throw_push_and_drag() {
         }
     }
     let (mut reference, _) = initial();
-    common::add_rotation(&mut reference, 1, 90, [-30., 0.]);
+    common::add_rotation(&mut reference, common::CAN.0, common::CAN.0, [-30., 0.]);
     let mut runtime = GarageRuntime::new(&reference).unwrap();
     let target = AimTarget {
         collider: rapier3d::prelude::ColliderHandle::invalid(),
-        item: reference.items[0].id,
+        item: common::CAN,
         distance: 1.,
         point: [10., 2., -1.],
         slot: None,
@@ -1916,7 +1922,7 @@ fn gripped_runtime() -> (my_summer_slop::reference::ReferenceManifest, GarageRun
         ResolvedAim {
             push_target: Some(AimTarget {
                 collider,
-                item: ItemId(5),
+                item: common::car(),
                 distance: 1.,
                 point: [10., 1., 0.],
                 slot: None,
@@ -2059,7 +2065,7 @@ fn pause_cancels_established_throw_charge_without_delayed_release() {
     use my_summer_slop::interaction::ResolvedAim;
     let (reference, mut runtime) = initial();
     let (_, mut control) = initial();
-    let item = reference.items[0].id;
+    let item = common::CAN;
     for runtime in [&mut runtime, &mut control] {
         establish_throw_charge(runtime, item);
         runtime.started = true;
@@ -2112,7 +2118,7 @@ fn pause_cancels_established_throw_charge_without_delayed_release() {
 fn new_game_cancels_established_throw_charge_without_delayed_release() {
     use my_summer_slop::interaction::ResolvedAim;
     let (reference, mut runtime) = initial();
-    let item = reference.items[0].id;
+    let item = common::CAN;
     establish_throw_charge(&mut runtime, item);
     runtime = GarageRuntime::new(&reference).unwrap();
     runtime.started = true;
@@ -2227,21 +2233,10 @@ fn production_fuel_can_lifts_and_follows_after_recenter() {
 }
 
 #[test]
-fn active_cycle_is_independent_of_physics_cap() {
+fn active_cycle_uses_only_accepted_fixed_steps() {
     let (reference, mut runtime) = initial();
     runtime.started = true;
     let mut clock = my_summer_slop::simulation::StepClock::default();
-    if !runtime.paused {
-        runtime.lighting.cycle.advance(
-            &reference.lighting.cycle,
-            my_summer_slop::lighting::CycleAdvance {
-                simulation_delta: (1.0) as f32,
-                cycle_extra: 0.,
-                cloud_scale: 1.,
-                sleep_progress: None,
-            },
-        );
-    }
     clock.accept_frame(1.0);
     let mut steps = 0;
     while clock.take_step(1.) {
@@ -2250,7 +2245,10 @@ fn active_cycle_is_independent_of_physics_cap() {
     for _ in 0..steps {
         runtime.step(&reference, FrameInput::default());
     }
-    assert_eq!(runtime.lighting.cycle.elapsed_seconds(), 1.0);
+    assert_eq!(
+        runtime.lighting.cycle.elapsed_seconds(),
+        f64::from(my_summer_slop::simulation::FIXED_DT) * f64::from(steps)
+    );
     assert!(steps <= 6);
 }
 #[test]
@@ -2290,7 +2288,7 @@ fn lighting_lifecycle_preserves_and_resets_owned_state() {
             },
         );
     }
-    runtime.lighting.advance_fades(&reference.lighting, 20.);
+
     runtime.step(
         &reference,
         FrameInput {

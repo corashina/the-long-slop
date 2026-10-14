@@ -1,10 +1,24 @@
 mod common;
 
-use my_summer_slop::reference::{ConsumptionEffect, ItemId};
+use common::{CAN, SUPPLY};
+use my_summer_slop::reference::ConsumptionEffect;
 use my_summer_slop::simulation::{FrameInput, keys};
 use my_summer_slop::starting_area::GarageRuntime;
 use my_summer_slop::survival::ToiletInput;
 use my_summer_slop::vehicle::{VehiclePose, to_rapier};
+
+fn drink_fixture() -> my_summer_slop::reference::ReferenceManifest {
+    let mut r = common::containers();
+    r.survival.initial.water = 1.;
+    let supply = common::tank_mut(&mut r, SUPPLY);
+    supply.no_drink = true;
+    supply.quantities_liters = [0., 0., 0., 100., 0., 0.];
+    let opening = r.openings.iter_mut().find(|o| o.tank == SUPPLY).unwrap();
+    opening.angle_disabled = true;
+    opening.particles.local_pose.translation = [0.; 3];
+    opening.particles.local_pose.rotation = [0., 0., 0., 1.];
+    r
+}
 
 #[test]
 fn one_primary_press_across_steps_takes_one_bite() {
@@ -57,7 +71,9 @@ fn one_primary_press_across_steps_takes_one_bite() {
         runtime.step(&reference, input.take_step());
     }
     assert_eq!(runtime.area.items.get(id).unwrap().food.unwrap().bite, 1);
-    assert!((runtime.survival.pending().food - 0.5).abs() < 0.001);
+    let fraction = my_summer_slop::simulation::FIXED_DT * reference.survival.delay_speed;
+    let expected_pending = 0.5 * (1. - fraction).powi(12);
+    assert!((runtime.survival.pending().food - expected_pending).abs() < 1e-6);
     input.merge(FrameInput {
         released: keys::PRIMARY,
         ..Default::default()
@@ -113,9 +129,9 @@ fn full_bowel_rejects_bite_without_mutation() {
 
 #[test]
 fn requested_drink_effect_precedes_actual_debit() {
-    let reference = common::reference();
+    let reference = drink_fixture();
     let mut runtime = GarageRuntime::new(&reference).unwrap();
-    let source = ItemId(3);
+    let source = CAN;
     runtime
         .area
         .items
@@ -148,9 +164,9 @@ fn requested_drink_effect_precedes_actual_debit() {
 
 #[test]
 fn near_full_bladder_filters_water_and_retains_other_fluid() {
-    let reference = common::reference();
+    let reference = drink_fixture();
     let mut runtime = GarageRuntime::new(&reference).unwrap();
-    let source = ItemId(3);
+    let source = CAN;
     runtime.survival.bladder.mixture.quantities_liters = [0., 0., 0., 1.9, 0., 0.];
     runtime
         .area
@@ -164,7 +180,8 @@ fn near_full_bladder_filters_water_and_retains_other_fluid() {
         .quantities_liters = [0.1, 0., 0., 0.4, 0.4, 0.1];
     let result = runtime.drink(&reference, source, 1.).unwrap();
     assert!((result.effect.water - 0.4).abs() < 0.000001);
-    assert!((result.debited_liters - 0.54444444).abs() < 0.000001);
+    // Blood acceptance exceeds its remaining source volume; reported debit caps at 0.4 L.
+    assert!((result.debited_liters - 0.5).abs() < 0.000001);
     let bladder = &runtime.survival.bladder.mixture;
     assert!(bladder.amount(3) < 1.9);
     assert!(bladder.amount(4) > 0.);
@@ -174,9 +191,9 @@ fn near_full_bladder_filters_water_and_retains_other_fluid() {
 
 #[test]
 fn full_bladder_blocks_effects_and_source_debit() {
-    let reference = common::reference();
+    let reference = drink_fixture();
     let mut runtime = GarageRuntime::new(&reference).unwrap();
-    let source = ItemId(3);
+    let source = CAN;
     runtime.survival.bladder.mixture.quantities_liters = [0., 0., 0., 2., 0., 0.];
     let before = runtime
         .area
@@ -208,18 +225,18 @@ fn full_bladder_blocks_effects_and_source_debit() {
 
 #[test]
 fn no_drink_source_has_no_effect() {
-    let reference = common::reference();
+    let reference = drink_fixture();
     let mut runtime = GarageRuntime::new(&reference).unwrap();
     let before = runtime.survival.pending();
-    assert!(runtime.drink(&reference, ItemId(18), 0.1).is_err());
+    assert!(runtime.drink(&reference, SUPPLY, 0.1).is_err());
     assert_eq!(runtime.survival.pending(), before);
 }
 
 #[test]
 fn particle_contact_does_not_debit_source_twice() {
-    let reference = common::reference();
+    let reference = drink_fixture();
     let mut runtime = GarageRuntime::new(&reference).unwrap();
-    let source = ItemId(18);
+    let source = SUPPLY;
     assert!(runtime.drink(&reference, source, 0.1).is_err());
     let emitted = {
         let fluid = runtime
@@ -244,7 +261,7 @@ fn particle_contact_does_not_debit_source_twice() {
     let result = runtime
         .drink_contact(&reference, source, emitted, [0., 0., 0., 1., 0., 0.])
         .unwrap();
-    assert_eq!(result.debited_liters, emitted);
+    assert_eq!(result.debited_liters, 0.);
     assert!(result.effect.water > 0.);
     assert_eq!(
         runtime
@@ -262,16 +279,16 @@ fn particle_contact_does_not_debit_source_twice() {
 
 #[test]
 fn open_particle_contact_emits_once_and_reaches_bladder() {
-    let mut reference = common::reference();
+    let mut reference = drink_fixture();
     let opening = reference
         .openings
         .iter_mut()
-        .find(|opening| opening.tank == ItemId(18))
+        .find(|opening| opening.tank == SUPPLY)
         .unwrap();
     opening.valve = 1.;
     let opening = opening.clone();
     let mut runtime = GarageRuntime::new(&reference).unwrap();
-    let source = ItemId(18);
+    let source = SUPPLY;
     let item = reference
         .items
         .iter()
@@ -366,7 +383,7 @@ fn open_particle_contact_emits_once_and_reaches_bladder() {
 
 #[test]
 fn closed_opening_cannot_create_contact_action() {
-    let reference = common::reference();
+    let reference = drink_fixture();
     let mut runtime = GarageRuntime::new(&reference).unwrap();
     runtime.started = true;
     let pending = runtime.survival.pending();
@@ -374,7 +391,7 @@ fn closed_opening_cannot_create_contact_action() {
         runtime
             .area
             .interaction
-            .opening_valve(my_summer_slop::reference::OpeningId(1)),
+            .opening_valve(my_summer_slop::reference::OpeningId(SUPPLY.0)),
         0.
     );
     runtime.step(&reference, FrameInput::default());

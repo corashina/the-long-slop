@@ -212,7 +212,7 @@ fn one_light_edge_survives_six_steps_hold_and_release() {
 }
 
 #[test]
-fn frame_fade_uses_active_elapsed_once_after_catch_up() {
+fn fixed_step_fade_pauses_and_resumes_after_catch_up() {
     use my_summer_slop::starting_area::GarageRuntime;
     let mut r = common::reference();
     for c in &mut r.lighting.controllers {
@@ -222,61 +222,68 @@ fn frame_fade_uses_active_elapsed_once_after_catch_up() {
     }
     let mut runtime = GarageRuntime::new(&r).unwrap();
     runtime.started = true;
+    let light = r
+        .lighting
+        .controllers
+        .iter()
+        .find(|c| {
+            c.kind == my_summer_slop::reference::LightControllerKind::Headlight
+                && c.vehicle == Some(0)
+        })
+        .unwrap()
+        .states[1]
+        .lights[0];
     runtime.lighting.cycle_headlights(&r.lighting, 0);
     for _ in 0..6 {
         runtime.step(&r, FrameInput::default());
     }
-    if !runtime.paused {
-        runtime.lighting.cycle.advance(
-            &r.lighting.cycle,
-            my_summer_slop::lighting::CycleAdvance {
-                simulation_delta: (0.5) as f32,
-                cycle_extra: 0.,
-                cloud_scale: 1.,
-                sleep_progress: None,
-            },
-        );
-    }
-    assert_eq!(runtime.lighting.cycle.elapsed_seconds(), 0.5);
-    runtime.lighting.advance_fades(&r.lighting, 0.1);
+    let elapsed = 6. * f64::from(my_summer_slop::simulation::FIXED_DT);
+    assert_eq!(runtime.lighting.cycle.elapsed_seconds(), elapsed);
     assert!(
         !runtime
             .lighting
             .light_outputs()
             .iter()
-            .find(|o| o.id.0 == 13)
+            .find(|o| o.id == light)
             .unwrap()
             .enabled
     );
     runtime.paused = true;
-    runtime.lighting.advance_fades(&r.lighting, 0.1);
+    for _ in 0..6 {
+        runtime.step(&r, FrameInput::default());
+    }
+    assert_eq!(runtime.lighting.cycle.elapsed_seconds(), elapsed);
     assert!(
         !runtime
             .lighting
             .light_outputs()
             .iter()
-            .find(|o| o.id.0 == 13)
+            .find(|o| o.id == light)
             .unwrap()
             .enabled
     );
     runtime.paused = false;
-    runtime.lighting.advance_fades(&r.lighting, 0.1);
-    assert!(
-        !runtime
-            .lighting
-            .light_outputs()
-            .iter()
-            .find(|o| o.id.0 == 13)
-            .unwrap()
-            .enabled
-    );
-    runtime.lighting.advance_fades(&r.lighting, 0.1);
+    for _ in 0..2 {
+        runtime.step(&r, FrameInput::default());
+    }
     assert!(
         runtime
             .lighting
             .light_outputs()
             .iter()
-            .find(|o| o.id.0 == 13)
+            .find(|o| o.id == light)
+            .unwrap()
+            .enabled
+    );
+    for _ in 0..6 {
+        runtime.step(&r, FrameInput::default());
+    }
+    assert!(
+        runtime
+            .lighting
+            .light_outputs()
+            .iter()
+            .find(|o| o.id == light)
             .unwrap()
             .enabled
     );

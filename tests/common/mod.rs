@@ -1,48 +1,57 @@
 #![allow(dead_code)]
 
+mod scenarios;
+#[allow(unused_imports)]
+pub use scenarios::*;
+
 use my_summer_slop::reference::{ColliderGeometry, ColliderId, ReferenceManifest};
 use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose};
 
 pub fn reference() -> ReferenceManifest {
-    let mut reference = ReferenceManifest::from_json(include_bytes!("reference.json"))
-        .expect("valid native fixture");
-    reference.colliders[0].geometry = ColliderGeometry::Box {
-        center: [0.0; 3],
-        half_extents: [0.76, 0.24, 1.55],
-        rotation: [0.0, 0.0, 0.0, 1.0],
-    };
-    let mut cabin = reference.colliders[0].clone();
-    cabin.id = ColliderId(
-        reference
+    ReferenceManifest::from_json(include_bytes!("reference.json")).expect("valid source fixture")
+}
+
+pub fn physics_reference() -> ReferenceManifest {
+    let mut reference = reference();
+    for index in 0..reference.vehicles.len() {
+        let vehicle = &reference.vehicles[index];
+        let mut shape = reference
             .colliders
             .iter()
-            .map(|collider| collider.id.0)
-            .max()
+            .find(|c| c.id == vehicle.colliders[0])
             .unwrap()
-            + 1,
-    );
-    cabin.source.path_id += 1;
-    cabin.geometry = ColliderGeometry::Box {
-        center: [0.0, 0.57, 0.2],
-        half_extents: [0.65, 0.36, 0.72],
-        rotation: [0.0, 0.0, 0.0, 1.0],
-    };
-    reference.vehicles[0].colliders.push(cabin.id);
-    reference
-        .action_bindings
-        .push(my_summer_slop::reference::ActionBinding {
-            collider: cabin.id,
-            use_owner: None,
-            pickup_owner: None,
-            removal_owner: None,
-            push_owner: None,
-        });
-    reference.colliders.push(cabin);
+            .clone();
+        let id = ColliderId(60000 + index as u32 * 2);
+        shape.id = id;
+        shape.source = my_summer_slop::reference::SourceId {
+            file: "test-physics".into(),
+            path_id: i64::from(id.0),
+        };
+        shape.node = vehicle.root;
+        shape.body = vehicle.body;
+        shape.enabled = true;
+        shape.sensor = false;
+        shape.geometry = ColliderGeometry::Box {
+            center: [0.; 3],
+            half_extents: [0.76, 0.24, 1.55],
+            rotation: [0., 0., 0., 1.],
+        };
+        let mut cabin = shape.clone();
+        cabin.id = ColliderId(id.0 + 1);
+        cabin.source.path_id += 1;
+        cabin.geometry = ColliderGeometry::Box {
+            center: [0., 0.57, 0.2],
+            half_extents: [0.65, 0.36, 0.72],
+            rotation: [0., 0., 0., 1.],
+        };
+        reference.vehicles[index].colliders = vec![id, cabin.id];
+        reference.colliders.extend([shape, cabin]);
+    }
     reference
 }
 
 pub fn world() -> PhysicsWorld {
-    let reference = reference();
+    let reference = physics_reference();
     let poses = my_summer_slop::starting_area::initial_vehicle_poses(&reference)
         .expect("valid fixture startup poses");
     PhysicsWorld::new(&reference, &poses).expect("valid fixture physics")
@@ -127,7 +136,10 @@ pub fn add_rotation(reference: &mut ReferenceManifest, item: u32, body: u32, lim
     owner.node = node;
     reference.mechanisms.push(MechanismReference {
         id: MechanismId(item),
-        source: reference.player.source.clone(),
+        source: my_summer_slop::reference::SourceId {
+            file: "test-mechanism".into(),
+            path_id: i64::from(item),
+        },
         item: ItemId(item),
         parent_item: None,
         driven_nodes: vec![node],
@@ -183,4 +195,59 @@ pub fn detach(
         .interaction
         .sync_parts(&mut g.area.items, &mut g.physics)
         .unwrap();
+}
+
+pub fn uncover_wheel(
+    g: &mut my_summer_slop::starting_area::GarageRuntime,
+    rim: my_summer_slop::reference::ItemId,
+) {
+    if let Some(cover) = g.area.interaction.parts.covering_item(rim) {
+        detach(g, cover);
+    }
+}
+
+pub fn saved_vehicle_index(
+    save: &my_summer_slop::save::SaveSnapshot,
+    r: &ReferenceManifest,
+    index: usize,
+) -> usize {
+    let instance = my_summer_slop::save::InstanceId::initial(&r.vehicles[index].source);
+    save.vehicles
+        .iter()
+        .position(|vehicle| vehicle.instance == instance)
+        .unwrap()
+}
+
+pub fn assert_rotation_close(a: [f32; 4], b: [f32; 4]) {
+    let same = a
+        .iter()
+        .zip(b)
+        .all(|(a, b)| (*a - b).abs() <= 8. * f32::EPSILON);
+    let opposite = a
+        .iter()
+        .zip(b)
+        .all(|(a, b)| (*a + b).abs() <= 8. * f32::EPSILON);
+    assert!(same || opposite, "rotation {a:?} != {b:?}");
+}
+pub fn assert_rebased_position(a: [f64; 3], b: [f64; 3], shift: [f32; 3]) {
+    for axis in 0..3 {
+        let scale = a[axis]
+            .abs()
+            .max(b[axis].abs())
+            .max(f64::from(shift[axis]).abs())
+            .max(1.);
+        let tolerance = 4. * f64::from(f32::EPSILON) * scale;
+        assert!(
+            (a[axis] - b[axis]).abs() <= tolerance,
+            "position {a:?} != {b:?}, bound {tolerance}"
+        );
+    }
+}
+pub fn assert_rebased_pose(
+    a: my_summer_slop::save::AbsolutePose,
+    b: my_summer_slop::save::AbsolutePose,
+    shift: [f32; 3],
+) {
+    assert_rebased_position(a.position, b.position, shift);
+    assert_rotation_close(a.rotation, b.rotation);
 }

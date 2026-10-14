@@ -10,8 +10,13 @@ fn accepts_recovered_scalars_with_synthetic_geometry() {
     assert_eq!(manifest.build_id, BUILD_ID);
     assert_eq!(manifest.vehicles[0].serialized_mass_kg, 717.0);
     assert_eq!(manifest.vehicles[0].engine.max_torque_nm, 87.0);
-    assert_eq!(manifest.tanks[0].capacity_liters, 39.0);
-    assert_eq!(manifest.tanks[0].quantities_liters[0], 0.5);
+    let fuel = manifest
+        .tanks
+        .iter()
+        .find(|tank| tank.item == manifest.vehicles[0].engine.fuel_tank)
+        .unwrap();
+    assert_eq!(fuel.capacity_liters, 39.0);
+    assert_eq!(fuel.quantities_liters[0], 0.5);
     assert_eq!(manifest.player.mass_kg, 72.0);
     assert_eq!(manifest.player.camera_culling_mask, 0x14db8f33);
     let car = &manifest.bodies[manifest.vehicles[0].body.0 as usize - 1];
@@ -99,7 +104,8 @@ fn rejects_invalid_geometry_quantities_and_hierarchy_cycles() {
     }
     assert!(manifest.validate().is_err());
     let mut input = fixture();
-    input["tanks"][0]["quantities_liters"][0] = serde_json::json!(40);
+    input["tanks"][0]["quantities_liters"][0] =
+        serde_json::json!(input["tanks"][0]["capacity_liters"].as_f64().unwrap() + 1.);
     assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
     let mut input = fixture();
     input["nodes"][0]["parent"] = serde_json::json!(2);

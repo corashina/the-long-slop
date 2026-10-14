@@ -72,7 +72,7 @@ fn recovers_active_player_and_source_values() {
         ),
         (1200., 5400., 15000.)
     );
-    assert_eq!(r.expected_instances(), 3);
+    assert_eq!(r.expected_instances(), 4);
 }
 #[test]
 fn rejects_missing_links_and_nonfinite_rates() {
@@ -127,7 +127,12 @@ fn rejects_rebound_starter_and_shelter_links() {
     assert!(r.weather.validate(&r).is_err());
 
     let mut r = common::reference();
-    r.weather.shelters[0].root = r.weather.shelters[4].root;
+    r.weather.shelters[0].root = r
+        .bodies
+        .iter()
+        .find(|b| b.node != r.area.home_root && !r.vehicles.iter().any(|v| v.root == b.node))
+        .unwrap()
+        .id;
     assert!(r.weather.validate(&r).is_err());
 
     let mut r = common::reference();

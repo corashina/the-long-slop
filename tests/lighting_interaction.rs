@@ -1,4 +1,5 @@
 mod common;
+use common::{CAN, SUPPLY};
 use my_summer_slop::interaction::feedback::{ActionMask, FeedbackContext};
 use my_summer_slop::interaction::items::ItemStore;
 use my_summer_slop::interaction::{
@@ -6,7 +7,7 @@ use my_summer_slop::interaction::{
 };
 use my_summer_slop::lighting::LightingState;
 use my_summer_slop::player::PlayerState;
-use my_summer_slop::reference::{ColliderId, LightControlId, LightControllerKind};
+use my_summer_slop::reference::{LightControlId, LightControllerKind};
 use my_summer_slop::simulation::{FrameInput, keys};
 use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose};
 use rapier3d::math::Vector;
@@ -87,7 +88,9 @@ fn switch_aim_obeys_reach_and_occlusion() {
     let (i, s, mut w, p) = fixture();
     w.rapier_mut().insert(
         RigidBodyBuilder::fixed().translation(Vector::new(10., 2., -1.)),
-        ColliderBuilder::ball(0.1).user_data(10u128 << 64),
+        ColliderBuilder::ball(0.1).user_data(
+            u128::from(common::reference().lighting.controllers[0].aim_colliders[0].0) << 64,
+        ),
     );
     w.refresh_queries();
     let mut short = common::reference();
@@ -100,7 +103,10 @@ fn switch_aim_obeys_reach_and_occlusion() {
             .is_none()
     );
     let t = i.resolve(&w, pose(), &s);
-    assert_eq!(t.light_target.unwrap().collider, ColliderId(10));
+    assert_eq!(
+        t.light_target.unwrap().collider,
+        common::reference().lighting.controllers[0].aim_colliders[0]
+    );
     assert_eq!(
         i.available_actions(&t, &p, &s, &w, Default::default(),)
             .light_control,
@@ -359,7 +365,7 @@ fn physical_headlight_switch_cycles_the_shared_car_request_once() {
         .lighting
         .controllers
         .iter()
-        .filter(|c| c.kind == LightControllerKind::Headlight)
+        .filter(|c| c.kind == LightControllerKind::Headlight && c.vehicle == Some(0))
     {
         assert!(
             state
@@ -734,18 +740,17 @@ fn held_container_fixture(
     full: bool,
 ) -> (InteractionState, ItemStore, PhysicsWorld, PlayerState) {
     use my_summer_slop::interaction::items::ItemLocation;
-    use my_summer_slop::reference::{ItemId, OpeningId};
-    let mut r = common::reference();
-    r.tanks[0].no_drink = !drinkable;
+    let mut r = common::containers();
+    let tank = common::tank_mut(&mut r, CAN);
+    tank.no_drink = !drinkable;
     if full {
-        r.tanks[0].quantities_liters = [r.tanks[0].capacity_liters, 0., 0., 0., 0., 0.];
+        tank.quantities_liters = [tank.capacity_liters, 0., 0., 0., 0., 0.];
     }
-    r.openings[0].valve = 1.;
-    let mut opening = r.openings[0].clone();
-    opening.id = OpeningId(77);
-    opening.tank = ItemId(1);
-    opening.cap = ItemId(1);
-    r.openings.push(opening);
+    for opening in &mut r.openings {
+        if opening.tank == CAN || opening.tank == SUPPLY {
+            opening.valve = 1.;
+        }
+    }
     let mut w = common::world();
     let p = PlayerState::new(&r.player, pose(), &mut w);
     let mut i = InteractionState::new(&r).unwrap();
@@ -753,16 +758,15 @@ fn held_container_fixture(
     let body = w
         .rapier_mut()
         .insert_body(RigidBodyBuilder::dynamic().translation(Vector::new(10., 2., -0.5)));
-    let item = items.get_mut(ItemId(1)).unwrap();
+    let item = items.get_mut(CAN).unwrap();
     item.body = Some(body);
     item.location = ItemLocation::World;
-    i.pickup_item(ItemId(1), [10., 2., -0.5], &p, &mut items, &mut w)
+    i.pickup_item(CAN, [10., 2., -0.5], &p, &mut items, &mut w)
         .unwrap();
     (i, items, w, p)
 }
 #[test]
 fn drinkable_container_reserves_click_while_use_can_switch() {
-    use my_summer_slop::reference::ItemId;
     let (mut i, mut items, mut w, mut p) = held_container_fixture(true, false);
     let aim = target(1);
     let a = i.available_actions(&aim, &p, &items, &w, Default::default());
@@ -770,7 +774,7 @@ fn drinkable_container_reserves_click_while_use_can_switch() {
     assert_eq!(a.light_control, Some(LightControlId(1)));
     assert!(matches!(
         step(&mut i, aim, &mut p, &mut items, &mut w, keys::PRIMARY),
-        Some(InteractionAction::Drink { source: ItemId(1), requested_liters }) if requested_liters > 0.
+        Some(InteractionAction::Drink { source: CAN, requested_liters }) if requested_liters > 0.
     ));
     assert_eq!(
         step(&mut i, aim, &mut p, &mut items, &mut w, keys::USE),
@@ -779,18 +783,20 @@ fn drinkable_container_reserves_click_while_use_can_switch() {
 }
 #[test]
 fn full_destination_reserves_click_after_fill_aim_changes() {
-    use my_summer_slop::reference::ItemId;
     let (mut i, mut items, mut w, mut p) = held_container_fixture(false, true);
     let mut aim = target(1);
     aim.filling_target = Some(AimTarget {
         collider: rapier3d::prelude::ColliderHandle::invalid(),
-        item: ItemId(19),
+        item: SUPPLY,
         distance: 1.,
         point: [10., 2., -1.],
         slot: None,
     });
     let a = i.available_actions(&aim, &p, &items, &w, Default::default());
-    assert_eq!(a.fill_reservation, Some(common::reference().openings[0].id));
+    assert_eq!(
+        a.fill_reservation,
+        Some(my_summer_slop::reference::OpeningId(SUPPLY.0))
+    );
     assert_eq!(a.actions.0 & ActionMask::FILL, 0);
     assert!(!a.lmb_use);
     assert_eq!(

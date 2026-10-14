@@ -90,8 +90,8 @@ fn cycle_wrap_retains_source_update_order() {
     );
     assert_eq!(state.output().phase, CyclePhase::Night);
     close(state.output().progress, 1.);
-    assert_eq!(state.elapsed_seconds(), 1500.02);
-    assert_eq!(state.output().cycle_seconds, 1500.02);
+    assert_eq!(state.elapsed_seconds(), 1500. + f64::from(0.02_f32));
+    assert_eq!(state.output().cycle_seconds, 1500. + f64::from(0.02_f32));
     let stars = state.output().star_rotation_degrees;
     let shader_time = state.output().shader_time_seconds;
     state.advance(
@@ -104,8 +104,8 @@ fn cycle_wrap_retains_source_update_order() {
         },
     );
     assert_eq!(state.output().phase, CyclePhase::Dawn);
-    assert_eq!(state.elapsed_seconds(), 1500.04);
-    assert_eq!(state.output().cycle_seconds, 0.02);
+    assert_eq!(state.elapsed_seconds(), 1500. + 2. * f64::from(0.02_f32));
+    assert_eq!(state.output().cycle_seconds, f64::from(0.02_f32));
     assert!(state.output().star_rotation_degrees > stars);
     assert!(state.output().shader_time_seconds > shader_time);
 }
@@ -829,7 +829,7 @@ fn fleet_lighting_uniform_fits_webgl2() {
     };
     let lights = constant("MAX_LIGHTS");
     let shadows = constant("SHADOW_SLOTS");
-    assert_eq!(lights, 40);
+    assert_eq!(lights, 42);
     assert_eq!(shadows, 100);
     assert!(shader.contains(&format!("lights: array<SourceLight,{lights}>")));
     assert!(shader.contains(&format!("shadows: array<SourceShadow,{shadows}>")));
@@ -862,6 +862,6 @@ fn fleet_lighting_uniform_fits_webgl2() {
             other => panic!("Unmeasured uniform field {other}"),
         })
         .sum::<usize>();
-    assert_eq!(bytes, 16_048);
+    assert_eq!(bytes, 16_368);
     assert!(bytes <= 16_384);
 }

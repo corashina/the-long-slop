@@ -56,6 +56,9 @@ fn standard_fixture(
     let material = &mut manifest.rendering.materials[1];
     material.shader_family = ShaderFamily::Standard;
     material.keywords = vec![keyword.to_owned()];
+    material.properties.textures.clear();
+    material.properties.defaults.clear();
+    material.properties.exclusions.clear();
     material.properties.floats = [
         "_Cutoff",
         "_Glossiness",

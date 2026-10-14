@@ -406,12 +406,22 @@ fn garage_terrain_keeps_interiors_clear_and_connects_driveway() {
         max: [40.0, 1.0, -60.0],
     };
     reference.area.driveway_height = 1.0;
+    reference.colliders.retain(|c| {
+        !reference
+            .nodes
+            .iter()
+            .find(|n| n.id == c.node)
+            .unwrap()
+            .name
+            .starts_with("interior")
+    });
     let mut interior = reference.nodes[0].clone();
-    interior.id = my_summer_slop::reference::NodeId(999);
+    interior.id = my_summer_slop::reference::NodeId(59000);
     interior.name = "interiorCellar".into();
     reference.nodes.push(interior);
     let mut collider = reference.colliders[0].clone();
-    collider.node = my_summer_slop::reference::NodeId(999);
+    collider.id = my_summer_slop::reference::ColliderId(59000);
+    collider.node = my_summer_slop::reference::NodeId(59000);
     collider.body = reference.bodies[0].id;
     collider.geometry = ColliderGeometry::Convex {
         points: vec![

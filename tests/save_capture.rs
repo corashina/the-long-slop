@@ -6,7 +6,6 @@ use my_summer_slop::simulation::engine::EngineInput;
 use my_summer_slop::starting_area::GarageRuntime;
 use my_summer_slop::vehicle::VehiclePose;
 use rapier3d::math::Vector;
-use serde_json::json;
 
 fn stamp(r: &ReferenceManifest) -> SourceStamp {
     SourceStamp {
@@ -24,68 +23,28 @@ fn stamp(r: &ReferenceManifest) -> SourceStamp {
     }
 }
 fn fixture() -> ReferenceManifest {
-    let mut r = common::reference();
+    let mut r = common::containers();
     let engine = r
         .items
         .iter()
-        .find(|i| i.id == r.vehicles[0].engine.item)
+        .find(|item| item.id == r.vehicles[0].engine.item)
         .unwrap()
         .clone();
-    let mut node = r
+    let node = r
         .nodes
-        .iter()
-        .find(|n| n.id == engine.node)
-        .unwrap()
-        .clone();
-    node.id = NodeId(190);
-    node.source.path_id = 90090;
-    node.parent = Some(r.vehicles[0].root);
-    node.transform.translation = [2., 1., 0.];
-    r.nodes.push(node);
-    let mut body = r
-        .bodies
-        .iter()
-        .find(|b| b.id == r.vehicles[0].body)
-        .unwrap()
-        .clone();
-    body.id = BodyId(90);
-    body.source.path_id = 90091;
-    body.node = NodeId(190);
-    body.parent_body = Some(r.vehicles[0].body);
-    body.pose.translation = [2., 1., 0.];
-    r.bodies.push(body);
-    let item = r.items.iter_mut().find(|i| i.id == engine.id).unwrap();
-    item.node = NodeId(190);
-    item.body = BodyId(90);
-    r.parts.push(serde_json::from_value(json!({
-        "scan_radius": 1., "usable": null, "item": engine.id, "source": {"file":"fixture", "path_id":90001},
-        "node":190, "main_types":["lada"], "part_types":["engine"], "cover_slot":null,
-        "local_rotation_after_mount":[0.,0.,0.,1.], "colliders":[], "linear_damping":0., "angular_damping":0.,
-        "enable_if_mounted":[], "enable_if_dismounted":[], "disable_if_mounted":[], "disable_if_dismounted":[]
-    })).unwrap());
-    r.part_slots.push(serde_json::from_value(json!({
-        "id":1, "source":{"file":"fixture","path_id":90002}, "node":190,
-        "owner":null, "part":engine.id, "mount_anchor":r.anchors[0].id, "detach_anchor":null,
-        "fixed_detach":false, "detach_position":[0.,0.,0.], "detach_rotation":[0.,0.,0.,1.],
-        "main_types":["lada"], "part_types":["engine"], "cant_craft":false, "cant_uncraft":false,
-        "disable_colliders_on_craft":false, "colliders":[]
-    })).unwrap());
-    let child_id = ItemId(5);
-    let mut child_node = r
-        .nodes
-        .iter()
-        .find(|n| n.id == r.vehicles[0].root)
-        .unwrap()
-        .clone();
-    child_node.id = NodeId(191);
-    child_node.source.path_id = 90092;
-    child_node.parent = Some(NodeId(190));
-    child_node.transform.translation = [0.25, 0.5, 0.75];
-    r.nodes.push(child_node);
-    let child = r.items.iter_mut().find(|i| i.id == child_id).unwrap();
-    child.node = NodeId(191);
-    child.body = BodyId(90);
+        .iter_mut()
+        .find(|node| node.id == NodeId(common::CHILD.0))
+        .unwrap();
+    node.parent = Some(engine.node);
+    node.transform.translation = [0.25, 0.5, 0.75];
+    let child = common::item_mut(&mut r, common::CHILD);
+    child.body = engine.body;
     child.attached_to = Some(engine.id);
+    r.bodies.retain(|body| body.id != BodyId(common::CHILD.0));
+    r.colliders
+        .retain(|collider| collider.id != ColliderId(common::CHILD.0));
+    r.action_bindings
+        .retain(|binding| binding.collider != ColliderId(common::CHILD.0));
     r.openings[0].valve = 0.37;
     r.vehicles[0].engine.start_chance = 0.5;
     r
@@ -202,6 +161,27 @@ fn capture_covers_drive_parts_fluids_and_carry() {
         .unwrap()
         .previous_rotation;
     assert_ne!(baseline, 0.);
+    let mut expected_assemblies: std::collections::BTreeSet<_> = g
+        .capture_save(&r, &source, CameraSave::Chase, "2026-10-12T10:00:00Z")
+        .unwrap()
+        .bodies
+        .into_iter()
+        .filter_map(|b| match b.identity {
+            BodyIdentity::Assembly { root } => Some(root),
+            _ => None,
+        })
+        .collect();
+    let rim = r
+        .wheel_slots
+        .iter()
+        .find(|s| s.id == removed_slot)
+        .unwrap()
+        .rim;
+    let cover = g.area.interaction.parts.covering_item(rim).unwrap();
+    for item in [rim, cover, r.vehicles[0].engine.item] {
+        expected_assemblies.insert(ids.item_instance(item).unwrap());
+    }
+    common::uncover_wheel(&mut g, rim);
     g.wheels
         .remove(removed_slot, &mut g.area.items, &mut g.physics)
         .unwrap();
@@ -252,26 +232,54 @@ fn capture_covers_drive_parts_fluids_and_carry() {
         .capture_save(&r, &source, CameraSave::Chase, "2026-10-12T10:00:00Z")
         .unwrap();
     saved.validate(&r, &source).unwrap();
-    assert_eq!(saved.vehicles[0].trip_m, g.vehicles[0].trip_m);
+    assert_eq!(
+        saved.vehicles[common::saved_vehicle_index(&saved, &r, 0)].trip_m,
+        g.vehicles[0].trip_m
+    );
     assert_eq!(saved.progress.start_attempts, "9007199254740993");
-    assert!(!saved.vehicles[0].handbrake);
+    assert!(!saved.vehicles[common::saved_vehicle_index(&saved, &r, 0)].handbrake);
     assert_eq!(saved.view.camera, CameraSave::Chase);
     assert_eq!(
         saved.player.seat.as_ref().unwrap().source,
         SourceKey::from(&seat.source)
     );
     assert_eq!(
-        saved.vehicles[0].body.linear_velocity,
+        saved.vehicles[common::saved_vehicle_index(&saved, &r, 0)]
+            .body
+            .linear_velocity,
         g.physics.snapshot(0).linear_velocity
     );
-    assert!(saved.vehicles[0].body.linear_velocity[2].abs() > 6.);
+    assert!(
+        saved.vehicles[common::saved_vehicle_index(&saved, &r, 0)]
+            .body
+            .linear_velocity[2]
+            .abs()
+            > 6.
+    );
     assert_eq!(
-        saved.vehicles[0].body.angular_velocity,
+        saved.vehicles[common::saved_vehicle_index(&saved, &r, 0)]
+            .body
+            .angular_velocity,
         g.physics.snapshot(0).angular_velocity
     );
-    assert!(saved.vehicles[0].engine.elapsed > 0.);
-    assert!(saved.vehicles[0].engine.last_start_chance_time > 0.);
-    assert_eq!(saved.vehicles[0].engine.random_start, 0.37);
+    assert!(
+        saved.vehicles[common::saved_vehicle_index(&saved, &r, 0)]
+            .engine
+            .elapsed
+            > 0.
+    );
+    assert!(
+        saved.vehicles[common::saved_vehicle_index(&saved, &r, 0)]
+            .engine
+            .last_start_chance_time
+            > 0.
+    );
+    assert_eq!(
+        saved.vehicles[common::saved_vehicle_index(&saved, &r, 0)]
+            .engine
+            .random_start,
+        0.37
+    );
     let empty = saved
         .attachments
         .wheels
@@ -285,7 +293,7 @@ fn capture_covers_drive_parts_fluids_and_carry() {
     let child = saved
         .items
         .iter()
-        .find(|i| i.instance == ids.item_instance(ItemId(5)).unwrap())
+        .find(|i| i.instance == ids.item_instance(common::CHILD).unwrap())
         .unwrap();
     assert_eq!(
         child.location,
@@ -294,17 +302,31 @@ fn capture_covers_drive_parts_fluids_and_carry() {
         }
     );
     assert_eq!(
-        saved.vehicles[0].engine,
+        saved.vehicles[common::saved_vehicle_index(&saved, &r, 0)].engine,
         g.vehicles[0].engine.capture_save()
     );
-    assert!(saved.attachments.parts[0].part.is_none());
+    let engine_slot = r
+        .part_slots
+        .iter()
+        .find(|slot| slot.part == Some(engine))
+        .unwrap();
+    assert!(
+        saved
+            .attachments
+            .parts
+            .iter()
+            .find(|part| part.slot == SourceKey::from(&engine_slot.source))
+            .unwrap()
+            .part
+            .is_none()
+    );
     let held = saved.player.carry.as_ref().unwrap();
     assert_eq!(
         held.item,
         InstanceId::initial(&r.items.iter().find(|i| i.id == engine).unwrap().source)
     );
     assert_ne!(held.offset, [0.; 3]);
-    assert_eq!(held.local_grip.rotation, [0., 0., 0., 1.]);
+    common::assert_rotation_close(held.local_grip.rotation, [0., 0., 0., 1.]);
     let fuel = saved
         .items
         .iter()
@@ -322,7 +344,16 @@ fn capture_covers_drive_parts_fluids_and_carry() {
     assert_eq!(fuel.condition, 0.42);
     assert_eq!(fuel.fluids, Some([1., 0.2, 0.3, 0.4, 0.5, 0.6]));
     assert_eq!(saved.mechanisms.openings.len(), r.openings.len());
-    assert_eq!(saved.mechanisms.openings[0].valve, 0.37);
+    assert_eq!(
+        saved
+            .mechanisms
+            .openings
+            .iter()
+            .find(|opening| opening.source == SourceKey::from(&r.openings[0].source))
+            .unwrap()
+            .valve,
+        0.37
+    );
     assert_eq!(saved.items.len(), r.items.len());
     assert!(!saved.world.records.is_empty());
     for WorldRecord::Pump { instance, valve } in &saved.world.records {
@@ -337,9 +368,12 @@ fn capture_covers_drive_parts_fluids_and_carry() {
         saved
             .bodies
             .iter()
-            .filter(|b| matches!(b.identity, BodyIdentity::Assembly { .. }))
-            .count(),
-        2
+            .filter_map(|b| match &b.identity {
+                BodyIdentity::Assembly { root } => Some(root.clone()),
+                _ => None,
+            })
+            .collect::<std::collections::BTreeSet<_>>(),
+        expected_assemblies
     );
     assert!(
         saved
@@ -362,18 +396,23 @@ fn capture_is_absolute_after_rebase() {
     shared.parent_body = None;
     shared.dynamic = true;
     shared.pose.translation = [16., 2., -32.];
-    shared.node = r.items.iter().find(|i| i.id == ItemId(18)).unwrap().node;
+    shared.node = r
+        .items
+        .iter()
+        .find(|i| i.id == common::SUPPLY)
+        .unwrap()
+        .node;
     r.bodies.push(shared);
     for item in &mut r.items {
-        if item.id == ItemId(18) || item.id == ItemId(19) {
+        if item.id == common::SUPPLY || item.id == common::DESTINATION {
             item.body = BodyId(192);
         }
     }
     r.items
         .iter_mut()
-        .find(|i| i.id == ItemId(19))
+        .find(|i| i.id == common::DESTINATION)
         .unwrap()
-        .attached_to = Some(ItemId(18));
+        .attached_to = Some(common::SUPPLY);
     let source = stamp(&r);
     let mut g = GarageRuntime::new(&r).unwrap();
     let handle = g.area.bodies[&BodyId(192)];
@@ -409,9 +448,9 @@ fn capture_is_absolute_after_rebase() {
     let after = g
         .capture_save(&r, &source, CameraSave::FirstPerson, "2026-10-12T10:00:00Z")
         .unwrap();
-    assert_eq!(before.player.pose.position, after.player.pose.position);
+    common::assert_rebased_pose(before.player.pose, after.player.pose, shift);
     for item in &before.items {
-        assert_eq!(
+        common::assert_rebased_position(
             item.pose.position,
             after
                 .items
@@ -419,11 +458,27 @@ fn capture_is_absolute_after_rebase() {
                 .find(|i| i.instance == item.instance)
                 .unwrap()
                 .pose
-                .position
+                .position,
+            shift,
         );
     }
-    assert_eq!(before.vehicles[0].body.pose, after.vehicles[0].body.pose);
-    assert_eq!(before.bodies, after.bodies);
+    common::assert_rebased_pose(
+        before.vehicles[common::saved_vehicle_index(&before, &r, 0)]
+            .body
+            .pose,
+        after.vehicles[common::saved_vehicle_index(&after, &r, 0)]
+            .body
+            .pose,
+        shift,
+    );
+    assert_eq!(before.bodies.len(), after.bodies.len());
+    for (before, after) in before.bodies.iter().zip(&after.bodies) {
+        assert_eq!(before.identity, after.identity);
+        assert_eq!(before.linear_velocity, after.linear_velocity);
+        assert_eq!(before.angular_velocity, after.angular_velocity);
+        assert_eq!(before.sleeping, after.sleeping);
+        common::assert_rebased_pose(before.pose, after.pose, shift);
+    }
 
     let mut seated = GarageRuntime::new(&r).unwrap();
     assert!(seated.area.player.enter(
@@ -437,7 +492,16 @@ fn capture_is_absolute_after_rebase() {
     let seated_before = seated
         .capture_save(&r, &source, CameraSave::FirstPerson, "2026-10-12T10:00:00Z")
         .unwrap();
-    assert_eq!(seated_before.player.pose.position[0], f64::from(0.03_f32));
+    common::assert_rebased_position(
+        seated_before.player.pose.position,
+        seated
+            .area
+            .player
+            .body_pose(&seated.physics)
+            .position
+            .map(f64::from),
+        [0.; 3],
+    );
     let seated_shift = [2048., 0., 0.];
     seated.physics.rebase(seated_shift);
     seated.stream.origin.shift(seated_shift);
@@ -445,11 +509,16 @@ fn capture_is_absolute_after_rebase() {
     let seated_after = seated
         .capture_save(&r, &source, CameraSave::FirstPerson, "2026-10-12T10:00:00Z")
         .unwrap();
-    assert_eq!(
+    common::assert_rebased_pose(
         seated_before.vehicles[0].body.pose,
-        seated_after.vehicles[0].body.pose
+        seated_after.vehicles[0].body.pose,
+        seated_shift,
     );
-    assert_eq!(seated_before.player.pose, seated_after.player.pose);
+    common::assert_rebased_pose(
+        seated_before.player.pose,
+        seated_after.player.pose,
+        seated_shift,
+    );
 }
 #[test]
 fn cycle_wrap_and_fade_capture_preserve_next_update() {
@@ -523,11 +592,16 @@ fn cycle_wrap_and_fade_capture_preserve_next_update() {
                 &ids,
                 &saved,
                 &vec![true; r.lighting.controllers.len()],
-                &[VehicleLightSample {
-                    electronics_output: electronics,
-                    ..Default::default()
-                }],
-                &[original.headlights(0)],
+                &vec![
+                    VehicleLightSample {
+                        electronics_output: electronics,
+                        ..Default::default()
+                    };
+                    r.vehicles.len()
+                ],
+                &(0..r.vehicles.len())
+                    .map(|index| original.headlights(index))
+                    .collect::<Vec<_>>(),
             )
             .unwrap();
         assert_eq!(original.cycle.output(), restored.cycle.output());

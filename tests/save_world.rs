@@ -122,6 +122,7 @@ fn distant_dropped_assembly_survives_stream_out_and_restore() {
     let reference = common::reference();
     let mut game = GarageRuntime::new(&reference).unwrap();
     let slot = reference.vehicles[0].wheel_slots[0];
+    common::uncover_wheel(&mut game, reference.wheel_slots[0].rim);
     let rim = game
         .wheels
         .remove(slot, &mut game.area.items, &mut game.physics)
@@ -149,7 +150,7 @@ fn distant_dropped_assembly_survives_stream_out_and_restore() {
     game.physics.rapier_mut().bodies[home].set_translation(Vector::new(12.25, 0., 8.5), false);
     game.area
         .items
-        .get_mut(my_summer_slop::reference::ItemId(18))
+        .get_mut(common::source_item(&reference, "level1", 21447))
         .unwrap()
         .fluid
         .as_mut()
@@ -196,6 +197,7 @@ fn distant_dropped_assembly_survives_stream_out_and_restore() {
     assert_eq!(before.attachments, away.attachments);
     let ids = my_summer_slop::save::IdentityMap::new(&reference).unwrap();
     let mut restored = GarageRuntime::new(&reference).unwrap();
+    common::uncover_wheel(&mut restored, reference.wheel_slots[0].rim);
     restored
         .wheels
         .remove(slot, &mut restored.area.items, &mut restored.physics)
@@ -369,6 +371,7 @@ fn dormant_car_recovery_keeps_cargo_and_logical_state() {
     let reference = common::reference();
     let mut game = GarageRuntime::new(&reference).unwrap();
     game.started = true;
+    common::uncover_wheel(&mut game, reference.wheel_slots[0].rim);
     let rim = game
         .wheels
         .remove(

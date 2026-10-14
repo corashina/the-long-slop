@@ -360,7 +360,7 @@ fn plate_rebase_preserves_mounted_and_loose_pose() {
         for i in 0..3 {
             assert!((a.position[i] + shift[i] - b.position[i]).abs() < 1e-4);
         }
-        assert_eq!(a.rotation, b.rotation);
+        common::assert_rotation_close(a.rotation, b.rotation);
     }
 }
 #[test]

@@ -1,70 +1,29 @@
 mod common;
 use my_summer_slop::{reference::*, save::*, simulation::FrameInput, starting_area::GarageRuntime};
 use rapier3d::math::Vector;
-use serde_json::json;
 fn fixture() -> ReferenceManifest {
-    let mut r = common::reference();
+    let mut r = common::containers();
     let engine = r
         .items
         .iter()
-        .find(|i| i.id == r.vehicles[0].engine.item)
+        .find(|item| item.id == r.vehicles[0].engine.item)
         .unwrap()
         .clone();
-    let mut node = r
+    let node = r
         .nodes
-        .iter()
-        .find(|n| n.id == engine.node)
-        .unwrap()
-        .clone();
-    node.id = NodeId(190);
-    node.source.path_id = 90090;
-    node.parent = Some(r.vehicles[0].root);
-    node.transform.translation = [2., 1., 0.];
-    r.nodes.push(node);
-    let mut body = r
-        .bodies
-        .iter()
-        .find(|b| b.id == r.vehicles[0].body)
-        .unwrap()
-        .clone();
-    body.id = BodyId(90);
-    body.source.path_id = 90091;
-    body.node = NodeId(190);
-    body.parent_body = Some(r.vehicles[0].body);
-    body.pose.translation = [2., 1., 0.];
-    r.bodies.push(body);
-    let item = r.items.iter_mut().find(|i| i.id == engine.id).unwrap();
-    item.node = NodeId(190);
-    item.body = BodyId(90);
-    r.parts.push(serde_json::from_value(json!({
-        "scan_radius": 1., "usable": null, "item": engine.id, "source": {"file":"fixture", "path_id":90001},
-        "node":190, "main_types":["lada"], "part_types":["engine"], "cover_slot":null,
-        "local_rotation_after_mount":[0.,0.,0.,1.], "colliders":[], "linear_damping":0., "angular_damping":0.,
-        "enable_if_mounted":[], "enable_if_dismounted":[], "disable_if_mounted":[], "disable_if_dismounted":[]
-    })).unwrap());
-    r.part_slots.push(serde_json::from_value(json!({
-        "id":1, "source":{"file":"fixture","path_id":90002}, "node":190,
-        "owner":null, "part":engine.id, "mount_anchor":r.anchors[0].id, "detach_anchor":null,
-        "fixed_detach":false, "detach_position":[0.,0.,0.], "detach_rotation":[0.,0.,0.,1.],
-        "main_types":["lada"], "part_types":["engine"], "cant_craft":false, "cant_uncraft":false,
-        "disable_colliders_on_craft":false, "colliders":[]
-    })).unwrap());
-    let child_id = ItemId(5);
-    let mut child_node = r
-        .nodes
-        .iter()
-        .find(|n| n.id == r.vehicles[0].root)
-        .unwrap()
-        .clone();
-    child_node.id = NodeId(191);
-    child_node.source.path_id = 90092;
-    child_node.parent = Some(NodeId(190));
-    child_node.transform.translation = [0.25, 0.5, 0.75];
-    r.nodes.push(child_node);
-    let child = r.items.iter_mut().find(|i| i.id == child_id).unwrap();
-    child.node = NodeId(191);
-    child.body = BodyId(90);
+        .iter_mut()
+        .find(|node| node.id == NodeId(common::CHILD.0))
+        .unwrap();
+    node.parent = Some(engine.node);
+    node.transform.translation = [0.25, 0.5, 0.75];
+    let child = common::item_mut(&mut r, common::CHILD);
+    child.body = engine.body;
     child.attached_to = Some(engine.id);
+    r.bodies.retain(|body| body.id != BodyId(common::CHILD.0));
+    r.colliders
+        .retain(|collider| collider.id != ColliderId(common::CHILD.0));
+    r.action_bindings
+        .retain(|binding| binding.collider != ColliderId(common::CHILD.0));
     r.openings[0].valve = 0.37;
     r.vehicles[0].engine.start_chance = 0.5;
     r
@@ -170,7 +129,10 @@ fn starter_boundary(steps: usize, engaged: bool) {
     let before = capture(&original, &r);
     original.clear_input();
     let saved = capture(&original, &r);
-    assert_eq!(saved.vehicles[0].engine, before.vehicles[0].engine);
+    assert_eq!(
+        saved.vehicles[common::saved_vehicle_index(&saved, &r, 0)].engine,
+        before.vehicles[common::saved_vehicle_index(&before, &r, 0)].engine
+    );
     assert_eq!(saved.progress, before.progress);
     assert_eq!(saved.player.recoil_velocity, before.player.recoil_velocity);
     assert_eq!(saved.items, before.items);
@@ -190,7 +152,10 @@ fn starter_boundary(steps: usize, engaged: bool) {
     original.step(&r, FrameInput::default());
     loaded.step(&r, FrameInput::default());
     assert_eq!(
-        original.vehicles[0].engine.ignition, saved.vehicles[0].engine.ignition,
+        original.vehicles[0].engine.ignition,
+        saved.vehicles[common::saved_vehicle_index(&saved, &r, 0)]
+            .engine
+            .ignition,
         "neutral input released a canceled short hold"
     );
     assert_eq!(
@@ -266,25 +231,32 @@ fn driven_rebased_roundtrip_preserves_logic_and_resumes() {
     assert_logical_equal(&saved, &capture(&loaded, &r));
     loaded.paused = false;
     loaded.step(&r, FrameInput::default());
-    assert!((loaded.vehicles[0].trip_m - saved.vehicles[0].trip_m).abs() < 1.);
+    assert!(
+        (loaded.vehicles[0].trip_m
+            - saved.vehicles[common::saved_vehicle_index(&saved, &r, 0)].trip_m)
+            .abs()
+            < 1.
+    );
 }
 #[test]
 fn removed_part_split_wheel_and_held_item_rebuild() {
     let mut r = fixture();
-    let portable = ItemId(18);
+    let portable = common::SUPPLY;
     let node = r.items.iter().find(|i| i.id == portable).unwrap().node;
     let mut body = r.bodies[1].clone();
     body.id = BodyId(91);
     body.source.path_id = 90093;
     body.node = node;
     body.parent_body = None;
-    body.mass_kg = 75.0; // Six kilograms dry plus 69 liters from the source tank.
+    body.mass_kg = 75.0;
+    common::item_mut(&mut r, portable).mass_kg = 6.;
+    common::tank_mut(&mut r, portable).quantities_liters = [0., 0., 0., 69., 0., 0.]; // Six kilograms dry plus 69 liters from the source tank.
     body.pose.translation = [10., 5., 0.];
     r.bodies.push(body);
     let node = r.nodes.iter_mut().find(|n| n.id == node).unwrap();
     node.parent = None;
     node.transform.translation = [10., 5., 0.];
-    for id in [portable, ItemId(19)] {
+    for id in [portable] {
         r.items.iter_mut().find(|i| i.id == id).unwrap().body = BodyId(91);
     }
     r.tanks
@@ -334,6 +306,7 @@ fn removed_part_split_wheel_and_held_item_rebuild() {
         .total();
     assert!(portable_mass < 75. && (portable_mass - 6. - portable_volume).abs() < 1e-5);
     let slot = r.wheel_slots[0].id;
+    common::uncover_wheel(&mut g, r.wheel_slots[0].rim);
     let rim = g
         .wheels
         .remove(slot, &mut g.area.items, &mut g.physics)
@@ -382,7 +355,13 @@ fn removed_part_split_wheel_and_held_item_rebuild() {
             .area
             .interaction
             .parts
-            .slot_item(r.part_slots[0].id)
+            .slot_item(
+                r.part_slots
+                    .iter()
+                    .find(|slot| slot.part == Some(engine))
+                    .unwrap()
+                    .id
+            )
             .is_none()
     );
     let new = loaded.area.items.get(rim).unwrap().body.unwrap();
@@ -446,22 +425,18 @@ fn removed_part_split_wheel_and_held_item_rebuild() {
 }
 #[test]
 fn fluid_mechanism_lighting_roundtrip_resumes() {
-    let mut r = common::reference();
-    let mut body = r.bodies[1].clone();
-    body.id = BodyId(90);
-    body.source.path_id = 90090;
-    body.parent_body = Some(r.vehicles[0].body);
-    r.bodies.push(body);
-    common::add_rotation(&mut r, 1, 90, [-30., 40.]);
-    // The helper shares source keys; this save fixture needs unique stable identities.
-    for (i, n) in r.nodes.iter_mut().enumerate() {
-        n.source.path_id = 100000 + i as i64;
-    }
+    let mut r = common::containers();
+    r.bodies
+        .iter_mut()
+        .find(|b| b.id == BodyId(common::HINGE.0))
+        .unwrap()
+        .parent_body = Some(r.vehicles[0].body);
+    common::add_rotation(&mut r, common::HINGE.0, common::HINGE.0, [-30., 40.]);
     let mut g = GarageRuntime::new(&r).unwrap();
     let mut supply = g
         .area
         .items
-        .get(ItemId(18))
+        .get(common::SUPPLY)
         .unwrap()
         .fluid
         .as_ref()
@@ -479,8 +454,8 @@ fn fluid_mechanism_lighting_roundtrip_resumes() {
         my_summer_slop::fluids::transfer(&mut supply, destination, 0.25),
         0.25
     );
-    g.area.items.get_mut(ItemId(18)).unwrap().fluid = Some(supply);
-    let control = r.mechanisms[0].item;
+    g.area.items.get_mut(common::SUPPLY).unwrap().fluid = Some(supply);
+    let control = common::HINGE;
     let view = g.area.player.view_pose(&g.physics);
     g.area.interaction.mechanisms.step(
         control,
@@ -689,6 +664,7 @@ fn instruments_initialize_without_time_step() {
 fn distant_world_and_dormant_car_roundtrip() {
     let r = fixture();
     let mut g = GarageRuntime::new(&r).unwrap();
+    common::uncover_wheel(&mut g, r.wheel_slots[0].rim);
     let rim = g
         .wheels
         .remove(r.wheel_slots[0].id, &mut g.area.items, &mut g.physics)
@@ -707,8 +683,20 @@ fn seated_relation_survives_large_absolute_coordinates() {
     let mut g = GarageRuntime::new(&r).unwrap();
     let seat = r.seats.iter().find(|s| s.driver).unwrap();
     let entry = my_summer_slop::vehicle::VehiclePose {
-        position: [0.03, 1.17, -0.123],
-        rotation: rapier3d::math::Rotation::from_rotation_y(0.2).to_array(),
+        position: r
+            .anchors
+            .iter()
+            .find(|a| a.id == seat.anchor)
+            .unwrap()
+            .transform
+            .translation,
+        rotation: r
+            .anchors
+            .iter()
+            .find(|a| a.id == seat.anchor)
+            .unwrap()
+            .transform
+            .rotation,
     };
     assert!(g.area.player.enter(seat.id, entry, &mut g.physics));
     let expected = g.area.player.body_pose(&g.physics);
@@ -723,8 +711,9 @@ fn seated_relation_survives_large_absolute_coordinates() {
     invalid.player.seat.as_mut().unwrap().local_pose.position[0] = f32::MAX;
     assert!(invalid.validate(&r, &stamp(&r)).is_err());
     let offset = my_summer_slop::world::MAX_ABSOLUTE_COORDINATE - 100.;
-    saved.vehicles[0].body.pose.position[0] += offset;
-    saved.vehicles[0].body.pose.position[2] -= offset;
+    let vehicle = common::saved_vehicle_index(&saved, &r, 0);
+    saved.vehicles[vehicle].body.pose.position[0] += offset;
+    saved.vehicles[vehicle].body.pose.position[2] -= offset;
     saved.player.pose.position[0] += offset;
     saved.player.pose.position[2] -= offset;
     let mut loaded = GarageRuntime::from_save(&r, &stamp(&r), &saved).unwrap();
@@ -984,4 +973,33 @@ fn installed_cross_vehicle_wheels_restore_current_owner() {
             Some(loaded.physics.chassis_handle(index))
         );
     }
+}
+#[test]
+fn unanimated_flashlight_switch_saves_immediately() {
+    let r = common::reference();
+    let mut g = GarageRuntime::new(&r).unwrap();
+    let controller = r
+        .lighting
+        .controllers
+        .iter()
+        .find(|c| c.kind == LightControllerKind::Switch && c.animated_poses.is_empty())
+        .unwrap();
+    assert!(
+        r.flashlights
+            .instances
+            .iter()
+            .any(|flashlight| flashlight.controller == controller.id)
+    );
+    g.lighting.use_control(&r.lighting, controller.id);
+    let saved = capture(&g, &r);
+    let state = saved
+        .lighting
+        .controllers
+        .iter()
+        .find(|c| c.source == SourceKey::from(&controller.source))
+        .unwrap();
+    assert_eq!(state.on, !controller.startup_on);
+    assert_eq!(state.switch_motion, None);
+    let loaded = GarageRuntime::from_save(&r, &stamp(&r), &saved).unwrap();
+    assert_logical_equal(&saved, &capture(&loaded, &r));
 }

@@ -7,7 +7,7 @@ fn plate_contract_rejects_invalid_font_data() {
         let mut manifest = original.clone();
         match mutation {
             0 => manifest.plates.font.characters.retain(|c| c.unicode != 65),
-            1 => manifest.plates.font.glyphs[0].rect[0] = 1024,
+            1 => manifest.plates.font.glyphs[0].rect[0] = manifest.plates.font.atlas_extent[0] + 1,
             2 => manifest.plates.plates[1].item = manifest.plates.plates[0].item,
             3 => manifest.plates.plates[1].same_as = Some(ItemId(u32::MAX)),
             4 => manifest.plates.font.glyphs[0].metrics[0] = f32::NAN,

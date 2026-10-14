@@ -38,27 +38,34 @@ mod tests {
         ))
         .unwrap();
         let mut lighting = manifest.render_lighting.clone();
+        let index = lighting.probes.len();
         let mut second = lighting.probes[0].clone();
         lighting.probes.push(second.clone());
         assert!(lighting.validate(&manifest.nodes).is_err());
-        second.source.path_id = 59660;
-        lighting.probes[1] = second.clone();
+        second.source.path_id = lighting
+            .probes
+            .iter()
+            .map(|probe| probe.source.path_id)
+            .max()
+            .unwrap()
+            + 1;
+        lighting.probes[index] = second.clone();
         assert!(lighting.validate(&manifest.nodes).is_err());
         second.node = manifest
             .nodes
             .iter()
-            .find(|node| node.id != second.node)
+            .find(|node| !lighting.probes.iter().any(|probe| probe.node == node.id))
             .unwrap()
             .id;
-        lighting.probes[1] = second;
+        lighting.probes[index] = second;
         assert!(lighting.validate(&manifest.nodes).is_ok());
-        lighting.probes[1].importance = 2;
+        lighting.probes[index].importance = 2;
         assert!(lighting.validate(&manifest.nodes).is_err());
-        lighting.probes[1].importance = 1;
-        lighting.probes[1].bounds_size[0] = 7.;
+        lighting.probes[index].importance = 1;
+        lighting.probes[index].bounds_size[0] = 7.;
         assert!(lighting.validate(&manifest.nodes).is_err());
-        lighting.probes[1].bounds_size[0] = 6.;
-        lighting.probes[1].far = lighting.probes[1].near;
+        lighting.probes[index].bounds_size[0] = 6.;
+        lighting.probes[index].far = lighting.probes[index].near;
         assert!(lighting.validate(&manifest.nodes).is_err());
     }
 }

@@ -105,7 +105,8 @@ fn occupied_slot_has_no_mount_action() {
 #[test]
 fn attached_tire_selects_tire_dismount() {
     let r = common::reference();
-    let run = GarageRuntime::new(&r).unwrap();
+    let mut run = GarageRuntime::new(&r).unwrap();
+    common::uncover_wheel(&mut run, r.wheel_slots[0].rim);
     let tire = r.wheel_slots[0].tire;
     let a = run.area.interaction.available_actions(
         &ResolvedAim {
@@ -140,6 +141,9 @@ fn blocked_exit_has_no_exit_action() {
         },
         &mut run.physics
     ));
+    let view = run.area.player.view_pose(&run.physics);
+    run.physics.insert_box(view.position, [20.; 3]);
+    run.physics.refresh_queries();
     let a = run.area.interaction.available_actions(
         &ResolvedAim::default(),
         &run.area.player,

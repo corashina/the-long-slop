@@ -2,7 +2,7 @@ use my_summer_slop::reference::{AssetUsage, ReferenceManifest};
 #[test]
 fn prototype_loading_does_not_spawn_a_pole_at_the_origin() {
     let manifest = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
-    assert_eq!(manifest.expected_instances(), 3);
+    assert_eq!(manifest.expected_instances(), 4);
     let prototype = manifest
         .assets
         .iter()

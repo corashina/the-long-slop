@@ -8,8 +8,15 @@ const START: VehiclePose = VehiclePose {
     rotation: [0.0, 0.0, 0.0, 1.0],
 };
 
+fn track_world() -> PhysicsWorld {
+    let reference = common::physics_reference();
+    let mut poses = my_summer_slop::starting_area::initial_vehicle_poses(&reference).unwrap();
+    poses[0] = START;
+    PhysicsWorld::new(&reference, &poses).expect("fixture physics")
+}
+
 fn flat_track() -> PhysicsWorld {
-    let mut world = PhysicsWorld::new(&common::reference(), &[START]).expect("fixture physics");
+    let mut world = track_world();
     world.insert_mesh(
         &[
             [-500.0, 0.0, -500.0],
@@ -59,7 +66,7 @@ fn settles_on_four_wheels() {
 #[test]
 fn removed_slot_has_no_raycast_support_and_restores_without_duplicates() {
     use my_summer_slop::vehicle::InstalledWheel;
-    let reference = common::reference();
+    let reference = common::physics_reference();
     let mut world = flat_track();
     let slot = reference.vehicles[0].wheel_slots[0];
     world.set_wheel(slot, None).unwrap();
@@ -97,7 +104,7 @@ fn removed_slot_has_no_raycast_support_and_restores_without_duplicates() {
 
 #[test]
 fn source_springs_keep_their_force_when_vehicle_mass_changes() {
-    let reference = common::reference();
+    let reference = common::physics_reference();
     let mut world = flat_track();
     let before = world.snapshot(0).pose.position[1];
     world.set_vehicle_mass(0, reference.vehicles[0].mass_kg * 0.5);
@@ -122,7 +129,7 @@ fn source_springs_keep_their_force_when_vehicle_mass_changes() {
 #[test]
 fn drivetrain_converts_running_torque_with_source_ratio_radius_and_drive_count() {
     use my_summer_slop::simulation::engine::EngineOutput;
-    let reference = common::reference();
+    let reference = common::physics_reference();
     let output = EngineOutput {
         running: true,
         torque_nm: 87.0,
@@ -151,7 +158,7 @@ fn drivetrain_converts_running_torque_with_source_ratio_radius_and_drive_count()
 
 #[test]
 fn automatic_shift_retains_selection_when_curve_candidates_are_zero() {
-    let mut reference = common::reference();
+    let mut reference = common::physics_reference();
     reference.vehicles[0]
         .engine
         .torque_curve
@@ -309,7 +316,7 @@ fn handbrake_slows_the_car() {
 
 #[test]
 fn removed_ground_cannot_support_wheels() {
-    let mut world = PhysicsWorld::new(&common::reference(), &[START]).expect("fixture physics");
+    let mut world = track_world();
     let ground = world.insert_mesh(
         &[
             [-10.0, 0.0, -10.0],

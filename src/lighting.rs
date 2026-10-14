@@ -1053,7 +1053,9 @@ impl LightingState {
         match c.kind {
             crate::reference::LightControllerKind::Switch => {
                 self.controllers[index].on = !self.controllers[index].on;
-                if self.pose_progress[index].is_none() {
+                if !reference.controllers[index].animated_poses.is_empty()
+                    && self.pose_progress[index].is_none()
+                {
                     self.pose_progress[index] = Some(SwitchMotion::Initial);
                 }
                 self.refresh_switch(reference, index);
