@@ -1,0 +1,41 @@
+   Compiling my-summer-slop v0.1.0 (/workspace)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.64s
+     Running tests/consumption.rs (/target/78ac7bd6eecbe24e855831b840b4a8349917d1730f10438b2db431f18ab9816e/debug/deps/consumption-8080107a3fab0488)
+
+running 11 tests
+test full_bowel_rejects_bite_without_mutation ... ok
+test requested_drink_effect_precedes_actual_debit ... ok
+test near_full_bladder_filters_water_and_retains_other_fluid ... ok
+test closed_opening_cannot_create_contact_action ... ok
+test final_bite_removes_all_bindings ... ok
+test no_drink_source_has_no_effect ... ok
+test particle_contact_does_not_debit_source_twice ... ok
+test defecation_spawns_one_three_group_turd_with_harmful_bites ... ok
+test full_bladder_blocks_effects_and_source_debit ... ok
+test one_primary_press_across_steps_takes_one_bite ... ok
+test open_particle_contact_emits_once_and_reaches_bladder ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.37s
+
+     Running tests/input.rs (/target/78ac7bd6eecbe24e855831b840b4a8349917d1730f10438b2db431f18ab9816e/debug/deps/input-d7d5f6a6cfada87a)
+
+running 17 tests
+test exported_brake_lights_sample_pedal_before_physics ... ignored, Requires exported Steam assets
+test exported_driver_lights_use_real_edges ... ignored, Requires exported Steam assets
+test exported_low_startup_keeps_source_outputs_through_pause ... ignored, Requires exported Steam assets
+test exported_reverse_lights_follow_selected_reverse_gear ... ignored, Requires exported Steam assets
+test catch_up_steps_consume_toggle_once_and_keep_held_input ... ok
+test f_release_edge_runs_once_across_catch_up_steps ... ok
+test installed_driving2_matches_source_seats ... ignored, requires installed source export
+test frames_without_physics_keep_edges_and_accumulate_look ... ok
+test lifecycle_boundary_discards_the_sampled_frame ... ok
+test pause_clear_discards_held_keys_edges_and_look ... ok
+test steering_clears_between_seats_and_capture_sessions ... ok
+test steering_is_equal_at_different_render_rates ... ok
+test carry_input_preserves_modes_and_consumes_recenter_once ... ok
+test car_and_headlight_electronics_keep_their_source_owners ... ok
+test driving2_uses_car_controls_without_throttle ... ok
+test one_light_edge_survives_six_steps_hold_and_release ... ok
+test fixed_step_fade_pauses_and_resumes_after_catch_up ... ok
+
+test result: ok. 12 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 3.48s
