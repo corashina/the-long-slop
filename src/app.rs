@@ -706,19 +706,28 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         .area
         .interaction
         .feedback(&available, &runtime.area.items, &reference.0);
-    let (amount, capacity, quantities, fluid_name, has_name, no_text) =
-        info.fluid
-            .as_ref()
-            .map_or((0., 0., [0.; 6], info.name, false, true), |f| {
-                (
-                    f.amount,
-                    f.capacity,
-                    f.quantities,
-                    f.presentation.name.as_str(),
-                    f.presentation.has_name,
-                    f.presentation.no_text,
-                )
-            });
+    let (mut amount, mut capacity, quantities, fluid_name, has_name, mut no_text) = info
+        .fluid
+        .as_ref()
+        .map_or((0., 0., [0.; 6], info.name, false, true), |f| {
+            (
+                f.amount,
+                f.capacity,
+                f.quantities,
+                f.presentation.name.as_str(),
+                f.presentation.has_name,
+                f.presentation.no_text,
+            )
+        });
+    let paint = runtime
+        .area
+        .interaction
+        .paint_feedback(&runtime.aim, &reference.0);
+    if let Some((quantity, maximum)) = paint {
+        amount = quantity;
+        capacity = maximum;
+        no_text = false;
+    }
     let condition = available
         .item
         .and_then(|id| runtime.area.conditions.item_quality(id))
@@ -745,7 +754,11 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             current.handbrake,
         ],
         actions: info.actions.0,
-        context: info.context as u32,
+        context: if paint.is_some() {
+            crate::interaction::feedback::FeedbackContext::Paint as u32
+        } else {
+            info.context as u32
+        },
         light_control: available.light_control.map_or(0, |id| id.0),
         lmb_use: available.lmb_use,
         item: available.item,

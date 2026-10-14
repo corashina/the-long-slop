@@ -5,6 +5,7 @@ export function formatRadio(r){if(r.context===11&&Number.isFinite(r.radioVolume)
 function volume(value){return (Math.round(value*10)/10).toFixed(1).replace(/\.0$/,'');}
 export function formatTank(r) {
  if(r.noText)return '';
+ if(r.context===14)return Math.round(r.amount).toString();
  const prefix=r.hasName?r.fluidName+':\n':'';
  if(r.amount<=Math.fround(.05))return prefix+'empty';
  const amount=volume(r.amount),capacity=volume(r.capacity);

@@ -381,6 +381,7 @@ def recover_conditions(source, nodes, components, pointer_node, item_nodes, coll
                     raise ValueError(f'{key(reader)} colorTypes missing or empty palette {name}')
             record=tool_owner(reader,d);record.update(source.cleaning_color_selections[key(reader)]);selected=source.cleaning_colors[key(source.resolve(reader,d['R']))]
             record.update({'ammo':source_id(ammo),'color_source':source_id(color),'float_quantity':bool(ad['floatOrInt']),
+                'hide_look_at_count':bool(ad['hideLookAtCount']),'hide_carried_count':bool(ad['hideLookAtCountInInventory']),'no_per_show':bool(ad['noPerShow']),
                 'startup_quantity':ad['fammo'] if ad['floatOrInt'] else float(ad['ammo']),'maximum_quantity':ad['max'],
                 'startup_color':[selected[c] for c in 'rgba'],'authored_color_set':bool(cd['set']),
                 'color_types':d['colorTypes'],
@@ -438,7 +439,11 @@ def recover_conditions(source, nodes, components, pointer_node, item_nodes, coll
             'installed_slot_source':sid(slot),'installed_part_slot':slots.get(slot_id),
             'installed_wheel_slot':wheels.get(slot_id),'installed_tire_slot':tire_slots.get(slot_id),'wash':washes[key(wash)] if wash else None})
     source.condition_record=result
-    (output/'conditions-evidence.json').write_text(json.dumps({'managed':managed,'startup':source.cleaning_startup,
+    physics=source.get('globalgamemanagers',10)
+    queries_hit_triggers=source.read(physics)['m_QueriesHitTriggers']
+    if queries_hit_triggers is not True:raise ValueError('Selected source tool rays require m_QueriesHitTriggers=true')
+    (output/'conditions-evidence.json').write_text(json.dumps({'managed':managed,
+        'physics_queries':{'source':source_id(physics),'queries_hit_triggers':queries_hit_triggers},'startup':source.cleaning_startup,
         'selections':source.condition_evidence,'conditions':result,'random_policy':'Fixed build hash seed. Native Unity random sequence is not matched.'},indent=2,allow_nan=False),encoding='utf-8')
     return result
 

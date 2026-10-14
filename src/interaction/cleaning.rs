@@ -47,6 +47,12 @@ struct WashEffect {
     elapsed: Option<f32>,
     emitter: [f64; 3],
 }
+struct Spray {
+    nozzle: Pose,
+    emitter: Vector,
+    rotation: Rotation,
+    particles: Vec<ParticleState>,
+}
 struct Contact {
     target: Option<Target>,
     collider: Option<ColliderHandle>,
@@ -68,10 +74,12 @@ pub struct ToolState {
     pub quantity: Option<f32>,
     pub color: Option<[f32; 4]>,
     pub disabled: bool,
+    pub valve: f32,
 }
 pub struct CleaningTools {
     pub states: Vec<ToolState>,
     contacts: Vec<Contact>,
+    sprays: Vec<Spray>,
     signals: Vec<ToolSignals>,
     bindings: HashMap<ColliderId, ConditionColliderBinding>,
     item_conditions: HashMap<ItemId, ConditionId>,
@@ -125,8 +133,49 @@ impl CleaningTools {
                 color: [1.; 4],
             });
         }
+        let mut sprays = Vec::with_capacity(reference.conditions.sprays.len());
+        for b in &reference.conditions.sprays {
+            let item = reference.items.iter().find(|i| i.id == b.item).unwrap();
+            let root = to_rapier(super::items::node_pose(reference, item.node)?);
+            let nozzle = root.inverse() * to_rapier(super::items::node_pose(reference, b.nozzle)?);
+            let emitter = Vector::from_array(b.particles[0].local_pose.translation);
+            let particles = b
+                .particles
+                .iter()
+                .enumerate()
+                .map(|(i, r)| {
+                    let mut r = r.clone();
+                    // Runtime owns the emitter pose and world rotation.
+                    r.local_pose.translation = [0.; 3];
+                    r.local_pose.rotation = [0., 0., 0., 1.];
+                    ParticleState::new(&r, b.source.path_id as u64 + i as u64)
+                })
+                .collect();
+            sprays.push(Spray {
+                nozzle,
+                emitter,
+                rotation: Rotation::from_xyzw(
+                    b.particles[0].local_pose.rotation[0],
+                    b.particles[0].local_pose.rotation[1],
+                    b.particles[0].local_pose.rotation[2],
+                    b.particles[0].local_pose.rotation[3],
+                ),
+                particles,
+            });
+            signals.push(ToolSignals {
+                item: b.item,
+                pose: from_rapier(&(root * nozzle)),
+                force: 0.,
+                doing_work: false,
+                playing: false,
+                voice_gain: 0.,
+                emission: [0.; 2],
+                color: b.startup_color,
+            });
+        }
         Ok(Self {
             contacts,
+            sprays,
             signals,
             wash_colliders: Vec::with_capacity(
                 reference
@@ -195,12 +244,14 @@ impl CleaningTools {
                     quantity: None,
                     color: None,
                     disabled: t.disabled,
+                    valve: 0.,
                 })
                 .chain(reference.conditions.sprays.iter().map(|t| ToolState {
                     item: t.item,
                     quantity: Some(t.startup_quantity),
                     color: Some(t.startup_color),
                     disabled: false,
+                    valve: t.startup_valve,
                 }))
                 .collect(),
         })
@@ -252,6 +303,13 @@ impl CleaningTools {
     pub fn particles(&self, tool: usize, particle: usize) -> &[crate::weather::ParticleOutput] {
         self.contacts[tool].particles[particle].particles()
     }
+    pub fn spray_particles(
+        &self,
+        tool: usize,
+        particle: usize,
+    ) -> &[crate::weather::ParticleOutput] {
+        self.sprays[tool].particles[particle].particles()
+    }
     pub fn wash_particles(
         &self,
         wash: usize,
@@ -260,10 +318,12 @@ impl CleaningTools {
         self.washes[wash].particles[particle].particles()
     }
     pub fn reset_contact(&mut self) {
-        for (c, s) in self.contacts.iter_mut().zip(&mut self.signals) {
+        for c in &mut self.contacts {
             c.target = None;
             c.collider = None;
             c.sampled = false;
+        }
+        for s in &mut self.signals {
             s.force = 0.;
             s.doing_work = false;
             s.playing = false;
@@ -316,6 +376,43 @@ impl CleaningTools {
             .or(b.forwarded_condition);
         condition.map(Target::Surface)
     }
+    fn paint_target(
+        &self,
+        collider: ColliderId,
+        items: &ItemStore,
+        parts: &PartAttachments,
+        reference: &ReferenceManifest,
+    ) -> Option<ConditionId> {
+        let b = self.bindings.get(&collider)?;
+        b.ancestor_condition
+            .or_else(|| {
+                if let Some(slot) = b.installed_part_slot {
+                    return parts
+                        .slot_item(slot)
+                        .and_then(|i| self.item_conditions.get(&i).copied());
+                }
+                if let Some(slot) = b.installed_wheel_slot {
+                    return items
+                        .iter()
+                        .find(|i| i.location == ItemLocation::WheelSlot(slot))
+                        .and_then(|i| self.item_conditions.get(&i.id).copied());
+                }
+                if let Some(rim) = b.installed_tire_slot {
+                    return items
+                        .iter()
+                        .find(|i| {
+                            i.location == ItemLocation::Attached(rim)
+                                && reference.items.iter().any(|p| {
+                                    p.id == i.id
+                                        && matches!(p.kind, crate::reference::ItemKind::Tire)
+                                })
+                        })
+                        .and_then(|i| self.item_conditions.get(&i.id).copied());
+                }
+                None
+            })
+            .or(b.pickup_condition)
+    }
     pub fn advance(
         &mut self,
         frame: ToolFrame,
@@ -342,12 +439,6 @@ impl CleaningTools {
             let own_body = items.get(b.item).and_then(|i| i.body);
             let filter = |_: ColliderHandle, c: &rapier3d::prelude::Collider| {
                 c.is_enabled()
-                    && (!c.is_sensor()
-                        || self
-                            .bindings
-                            .get(&ColliderId((c.user_data >> 64) as u32))
-                            .and_then(|b| b.wash)
-                            .is_some())
                     && (own_body.is_none() || c.parent() != own_body)
                     && c.collision_groups().memberships.bits() & b.mask != 0
                     && !c.shape().contains_point(c.position(), ray.origin)
@@ -558,6 +649,7 @@ impl CleaningTools {
                 );
             }
         }
+        self.advance_sprays(frame, reference, conditions, items, physics, parts);
         for effect in &mut self.washes {
             if let Some(elapsed) = effect.elapsed.as_mut() {
                 for (index, p) in effect.particles.iter_mut().enumerate() {
@@ -576,6 +668,105 @@ impl CleaningTools {
             }
         }
         reserved
+    }
+    fn advance_sprays(
+        &mut self,
+        frame: ToolFrame,
+        reference: &ReferenceManifest,
+        conditions: &mut ConditionStore,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+        parts: &PartAttachments,
+    ) {
+        let offset = self.contacts.len();
+        for index in 0..self.sprays.len() {
+            let b = &reference.conditions.sprays[index];
+            let root = to_rapier(items.get(b.item).expect("checked spray owner").pose);
+            let nozzle = root * self.sprays[index].nozzle;
+            let emitter = root * self.sprays[index].emitter;
+            let firing = frame.held == Some(b.item) && frame.lmb;
+            let ti = offset + index;
+            let color = self.states[ti].color.expect("spray color");
+            let mut rotation = root.rotation * self.sprays[index].rotation;
+            let mut painted = false;
+            if firing {
+                let state = &mut self.states[ti];
+                state.valve += (1. - state.valve) * (b.valve_speed * frame.dt).clamp(0., 1.);
+                let quantity = state.quantity.as_mut().expect("spray quantity");
+                if *quantity > 0. {
+                    // Fire checks ammo, consumes it, then paints even on the last shot.
+                    *quantity -= (b.paint_loss * state.valve * frame.dt).clamp(0., *quantity);
+                    rotation = nozzle.rotation;
+                    let ray = Ray::new(nozzle.translation, nozzle.rotation * -Vector::Z);
+                    let own = items.get(b.item).and_then(|i| i.body);
+                    let filter = |_: ColliderHandle, c: &rapier3d::prelude::Collider| {
+                        c.is_enabled()
+                            && (own.is_none() || c.parent() != own)
+                            && c.collision_groups().memberships.bits() & b.mask != 0
+                            && !c.shape().contains_point(c.position(), ray.origin)
+                    };
+                    if let Some((handle, hit)) = physics
+                        .queries(QueryFilter::default().predicate(&filter))
+                        .cast_ray_and_get_normal(&ray, b.distance, true)
+                    {
+                        let id =
+                            ColliderId((physics.rapier().colliders[handle].user_data >> 64) as u32);
+                        if let Some(target) = self.paint_target(id, items, parts, reference) {
+                            let previous = conditions.get(target).color;
+                            let falloff = ((hit.time_of_impact - b.distance) / (1. - b.distance))
+                                .clamp(0., 1.);
+                            let factor = (b.color_lerp * frame.dt * falloff).clamp(0., 1.);
+                            painted = conditions.paint(
+                                target,
+                                std::array::from_fn(|j| {
+                                    previous[j] + (color[j] - previous[j]) * factor
+                                }),
+                            );
+                        }
+                        let forward =
+                            (ray.point_at(hit.time_of_impact) - emitter).normalize_or_zero();
+                        let right = forward
+                            .cross(nozzle.rotation * Vector::Y)
+                            .normalize_or_zero();
+                        if right.length_squared() > 0. {
+                            rotation = Rotation::from_mat3(&rapier3d::math::Matrix::from_cols(
+                                right,
+                                right.cross(forward),
+                                -forward,
+                            ));
+                        }
+                    }
+                }
+            }
+            self.sprays[index].rotation = root.rotation.inverse() * rotation;
+            let state = &mut self.states[ti];
+            let signal = &mut self.signals[ti];
+            // Update reads the open valve before it performs release interpolation.
+            let emitting = state.quantity.unwrap() > 0. && state.valve > 0.;
+            signal.pose = from_rapier(&Pose::from_parts(emitter, rotation));
+            signal.color = color;
+            signal.doing_work = painted;
+            signal.playing = emitting && b.voice.is_some();
+            signal.voice_gain = if emitting {
+                state.valve * b.max_volume
+            } else {
+                0.
+            };
+            signal.emission = [if emitting { state.valve } else { 0. }, 0.];
+            for particle in &mut self.sprays[index].particles {
+                particle.rotation = rotation;
+                particle.start_color = Some(color);
+                particle.advance(
+                    frame.dt,
+                    std::array::from_fn(|j| frame.origin[j] + f64::from(emitter[j])),
+                    signal.emission[0],
+                    &[],
+                );
+            }
+            if !firing {
+                state.valve += (0. - state.valve) * (b.valve_speed * frame.dt).clamp(0., 1.);
+            }
+        }
     }
     pub fn get(&self, item: ItemId) -> Option<&ToolState> {
         self.states.iter().find(|t| t.item == item)
@@ -644,6 +835,17 @@ impl CleaningTools {
             t.quantity = v.quantity;
             t.color = v.color;
             t.disabled = v.disabled;
+            t.valve = 0.;
+        }
+        for signal in &mut self.signals {
+            if let Some(color) = self
+                .states
+                .iter()
+                .find(|t| t.item == signal.item)
+                .and_then(|t| t.color)
+            {
+                signal.color = color;
+            }
         }
         Ok(())
     }

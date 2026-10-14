@@ -402,3 +402,405 @@ fn part_remove_reinstall_does_not_override_a_chassis_wash() {
     assert!(g.physics.rapier().colliders[handle].is_enabled());
     assert!(!g.physics.rapier().bodies[body].is_enabled());
 }
+fn spray_setup() -> (
+    ReferenceManifest,
+    CleaningTools,
+    ConditionStore,
+    ItemStore,
+    PhysicsWorld,
+    PartAttachments,
+) {
+    let (mut r, _, _, mut items, physics, parts) = setup();
+    let spray = &mut r.conditions.sprays[0];
+    spray.startup_quantity = 100.;
+    spray.startup_valve = 0.;
+    spray.startup_color = [1., 0., 0., 1.];
+    items.get_mut(spray.item).unwrap().pose = VehiclePose {
+        position: [1000., 1000., 1001.],
+        rotation: [0., 0., 0., 1.],
+    };
+    r.conditions.surfaces[0].startup.color = [0., 0., 0., 1.];
+    for row in &mut r.conditions.repair_tables[0] {
+        row[0] = true;
+    }
+    let tools = CleaningTools::new(&r).unwrap();
+    let conditions = ConditionStore::new(&r).unwrap();
+    (r, tools, conditions, items, physics, parts)
+}
+fn spray_frame(r: &ReferenceManifest) -> ToolFrame {
+    let mut f = frame(r, 10.);
+    f.held = Some(r.conditions.sprays[0].item);
+    f
+}
+#[test]
+fn spray_consumes_paint_on_miss() {
+    let (r, mut t, mut c, mut i, p, a) = spray_setup();
+    i.get_mut(r.conditions.sprays[0].item)
+        .unwrap()
+        .pose
+        .position[0] += 10.;
+    t.advance(spray_frame(&r), &r, &mut c, &i, &p, &a);
+    let state = t.get(r.conditions.sprays[0].item).unwrap();
+    assert!((state.quantity.unwrap() - 99.55).abs() < 1e-5);
+    assert_eq!(state.valve, 1.);
+}
+#[test]
+fn spray_blends_by_source_distance() {
+    let (r, mut t, mut c, i, p, a) = spray_setup();
+    t.advance(spray_frame(&r), &r, &mut c, &i, &p, &a);
+    assert!((c.get(r.conditions.surfaces[0].id).color[0] - 0.0125).abs() < 1e-5);
+}
+#[test]
+fn empty_spray_stops_color_sound_and_particles() {
+    let (r, mut t, mut c, i, p, a) = spray_setup();
+    t.states.last_mut().unwrap().quantity = Some(0.);
+    t.advance(spray_frame(&r), &r, &mut c, &i, &p, &a);
+    let s = t.signals().last().unwrap();
+    assert!(!s.playing);
+    assert_eq!(s.emission, [0.; 2]);
+    assert_eq!(c.get(r.conditions.surfaces[0].id).color, [0., 0., 0., 1.]);
+}
+#[test]
+fn unsupported_surface_still_consumes_paint() {
+    let (mut r, _, _, i, p, a) = spray_setup();
+    for row in &mut r.conditions.repair_tables[0] {
+        row[0] = false;
+    }
+    let mut t = CleaningTools::new(&r).unwrap();
+    let mut c = ConditionStore::new(&r).unwrap();
+    t.advance(spray_frame(&r), &r, &mut c, &i, &p, &a);
+    assert!(
+        (t.get(r.conditions.sprays[0].item)
+            .unwrap()
+            .quantity
+            .unwrap()
+            - 99.55)
+            .abs()
+            < 1e-5
+    );
+    assert_eq!(c.get(r.conditions.surfaces[0].id).color, [0., 0., 0., 1.]);
+}
+#[test]
+fn spray_release_closes_valve() {
+    let (r, mut t, mut c, i, p, a) = spray_setup();
+    t.advance(spray_frame(&r), &r, &mut c, &i, &p, &a);
+    let quantity = t.states.last().unwrap().quantity;
+    let mut f = spray_frame(&r);
+    f.lmb = false;
+    f.dt = 0.05;
+    t.advance(f, &r, &mut c, &i, &p, &a);
+    assert_eq!(t.states.last().unwrap().valve, 0.5);
+    assert_eq!(t.states.last().unwrap().quantity, quantity);
+    assert_eq!(t.signals().last().unwrap().voice_gain, 0.5);
+}
+#[test]
+fn saved_spray_keeps_color_and_quantity() {
+    let (r, mut t, _, _, _, _) = spray_setup();
+    let color = r.conditions.sprays[0]
+        .color_palettes
+        .values()
+        .next()
+        .unwrap()[0];
+    let state = t.states.last_mut().unwrap();
+    state.quantity = Some(37.5);
+    state.color = Some(color);
+    let saved = t.capture_save(&r).unwrap();
+    let mut restored = CleaningTools::new(&r).unwrap();
+    restored.restore_save(&r, &saved).unwrap();
+    let state = restored.get(r.conditions.sprays[0].item).unwrap();
+    assert_eq!(state.quantity, Some(37.5));
+    assert_eq!(state.color, Some(color));
+    assert_eq!(restored.signals().last().unwrap().color, color);
+}
+#[test]
+fn last_paint_shot_changes_color_but_stops_effects() {
+    let (r, mut t, mut c, i, p, a) = spray_setup();
+    t.states.last_mut().unwrap().quantity = Some(0.01);
+    t.advance(spray_frame(&r), &r, &mut c, &i, &p, &a);
+    assert_eq!(t.states.last().unwrap().quantity, Some(0.));
+    assert!(c.get(r.conditions.surfaces[0].id).color[0] > 0.);
+    assert!(!t.signals().last().unwrap().playing);
+    assert_eq!(t.signals().last().unwrap().emission, [0.; 2]);
+    assert!(t.spray_particles(0, 0).is_empty());
+}
+#[test]
+fn solid_and_source_trigger_hits_block_spray() {
+    for sensor in [false, true] {
+        let (r, mut t, mut c, i, mut p, a) = spray_setup();
+        p.rapier_mut().colliders.insert(
+            ColliderBuilder::cuboid(2., 2., 0.1)
+                .translation(rapier3d::math::Vector::new(1000., 1000., 1000.5))
+                .sensor(sensor),
+        );
+        p.refresh_queries();
+        t.advance(spray_frame(&r), &r, &mut c, &i, &p, &a);
+        assert_eq!(c.get(r.conditions.surfaces[0].id).color, [0., 0., 0., 1.]);
+        assert!((t.states.last().unwrap().quantity.unwrap() - 99.55).abs() < 1e-5);
+    }
+}
+#[test]
+fn spray_pause_freezes_valve_and_drop_releases_without_loss() {
+    let (r, mut t, mut c, i, p, a) = spray_setup();
+    t.advance(spray_frame(&r), &r, &mut c, &i, &p, &a);
+    let quantity = t.states.last().unwrap().quantity;
+    let mut f = spray_frame(&r);
+    f.active = false;
+    f.dt = 10.;
+    t.advance(f, &r, &mut c, &i, &p, &a);
+    assert_eq!(t.states.last().unwrap().valve, 1.);
+    assert_eq!(t.states.last().unwrap().quantity, quantity);
+    assert!(!t.signals().last().unwrap().playing);
+    f.active = true;
+    f.held = None;
+    f.dt = 0.05;
+    t.advance(f, &r, &mut c, &i, &p, &a);
+    assert_eq!(t.states.last().unwrap().valve, 0.5);
+    assert_eq!(t.states.last().unwrap().quantity, quantity);
+    assert!(t.signals().last().unwrap().playing);
+}
+#[test]
+fn spray_uses_pickup_condition_only_without_direct_ancestor() {
+    let (mut r, _, _, i, p, a) = spray_setup();
+    let binding = r.conditions.collider_bindings.last_mut().unwrap();
+    binding.pickup_condition = binding.ancestor_condition.take();
+    let mut t = CleaningTools::new(&r).unwrap();
+    let mut c = ConditionStore::new(&r).unwrap();
+    t.advance(spray_frame(&r), &r, &mut c, &i, &p, &a);
+    assert!((c.get(r.conditions.surfaces[0].id).color[0] - 0.0125).abs() < 1e-5);
+}
+#[test]
+fn source_spray_color_reaches_particles_and_signal() {
+    let (r, mut t, mut c, i, p, a) = spray_setup();
+    t.advance(spray_frame(&r), &r, &mut c, &i, &p, &a);
+    assert_eq!(t.signals().last().unwrap().color, [1., 0., 0., 1.]);
+    assert!(!t.spray_particles(0, 0).is_empty());
+    for particle in t.spray_particles(0, 0) {
+        assert_eq!(particle.color[1], 0.);
+        assert_eq!(particle.color[2], 0.);
+    }
+}
+
+#[test]
+fn source_non_wash_sensor_blocks_brush() {
+    let (r, mut t, mut c, i, mut p, a) = setup();
+    p.rapier_mut().colliders.insert(
+        ColliderBuilder::cuboid(2., 2., 0.1)
+            .translation(rapier3d::math::Vector::new(1000., 1000., 999.5))
+            .sensor(true),
+    );
+    p.refresh_queries();
+    for x in [0., 0.1, 0.2, 0.3] {
+        t.advance(frame(&r, x), &r, &mut c, &i, &p, &a);
+    }
+    assert_eq!(c.get(r.conditions.surfaces[0].id).repair_progress, 0.);
+    assert!(!t.signals()[0].doing_work);
+}
+
+#[test]
+fn looked_at_can_count_has_a_separate_owner_from_held_tool() {
+    use my_summer_slop::{interaction::AimTarget, starting_area::GarageRuntime};
+    let mut r = common::reference();
+    let mut other = r.conditions.sprays[0].clone();
+    let item = r.items.iter().find(|i| i.pickup.is_some()).unwrap();
+    other.source = SourceId {
+        file: "spray-hud-fixture".into(),
+        path_id: 1,
+    };
+    other.item = item.id;
+    other.body = item.body;
+    other.pickup = item.pickup.as_ref().unwrap().source.clone();
+    other.nozzle = item.node;
+    other.renderer_node = item.node;
+    let other_item = other.item;
+    r.conditions.sprays.push(other);
+    for held in [r.conditions.brushes[0].item, r.conditions.sprays[0].item] {
+        let mut g = GarageRuntime::new(&r).unwrap();
+        g.area
+            .interaction
+            .pickup_item(
+                held,
+                [10., 2., -1.],
+                &g.area.player,
+                &mut g.area.items,
+                &mut g.physics,
+            )
+            .unwrap();
+        g.area
+            .interaction
+            .cleaning
+            .states
+            .iter_mut()
+            .find(|t| t.item == other_item)
+            .unwrap()
+            .quantity = Some(37.5);
+        let aim = common::resolved(Some(AimTarget {
+            item: other_item,
+            collider: g.physics.rapier().colliders.iter().next().unwrap().0,
+            distance: 1.,
+            point: [0.; 3],
+            slot: None,
+        }));
+        let available = g.area.interaction.available_actions(
+            &aim,
+            &g.area.player,
+            &g.area.items,
+            &g.physics,
+            Default::default(),
+        );
+        assert_eq!(available.item, Some(held));
+        assert_eq!(
+            g.area.interaction.paint_feedback(&aim, &r),
+            Some((37.5, 100.))
+        );
+        let own = common::resolved(Some(AimTarget {
+            item: held,
+            collider: g.physics.rapier().colliders.iter().next().unwrap().0,
+            distance: 1.,
+            point: [0.; 3],
+            slot: None,
+        }));
+        assert_eq!(g.area.interaction.paint_feedback(&own, &r), None);
+    }
+}
+
+#[test]
+fn painted_virtual_part_keeps_color_through_remove_and_reinstall() {
+    use my_summer_slop::{interaction::items::ItemLocation, starting_area::GarageRuntime};
+    let mut r = common::reference();
+    let initial = GarageRuntime::new(&r).unwrap();
+    let part = r
+        .parts
+        .iter()
+        .find(|p| {
+            initial
+                .area
+                .interaction
+                .parts
+                .can_remove(p.item, &initial.area.player, &initial.area.items)
+                .is_ok()
+        })
+        .unwrap()
+        .item;
+    let ItemLocation::PartSlot(slot) = initial.area.items.get(part).unwrap().location else {
+        panic!("mounted part")
+    };
+    let target = r
+        .conditions
+        .surfaces
+        .iter()
+        .find(|s| s.item == Some(part))
+        .map(|s| s.id)
+        .unwrap_or_else(|| common::add_condition_owner(&mut r, part));
+    let surface = r
+        .conditions
+        .surfaces
+        .iter_mut()
+        .find(|s| s.id == target)
+        .unwrap();
+    surface.startup.color = [0., 0., 0., 1.];
+    surface.permission_index = 0;
+    for row in &mut r.conditions.repair_tables[0] {
+        row[0] = true;
+    }
+    r.conditions.sprays[0].startup_color = [1., 0., 0., 1.];
+    let collider = r.colliders[0].id;
+    r.conditions
+        .collider_bindings
+        .push(ConditionColliderBinding {
+            collider,
+            source: r.colliders[0].source.clone(),
+            ancestor_condition: None,
+            pickup_condition: None,
+            forwarded_condition: None,
+            installed_slot_source: Some(
+                r.part_slots
+                    .iter()
+                    .find(|s| s.id == slot)
+                    .unwrap()
+                    .source
+                    .clone(),
+            ),
+            installed_part_slot: Some(slot),
+            installed_wheel_slot: None,
+            installed_tire_slot: None,
+            wash: None,
+        });
+    let mut g = GarageRuntime::new(&r).unwrap();
+    g.area
+        .items
+        .get_mut(r.conditions.sprays[0].item)
+        .unwrap()
+        .pose = VehiclePose {
+        position: [1000., 1000., 1001.],
+        rotation: [0., 0., 0., 1.],
+    };
+    g.physics.rapier_mut().colliders.insert(
+        ColliderBuilder::cuboid(2., 2., 0.1)
+            .translation(rapier3d::math::Vector::new(1000., 1000., 998.9))
+            .user_data(u128::from(collider.0) << 64),
+    );
+    g.physics.refresh_queries();
+    g.area.interaction.cleaning.advance(
+        spray_frame(&r),
+        &r,
+        &mut g.area.conditions,
+        &g.area.items,
+        &g.physics,
+        &g.area.interaction.parts,
+    );
+    let color = g.area.conditions.get(target).color;
+    assert!((color[0] - 0.0125).abs() < 1e-5);
+    common::detach(&mut g, part);
+    g.area.interaction.cleaning.advance(
+        spray_frame(&r),
+        &r,
+        &mut g.area.conditions,
+        &g.area.items,
+        &g.physics,
+        &g.area.interaction.parts,
+    );
+    assert_eq!(g.area.conditions.get(target).color, color);
+    g.area
+        .interaction
+        .parts
+        .install(part, slot, &mut g.area.items, &mut g.physics)
+        .unwrap();
+    g.area
+        .interaction
+        .parts
+        .mount_mechanism(part, &mut g.area.interaction.mechanisms);
+    g.area
+        .interaction
+        .sync_parts(&mut g.area.items, &mut g.physics)
+        .unwrap();
+    assert_eq!(g.area.conditions.get(target).color, color);
+    g.area.interaction.cleaning.advance(
+        spray_frame(&r),
+        &r,
+        &mut g.area.conditions,
+        &g.area.items,
+        &g.physics,
+        &g.area.interaction.parts,
+    );
+    assert!(g.area.conditions.get(target).color[0] > color[0]);
+    let ancestor = r.conditions.surfaces[0].id;
+    assert_ne!(ancestor, target);
+    let before = g.area.conditions.get(ancestor).color;
+    let part_color = g.area.conditions.get(target).color;
+    r.conditions
+        .collider_bindings
+        .last_mut()
+        .unwrap()
+        .ancestor_condition = Some(ancestor);
+    let mut tools = CleaningTools::new(&r).unwrap();
+    tools.advance(
+        spray_frame(&r),
+        &r,
+        &mut g.area.conditions,
+        &g.area.items,
+        &g.physics,
+        &g.area.interaction.parts,
+    );
+    assert_ne!(g.area.conditions.get(ancestor).color, before);
+    assert_eq!(g.area.conditions.get(target).color, part_color);
+}

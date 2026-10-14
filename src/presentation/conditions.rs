@@ -752,6 +752,19 @@ pub(crate) fn sync_conditions(world: &mut World) {
                 world,
             );
         }
+        for (item, receivers) in &visuals.sprays {
+            let color = world
+                .resource::<Drive>()
+                .runtime
+                .area
+                .interaction
+                .cleaning
+                .get(*item)
+                .unwrap()
+                .color
+                .unwrap();
+            apply_spray(receivers, color, visuals.bank, world, false);
+        }
         visuals.apply_visibility(world);
         for (index, (_, model, _)) in visuals.tools.iter().enumerate() {
             let Some(model) = model else { continue };

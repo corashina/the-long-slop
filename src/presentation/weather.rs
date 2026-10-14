@@ -152,6 +152,7 @@ impl AsBindGroup for ParticleMaterial {
 enum Owner {
     Urine,
     Brush(usize),
+    Spray(usize),
     Wash(usize),
     Outlet(u32),
     Storm(crate::weather::StormId),
@@ -403,6 +404,19 @@ fn sync_weather(
                 );
             }
         }
+        for (tool, b) in reference.0.conditions.sprays.iter().enumerate() {
+            for (particle, p) in b.particles.iter().enumerate() {
+                add_group(
+                    &mut state,
+                    Owner::Spray(tool),
+                    particle,
+                    p,
+                    &lighting,
+                    &mut commands,
+                    &mut materials,
+                );
+            }
+        }
     }
     for g in &mut state.groups {
         if let Owner::Storm(id) = g.owner {
@@ -438,6 +452,7 @@ fn sync_weather(
     let state = &mut *state;
     for g in &mut state.groups {
         let p = match g.owner {
+            Owner::Spray(tool) => &reference.0.conditions.sprays[tool].particles[g.source],
             Owner::Brush(tool) => &reference.0.conditions.brushes[tool].particles[g.source],
             Owner::Wash(wash) => &reference.0.conditions.washes[wash].particles[g.source],
             _ => &r.particles[g.source],
@@ -451,7 +466,7 @@ fn sync_weather(
                 .fluid_particles()
                 .find(|(key, _)| key.0 == id)
                 .map(|(_, p)| p),
-            Owner::Storm(_) | Owner::Brush(_) | Owner::Wash(_) => None,
+            Owner::Storm(_) | Owner::Brush(_) | Owner::Spray(_) | Owner::Wash(_) => None,
         };
         let splash = p.role.starts_with("splash") || p.role == "urine_splash";
         let particles = if let Owner::Wash(wash) = g.owner {
@@ -462,6 +477,15 @@ fn sync_weather(
                     .interaction
                     .cleaning
                     .wash_particles(wash, g.source),
+            )
+        } else if let Owner::Spray(tool) = g.owner {
+            Some(
+                drive
+                    .runtime
+                    .area
+                    .interaction
+                    .cleaning
+                    .spray_particles(tool, g.source),
             )
         } else if let Owner::Brush(tool) = g.owner {
             Some(

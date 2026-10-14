@@ -19,6 +19,9 @@ pub fn display_name<'a>(
             "Sponge"
         };
     }
+    if reference.conditions.sprays.iter().any(|t| t.item == id) {
+        return "Paint";
+    }
     let label = match item.name.as_str() {
         "GarageDoorRightCollider" | "GarageDoorLeftCollider"
             if reference.mechanisms.iter().any(|m| m.item == id) =>

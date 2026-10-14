@@ -821,6 +821,18 @@ impl GarageRuntime {
                     audio.voice(voice, s.playing, s.voice_gain, 1.);
                 }
             }
+            for (b, s) in reference.conditions.sprays.iter().zip(
+                self.area
+                    .interaction
+                    .cleaning
+                    .signals()
+                    .iter()
+                    .skip(reference.conditions.brushes.len()),
+            ) {
+                if let Some(voice) = b.voice {
+                    audio.voice(voice, s.playing, s.voice_gain, 1.);
+                }
+            }
         }
     }
 

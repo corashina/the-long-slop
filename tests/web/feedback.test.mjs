@@ -62,3 +62,13 @@ test('radio_feedback_uses_source_values_without_playback',async()=>{
  r.radioFrequency=undefined;m.update(r);assert.equal(m.fluidText,'');
  r.context=2;m.update(r);assert.equal(m.targetName,'RadioColVolume');assert.equal(m.fluidText,'');a.dispose();
 });
+test('source_paint_count_is_bare_and_hidden_during_carry',()=>{
+ const r={...tank(37.5,100),context:14,hasName:true,fluidName:'Paint'};
+ assert.equal(formatTank(r),'38');
+ assert.equal(formatTank({...r,amount:0}),'0');
+ assert.equal(formatTank({...r,noText:true}),'');
+ const state=new FeedbackState(); state.update({...r,actions:4,carrying:false,name:'Paint'});
+ assert.equal(state.fluidText,'38');
+ state.update({...r,noText:true,actions:8,carrying:true,name:'Paint'});
+ assert.equal(state.fluidText,'');
+});

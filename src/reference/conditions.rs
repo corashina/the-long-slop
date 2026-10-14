@@ -131,6 +131,9 @@ pub struct SprayReference {
     pub ammo: SourceId,
     pub color_source: SourceId,
     pub float_quantity: bool,
+    pub hide_look_at_count: bool,
+    pub hide_carried_count: bool,
+    pub no_per_show: bool,
     pub startup_quantity: f32,
     pub maximum_quantity: f32,
     pub startup_color: [f32; 4],
@@ -547,6 +550,7 @@ impl ConditionRecord {
             )?;
             voice(&t.source, t.voice, &t.voice_source)?;
             check(&t.source, t.voice.is_some(), "voice")?;
+            check(&t.source, t.particles.len() == 1, "spray particle owner")?;
             for p in &t.particles {
                 validate_particle(&t.source, p, r)?;
             }

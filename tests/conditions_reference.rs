@@ -100,6 +100,7 @@ fn invalid_palette_is_rejected() {
 #[test]
 fn invalid_spray_palette_index_and_empty_choices_are_rejected() {
     let mut r = common::reference();
+    let particles = r.conditions.sprays[0].particles.clone();
     r.conditions.sprays.clear();
     r.conditions.brushes.clear();
     let item = r.items.iter().find(|item| item.pickup.is_some()).unwrap();
@@ -109,13 +110,14 @@ fn invalid_spray_palette_index_and_empty_choices_are_rejected() {
             "source":identity,"item":item.id,"body":item.body,
             "pickup":item.pickup.as_ref().unwrap().source,"save":identity,
             "ammo":identity,"color_source":identity,"float_quantity":true,
+            "hide_look_at_count":false,"hide_carried_count":true,"no_per_show":true,
             "startup_quantity":100.,"maximum_quantity":100.,"startup_color":[1.,0.,0.,1.],
             "authored_color_set":false,"startup_palette":"paint","startup_color_index":1,
             "color_types":["paint"],"colors":[],"color_palettes":{"paint":[[1.,0.,0.,1.]]},
             "nozzle":item.node,"renderer":identity,"renderer_node":item.node,
             "distance":3.,"mask":8552449,"color_lerp":0.25,"paint_loss":4.5,
             "valve_speed":10.,"startup_valve":0.,"rate":250.,"max_volume":1.,
-            "text":0,"start_speed":1.,"voice_source":r.audio["voices"][0]["source"],"voice":r.audio["voices"][0]["id"],"particles":[]
+            "text":0,"start_speed":1.,"voice_source":r.audio["voices"][0]["source"],"voice":r.audio["voices"][0]["id"],"particles":particles
         }))
         .unwrap();
     r.conditions.sprays.push(tool);

@@ -47,6 +47,7 @@ pub enum FeedbackContext {
     RadioVolume = 11,
     RadioTuning = 12,
     Food = 13,
+    Paint = 14,
 }
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ActionAvailability {
@@ -489,6 +490,22 @@ impl InteractionState {
         }
         a
     }
+    pub fn paint_feedback(
+        &self,
+        aim: &ResolvedAim,
+        reference: &ReferenceManifest,
+    ) -> Option<(f32, f32)> {
+        let item = aim.focus_target?.item;
+        let tool = reference
+            .conditions
+            .sprays
+            .iter()
+            .find(|t| t.item == item)?;
+        if tool.hide_look_at_count || (self.held() == Some(item) && tool.hide_carried_count) {
+            return None;
+        }
+        Some((self.cleaning.get(item)?.quantity?, tool.maximum_quantity))
+    }
     pub fn feedback<'a>(
         &self,
         a: &ActionAvailability,
@@ -514,7 +531,14 @@ impl InteractionState {
             });
         InteractionFeedback {
             actions: a.actions,
-            context: a.context,
+            context: if a
+                .item
+                .is_some_and(|id| reference.conditions.sprays.iter().any(|t| t.item == id))
+            {
+                FeedbackContext::Paint
+            } else {
+                a.context
+            },
             name,
             carrying: self.held().is_some(),
             fluid,
