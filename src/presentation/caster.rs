@@ -178,6 +178,7 @@ impl CasterPasses {
                 );
                 descriptor.layout[0] = super::source_lighting::source_camera_layout();
                 descriptor.layout[1] = caster_layout();
+                descriptor.layout[3] = super::caster_material::layout();
                 descriptor.multisample = MultisampleState::default();
                 descriptor.vertex.shader = shader.clone();
                 descriptor.vertex.entry_point = Some("vertex".into());

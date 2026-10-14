@@ -1060,6 +1060,11 @@ pub struct SourceMaterial {
     pub base: StandardMaterial,
     pub extension: SourceExtension,
 }
+impl SourceMaterial {
+    pub(crate) fn caster_data(&self) -> SourceUniform {
+        self.extension.surface.data
+    }
+}
 impl AsBindGroup for SourceMaterial {
     type Data = (
         <StandardMaterial as AsBindGroup>::Data,

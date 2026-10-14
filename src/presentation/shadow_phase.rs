@@ -2,7 +2,7 @@
 use super::caster::CasterViews;
 use bevy::ecs as bevy_ecs;
 use bevy::ecs::{query::ROQueryItem, system::SystemParamItem};
-use bevy::pbr::{DrawMesh, SetMaterialBindGroup, SetMeshBindGroup};
+use bevy::pbr::{DrawMesh, SetMeshBindGroup};
 use bevy::prelude::*;
 use bevy::render::{
     render_phase::*, render_resource::CachedRenderPipelineId, sync_world::MainEntity,
@@ -155,7 +155,7 @@ type DrawSourceShadow = (
     MarkDraw<false>,
     super::source_lighting::SetSourceViewCamera,
     SetMeshBindGroup<2>,
-    SetMaterialBindGroup<3>,
+    super::caster_material::SetCasterMaterial,
     DrawMesh,
     MarkDraw<true>,
 );
