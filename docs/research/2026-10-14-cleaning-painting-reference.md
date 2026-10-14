@@ -161,6 +161,29 @@ Color updates write retained receiver and caster buffers through RenderQueue.
 The existing weather and audio owners prepare and update tool effects.
 The implementation adds no frame material, buffer, binding, or effect pool setup.
 
+## Selected spray particle motion and collision
+
+Spray controllers `level1:73834/73835` select particle records `level1:58926/58927`.
+The retained shared ParticleState pool applies local XYZ velocity and Initial inherited emitter velocity, with multiplier 0.5.
+Each local XYZ channel draws between checked constants +0.1 and -0.1. Orbital and radial channels are zero.
+The owner retains authored emitter translation and rotation. Nozzle aiming overrides particle emission rotation.
+Rapier swept spheres use mask 10127377, radius scale 1, bounce 0.4, dampen 0.3, and lifetime loss 0.5.
+The source mask includes layer 0 on each can. We add no own-body, brush-target, or interior-point filter.
+The shared collision route removes initial penetration, as the existing FluidContact route does.
+Pause, drop, load, and origin changes reset emitter history and avoid false inherited motion.
+Contact resets preserve live pool contents. Runtime Load rebuilds transient pools.
+The shared owner retains particle capacity and samples random channel values once per particle.
+Native collision-cache ordering, collision messages, and world tank-fill callbacks remain outside this route.
+We retain FluidContact's non-sensor sweep filter as an explicit adaptation. Selected spray TriggerModule is disabled.
+We do not derive particle filtering from PhysicsManager's ray trigger setting.
+The [Unity 2021.3 Collision manual](https://docs.unity3d.com/2021.3/Documentation/Manual/PartSysCollisionModule.html) defines world mode, masks, and dynamic colliders.
+It does not specify trigger membership. Native particle trigger membership needs a matched source check.
+
+The controller accepted two bounded shared-renderer deferrals as known visual differences.
+Spray material `sharedassets1.assets:481` lacks scene-color refraction, despite checked distortion strength 50.
+Brush material `sharedassets1.assets:50` lacks sampled-depth soft-particle fading. Intersections keep hard edges.
+The shared rendering work owns these changes. We keep the roadmap Partial and make no active/native parity claim.
+
 ## Final acceptance package and limits
 
 The final Task 4 fix package uses code head `6ba1886`.

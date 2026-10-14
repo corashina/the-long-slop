@@ -43,7 +43,10 @@ Brush, Sponge, and Paint are port item labels. Wash and Scrub use checked native
 
 The isolated cleaning branch passed menu readiness checks on its final package.
 Active tool use, both-car driving, retained effect counts, and matched source views remain unverified.
-The roadmap keeps Cleaning and painting Partial until those checks pass.
+Spray particles apply source local velocity, inherited emitter motion, and masked surface collision through the shared particle pool.
+Spray scene-color refraction and brush soft-particle depth fading remain bounded shared-renderer deferrals.
+These known visual differences keep background refraction absent and brush intersections hard.
+The roadmap keeps Cleaning and painting Partial until the required checks and shared-renderer work pass.
 
 Survival includes health, food, water, bladder, bowel, sausage, toilet actions, healing, starvation, and death.
 Sleep follows source eligibility, hold progress, wake, and clock rules.

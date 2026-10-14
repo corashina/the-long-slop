@@ -272,6 +272,7 @@ impl WeatherState {
         player: [f64; 3],
         night: f32,
         shelters: &[ShelterVolume],
+        physics: &PhysicsWorld,
     ) {
         for storm in &mut self.storms {
             let small = std::array::from_fn(|i| {
@@ -293,7 +294,7 @@ impl WeatherState {
                     let day = first[j] + (second[j] - first[j]) * draw;
                     day + (reference.storm.night_color[j] - day) * night
                 }));
-                p.origin = self.origin;
+                p.set_origin(self.origin);
                 p.advance(
                     dt,
                     if i == 0 {
@@ -307,6 +308,7 @@ impl WeatherState {
                         storm.strength
                     },
                     shelters,
+                    physics,
                 );
             }
             storm.last_player = player;

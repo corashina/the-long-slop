@@ -121,11 +121,13 @@ impl FluidContact {
         }
         self.last_poured = poured.unwrap_or(0.);
         self.splash.rotation = cap_pose.rotation;
+        self.splash.set_origin(self.origin);
         self.splash.advance(
             dt,
             std::array::from_fn(|i| cap_pose.translation[i] as f64 + self.origin[i]),
             0.,
             &[],
+            physics,
         );
         let emitter = cap_pose
             * Pose::from_parts(

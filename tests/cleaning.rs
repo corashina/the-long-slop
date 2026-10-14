@@ -804,3 +804,61 @@ fn painted_virtual_part_keeps_color_through_remove_and_reinstall() {
     assert_ne!(g.area.conditions.get(ancestor).color, before);
     assert_eq!(g.area.conditions.get(target).color, part_color);
 }
+
+#[test]
+fn spray_lifecycle_resets_emitter_motion_without_erasing_particles() {
+    for reset in 0..4 {
+        let (mut r, _, mut conditions, mut items, physics, parts) = spray_setup();
+        let particle = &mut r.conditions.sprays[0].particles[0];
+        particle.rate_over_time = 10.;
+        particle
+            .curves
+            .get_mut("InitialModule.startSpeed")
+            .unwrap()
+            .scalar = 0.;
+        particle
+            .scalars
+            .insert("ShapeModule.radius.value".into(), 0.);
+        for name in ["VelocityModule.x", "VelocityModule.y", "VelocityModule.z"] {
+            particle.curves.get_mut(name).unwrap().mode = 0;
+            particle.curves.get_mut(name).unwrap().scalar = 0.;
+        }
+        let mut tools = CleaningTools::new(&r).unwrap();
+        tools.advance(
+            spray_frame(&r),
+            &r,
+            &mut conditions,
+            &items,
+            &physics,
+            &parts,
+        );
+        let original = tools.spray_particles(0, 0)[0];
+        match reset {
+            0 => {
+                let mut paused = spray_frame(&r);
+                paused.active = false;
+                tools.advance(paused, &r, &mut conditions, &items, &physics, &parts);
+            }
+            1 => tools.reset_contact(), // InteractionState calls this on drop.
+            2 => {
+                let save = tools.capture_save(&r).unwrap();
+                tools.restore_save(&r, &save).unwrap();
+            }
+            _ => {} // Origin change resets the shared pool in the next frame.
+        }
+        assert_eq!(
+            tools.spray_particles(0, 0)[0].absolute_position,
+            original.absolute_position
+        );
+        let mut frame = spray_frame(&r);
+        let item = items.get_mut(r.conditions.sprays[0].item).unwrap();
+        item.pose.position[0] += 1.;
+        if reset == 3 {
+            frame.origin = [10., 0., 0.];
+            item.pose.position[0] -= 10.;
+        }
+        tools.advance(frame, &r, &mut conditions, &items, &physics, &parts);
+        assert_eq!(tools.spray_particles(0, 0).len(), 2);
+        assert!((tools.spray_particles(0, 0)[1].absolute_position[0] - 1001.).abs() < 1e-5);
+    }
+}

@@ -79,7 +79,15 @@ Bevy can publish warnings at log level. The error query does not establish warni
 
 Earlier Task 2 diagnostic packages proved retained receiver/caster GPU identities, independent material changes, and candidate isolation.
 They retained 1118 meshes, 122 owners, 168 receivers, 1680 condition materials, 2266 source materials, and capacity 5812.
+First diagnostic WASM SHA256: `4aa3a23d50a0e68a4118f109018f065d570e0051b1d7b693a1fa3f23fa5d5379`.
+Overlap diagnostic WASM SHA256: `bd567814d33ef9b13e60e242bf84a539b6ad36dc2a6f95c4a0c51157e0e8077a`.
 Those named packages predate spray effects. They do not prove final can buffers or active particle/binding counts.
+
+The controller accepted two bounded shared-renderer deferrals. Both remain known visual differences.
+Spray material `sharedassets1.assets:481` lacks scene-color refraction; its checked distortion strength is 50.
+Brush material `sharedassets1.assets:50` lacks sampled-depth soft-particle fading; intersections keep hard edges.
+The shared rendering work must resolve these differences before matched source particle acceptance.
+We keep Cleaning and painting Partial.
 
 Complete the following route before marking the feature complete:
 
@@ -90,6 +98,8 @@ Complete the following route before marking the feature complete:
 - Measure final material, particle, and binding counts after repeated active work and load/restart.
 
 The fixed build hash color policy does not reproduce Unity's random sequence.
+The particle sweep retains the shared FluidContact non-sensor filter as an explicit adaptation.
+Native particle trigger membership needs matched source proof; ray queriesHitTriggers does not establish it.
 The controller owns independent whole-branch review and branch integration.
 
 ## Rendering merge: 2026-10-12

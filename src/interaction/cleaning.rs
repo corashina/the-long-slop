@@ -143,13 +143,7 @@ impl CleaningTools {
                 .particles
                 .iter()
                 .enumerate()
-                .map(|(i, r)| {
-                    let mut r = r.clone();
-                    // Runtime owns the emitter pose and world rotation.
-                    r.local_pose.translation = [0.; 3];
-                    r.local_pose.rotation = [0., 0., 0., 1.];
-                    ParticleState::new(&r, b.source.path_id as u64 + i as u64)
-                })
+                .map(|(i, r)| ParticleState::new(r, b.source.path_id as u64 + i as u64))
                 .collect();
             sprays.push(Spray {
                 nozzle,
@@ -322,6 +316,19 @@ impl CleaningTools {
             c.target = None;
             c.collider = None;
             c.sampled = false;
+            for p in &mut c.particles {
+                p.reset_emitter();
+            }
+        }
+        for spray in &mut self.sprays {
+            for p in &mut spray.particles {
+                p.reset_emitter();
+            }
+        }
+        for wash in &mut self.washes {
+            for p in &mut wash.particles {
+                p.reset_emitter();
+            }
         }
         for s in &mut self.signals {
             s.force = 0.;
@@ -641,11 +648,13 @@ impl CleaningTools {
             s.pose = from_rapier(&c.model);
             for (pi, p) in c.particles.iter_mut().enumerate() {
                 p.rotation = c.model.rotation;
+                p.set_origin(frame.origin);
                 p.advance(
                     frame.dt,
                     std::array::from_fn(|j| frame.origin[j] + f64::from(c.model.translation[j])),
                     s.emission[pi],
                     &[],
+                    physics,
                 );
             }
         }
@@ -653,6 +662,7 @@ impl CleaningTools {
         for effect in &mut self.washes {
             if let Some(elapsed) = effect.elapsed.as_mut() {
                 for (index, p) in effect.particles.iter_mut().enumerate() {
+                    p.set_origin(frame.origin);
                     p.advance(
                         frame.dt,
                         effect.emitter,
@@ -662,6 +672,7 @@ impl CleaningTools {
                             0.
                         },
                         &[],
+                        physics,
                     );
                 }
                 *elapsed += frame.dt;
@@ -754,13 +765,16 @@ impl CleaningTools {
             };
             signal.emission = [if emitting { state.valve } else { 0. }, 0.];
             for particle in &mut self.sprays[index].particles {
-                particle.rotation = rotation;
+                particle.rotation = root.rotation;
+                particle.emission_rotation = Some(rotation);
+                particle.set_origin(frame.origin);
                 particle.start_color = Some(color);
                 particle.advance(
                     frame.dt,
-                    std::array::from_fn(|j| frame.origin[j] + f64::from(emitter[j])),
+                    std::array::from_fn(|j| frame.origin[j] + f64::from(root.translation[j])),
                     signal.emission[0],
                     &[],
+                    physics,
                 );
             }
             if !firing {

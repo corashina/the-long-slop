@@ -54,7 +54,7 @@ def particle(source,reader,role,rate,output,owner=None):
     for k in ['m_RenderMode','m_SortMode','m_MinParticleSize','m_MaxParticleSize','m_CameraVelocityScale','m_VelocityScale','m_LengthScale','m_SortingFudge','m_RenderAlignment','m_Pivot','m_Flip']:
         visit(rd[k],'renderer.'+k)
     if result['module_flags']['CollisionModule']:
-        result['limits'].append({'source':source_id(reader),'module':'CollisionModule','visible_effect':'Rapier swept spheres adapt Unity particle collision; world tank fill routing and native collision cache differ.'})
+        result['limits'].append({'source':source_id(reader),'module':'CollisionModule','visible_effect':'Retained ParticleState spray pools and FluidContact outlet pools cast masked non-sensor Rapier swept spheres, apply bounce, dampen and lifetime loss, and remove initial penetration. Native collision cache, collision messages and world tank-fill callbacks remain outside this route. Native particle trigger membership remains unproved; ray queriesHitTriggers does not govern this adaptation.'})
     if result['module_flags'].get('TriggerModule'):
         result['limits'].append({'source':source_id(reader),'module':'TriggerModule','visible_effect':'Retained shelter AABBs adapt native particle collider overlap, including radiusScale.'})
     for m in result['materials']:

@@ -147,3 +147,50 @@ fn invalid_spray_palette_index_and_empty_choices_are_rejected() {
     r.conditions.sprays[0].voice_source = None;
     assert!(r.validate().unwrap_err().to_string().contains("voice"));
 }
+
+#[test]
+fn enabled_particle_motion_requires_checked_payload() {
+    for field in [
+        "VelocityModule.x",
+        "VelocityModule.speedModifier",
+        "InheritVelocityModule.m_Curve",
+        "CollisionModule.m_Bounce",
+    ] {
+        let mut r = common::reference();
+        r.conditions.sprays[0].particles[0].curves.remove(field);
+        assert!(
+            r.conditions
+                .validate(&r)
+                .unwrap_err()
+                .to_string()
+                .contains(field)
+        );
+    }
+    for field in [
+        "InheritVelocityModule.m_Mode",
+        "CollisionModule.radiusScale",
+        "CollisionModule.collidesWith.m_Bits",
+    ] {
+        let mut r = common::reference();
+        r.conditions.sprays[0].particles[0].scalars.remove(field);
+        assert!(
+            r.conditions
+                .validate(&r)
+                .unwrap_err()
+                .to_string()
+                .contains(field)
+        );
+    }
+    let mut r = common::reference();
+    r.conditions.sprays[0].particles[0]
+        .flags
+        .remove("VelocityModule.inWorldSpace");
+    assert!(r.conditions.validate(&r).is_err());
+    let mut r = common::reference();
+    r.conditions.sprays[0].particles[0]
+        .curves
+        .get_mut("VelocityModule.x")
+        .unwrap()
+        .scalar = f32::NAN;
+    assert!(r.conditions.validate(&r).is_err());
+}

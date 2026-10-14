@@ -6,6 +6,8 @@ Updated: 2026-10-14.
 
 Cleaning and painting remains on `codex/cleaning-painting`, based on the reviewed code head `6ba1886`.
 We implemented authored tools, live condition state, cleaning, spray paint, and strict save schema 2.
+The shared particle owner applies selected spray velocity, inherited motion, and masked collision.
+Spray refraction and brush soft-particle depth fading remain bounded shared-renderer deferrals and known visual differences.
 The final package reached garage readiness, New Game, and Load with enabled controls.
 IAB showed `Mouse capture failed` after Continue. Active preparation and driving remain unverified.
 See [cleaning evidence](research/2026-10-14-cleaning-painting-reference.md) and [verification](verification.md).

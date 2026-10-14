@@ -176,6 +176,7 @@ impl GarageRuntime {
             player,
             night,
             &self.weather_bindings.volumes,
+            &self.physics,
         );
         self.lighting
             .cycle

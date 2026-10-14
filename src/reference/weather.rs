@@ -53,6 +53,110 @@ pub struct ParticleReference {
     pub materials: Vec<SkyMaterialReference>,
     pub limits: Vec<ParticleLimit>,
 }
+impl ParticleReference {
+    pub(crate) fn validate_motion(&self) -> Result<(), ReferenceError> {
+        let invalid = |field: &str| {
+            ReferenceError(format!(
+                "Invalid particle {}:{} field {field}",
+                self.source.file, self.source.path_id
+            ))
+        };
+        let scalar = |field: &str| {
+            self.scalars
+                .get(field)
+                .copied()
+                .filter(|v| v.is_finite())
+                .ok_or_else(|| invalid(field))
+        };
+        let flag = |field: &str| self.flags.get(field).copied().ok_or_else(|| invalid(field));
+        let curve = |field: &str| {
+            let c = self.curves.get(field).ok_or_else(|| invalid(field))?;
+            if c.mode > 3
+                || !finite(&[c.scalar, c.min_scalar])
+                || !curve_valid(&c.min_curve)
+                || !curve_valid(&c.max_curve)
+                || ((c.mode == 1 || c.mode == 2) && c.max_curve.keys.is_empty())
+                || (c.mode == 2 && c.min_curve.keys.is_empty())
+            {
+                return Err(invalid(field));
+            }
+            Ok(c)
+        };
+        if self.module_flags.get("VelocityModule") == Some(&true) {
+            flag("VelocityModule.inWorldSpace")?;
+            for field in [
+                "VelocityModule.x",
+                "VelocityModule.y",
+                "VelocityModule.z",
+                "VelocityModule.speedModifier",
+            ] {
+                curve(field)?;
+            }
+            // Checked selected systems have no orbital or radial motion.
+            for field in [
+                "VelocityModule.orbitalX",
+                "VelocityModule.orbitalY",
+                "VelocityModule.orbitalZ",
+                "VelocityModule.orbitalOffsetX",
+                "VelocityModule.orbitalOffsetY",
+                "VelocityModule.orbitalOffsetZ",
+                "VelocityModule.radial",
+            ] {
+                let c = curve(field)?;
+                if c.mode != 0 || c.scalar != 0. {
+                    return Err(invalid(field));
+                }
+            }
+        }
+        if self.module_flags.get("InheritVelocityModule") == Some(&true) {
+            let mode = scalar("InheritVelocityModule.m_Mode")?;
+            if mode != 0. && mode != 1. {
+                return Err(invalid("InheritVelocityModule.m_Mode"));
+            }
+            curve("InheritVelocityModule.m_Curve")?;
+            if scalar("emitterVelocityMode")? != 1. {
+                return Err(invalid("emitterVelocityMode"));
+            }
+        }
+        if self.module_flags.get("CollisionModule") == Some(&true) {
+            for field in [
+                "CollisionModule.m_Bounce",
+                "CollisionModule.m_Dampen",
+                "CollisionModule.m_EnergyLossOnCollision",
+            ] {
+                let c = curve(field)?;
+                if !(0. ..=1.).contains(&c.scalar) || !(0. ..=1.).contains(&c.min_scalar) {
+                    return Err(invalid(field));
+                }
+            }
+            for (field, value) in [
+                ("CollisionModule.type", 1.),
+                ("CollisionModule.collisionMode", 0.),
+                ("CollisionModule.colliderForce", 0.),
+            ] {
+                if scalar(field)? != value {
+                    return Err(invalid(field));
+                }
+            }
+            flag("CollisionModule.collidesWithDynamic")?;
+            if flag("CollisionModule.interiorCollisions")? {
+                return Err(invalid("CollisionModule.interiorCollisions"));
+            }
+            if scalar("CollisionModule.radiusScale")? <= 0. {
+                return Err(invalid("CollisionModule.radiusScale"));
+            }
+            let mask = scalar("CollisionModule.collidesWith.m_Bits")?;
+            if mask < 0. || mask > u32::MAX as f32 || mask.fract() != 0. {
+                return Err(invalid("CollisionModule.collidesWith.m_Bits"));
+            }
+            let min = scalar("CollisionModule.minKillSpeed")?;
+            if min < 0. || scalar("CollisionModule.maxKillSpeed")? < min {
+                return Err(invalid("CollisionModule.maxKillSpeed"));
+            }
+        }
+        Ok(())
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StormReference {
@@ -306,6 +410,7 @@ impl WeatherReference {
             }
         }
         for p in &self.particles {
+            p.validate_motion()?;
             let check = |valid: bool, field: &str| {
                 if valid {
                     Ok(())

@@ -694,5 +694,6 @@ fn validate_particle(
                     })
             }),
         "particles",
-    )
+    )?;
+    p.validate_motion()
 }
