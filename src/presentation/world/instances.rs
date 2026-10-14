@@ -400,6 +400,9 @@ impl SourceInstances {
                                         stream.frame().request.session,
                                         prototype,
                                         primitive,
+                                        extras.source_renderer.as_ref().ok_or_else(|| {
+                                            ReferenceError("Missing source renderer record".into())
+                                        })?,
                                         initial,
                                         selected,
                                         source_node.layer,
@@ -496,6 +499,13 @@ impl SourceInstances {
                                                 stream.frame().request.session,
                                                 prototype,
                                                 primitive,
+                                                extras.source_renderer.as_ref().ok_or_else(
+                                                    || {
+                                                        ReferenceError(
+                                                            "Missing source renderer record".into(),
+                                                        )
+                                                    },
+                                                )?,
                                                 initial,
                                                 Some(&source),
                                                 source_node.layer,
@@ -531,6 +541,7 @@ impl SourceInstances {
                                     if !is_grass {
                                         commands.entity(entity).insert(Mesh3d(mesh.clone()));
                                         binding.visible.insert(entity, commands);
+                                        binding.apply_sort(entity, commands);
                                     }
                                     let mut skin_binding = None;
                                     if let Some(skin) = node.skin {
@@ -913,6 +924,7 @@ impl SourceInstances {
                     std::mem::swap(&mut renderer.material_source, &mut variant.source);
                     std::mem::swap(&mut renderer.tickets, &mut variant.tickets);
                     renderer.binding.visible.replace(renderer.entity, commands);
+                    renderer.binding.apply_sort(renderer.entity, commands);
                     if let Some(entity) = renderer.caster_entity {
                         if let Some(caster) = &renderer.binding.caster {
                             commands.entity(entity).remove::<(

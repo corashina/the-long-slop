@@ -120,6 +120,7 @@ pub(crate) fn prepare_road_lamp(
     visuals: Res<crate::presentation::reference::ReferenceVisuals>,
     gltfs: Res<Assets<bevy::gltf::Gltf>>,
     mut source: ResMut<SourceLighting>,
+    materials: Res<crate::presentation::materials::SourceMaterials>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
     receivers: Query<
@@ -134,6 +135,7 @@ pub(crate) fn prepare_road_lamp(
             Option<&Children>,
             &crate::presentation::renderers::SourceRenderer,
             &bevy::camera::primitives::Aabb,
+            &bevy::gltf::GltfMaterialExtras,
         ),
         Without<SourceCaster>,
     >,
@@ -269,7 +271,7 @@ pub(crate) fn prepare_road_lamp(
         {
             continue;
         }
-        let Ok((_, _, _, _, _, mode, _, children, _, _)) = receivers.get(entity) else {
+        let Ok((_, _, _, _, _, mode, _, children, _, _, _)) = receivers.get(entity) else {
             return;
         };
         if mode.0 != 0
@@ -307,6 +309,7 @@ pub(crate) fn prepare_road_lamp(
                 children,
                 renderer,
                 bounds,
+                material_extras,
             ) = receivers.get(primitive).unwrap();
             let caster = children.and_then(|children| {
                 children
@@ -325,6 +328,41 @@ pub(crate) fn prepare_road_lamp(
                 ))
                 .id();
             source.warmups.push((warm, false));
+            #[derive(serde::Deserialize)]
+            struct MaterialIdentity {
+                asset: crate::reference::AssetId,
+                gltf_material: u32,
+            }
+            #[derive(serde::Deserialize)]
+            struct PrimitiveIdentity {
+                submesh: u32,
+            }
+            let identity: MaterialIdentity =
+                serde_json::from_str(&material_extras.value).expect("validated road lamp material");
+            let primitive: PrimitiveIdentity = serde_json::from_str(
+                &extras
+                    .get(primitive)
+                    .expect("checked road lamp primitive")
+                    .1
+                    .value,
+            )
+            .expect("validated road lamp primitive");
+            match materials.sort_data(
+                (identity.asset, identity.gltf_material),
+                &renderer.0,
+                primitive.submesh,
+            ) {
+                Ok(Some(sort)) => {
+                    commands
+                        .entity(warm)
+                        .insert((sort, bevy::render::batching::NoAutomaticBatching));
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    source.state = RenderingState::Failed(error.0);
+                    return;
+                }
+            }
             if let Some(caster) = &caster {
                 let warm = commands
                     .spawn((

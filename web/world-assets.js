@@ -133,7 +133,9 @@ export async function preflightWorldPrototype(path,sha256,budget,key){
   const identity=primitive.extras?.world_source_material;
   const material=primitive.material===undefined?null:gltf.materials[primitive.material].extras;
   if(identity===undefined&&material===undefined)throw Error('Missing source material identity.');
-  primitives.push({mesh:meshIndex,primitive:primitiveIndex,vertices,indices:count,bytes:vertices*stride+count*4,
+  const submesh=primitive.extras?.submesh;
+  if(!Number.isSafeInteger(submesh)||submesh<0)throw Error('Missing source submesh identity.');
+  primitives.push({mesh:meshIndex,primitive:primitiveIndex,submesh,vertices,indices:count,bytes:vertices*stride+count*4,
    attributes:Object.keys(attributes),source_material:identity??null,has_source_material:Object.hasOwn(primitive.extras??{},'world_source_material'),material:material??null});
  }
  const nodes=(gltf.nodes??[]).map((node,index)=>({index,mesh:node.mesh??null,children:node.children??[],

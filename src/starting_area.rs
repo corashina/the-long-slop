@@ -1105,7 +1105,8 @@ impl GarageRuntime {
             self.notice = "";
         }
         let mut walking_input = input;
-        if (input.held & keys::USE != 0 && self.area.interaction.dragging_mechanism().is_some())
+        if (input.held & (keys::USE | keys::PRIMARY) != 0
+            && self.area.interaction.dragging_mechanism().is_some())
             || (input.held & keys::USE != 0 && self.area.interaction.tuning_opening().is_some())
             || (input.held & keys::PRIMARY != 0
                 && availability.lmb_use

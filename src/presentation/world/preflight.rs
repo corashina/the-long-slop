@@ -82,6 +82,7 @@ pub struct NodeExtras {
 pub struct PlanPrimitive {
     pub mesh: u32,
     pub primitive: u32,
+    pub submesh: u32,
     pub vertices: usize,
     pub indices: usize,
     pub bytes: usize,

@@ -1424,7 +1424,7 @@ fn removable_mechanism_prompt_shows_drag_and_removal() {
     };
     assert_eq!(
         g.area.interaction.prompt(&aim, &g.area.items),
-        "Hold E + mouse: move · F: remove"
+        "Hold LMB + mouse: move · F: remove"
     );
     let aim = ResolvedAim {
         grab_target: None,
@@ -1432,7 +1432,7 @@ fn removable_mechanism_prompt_shows_drag_and_removal() {
     };
     assert_eq!(
         g.area.interaction.prompt(&aim, &g.area.items),
-        "Hold E + mouse: move"
+        "Hold LMB + mouse: move"
     );
 }
 

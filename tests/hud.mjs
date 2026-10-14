@@ -45,6 +45,7 @@ test('merged feedback ABI preserves source fluids and independent action rows',(
  const rows=elements.get('#hud').children.filter(row=>!row.hidden);
  assert.equal(rows.length,3);
  const use=rows.filter(row=>row.textContent.includes('[Mouse]')||row.textContent.startsWith('[Scroll]'));
+ assert.equal(use[0].textContent,'[LMB]+[Mouse]: Move');
  assert.equal(new Set(use.map(row=>row.style.top)).size,2);
  assert.equal(window.gameState.seated,true);
  assert.equal(window.gameState.fluidVolumes[0],.5);

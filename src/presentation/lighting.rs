@@ -208,7 +208,7 @@ pub struct LightingGpu {
     pub status: Arc<Mutex<RenderingState>>,
 }
 #[derive(Resource, Default)]
-struct ExtractedLighting {
+pub(crate) struct ExtractedLighting {
     shader: Option<AssetId<Shader>>,
     sky_shader: Option<AssetId<Shader>>,
     prepared: bool,
@@ -217,6 +217,12 @@ struct ExtractedLighting {
     uniform: LightingUniform,
     cookies: Option<[AssetId<Image>; 3]>,
     status: Option<Arc<Mutex<RenderingState>>>,
+}
+
+impl ExtractedLighting {
+    pub(crate) fn is_warmup(&self, entity: bevy::render::sync_world::MainEntity) -> bool {
+        self.warming && self.warmups.iter().any(|(warmup, _)| *warmup == entity)
+    }
 }
 
 pub struct SourceLightingPlugin;

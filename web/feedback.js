@@ -51,7 +51,7 @@ export function createFeedback(ui,switchIconUrl) {
  const state=new FeedbackState(),root=document.querySelector('#hud'),icon=document.querySelector('#crosshair'),fluid=document.querySelector('#fluid-text'),carry=document.querySelector('#carry-help'),notice=document.querySelector('#action-notice'),target=document.querySelector('#target-name'),condition=document.querySelector('#target-condition'),charge=document.querySelector('#throw-charge'),level=document.querySelector('#throw-level');
  const rows=[
   [ACTION.USE,'use','[E]: Open/Close'],
-  [ACTION.DOOR,'door','[E]+[Mouse]: Open/Close'],
+  [ACTION.DOOR,'door','[LMB]+[Mouse]: Open/Close'],
   [ACTION.PICKUP,'pickup','[F]: Pick Up'],
   [ACTION.DROP,'drop','[F]: Drop'],
   [ACTION.MOUNT,'mount','[F]: Mount'],
@@ -98,7 +98,7 @@ export function createFeedback(ui,switchIconUrl) {
  function paint(){
   root.hidden=!state.visible;
   for(const r of rows)r.n.hidden=!(state.actions&r.bit)||(r.bit===ACTION.DROP&&Boolean(state.actions&ACTION.THROW))||(r.bit===ACTION.SWITCH&&Boolean(state.actions&ACTION.PRIMARY_SWITCH));
-  const doorText=state.context===7?'[E]+[Mouse]: Move':'[E]+[Mouse]: Open/Close';
+  const doorText=state.context===7?'[LMB]+[Mouse]: Move':'[LMB]+[Mouse]: Open/Close';
   if(doorText!==lastDoor){rows[1].n.textContent=doorText;lastDoor=doorText;}
   const useText=state.context===10?(state.lmbUse&&!(state.actions&ACTION.HELD_SWITCH)?'[E] / [LMB]: Switch':'[E]: Switch'):'[E]: Open/Close';
   if(useText!==lastUse){rows[0].n.textContent=useText;lastUse=useText;}

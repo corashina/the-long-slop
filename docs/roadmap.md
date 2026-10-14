@@ -4,11 +4,11 @@ Updated: 2026-10-14.
 
 ## Current status
 
-Master retains the accepted game features and local door-control changes.
+Master retains the accepted game features and committed door-control changes.
 We keep the complete source-world integration on `codex/world-integration-deferred`, based on `05bdc507`.
-We completed nine source-world implementation layers and two integration merges in that separate branch.
-The user deferred integration into master. Master does not contain the source generator or Bevy ownership patch.
-Source-world changes shared startup, collision, save identities, and renderer paths. It requires the later integration work.
+We completed nine source-world implementation layers and three integration merges in that separate branch.
+The user authorized the merge and retained Bevy ownership patch. Master promotion awaits the final scoped review.
+We reconciled master `6423b062` with source-world startup, collision, save identities, and renderer paths.
 We fixed hidden grass preparation and generated attachment readiness in `8d4341f`.
 We fixed the final review's texture receipt cleanup finding in `103bee7`.
 The full integration review and scoped re-review have no open Critical or Important findings.
@@ -28,7 +28,7 @@ The branch remains separate from master. We added no features or dependencies du
 | Roadside stations | Source fuel station models, static collision, and ground alignment on the current procedural road |
 
 We added left-button door dragging and suppress view movement during a drag.
-The station models come from the concurrent remote master update. The complete source road generator remains separate.
+The integration replaces the obsolete station generator with checked source-world placement and selected prototypes.
 
 ### Deferred source-world changes
 
@@ -73,11 +73,11 @@ We retained master's latest depth/shadow bindings and connected candidate caster
 The final native/WASM builds, packaging, 22 shader variants, JavaScript syntax, and scoped whitespace checks passed.
 We preserved existing WASM warnings and unchanged upstream whitespace.
 
-Remaining deferred work:
+Remaining integration work:
 
-1. Perform runtime acceptance when authorized. Tests and runtime checks remain skipped.
-2. Reconcile later master changes only when a future integration is requested.
-3. Merge into master only after a later user instruction.
+1. Complete the scoped review of the final master integration. Its native/WASM builds and packaging passed.
+2. Promote the reviewed branch and existing runtime inputs to master.
+3. Perform runtime acceptance when authorized. Tests and runtime checks remain skipped.
 
 ### Verification limits
 
@@ -92,14 +92,14 @@ We added no new storage engine, save migration, multiplayer, or deployment work.
 ## Full-game feature gaps
 
 Reference: installed Steam build `11140890`. This backlog records gaps beyond the implemented layers above.
-We keep source-world integration separate. Its roads, terrain, biomes, and placement need acceptance before a later merge.
+The source-world integration awaits final review and promotion. Its runtime acceptance remains open.
 Missing means no gameplay implementation. Partial means the current implementation covers selected behavior or content.
 The backlog does not expand approved implementation scope. Each new feature needs a source-based specification.
 
 | Feature | Status | Remaining work |
 | --- | --- | --- |
-| Source world generation | Deferred branch | Resolve integration findings; verify source samples and runtime behavior before merging. |
-| Buildings and exploration | Deferred branch | Check source buildings, interiors, landmarks, placement, content coverage, and collision before merging. |
+| Source world generation | Integration branch | Complete review and promotion; verify source samples and runtime behavior when authorized. |
+| Buildings and exploration | Integration branch | Check source buildings, interiors, landmarks, placement, content coverage, and collision when authorized. |
 | World population | Partial | Integrate source loot placement; add excluded abandoned vehicles, items, and encounters. |
 | Full vehicle range | Partial | Add vehicles beyond the Lada and Skoda, including diesel, two-stroke, automatic, bus, and bike mechanics. |
 | Driving physics | Partial | Add manual gears and clutch; match throttle ramps, tire friction, bare-rim behavior, suspension, and combined braking. |

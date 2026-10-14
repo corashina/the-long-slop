@@ -478,6 +478,12 @@ impl MechanismState {
             .get(&item)
             .is_some_and(|i| self.controls[*i].enabled)
     }
+    pub fn drag_eligible(&self, item: ItemId) -> bool {
+        self.items.get(&item).is_some_and(|&i| {
+            let c = &self.controls[i];
+            c.enabled && (c.reference.rotation.is_some() || c.reference.slide.is_some())
+        })
+    }
     pub fn begin_audio_step(&mut self) {
         self.radio_seconds += crate::simulation::FIXED_DT;
         for c in &mut self.controls {
@@ -733,7 +739,7 @@ impl MechanismState {
                 return;
             }
         }
-        let held = input.held & keys::USE != 0;
+        let held = input.held & (keys::USE | keys::PRIMARY) != 0;
         if !held && !(input.wheel != 0.0 && self.scroll_eligible(item)) {
             return;
         }

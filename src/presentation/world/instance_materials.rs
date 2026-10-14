@@ -25,6 +25,7 @@ pub enum InstanceMaterial {
 #[derive(Clone)]
 pub struct RendererMaterial {
     pub visible: InstanceMaterial,
+    pub sort: Option<crate::presentation::transparent::SourceSortData>,
     pub caster: Option<Handle<LodCasterMaterial>>,
 }
 #[derive(SystemParam)]
@@ -85,6 +86,7 @@ impl InstanceMaterials<'_> {
         session: u64,
         prototype: &WorldPrototypeReference,
         primitive: &PlanPrimitive,
+        renderer: &crate::reference::render_lighting::RendererRecord,
         initial: Option<(crate::reference::AssetId, u32)>,
         selected: Option<&crate::reference::SourceId>,
         layer: u8,
@@ -96,6 +98,7 @@ impl InstanceMaterials<'_> {
     ) -> Result<Option<RendererMaterial>, ReferenceError> {
         let mask = 1u32 << layer;
         let mut caster = None;
+        let mut sort = None;
         let visible = if initial.is_none() && (selected.is_some() || primitive.has_source_material)
         {
             let Some(id) = selected.or(primitive.source_material.as_ref()) else {
@@ -170,6 +173,9 @@ impl InstanceMaterials<'_> {
                 .ok_or_else(|| {
                     ReferenceError("Missing generated primary material identity".into())
                 })?;
+            sort = self
+                .cache
+                .sort_data(identity, renderer, primitive.submesh)?;
             if shadow_mode != 0 {
                 let mut base = materials::authored_caster_material(identity, &self.cache);
                 if shadow_mode == 2 {
@@ -211,7 +217,11 @@ impl InstanceMaterials<'_> {
                 self.grass.get_mut(h).unwrap().preparation = self.cache.preparation.clone()
             }
         }
-        Ok(Some(RendererMaterial { visible, caster }))
+        Ok(Some(RendererMaterial {
+            visible,
+            sort,
+            caster,
+        }))
     }
     pub fn color(
         &mut self,
@@ -336,5 +346,20 @@ pub fn ready(ticket: &Option<PipelineTicket>) -> Result<bool, ReferenceError> {
         Some(RenderingState::Ready) => Ok(true),
         Some(RenderingState::Failed(error)) => Err(ReferenceError(error)),
         _ => Ok(false),
+    }
+}
+
+impl RendererMaterial {
+    pub fn apply_sort(&self, entity: Entity, commands: &mut Commands) {
+        if let Some(sort) = self.sort {
+            commands
+                .entity(entity)
+                .insert((sort, bevy::render::batching::NoAutomaticBatching));
+        } else {
+            commands.entity(entity).remove::<(
+                crate::presentation::transparent::SourceSortData,
+                bevy::render::batching::NoAutomaticBatching,
+            )>();
+        }
     }
 }

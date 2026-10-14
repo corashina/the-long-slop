@@ -4,10 +4,17 @@ use my_summer_slop::simulation::DriveInput;
 use my_summer_slop::vehicle::{PhysicsWorld, VehiclePose};
 use my_summer_slop::world::WorldOrigin;
 
+/// These streaming tests drive one car.
+fn lada_only() -> my_summer_slop::reference::ReferenceManifest {
+    let mut reference = common::reference();
+    reference.vehicles.truncate(1);
+    reference
+}
+
 #[test]
 fn rebase_preserves_wheels_velocities_and_absolute_position() {
     let mut physics = PhysicsWorld::new(
-        &common::reference(),
+        &lada_only(),
         &[VehiclePose {
             position: [0.0, 1.1, 0.0],
             rotation: [0.0, 0.0, 0.0, 1.0],
