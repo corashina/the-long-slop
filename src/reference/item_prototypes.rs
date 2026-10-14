@@ -7,6 +7,7 @@ pub struct PrototypeId(pub SourceId);
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ItemPrototype {
+    pub consumable: Option<CigaretteConsumptionReference>,
     pub id: PrototypeId,
     pub source: SourceId,
     pub item_id: Option<u32>,
@@ -43,6 +44,7 @@ pub struct PrototypeVariant {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PrototypeRenderer {
+    pub state: render_lighting::RendererRecord,
     pub source: SourceId,
     pub node: NodeId,
     pub mesh: SourceId,
@@ -134,10 +136,9 @@ impl PickupReference {
 
 pub fn validate_prototypes(m: &ReferenceManifest) -> Result<(), ReferenceError> {
     require(
-        m.item_prototypes
-            .iter()
-            .map(|p| p.id.0.path_id)
-            .eq([75443, 51722, 61587, 81642, 81645]),
+        m.item_prototypes.iter().map(|p| p.id.0.path_id).eq([
+            75443, 51722, 61587, 81642, 81645, 70812, 53838, 53837, 63605, 63259, 54495,
+        ]),
         "selected item prototypes",
     )?;
     ids(
@@ -155,7 +156,7 @@ pub fn validate_prototypes(m: &ReferenceManifest) -> Result<(), ReferenceError> 
 }
 
 impl ItemPrototype {
-    fn within(&self, m: &ReferenceManifest, mut node: NodeId) -> bool {
+    pub(super) fn within(&self, m: &ReferenceManifest, mut node: NodeId) -> bool {
         for _ in 0..=m.nodes.len() {
             let Some(n) = m
                 .nodes
@@ -194,6 +195,12 @@ impl ItemPrototype {
             61587 => (Some(216), 1, Some(4553), true, true, Some(144067)),
             81642 => (None, 56, Some(4623), true, false, None),
             81645 => (None, 14, Some(4623), true, false, None),
+            70812 => (Some(217), 1, Some(4557), true, false, Some(157660)),
+            53838 => (Some(218), 1, Some(4527), true, false, Some(147660)),
+            53837 => (Some(221), 1, Some(4529), true, false, Some(147659)),
+            63605 => (Some(245), 1, None, false, false, Some(147259)),
+            63259 => (Some(92), 1, Some(4590), true, false, Some(149587)),
+            54495 => (Some(230), 1, None, false, false, Some(134670)),
             _ => return Err(ReferenceError("unknown item prototype".into())),
         };
         require(
@@ -217,6 +224,12 @@ impl ItemPrototype {
             61587 => (2, 3),
             81642 => (58, 56),
             81645 => (15, 14),
+            70812 => (3, 25),
+            53838 => (2, 4),
+            53837 => (1, 2),
+            63605 => (12, 2),
+            63259 => (3, 2),
+            54495 => (1, 7),
             _ => unreachable!(),
         };
         require(
@@ -314,8 +327,14 @@ impl ItemPrototype {
                     && p.collision_gain.is_finite()
                     && p.collision_gain >= 0.
                     && p.collision_clip.as_ref().is_some_and(|s| {
-                        checked(s, if item_id == Some(74) { 4270 } else { 4166 })
-                            && clip_exists(m, s)
+                        checked(
+                            s,
+                            if matches!(item_id, Some(74 | 218 | 221 | 92 | 230)) {
+                                4270
+                            } else {
+                                4166
+                            },
+                        ) && clip_exists(m, s)
                     }),
                 "prototype pickup owner",
             )?;
@@ -347,6 +366,11 @@ impl ItemPrototype {
         )?;
         require(!self.renderers.is_empty(), "prototype renderers")?;
         for r in &self.renderers {
+            r.state.validate_template()?;
+            require(
+                r.state.source == r.source,
+                "prototype renderer state source",
+            )?;
             require(
                 self.within(m, r.node)
                     && checked(&r.source, r.source.path_id)
@@ -447,7 +471,12 @@ impl ItemPrototype {
             Some(74) => require(
                 optional_checked(&b.pack, 141307)
                     && optional_checked(&b.ammo, 141757)
-                    && optional_checked(&b.cigarette_prefab, 11985),
+                    && optional_checked(&b.cigarette_prefab, 11985)
+                    && m.item_prototypes.iter().any(|p| {
+                        checked(&p.source, 54495)
+                            && p.item_id == Some(230)
+                            && p.consumable.is_some()
+                    }),
                 "pack source links",
             )?,
             Some(62) => require(
@@ -489,7 +518,14 @@ impl ItemPrototype {
                     && self.pickups.iter().all(|p| p.node != self.root),
                 "debris child owners",
             )?,
-            _ => unreachable!(),
+            _ => {}
+        }
+        require(
+            self.consumable.is_some() == (item_id == Some(230)),
+            "cigarette consumable owner",
+        )?;
+        if let Some(c) = &self.consumable {
+            c.validate(self, m)?;
         }
         require(
             item_id.is_none() || b.gib_children.is_empty(),

@@ -31,6 +31,8 @@ pub mod plates;
 pub use plates::*;
 pub mod mirrors;
 pub use mirrors::*;
+pub mod clothing;
+pub use clothing::*;
 pub mod item_prototypes;
 pub use item_prototypes::*;
 pub mod inventory;
@@ -812,6 +814,7 @@ pub struct LibraryProvenance {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
+    pub clothing: ClothingReference,
     pub item_prototypes: Vec<ItemPrototype>,
     pub inventory: InventoryReference,
     pub audio: serde_json::Value,
@@ -940,6 +943,7 @@ impl ReferenceManifest {
         for food in &self.survival.foods {
             food.pickup.validate_links(self, food.asset)?;
         }
+        self.clothing.validate(self)?;
         self.inventory.validate(self)?;
         item_prototypes::validate_prototypes(self)?;
         AudioGameplayReference::from_value(&self.audio)?;

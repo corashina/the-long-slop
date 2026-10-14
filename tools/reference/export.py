@@ -87,6 +87,8 @@ def lighting_resources(manifest):
             for child in value: collect(child)
     collect(manifest.get('lighting', {}))
     collect(manifest.get('weather', {}))
+    collect(manifest.get('clothing', {}))
+    for p in manifest.get('item_prototypes',[]):collect(p.get('consumable'))
     for item in manifest.get('render_lighting', {}).get('dependencies', []):
         collect({'path':item['file'],'sha256':item['sha256']})
     return list(resources.values())
@@ -328,11 +330,17 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     resources={entry['file'] for entry in manifest['assets'][0]['dependencies']}
     manifest['assets'][0]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in lighting_resources(manifest) if r['path'] not in resources)
     manifest['item_prototypes'] = recover_item_prototypes(source, manifest, output)
+    from .clothing import recover_clothing,validate_clothing
+    manifest['clothing'] = recover_clothing(source,manifest,output)
+    manifest['lighting']['textures']=list(source.lighting_textures.values())
+    resources={entry['file'] for entry in manifest['assets'][0]['dependencies']}
+    manifest['assets'][0]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in lighting_resources(manifest) if r['path'] not in resources)
     manifest['ui']=export_ui(source,output,library)
     for index,name in enumerate(CARS):
         manifest['vehicles'][index]['instruments']=recover_instruments(source,manifest,report,name,roots[name][0])
     manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if (name not in CARS or name == 'lada') and name not in STATIONS and not name.startswith('item_')},manifest,library,output)
     validate_item_prototypes(manifest['item_prototypes'], manifest)
+    validate_clothing(manifest['clothing'],manifest)
     validate_lighting_export(manifest,output)
     (output/'lighting-evidence.json').write_text(json.dumps({'lighting':manifest['lighting'],'render_lighting':manifest['render_lighting'],'byte_checks':source.evidence,'native_engine':native_engine,'fog_setting':source.lighting_fog_evidence,'library':manifest['library']},indent=2,allow_nan=False),encoding='utf-8')
     parameters['controls']={

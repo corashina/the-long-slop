@@ -7,7 +7,9 @@ from .survival import component, managed_evidence, finite_record
 
 # Checked prefab root Transforms, database numbers, pickup counts, and asset names.
 SELECTED = ((75443,74,1,'item_pack'),(51722,62,1,'item_box'),(61587,216,1,'item_shovel'),
-            (81642,None,56,'item_box_debris'),(81645,None,14,'item_box_debris_reduced'))
+            (81642,None,56,'item_box_debris'),(81645,None,14,'item_box_debris_reduced'),
+            (70812,217,1,'item_sunglasses'),(53838,218,1,'item_hat'),(53837,221,1,'item_cap'),
+            (63605,245,1,'item_cone'),(63259,92,1,'item_pumpkin'),(54495,230,1,'item_cigarette'))
 
 
 def prepare_item_prototypes(source, roots):
@@ -78,9 +80,10 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
                     'collision_clip':source_id(clip) if clip else None,'collision_gain':d['collisionSoundM']})
             if 'MeshRenderer' in group:
                 c=group['MeshRenderer'];d=source.read(c);mesh=source.resolve(group['MeshFilter'],source.read(group['MeshFilter'])['m_Mesh'])
-                renderers.append({'source':source_id(c),'node':node,'mesh':source_id(mesh),
+                from .render_lighting import recover_renderer
+                renderers.append({'state':recover_renderer(source,c,mesh,'item_prototype'),'source':source_id(c),'node':node,'mesh':source_id(mesh),
                     'enabled':bool(d['m_Enabled']), 'materials':[source_id(source.resolve(c,p)) for p in d['m_Materials']]})
-            if 'partconditionscript' in group:
+            if 'partconditionscript' in group and item_id not in (217,218,221,245,92,230):
                 c=group['partconditionscript'];d=source.read(c)
                 if d['UseMatList'] or d['UseMesList'] or d['useRandomTipus']:raise ValueError('Unaudited physical prototype selector')
                 if d['UseGoList']:
@@ -109,14 +112,16 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
             behavior['contact_sound_source']=source_id(main)
             behavior['contact_clips']=[[source_id(source.resolve(main,p)) for p in group['a']] for group in source.read(main)['meleeHitSounds']]
             managed_evidence(source,['mainscript.PlayClipAtPoint(mainscript.M.meleeHitSounds[(int)hitType].a[num], V, mainscript.hitVolume[(int)hitType], mainscript.AudioPriorities[7]);'])
-        else:
+        elif item_id is None:
             c=component(source,root,'gibscript')
             behavior.update(gib=source_id(c),gib_children=[nodes[key(source.resolve(c,p))]['id'] for p in source.read(c)['childs']])
         for identity in [*behavior['clips'],*(c for group in behavior['contact_clips'] for c in group)]:
             c=source.get(identity['file'],identity['path_id'])
             if c.type.name!='AudioClip':raise ValueError('Invalid behavior clip')
             source.item_clips.add(key(c))
-        result.append({'id':source_id(root),'source':source_id(root),'item_id':item_id,
+        from .survival import recover_cigarette
+        consumable = recover_cigarette(source, root, manifest, output) if item_id==230 else None
+        result.append({'consumable':consumable,'id':source_id(root),'source':source_id(root),'item_id':item_id,
             'asset':nodes[key(root)]['asset'],'root':nodes[key(root)]['id'],'bodies':bodies,'colliders':colliders,
             'pickups':pickups,'variants':variants,'renderers':renderers,'behavior':behavior})
     return result
@@ -153,7 +158,7 @@ def validate_item_prototypes(prototypes, manifest) -> None:
                 node=nodes[node]['parent']
             return False
         if not within(p['root']) or nodes[p['root']]['parent'] is not None or assets[p['asset']]['root']!=p['source']:raise ValueError('Foreign prototype root')
-        counts={75443:(1,3),51722:(2,3),61587:(2,3),81642:(58,56),81645:(15,14)}
+        counts={75443:(1,3),51722:(2,3),61587:(2,3),81642:(58,56),81645:(15,14),70812:(3,25),53838:(2,4),53837:(1,2),63605:(12,2),63259:(3,2),54495:(1,7)}
         if (len(p['colliders']),len(p['renderers']))!=counts[p['id']['path_id']]:raise ValueError('Incomplete selected geometry')
         bodies={b['id']:b for b in p['bodies']}
         for records in (p['bodies'],p['colliders']):unique(r['id'] for r in records);unique((r['source']['file'],r['source']['path_id']) for r in records)
@@ -174,9 +179,9 @@ def validate_item_prototypes(prototypes, manifest) -> None:
             pickup=x['pickup'];source=pickup['source']
             exceptions={(81642,135313):77169,(81642,140775):82214,(81645,135314):77170}
             exception=exceptions.get((p['id']['path_id'],source['path_id']))
-            expected_icon={74:4624,62:None,216:4553,None:4623}[p['item_id']] if exception is None else None
+            expected_icon={74:4624,62:None,216:4553,None:4623,217:4557,218:4527,221:4529,245:None,92:4590,230:None}[p['item_id']] if exception is None else None
             icon=pickup['inventory_icon']
-            if source['file']!='sharedassets1.assets' or pickup['can_inventory']!=(p['item_id']!=62 and exception is None) or pickup['can_hold_right_hand']!=(p['item_id']==216):raise ValueError('Pickup source eligibility')
+            if source['file']!='sharedassets1.assets' or pickup['can_inventory']!=(p['item_id'] not in (62,245,230) and exception is None) or pickup['can_hold_right_hand']!=(p['item_id']==216):raise ValueError('Pickup source eligibility')
             if icon!=({'file':'sharedassets1.assets','path_id':expected_icon} if expected_icon else None):raise ValueError('Pickup source icon')
             if exception is not None and nodes.get(x['node'],{}).get('source')!={'file':'sharedassets1.assets','path_id':exception}:raise ValueError('Debris eligibility owner')
             if not within(x['node']) or x['body'] not in bodies or x['body']!=owner(x['node']):raise ValueError('Wrong pickup body')
@@ -186,11 +191,19 @@ def validate_item_prototypes(prototypes, manifest) -> None:
             if not any(a['source']==c for a in manifest['audio']['clips']):raise ValueError('Missing behavior clip')
         unique(r['node'] for r in p['renderers']);unique((r['source']['file'],r['source']['path_id']) for r in p['renderers'])
         for r in p['renderers']:
+            state=r['state']
+            shadow_only=r['source']['file']=='sharedassets1.assets' and r['source']['path_id'] in (98477,98194,93128,91870,98218)
+            valid_shadow=state['cast_shadows']==3 if shadow_only else state['cast_shadows'] in (0,1)
+            if state['source']!=r['source'] or not valid_shadow or state['reflection_probe_usage'] not in (0,1) or state['motion_vectors']!=1 or state['sorting_layer']!=0 or state['sorting_order']!=0:raise ValueError('Prototype renderer state')
+            if len(state['bounds_center'])!=3 or len(state['bounds_extents'])!=3 or min(state['bounds_extents'])<0:raise ValueError('Prototype renderer bounds')
             if not within(r['node']) or r['source']['file']!='sharedassets1.assets' or not r['materials']:raise ValueError('Invalid renderer owner')
             if any(not any(m['asset']==p['asset'] and m['source']==material for m in manifest['rendering']['materials']) for material in r['materials']):raise ValueError('Missing renderer material slot')
         if p['item_id']==74:
             if len(p['variants'])!=1 or [nodes[n]['source']['path_id'] for n in p['variants'][0]['nodes']]!=[56803,56801,56802]:raise ValueError('Missing pack variants')
         elif p['variants']:raise ValueError('Unexpected prototype variants')
+        from .survival import validate_cigarette
+        if (p['consumable'] is not None)!=(p['item_id']==230):raise ValueError('Cigarette consumable owner')
+        if p['consumable'] is not None:validate_cigarette(p['consumable'],p,manifest)
         if p['item_id'] is None and p['behavior']['gib_children']!=[x['node'] for x in p['pickups']]:raise ValueError('Missing debris child owners')
         if (any(within(b['node']) for b in manifest['bodies']) or any(within(i['node']) for i in manifest['items'])
             or any(nodes.get(c['node'],{}).get('asset')==p['asset'] for c in manifest['colliders'])):

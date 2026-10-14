@@ -218,12 +218,29 @@ fn streaming_bounds_colliders_and_loads_teleport_destination() {
                             .sum::<usize>()
                 })
                 .sum::<usize>();
+        let station_meshes = stream
+            .chunks()
+            .flat_map(|chunk| &chunk.data.stations)
+            .map(|station| {
+                stream.stations().types[station.kind]
+                    .colliders
+                    .iter()
+                    .filter(|collider| {
+                        matches!(
+                            collider.geometry,
+                            my_summer_slop::reference::ColliderGeometry::Trimesh { .. }
+                        )
+                    })
+                    .count()
+            })
+            .sum::<usize>();
         let terrain_count = physics
             .rapier()
             .colliders
             .iter()
             .filter(|(_, collider)| collider.shape().as_trimesh().is_some())
-            .count();
+            .count()
+            - station_meshes;
         assert!((11..=14).contains(&terrain_count));
         assert_eq!(
             physics.collider_count(),

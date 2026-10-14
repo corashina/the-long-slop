@@ -424,3 +424,400 @@ pub struct DrinkingReference {
     pub particle_contact_radius_multiplier: f32,
     pub evidence: ManagedEvidence,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CigaretteConsumptionReference {
+    pub source: SourceId,
+    pub continuous: bool,
+    pub automatic: bool,
+    pub destroy_on_end: bool,
+    pub ate_once: bool,
+    pub serialized_hp: f32,
+    pub startup_hp: f32,
+    pub eat_speed: f32,
+    pub auto_eat_speed: f32,
+    pub effect: ConsumptionEffect,
+    pub parts: Vec<NodeId>,
+    pub start: Vec<NodeId>,
+    pub end: Vec<NodeId>,
+    pub index: u32,
+    pub is_smoke: bool,
+    pub has_particle: bool,
+    pub particle_position: NodeId,
+    pub particle_type: u32,
+    pub min_particle: i32,
+    pub max_particle: i32,
+    pub sound: u32,
+    pub text: u32,
+    pub dont_show_stats: bool,
+    pub ember_in_auto: bool,
+    pub ember: CigaretteEmberReference,
+    pub evidence: ManagedEvidence,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CigaretteEmberReference {
+    pub source: SourceId,
+    pub renderer: NodeId,
+    pub renderer_source: SourceId,
+    pub material: SourceId,
+    pub light: LightReference,
+    pub particle: ParticleReference,
+    pub particle_node: NodeId,
+    pub particle_renderer: SourceId,
+    pub colors: [[f32; 4]; 4],
+    pub light_intensities: [f32; 4],
+    pub particle_rates: [f32; 4],
+    pub speed_up: f32,
+    pub speed_down: f32,
+    pub lerp: f32,
+}
+impl CigaretteConsumptionReference {
+    pub fn validate(&self, p: &ItemPrototype, m: &ReferenceManifest) -> Result<(), ReferenceError> {
+        let sid = |path_id| SourceId {
+            file: "sharedassets1.assets".into(),
+            path_id,
+        };
+        let node = |n: NodeId, id| {
+            m.nodes
+                .iter()
+                .any(|v| v.id == n && v.source == sid(id) && p.within(m, n))
+        };
+        require(
+            self.source == sid(134642)
+                && self.continuous
+                && self.automatic
+                && !self.destroy_on_end
+                && !self.ate_once
+                && self.serialized_hp == 0.
+                && self.startup_hp == 1.
+                && self.min_particle == -100
+                && self.max_particle == 1
+                && !self.ember_in_auto
+                && self.index == 0
+                && self.is_smoke
+                && self.has_particle
+                && self.particle_type == 3
+                && self.text == 324
+                && self.sound == 0
+                && !self.dont_show_stats,
+            "cigarette continuous source",
+        )?;
+        require(
+            self.eat_speed == 0.02
+                && self.auto_eat_speed == 0.0020833334
+                && self.effect.food == -0.0002
+                && self.effect.water == -0.0002
+                && self.effect.bowel == 0.0002
+                && self.effect.hp == 0.,
+            "cigarette consumption rates",
+        )?;
+        for (nodes, expected) in [
+            (&self.parts, [78874, 87786]),
+            (&self.start, [73923, 74031]),
+            (&self.end, [50758, 78154]),
+        ] {
+            require(
+                nodes.len() == 2 && nodes.iter().zip(expected).all(|(n, id)| node(*n, id)),
+                "cigarette source part links",
+            )?;
+        }
+        require(
+            node(self.particle_position, 84276)
+                && self.evidence.valid()
+                && self
+                    .evidence
+                    .methods
+                    .iter()
+                    .map(String::as_str)
+                    .eq(CIGARETTE_METHODS.iter().copied()),
+            "cigarette source method evidence",
+        )?;
+        let e = &self.ember;
+        require(
+            e.source == sid(156940)
+                && e.renderer_source == sid(94155)
+                && e.material == sid(460)
+                && p.renderers
+                    .iter()
+                    .any(|r| r.node == e.renderer && r.source == e.renderer_source)
+                && m.rendering
+                    .materials
+                    .iter()
+                    .any(|r| r.asset == p.asset && r.source == e.material),
+            "cigarette ember renderer and material",
+        )?;
+        require(
+            e.colors.iter().all(|c| finite(c))
+                && finite(&e.light_intensities)
+                && finite(&e.particle_rates)
+                && e.light_intensities == [0., 0.1, 0.25, 0.]
+                && e.particle_rates == [0., 100., 0., 0.]
+                && e.speed_up == 1.
+                && e.speed_down == 1.
+                && e.lerp == 0.,
+            "cigarette ember source values",
+        )?;
+        let l = &e.light;
+        require(
+            l.source == sid(123875)
+                && l.node.is_some_and(|n| node(n, 85874))
+                && l.kind == LightKind::Point
+                && transform(&l.pose)
+                && finite(&l.color)
+                && l.serialized_intensity.is_finite()
+                && l.startup_intensity == 0.
+                && l.range_meters.is_finite()
+                && l.range_meters > 0.
+                && l.cookie.is_none()
+                && l.cookie_size.is_finite()
+                && finite(&[
+                    l.full_cone_degrees,
+                    l.inner_cone_degrees,
+                    l.shadows.strength,
+                    l.shadows.bias,
+                    l.shadows.normal_bias,
+                    l.shadows.near_plane,
+                ])
+                && l.full_cone_degrees > 0.
+                && l.full_cone_degrees <= 180.
+                && l.inner_cone_degrees >= 0.
+                && l.inner_cone_degrees <= l.full_cone_degrees
+                && l.shadows.kind <= 2
+                && (0. ..=1.).contains(&l.shadows.strength)
+                && l.shadows.bias >= 0.
+                && l.shadows.normal_bias >= 0.
+                && l.shadows.near_plane >= 0.
+                && l.culling_mask != 0,
+            "cigarette local ember light",
+        )?;
+        let particle = &e.particle;
+        require(
+            particle.source == sid(128014)
+                && e.particle_renderer == sid(128908)
+                && node(e.particle_node, 87786)
+                && particle.role == "cigarette"
+                && particle.simulation_space == 1
+                && particle.materials.len() == 1
+                && particle.materials[0].source == sid(60)
+                && particle.materials[0].shader.name == "Legacy Shaders/Particles/Alpha Blended",
+            "cigarette particle source",
+        )?;
+        let modules: &[(&str, bool)] = &[
+            ("ClampVelocityModule", false),
+            ("CollisionModule", false),
+            ("ColorBySpeedModule", false),
+            ("ColorModule", true),
+            ("CustomDataModule", false),
+            ("EmissionModule", true),
+            ("ExternalForcesModule", false),
+            ("ForceModule", true),
+            ("InheritVelocityModule", false),
+            ("InitialModule", true),
+            ("LifetimeByEmitterSpeedModule", false),
+            ("LightsModule", false),
+            ("NoiseModule", false),
+            ("RotationBySpeedModule", false),
+            ("RotationModule", false),
+            ("ShapeModule", true),
+            ("SizeBySpeedModule", false),
+            ("SizeModule", true),
+            ("SubModule", false),
+            ("TrailModule", false),
+            ("TriggerModule", false),
+            ("UVModule", false),
+            ("VelocityModule", true),
+        ];
+        require(
+            particle.module_flags.len() == modules.len()
+                && modules
+                    .iter()
+                    .all(|(name, value)| particle.module_flags.get(*name) == Some(value)),
+            "cigarette source particle modules",
+        )?;
+        let required = &[
+            "EmissionModule.rateOverDistance",
+            "EmissionModule.rateOverTime",
+            "ForceModule.x",
+            "ForceModule.y",
+            "ForceModule.z",
+            "InitialModule.gravityModifier",
+            "InitialModule.startLifetime",
+            "InitialModule.startRotation",
+            "InitialModule.startRotationX",
+            "InitialModule.startRotationY",
+            "InitialModule.startSize",
+            "InitialModule.startSizeY",
+            "InitialModule.startSizeZ",
+            "InitialModule.startSpeed",
+            "ShapeModule.arc.speed",
+            "ShapeModule.m_MeshSpawn.speed",
+            "ShapeModule.radius.speed",
+            "SizeModule.curve",
+            "SizeModule.y",
+            "SizeModule.z",
+            "VelocityModule.orbitalOffsetX",
+            "VelocityModule.orbitalOffsetY",
+            "VelocityModule.orbitalOffsetZ",
+            "VelocityModule.orbitalX",
+            "VelocityModule.orbitalY",
+            "VelocityModule.orbitalZ",
+            "VelocityModule.radial",
+            "VelocityModule.speedModifier",
+            "VelocityModule.x",
+            "VelocityModule.y",
+            "VelocityModule.z",
+            "startDelay",
+        ];
+        require(
+            particle.curves.len() == required.len()
+                && required
+                    .iter()
+                    .all(|key| particle.curves.contains_key(*key)),
+            "cigarette required particle curves",
+        )?;
+        let required = &["ColorModule.gradient", "InitialModule.startColor"];
+        require(
+            particle.colors.len() == required.len()
+                && required
+                    .iter()
+                    .all(|key| particle.colors.contains_key(*key)),
+            "cigarette required particle colors",
+        )?;
+        let required = &[
+            "InitialModule.customEmitterVelocity",
+            "ShapeModule.boxThickness",
+            "ShapeModule.m_Position",
+            "ShapeModule.m_Rotation",
+            "ShapeModule.m_Scale",
+            "renderer.m_Flip",
+            "renderer.m_Pivot",
+        ];
+        require(
+            particle.vectors.len() == required.len()
+                && required
+                    .iter()
+                    .all(|key| particle.vectors.contains_key(*key)),
+            "cigarette required particle vectors",
+        )?;
+        let required = &[
+            "EmissionModule.m_BurstCount",
+            "InitialModule.maxNumParticles",
+            "InitialModule.randomizeRotationDirection",
+            "ShapeModule.angle",
+            "ShapeModule.arc.mode",
+            "ShapeModule.arc.spread",
+            "ShapeModule.arc.value",
+            "ShapeModule.donutRadius",
+            "ShapeModule.length",
+            "ShapeModule.m_MeshMaterialIndex",
+            "ShapeModule.m_MeshNormalOffset",
+            "ShapeModule.m_MeshSpawn.mode",
+            "ShapeModule.m_MeshSpawn.spread",
+            "ShapeModule.m_TextureClipChannel",
+            "ShapeModule.m_TextureClipThreshold",
+            "ShapeModule.m_TextureUVChannel",
+            "ShapeModule.placementMode",
+            "ShapeModule.radius.mode",
+            "ShapeModule.radius.spread",
+            "ShapeModule.radius.value",
+            "ShapeModule.radiusThickness",
+            "ShapeModule.randomDirectionAmount",
+            "ShapeModule.randomPositionAmount",
+            "ShapeModule.sphericalDirectionAmount",
+            "ShapeModule.type",
+            "cullingMode",
+            "emitterVelocityMode",
+            "gameObject.layer",
+            "lengthInSec",
+            "moveWithTransform",
+            "randomSeed",
+            "renderer.m_CameraVelocityScale",
+            "renderer.m_LengthScale",
+            "renderer.m_MaxParticleSize",
+            "renderer.m_MinParticleSize",
+            "renderer.m_RenderAlignment",
+            "renderer.m_RenderMode",
+            "renderer.m_SortMode",
+            "renderer.m_SortingFudge",
+            "renderer.m_VelocityScale",
+            "ringBufferLoopRange.x",
+            "ringBufferLoopRange.y",
+            "ringBufferMode",
+            "scalingMode",
+            "simulationSpeed",
+            "stopAction",
+        ];
+        require(
+            particle.scalars.len() == required.len()
+                && required
+                    .iter()
+                    .all(|key| particle.scalars.contains_key(*key)),
+            "cigarette required particle scalars",
+        )?;
+        let flags = &[
+            ("ColorModule.enabled", true),
+            ("EmissionModule.enabled", true),
+            ("ForceModule.enabled", true),
+            ("ForceModule.inWorldSpace", true),
+            ("ForceModule.randomizePerFrame", true),
+            ("InitialModule.enabled", true),
+            ("InitialModule.rotation3D", false),
+            ("InitialModule.size3D", false),
+            ("ShapeModule.alignToDirection", false),
+            ("ShapeModule.enabled", true),
+            ("ShapeModule.m_TextureAlphaAffectsParticles", true),
+            ("ShapeModule.m_TextureBilinearFiltering", false),
+            ("ShapeModule.m_TextureColorAffectsParticles", true),
+            ("ShapeModule.m_UseMeshColors", true),
+            ("ShapeModule.m_UseMeshMaterialIndex", false),
+            ("SizeModule.enabled", true),
+            ("SizeModule.separateAxes", false),
+            ("VelocityModule.enabled", true),
+            ("VelocityModule.inWorldSpace", true),
+            ("autoRandomSeed", true),
+            ("looping", true),
+            ("playOnAwake", true),
+            ("prewarm", false),
+            ("useUnscaledTime", false),
+            ("gameObject.active", true),
+            ("renderer.enabled", true),
+        ];
+        require(
+            particle.flags.len() == flags.len()
+                && flags
+                    .iter()
+                    .all(|(key, value)| particle.flags.get(*key) == Some(value)),
+            "cigarette particle flags",
+        )?;
+        require(
+            particle.links.len() == 1 && particle.links.get("m_GameObject") == Some(&sid(37823)),
+            "cigarette particle source links",
+        )?;
+        particle.validate_data(1)?;
+        require(
+            !m.lighting.lights.iter().any(|l| l.source == e.light.source)
+                && !m
+                    .weather
+                    .particles
+                    .iter()
+                    .any(|x| x.source == particle.source),
+            "cigarette active effects publication",
+        )?;
+        Ok(())
+    }
+}
+
+const CIGARETTE_METHODS: &[&str] = &[
+    "public void UpdParts(bool _updMulti)\n\t{\n\t\tif (continous)\n\t\t{\n\t\t\tfor (int i = 0; i < parts.Length; i++)\n\t\t\t{\n\t\t\t\tparts[i].transform.position = Vector3.Lerp(end[i].position, start[i].position, hp);\n\t\t\t\tparts[i].transform.rotation = Quaternion.Lerp(end[i].rotation, start[i].rotation, hp);\n\t\t\t\tparts[i].transform.localScale = Vector3.Lerp(end[i].localScale, start[i].localScale, hp);\n\t\t\t}\n\t\t}\n\t\telse if (moreParts)",
+    "if (!ateOnce)\n\t\t{\n\t\t\thp = 1f;",
+    "float num = ((!auto) ? (eatSpeed * Time.deltaTime) : (autoEatSpeed * Time.deltaTime));",
+    "hp = Mathf.Clamp(hp - num, 0f, 1f);",
+    "if (ember != null && (!auto || emberInAuto))",
+    "if (hp <= 0f)\n\t\t\t\t{\n\t\t\t\t\tember.End();",
+    "parts[i].transform.position = Vector3.Lerp(end[i].position, start[i].position, hp);",
+    "Eat(out var _, out var _, out var _, _playSound: true, auto: true);",
+    "survival.Eat(weared[i].edible.Eat(out tempShitValue, out tempHpValue, out tempWaterValue, _playSound: true), tempShitValue, tempHpValue, tempWaterValue);",
+    "if (!(weared[num3] == null) && weared[num3].edible != null)\n\t\t\t\t{\n\t\t\t\t\tTakeOff(num3);",
+];

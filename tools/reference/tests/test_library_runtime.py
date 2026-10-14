@@ -18,7 +18,7 @@ class RuntimeTests(unittest.TestCase):
         from tools.reference.export import validate_runtime_paths
         with self.assertRaises(ValueError): validate_runtime_paths({'assets':[{'path':'library/models/unused.gltf','dependencies':[]}]})
         manifest = {'assets': [{'path': f'reference/{name}.gltf', 'dependencies': []}
-                               for name in ('home', 'lada', 'skoda', 'items', 'road_lamp', 'sky', 'food', 'station_benzinkut01', 'station_legjobbbenzinkut', 'station_nagybenzinkut', 'item_pack', 'item_box', 'item_shovel', 'item_box_debris', 'item_box_debris_reduced')]}
+                               for name in ('home', 'lada', 'skoda', 'items', 'road_lamp', 'sky', 'food', 'station_benzinkut01', 'station_legjobbbenzinkut', 'station_nagybenzinkut', 'item_pack', 'item_box', 'item_shovel', 'item_box_debris', 'item_box_debris_reduced', 'item_sunglasses', 'item_hat', 'item_cap', 'item_cone', 'item_pumpkin', 'item_cigarette')]}
         manifest['plates']={'material':{'shader':{'path':'reference/plate-fixture.json','sha256':'a'*64},'compiled_shader':{'path':'reference/plate-fixture.bin','sha256':'a'*64},'resources':[]}}
         validate_runtime_paths(manifest)
         manifest['ui']={'sprites':[{'path':'reference/ui-test-3.png','source':{'file':'test','path_id':3}}]}
@@ -32,7 +32,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_lighting_dependency_receipts_require_matching_typed_hashes(self):
         from tools.reference.export import validate_runtime_paths
-        manifest={'assets':[{'path':f'reference/{name}.gltf','dependencies':[]} for name in ('home', 'lada', 'skoda', 'items', 'road_lamp', 'sky', 'food', 'station_benzinkut01', 'station_legjobbbenzinkut', 'station_nagybenzinkut', 'item_pack', 'item_box', 'item_shovel', 'item_box_debris', 'item_box_debris_reduced')]}
+        manifest={'assets':[{'path':f'reference/{name}.gltf','dependencies':[]} for name in ('home', 'lada', 'skoda', 'items', 'road_lamp', 'sky', 'food', 'station_benzinkut01', 'station_legjobbbenzinkut', 'station_nagybenzinkut', 'item_pack', 'item_box', 'item_shovel', 'item_box_debris', 'item_box_debris_reduced', 'item_sunglasses', 'item_hat', 'item_cap', 'item_cone', 'item_pumpkin', 'item_cigarette')]}
         resource={'path':'reference/lighting-test-1.smip','sha256':'a'*64}
         manifest['plates']={'material':{'shader':{'path':'reference/plate-fixture.json','sha256':'a'*64},'compiled_shader':{'path':'reference/plate-fixture.bin','sha256':'a'*64},'resources':[]}}
         manifest['lighting']={'textures':[resource]}
@@ -268,6 +268,8 @@ class RuntimeContractTests(unittest.TestCase):
             elif isinstance(value,list):
                 for child in value:update_resource_hashes(child)
         update_resource_hashes(manifest['weather'])
+        update_resource_hashes(manifest['item_prototypes'])
+        update_resource_hashes(manifest['clothing'])
         update_resource_hashes(manifest['lighting'])
         update_resource_hashes(manifest['render_lighting'])
         update_resource_hashes(manifest['plates'])

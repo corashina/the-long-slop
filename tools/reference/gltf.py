@@ -303,7 +303,7 @@ class GltfExporter(GltfBuilder):
                     node.mesh = self.mesh(mesh_reader,materials,color,condition)
                     if self.with_materials:
                         from .render_lighting import recover_renderer
-                        node.extras["source_renderer"] = recover_renderer(self.source,renderer,mesh_reader)
+                        node.extras["source_renderer"] = recover_renderer(self.source,renderer,mesh_reader,"item_prototype" if identity in getattr(self.source,"item_geometry_nodes",set()) else "scene")
                     if renderer.type.name == 'SkinnedMeshRenderer':
                         bones = [self.source.resolve(renderer, pointer) for pointer in renderer_data['m_Bones']]
                         if bones:
@@ -326,6 +326,12 @@ class GltfExporter(GltfBuilder):
                 root_nodes.append(index)
             else:
                 self.document.nodes[mapping[key(record['parent'])]].children.append(index)
+        for record in records:
+            if key(record['reader']) not in getattr(self.source,'item_geometry_nodes',set()):continue
+            for component in record['components']:
+                if component.type.name=='MonoBehaviour' and self.source.class_name(component)=='partconditionscript':
+                    for pointer in self.source.read(component)['MatList']:
+                        self.material(self.source.resolve(component,pointer))
         # Cache all instrument material variants in the same imported glTF.
         for record in records:
             for component in record['components']:

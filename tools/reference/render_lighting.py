@@ -238,7 +238,7 @@ def recover_lights_and_probes(source, roots):
     return lights,probes
 
 
-def recover_renderer(source, reader, mesh):
+def recover_renderer(source, reader, mesh, usage="scene"):
     """Keep source renderer state separate from shared mesh geometry."""
     from .source import source_id, vector
     data = source.read(reader)
@@ -253,7 +253,11 @@ def recover_renderer(source, reader, mesh):
               'sorting_layer':data['m_SortingLayer'], 'sorting_order':data['m_SortingOrder']}
     if data['m_SortingLayerID'] != 0 or fields['sorting_layer'] != 0 or fields['sorting_order'] != 0:
         raise ValueError(f'{source_id(reader)} unsupported source sorting state')
-    if any(fields[name] not in (0,1) for name in ('cast_shadows','reflection_probe_usage')):
+    template_shadow=usage=='item_prototype' and source_id(reader)['file']=='sharedassets1.assets' and reader.path_id in (98477,98194,93128,91870,98218)
+    valid_shadow=fields['cast_shadows']==3 if template_shadow else fields['cast_shadows'] in (0,1)
+    if not valid_shadow:
+        raise ValueError(f'{source_id(reader)} unsupported source shadow mode')
+    if fields['reflection_probe_usage'] not in (0,1):
         raise ValueError(f'{source_id(reader)} unsupported source renderer flags')
     if data['m_ReceiveShadows'] not in (0,1):
         raise ValueError(f'{source_id(reader)} unsupported shadow receiver state')

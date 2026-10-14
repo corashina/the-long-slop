@@ -201,18 +201,34 @@ pub struct RendererRecord {
     pub sorting_order: i16,
 }
 impl RendererRecord {
-    pub fn validate(&self) -> Result<(), ReferenceError> {
+    fn validate_fields(&self) -> Result<(), ReferenceError> {
         require(
             valid_source(&self.source)
                 && finite(&self.bounds_center)
                 && finite(&self.bounds_extents)
                 && self.bounds_extents.iter().all(|v| *v >= 0.)
-                && self.cast_shadows <= 1
                 && self.reflection_probe_usage <= 1
                 && self.motion_vectors == 1
                 && self.sorting_layer == 0
                 && self.sorting_order == 0,
             &format!("renderer {}:{}", self.source.file, self.source.path_id),
+        )
+    }
+    pub fn validate(&self) -> Result<(), ReferenceError> {
+        self.validate_fields()?;
+        require(self.cast_shadows <= 1, "unsupported active shadow mode")
+    }
+    pub fn validate_template(&self) -> Result<(), ReferenceError> {
+        self.validate_fields()?;
+        let shadow_only = self.source.file == "sharedassets1.assets"
+            && [98477, 98194, 93128, 91870, 98218].contains(&self.source.path_id);
+        require(
+            if shadow_only {
+                self.cast_shadows == 3
+            } else {
+                self.cast_shadows <= 1
+            },
+            "template shadow source mode",
         )
     }
     /// Two constant vertex attributes. Flags are small integers, exactly represented by f32.

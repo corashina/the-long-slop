@@ -33,8 +33,8 @@ class ItemPrototypeTests(unittest.TestCase):
         from tools.reference.actions import recover_pickup
         with patch.object(source,'read',side_effect=lambda r:fields if r==reader else read(r)):
             with self.assertRaisesRegex(ValueError,'expected Sprite'):recover_pickup(source,reader)
-        self.assertEqual([len(p['renderers']) for p in recovered],[3,3,3,56,14])
-        self.assertEqual([len(p['colliders']) for p in recovered],[1,2,2,58,15])
+        self.assertEqual([len(p['renderers']) for p in recovered],[3,3,3,56,14,25,4,2,2,2,7])
+        self.assertEqual([len(p['colliders']) for p in recovered],[1,2,2,58,15,3,2,1,12,3,1])
         for prototype in recovered:
             asset=next(a for a in manifest['assets'] if a['id']==prototype['asset'])
             document=json.loads((Path('web/assets')/asset['path']).read_bytes())
@@ -50,8 +50,8 @@ class ItemPrototypeTests(unittest.TestCase):
 
     def test_complete_checked_templates_and_isolated_physics(self):
         m = self.fixture()
-        p = m['item_prototypes']
-        validate_item_prototypes(p, m)
+        p = m['item_prototypes'][:5]
+        validate_item_prototypes(m['item_prototypes'], m)
         self.assertEqual([x['id']['path_id'] for x in p], [75443, 51722, 61587, 81642, 81645])
         self.assertEqual([x['item_id'] for x in p], [74, 62, 216, None, None])
         self.assertEqual([len(x['pickups']) for x in p], [1, 1, 1, 56, 14])

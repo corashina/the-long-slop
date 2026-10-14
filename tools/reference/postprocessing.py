@@ -184,3 +184,62 @@ def recover_camera_stack(source):
                        'hdr': bool(data['m_HDR']), 'allow_msaa': bool(data['m_AllowMSAA']),
                        'postprocessing': post})
     return result
+
+
+def recover_glasses_profiles(source,manifest,output):
+    from .source import source_id,key
+    from .lighting import texture
+    from .weather import curve
+    source.lighting_textures=getattr(source,'lighting_textures',{(t['source']['file'],t['source']['path_id']):t for t in manifest['lighting']['textures']})
+    profiles=[]
+    for pid in range(130128,130134):
+        reader=source.get('sharedassets1.assets',pid);effects=[]
+        for pointer in source.read(reader)['settings']:
+            effect=source.resolve(reader,pointer);data=source.read(effect)
+            if source.class_name(effect)!='ColorGrading':raise ValueError('Unknown required glasses effect')
+            parameters={}
+            for name,p in data.items():
+                if not isinstance(p,dict) or 'overrideState' not in p:continue
+                value=p['value'];v={'override_state':bool(p['overrideState'])}
+                if isinstance(value,dict) and 'm_PathID' in value:
+                    target=source.resolve(effect,value)
+                    v.update(value=source_id(target) if target else None,default_state=p['defaultState'],texture=None)
+                    if target:
+                        if output is None:
+                            v['texture']=source.lighting_textures[key(target)]['id']
+                        else:v['texture']=texture(source,target,output)
+                elif isinstance(value,dict) and 'curve' in value:
+                    c=curve({'minMaxState':0,'minScalar':0.,'scalar':1.,'minCurve':value['curve'],'maxCurve':value['curve']})['max_curve']
+                    v['value']={'curve':c,'cached_data':value['cachedData'],'loop':bool(value['m_Loop']),'range':value['m_Range'],'zero_value':value['m_ZeroValue']}
+                elif isinstance(value,dict):v['value']=[value[c] for c in ('rgba' if 'r' in value else 'xyzw')]
+                else:v['value']=bool(value) if name=='enabled' else value
+                parameters[name]=v
+            effects.append({'kind':'color_grading','source':source_id(effect),'active':bool(data['active']),'parameters':parameters})
+        profiles.append({'source':source_id(reader),'effects':effects})
+    return profiles
+
+
+def validate_glasses_profiles(profiles,manifest):
+    from .survival import finite_record
+    finite_record(profiles)
+    if [p['source'] for p in profiles]!=[{'file':'sharedassets1.assets','path_id':i} for i in range(130128,130134)]:raise ValueError('Selected glasses profiles')
+    for i,p in enumerate(profiles):
+        if len(p['effects'])!=1:raise ValueError('Required glasses effect count')
+        e=p['effects'][0]
+        if e['kind']!='color_grading' or e['source']!={'file':'sharedassets1.assets','path_id':130142+i} or not e['active']:raise ValueError('Unknown required glasses effect')
+        d=e['parameters']
+        if set(d)!=GLASSES_PARAMETERS:raise ValueError('Incomplete glasses parameters')
+        for name,value in [('enabled',True),('gradingMode',1),('tonemapper',0),('toneCurveToeLength',.5),('toneCurveToeStrength',0.),('postExposure',-2. if i==0 else 0.)]:
+            if d[name]!={'override_state':True,'value':value}:raise ValueError('Glasses source override')
+        if any(d[k]['override_state'] for k in ['blueCurve', 'brightness', 'colorFilter', 'contrast', 'externalLut', 'gain', 'gamma', 'greenCurve', 'hueShift', 'hueVsHueCurve', 'hueVsSatCurve', 'ldrLut', 'ldrLutContribution', 'lift', 'lumVsSatCurve', 'masterCurve', 'mixerBlueOutGreenIn', 'mixerBlueOutRedIn', 'mixerGreenOutBlueIn', 'mixerGreenOutRedIn', 'mixerRedOutBlueIn', 'mixerRedOutGreenIn', 'redCurve', 'satVsSatCurve', 'saturation', 'temperature', 'tint', 'toneCurveGamma', 'toneCurveShoulderAngle', 'toneCurveShoulderLength', 'toneCurveShoulderStrength']):raise ValueError('Unexpected glasses override')
+        diagonal=[(100.,100.,100.),(50.,100.,200.),(75.,200.,75.),(200.,150.,80.),(150.,50.,50.),(150.,150.,50.)][i]
+        for channel,value in zip(('Red','Green','Blue'),diagonal):
+            field=d[f'mixer{channel}Out{channel}In']
+            if field['override_state']!=(i>0) or field['value']!=value:raise ValueError('Glasses source mixer')
+        for name in ('ldrLut','externalLut'):
+            t=d[name];expected={'file':'sharedassets0.assets','path_id':255} if name=='ldrLut' else None
+            if t['value']!=expected or t['override_state'] or t['default_state']!=(4 if name=='ldrLut' else 1):raise ValueError('Glasses resource source')
+            if expected and not any(r['id']==t['texture'] and r['source']==expected for r in manifest['lighting']['textures']):raise ValueError('Glasses resource dependency')
+            if not expected and t['texture'] is not None:raise ValueError('Unexpected glasses resource')
+
+GLASSES_PARAMETERS={'masterCurve', 'mixerBlueOutGreenIn', 'postExposure', 'toneCurveShoulderAngle', 'gamma', 'gradingMode', 'blueCurve', 'mixerRedOutBlueIn', 'toneCurveGamma', 'mixerRedOutRedIn', 'satVsSatCurve', 'toneCurveToeLength', 'mixerRedOutGreenIn', 'tonemapper', 'lumVsSatCurve', 'ldrLut', 'mixerBlueOutBlueIn', 'lift', 'mixerGreenOutRedIn', 'toneCurveShoulderLength', 'greenCurve', 'mixerBlueOutRedIn', 'toneCurveToeStrength', 'hueVsSatCurve', 'contrast', 'saturation', 'externalLut', 'colorFilter', 'enabled', 'gain', 'brightness', 'tint', 'mixerGreenOutGreenIn', 'ldrLutContribution', 'temperature', 'redCurve', 'hueShift', 'mixerGreenOutBlueIn', 'toneCurveShoulderStrength', 'hueVsHueCurve'}

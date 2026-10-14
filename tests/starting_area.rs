@@ -963,21 +963,32 @@ fn walking_far_keeps_a_parked_road_car_supported() {
     };
     let support_budget = 3 * physics.vehicle_count();
     assert!(physics.collider_count() <= fleet_colliders + streamed(&stream) + support_budget);
+    let station_meshes = |stream: &my_summer_slop::world::WorldStream| {
+        stream
+            .chunks()
+            .flat_map(|chunk| &chunk.data.stations)
+            .map(|station| {
+                stream.stations().types[station.kind]
+                    .colliders
+                    .iter()
+                    .filter(|collider| {
+                        matches!(
+                            collider.geometry,
+                            my_summer_slop::reference::ColliderGeometry::Trimesh { .. }
+                        )
+                    })
+                    .count()
+            })
+            .sum::<usize>()
+    };
     let away_terrain = physics
         .rapier()
         .colliders
         .iter()
         .filter(|(_, collider)| collider.shape().as_trimesh().is_some())
-        .count();
-    assert_eq!(
-        physics
-            .rapier()
-            .colliders
-            .iter()
-            .filter(|(_, collider)| collider.shape().as_trimesh().is_some())
-            .count(),
-        11 + support_budget
-    );
+        .count()
+        - station_meshes(&stream);
+    assert_eq!(away_terrain, 11 + support_budget);
     stream.sync_at(stream.origin.absolute(after), &mut physics);
     let count = physics.collider_count();
     assert!(
@@ -990,7 +1001,8 @@ fn walking_far_keeps_a_parked_road_car_supported() {
             .colliders
             .iter()
             .filter(|(_, collider)| collider.shape().as_trimesh().is_some())
-            .count(),
+            .count()
+            - station_meshes(&stream),
         away_terrain - 3
     );
     stream.sync_at(stream.origin.absolute(after), &mut physics);
