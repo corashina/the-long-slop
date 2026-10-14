@@ -765,7 +765,11 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         opening: available.opening,
         carrying: info.carrying,
         notice,
-        amount: (amount * 10.).round() as u32,
+        amount: if paint.is_some() {
+            amount.round() as u32
+        } else {
+            (amount * 10.).round() as u32
+        },
         empty: amount <= 0.05,
         capacity,
         percents: std::array::from_fn(|i| {

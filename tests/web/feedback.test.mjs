@@ -72,3 +72,19 @@ test('source_paint_count_is_bare_and_hidden_during_carry',()=>{
  state.update({...r,noText:true,actions:8,carrying:true,name:'Paint'});
  assert.equal(state.fluidText,'');
 });
+test('paint_count_cache_tracks_integer_boundary_with_same_held_tool',()=>{
+ const state=new FeedbackState();
+ const r={...tank(37.51,100),quantities:[0,0,0,0,0,0],context:14,actions:4194304,carrying:true,name:'Brush',fluidName:'',lmbUse:false};
+ assert.equal(state.update(r),true);
+ assert.equal(state.fluidText,'38');
+ assert.equal(state.update({...r,amount:37.49}),true);
+ assert.equal(state.fluidText,'37');
+ assert.equal(state.update({...r,amount:37.41}),false);
+ assert.equal(state.fluidText,'37');
+ assert.equal(state.update(r),true);
+ assert.equal(state.fluidText,'38');
+ const fluid=new FeedbackState(),f={...tank(37.51,100),context:3,actions:4,carrying:false,name:'Fuel cap'};
+ assert.equal(fluid.update(f),true);
+ assert.equal(fluid.update({...f,amount:37.49,quantities:[37.49,0,0,0,0,0]}),false);
+ assert.match(fluid.fluidText,/37.5 \/ 100 L/);
+});

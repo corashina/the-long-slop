@@ -34,7 +34,7 @@ export class FeedbackState {
  setVisible(active){this.active=active;this.visible=active&&this.enabled;}
  toggle(){this.enabled=!this.enabled;this.visible=this.active&&this.enabled;}
  update(r){
-  const amountKey=Math.round(r.amount*10),empty=r.amount<=Math.fround(.05);
+  const amountKey=Math.round(r.amount*(r.context===14?1:10)),empty=r.amount<=Math.fround(.05);
   let changed=r.context!==this.context||amountKey!==this.amountKey||r.capacity!==this.capacity||r.fluidName!==this.fluidName||r.hasName!==this.hasName||r.noText!==this.noText||empty!==this.empty;
   for(let i=0;i<6;i++){const percent=r.amount>0?Math.fround(Math.fround(r.quantities[i]/r.amount)*100):0;const key=percent>=1?Math.round(percent):-1;if(this.percentKeys[i]!==key){changed=true;this.percentKeys[i]=key;}}
   const radioChanged=r.radioAm!==this.radioAm||r.radioFrequency!==this.radioFrequency||r.radioVolume!==this.radioVolume;
