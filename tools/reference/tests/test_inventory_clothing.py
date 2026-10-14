@@ -1,8 +1,13 @@
 import copy
+import hashlib
+import os
 import json
 import unittest
 from pathlib import Path
-from tools.reference.inventory import validate_inventory
+from tools.reference.inventory import recover_inventory, validate_inventory
+from tools.reference.library.reader import LibraryReader
+from tools.reference.library.types import LibraryReceipt
+from tools.reference.source import LibrarySource
 
 INPUTS = [
     ('equiprecenter', 19, 'Tab'), ('removeSunglasses', 30, 'X'),
@@ -14,6 +19,20 @@ INPUTS = [
 class InventoryClothingTests(unittest.TestCase):
     def setUp(self):
         self.manifest = json.loads(Path('tests/common/reference.json').read_text())
+
+    def test_recovers_checked_inventory_from_accepted_source(self):
+        root = os.environ.get('REFERENCE_LIBRARY_ROOT')
+        self.assertIsNotNone(root, 'Set REFERENCE_LIBRARY_ROOT to the accepted source library')
+        path = Path(root) / 'manifest.json'
+        content = path.read_bytes()
+        metadata = json.loads(content)
+        receipt = LibraryReceipt(path, hashlib.sha256(content).hexdigest(),
+                                 metadata['catalog_sha256'], metadata['source_manifest_sha256'], ())
+        source = LibrarySource(LibraryReader(receipt))
+        recovered = recover_inventory(source, self.manifest)
+        self.assertEqual(recovered, self.manifest['inventory'])
+        self.assertEqual(recovered['inputs'][-1], {'action': 'smoke', 'index': 29, 'key': 'CapsLock'})
+        self.assertEqual([(i['action'], i['index'], i['key']) for i in recovered['inputs']], INPUTS)
 
     def test_checked_inventory_contract(self):
         r = self.manifest['inventory']
