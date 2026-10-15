@@ -24,6 +24,7 @@ test('loading keeps counts and budgets on failure, then resets for the next load
  now=3000;loading.progress(50000,50000,true,false);
  assert.equal(nodes.get('#loading-progress').value,null,'world preparation has no known percentage');
  loading.fail();const stopped=nodes.get('#loading-phase').textContent;
+ assert.deepEqual(loading.snapshot().budgets,[{name:'Asset GPU',used:120*1048576,limit:512*1048576,unit:'bytes'}]);
  loading.progress(1,50000,false,false);loading.budget('Asset GPU',0,512*1048576,'bytes');
  assert.equal(nodes.get('#loading-phase').textContent,stopped);
  assert.match(stopped,/stopped/);

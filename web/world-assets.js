@@ -25,7 +25,7 @@ async function checkedBytes(response,maxBytes=MAX_FILE_BYTES){
 }
 
 // Check catalog bytes without decoding meshes or textures into resident assets.
-export async function admitWorldAssets(manifest,onProgress){
+export async function admitWorldAssets(manifest,onProgress,onFetched=()=>{}){
  if(!manifest.world||!manifest.world.prototypes?.length)throw Error('Missing required world contract.');
  const files=new Map(),pngMips=new Map(),prototypeInputs=new Map();
  const prototypePaths=new Set(manifest.assets.filter(a=>a.usage==='world_prototype').map(a=>a.path));
@@ -49,6 +49,7 @@ export async function admitWorldAssets(manifest,onProgress){
     const response=await fetch('./assets/'+entry.file,{signal:controller.signal});
     if(!response.ok)throw Error('HTTP '+response.status);
     const bytes=await checkedBytes(response);
+    onFetched({path:'assets/'+entry.file,requiredBytes:Number(response.headers.get('content-length'))||bytes.byteLength,receivedBytes:bytes.byteLength});
     worldBootstrapMeasurements.maxDependencyBytes=Math.max(worldBootstrapMeasurements.maxDependencyBytes,bytes.byteLength);
     worldBootstrapMeasurements.dependencyPayloadCopyBytes=2*worldBootstrapMeasurements.maxDependencyBytes;
     const digest=await crypto.subtle.digest('SHA-256',bytes);

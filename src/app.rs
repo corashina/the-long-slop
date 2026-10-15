@@ -747,12 +747,9 @@ fn publish_loading(
     plates: Res<presentation::plates::PlateTextStatus>,
     time: Res<Time<Real>>,
     mut last: Local<f64>,
+    mut traced: Local<u8>,
 ) {
     let now = time.elapsed_secs_f64();
-    if drive.ready || visuals.failed || now - *last < 0.5 {
-        return;
-    }
-    *last = now;
     let stream = &drive.runtime.stream;
     let rendering = visuals.bound
         && materials.state == presentation::materials::RenderingState::Ready
@@ -760,6 +757,22 @@ fn publish_loading(
         && source_lighting.state == presentation::materials::RenderingState::Ready
         && mirrors.ready()
         && plates.ready();
+    if stream.metrics().prepared_roads == crate::world::ROAD_SEGMENTS && *traced & 1 == 0 {
+        game_startup_stage("generation", false);
+        *traced |= 1;
+    }
+    if visuals.bound && *traced & 2 == 0 {
+        game_startup_stage("decodeUpload", false);
+        *traced |= 2;
+    }
+    if rendering && *traced & 4 == 0 {
+        game_startup_stage("pipeline", false);
+        *traced |= 4;
+    }
+    if drive.ready || visuals.failed || now - *last < 0.5 {
+        return;
+    }
+    *last = now;
     game_loading_progress(
         stream.metrics().prepared_roads,
         crate::world::ROAD_SEGMENTS,

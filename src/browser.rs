@@ -92,6 +92,10 @@ extern "C" {
     pub fn game_loading_progress(roads: u32, total: u32, rendering: bool, world: bool);
     #[wasm_bindgen(js_namespace = window, js_name = gameLoadingBudget)]
     pub fn game_loading_budget(name: &str, used: f64, limit: f64, unit: &str);
+    #[wasm_bindgen(js_namespace = window, js_name = gameStartupStage)]
+    pub fn game_startup_stage(stage: &str, started: bool);
+    #[wasm_bindgen(js_namespace = window, js_name = gameStartupFailureDetails)]
+    pub fn game_startup_failure_details(json: &str);
     #[wasm_bindgen(js_namespace=window,js_name=gameSurvival)]
     pub fn game_survival(
         hp: f32,

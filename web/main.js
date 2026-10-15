@@ -9,6 +9,7 @@ import {createInput} from './input.js';
 import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
 import {createLoading} from './loading.js';
+import {createStartupTrace} from './startup-trace.js';
 import {loadUiAssets} from './ui-layout.js';
 import {admitWorldAssets,preflightWorldPrototype,verifyWorldBytes,cancelWorldPrototype,worldBootstrapMeasurements,worldInputBytes,worldPrototypeStaging,worldDependencyReserve,worldInputMetadataBytes} from './world-assets.js';
 window.sourcePrototypePlan=preflightWorldPrototype;
@@ -20,6 +21,17 @@ window.sourceVerifyBytes=verifyWorldBytes;
 window.sourcePrototypeCancel=cancelWorldPrototype;
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
 const loading=createLoading();
+performance.setResourceTimingBufferSize?.(16000);
+const startup=createStartupTrace(()=>performance.now());
+let startupFailureDetails=null,startupDone=false;
+function fetched(record){
+ const entry=performance.getEntriesByName?.(new URL(record.path,location.href).href)?.at(-1);
+ startup.fetched({...record,cache:entry?entry.transferSize===0?'hit':'miss':'unknown',downloadMs:entry?entry.responseEnd-entry.requestStart:null});
+}
+window.gameStartupTrace=()=>startup.snapshot();
+window.gameStartupDone=()=>startupDone;
+window.gameStartupFailureDetails=json=>{startupFailureDetails=JSON.parse(json);};
+window.gameStartupStage=(stage,started)=>{if(started)startup.begin(stage);else startup.end(stage);};
 window.gameLoadingProgress=(roads,total,rendering,world)=>loading.progress(roads,total,rendering,world);
 window.gameLoadingBudget=(name,used,limit,unit)=>loading.budget(name,used,limit,unit);
 const bootStarted=performance.now();
@@ -88,21 +100,26 @@ const sleep={phase:0,eligible:false,charge:0,cooldownRemaining:0,progress:0,held
 window.gameSleep=(phase,eligible,charge,cooldownRemaining,progress)=>{
  sleep.phase=phase;sleep.eligible=eligible;sleep.charge=charge;sleep.cooldownRemaining=cooldownRemaining;sleep.progress=progress;sleep.held=(input.state.held&262144)!==0;sleep.dead=dead;sleeping=phase===2;survival?.updateSleep(sleep,feedback?.state.enabled);
 };
-function fail(message,notifyRenderer=true){if(failed)return;failed=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
+function fail(message,notifyRenderer=true){if(failed)return;failed=true;startup.reconcile(performance.getEntriesByType('resource'));startup.fail({...startupFailureDetails,message,loading:loading.snapshot()});startupDone=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
 window.gameFailure=message=>fail(message,false);
 window.gameLoading=()=>{if(failed)return;loading.start();loading.stage('Loading the garage...');menu.loading();};
-window.gameReady=()=>{if(failed||!worldAdmitted)return;if(initialReadyMs===null)initialReadyMs=performance.now()-bootStarted;loading.finish();menu.ready();};
+window.gameReady=()=>{if(failed||!worldAdmitted)return;if(initialReadyMs===null)initialReadyMs=performance.now()-bootStarted;loading.finish();menu.ready();requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(()=>{if(!failed){startup.reconcile(performance.getEntriesByType('resource'));startup.finish({presentedFrames:2,inputReady:Boolean(input&&menu)});startupDone=true;}})));};
 window.addEventListener('error',event=>fail(event.message||'The runtime stopped.'));
 window.addEventListener('unhandledrejection',event=>fail(event.reason?.message||String(event.reason)));
 canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();fail('The graphics context was lost.');});
 async function load(){
+ startup.begin('webgl');
  const probe=document.createElement('canvas'),graphics=probe.getContext('webgl2');
  if(!graphics)throw Error('This browser cannot use WebGL2.');
  graphics.getExtension('WEBGL_lose_context')?.loseContext();
+ startup.end('webgl');startup.begin('manifest');
  const response=await fetch('./assets/reference/manifest.json');
  if(!response.ok)throw Error('Cannot load reference manifest (HTTP '+response.status+').');
  const bytes=await response.arrayBuffer(),text=new TextDecoder().decode(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
+ fetched({path:'assets/reference/manifest.json',requiredBytes:bytes.byteLength,receivedBytes:bytes.byteLength});
+ startup.build({sourceBuildId:manifest.build_id,manifestSha256:manifestHash,wasm:'release'});
+ startup.end('manifest');startup.begin('interface');
  input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas,manifest.driving.bindings);
  bootstrap.manifestUtf16PayloadBytes=text.length*2;
  status.textContent='Loading interface assets...';
@@ -115,14 +132,20 @@ async function load(){
  const switchIconUrl='./assets/'+manifest.lighting.switch_icon.path;
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
  feedback=createFeedback(manifest.ui,switchIconUrl);
+ startup.end('interface');startup.begin('catalog');
  status.textContent='Checking world assets...';
  loading.stage(status.textContent);
- await admitWorldAssets(manifest,(done,total)=>loading.stage('Checking world assets...',done,total));worldAdmitted=true;
+ await admitWorldAssets(manifest,(done,total)=>loading.stage('Checking world assets...',done,total),fetched);worldAdmitted=true;
+ startup.end('catalog');startup.begin('wasm');
  status.textContent='Loading game code...';
  loading.stage(status.textContent);
  const {default:init,run,source_render_failure}=await import('./pkg/my_summer_slop.js');
  const wasm=await fetch('./pkg/my_summer_slop_bg.wasm');if(!wasm.ok)throw Error('Cannot load game code (HTTP '+wasm.status+').');
- const exports=await init({module_or_path:wasm});wasmMemory=exports.memory;if(failed)return;renderFailure=source_render_failure;status.textContent='Loading the garage...';loading.stage(status.textContent);
+ const wasmBytes=Number(wasm.headers.get('content-length'))||0;
+ startup.build({wasmBytes,wasmLastModified:wasm.headers.get('last-modified')});
+ fetched({path:'pkg/my_summer_slop_bg.wasm',requiredBytes:wasmBytes,receivedBytes:wasmBytes});
+ const exports=await init({module_or_path:wasm});wasmMemory=exports.memory;if(failed)return;renderFailure=source_render_failure;startup.end('wasm');status.textContent='Loading the garage...';loading.stage(status.textContent);
+ startup.begin('generation');startup.begin('decodeUpload');startup.begin('pipeline');
  run(text,manifestHash);
 }
 load().catch(error=>fail(error?.message??String(error)));

@@ -555,6 +555,36 @@ pub(crate) fn source_lamp_admission(
     if required + source.road_lamps.overlap.0 > light_capacity.min(32)
         || shadow_count + source.road_lamps.overlap.1 > shadow_capacity
     {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let entries: Vec<_> = source.road_lamps.required.iter().filter_map(|id| {
+                frame.lights.iter().find(|light| &light.id == id).map(|light| {
+                    let faces = if light.record.shadows.kind == 0 { 0 }
+                        else if light.record.kind == crate::reference::LightKind::Point { 6 }
+                        else { 1 };
+                    serde_json::json!({
+                        "id": id,
+                        "sourceId": light.record.source,
+                        "prototypeId": light.prototype,
+                        "shadowFaces": faces,
+                        "controllerOutput": {"enabled": light.enabled, "intensity": light.intensity},
+                    })
+                })
+            }).collect();
+            crate::browser::game_startup_failure_details(&serde_json::json!({
+                "kind": "sourceLightAdmission",
+                "requiredLightEntries": required,
+                "requiredShadowFaces": shadow_count,
+                "availableLightEntries": light_capacity.min(32),
+                "availableShadowFaces": shadow_capacity,
+                "availableNewLightEntries": light_capacity.min(32).saturating_sub(source.road_lamps.overlap.0),
+                "availableNewShadowFaces": shadow_capacity.saturating_sub(source.road_lamps.overlap.1),
+                "fixedLightEntries": source.road_lamps.fixed_lights,
+                "fixedShadowFaces": source.road_lamps.fixed_shadows,
+                "retainedOverlap": {"lightEntries": source.road_lamps.overlap.0, "shadowFaces": source.road_lamps.overlap.1},
+                "entries": entries,
+            }).to_string());
+        }
         return Err(crate::reference::ReferenceError(format!(
             "Required source lights exceed renderer capacity: {required}"
         )));

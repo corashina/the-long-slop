@@ -5,14 +5,14 @@ import test from 'node:test';
 
 function fixture(){
  const elements=new Map();
- const element=()=>({hidden:true,value:0,textContent:'',style:{},children:[],addEventListener(){},append(node){this.children.push(node);}});
+ const element=()=>({hidden:true,value:0,textContent:'',style:{},children:[],addEventListener(){},removeAttribute(){},append(...nodes){this.children.push(...nodes);}});
  const document={querySelector(selector){if(!elements.has(selector))elements.set(selector,element());return elements.get(selector);},createElement:element,addEventListener(){}};
  const window={addEventListener(){}};
  const layout={canvas:{resolution:[1920,1080],mode:0},ancestry:[],font_size:20,font:'Arial',color:[1,1,1,1],image_color:[1,1,1,1],sprite:null};
  const ui={layouts:Object.fromEntries(['reticle','use','pickup','mount','fill','carry','fluid'].map(role=>[role,layout])),urls:['icon'],icons:Object.fromEntries(['default','pickup','dismount','carrying','cap','mount','fill','enter','exit','door'].map(role=>[role,0]))};
  const source=path=>readFileSync(new URL(path,import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/export /g,'');
- const main=source('../web/main.js').replace('load().catch(error=>fail(error.message));','');
- runInNewContext(source('../web/save-storage.js')+'\n'+source('../web/save-session.js')+'\n'+source('../web/save-bridge.js')+'\n'+source('../web/ui-layout.js')+'\n'+source('../web/input.js')+'\n'+source('../web/feedback.js')+'\n'+main+'\nfeedback=createFeedback(ui);feedback.setVisible(true);',{document,window,TextEncoder,innerWidth:1280,innerHeight:720,ui});
+ const main=source('../web/main.js').replace(/load\(\)\.catch\(.*\);\s*$/,'');
+ runInNewContext(source('../web/save-storage.js')+'\n'+source('../web/save-session.js')+'\n'+source('../web/save-bridge.js')+'\n'+source('../web/ui-layout.js')+'\n'+source('../web/input.js')+'\n'+source('../web/feedback.js')+'\n'+source('../web/loading.js')+'\n'+source('../web/world-assets.js')+'\n'+source('../web/startup-trace.js')+'\n'+main+'\nloading.finish();feedback=createFeedback(ui);feedback.setVisible(true);',{document,window,TextEncoder,innerWidth:1280,innerHeight:720,ui,performance,structuredClone,setInterval,clearInterval});
  const update=(held,charge,active,mask=8192)=>window.gameFeedback(mask,8,'Rim','',Boolean(held),0,0,false,true,'',.7,held,charge,active,800,true,true,false,false,true,.5,0,0,0,0,0);
  return {elements,window,update};
 }
