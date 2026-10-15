@@ -4,21 +4,27 @@ Updated: 2026-10-15.
 
 ## Current status
 
-The cleaning integration combines current master with the feature fixes from `1b51c388`.
-The historical feature package passed release, export, readiness, New Game, and same-export Save/Load checks.
-Merged package and active gameplay acceptance remain open.
+We merged Cleaning and painting into local master in `70a4604`, then fixed restored wheel quality in `a48cc2c`.
 We implemented authored tools, live condition state, cleaning, spray paint, and strict save schema 4.
+We reject save versions 1, 2, and 3 without migration.
+Native library and WASM checks, release compilation, and wasm-bindgen passed for `a48cc2c`.
+All 50 focused web tests passed after the merge. The full web suite retains six confirmed master failures.
+Native behavior checks remain blocked by missing world fixture data and obsolete test APIs.
+Fresh runtime export needs the missing checked world probes: `samples.json`, `harness.json`, and their provenance files.
+We retained the earlier runtime assets and WASM package. Merged package and active gameplay acceptance remain open.
+
 The shared particle owner applies selected spray velocity, inherited motion, and masked collision.
-Spray refraction and brush soft-particle depth fading remain bounded shared-renderer deferrals and known visual differences.
-The final package reached these browser gates with enabled pause controls.
-IAB showed `Mouse capture failed` after Continue. Active preparation and driving remain unverified.
+Spray refraction and brush soft-particle depth fading remain deferred shared-renderer work and known visual differences.
+The historical feature package passed release, export, readiness, New Game, and same-export Save/Load checks.
+IAB showed `Mouse capture failed` after Continue. Active tool use and driving remain unverified.
 See [cleaning evidence](research/2026-10-14-cleaning-painting-reference.md) and [verification](verification.md).
 
+### Earlier source-world integration
 
 Master contains the source-world integration and retained Bevy ownership patch after merge `79765e3`.
 The deferred worktree retains implementation reports and recovery files.
 We completed nine source-world implementation layers and three integration merges.
-The final scoped review passed with no findings. Checked runtime inputs and the WASM package are installed in master.
+The source-world scoped review passed with no findings. We installed its checked runtime inputs and WASM package before cleaning integration.
 We reconciled master `6423b062` with source-world startup, collision, save identities, and renderer paths.
 We fixed hidden grass preparation and generated attachment readiness in `8d4341f`.
 We fixed the final review's texture receipt cleanup finding in `103bee7`.
@@ -38,7 +44,8 @@ The merged source export needs the missing checked world probe files. Historical
 | Audio | Source vehicle, interaction, weather, and Lada radio audio |
 | Survival and weather | Existing consumables, survival state, sleep, weather, storm lighting, and particles |
 | Portable flashlight | Source bindings, carried controls, storage restrictions, and shared light rendering |
-| Save/load | Browser storage, fleet state, fluids, item state, and scene replacement |
+| Cleaning and painting | Authored tools, cleaning, spray paint, wear, live conditions, and retained material updates |
+| Save/load | Browser storage, fleet, fluids, items, conditions, tools, and scene replacement under strict schema 4 |
 | Performance | Reduced camera light clustering and depth/shadow material bindings |
 | Roadside stations | Checked source placement, selected prototypes, static collision, and terrain alignment |
 
@@ -88,9 +95,9 @@ We retained master's latest depth/shadow bindings and connected candidate caster
 The final native/WASM builds, packaging, 22 shader variants, JavaScript syntax, and scoped whitespace checks passed.
 We preserved existing WASM warnings and unchanged upstream whitespace.
 
-The final merged native and release WASM builds, packaging, JavaScript syntax, and scoped whitespace checks passed.
-Master's source matches the reviewed build. All 7,890 installed runtime file hashes match their receipts.
-Runtime acceptance remains open. Tests and runtime checks remain skipped.
+The source-world native and release WASM builds, packaging, JavaScript syntax, and scoped whitespace checks passed.
+We verified all 7,890 installed runtime file hashes against their receipts before the cleaning merge.
+Source-world runtime acceptance remains open. We skipped tests and runtime checks for that earlier merge.
 
 ### Verification limits
 
@@ -144,7 +151,7 @@ The backlog does not expand approved implementation scope. Each new feature need
 | Full vehicle range | Partial | Add vehicles beyond the Lada and Skoda, including diesel, two-stroke, automatic, bus, and bike mechanics. |
 | Driving physics | Partial | Verify launch and both-car driving; collect native source measurements before wheel, rim, hub, suspension, and combined-brake work. |
 | Inventory and clothing | Missing | Add inventory slots, equipped items, wearables, and player customization. |
-| Cleaning and painting | Partial | Branch implements startup tools, cleaning, paint, wear, and saved conditions. Verify active use, both-car driving, lifecycle counts, and matched source views. |
+| Cleaning and painting | Partial; merged | Restore checked world probes and export the merged runtime. Verify active tools, both-car driving, lifecycle counts, and matched source views. |
 | Cargo and towing | Partial | Add general cargo locking, attachment objects, towing hooks, and trailers. Current storage locking covers flashlights. |
 | Full item range | Partial | Add remaining source food, tools, containers, and their actions. |
 | Animals and enemies | Missing | Add rabbits, human enemies, movement, attacks, and spawn rules. |
