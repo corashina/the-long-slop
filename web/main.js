@@ -8,11 +8,35 @@ const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRun
 import {createInput} from './input.js';
 import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
+import {createLoading} from './loading.js';
 import {loadUiAssets} from './ui-layout.js';
+import {admitWorldAssets,preflightWorldPrototype,verifyWorldBytes,cancelWorldPrototype,worldBootstrapMeasurements,worldInputBytes,worldPrototypeStaging,worldDependencyReserve,worldInputMetadataBytes} from './world-assets.js';
+window.sourcePrototypePlan=preflightWorldPrototype;
+window.sourceInputBytes=worldInputBytes;
+window.sourcePrototypeStaging=worldPrototypeStaging;
+window.sourceDependencyReserve=worldDependencyReserve;
+window.sourceInputMetadataBytes=worldInputMetadataBytes;
+window.sourceVerifyBytes=verifyWorldBytes;
+window.sourcePrototypeCancel=cancelWorldPrototype;
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
-let survival,dead=false,sleeping=false,audio,menu,feedback,failed=false,timeout,actions=0,frame,renderFailure;
+const loading=createLoading();
+window.gameLoadingProgress=(roads,total,rendering,world)=>loading.progress(roads,total,rendering,world);
+window.gameLoadingBudget=(name,used,limit,unit)=>loading.budget(name,used,limit,unit);
+const bootStarted=performance.now();
+let wasmMemory,initialReadyMs=null,peakFrameMs=0,lastFrameTime=null,measureRequested=false;
+const measurementWaiters=[];
+const bootstrap={manifestUtf16PayloadBytes:0,dependencyGate:worldBootstrapMeasurements};
+window.gameNow=()=>performance.now();
+window.measureWorld=()=>new Promise(resolve=>{measurementWaiters.push(resolve);measureRequested=true;});
+window.gameMeasureRequested=()=>{const requested=measureRequested;measureRequested=false;return requested;};
+window.gameMeasurements=json=>{
+ const snapshot=JSON.parse(json);
+ snapshot.browser={wasmLinearBytes:wasmMemory?.buffer.byteLength??null,jsHeapBytes:performance.memory?.usedJSHeapSize??null,
+  initialStartReadyMs:initialReadyMs,peakFrameIntervalMs:peakFrameMs,bootstrap};
+ for(const resolve of measurementWaiters.splice(0))resolve(snapshot);
+};
+let input,survival,dead=false,sleeping=false,audio,menu,feedback,failed=false,worldAdmitted=false,actions=0,frame,renderFailure;
 const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',condition:-1,held:'',throwCharge:0,throwActive:false,radioVolume:undefined,radioFrequency:undefined,radioAm:false,quantities:[0,0,0,0,0,0]};
-const input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas);
 const settleSave=window.gameSaveResult;
 window.gameSaveResult=(id,kind,payload,error)=>{
  if(kind==='Commit'&&!error){input.clear();actions=0;}
@@ -21,20 +45,25 @@ window.gameSaveResult=(id,kind,payload,error)=>{
 window.gameKeys=()=>{frame=input.takeFrame();return frame.held;};
 window.gamePressed=()=>frame.pressed;window.gameReleased=()=>frame.released;
 window.gameMouseX=()=>frame.mouseX;window.gameMouseY=()=>frame.mouseY;window.gameWheel=()=>frame.wheel;
+window.gameDrivingAssists=()=>menu?.takeDrivingAssists()??0;
+window.gameDrivingState=(gear,assists,seated)=>{window.gameState.gear=gear;window.gameState.drivingAssists=assists;menu?.drivingState(assists);feedback?.drivingState(gear,seated);};
 window.gameActions=()=>{const a=actions;actions=0;return a;};
 window.gameState = { speedKmh: 0, camera: 'First person', x: 0, y: 0, z: 0, contacts: 0,
-  frameSteps: 0, totalSteps: 0, activeChunks: 0, colliderCount: 0, absoluteX: 0, absoluteY: 0, absoluteZ: 0,
-  originX: 0, originY: 0, originZ: 0, rebases: 0, travelM: 0, lateralBand: 0, fuelLiters: 0,
+  frameSteps: 0, totalSteps: 0, activeSurfaces: 0, colliderCount: 0, absoluteX: 0, absoluteY: 0, absoluteZ: 0,
+  originX: 0, originY: 0, originZ: 0, rebases: 0, travelM: 0, preparedRoads: 0, fuelLiters: 0,
   paused: false, started: false, target: '', targetAction: 0, carrying:false, heldItem:'', rpm:0, ignition:false, running:false, starter:false, seated:false, handbrake:true, throwCharge:0, throwActive:false, fluidVolumes:record.quantities };
-window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, chunks, colliders, absoluteX, absoluteY, absoluteZ,
-  originX, originY, originZ, rebases, travelM, lateralBand, fuelLiters, paused, started) => {
+window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, surfaces, colliders, absoluteX, absoluteY, absoluteZ,
+  originX, originY, originZ, rebases, travelM, preparedRoads, fuelLiters, paused, started) => {
+  const now=performance.now();
+  if(lastFrameTime!==null)peakFrameMs=Math.max(peakFrameMs,now-lastFrameTime);
+  lastFrameTime=now;
   const state = window.gameState;
   state.speedKmh = kmh; state.camera = mode ? 'First person' : 'Chase';
   state.x = x; state.y = y; state.z = z; state.contacts = contacts;
-  state.frameSteps = steps; state.totalSteps += steps; state.activeChunks = chunks; state.colliderCount = colliders;
+  state.frameSteps = steps; state.totalSteps += steps; state.activeSurfaces = surfaces; state.colliderCount = colliders;
   state.absoluteX = absoluteX; state.absoluteY = absoluteY; state.absoluteZ = absoluteZ;
   state.originX = originX; state.originY = originY; state.originZ = originZ;
-  state.rebases = rebases; state.travelM = travelM; state.lateralBand = lateralBand;
+  state.rebases = rebases; state.travelM = travelM; state.preparedRoads = preparedRoads;
   state.fuelLiters = fuelLiters; state.paused = paused; state.started = started;
   menu?.sync(started,paused,travelM);
   if(record.context===11||record.context===12){const radio=audio?.radioFrame;record.radioVolume=radio?.volume;record.radioFrequency=radio?.frequency;record.radioAm=radio?.am;feedback?.update(record);}
@@ -59,10 +88,10 @@ const sleep={phase:0,eligible:false,charge:0,cooldownRemaining:0,progress:0,held
 window.gameSleep=(phase,eligible,charge,cooldownRemaining,progress)=>{
  sleep.phase=phase;sleep.eligible=eligible;sleep.charge=charge;sleep.cooldownRemaining=cooldownRemaining;sleep.progress=progress;sleep.held=(input.state.held&262144)!==0;sleep.dead=dead;sleeping=phase===2;survival?.updateSleep(sleep,feedback?.state.enabled);
 };
-function fail(message,notifyRenderer=true){if(failed)return;failed=true;clearTimeout(timeout);const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
+function fail(message,notifyRenderer=true){if(failed)return;failed=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
 window.gameFailure=message=>fail(message,false);
-window.gameLoading=()=>{if(failed)return;menu.loading();clearTimeout(timeout);timeout=setTimeout(()=>fail('The garage did not load within 120 seconds.'),120000);};
-window.gameReady=()=>{if(failed)return;clearTimeout(timeout);menu.ready();};
+window.gameLoading=()=>{if(failed)return;loading.start();loading.stage('Loading the garage...');menu.loading();};
+window.gameReady=()=>{if(failed||!worldAdmitted)return;if(initialReadyMs===null)initialReadyMs=performance.now()-bootStarted;loading.finish();menu.ready();};
 window.addEventListener('error',event=>fail(event.message||'The runtime stopped.'));
 window.addEventListener('unhandledrejection',event=>fail(event.reason?.message||String(event.reason)));
 canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();fail('The graphics context was lost.');});
@@ -74,19 +103,26 @@ async function load(){
  if(!response.ok)throw Error('Cannot load reference manifest (HTTP '+response.status+').');
  const bytes=await response.arrayBuffer(),text=new TextDecoder().decode(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
+ input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas,manifest.driving.bindings);
+ bootstrap.manifestUtf16PayloadBytes=text.length*2;
  status.textContent='Loading interface assets...';
+ loading.stage(status.textContent);
  await loadUiAssets(manifest.ui);
  survival=createSurvival(manifest.ui,manifest.sleep.cooldown_seconds);
  audio=createAudio(manifest.audio);installAudioBridge(window,audio);
  window.addEventListener('pagehide',()=>audio.dispose());
- menu=createMenu({canvas,ui:manifest.ui,saveSession,audio,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ menu=createMenu({canvas,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,audio,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  const switchIconUrl='./assets/'+manifest.lighting.switch_icon.path;
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
  feedback=createFeedback(manifest.ui,switchIconUrl);
+ status.textContent='Checking world assets...';
+ loading.stage(status.textContent);
+ await admitWorldAssets(manifest,(done,total)=>loading.stage('Checking world assets...',done,total));worldAdmitted=true;
  status.textContent='Loading game code...';
+ loading.stage(status.textContent);
  const {default:init,run,source_render_failure}=await import('./pkg/my_summer_slop.js');
  const wasm=await fetch('./pkg/my_summer_slop_bg.wasm');if(!wasm.ok)throw Error('Cannot load game code (HTTP '+wasm.status+').');
- await init({module_or_path:wasm});if(failed)return;renderFailure=source_render_failure;status.textContent='Loading the garage...';
- timeout=setTimeout(()=>fail('The garage did not load within 120 seconds.'),120000);run(text,manifestHash);
+ const exports=await init({module_or_path:wasm});wasmMemory=exports.memory;if(failed)return;renderFailure=source_render_failure;status.textContent='Loading the garage...';loading.stage(status.textContent);
+ run(text,manifestHash);
 }
-load().catch(error=>fail(error.message));
+load().catch(error=>fail(error?.message??String(error)));

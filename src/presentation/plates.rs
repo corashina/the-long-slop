@@ -367,6 +367,7 @@ fn bind(world: &mut World) -> Result<(), String> {
             .add(PlateTextMaterial {
                 surface,
                 lighting: SourceExtension {
+                    lod_fade: 1.,
                     receiver_mask: receiver_mask.unwrap(),
                     surface: Default::default(),
                 },

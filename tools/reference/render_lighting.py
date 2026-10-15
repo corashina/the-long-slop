@@ -242,7 +242,7 @@ def recover_renderer(source, reader, mesh):
     """Keep source renderer state separate from shared mesh geometry."""
     from .source import source_id, vector
     data = source.read(reader)
-    if reader.type.name != 'MeshRenderer':
+    if reader.type.name not in ('MeshRenderer','SkinnedMeshRenderer'):
         raise ValueError(f'{source_id(reader)} unsupported source renderer type')
     if data['m_ProbeAnchor']['m_PathID']:
         raise ValueError(f'{source_id(reader)} unsupported probe anchor')
@@ -253,13 +253,13 @@ def recover_renderer(source, reader, mesh):
               'sorting_layer':data['m_SortingLayer'], 'sorting_order':data['m_SortingOrder']}
     if data['m_SortingLayerID'] != 0 or fields['sorting_layer'] != 0 or fields['sorting_order'] != 0:
         raise ValueError(f'{source_id(reader)} unsupported source sorting state')
-    if any(fields[name] not in (0,1) for name in ('cast_shadows','reflection_probe_usage')):
+    if fields['cast_shadows'] not in (0,1,2,3) or fields['reflection_probe_usage'] not in (0,1):
         raise ValueError(f'{source_id(reader)} unsupported source renderer flags')
     if data['m_ReceiveShadows'] not in (0,1):
         raise ValueError(f'{source_id(reader)} unsupported shadow receiver state')
     if fields['motion_vectors'] != 1:
         raise ValueError(f'{source_id(reader)} unsupported source motion mode')
-    bounds = source.read(mesh)['m_LocalAABB']
+    bounds = data['m_AABB'] if reader.type.name == 'SkinnedMeshRenderer' else source.read(mesh)['m_LocalAABB']
     center = list(convert_point(vector(bounds['m_Center'])))
     extents = list(vector(bounds['m_Extent']))
     if not all(math.isfinite(v) for v in center+extents) or min(extents) < 0:

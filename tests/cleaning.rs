@@ -862,3 +862,33 @@ fn spray_lifecycle_resets_emitter_motion_without_erasing_particles() {
         assert!((tools.spray_particles(0, 0)[1].absolute_position[0] - 1001.).abs() < 1e-5);
     }
 }
+
+#[test]
+fn generated_quality_round_trip_keeps_imported_semantic_owner() {
+    use my_summer_slop::world::{AbsolutePose, GeneratedId, WorldLayer};
+    let r = common::reference();
+    let mut items = ItemStore::new(&r).unwrap();
+    let prototype = &r.world.prototypes[0];
+    let key = GeneratedId {
+        layer: WorldLayer::Prop,
+        generator: prototype.source.clone(),
+        unit: [0, 0],
+        ordinal: 0,
+        children: Vec::new(),
+    };
+    let pose = AbsolutePose {
+        position: [10., 2., 3.],
+        rotation: [0., 0., 0., 1.],
+    };
+    let id = items.insert_generated(key, prototype, pose).unwrap();
+    let mut saved = items.generated_snapshot(id, None).unwrap();
+    saved.condition = 0.25;
+    items.restore_generated(id, &saved).unwrap();
+    assert_eq!(items.generated_snapshot(id, None).unwrap().condition, 0.25);
+    let imported = r.conditions.surfaces.iter().find_map(|s| s.item).unwrap();
+    assert_eq!(items.get(imported).unwrap().generated_condition, None);
+    items.restore_generated(imported, &saved).unwrap();
+    assert_eq!(items.get(imported).unwrap().generated_condition, None);
+    let conditions = ConditionStore::new(&r).unwrap();
+    assert_eq!(conditions.item_quality(imported), Some(1.));
+}

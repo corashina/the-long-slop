@@ -1,4 +1,5 @@
 //! Persistent imported home bodies and preparation state.
+pub mod recovery;
 use crate::interaction::{
     InteractionAction, InteractionState, ResolvedAim,
     items::{ItemStore, node_pose},
@@ -20,9 +21,9 @@ use rapier3d::prelude::{
 use std::collections::HashMap;
 
 mod survival;
+pub(crate) use survival::active_part as active_food_part;
 mod weather;
 pub use survival::DrinkResult;
-pub(crate) use survival::spawn_consumable;
 
 struct CompoundCollider {
     handle: crate::vehicle::ColliderHandle,
@@ -570,7 +571,7 @@ pub struct VehicleRuntime {
     /// Distance this vehicle has driven, in meters.
     pub trip_m: f64,
     ignition_held: bool,
-    auto_gear: usize,
+    pub drivetrain: crate::simulation::drivetrain::DrivetrainState,
     recovery_bounds: crate::reference::Bounds,
     /// Absolute position at the start of the current step.
     previous: [f64; 3],
@@ -606,11 +607,7 @@ impl VehicleRuntime {
             handbrake: vehicle.handbrake,
             trip_m: 0.0,
             ignition_held: false,
-            auto_gear: vehicle
-                .gear_ratios
-                .iter()
-                .position(|ratio| *ratio == 0.0)
-                .expect("validated neutral"),
+            drivetrain: crate::simulation::drivetrain::DrivetrainState::new(vehicle),
             recovery_bounds,
             previous: [0.0; 3],
         })
@@ -620,6 +617,7 @@ impl VehicleRuntime {
 mod save;
 
 pub struct GarageRuntime {
+    pub driving_assists: crate::reference::DrivingAssists,
     pub survival: crate::survival::SurvivalState,
     pub sleep: crate::sleep::SleepState,
     pub weather: crate::weather::WeatherState,
@@ -639,11 +637,15 @@ pub struct GarageRuntime {
 
     pub audio: Option<crate::audio::AudioState>,
     pub persistent_world: crate::save::PersistentWorld,
+    pending_restore: Option<save::PendingRestore>,
     pub lighting: crate::lighting::LightingState,
     pub physics: PhysicsWorld,
     pub area: StartingArea,
     pub stream: WorldStream,
     pub vehicles: Vec<VehicleRuntime>,
+    pub recovering: bool,
+    pub startup_aligned: bool,
+    recovery_held_bodies: Vec<RigidBodyHandle>,
     /// The vehicle the player last sat in. The HUD and recovery follow it.
     pub vehicle: usize,
     pub paused: bool,
@@ -653,39 +655,45 @@ pub struct GarageRuntime {
     pub notice: &'static str,
     pub aim: ResolvedAim,
     pub wheels: crate::interaction::wheels::WheelAssemblies,
-    steering: crate::simulation::input::KeyboardSteering,
+    driving_input: crate::simulation::input::KeyboardDriving,
     recovery_bodies: Vec<RigidBodyHandle>,
     light_owners: Vec<Option<ItemId>>,
 }
 
 impl GarageRuntime {
+    pub fn set_driving_assists(
+        &mut self,
+        mut requested: crate::reference::DrivingAssists,
+    ) -> Result<(), ReferenceError> {
+        if self.started && !self.paused {
+            return Err(ReferenceError("Driving assists require pause".into()));
+        }
+        requested.automatic_gears &= requested.automatic_clutch;
+        self.driving_assists = requested;
+        self.clear_input();
+        Ok(())
+    }
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
-        Self::new_candidate(reference, true)
+        Self::new_candidate(reference, true, DEFAULT_SEED as i32)
     }
     fn new_candidate(
         reference: &ReferenceManifest,
         stream_world: bool,
+        seed: i32,
     ) -> Result<Self, ReferenceError> {
         let mut physics = PhysicsWorld::new(reference, &initial_vehicle_poses(reference)?)?;
 
         let mut area = StartingArea::new(reference, &mut physics, [0.0; 3])?;
-        let mut stream = WorldStream::new(DEFAULT_SEED, &reference.stations)?;
-        stream.configure_starting_area(reference);
+        let mut stream = WorldStream::new(reference, seed)?;
+        stream.select_source_car(reference.vehicles[0].spawn_car_id);
         if stream_world {
-            stream.sync_at(
-                reference.area.player_spawn.translation.map(|v| v as f64),
-                &mut physics,
-            );
-            crate::world::sync_station_food(&mut stream, reference, &mut area, &mut physics)?;
-            crate::world::sync_station_supplies(
-                &mut stream,
-                &mut area.items,
-                &mut area.interaction,
-                &mut physics,
+            stream.request_at(
+                reference.area.player_spawn.translation.map(f64::from),
+                physics.snapshot(0).pose.position.map(f64::from),
             );
         }
         let mut wheels = crate::interaction::wheels::WheelAssemblies::new(reference)?;
-        wheels.refresh_conditions(&area.conditions);
+        wheels.refresh_conditions(&area.conditions, &area.items);
         wheels.sync(&mut area.items, &mut physics)?;
         area.interaction
             .cleaning
@@ -693,6 +701,7 @@ impl GarageRuntime {
         physics.refresh_queries();
         area.items.sync_poses(&physics);
         area.commit_poses(&physics, true);
+        stream.initialize_imported_changes(reference, &area.items, &area.interaction, &physics);
         let lighting = crate::lighting::LightingState::new(&reference.lighting);
         let audio = crate::reference::AudioReference::from_value(&reference.audio, reference)
             .ok()
@@ -723,10 +732,11 @@ impl GarageRuntime {
             0x70697373,
         );
         let mut runtime = Self {
+            driving_assists: reference.driving.default_assists,
             urine,
             urine_reference,
             urine_emission: [0.; 2],
-            weather: crate::weather::WeatherState::new(&reference.weather, DEFAULT_SEED),
+            weather: crate::weather::WeatherState::new(&reference.weather, seed as u64),
             weather_bindings,
             survival: crate::survival::SurvivalState::new(&reference.survival),
             sleep: crate::sleep::SleepState::new(&reference.sleep),
@@ -741,9 +751,12 @@ impl GarageRuntime {
             audio_gameplay: crate::reference::AudioGameplayReference::from_value(&reference.audio)?,
             audio,
             persistent_world: crate::save::PersistentWorld::new(reference),
+            pending_restore: None,
             physics,
             area,
             stream,
+            recovering: false,
+            startup_aligned: false,
             lighting,
             vehicles: reference
                 .vehicles
@@ -758,10 +771,12 @@ impl GarageRuntime {
             notice: "",
             aim: ResolvedAim::default(),
             wheels,
-            steering: crate::simulation::input::KeyboardSteering::new(
+            driving_input: crate::simulation::input::KeyboardDriving::new(
                 reference.vehicles[0].keyboard_steering_rate,
+                reference.driving.pedal_rate,
             ),
             recovery_bodies: Vec::with_capacity(reference.items.len()),
+            recovery_held_bodies: Vec::with_capacity(reference.items.len()),
             light_owners: reference
                 .lighting
                 .controllers
@@ -841,6 +856,7 @@ impl GarageRuntime {
     }
 
     fn advance_light_fades(&mut self, reference: &ReferenceManifest, dt: f32) {
+        self.stream.advance_generated_lamps(dt);
         for (index, owner) in self.light_owners.iter().enumerate() {
             self.lighting.set_controller_mounted(
                 index,
@@ -851,8 +867,12 @@ impl GarageRuntime {
     }
 
     pub fn step(&mut self, reference: &ReferenceManifest, mut input: FrameInput) {
-        self.wheels.refresh_conditions(&self.area.conditions);
-        if !self.started || self.paused {
+        self.wheels
+            .refresh_conditions(&self.area.conditions, &self.area.items);
+        if let Err(error) = self.sync_world_activity(reference) {
+            self.stream.fail(ReferenceError(error.to_string()));
+        }
+        if !self.started || self.paused || self.recovering || !self.world_supported() {
             self.clear_input();
             return;
         }
@@ -910,7 +930,8 @@ impl GarageRuntime {
             self.notice = "";
         }
         self.aim = aim;
-        let seated = self.area.player.seat().is_some();
+        let previous_seat = self.area.player.seat();
+        let seated = previous_seat.is_some();
         let availability = self.area.interaction.available_actions(
             &aim,
             &self.area.player,
@@ -961,7 +982,11 @@ impl GarageRuntime {
                 }
             }
             Some(InteractionAction::LightControl(control)) => {
-                self.lighting.use_control(&reference.lighting, control);
+                match self.stream.use_generated_light(control) {
+                    Ok(false) => self.lighting.use_control(&reference.lighting, control),
+                    Ok(true) => {}
+                    Err(error) => self.stream.fail(error),
+                }
                 self.area
                     .interaction
                     .completed_action(InteractionAction::LightControl(control));
@@ -1174,15 +1199,23 @@ impl GarageRuntime {
             .expect("bound parts");
         if let Some(vehicle) = self.area.player.seat_vehicle() {
             self.vehicle = vehicle;
+            self.stream
+                .select_source_car(reference.vehicles[vehicle].spawn_car_id);
         }
+        let vehicle_input = if previous_seat != self.area.player.seat() {
+            self.clear_driving_input();
+            FrameInput::default()
+        } else {
+            input
+        };
         let driving = self.area.player.driving();
-        let steering = self.steering.step(
+        let controls = self.driving_input.step(
             if driving {
                 self.area.player.seat()
             } else {
                 None
             },
-            input.held,
+            vehicle_input.held,
         );
         if driving && input.pressed & keys::LIGHTS != 0 {
             if let Some(audio) = &mut self.audio
@@ -1201,9 +1234,9 @@ impl GarageRuntime {
             self.step_vehicle(
                 reference,
                 index,
-                input,
+                vehicle_input,
                 driving && index == self.vehicle,
-                steering,
+                controls,
             );
         }
         self.advance_urine(reference, FIXED_DT);
@@ -1296,7 +1329,14 @@ impl GarageRuntime {
             self.area.player.focus_position(&self.physics)
         };
         let absolute = self.stream.origin.absolute(focus);
-        self.stream.focus = absolute;
+        self.stream.request_at(
+            absolute,
+            self.persistent_world.absolute_vehicle_position(
+                &self.physics,
+                &self.stream.origin,
+                self.vehicle,
+            ),
+        );
         self.persistent_world
             .sync(
                 reference,
@@ -1323,7 +1363,12 @@ impl GarageRuntime {
             }));
             self.rebases += 1;
         }
-        self.stream.sync_at(absolute, &mut self.physics);
+        self.stream.capture_changes(
+            reference,
+            &mut self.area.items,
+            &self.area.interaction,
+            &self.physics,
+        );
         self.persistent_world
             .sync(
                 reference,
@@ -1333,21 +1378,6 @@ impl GarageRuntime {
                 &mut self.physics,
             )
             .expect("persistent world bindings");
-        crate::world::sync_station_supplies(
-            &mut self.stream,
-            &mut self.area.items,
-            &mut self.area.interaction,
-            &mut self.physics,
-        );
-        self.persistent_world
-            .sync_pumps(&self.stream, &mut self.area.interaction);
-        crate::world::sync_station_food(
-            &mut self.stream,
-            reference,
-            &mut self.area,
-            &mut self.physics,
-        )
-        .expect("valid station food");
         self.sync_weather_bindings(reference);
         self.advance_light_fades(reference, FIXED_DT);
         self.advance_needs(reference, FIXED_DT, factors.need_scale);
@@ -1377,7 +1407,7 @@ impl GarageRuntime {
         index: usize,
         input: FrameInput,
         driving: bool,
-        steering: f32,
+        controls: crate::simulation::input::DrivingControls,
     ) {
         if !self.physics.body_active(self.physics.chassis_handle(index)) {
             return;
@@ -1387,8 +1417,11 @@ impl GarageRuntime {
         let engine_reference = &source.engine;
         let snapshot = self.physics.snapshot(index);
         let speed = snapshot.speed_mps;
-        let axis = ((driving && input.held & keys::FORWARD != 0) as u8 as f32)
-            - ((driving && input.held & keys::BACK != 0) as u8 as f32);
+        let controls = if driving {
+            controls
+        } else {
+            Default::default()
+        };
         let direction = speed
             * snapshot
                 .linear_velocity
@@ -1396,16 +1429,27 @@ impl GarageRuntime {
                 .map(|v| v * v)
                 .sum::<f32>()
                 .sqrt();
-        let throttle =
-            axis != 0.0 && (direction.abs() <= source.auto_move_min || direction * axis > 0.0);
+        let rolling_rpm = self.physics.driven_wheel_rpm(index);
+        let engine_present = self.area.items.mounted(engine_reference.item);
         let vehicle = &mut self.vehicles[index];
+        let drivetrain = vehicle.drivetrain.step(
+            controls,
+            input.pressed,
+            self.driving_assists,
+            engine_present.then_some(vehicle.engine_output),
+            rolling_rpm,
+            direction,
+            source,
+            &reference.driving,
+            driving,
+        );
+        let gear = drivetrain.gear;
+        let throttle = drivetrain.throttle;
+        let brake = drivetrain.brake;
         let car_controls = driving
             || (self.area.player.driving2() && self.area.player.seat_vehicle() == Some(index));
-        let ignition_held = car_controls
-            && (input.held & keys::IGNITION != 0
-                || (!source.dont_ignite_with_throttle_in_automatic
-                    && throttle
-                    && !vehicle.engine_output.running));
+        let ignition_held =
+            car_controls && (input.held & keys::IGNITION != 0 || drivetrain.ignition_request);
         let ignition_pressed = (car_controls && input.pressed & keys::IGNITION != 0)
             || (ignition_held && !vehicle.ignition_held);
         let ignition_released = !ignition_held
@@ -1414,34 +1458,6 @@ impl GarageRuntime {
         if ignition_pressed {
             self.attempts = self.attempts.wrapping_add(1);
         }
-        let radius = reference
-            .wheel_slots
-            .iter()
-            .find(|slot| slot.id == source.wheel_slots[0])
-            .expect("validated wheel slot")
-            .radius;
-        let rolling_rpm = self.physics.driven_wheel_rpm(index);
-        let gear = crate::vehicle::select_gear(
-            rolling_rpm,
-            axis < 0.0,
-            throttle,
-            vehicle.auto_gear,
-            engine_reference,
-            source,
-        );
-        if throttle {
-            vehicle.auto_gear = gear;
-        }
-        let ratio = source.gear_ratios[gear].abs() * source.final_drive_ratio;
-        let wheel_rpm = rolling_rpm.abs() * ratio;
-        let clutch = if ratio == 0.0 {
-            0.0
-        } else {
-            ((vehicle.engine.rpm - engine_reference.auto_shift_clutch_rpm
-                + engine_reference.auto_shift_clutch_rpm_range)
-                / engine_reference.auto_shift_clutch_rpm_range)
-                .clamp(0.0, 1.0)
-        };
         let radiator_condition = ((1.0
             - self
                 .area
@@ -1454,15 +1470,15 @@ impl GarageRuntime {
         let was_running = vehicle.engine_output.running;
         vehicle.engine_output = vehicle.engine.step(
             EngineInput {
-                engine_present: self.area.items.mounted(engine_reference.item),
+                engine_present,
                 radiator_present: self.area.items.mounted(engine_reference.coolant_tank),
                 ignition_held,
                 ignition_pressed,
                 ignition_released,
-                throttle: throttle as u8 as f32,
-                clutch,
-                wheel_rpm,
-                free_run: source.gear_free_run[gear],
+                throttle,
+                clutch: drivetrain.engagement,
+                wheel_rpm: drivetrain.wheel_rpm,
+                free_run: drivetrain.free_run,
                 speed_kmh: speed * 3.6,
                 ambient_temperature: self.lighting.cycle.output().ambient_temperature,
                 ambient_heat_modifier: engine_reference.globals.outside_temperature_modifier
@@ -1531,10 +1547,10 @@ impl GarageRuntime {
             .filter(|(body, _)| self.physics.vehicle_of(*body) == Some(index))
             .map(|(_, steer)| steer);
         let drive = DriveInput {
-            accelerate: driving && input.held & keys::FORWARD != 0,
-            brake_reverse: driving && input.held & keys::BACK != 0,
-            steer: pushed.unwrap_or(if driving { steering } else { 0.0 }),
-            handbrake: self.vehicles[index].handbrake,
+            throttle,
+            brake,
+            steer: pushed.unwrap_or(controls.steer),
+            handbrake: self.vehicles[index].handbrake as u8 as f32,
         };
         let electronics = reference
             .lighting
@@ -1551,21 +1567,15 @@ impl GarageRuntime {
             index,
             crate::lighting::VehicleLightSample {
                 local_ignition: output.ignition && electronics_fine,
-                brake: crate::simulation::braking(drive, direction, source.auto_move_min) as u8
-                    as f32,
+                brake,
                 gear_ratio: source.gear_ratios[gear],
                 electronics_output: electronics.electronics_output,
             },
         );
-        let drive_count = self.physics.driven_wheel_count(index);
-        self.physics.set_engine_brake(
-            index,
-            output.brake_torque_nm * ratio / (drive_count.max(1) as f32 * radius),
-        );
         self.physics.apply_vehicle_forces(
             index,
             drive,
-            crate::vehicle::drive_force(output, source, gear, radius, drive_count),
+            crate::simulation::drivetrain::transmitted_torques(output, source, gear),
         );
     }
 
@@ -1587,13 +1597,17 @@ impl GarageRuntime {
 
     pub fn clear_input(&mut self) {
         self.sleep.cancel_charge();
-        self.steering.clear();
+        self.clear_driving_input();
+        self.area.interaction.cancel_input();
+    }
+
+    fn clear_driving_input(&mut self) {
+        self.driving_input.clear();
         for vehicle in &mut self.vehicles {
             vehicle.ignition_held = false;
             vehicle.engine.clear_input();
             vehicle.engine_output.starter = false;
         }
-        self.area.interaction.cancel_input();
     }
 
     /// Moves the current vehicle, its cargo, and a walking player back to the road.
@@ -1605,229 +1619,111 @@ impl GarageRuntime {
         self.audio_motion_revision = self.audio_motion_revision.wrapping_add(1);
         self.previous_speed = None;
         self.death_protected = true;
-        let index = self.vehicle;
-        let dormant = !self.physics.body_active(self.physics.chassis_handle(index));
-        if dormant {
-            let player = self
-                .stream
-                .origin
-                .absolute(self.area.player.focus_position(&self.physics));
-            let empty = self
-                .area
-                .items
-                .get(reference.vehicles[index].engine.fuel_tank)
-                .and_then(|i| i.fluid.as_ref())
-                .is_none_or(|f| f.mixture.total() <= 0.);
-            let (target, _) = self.stream.recovery_destination(-player[2], empty);
-            self.persistent_world.relocate_dormant_vehicle(
-                reference,
-                &mut self.area,
+        let position = if self
+            .physics
+            .body_active(self.physics.chassis_handle(self.vehicle))
+        {
+            self.persistent_world.absolute_vehicle_position(
                 &self.physics,
-                index,
-                target,
-                &self.vehicles[index].recovery_bounds,
-                &mut self.recovery_bodies,
-            );
-            self.stream.focus = target;
-            if (0..3).any(|axis| {
-                (target[axis] - self.stream.origin.offset[axis]).abs()
-                    > crate::world::REBASE_LIMIT as f64
-            }) {
-                // Hibernate source bodies before transporting the recovery origin.
-                self.persistent_world
-                    .sync(
-                        reference,
-                        &mut self.area,
-                        &mut self.wheels,
-                        &self.stream,
-                        &mut self.physics,
-                    )
-                    .expect("persistent recovery bindings");
-                let player_pose = self.area.player.body_pose(&self.physics);
-                let held_pose = self
-                    .area
-                    .interaction
-                    .held()
-                    .and_then(|id| self.area.items.get(id))
-                    .and_then(|i| i.body)
-                    .map(|body| (body, *self.physics.rapier().bodies[body].position()));
-                let shift = std::array::from_fn(|axis| {
-                    (target[axis] - self.stream.origin.offset[axis]) as f32
-                });
-                self.physics.rebase(shift);
-                self.urine.rebase(rapier3d::math::Vector::from_array(shift));
-                self.stream.origin.offset = target;
-                self.area.sync_origin(target);
-                if let Some(audio) = &mut self.audio {
-                    audio.rebase(shift);
-                }
-                if let Some((body, pose)) = held_pose {
-                    self.physics.rapier_mut().bodies[body].set_position(pose, false);
-                }
-                let old_player = self.area.player.body_handle();
-                self.physics.rapier_mut().remove_body(old_player);
-                self.area.player =
-                    PlayerState::new(&reference.player, player_pose, &mut self.physics);
-                self.area.player.configure_seats(&reference.seats);
-                self.area
-                    .interaction
-                    .bind_player_body(self.area.player.body_handle());
-                self.area.items.sync_poses(&self.physics);
-                self.rebases += 1;
-            }
-            self.persistent_world
-                .sync(
-                    reference,
-                    &mut self.area,
-                    &mut self.wheels,
-                    &self.stream,
-                    &mut self.physics,
-                )
-                .expect("persistent recovery bindings");
-        }
-        self.clear_input();
-        self.area
-            .interaction
-            .finish_cancelled_input(&mut self.area.player, &mut self.physics);
-        self.aim = ResolvedAim::default();
-        let held = self
-            .area
-            .interaction
-            .held()
-            .and_then(|item| self.area.items.get(item))
-            .and_then(|item| item.body);
-        let old_view = to_rapier(self.area.player.view_pose(&self.physics));
-        let old_car = to_rapier(self.physics.snapshot(index).pose);
-        let inverse = old_car.inverse();
-        let bounds = self.vehicles[index].recovery_bounds;
-        if !dormant {
-            self.recovery_bodies.clear();
-            for item in self.area.items.iter() {
-                let Some(handle) = item.body else {
-                    continue;
-                };
-                if Some(handle) == held
-                    || self.physics.vehicle_of(handle).is_some()
-                    || self.recovery_bodies.contains(&handle)
-                {
-                    continue;
-                }
-                let body = &self.physics.rapier().bodies[handle];
-                if !body.is_dynamic() || !body.is_enabled() {
-                    continue;
-                }
-                let point = inverse * body.position().translation;
-                if (0..3).all(|i| point[i] >= bounds.min[i] && point[i] <= bounds.max[i]) {
-                    self.recovery_bodies.push(handle);
-                }
-            }
-        }
-        self.area
-            .interaction
-            .drop_held(&mut self.area.items, &mut self.physics);
-        let old = self.physics.snapshot(index).pose;
-        let fuel = self
+                &self.stream.origin,
+                self.vehicle,
+            )
+        } else {
+            self.stream
+                .origin
+                .absolute(self.area.player.focus_position(&self.physics))
+        };
+        let empty = self
             .area
             .items
-            .get(reference.vehicles[index].engine.fuel_tank)
+            .get(reference.vehicles[self.vehicle].engine.fuel_tank)
             .and_then(|item| item.fluid.as_ref())
-            .map_or(0.0, |fluid| fluid.mixture.total());
-        let distance = -self.stream.origin.absolute(old.position)[2];
-        let pose = self
-            .stream
-            .reset_pose(distance, fuel <= 0.0, &mut self.physics);
-        crate::world::sync_station_supplies(
-            &mut self.stream,
-            &mut self.area.items,
-            &mut self.area.interaction,
-            &mut self.physics,
-        );
-        crate::world::sync_station_food(
-            &mut self.stream,
-            reference,
-            &mut self.area,
-            &mut self.physics,
-        )
-        .expect("valid station food");
-        if dormant {
-            self.physics.reset_preserving_wheels(index, pose);
-        } else {
-            self.physics.reset(index, pose);
-        }
-
-        let cargo_delta = to_rapier(pose) * inverse;
-        for &body in &self.recovery_bodies {
-            transport_body(&mut self.physics, body, cargo_delta);
-        }
-        self.area.interaction.sync_mechanisms(&mut self.physics);
-        self.area.sync_attachments(&mut self.physics, false);
-        self.area.sync_compound(&mut self.physics);
-        self.area
-            .interaction
-            .sync_parts(&mut self.area.items, &mut self.physics)
-            .expect("bound parts");
-        self.wheels
-            .sync(&mut self.area.items, &mut self.physics)
-            .expect("validated wheel bindings");
-        self.physics.refresh_queries();
-        self.area.items.sync_poses(&self.physics);
-        if self.area.player.seat().is_none() {
-            let old_player = self.area.player.body_handle();
-            let standing = rapier3d::prelude::SharedShape::capsule_y(
-                reference.player.standing_height * 0.5 - reference.player.standing_radius,
-                reference.player.standing_radius,
-            );
-            let mut clear = None;
-            for distance in [3.0, 4.0, 5.0, 6.0] {
-                for side in [-1.0, 1.0] {
-                    let mut candidate = to_rapier(pose);
-                    candidate.translation += candidate.rotation
-                        * rapier3d::math::Vector::new(
-                            distance * side,
-                            reference.player.standing_height * 0.5 - 1.1 + 0.05,
-                            0.0,
-                        );
-                    if self
-                        .physics
-                        .queries(
-                            rapier3d::prelude::QueryFilter::default()
-                                .exclude_sensors()
-                                .exclude_rigid_body(old_player),
-                        )
-                        .intersect_shape(candidate, standing.as_ref())
-                        .next()
-                        .is_none()
-                    {
-                        clear = Some(crate::vehicle::from_rapier(&candidate));
-                        break;
-                    }
-                }
-                if clear.is_some() {
-                    break;
-                }
+            .is_some_and(|fluid| fluid.mixture.total() <= 0.0);
+        match self.stream.recovery_target(position, empty) {
+            Ok(_) => {
+                self.recovering = true;
+                self.clear_input();
             }
-            if let Some(clear) = clear {
-                self.physics.rapier_mut().remove_body(old_player);
-                self.area.player = PlayerState::new(&reference.player, clear, &mut self.physics);
-                self.area.player.configure_seats(&reference.seats);
-                self.area
-                    .interaction
-                    .bind_player_body(self.area.player.body_handle());
+            Err(error) => self.stream.fail(error),
+        }
+    }
+    pub fn world_supported(&self) -> bool {
+        if self.restore_pending() || !self.startup_aligned || !self.stream.metrics().indices_ready {
+            return false;
+        }
+        let supported = |point: [f32; 3], padding: f64| {
+            let center = self.stream.origin.absolute(point);
+            self.stream.supports(crate::world::WorldBounds {
+                min: center.map(|v| v - padding),
+                max: center.map(|v| v + padding),
+            })
+        };
+        supported(self.area.player.focus_position(&self.physics), 8.)
+            && (0..self.physics.vehicle_count()).all(|index| {
+                let handle = self.physics.chassis_handle(index);
+                !self.physics.body_active(handle)
+                    || supported(
+                        self.physics.snapshot(index).pose.position,
+                        8. + self.physics.rapier().bodies[handle].linvel().length() as f64
+                            * FIXED_DT as f64,
+                    )
+            })
+    }
+    /// Call after source publication, before deciding whether the simulation can advance.
+    pub fn sync_world_activity(
+        &mut self,
+        reference: &ReferenceManifest,
+    ) -> Result<(), crate::save::SaveError> {
+        if self.startup_aligned {
+            self.persistent_world.sync(
+                reference,
+                &mut self.area,
+                &mut self.wheels,
+                &self.stream,
+                &mut self.physics,
+            )?;
+        }
+        Ok(())
+    }
+    pub fn align_startup(&mut self, reference: &ReferenceManifest) -> Result<bool, ReferenceError> {
+        if self.startup_aligned {
+            return Ok(true);
+        }
+        let frame = self.stream.frame();
+        let Some(startup) = frame.startup else {
+            return Ok(false);
+        };
+        for body in &reference.bodies {
+            let mut node = reference.nodes.iter().find(|n| n.id == body.node);
+            let mut offset = 0.0;
+            while let Some(record) = node {
+                offset += startup
+                    .root_offsets
+                    .iter()
+                    .filter(|(id, _)| *id == record.source)
+                    .map(|(_, value)| *value)
+                    .sum::<f32>();
+                node = record
+                    .parent
+                    .and_then(|id| reference.nodes.iter().find(|n| n.id == id));
             }
+            let handle = self.area.bodies[&body.id];
+            let body = &mut self.physics.rapier_mut().bodies[handle];
+            let mut pose = *body.position();
+            pose.translation.y += offset;
+            body.set_position(pose, true);
         }
-        if let Some(body) = held {
-            let player_delta =
-                to_rapier(self.area.player.view_pose(&self.physics)) * old_view.inverse();
-            transport_body(&mut self.physics, body, player_delta);
-            self.area
-                .interaction
-                .sync_parts(&mut self.area.items, &mut self.physics)
-                .expect("bound parts");
-        }
+        let handle = self.area.player.body_handle();
+        let body = &mut self.physics.rapier_mut().bodies[handle];
+        let mut pose = *body.position();
+        pose.translation.y += startup.player_offset;
+        body.set_position(pose, true);
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, true);
         self.sync_weather_bindings(reference);
+        self.startup_aligned = true;
+        Ok(true)
     }
 }
 
@@ -1844,5 +1740,15 @@ fn transport_body(
 }
 
 fn start_sample(seed: u64, attempt: u64) -> f32 {
-    (crate::world::hash(seed ^ attempt) >> 40) as f32 / 16_777_216.0
+    (startup_hash(seed ^ attempt) >> 40) as f32 / 16_777_216.0
 }
+
+fn startup_hash(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9e3779b97f4a7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
+    value ^ (value >> 31)
+}
+
+#[cfg(test)]
+mod transition_tests;

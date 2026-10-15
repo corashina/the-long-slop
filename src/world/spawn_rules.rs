@@ -1,0 +1,505 @@
+//! Borrowed access to checked prototype records and compact initialization inputs.
+use crate::reference::WorldFields;
+use crate::reference::{
+    ReferenceError, SourceId, Transform, WorldInitField, WorldReference, WorldValue,
+};
+use std::collections::HashMap;
+#[derive(Clone, Copy)]
+pub(crate) enum Fields<'a> {
+    Record(&'a WorldFields),
+    Compact(&'a [WorldInitField]),
+}
+pub(crate) trait FieldAccess<'a>: Copy {
+    fn get(self, name: &str) -> Option<&'a WorldValue>;
+}
+impl<'a> FieldAccess<'a> for Fields<'a> {
+    fn get(self, name: &str) -> Option<&'a WorldValue> {
+        match self {
+            Self::Record(f) => f.get(name),
+            Self::Compact(f) => f.iter().find(|f| f.name == name).map(|f| &f.value),
+        }
+    }
+}
+impl<'a> FieldAccess<'a> for &Fields<'a> {
+    fn get(self, name: &str) -> Option<&'a WorldValue> {
+        (*self).get(name)
+    }
+}
+impl<'a> FieldAccess<'a> for &'a WorldFields {
+    fn get(self, name: &str) -> Option<&'a WorldValue> {
+        WorldFields::get(self, name)
+    }
+}
+#[derive(Clone, Copy)]
+pub(crate) struct SourceRecord<'a> {
+    pub source: &'a SourceId,
+    pub class_name: &'a str,
+    pub fields: Fields<'a>,
+    pub execution_order: i32,
+}
+pub(crate) struct SourceNode<'a> {
+    pub owner: &'a SourceId,
+    pub parent: Option<&'a SourceId>,
+    pub pose: Transform,
+    pub active: bool,
+}
+pub(crate) struct SourceRules {
+    indices: Vec<(bool, u32)>,
+    nodes: Vec<u32>,
+    owners: Vec<u32>,
+    radii: HashMap<SourceId, f64>,
+}
+impl SourceRules {
+    pub fn new(reference: &WorldReference) -> Self {
+        let mut indices: Vec<_> = (0..reference.records.len())
+            .map(|i| (false, i as u32))
+            .chain((0..reference.initialization.components.len()).map(|i| (true, i as u32)))
+            .collect();
+        indices.sort_unstable_by(|a, b| {
+            source_order(
+                Self::indexed_source(reference, *a),
+                Self::indexed_source(reference, *b),
+            )
+        });
+        let mut nodes: Vec<_> = (0..reference.initialization.nodes.len() as u32).collect();
+        nodes.sort_unstable_by(|a, b| {
+            source_order(
+                &reference.initialization.nodes[*a as usize].source,
+                &reference.initialization.nodes[*b as usize].source,
+            )
+        });
+        let mut owners = nodes.clone();
+        owners.sort_unstable_by(|a, b| {
+            source_order(
+                &reference.initialization.nodes[*a as usize].owner,
+                &reference.initialization.nodes[*b as usize].owner,
+            )
+        });
+        Self {
+            indices,
+            nodes,
+            owners,
+            radii: super::placement::prototype_radii(reference),
+        }
+    }
+    fn indexed_source(reference: &WorldReference, (compact, index): (bool, u32)) -> &SourceId {
+        if compact {
+            &reference.initialization.components[index as usize].source
+        } else {
+            &reference.records[index as usize].source
+        }
+    }
+    fn index(&self, reference: &WorldReference, source: &SourceId) -> Option<(bool, usize)> {
+        self.indices
+            .binary_search_by(|entry| source_order(Self::indexed_source(reference, *entry), source))
+            .ok()
+            .map(|i| {
+                let (compact, index) = self.indices[i];
+                (compact, index as usize)
+            })
+    }
+    fn node_index(&self, reference: &WorldReference, source: &SourceId) -> Option<usize> {
+        self.nodes
+            .binary_search_by(|i| {
+                source_order(&reference.initialization.nodes[*i as usize].source, source)
+            })
+            .ok()
+            .map(|i| self.nodes[i] as usize)
+    }
+    pub fn radius(&self, source: &SourceId) -> Option<f64> {
+        self.radii.get(source).copied()
+    }
+    /// Bound per-instance initialization, appearance, temporary traversal, and copied keys.
+    pub fn initialization_bound(
+        &self,
+        reference: &WorldReference,
+        root: &SourceId,
+        identity: usize,
+        depth: usize,
+    ) -> Result<usize, ReferenceError> {
+        if depth > 256 {
+            return Err(ReferenceError(
+                "Source initialization hierarchy cycle".into(),
+            ));
+        }
+        let mut bytes = 1024usize + identity.saturating_mul(8);
+        let mut component = |source: &SourceId| -> Result<(), ReferenceError> {
+            if let Ok(record) = self.get(reference, source) {
+                // Selection rows are borrowed. Each selected child gets its own admission.
+                // Mesh, collider and raw transform fields never become initialization copies.
+                if !matches!(
+                    record.class_name,
+                    "tosaveitemscript"
+                        | "partconditionscript"
+                        | "randomTypeSelector"
+                        | "electronicsscript"
+                        | "flashlightscript"
+                        | "partslotscript"
+                        | "newAiScript"
+                        | "randomFlyer"
+                        | "nyulscript"
+                        | "paintingScript"
+                        | "randomScaleScript"
+                        | "tankscript"
+                        | "Light"
+                ) {
+                    return Ok(());
+                }
+                let fields = match record.fields {
+                    Fields::Record(f) => f.values().map(|v| v.input_heap_bytes()).sum::<usize>(),
+                    Fields::Compact(f) => {
+                        f.iter().map(|f| f.value.input_heap_bytes()).sum::<usize>()
+                    }
+                };
+                bytes = bytes
+                    .saturating_add(2048 + identity.saturating_mul(8) + fields.saturating_mul(16));
+            }
+            Ok(())
+        };
+        if let Some(i) = self.node_index(reference, root) {
+            let node = &reference.initialization.nodes[i];
+            for source in &node.components {
+                component(source)?;
+            }
+            for child in &node.children {
+                bytes = bytes.saturating_add(self.initialization_bound(
+                    reference,
+                    child,
+                    identity,
+                    depth + 1,
+                )?);
+            }
+        } else {
+            let node = self.node(reference, root)?;
+            for pointer in array(self.get(reference, node.owner)?.fields, "m_Component")? {
+                component(link(fields(pointer)?, "component")?)?;
+            }
+            for child in array(self.get(reference, root)?.fields, "m_Children")? {
+                bytes = bytes.saturating_add(self.initialization_bound(
+                    reference,
+                    value_link(child)?,
+                    identity,
+                    depth + 1,
+                )?);
+            }
+        }
+        Ok(bytes)
+    }
+    pub fn retained_bytes(&self) -> usize {
+        self.indices.capacity() * std::mem::size_of::<(bool, u32)>()
+            + (self.nodes.capacity() + self.owners.capacity()) * std::mem::size_of::<u32>()
+            + self.radii.capacity() * (std::mem::size_of::<(SourceId, f64)>() + 16)
+            + self.radii.keys().map(|s| s.file.capacity()).sum::<usize>()
+    }
+    pub fn get<'a>(
+        &self,
+        reference: &'a WorldReference,
+        source: &SourceId,
+    ) -> Result<SourceRecord<'a>, ReferenceError> {
+        let (compact, i) = self.index(reference, source).ok_or_else(|| {
+            ReferenceError(format!(
+                "Missing source rule {}:{}",
+                source.file, source.path_id
+            ))
+        })?;
+        if compact {
+            let r = &reference.initialization.components[i];
+            return Ok(SourceRecord {
+                source: &r.source,
+                class_name: &r.class_name,
+                fields: Fields::Compact(&r.fields),
+                execution_order: r.execution_order,
+            });
+        }
+        let r = &reference.records[i];
+        let order = if let Some(WorldValue::Link(script)) = r.fields.get("m_Script") {
+            self.index(reference, script)
+                .filter(|(c, _)| !*c)
+                .and_then(|(_, i)| reference.records[i].fields.get("m_ExecutionOrder"))
+                .and_then(|v| {
+                    if let WorldValue::Integer(n) = v {
+                        Some(*n as i32)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        Ok(SourceRecord {
+            source: &r.source,
+            class_name: &r.class_name,
+            fields: Fields::Record(&r.fields),
+            execution_order: order,
+        })
+    }
+    pub fn node<'a>(
+        &self,
+        reference: &'a WorldReference,
+        source: &SourceId,
+    ) -> Result<SourceNode<'a>, ReferenceError> {
+        if let Some(i) = self.node_index(reference, source) {
+            let n = &reference.initialization.nodes[i];
+            return Ok(SourceNode {
+                owner: &n.owner,
+                parent: n.parent.as_ref(),
+                pose: n.pose,
+                active: n.active,
+            });
+        }
+        let r = self.get(reference, source)?;
+        let f = r.fields;
+        let q = fields(value(f, "m_LocalRotation")?)?;
+        let p = vector(f, "m_LocalPosition")?;
+        let owner = link(f, "m_GameObject")?;
+        let go = self.get(reference, owner)?;
+        Ok(SourceNode {
+            owner,
+            parent: optional(f, "m_Father")?,
+            active: flag(go.fields, "m_IsActive")?,
+            pose: Transform {
+                translation: [p[0], p[1], -p[2]],
+                rotation: [
+                    -number(q, "x")?,
+                    -number(q, "y")?,
+                    number(q, "z")?,
+                    number(q, "w")?,
+                ],
+                scale: vector(f, "m_LocalScale")?,
+            },
+        })
+    }
+    pub fn root<'a>(
+        &'a self,
+        reference: &'a WorldReference,
+        object: &SourceId,
+    ) -> Result<&'a SourceId, ReferenceError> {
+        if let Some(i) = self.node_index(reference, object) {
+            return Ok(&reference.initialization.nodes[i].source);
+        }
+        if let Ok(i) = self.owners.binary_search_by(|i| {
+            source_order(&reference.initialization.nodes[*i as usize].owner, object)
+        }) {
+            return Ok(&reference.initialization.nodes[self.owners[i] as usize].source);
+        }
+        let r = self.get(reference, object)?;
+        if matches!(r.class_name, "Transform" | "RectTransform") {
+            return Ok(r.source);
+        }
+        if let Some((true, i)) = self.index(reference, object) {
+            return self.root(reference, &reference.initialization.components[i].owner);
+        }
+        let owner = if r.class_name == "GameObject" {
+            r.source
+        } else {
+            link(r.fields, "m_GameObject")?
+        };
+        let go = self.get(reference, owner)?;
+        for pointer in array(go.fields, "m_Component")? {
+            let target = link(fields(pointer)?, "component")?;
+            if let Ok(r) = self.get(reference, target) {
+                if matches!(r.class_name, "Transform" | "RectTransform") {
+                    return Ok(r.source);
+                }
+            }
+        }
+        Err(ReferenceError("Source object has no transform".into()))
+    }
+    pub fn component<'a>(
+        &'a self,
+        reference: &'a WorldReference,
+        object: &SourceId,
+        class: &str,
+    ) -> Result<Option<SourceRecord<'a>>, ReferenceError> {
+        let root = self.root(reference, object)?;
+        if class == "Transform" {
+            return Ok(None);
+        }
+        if let Some(i) = self.node_index(reference, root) {
+            for source in &reference.initialization.nodes[i].components {
+                let r = self.get(reference, source)?;
+                if r.class_name == class {
+                    return Ok(Some(r));
+                }
+            }
+        } else {
+            let n = self.node(reference, root)?;
+            let go = self.get(reference, n.owner)?;
+            for pointer in array(go.fields, "m_Component")? {
+                let target = link(fields(pointer)?, "component")?;
+                if let Ok(r) = self.get(reference, target) {
+                    if r.class_name == class {
+                        return Ok(Some(r));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+    pub fn start_components<'a>(
+        &'a self,
+        reference: &'a WorldReference,
+        root: &SourceId,
+        output: &mut Vec<&'a SourceId>,
+    ) -> Result<(), ReferenceError> {
+        self.descend(reference, root, "", true, true, output, 0)
+    }
+    pub fn children<'a>(
+        &'a self,
+        reference: &'a WorldReference,
+        root: &SourceId,
+        class: &str,
+        inactive: bool,
+        output: &mut Vec<&'a SourceId>,
+    ) -> Result<(), ReferenceError> {
+        self.descend(reference, root, class, inactive, true, output, 0)
+    }
+    fn descend<'a>(
+        &'a self,
+        reference: &'a WorldReference,
+        root: &SourceId,
+        class: &str,
+        inactive: bool,
+        is_root: bool,
+        output: &mut Vec<&'a SourceId>,
+        depth: usize,
+    ) -> Result<(), ReferenceError> {
+        if depth > 256 {
+            return Err(ReferenceError("Source hierarchy cycle".into()));
+        }
+        let n = self.node(reference, root)?;
+        if !inactive && !is_root && !n.active {
+            return Ok(());
+        }
+        let include = |r: SourceRecord<'a>| {
+            r.class_name == class
+                || (class.is_empty()
+                    && r.fields
+                        .get("m_Enabled")
+                        .is_some_and(|v| numeric(v).is_ok_and(|n| n != 0.)))
+        };
+        if let Some(i) = self.node_index(reference, root) {
+            let n = &reference.initialization.nodes[i];
+            for source in &n.components {
+                let r = self.get(reference, source)?;
+                if include(r) {
+                    output.push(r.source);
+                }
+            }
+            for child in &n.children {
+                self.descend(reference, child, class, inactive, false, output, depth + 1)?;
+            }
+        } else {
+            let go = self.get(reference, n.owner)?;
+            for p in array(go.fields, "m_Component")? {
+                if let Ok(r) = self.get(reference, link(fields(p)?, "component")?) {
+                    if include(r) {
+                        output.push(r.source);
+                    }
+                }
+            }
+            let t = self.get(reference, root)?;
+            for child in array(t.fields, "m_Children")? {
+                self.descend(
+                    reference,
+                    value_link(child)?,
+                    class,
+                    inactive,
+                    false,
+                    output,
+                    depth + 1,
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+pub(crate) fn value<'a>(
+    f: impl FieldAccess<'a>,
+    n: &str,
+) -> Result<&'a WorldValue, ReferenceError> {
+    f.get(n)
+        .ok_or_else(|| ReferenceError(format!("Missing source field {n}")))
+}
+pub(crate) fn number<'a>(f: impl FieldAccess<'a>, n: &str) -> Result<f32, ReferenceError> {
+    numeric(value(f, n)?)
+}
+pub(crate) fn numeric(v: &WorldValue) -> Result<f32, ReferenceError> {
+    match v {
+        WorldValue::Number(v) => Ok(*v as f32),
+        WorldValue::Integer(v) => Ok(*v as f32),
+        WorldValue::Bool(v) => Ok(u8::from(*v) as f32),
+        _ => Err(ReferenceError("Invalid source number".into())),
+    }
+}
+pub(crate) fn flag<'a>(f: impl FieldAccess<'a>, n: &str) -> Result<bool, ReferenceError> {
+    Ok(number(f, n)? != 0.)
+}
+pub(crate) fn integer<'a>(f: impl FieldAccess<'a>, n: &str) -> Result<i32, ReferenceError> {
+    match value(f, n)? {
+        WorldValue::Integer(v) => {
+            i32::try_from(*v).map_err(|_| ReferenceError("Source integer overflow".into()))
+        }
+        _ => Err(ReferenceError(format!("Invalid source integer {n}"))),
+    }
+}
+pub(crate) fn array<'a>(
+    f: impl FieldAccess<'a>,
+    n: &str,
+) -> Result<&'a [WorldValue], ReferenceError> {
+    match value(f, n)? {
+        WorldValue::Array(v) => Ok(v),
+        _ => Err(ReferenceError(format!("Invalid source array {n}"))),
+    }
+}
+pub(crate) fn fields(v: &WorldValue) -> Result<Fields<'_>, ReferenceError> {
+    match v {
+        WorldValue::Record(f) => Ok(Fields::Record(f)),
+        _ => Err(ReferenceError("Invalid source record".into())),
+    }
+}
+pub(crate) fn text<'a>(f: impl FieldAccess<'a>, n: &str) -> Result<&'a str, ReferenceError> {
+    match value(f, n)? {
+        WorldValue::Text(v) => Ok(v),
+        _ => Err(ReferenceError(format!("Invalid source text {n}"))),
+    }
+}
+pub(crate) fn optional<'a>(
+    f: impl FieldAccess<'a>,
+    n: &str,
+) -> Result<Option<&'a SourceId>, ReferenceError> {
+    match value(f, n)? {
+        WorldValue::Link(v) => Ok(Some(v)),
+        WorldValue::Empty => Ok(None),
+        _ => Err(ReferenceError(format!("Invalid source link {n}"))),
+    }
+}
+pub(crate) fn link<'a>(f: impl FieldAccess<'a>, n: &str) -> Result<&'a SourceId, ReferenceError> {
+    optional(f, n)?.ok_or_else(|| ReferenceError(format!("Null source link {n}")))
+}
+pub(crate) fn value_link(v: &WorldValue) -> Result<&SourceId, ReferenceError> {
+    match v {
+        WorldValue::Link(v) => Ok(v),
+        _ => Err(ReferenceError("Invalid source pointer".into())),
+    }
+}
+pub(crate) fn vector<'a>(f: impl FieldAccess<'a>, n: &str) -> Result<[f32; 3], ReferenceError> {
+    let v = fields(value(f, n)?)?;
+    Ok([number(v, "x")?, number(v, "y")?, number(v, "z")?])
+}
+
+fn source_order(a: &SourceId, b: &SourceId) -> std::cmp::Ordering {
+    a.file.cmp(&b.file).then(a.path_id.cmp(&b.path_id))
+}
+
+pub(crate) fn optional_array<'a>(
+    f: impl FieldAccess<'a>,
+    name: &str,
+) -> Result<&'a [WorldValue], ReferenceError> {
+    if matches!(value(f, name)?, WorldValue::Empty) {
+        Ok(&[])
+    } else {
+        array(f, name)
+    }
+}

@@ -18,6 +18,9 @@ pub struct CasterUniform {
     pub clip_from_world: Mat4,
     pub direction_to_light: Vec4,
     pub bias: Vec4,
+    pub view_from_world: Mat4,
+    pub world_from_view: Mat4,
+    pub clip_from_view: Mat4,
 }
 pub fn caster_layout() -> BindGroupLayoutDescriptor {
     BindGroupLayoutDescriptor::new(
@@ -55,6 +58,9 @@ impl CasterViews {
                 clip_from_world: Mat4::IDENTITY,
                 direction_to_light: Vec4::Y,
                 bias: Vec4::ZERO,
+                view_from_world: Mat4::IDENTITY,
+                world_from_view: Mat4::IDENTITY,
+                clip_from_view: Mat4::IDENTITY,
             });
             uniform.set_label(Some("source_caster_uniform"));
             uniform.write_buffer(device, queue);
@@ -87,6 +93,7 @@ impl CasterViews {
 #[derive(Resource, Default)]
 pub struct CasterPasses {
     inspected: usize,
+    isolated: HashSet<CachedRenderPipelineId>,
     classified: HashSet<CachedRenderPipelineId>,
     variants: HashMap<CachedRenderPipelineId, [Option<CachedRenderPipelineId>; 2]>,
 }
@@ -97,6 +104,32 @@ fn flag(defs: &[ShaderDefVal], name: &str) -> Option<bool> {
     })
 }
 impl CasterPasses {
+    pub fn revisit(&mut self, id: CachedRenderPipelineId) {
+        self.inspected = self.inspected.min(id.id());
+    }
+    pub fn companion_state(
+        &self,
+        base: CachedRenderPipelineId,
+        cache: &PipelineCache,
+    ) -> Option<Result<bool, String>> {
+        self.variants.get(&base).map(|ids| {
+            let mut ready = true;
+            for id in ids.iter().flatten() {
+                match cache.get_render_pipeline_state(*id) {
+                    CachedPipelineState::Ok(_) => {}
+                    CachedPipelineState::Err(
+                        ShaderCacheError::ShaderNotLoaded(_)
+                        | ShaderCacheError::ShaderImportNotYetAvailable,
+                    ) => ready = false,
+                    CachedPipelineState::Err(error) => {
+                        return Err(format!("Source caster pipeline: {error}"));
+                    }
+                    _ => ready = false,
+                }
+            }
+            Ok(ready)
+        })
+    }
     pub fn counts(&self) -> (usize, usize) {
         (
             self.variants.len(),
@@ -123,9 +156,9 @@ impl CasterPasses {
         !self.variants.is_empty()
             && self
                 .variants
-                .values()
-                .flatten()
-                .flatten()
+                .iter()
+                .filter(|(base, _)| !self.isolated.contains(base))
+                .flat_map(|(_, ids)| ids.iter().flatten())
                 .all(|id| cache.get_render_pipeline(*id).is_some())
     }
     /// Called during preparation. Descriptors are cloned only once per new source surface variant.
@@ -134,35 +167,61 @@ impl CasterPasses {
         cache: &PipelineCache,
         shader: &Handle<Shader>,
         status: &SourceLightingStatus,
+        isolation: &super::world::pipelines::PipelineIsolation,
+        owners: &super::pipeline_ownership::PipelineOwners,
     ) {
+        self.isolated.clone_from(&isolation.0);
         if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
             return;
         }
         let first = self.inspected;
         for (index, entry) in cache.pipelines().enumerate().skip(first) {
             self.inspected = index + 1;
+            let base_id = CachedRenderPipelineId::new(index);
+            if self.classified.contains(&base_id)
+                || owners.owner(base_id).is_some_and(|o| o.cancelled())
+            {
+                continue;
+            }
             let PipelineDescriptor::RenderPipelineDescriptor(base) = &entry.descriptor else {
                 continue;
             };
             let Some(fragment) = &base.fragment else {
                 continue;
             };
-            if flag(&fragment.shader_defs, "SOURCE_SURFACE") != Some(true)
+            let world_shader = flag(&fragment.shader_defs, "SOURCE_WORLD") == Some(true);
+            if flag(&fragment.shader_defs, "SOURCE_SURFACE") != Some(true) && !world_shader
                 || flag(&fragment.shader_defs, "SOURCE_FORWARD_ADD") == Some(true)
             {
                 continue;
             }
             self.classified.insert(CachedRenderPipelineId::new(index));
-            if flag(&fragment.shader_defs, "SOURCE_STANDARD") != Some(true) {
+            if flag(&fragment.shader_defs, "SOURCE_STANDARD") != Some(true) && !world_shader {
                 continue;
             }
             let Some(reflected) = flag(&fragment.shader_defs, "SOURCE_OBJECT_REFLECTED") else {
-                *status.0.lock().unwrap() = RenderingState::Failed(
-                    "Source caster requires object transform parity metadata".into(),
-                );
+                let error = "Source caster requires object transform parity metadata".to_string();
+                if let Some(owner) = owners.owner(CachedRenderPipelineId::new(index)) {
+                    owner.fail(error);
+                } else {
+                    *status.0.lock().unwrap() = RenderingState::Failed(error);
+                }
                 return;
             };
+            let base_id = CachedRenderPipelineId::new(index);
+            let owner = owners.owner(base_id);
             let ids = std::array::from_fn(|index| {
+                let _queue = if let Some(owner) = &owner {
+                    match super::pipeline_ownership::queue_scope(cache) {
+                        Ok(scope) => Some(scope),
+                        Err(error) => {
+                            owner.fail(error.into());
+                            return None;
+                        }
+                    }
+                } else {
+                    None
+                };
                 let mut descriptor = base.clone();
                 let shadow = index == 1;
                 if !shadow && flag(&fragment.shader_defs, "SOURCE_TRANSPARENT") == Some(true) {
@@ -178,22 +237,35 @@ impl CasterPasses {
                 );
                 descriptor.layout[0] = super::source_lighting::source_camera_layout();
                 descriptor.layout[1] = caster_layout();
-                descriptor.layout[3] = super::caster_material::layout();
+                if !world_shader
+                    && flag(&fragment.shader_defs, "WORLD_TEXTURE_ARRAYS") != Some(true)
+                {
+                    descriptor.layout[3] = super::caster_material::layout();
+                }
                 descriptor.multisample = MultisampleState::default();
-                descriptor.vertex.shader = shader.clone();
+                if !world_shader {
+                    descriptor.vertex.shader = shader.clone();
+                }
                 descriptor.vertex.entry_point = Some("vertex".into());
                 let fragment = descriptor.fragment.as_mut().unwrap();
-                fragment.shader = shader.clone();
+                if !world_shader {
+                    fragment.shader = shader.clone();
+                }
                 fragment.entry_point = Some("fragment".into());
                 fragment.targets.clear();
                 for defs in [
                     &mut descriptor.vertex.shader_defs,
                     &mut fragment.shader_defs,
                 ] {
-                    defs.retain(|v|!matches!(v,ShaderDefVal::Bool(n,_)if n=="SOURCE_SURFACE"||n=="SOURCE_FORWARD_ADD"));
+                    defs.retain(|v|!matches!(v,ShaderDefVal::Bool(n,_)if n=="SOURCE_SURFACE"||n=="SOURCE_FORWARD_ADD"||n=="SOURCE_WORLD"));
                     defs.push(ShaderDefVal::Bool("SOURCE_CASTER".into(), true));
+                    if world_shader {
+                        defs.push(ShaderDefVal::Bool("PREPASS_PIPELINE".into(), true));
+                    }
                 }
-                descriptor.primitive.cull_mode = Some(Face::Back);
+                if !world_shader {
+                    descriptor.primitive.cull_mode = Some(Face::Back);
+                }
                 // RenderShadowMaps sets userBackfaceMode=false for Directional1, even inside cube capture.
                 if shadow {
                     descriptor.primitive.front_face = if reflected {
@@ -209,12 +281,19 @@ impl CasterPasses {
                     stencil: StencilState::default(),
                     bias: DepthBiasState::default(),
                 });
-                Some(cache.queue_render_pipeline(*descriptor))
+                let id = cache.queue_render_pipeline(*descriptor);
+                owners.companion(cache, base_id, id);
+                Some(id)
             });
             self.variants
                 .insert(CachedRenderPipelineId::new(index), ids);
         }
-        for id in self.variants.values().flatten().flatten() {
+        for id in self
+            .variants
+            .iter()
+            .filter(|(base, _)| !self.isolated.contains(base))
+            .flat_map(|(_, ids)| ids.iter().flatten())
+        {
             match cache.get_render_pipeline_state(*id) {
                 CachedPipelineState::Err(
                     ShaderCacheError::ShaderNotLoaded(_)
@@ -268,6 +347,9 @@ pub fn prepare_views(
             .unwrap_or_else(|| view.clip_from_view * view.world_from_view.affine().inverse());
         let uniform = CasterUniform {
             clip_from_world,
+            view_from_world: view.world_from_view.to_matrix().inverse(),
+            world_from_view: view.world_from_view.to_matrix(),
+            clip_from_view: view.clip_from_view,
             direction_to_light: scene.direction_to_sun,
             // DepthPassJob337330 clears unity_LightShadowBias before camera-depth draws.
             bias: Vec4::ZERO,
@@ -295,9 +377,11 @@ pub fn prepare_passes(
     assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,
     cache: Res<PipelineCache>,
     status: Res<SourceLightingStatus>,
+    isolation: Res<super::world::pipelines::PipelineIsolation>,
+    owners: Res<super::pipeline_ownership::PipelineOwners>,
 ) {
     let Some(assets) = assets else {
         return;
     };
-    passes.prepare(&cache, &assets.shaders.caster, &status);
+    passes.prepare(&cache, &assets.shaders.caster, &status, &isolation, &owners);
 }

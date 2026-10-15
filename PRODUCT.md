@@ -9,7 +9,7 @@ Keyboard and mouse controls. WebGL2 rendering.
 
 ## Purpose
 
-Prepare a fixed Lada 2101 in the imported starting garage. Drive onto the endless desert road.
+Prepare a fixed Lada 2101 in the imported starting garage. Drive onto the source desert road.
 A source Skoda waits in the yard as a second car.
 Installed Steam build 11140890 owns the reference values.
 The approved garage spawn takes precedence over the original bedroom spawn.
@@ -18,9 +18,15 @@ The approved garage spawn takes precedence over the original bedroom spawn.
 
 The build includes walking, first person look, crouching, jumping, seating, carrying, and aimed use.
 Preparation includes doors, fluid caps, filling, spilling, ignition, and wheel assembly.
-It retains the road, stations, chase camera, pause, recovery, and restart.
+It includes source road segments, supported structures and supplies, chase camera, pause, recovery, and restart.
 The interface uses source menus, action icons, fluid percentages, and animated car instruments.
-Recovery preserves state. Restart restores the garage.
+Recovery preserves state. Restart restores the garage and clears session changes.
+The checked source road contains 50,000 segments. The off-road grid has no finite extent.
+The normal seed is 42. Generation uses the saved 5,000-metre default source settings.
+The runtime retains stable source identities, bounded source replay inputs, and uncapped actual change records.
+Changes include supported physics motion, fluids, attachments, mechanisms, and lamps. Unloaded objects do not simulate.
+A full source-history budget can prevent further first encounters. Accepted collision support remains available.
+Recovery destinations use actual supported supplies. A water tank does not imply available fuel.
 
 The source cycle changes sky, illumination, ambient light, and fog during active play.
 Lights include headlights, cabin lights, rear lamps, five house switches, and automatic roadside lamps.
@@ -32,6 +38,8 @@ Restart restores the garage and source startup state at 240 seconds.
 Adjustable mirrors show live views. The renderer covers source shadows, sky, reflections, post effects, and stained glass.
 Source audio covers ignition, engine, horn, interaction sounds, and the Lada radio.
 One manual browser save slot stores both cars, items, mechanisms, pumps, and lamps.
+Driving includes source manual gears, clutch, Automatic clutch, and Automatic gears.
+The save stores selected gears and both assist choices. Automatic gears requires Automatic clutch.
 
 The cleaning branch adds two brushes, two sponges, and two spray cans from the authored startup scene.
 Use carried tools with LMB. Rub an eligible surface with a brush or sponge; hold LMB to spray paint.
@@ -57,8 +65,10 @@ Sleep follows source eligibility, hold progress, wake, and clock rules.
 Source sandstorms add movement, fog, light, wind, and particles.
 Engine heat follows the source cycle's ambient temperature.
 
-Portable flashlights, license plate text, fatigue, beds, rain, snow, creatures, weapons, and further vehicles remain outside this stage.
-Saved needs and weather, autosave, settings, control rebinding, multiplayer, and deployment also remain outside this stage.
+Portable flashlights and source license plate text are implemented.
+Fatigue, beds, rain, snow, creatures, weapons, and further vehicles remain outside this stage.
+Saved needs and weather, autosave, general settings, control rebinding, multiplayer, and deployment remain outside this stage.
+The two driving assists are the approved settings exception.
 The build does not claim identical Unity physics or full-game parity.
 
 ## Development assets

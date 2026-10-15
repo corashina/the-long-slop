@@ -120,3 +120,43 @@ pub fn bind_renderer_meshes(
         state.variants, bytes
     );
 }
+
+/// Bevy batches retain main entity IDs and can use a placeholder render entity.
+#[derive(Resource, Default)]
+pub struct ShadowsOnly(std::collections::HashSet<Entity>);
+pub(crate) fn extract_shadows_only(
+    source: bevy::render::Extract<
+        Query<(Entity, &SourceRenderer), Without<super::save::HiddenWorld>>,
+    >,
+    mut target: ResMut<ShadowsOnly>,
+) {
+    target.0.clear();
+    target.0.extend(
+        source
+            .iter()
+            .filter(|(_, r)| r.0.cast_shadows == 3)
+            .map(|(e, _)| e),
+    );
+}
+/// ShadowsOnly renderers remain in light passes and skip camera passes.
+pub struct SourceCameraVisible;
+impl<P: bevy::render::render_phase::PhaseItem> bevy::render::render_phase::RenderCommand<P>
+    for SourceCameraVisible
+{
+    type Param = bevy::ecs::system::lifetimeless::SRes<ShadowsOnly>;
+    type ViewQuery = ();
+    type ItemQuery = ();
+    fn render<'w>(
+        item: &P,
+        _: (),
+        _: Option<()>,
+        only: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
+        _: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
+    ) -> bevy::render::render_phase::RenderCommandResult {
+        if only.0.contains(&item.main_entity().id()) {
+            bevy::render::render_phase::RenderCommandResult::Skip
+        } else {
+            bevy::render::render_phase::RenderCommandResult::Success
+        }
+    }
+}

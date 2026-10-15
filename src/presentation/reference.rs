@@ -66,7 +66,12 @@ pub fn load(commands: &mut Commands, server: &AssetServer, reference: &Reference
         expected_instances: reference.expected_instances(),
         ..Default::default()
     };
-    for asset in &reference.assets {
+    for asset in reference.assets.iter().filter(|asset| {
+        matches!(
+            asset.usage,
+            AssetUsage::UniqueScene | AssetUsage::RoadLampPrototype | AssetUsage::SkyPrototype
+        )
+    }) {
         let handle = server
             .load_builder()
             .with_settings(source_gltf_settings)
@@ -83,7 +88,17 @@ pub fn spawn_scenes(
     visuals: &mut ReferenceVisuals,
     gltfs: &Assets<bevy::gltf::Gltf>,
 ) {
-    for (asset, (_, handle)) in reference.assets.iter().zip(&visuals.handles) {
+    for (asset, (_, handle)) in reference
+        .assets
+        .iter()
+        .filter(|asset| {
+            matches!(
+                asset.usage,
+                AssetUsage::UniqueScene | AssetUsage::RoadLampPrototype | AssetUsage::SkyPrototype
+            )
+        })
+        .zip(&visuals.handles)
+    {
         if asset.usage != AssetUsage::UniqueScene {
             continue;
         }
@@ -323,12 +338,63 @@ pub fn bind(
     Ok(true)
 }
 
+pub(crate) fn bind_generated_cap(
+    commands: &mut Commands,
+    cap: &crate::world::GeneratedCapVisual,
+    prototype: &crate::reference::WorldPrototypeReference,
+    nodes: &[Entity],
+) {
+    let links = &cap.visual;
+    let entity = |id: NodeId| nodes[prototype.nodes[id.0 as usize].gltf_node as usize];
+    for &id in &links.open_nodes {
+        commands.entity(entity(id)).insert(ValveVisibility {
+            opening: cap.opening,
+            open: true,
+        });
+    }
+    for &id in &links.closed_nodes {
+        commands.entity(entity(id)).insert(ValveVisibility {
+            opening: cap.opening,
+            open: false,
+        });
+    }
+    if let Some(id) = links.cap_node {
+        let scale = Vec3::from_array(prototype.nodes[id.0 as usize].transform.scale);
+        let pose = |id: NodeId| {
+            let t = prototype.nodes[id.0 as usize].transform;
+            Transform::from_translation(Vec3::from_array(t.translation))
+                .with_rotation(Quat::from_array(t.rotation))
+                .with_scale(scale)
+        };
+        let closed = pose(links.closed_node.unwrap_or(id));
+        commands.entity(entity(id)).insert(CapVisual {
+            opening: cap.opening,
+            closed,
+            opened: links.open_node.map(pose).unwrap_or(closed),
+            euler: links.euler_rotation,
+            closed_euler: Vec3::from_array(links.closed_euler_degrees),
+            open_euler: Vec3::from_array(links.open_euler_degrees),
+        });
+    }
+}
+
 pub fn sync_caps(
     area: &StartingArea,
-    caps: &mut Query<(&CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
+    caps: &mut Query<
+        (&CapVisual, &mut Transform),
+        (
+            Without<BodyVisual>,
+            Without<ItemVisual>,
+            Without<super::save::HiddenWorld>,
+        ),
+    >,
     visibility: &mut Query<
         (&ValveVisibility, &mut Visibility),
-        (Without<BodyVisual>, Without<ItemVisual>),
+        (
+            Without<BodyVisual>,
+            Without<ItemVisual>,
+            Without<super::save::HiddenWorld>,
+        ),
     >,
 ) {
     for (cap, mut transform) in caps {

@@ -3,7 +3,7 @@ use super::surface_views::VIEW_COUNT;
 use super::{
     caster::{CasterPasses, CasterUniform, CasterViews},
     lighting_scene::SourceSceneLighting,
-    materials::{RenderingState, SourceMaterial},
+    materials::RenderingState,
     shadow_phase::{self, ShadowDrawState, SourceShadow},
     shadow_scene::ShadowScene,
     source_lighting::SourceLightingStatus,
@@ -30,7 +30,7 @@ use bevy::render::{
     view::{ExtractedView, RetainedViewEntity},
 };
 use bevy::{ecs as bevy_ecs, prelude::*};
-use std::{any::TypeId, sync::Arc};
+use std::sync::Arc;
 struct CachedSpecialization {
     mesh_key: MeshPipelineKey,
     layout: MeshVertexBufferLayoutRef,
@@ -78,9 +78,7 @@ fn base_pipeline(
     else {
         return Ok(None);
     };
-    if instance.asset_id.type_id() != TypeId::of::<SourceMaterial>() {
-        return Err("Source shadow material type is unsupported".into());
-    }
+    let material_type = instance.asset_id.type_id();
     let Some(mesh) = world.resource::<RenderAssets<RenderMesh>>().get(mesh_id) else {
         return Ok(None);
     };
@@ -116,7 +114,7 @@ fn base_pipeline(
     let properties = material.properties.clone();
     let layout = mesh.layout.clone();
     let full = ErasedMaterialPipelineKey {
-        type_id: TypeId::of::<SourceMaterial>(),
+        type_id: material_type,
         mesh_key: ErasedMeshPipelineKey::new(key),
         material_key: properties.material_key.clone(),
     };
@@ -144,7 +142,7 @@ pub fn queue(world: &mut World) {
             if scene.frame == 0 || scene.frame != world.resource::<SourceViewFrame>().frame {
                 return;
             }
-            if state.specializations.capacity() == 0 {
+            if state.specializations.capacity() < scene.capacity() * VIEW_COUNT {
                 state
                     .specializations
                     .reserve_exact(scene.capacity() * VIEW_COUNT);
@@ -176,6 +174,11 @@ pub fn queue(world: &mut World) {
                             world.entity_mut(entity).insert(ShadowDrawState::default());
                         }
                         let phase = phases.get_mut(&retained).unwrap();
+                        if phase.items.capacity() < scene.capacity() {
+                            phase
+                                .items
+                                .reserve(scene.capacity().saturating_sub(phase.items.len()));
+                        }
                         phase.clear();
                         let mut ready = true;
                         for (item, main) in scene.entities.iter().enumerate() {
@@ -266,6 +269,18 @@ pub(crate) fn cascade_projection(
         p[2][2],
     )
 }
+fn cascade_world_from_view(
+    cascade: &crate::reference::shadows::ShadowCascade,
+    basis: [Vec3; 3],
+) -> Mat4 {
+    Mat4::from_scale(Vec3::new(1., 1., -1.))
+        * Mat4::from_cols(
+            basis[0].extend(0.),
+            basis[1].extend(0.),
+            (-basis[2]).extend(0.),
+            Vec3::from_array(cascade.light_position).extend(1.),
+        )
+}
 pub fn write_cascades(
     scene: Res<ShadowScene>,
     frame: Res<SourceViewFrame>,
@@ -312,6 +327,9 @@ pub fn write_cascades(
                 index + 1,
                 CasterUniform {
                     clip_from_world: projection,
+                    world_from_view: cascade_world_from_view(cascade, basis),
+                    view_from_world: cascade_world_from_view(cascade, basis).inverse(),
+                    clip_from_view: projection * cascade_world_from_view(cascade, basis),
                     direction_to_light: (rotation * Vec3::Z).extend(0.),
                     bias: Vec4::new(depth_bias, 1., normal_bias, 0.),
                 },

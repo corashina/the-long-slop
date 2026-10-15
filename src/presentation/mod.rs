@@ -1,6 +1,8 @@
 pub mod camera;
+mod candidate_upload;
 pub mod conditions;
 pub mod consumables;
+pub mod gpu_prepare;
 pub mod instruments;
 pub mod lighting;
 pub mod materials;
@@ -66,3 +68,5 @@ pub mod surface_views;
 pub mod transparent;
 pub mod view_frame;
 pub mod weather;
+
+mod pipeline_ownership;

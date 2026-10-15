@@ -43,14 +43,14 @@ pub fn reference() -> ReferenceManifest {
 }
 
 pub fn world() -> PhysicsWorld {
-    PhysicsWorld::new(
-        &reference(),
-        &[VehiclePose {
-            position: [0.0, 1.1, 0.0],
-            rotation: [0.0, 0.0, 0.0, 1.0],
-        }],
-    )
-    .expect("valid fixture physics")
+    let reference = reference();
+    let mut poses = my_summer_slop::starting_area::initial_vehicle_poses(&reference)
+        .expect("valid fixture vehicle poses");
+    poses[0] = VehiclePose {
+        position: [0.0, 1.1, 0.0],
+        rotation: [0.0, 0.0, 0.0, 1.0],
+    };
+    PhysicsWorld::new(&reference, &poses).expect("valid fixture physics")
 }
 
 pub fn resolved(

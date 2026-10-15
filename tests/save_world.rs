@@ -8,7 +8,12 @@ fn station_identity_is_visit_order_independent() {
     let visit = |order: &[i64]| {
         let mut game = GarageRuntime::new(&reference).unwrap();
         for station in order {
-            let point = nearest_station(game.stream.seed, *station as f64 * 640.).absolute_point;
+            let point = nearest_station(
+                game.stream.seed,
+                *station as f64 * 640.,
+                &reference.stations,
+            )
+            .absolute_point;
             game.stream.sync_at(point, &mut game.physics);
             sync_station_supplies(
                 &mut game.stream,

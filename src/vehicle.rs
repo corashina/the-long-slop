@@ -3,7 +3,7 @@ use rapier3d::math::{Pose, Rotation, Vector};
 pub use rapier3d::prelude::ColliderHandle;
 use rapier3d::prelude::{
     ColliderBuilder, Group, InteractionGroups, InteractionTestMode, QueryFilter, QueryPipeline,
-    QueryPipelineMut, RigidBodyBuilder, RigidBodyHandle, SharedShape,
+    QueryPipelineMut, RigidBodyBuilder, RigidBodyHandle,
 };
 
 use crate::reference::{
@@ -11,6 +11,13 @@ use crate::reference::{
     WheelSlotReference,
 };
 use crate::simulation::{DriveInput, FIXED_DT};
+
+/// Axle torque after gear ratios and engine engagement. Motor torque has a sign.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DriveTorques {
+    pub motor_nm: f32,
+    pub engine_brake_nm: f32,
+}
 
 #[derive(Clone, Copy)]
 pub struct InstalledWheel {
@@ -77,9 +84,7 @@ struct VehicleBody {
     installed: [Option<InstalledWheel>; 4],
     wheel_rotations: [f32; 4],
     wheel_rpm: [f32; 4],
-    auto_move_min: f32,
-    engine_brake_force: f32,
-    last_handbrake: bool,
+    last_handbrake: f32,
 }
 
 pub struct PhysicsWorld {
@@ -218,7 +223,7 @@ impl VehicleBody {
                 suspension_compression: wheel.damper / vehicle.mass_kg,
                 suspension_damping: wheel.damper / vehicle.mass_kg,
                 max_suspension_travel: rest_length.min(wheel.suspension_distance - rest_length),
-                friction_slip: wheel.sideways_friction[4],
+                friction_slip: wheel.sideways_friction.stiffness,
                 max_suspension_force: wheel.spring * wheel.suspension_distance,
                 ..Default::default()
             };
@@ -258,9 +263,7 @@ impl VehicleBody {
             }),
             wheel_rotations: [0.0; 4],
             wheel_rpm: [0.0; 4],
-            auto_move_min: vehicle.auto_move_min,
-            engine_brake_force: 0.0,
-            last_handbrake: true,
+            last_handbrake: vehicle.handbrake as u8 as f32,
         })
     }
 }
@@ -285,42 +288,42 @@ impl PhysicsWorld {
         })
     }
 
-    pub fn apply_vehicle_forces(&mut self, index: usize, input: DriveInput, drive_force: f32) {
+    pub fn apply_vehicle_forces(&mut self, index: usize, input: DriveInput, torques: DriveTorques) {
+        let drive_count = self.driven_wheel_count(index).max(1) as f32;
         let vehicle = &mut self.vehicles[index];
-
-        if input.accelerate
-            || input.brake_reverse
+        let pedal = |value: f32| {
+            if value.is_finite() {
+                value.clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        };
+        let brake = pedal(input.brake);
+        let handbrake = pedal(input.handbrake);
+        let motor_nm = if torques.motor_nm.is_finite() {
+            torques.motor_nm
+        } else {
+            0.0
+        };
+        let engine_brake_nm = if torques.engine_brake_nm.is_finite() {
+            torques.engine_brake_nm.max(0.0)
+        } else {
+            0.0
+        };
+        if pedal(input.throttle) > 0.0
+            || brake > 0.0
+            || motor_nm != 0.0
             || input.steer != 0.0
-            || input.handbrake != vehicle.last_handbrake
+            || handbrake != vehicle.last_handbrake
         {
             self.physics.bodies[vehicle.chassis].wake_up(true);
         }
-        vehicle.last_handbrake = input.handbrake;
+        vehicle.last_handbrake = handbrake;
         if self.physics.bodies[vehicle.chassis].is_sleeping() {
             return;
         }
-        let chassis = &self.physics.bodies[vehicle.chassis];
-        let speed = chassis
-            .linvel()
-            .dot(chassis.position().rotation * -Vector::Z);
         let steering = if input.steer.is_finite() {
             input.steer.clamp(-1.0, 1.0) * vehicle.max_steer
-        } else {
-            0.0
-        };
-        let direction = speed * chassis.linvel().length();
-        let braking = crate::simulation::braking(input, direction, vehicle.auto_move_min);
-        let drive_force = if drive_force.is_finite() {
-            drive_force.max(0.0)
-        } else {
-            0.0
-        };
-        let engine_force = if braking || input.handbrake {
-            0.0
-        } else if input.brake_reverse {
-            -drive_force
-        } else if input.accelerate {
-            drive_force
         } else {
             0.0
         };
@@ -329,19 +332,23 @@ impl PhysicsWorld {
             let reference = &vehicle.wheel_references[slot];
             wheel.steering = if reference.steer { steering } else { 0.0 };
             wheel.engine_force = if reference.drive {
-                engine_force * reference.radius / wheel.radius
+                motor_nm / (drive_count * wheel.radius)
             } else {
                 0.0
             };
-            wheel.brake = if input.handbrake && reference.handbrake {
-                vehicle.handbrake_torque / wheel.radius * FIXED_DT
-            } else if braking && reference.brake {
-                vehicle.brake_torque / wheel.radius * FIXED_DT
-            } else if reference.drive {
-                vehicle.engine_brake_force * reference.radius / wheel.radius * FIXED_DT
+            let mut brake_nm = if reference.drive {
+                engine_brake_nm / drive_count
             } else {
                 0.0
             };
+            if reference.brake {
+                brake_nm += vehicle.brake_torque * brake;
+            }
+            if reference.handbrake {
+                brake_nm += vehicle.handbrake_torque * handbrake;
+            }
+            // Rapier 0.36 uses this impulse only when engine_force is zero.
+            wheel.brake = brake_nm / wheel.radius * FIXED_DT;
             wheel.friction_slip =
                 0.75 + 0.5 * vehicle.installed[slot].unwrap().condition.clamp(0.0, 1.0);
         }
@@ -431,14 +438,6 @@ impl PhysicsWorld {
 
     pub fn wheel_support_count(&self, index: usize) -> usize {
         self.vehicles[index].active_slots.len()
-    }
-
-    pub fn set_engine_brake(&mut self, index: usize, force: f32) {
-        self.vehicles[index].engine_brake_force = if force.is_finite() {
-            force.max(0.0)
-        } else {
-            0.0
-        };
     }
 
     pub fn driven_wheel_rpm(&self, index: usize) -> f32 {
@@ -699,6 +698,64 @@ impl PhysicsWorld {
         handle
     }
 
+    /// Fallible source mesh publication leaves existing collision untouched on failure.
+    pub fn insert_source_mesh(
+        &mut self,
+        surface: &crate::world::WorldSurface,
+        position: [f32; 3],
+        layer: u8,
+        filter: u32,
+        friction: f32,
+        restitution: f32,
+        available_cpu: usize,
+    ) -> Result<(ColliderHandle, usize), ReferenceError> {
+        // Reserve vertices, indices, BVH construction and retained collider storage before allocation.
+        let reservation = surface
+            .vertices
+            .len()
+            .saturating_mul(48)
+            .saturating_add(surface.triangles.len().saturating_mul(256))
+            .saturating_add(std::mem::size_of::<rapier3d::prelude::Collider>());
+        if reservation > available_cpu {
+            return Err(ReferenceError(format!(
+                "Source collision reservation exceeds budget: {reservation}"
+            )));
+        }
+        let mesh = ColliderBuilder::trimesh(
+            surface
+                .vertices
+                .iter()
+                .copied()
+                .map(Vector::from_array)
+                .collect(),
+            surface.triangles.clone(),
+        )
+        .map_err(|error| ReferenceError(format!("Source collision mesh: {error}")))?
+        .friction(friction)
+        .restitution(restitution)
+        .translation(Vector::from_array(position))
+        .collision_groups(InteractionGroups::new(
+            Group::from_bits_truncate(1u32 << layer),
+            Group::from_bits_truncate(filter),
+            InteractionTestMode::And,
+        ))
+        .build();
+        let bytes = std::mem::size_of::<rapier3d::prelude::Collider>()
+            + mesh
+                .shape()
+                .as_trimesh()
+                .expect("source triangle mesh")
+                .total_memory_size();
+        if bytes > available_cpu {
+            return Err(ReferenceError(format!(
+                "Source collision allocation exceeds budget: {bytes}"
+            )));
+        }
+        let handle = self.physics.colliders.insert(mesh);
+        self.refresh_queries();
+        Ok((handle, bytes))
+    }
+
     pub fn remove_collider(&mut self, handle: ColliderHandle) {
         for vehicle in &self.vehicles {
             if vehicle
@@ -738,16 +795,6 @@ impl PhysicsWorld {
                 .translation(Vector::from_array(center))
                 .friction(0.8),
         );
-        self.refresh_queries();
-        handle
-    }
-
-    /// Fixed shape. The shape stays shared with its source.
-    pub fn insert_shape(&mut self, shape: SharedShape, pose: Pose) -> ColliderHandle {
-        let handle = self
-            .physics
-            .colliders
-            .insert(ColliderBuilder::new(shape).position(pose).friction(0.8));
         self.refresh_queries();
         handle
     }
@@ -810,65 +857,6 @@ pub fn collider_builder(geometry: &ColliderGeometry) -> Result<ColliderBuilder, 
     }
 }
 
-/// Returns force per driven wheel. The gear index owns forward/reverse selection.
-pub fn drive_force(
-    output: crate::simulation::engine::EngineOutput,
-    vehicle: &VehicleReference,
-    gear_index: usize,
-    radius: f32,
-    drive_count: usize,
-) -> f32 {
-    if !output.running {
-        return 0.0;
-    }
-    let Some(ratio) = vehicle.gear_ratios.get(gear_index) else {
-        return 0.0;
-    };
-    if radius <= 0.0 || drive_count == 0 {
-        return 0.0;
-    }
-    (output.torque_nm * ratio.abs() * vehicle.final_drive_ratio / (drive_count as f32 * radius))
-        .max(0.0)
-}
-
-pub fn select_gear(
-    wheel_rpm: f32,
-    reverse: bool,
-    throttle: bool,
-    previous: usize,
-    engine: &crate::reference::EngineReference,
-    vehicle: &VehicleReference,
-) -> usize {
-    let neutral = vehicle
-        .gear_ratios
-        .iter()
-        .position(|ratio| *ratio == 0.0)
-        .expect("validated neutral gear");
-    if !throttle {
-        return neutral;
-    }
-    let mut selected = previous;
-    let mut maximum = 0.0;
-    for (index, ratio) in vehicle.gear_ratios.iter().enumerate().rev() {
-        if *ratio == 0.0 || (*ratio < 0.0) != reverse {
-            continue;
-        }
-        let rpm = wheel_rpm.abs() * vehicle.final_drive_ratio * ratio.abs();
-        let mut value = crate::simulation::engine::torque(&engine.torque_curve, rpm);
-        if value == 0.0 {
-            value = crate::simulation::engine::torque(
-                &engine.torque_curve,
-                engine.max_rpm * 0.5 * vehicle.final_drive_ratio * ratio.abs(),
-            );
-        }
-        if value > maximum {
-            maximum = value;
-            selected = index;
-        }
-    }
-    selected
-}
-
 fn refresh_world_queries(physics: &mut rapier3d::prelude::PhysicsWorld) {
     // CollisionPipeline consumes body changes before PhysicsPipeline registers islands.
     // Update query bounds while retaining those changes for the next fixed step.
@@ -897,5 +885,97 @@ pub fn from_rapier(pose: &Pose) -> VehiclePose {
     VehiclePose {
         position: pose.translation.to_array(),
         rotation: pose.rotation.to_array(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn axle_torque_uses_active_driven_count_and_installed_radius_once() {
+        let reference =
+            ReferenceManifest::from_json(include_bytes!("../tests/common/reference.json")).unwrap();
+        let poses = crate::starting_area::initial_vehicle_poses(&reference).unwrap();
+        let mut world = PhysicsWorld::new(&reference, &poses).unwrap();
+        for index in 0..reference.vehicles.len() {
+            let input = DriveInput {
+                steer: 0.5,
+                throttle: 0.25,
+                brake: 0.4,
+                handbrake: 0.6,
+            };
+            let torques = DriveTorques {
+                motor_nm: -1200.0,
+                engine_brake_nm: 600.0,
+            };
+            world.apply_vehicle_forces(index, input, torques);
+            let vehicle = &world.vehicles[index];
+            for (i, wheel) in vehicle.controller.wheels().iter().enumerate() {
+                let slot = vehicle.active_slots[i];
+                let source = &vehicle.wheel_references[slot];
+                let expected_force = if source.drive {
+                    -1200.0 / (2.0 * wheel.radius)
+                } else {
+                    0.0
+                };
+                assert!((wheel.engine_force - expected_force).abs() < 0.001);
+                let mut expected_brake = if source.drive { 600.0 / 2.0 } else { 0.0 };
+                if source.brake {
+                    expected_brake += vehicle.brake_torque * 0.4;
+                }
+                if source.handbrake {
+                    expected_brake += vehicle.handbrake_torque * 0.6;
+                }
+                assert!((wheel.brake - expected_brake / wheel.radius * FIXED_DT).abs() < 0.001);
+            }
+            let driven: Vec<_> = vehicle
+                .wheel_references
+                .iter()
+                .filter(|s| s.drive)
+                .map(|s| s.id)
+                .collect();
+            world.set_wheel(driven[0], None).unwrap();
+            world
+                .set_wheel(
+                    driven[1],
+                    Some(InstalledWheel {
+                        radius: 0.45,
+                        condition: 1.0,
+                    }),
+                )
+                .unwrap();
+            world.apply_vehicle_forces(index, input, torques);
+            let vehicle = &world.vehicles[index];
+            let active = vehicle
+                .active_slots
+                .iter()
+                .position(|slot| vehicle.wheel_references[*slot].id == driven[1])
+                .unwrap();
+            let wheel = &vehicle.controller.wheels()[active];
+            assert!((wheel.engine_force - (-1200.0 / 0.45)).abs() < 0.001);
+            assert!(
+                (wheel.brake - (600.0 + vehicle.brake_torque * 0.4) / 0.45 * FIXED_DT).abs()
+                    < 0.001
+            );
+            world.apply_vehicle_forces(
+                index,
+                DriveInput {
+                    throttle: f32::NAN,
+                    brake: f32::NAN,
+                    handbrake: f32::NAN,
+                    steer: f32::NAN,
+                },
+                DriveTorques {
+                    motor_nm: f32::NAN,
+                    engine_brake_nm: f32::NAN,
+                },
+            );
+            for wheel in world.vehicles[index].controller.wheels() {
+                assert_eq!(wheel.engine_force, 0.0);
+                assert_eq!(wheel.brake, 0.0);
+                assert_eq!(wheel.steering, 0.0);
+            }
+        }
     }
 }

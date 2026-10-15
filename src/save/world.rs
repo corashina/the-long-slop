@@ -30,8 +30,6 @@ struct Record {
 pub struct PersistentWorld {
     records: Vec<Record>,
     processed: Vec<RigidBodyHandle>,
-    seed: u64,
-    pumps: Vec<(i64, f32, Option<ItemId>)>,
     pending_items: Vec<(ItemId, AbsolutePose)>,
     configured: bool,
 }
@@ -58,8 +56,6 @@ impl PersistentWorld {
         Self {
             processed: Vec::with_capacity(records.len()),
             records,
-            seed: crate::world::DEFAULT_SEED,
-            pumps: Vec::new(),
             pending_items: Vec::new(),
             configured: true,
         }
@@ -108,24 +104,9 @@ impl PersistentWorld {
                 enabled: true,
             });
         }
-        let seed = super::identity::unsigned(&snapshot.world.seed)?;
-        let pumps = snapshot
-            .world
-            .records
-            .iter()
-            .map(|WorldRecord::Pump { instance, valve }| {
-                let (record_seed, index) = instance.station()?;
-                if seed != record_seed {
-                    return Err(SaveError::InvalidLinks("Station seed".into()));
-                }
-                Ok((index, *valve, None))
-            })
-            .collect::<Result<Vec<_>, SaveError>>()?;
         Ok(Self {
             processed: Vec::with_capacity(records.len()),
             records,
-            seed,
-            pumps,
             pending_items: snapshot
                 .items
                 .iter()
@@ -134,60 +115,6 @@ impl PersistentWorld {
             configured: false,
         })
     }
-    pub fn capture(
-        &self,
-        _area: &StartingArea,
-        _physics: &PhysicsWorld,
-        _origin: &WorldOrigin,
-        _identities: &IdentityMap,
-    ) -> Result<WorldSnapshot, SaveError> {
-        let mut records = self
-            .pumps
-            .iter()
-            .map(|(index, valve, _)| WorldRecord::Pump {
-                instance: InstanceId::Station {
-                    seed: self.seed.to_string(),
-                    index: index.to_string(),
-                    role: "pump".into(),
-                },
-                valve: *valve,
-            })
-            .collect::<Vec<_>>();
-        records.sort_by(|a, b| {
-            let WorldRecord::Pump { instance: a, .. } = a;
-            let WorldRecord::Pump { instance: b, .. } = b;
-            a.cmp(b)
-        });
-        Ok(WorldSnapshot {
-            seed: self.seed.to_string(),
-            records,
-        })
-    }
-    pub fn sync_pumps(
-        &mut self,
-        stream: &WorldStream,
-        interaction: &mut crate::interaction::InteractionState,
-    ) {
-        self.seed = stream.seed;
-        for (index, item) in stream.station_bindings() {
-            if let Some((_, valve, binding)) = self.pumps.iter_mut().find(|(id, _, _)| id == index)
-            {
-                if binding.is_none() {
-                    interaction.restore_pump_valve(*item, *valve);
-                    *binding = Some(*item);
-                } else {
-                    *valve = interaction.opening_valve(crate::reference::OpeningId(item.0));
-                }
-            } else {
-                self.pumps.push((
-                    *index,
-                    interaction.opening_valve(crate::reference::OpeningId(item.0)),
-                    Some(*item),
-                ));
-            }
-        }
-    }
-
     pub fn body_snapshot(
         &self,
         handle: RigidBodyHandle,
@@ -206,79 +133,95 @@ impl PersistentWorld {
             sleeping: state.sleeping,
         })
     }
-    pub fn relocate_dormant_vehicle(
-        &mut self,
-        reference: &ReferenceManifest,
-        area: &mut StartingArea,
+    pub fn recovery_body_pose(
+        &self,
         physics: &PhysicsWorld,
+        handle: RigidBodyHandle,
         vehicle: usize,
-        target: [f64; 3],
-        bounds: &crate::reference::Bounds,
-        cargo_bodies: &mut Vec<RigidBodyHandle>,
-    ) {
-        cargo_bodies.clear();
+    ) -> Option<VehiclePose> {
         let Some(car) = self
             .records
             .iter()
             .find(|r| r.handle == Some(physics.chassis_handle(vehicle)))
             .and_then(|r| r.state)
         else {
-            return;
+            return Some(from_rapier(physics.rapier().bodies[handle].position()));
         };
-        let inverse = Rotation::from_array(car.pose.rotation).inverse();
-        for record in &mut self.records {
-            let Some(state) = &mut record.state else {
+        let state = self
+            .records
+            .iter()
+            .find(|r| r.handle == Some(handle))?
+            .state?;
+        let delta =
+            std::array::from_fn::<_, 3, _>(|i| state.pose.position[i] - car.pose.position[i]);
+        if delta.iter().any(|v| v.abs() > f64::from(REBASE_LIMIT)) {
+            return None;
+        }
+        Some(VehiclePose {
+            position: delta.map(|v| v as f32),
+            rotation: state.pose.rotation,
+        })
+    }
+    pub fn recovery_cargo(
+        &self,
+        physics: &PhysicsWorld,
+        handle: RigidBodyHandle,
+        vehicle: usize,
+        bounds: &crate::reference::Bounds,
+    ) -> bool {
+        let Some(state) = self
+            .records
+            .iter()
+            .find(|r| r.handle == Some(handle))
+            .and_then(|r| r.state)
+        else {
+            return false;
+        };
+        let Some(car) = self.recovery_body_pose(physics, physics.chassis_handle(vehicle), vehicle)
+        else {
+            return false;
+        };
+        let Some(pose) = self.recovery_body_pose(physics, handle, vehicle) else {
+            return false;
+        };
+        let point = to_rapier(car).inverse() * Vector::from_array(pose.position);
+        state.enabled
+            && physics.rapier().bodies[handle].is_dynamic()
+            && physics.vehicle_of(handle).is_none()
+            && (0..3).all(|i| point[i] >= bounds.min[i] && point[i] <= bounds.max[i])
+    }
+    pub fn activate_recovery_bodies(
+        &mut self,
+        area: &mut StartingArea,
+        physics: &mut PhysicsWorld,
+        vehicle: usize,
+        bodies: &[RigidBodyHandle],
+    ) {
+        if physics.body_active(physics.chassis_handle(vehicle)) {
+            return;
+        }
+        // Set the virtual clearance frame only after the target permit succeeds.
+        for &handle in bodies {
+            let Some(pose) = self.recovery_body_pose(physics, handle, vehicle) else {
                 continue;
             };
-            let delta = std::array::from_fn::<_, 3, _>(|axis| {
-                state.pose.position[axis] - car.pose.position[axis]
-            });
-            let near = delta
+            let enabled = self
+                .records
                 .iter()
-                .all(|v| v.abs() <= crate::world::REBASE_LIMIT as f64);
-            let point = if near {
-                inverse * Vector::from_array(delta.map(|v| v as f32))
-            } else {
-                Vector::splat(f32::INFINITY)
-            };
-            let cargo = state.enabled
-                && record.handle.is_some_and(|handle| {
-                    physics.rapier().bodies[handle].is_dynamic()
-                        && physics.vehicle_of(handle).is_none()
-                })
-                && (0..3)
-                    .all(|axis| point[axis] >= bounds.min[axis] && point[axis] <= bounds.max[axis]);
-            let attached = match record.key {
-                Key::Source(id) => {
-                    crate::starting_area::body_vehicle(reference, id) == Some(vehicle)
-                }
-                Key::Assembly(_) => false,
-            };
-            if cargo && !attached {
-                if let Some(handle) = record.handle {
-                    if !cargo_bodies.contains(&handle) {
-                        cargo_bodies.push(handle);
-                    }
-                }
+                .find(|r| r.handle == Some(handle))
+                .and_then(|r| r.state)
+                .is_some_and(|s| s.enabled);
+            let body = &mut physics.rapier_mut().bodies[handle];
+            body.set_position(to_rapier(pose), false);
+            body.set_enabled(enabled);
+        }
+        for &handle in bodies {
+            for record in self.records.iter_mut().filter(|r| r.handle == Some(handle)) {
+                record.state = None;
             }
-            if !attached && !cargo {
-                continue;
-            }
-            let shift =
-                std::array::from_fn::<_, 3, _>(|axis| target[axis] - car.pose.position[axis]);
-            for axis in 0..3 {
-                state.pose.position[axis] += shift[axis];
-            }
-            for item in area
-                .items
-                .iter_mut()
-                .filter(|item| item.body == record.handle)
-            {
-                if let Some(pose) = &mut item.inactive_pose {
-                    for axis in 0..3 {
-                        pose.position[axis] += shift[axis];
-                    }
-                }
+            physics.inactive_bodies.remove(&handle);
+            for item in area.items.iter_mut().filter(|i| i.body == Some(handle)) {
+                item.inactive_pose = None;
             }
         }
     }
@@ -355,7 +298,31 @@ impl PersistentWorld {
             }
             self.configured = true;
         }
-        self.seed = stream.seed;
+        for record in &mut self.records {
+            match record.key {
+                Key::Assembly(id)
+                    if area.items.get(id).is_some_and(|i| {
+                        !matches!(i.location, ItemLocation::World | ItemLocation::Held)
+                    }) =>
+                {
+                    record.state = None;
+                    record.handle = None;
+                }
+                Key::Source(id) => {
+                    let handle = area.bodies[&id];
+                    if reference.items.iter().filter(|i| i.body == id).any(|i| {
+                        area.items
+                            .get(i.id)
+                            .is_some_and(|item| item.body.is_some() && item.body != Some(handle))
+                    }) {
+                        if let Some(state) = &mut record.state {
+                            state.enabled = false;
+                        }
+                    }
+                }
+                _ => (),
+            }
+        }
         let mut changed = false;
         self.processed.clear();
         let held = area
@@ -432,9 +399,15 @@ impl PersistentWorld {
                     (absolute[axis] - stream.origin.offset[axis]).abs() + extent
                         <= REBASE_LIMIT as f64
                 }) && [0, 2].iter().all(|&axis| {
-                    (absolute[axis] - stream.focus[axis]).abs() + extent <= REBASE_LIMIT as f64
+                    (absolute[axis] - stream.focus()[axis]).abs() + extent <= REBASE_LIMIT as f64
                 });
-                let active = if let Some(parent) = parent {
+                let pending_attachment = area
+                    .items
+                    .iter()
+                    .any(|item| item.body == Some(handle) && item.pending_attachment);
+                let active = if pending_attachment {
+                    false
+                } else if let Some(parent) = parent {
                     area.bodies
                         .get(&parent)
                         .is_some_and(|h| physics.body_active(*h))
@@ -445,8 +418,10 @@ impl PersistentWorld {
                             .seat_vehicle()
                             .is_some_and(|vehicle| handle == physics.chassis_handle(vehicle))
                         || (bounded
-                            && (physics.vehicle_of(handle).is_some()
-                                || stream.contains_active(absolute)))
+                            && stream.supports(crate::world::WorldBounds {
+                                min: absolute.map(|v| v - extent - 2.),
+                                max: absolute.map(|v| v + extent + 2.),
+                            }))
                 };
                 if active {
                     if let Some(state) = self.records[index].state.take() {
@@ -523,7 +498,6 @@ impl PersistentWorld {
             }
         }
         self.pending_items.clear();
-        self.sync_pumps(stream, &mut area.interaction);
         if changed {
             wheels.sync_activity(physics);
             area.items.sync_poses(physics);

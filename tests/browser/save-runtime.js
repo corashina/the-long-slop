@@ -184,7 +184,7 @@ async function topology(){
 async function saveReload(kind,evidence){
  const snapshot=await runtime.capture(),inspection=await topology();
  await session.save();const record=await storage.read(),stored=await verifyRecord(record);
- assert(stored.schema_version===1,'Stored schema is not 1.');
+ assert(stored.schema_version===4,'Stored schema is not 4.');
  equal(normalize(stored),normalize(snapshot),'Stored state differs.');
  sessionStorage.setItem(proofKey,JSON.stringify({kind,snapshot:stored,inspection,evidence}));
  log('PASS '+kind+'_manual_slot_saved '+JSON.stringify({inspection,evidence}));
@@ -301,7 +301,7 @@ parentDocument.querySelector('#manual-reload').addEventListener('click',async()=
  const button=parentDocument.querySelector('#manual-reload');button.disabled=true;
  try{
   await session.newGame();await waitForRenderer();await session.save();const record=await storage.read(),snapshot=await verifyRecord(record);
-  assert(snapshot.schema_version===1,'Stored schema is not 1.');
+  assert(snapshot.schema_version===4,'Stored schema is not 4.');
   sessionStorage.setItem(proofKey,JSON.stringify({kind:'default_manual_slot',snapshot}));storage.close();parent.location.reload();
  }catch(error){log('FAIL '+error.stack);button.disabled=false;}
 });

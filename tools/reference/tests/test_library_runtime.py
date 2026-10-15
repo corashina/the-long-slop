@@ -4,6 +4,29 @@ from unittest.mock import patch
 from tools.reference.export import verify_reference, promote_reference
 
 class RuntimeTests(unittest.TestCase):
+    def test_plate_shader_receipts_use_typed_paths_and_hashes(self):
+        from tools.reference.export import validate_runtime_paths
+        names = ('home', 'lada', 'skoda', 'items', 'road_lamp', 'sky', 'food', 'world')
+        manifest = {
+            'assets': [dict(id=i, path=f'reference/{name}.gltf', dependencies=[],
+                            usage='world_prototype' if name == 'world' else 'unique_scene')
+                       for i, name in enumerate(names, 1)],
+            'world': {'prototypes': [{'asset': 8}], 'painting_materials': []},
+            'plates': {'material': {
+                'shader': {'path': 'reference/plate-fixture.shader.json', 'sha256': 'a' * 64},
+                'compiled_shader': {'path': 'reference/plate-fixture.shader.bin', 'sha256': 'a' * 64},
+                'resources': []}},
+        }
+        dependency = dict(file='reference/plate-fixture.shader.json', sha256='a' * 64)
+        manifest['assets'][0]['dependencies'] = [dependency]
+        validate_runtime_paths(manifest)
+        dependency['sha256'] = 'b' * 64
+        with self.assertRaisesRegex(ValueError, 'Runtime dependency hash'):
+            validate_runtime_paths(manifest)
+        dependency.update(file='reference/unselected.json', sha256='a' * 64)
+        with self.assertRaisesRegex(ValueError, 'Invalid selected runtime dependency'):
+            validate_runtime_paths(manifest)
+
     def test_runtime_requires_accepted_library(self):
         from types import SimpleNamespace as NS
         receipt=NS(manifest_sha256='a'*64,catalog_sha256='b'*64,source_manifest_sha256='c'*64)

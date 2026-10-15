@@ -45,20 +45,29 @@ struct VehicleMass {
     last_mass: f32,
 }
 pub struct WheelAssemblies {
+    rules: Vec<crate::reference::WheelPartReference>,
     parts: Vec<Part>,
     indices: HashMap<ItemId, usize>,
     slots: Vec<Slot>,
     tire_fits: HashSet<(ItemId, ItemId)>,
     vehicles: Vec<VehicleMass>,
+    generated_tanks: Vec<ItemId>,
     bound: bool,
     general_mass: Vec<(ItemId, f32)>,
     covers: HashMap<ItemId, PartSlotId>,
 }
 
 impl WheelAssemblies {
-    pub fn refresh_conditions(&mut self, conditions: &crate::conditions::ConditionStore) {
+    pub fn refresh_conditions(
+        &mut self,
+        conditions: &crate::conditions::ConditionStore,
+        items: &ItemStore,
+    ) {
         for part in &mut self.parts {
-            if let Some(quality) = conditions.item_quality(part.item) {
+            if let Some(quality) = conditions
+                .item_quality(part.item)
+                .or_else(|| items.get(part.item).and_then(|i| i.generated_condition))
+            {
                 part.quality = quality;
             }
         }
@@ -139,6 +148,47 @@ impl WheelAssemblies {
         }
         Ok(())
     }
+    pub fn has_external_dependents(&self, owns: impl Fn(ItemId) -> bool) -> bool {
+        self.parts.iter().any(|part| {
+            owns(part.item) && part.tire.is_some_and(|tire| !owns(self.parts[tire].item))
+        })
+    }
+    pub(crate) fn retained_binding_bytes(&self) -> usize {
+        use super::memory::{map, set, strings, vector};
+        vector(&self.rules)
+            + self
+                .rules
+                .iter()
+                .map(|r| {
+                    r.source.file.capacity()
+                        + strings(&r.main_types)
+                        + strings(&r.part_types)
+                        + vector(&r.colliders)
+                        + strings(&r.tire_main_types)
+                        + strings(&r.tire_types)
+                })
+                .sum::<usize>()
+            + vector(&self.parts)
+            + self
+                .parts
+                .iter()
+                .map(|p| vector(&p.collider_ids) + vector(&p.colliders))
+                .sum::<usize>()
+            + map(&self.indices)
+            + vector(&self.slots)
+            + self.slots.iter().map(|s| set(&s.compatible)).sum::<usize>()
+            + set(&self.tire_fits)
+            + vector(&self.generated_tanks)
+            + vector(&self.vehicles)
+            + self
+                .vehicles
+                .iter()
+                .map(|v| vector(&v.tanks))
+                .sum::<usize>()
+            + vector(&self.general_mass)
+            + map(&self.covers)
+    }
+
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut parts = Vec::with_capacity(reference.wheel_parts.len());
         let mut indices = HashMap::with_capacity(reference.wheel_parts.len());
@@ -377,11 +427,13 @@ impl WheelAssemblies {
             })
             .collect();
         Ok(Self {
+            rules: reference.wheel_parts.clone(),
             parts,
             indices,
             slots,
             tire_fits,
             vehicles,
+            generated_tanks: Vec::new(),
             general_mass,
             covers: reference
                 .wheel_parts
@@ -392,6 +444,134 @@ impl WheelAssemblies {
         })
     }
 
+    pub fn set_generated_cover(&mut self, item: ItemId, slot: PartSlotId) {
+        self.covers.insert(item, slot);
+    }
+    pub fn rules(&self) -> &[crate::reference::WheelPartReference] {
+        &self.rules
+    }
+    pub fn register_generated(
+        &mut self,
+        rule: crate::reference::WheelPartReference,
+        rim: bool,
+        mass: f32,
+        colliders: &[(ColliderId, ColliderHandle)],
+        items: &ItemStore,
+        physics: &mut PhysicsWorld,
+        reference: &ReferenceManifest,
+    ) -> Result<(), ReferenceError> {
+        self.bind(items, physics)?;
+        if self.indices.contains_key(&rule.item) {
+            return Err(error("Generated wheel already bound"));
+        }
+        let item = items
+            .get(rule.item)
+            .ok_or_else(|| error("Generated wheel item missing"))?;
+        let inverse = to_rapier(item.pose).inverse();
+        let shapes = colliders
+            .iter()
+            .map(|&(id, handle)| {
+                let _ = id;
+                (
+                    handle,
+                    inverse * *physics.rapier().colliders[handle].position(),
+                )
+            })
+            .collect();
+        for slot in &mut self.slots {
+            let r = reference
+                .wheel_slots
+                .iter()
+                .find(|r| r.id == slot.id)
+                .unwrap();
+            if rim
+                && fits(
+                    &r.rim_main_types,
+                    &r.rim_types,
+                    &rule.main_types,
+                    &rule.part_types,
+                )
+            {
+                slot.compatible.insert(rule.item);
+            }
+        }
+        for old in &self.rules {
+            let old_rim = self.parts[self.indices[&old.item]].rim;
+            if rim
+                && !old_rim
+                && fits(
+                    &rule.tire_main_types,
+                    &rule.tire_types,
+                    &old.main_types,
+                    &old.part_types,
+                )
+            {
+                self.tire_fits.insert((rule.item, old.item));
+            }
+            if !rim
+                && old_rim
+                && fits(
+                    &old.tire_main_types,
+                    &old.tire_types,
+                    &rule.main_types,
+                    &rule.part_types,
+                )
+            {
+                self.tire_fits.insert((old.item, rule.item));
+            }
+        }
+        self.indices.insert(rule.item, self.parts.len());
+        self.parts.push(Part {
+            quality: item.generated_condition.expect("generated wheel condition"),
+            item: rule.item,
+            rim,
+            radius: rule.radius,
+            mass,
+            last_mass: f32::NAN,
+            rotation: Rotation::from_array(rule.local_rotation_after_mount),
+            tire_mount: rule.tire_mount.as_ref().map(pose),
+            tire: None,
+            collider_ids: rule.colliders.clone(),
+            colliders: shapes,
+            free_body: (item.location == ItemLocation::World)
+                .then_some(item.body)
+                .flatten(),
+        });
+        self.rules.push(rule);
+        Ok(())
+    }
+    pub fn register_generated_general(&mut self, item: ItemId, mass: f32, fluid: bool) {
+        self.general_mass.push((item, mass));
+        if fluid {
+            self.generated_tanks.push(item);
+        }
+    }
+    pub fn remove_generated(&mut self, item: ItemId) {
+        self.covers.remove(&item);
+        self.general_mass.retain(|(id, _)| *id != item);
+        self.generated_tanks.retain(|id| *id != item);
+        let Some(index) = self.indices.remove(&item) else {
+            return;
+        };
+        self.parts.remove(index);
+        self.rules.retain(|r| r.item != item);
+        self.tire_fits
+            .retain(|(rim, tire)| *rim != item && *tire != item);
+        for slot in &mut self.slots {
+            slot.compatible.remove(&item);
+            slot.rim = slot
+                .rim
+                .and_then(|rim| (rim != index).then_some(rim - usize::from(rim > index)));
+        }
+        for (i, part) in self.parts.iter_mut().enumerate() {
+            self.indices.insert(part.item, i);
+            if let Some(tire) = &mut part.tire {
+                if *tire > index {
+                    *tire -= 1;
+                }
+            }
+        }
+    }
     fn covered(&self, item: ItemId, items: &ItemStore) -> bool {
         self.covers.get(&item).is_some_and(|slot| {
             items
@@ -421,6 +601,7 @@ impl WheelAssemblies {
                     slot: crate::save::identity::source_key(&ids.wheel_slots, slot.id)?,
                     rim: slot
                         .rim
+                        .filter(|rim| ids.items.values().any(|id| *id == self.parts[*rim].item))
                         .map(|rim| ids.item_instance(self.parts[rim].item))
                         .transpose()?,
                     rotation,
@@ -434,6 +615,10 @@ impl WheelAssemblies {
             .iter()
             .filter(|part| part.rim)
             .filter_map(|part| part.tire.map(|tire| (part, tire)))
+            .filter(|(part, tire)| {
+                ids.items.values().any(|id| *id == part.item)
+                    && ids.items.values().any(|id| *id == self.parts[*tire].item)
+            })
             .map(|(part, tire)| {
                 Ok(crate::save::TireAttachment {
                     rim: ids.item_instance(part.item)?,
@@ -851,7 +1036,7 @@ impl WheelAssemblies {
                     mass += dry;
                 }
             }
-            for id in &state.tanks {
+            for id in state.tanks.iter().chain(&self.generated_tanks) {
                 if items.get(*id).is_some_and(|i| i.body != Some(chassis)) {
                     continue;
                 }
@@ -984,4 +1169,38 @@ fn item_pose(
 }
 fn error(message: &str) -> ReferenceError {
     ReferenceError(message.into())
+}
+
+#[cfg(test)]
+mod condition_tests {
+    use super::*;
+    #[test]
+    fn imported_tire_quality_reaches_installed_support() {
+        let mut reference =
+            ReferenceManifest::from_json(include_bytes!("../../tests/common/reference.json"))
+                .unwrap();
+        let tire = reference.wheel_slots[0].tire;
+        let mut surface = reference.conditions.surfaces[0].clone();
+        surface.id.0 = 9000;
+        surface.source.file = "merged-wheel-condition".into();
+        surface.source.path_id = 9000;
+        surface.item = Some(tire);
+        surface.node = reference.items.iter().find(|i| i.id == tire).unwrap().node;
+        surface.renderers.clear();
+        surface.startup.state = 3;
+        reference
+            .conditions
+            .surfaces
+            .retain(|s| s.item != Some(tire));
+        reference.conditions.surfaces.push(surface);
+        let conditions = crate::conditions::ConditionStore::new(&reference).unwrap();
+        let mut items = ItemStore::new(&reference).unwrap();
+        let poses = crate::starting_area::initial_vehicle_poses(&reference).unwrap();
+        let mut physics = PhysicsWorld::new(&reference, &poses).unwrap();
+        let mut wheels = WheelAssemblies::new(&reference).unwrap();
+        wheels.refresh_conditions(&conditions, &items);
+        wheels.sync(&mut items, &mut physics).unwrap();
+        assert_eq!(wheels.slots[0].last_support.unwrap().1, 0.25);
+        assert_eq!(items.get(tire).unwrap().generated_condition, None);
+    }
 }

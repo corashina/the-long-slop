@@ -1,5 +1,8 @@
 //! Validated installed-build data. Geometry uses converted body-local meters.
 
+pub mod driving;
+pub use driving::*;
+
 pub mod audio;
 pub use audio::*;
 
@@ -7,6 +10,8 @@ pub mod lighting_scene;
 pub mod postprocessing;
 pub mod reflections;
 pub mod render_lighting;
+pub mod world;
+pub use world::*;
 pub mod rendering;
 pub mod shadow_candidates;
 pub mod shadow_frame;
@@ -33,10 +38,8 @@ pub mod plates;
 pub use plates::*;
 pub mod mirrors;
 pub use mirrors::*;
-pub mod stations;
 pub mod survival;
 pub mod weather;
-pub use stations::*;
 pub use survival::*;
 pub use weather::*;
 pub mod instruments;
@@ -73,7 +76,7 @@ id!(AttachmentTargetId, u32);
 id!(LightId, u32);
 id!(LightControlId, u32);
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceId {
     pub file: String,
@@ -102,7 +105,8 @@ pub enum AssetUsage {
     RoadLampPrototype,
     SkyPrototype,
     FoodPrototype,
-    StationPrototype,
+    WorldPrototype,
+    WorldMaterial,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -669,8 +673,13 @@ pub struct WheelSlotReference {
     pub drive: bool,
     pub brake: bool,
     pub handbrake: bool,
-    pub forward_friction: [f32; 5],
-    pub sideways_friction: [f32; 5],
+    pub forward_friction: WheelFrictionCurve,
+    pub sideways_friction: WheelFrictionCurve,
+    pub wheel_mass_kg: f32,
+    pub rotational_damping: f32,
+    pub force_application_distance_m: f32,
+    pub sideways_stiffness_modifier: f32,
+    pub hub: WheelHubReference,
     pub tire_condition_range: [u8; 2],
     pub rim_condition_range: [u8; 2],
     pub rim_main_types: Vec<String>,
@@ -745,6 +754,8 @@ pub struct WheelPartReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VehicleReference {
+    pub driving: DrivingVehicleReference,
+    pub spawn_car_id: i32,
     pub engine: EngineReference,
     pub instruments: InstrumentReference,
     pub handbrake: bool,
@@ -799,14 +810,18 @@ pub struct LibraryProvenance {
     pub source_manifest_sha256: String,
 }
 
+pub const MAX_MANIFEST_BYTES: usize = 256 * 1024 * 1024;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
     pub conditions: ConditionRecord,
+    pub driving: DrivingReference,
     pub audio: serde_json::Value,
     pub survival: SurvivalReference,
     pub sleep: SleepReference,
     pub weather: WeatherReference,
+    pub world: std::sync::Arc<WorldReference>,
     pub ui: UiReference,
     pub library: LibraryProvenance,
     pub lighting: LightingRecord,
@@ -839,7 +854,6 @@ pub struct ReferenceManifest {
     pub seats: Vec<SeatReference>,
     pub vehicles: Vec<VehicleReference>,
     pub area: StartingAreaReference,
-    pub stations: StationsReference,
 }
 
 #[derive(Debug)]
@@ -890,7 +904,7 @@ impl ReferenceManifest {
             .count()
     }
     pub fn from_json(bytes: &[u8]) -> Result<Self, ReferenceError> {
-        require(bytes.len() <= 64 * 1024 * 1024, "manifest size")?;
+        require(bytes.len() <= MAX_MANIFEST_BYTES, "manifest size")?;
         let manifest: Self =
             serde_json::from_slice(bytes).map_err(|e| ReferenceError(e.to_string()))?;
         manifest.validate()?;
@@ -898,7 +912,7 @@ impl ReferenceManifest {
     }
 
     pub fn from_runtime_json(bytes: &[u8]) -> Result<Self, ReferenceError> {
-        require(bytes.len() <= 64 * 1024 * 1024, "manifest size")?;
+        require(bytes.len() <= MAX_MANIFEST_BYTES, "manifest size")?;
         let manifest: Self =
             serde_json::from_slice(bytes).map_err(|e| ReferenceError(e.to_string()))?;
         manifest.validate_gameplay()?;
@@ -911,6 +925,7 @@ impl ReferenceManifest {
     }
 
     fn validate_gameplay(&self) -> Result<(), ReferenceError> {
+        self.driving.validate(self)?;
         require(
             self.library.schema_version == 1
                 && hash(&self.library.manifest_sha256)
@@ -922,6 +937,7 @@ impl ReferenceManifest {
             self.app_id == APP_ID && self.build_id == BUILD_ID,
             "app/build",
         )?;
+        self.world.validate(self)?;
         self.lighting.validate(self)?;
         self.mirrors.validate(self)?;
         self.render_lighting.validate(&self.nodes)?;
@@ -930,7 +946,6 @@ impl ReferenceManifest {
         self.sleep.validate(self)?;
         self.weather.validate(self)?;
         self.plates.validate(self)?;
-        self.stations.validate(self)?;
         require(
             self.bodies.iter().all(|b| {
                 self.nodes.iter().any(|n| {
@@ -1838,10 +1853,31 @@ impl ReferenceManifest {
                     r.damper,
                     r.target_position,
                 ]) && finite(&r.center)
-                    && finite(&r.forward_friction)
-                    && finite(&r.sideways_friction)
+                    && r.forward_friction.valid()
+                    && r.sideways_friction.valid()
+                    && finite(&[
+                        r.wheel_mass_kg,
+                        r.rotational_damping,
+                        r.force_application_distance_m,
+                        r.sideways_stiffness_modifier,
+                        r.hub.radius_m,
+                        r.hub.mass_kg,
+                        r.hub.forward_stiffness,
+                        r.hub.sideways_stiffness,
+                    ])
+                    && r.wheel_mass_kg > 0.0
+                    && r.rotational_damping >= 0.0
+                    && r.force_application_distance_m >= 0.0
+                    && r.sideways_stiffness_modifier >= 0.0
+                    && r.hub.radius_m > 0.0
+                    && r.hub.mass_kg > 0.0
+                    && r.hub.forward_stiffness >= 0.0
+                    && r.hub.sideways_stiffness >= 0.0
                     && r.radius > 0.0
-                    && r.suspension_distance > 0.0,
+                    && r.suspension_distance > 0.0
+                    && r.spring >= 0.0
+                    && r.damper >= 0.0
+                    && (0.0..=1.0).contains(&r.target_position),
                 "wheel parameters",
             )?;
         }
@@ -1896,6 +1932,16 @@ impl ReferenceManifest {
                     && v.wheel_slots.iter().all(|id| wheel_ids.contains(id))
                     && v.colliders.iter().all(|id| collider_ids.contains(id)),
                 "vehicle bindings",
+            )?;
+            require(
+                v.spawn_car_id >= 0
+                    && self
+                        .world
+                        .catalog
+                        .items
+                        .iter()
+                        .any(|i| i.index == v.spawn_car_id as u32),
+                "Source vehicle spawn selector",
             )?;
             require(
                 v.wheel_slots.iter().collect::<HashSet<_>>().len() == 4 && !v.colliders.is_empty(),

@@ -1,7 +1,7 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 2;
+pub const SAVE_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -20,6 +20,7 @@ pub struct SourceStamp {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SaveSnapshot {
+    pub driving_assists: crate::reference::DrivingAssists,
     pub schema_version: u32,
     pub saved_at: String,
     pub source: SourceStamp,
@@ -37,6 +38,15 @@ pub struct SaveSnapshot {
 }
 impl SaveSnapshot {
     pub fn from_json(bytes: &[u8]) -> Result<Self, SaveError> {
+        #[derive(Deserialize)]
+        struct Version {
+            schema_version: u32,
+        }
+        let version: Version =
+            serde_json::from_slice(bytes).map_err(|e| SaveError::CorruptData(e.to_string()))?;
+        if version.schema_version != SAVE_SCHEMA_VERSION {
+            return Err(SaveError::IncompatibleSources("Schema version".into()));
+        }
         serde_json::from_slice(bytes).map_err(|e| SaveError::CorruptData(e.to_string()))
     }
 }
@@ -70,13 +80,11 @@ pub struct BodySnapshot {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldSnapshot {
-    pub seed: String,
-    pub records: Vec<WorldRecord>,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum WorldRecord {
-    Pump { instance: InstanceId, valve: f32 },
+    pub seed: i32,
+    #[serde(with = "super::identity::lossless")]
+    pub changes: crate::world::ChangeRecords,
+    #[serde(with = "super::identity::lossless")]
+    pub spawn: crate::world::spawn_state::SpawnHistory,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -112,7 +120,7 @@ pub struct VehicleSnapshot {
     pub instance: InstanceId,
     pub body: BodySnapshot,
     pub engine: EngineSnapshot,
-    pub auto_gear: usize,
+    pub gear: usize,
     pub handbrake: bool,
     pub trip_m: f64,
     pub requested_headlights: u8,
@@ -141,14 +149,24 @@ pub struct ItemSnapshot {
     pub temperature: Option<f32>,
     pub fluids: Option<[f32; 6]>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ItemLocationSave {
     World,
     Held,
-    PartSlot { slot: SourceKey },
-    WheelSlot { slot: SourceKey },
-    Attached { owner: InstanceId },
+    PartSlot {
+        slot: SourceKey,
+    },
+    WheelSlot {
+        slot: SourceKey,
+    },
+    Attached {
+        owner: InstanceId,
+    },
+    GeneratedAttachment {
+        #[serde(with = "super::identity::lossless")]
+        attachment: crate::world::AttachmentSnapshot,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

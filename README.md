@@ -54,9 +54,9 @@ Development availability does not add further vehicles, audio, animation playbac
 
 | Control | On foot | In the driver seat |
 | --- | --- | --- |
-| WASD | Move | Accelerate, brake, reverse, steer |
+| WASD | Move | Accelerate, brake, steer |
 | Mouse | Look | Look |
-| Shift / Ctrl | Run / crouch | — |
+| Shift | Run | — |
 | Space | Jump | Toggle handbrake |
 | E | Use cap, switch, or seat | Use control or leave seat |
 | Hold LMB + mouse | Move an aimed mechanism | Move an aimed mechanism |
@@ -70,6 +70,11 @@ Development availability does not add further vehicles, audio, animation playbac
 | X | Split a wheel | - |
 | Hold LMB | Fill an open container | Use an aimed switch |
 | I | — | Tap ignition; hold starter |
+| Left Ctrl / Right Ctrl / Numpad 0 | Crouch with Ctrl | Clutch |
+| Up arrow / Down arrow | — | Shift up / down |
+| R / Numpad + | — | Select reverse |
+| 0 / Numpad - / N | — | Select neutral |
+| 1–6 / Numpad 1–6 | — | Select a forward gear, when available |
 | L | — | Cycle headlights: off, low beam, high beam |
 | C | — | Switch first person / chase view |
 | Backspace | Hide or show feedback | Hide or show feedback |
@@ -81,65 +86,23 @@ Aim at an empty wheel slot to install a wheel.
 Some source items, including the fuel can, cannot rotate.
 
 Carry a fuel can. Open the fuel cap. Aim at the opening and hold LMB to fill it.
-Open carried containers before filling them at roadside pumps.
-Open containers spill when tilted. Pumps retain unlimited gasoline stock.
+Open carried containers before filling them at a supported supply.
+Open containers spill when tilted. Supplies retain their checked fluid types and current stock.
 The Lada starts with 0.5 L gasoline, 2.5 L oil, and 3.6 L water.
 Its capacities are 39 L fuel, 5 L oil, and 5 L coolant.
 The Skoda starts with the same fluids. Its capacities are 32 L fuel, 5 L oil, and 5 L coolant.
+
+Controls contains Automatic clutch and Automatic gears. Automatic gears requires Automatic clutch.
+With Automatic gears, S requests reverse after the car stops. W requests forward travel.
+Disable Automatic gears to select gears. Without Automatic clutch, press the clutch past halfway before a shift.
+The gear display shows R, N, or the forward gear number while seated.
+Save stores both cars' gears and engine state, plus the two assist choices. Load restores them.
+New game restores neutral and enables both assists. Recovery and input clearing keep the selected gears.
 
 Use Recover in the pause menu. Use Controls for bindings and Fullscreen.
 Aim at a tire and press F to dismount it. Release F to mount a held tire or rim.
 Focus loss pauses play and clears input. Continue captures the mouse again.
 Recovery preserves fluids, parts, condition, trip distance, cycle time, and lamp state.
-An empty fuel tank moves recovery to a station.
-New game restores the garage, supplies, car, origin, trip distance, source cycle time, and lamp state.
-Close the driver door before reversing through the garage exit.
-Keyboard steering reaches full lock in 0.8 seconds. Release the key to return to center.
-
-## Save and load
-
-Use Save in the pause menu. Use Load in the start or pause menu.
-Save replaces one manual slot in this browser and site address.
-The browser stores the slot in IndexedDB. Clearing site data removes it.
-There is no automatic save.
-
-Load restores a paused session. Select Continue to resume play and capture the mouse.
-The slot includes world state, absolute positions, player pose, seat, and held item.
-It also includes bodies, parts, wheels, fluids, condition, temperature, controls, and openings.
-Both vehicles retain engine state, gear, handbrake, trip distance, and headlights.
-The selected vehicle returns, including when the player saves on foot.
-Cycle time, lamp state, fade progress, and camera mode also return.
-Read the [complete saved-state inventory](docs/superpowers/specs/2026-10-12-save-load-design.md#current-state-inventory) for each owner.
-
-Load requires the current save schema and the exact current source export.
-A different Steam build, manifest hash, or source hash causes rejection. There are no save migrations.
-A failed save keeps the previous slot. A failed load keeps the active session.
-The menu shows the error. Continue resumes the active session after a failed load.
-
-New game replaces the active session after preparation succeeds. It keeps the manual slot until you select Save.
-Recover moves the current car to a safe location. It does not load the slot.
-
-## Scope and evidence
-
-Read the [approved interaction scope](docs/superpowers/specs/2026-10-10-interaction-parity-design.md), [garage scope](docs/superpowers/specs/2026-10-09-garage-start-design.md), and [verification](docs/verification.md).
-Imported layout and recovered rules do not establish identical Unity physics or full-game parity.
-Lighting follows the approved [day cycle scope](docs/superpowers/specs/2026-10-10-day-night-lighting-design.md).
-The source cycle controls sun, moon, clouds, stars, fog, headlights, cabin lights, house lamps, and roadside lamps.
-Pause freezes cycle time, lamp fades, and switch movement.
-New game restores the source startup offset of 240 seconds.
-Selected source material behavior is reconstructed. Exact shadows, probe publication, postprocessing, and stained-glass capture remain deferred.
-Live mirror reflections and audio remain outside this stage.
-See [completed work and roadmap](docs/roadmap.md) and [the deferred rendering plan](docs/superpowers/plans/2026-10-11-rendering-completion.md).
-The final browser walking route was skipped at the user's request. It remains unverified.
-The build has no survival system, multiplayer, or public deployment.
-
-## Toolchain
-
-`Cargo.lock` pins Rust dependencies. The Dockerfile pins the Rust image by digest.
-Bevy 0.19.1 uses WebGL2. Rapier 0.36.0 handles native and browser physics.
-wasm-bindgen crate and CLI use 0.2.129.
-The server binds to `127.0.0.1:4173` and serves WASM with `application/wasm`.
-The menus use self-hosted [Liberation Sans 2.1.5](https://github.com/liberationfonts/liberation-fonts/releases/tag/2.1.5).
-Its license and provenance are in web/fonts/. Gameplay text uses Arial.
-Source feedback replaces the persistent vehicle status card.
-The Lada shows speed, fuel, temperature, warning lights, and distance on its imported instruments.
+An empty fuel tank requests the nearest supported physical supply. Water supplies do not provide gasoline.
+Recovery waits for destination geometry, materials, collision, and clearance before moving the car.
+Restart restores the garage, supplies, car, origin, trip distance, source cycle time, and lamp state.

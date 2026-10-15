@@ -270,8 +270,8 @@ fn prepare(
                                 Color::srgba(color[0], color[1], color[2], color[3]);
                         }
                         let sort = source
-                            .sort_data(key, &metadata.0, &primitive)
-                            .map_err(fail)?;
+                            .sort_data(key, &metadata.0, slot as u32)
+                            .map_err(|e| fail(e.to_string()))?;
                         materials::retain_color(&mut material, world);
                         let material = world.resource_mut::<Assets<SourceMaterial>>().add(material);
                         let caster = world.resource_mut::<Assets<StandardMaterial>>().add(caster);
@@ -561,6 +561,24 @@ fn apply_owner(owner: &Owner, state: &ConditionState, bank: usize, world: &mut W
     bind_owner(owner, state, bank, world);
 }
 impl ConditionVisuals {
+    fn visibility_count(&self) -> usize {
+        self.washes
+            .iter()
+            .map(|(_, nodes)| nodes.len())
+            .sum::<usize>()
+            + self
+                .tools
+                .iter()
+                .map(|(_, model, disabled)| {
+                    usize::from(model.is_some()) + usize::from(disabled.is_some())
+                })
+                .sum::<usize>()
+    }
+    pub(crate) fn candidate_bytes(&self) -> usize {
+        self.owners.len() * std::mem::size_of::<OwnerUpdate>()
+            + self.visibility_count() * std::mem::size_of::<(Entity, Visibility)>()
+            + self.sprays.len() * std::mem::size_of::<(crate::reference::ItemId, [f32; 4])>()
+    }
     pub fn validate_assets(&self, world: &World) -> Result<(), SaveError> {
         if !self.prepared {
             return Err(fail("Condition bindings are not ready"));
@@ -593,7 +611,7 @@ impl ConditionVisuals {
         Ok(())
     }
     fn visibility(&self, store: &ConditionStore) -> Vec<(Entity, Visibility)> {
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(self.visibility_count());
         for (id, objects) in &self.washes {
             let state = store.wash(*id);
             for &entity in objects {

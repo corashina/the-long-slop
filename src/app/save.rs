@@ -1,5 +1,5 @@
 use super::*;
-use crate::presentation::save::{PreparedPresentation, SaveAssetView, prepare_presentation};
+use crate::presentation::save::PreparedPresentation;
 use crate::save::{CameraSave, SaveError, SaveSnapshot, SourceHash, SourceStamp};
 use serde::Deserialize;
 
@@ -12,11 +12,14 @@ pub struct SaveRequests {
     #[cfg(feature = "save-fixture")]
     fixture_material: Option<bevy::asset::AssetId<presentation::materials::SourceMaterial>>,
 }
-struct Candidate {
+pub(crate) struct Candidate {
     id: u32,
     runtime: GarageRuntime,
     camera: CameraMode,
-    presentation: PreparedPresentation,
+    pub(crate) presentation: Option<PreparedPresentation>,
+    kind: String,
+    ready: bool,
+    canceled: bool,
 }
 #[derive(Deserialize)]
 struct Request {
@@ -26,6 +29,14 @@ struct Request {
     payload: serde_json::Value,
 }
 impl SaveRequests {
+    pub(crate) fn hidden(&self) -> Option<&PreparedPresentation> {
+        self.candidate
+            .as_ref()
+            .and_then(|c| c.presentation.as_ref())
+    }
+    pub(crate) fn freezes_world(&self) -> bool {
+        self.hidden().is_some()
+    }
     pub fn pending(&self) -> bool {
         self.candidate.is_some()
     }
@@ -55,6 +66,7 @@ impl SaveRequests {
 
 /// Runs after lifecycle input, between fixed-step batches and before binding updates.
 pub fn dispatch(world: &mut World) {
+    advance(world);
     if !game_has_save_request() {
         return;
     }
@@ -69,7 +81,11 @@ pub fn dispatch(world: &mut World) {
     world.resource_scope(|world, mut requests: Mut<SaveRequests>| {
         let result = process(world, &mut requests, &request);
         match result {
-            Ok(payload) => game_save_result(request.id, &request.kind, &payload, ""),
+            Ok(payload) => {
+                if request.kind != "Prepare" && request.kind != "PrepareNewGame" {
+                    game_save_result(request.id, &request.kind, &payload, "");
+                }
+            }
             Err(error) => game_save_result(request.id, &request.kind, "", &error.to_string()),
         }
     });
@@ -159,12 +175,11 @@ fn process_request(
                 .as_ref()
                 .is_some_and(|candidate| Some(candidate.id as u64) == request.payload.as_u64())
             {
-                requests
-                    .candidate
-                    .take()
-                    .unwrap()
-                    .presentation
-                    .discard(world);
+                let candidate = requests.candidate.as_mut().unwrap();
+                candidate.canceled = true;
+                if let Some(presentation) = &mut candidate.presentation {
+                    presentation.cancel();
+                }
             }
             Ok(String::new())
         }
@@ -176,14 +191,37 @@ fn process_request(
             {
                 return Err(invalid("Prepared session is missing"));
             }
-            let candidate = requests.candidate.take().unwrap();
+            if !requests
+                .candidate
+                .as_ref()
+                .is_some_and(|c| c.ready && !c.canceled)
+            {
+                return Err(invalid("Prepared renderer is not ready"));
+            }
+            let candidate = requests.candidate.as_ref().unwrap();
+            candidate.presentation.as_ref().unwrap().validate_commit(
+                &reference,
+                &candidate.runtime,
+                world,
+            )?;
+            let mut candidate = requests.candidate.take().unwrap();
+            candidate
+                .runtime
+                .stream
+                .set_overlap(crate::world::WorldMetrics::default())?;
             // The prepared commands and stable bindings make this boundary infallible.
             world.resource_scope(
                 |world, mut food: Mut<crate::presentation::consumables::ConsumableVisuals>| {
                     food.reset(world)
                 },
             );
-            candidate.presentation.commit(world);
+            world.resource_scope(|world, mut drive: Mut<Drive>| {
+                candidate
+                    .presentation
+                    .take()
+                    .unwrap()
+                    .commit(&mut drive.runtime, world);
+            });
             let mut drive = world.resource_mut::<Drive>();
             let session = drive
                 .runtime
@@ -266,15 +304,79 @@ fn process_request(
             };
             runtime.started = true;
             runtime.paused = true;
-            let presentation = prepare_presentation(&reference, &runtime, SaveAssetView { world })?;
+
             requests.candidate = Some(Candidate {
                 id: request.id,
                 runtime,
                 camera,
-                presentation,
+                presentation: None,
+                kind: request.kind.clone(),
+                ready: false,
+                canceled: false,
             });
             Ok(request.id.to_string())
         }
         _ => Err(invalid("Unknown save request")),
     }
+}
+
+fn advance(world: &mut World) {
+    world.resource_scope(|world, mut requests: Mut<SaveRequests>| {
+        let Some(mut candidate) = requests.candidate.take() else {
+            return;
+        };
+        if candidate.canceled {
+            if candidate
+                .presentation
+                .as_mut()
+                .is_none_or(|p| p.drained(world))
+            {
+                if let Some(p) = candidate.presentation.take() {
+                    p.release(&mut candidate.runtime, world);
+                }
+                game_save_result(candidate.id, &candidate.kind, "", "Save operation canceled");
+                return;
+            }
+            requests.candidate = Some(candidate);
+            return;
+        }
+        if candidate.ready {
+            requests.candidate = Some(candidate);
+            return;
+        }
+        let reference = world.resource::<RuntimeReference>().0.clone();
+        let result = (|| -> Result<bool, SaveError> {
+            if candidate.presentation.is_none() {
+                if !PreparedPresentation::can_start(world) {
+                    return Ok(false);
+                }
+                candidate.presentation = Some(PreparedPresentation::new(
+                    &reference,
+                    &mut candidate.runtime,
+                    world,
+                )?);
+            }
+            candidate.presentation.as_mut().unwrap().advance(
+                &reference,
+                &mut candidate.runtime,
+                candidate.camera,
+                world,
+            )
+        })();
+        match result {
+            Ok(true) => {
+                candidate.ready = true;
+                game_save_result(candidate.id, &candidate.kind, &candidate.id.to_string(), "");
+            }
+            Ok(false) => {}
+            Err(error) => {
+                game_save_result(candidate.id, &candidate.kind, "", &error.to_string());
+                candidate.canceled = true;
+                if let Some(p) = &mut candidate.presentation {
+                    p.cancel();
+                }
+            }
+        }
+        requests.candidate = Some(candidate);
+    });
 }

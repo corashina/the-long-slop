@@ -43,12 +43,59 @@ Rapier 0.36 CCD sweeps disabled colliders. The Skoda has disabled source collide
 CCD then clamped the chassis each step. The car moved at a fraction of its speed. The Lada lost half its motion.
 Disabled colliders now have empty solver groups. CCD ignores them.
 
+## Driving controls
+
+The driving branch uses source bindings for both cars. Gear keys act with Automatic gears disabled.
+
+| Action | Keys |
+| --- | --- |
+| Clutch | Left Ctrl, Right Ctrl, Numpad 0 |
+| Shift up / down | Up arrow / Down arrow |
+| Reverse | R, Numpad + |
+| Neutral | 0, Numpad -, N |
+| Forward gear | 1–6, Numpad 1–6, within the car's gear range |
+
+Without Automatic clutch, depress the clutch past halfway before a shift.
+Automatic clutch permits manual shifts. Its RPM clutch ramp runs inside automatic shifting.
+Automatic gears requires Automatic clutch. In that mode, S requests reverse after stopping; W requests forward travel.
+Both cars use neutral and both assists at New game startup.
+At exact zero driven-wheel RPM, the endpoint-clamped port can retain neutral.
+Source CalcTorque evaluates its curve without that wrapper. Native curve extrapolation remains unmeasured.
+The serialized infinity value does not establish the public WrapMode mapping. Source boundary parity remains conditional.
+Normal browser launch in both cars remains unverified.
+
+The save stores each car's selected gear and engine state, plus both shared assist choices.
+Load restores those values. Pause, capture loss, seat changes, and recovery clear input while keeping selected gears.
+Seat entry suppresses pending shift edges. Seat exit clears ignition holds without a release toggle.
+Automatic rules require a mounted engine; manual selection retains its source conditions.
+Suspension validation accepts target `[0,1]` and nonnegative spring and damping values.
+The gear display uses R, N, or a forward number. Browser acceptance of the seated display remains open.
+
+## Wheel adapter limits
+
+The drivetrain applies clutch engagement in the engine owner and each gear/final-drive ratio once.
+The physics owner distributes axle torque among active driven wheels, then converts by installed wheel radius.
+It supplies engine, service, and handbrake contributions to eligible wheels.
+The stock Rapier controller excludes simultaneous motor force and brake impulse on one wheel.
+Input sums therefore do not prove source combined-brake response.
+
+Source tire stiffness and Rapier friction describe different models.
+Tire/rim differences, empty hubs, suspension settling, and wheel spin require native measurements before further adapter work.
+Task 4 lacks qualifying source observations. Task 5 remains unscheduled.
+
 ## Verification
 
-- `production_skoda_drives_switches_recovers_and_rebases` starts the Skoda and switches cars with its engine running.
-  It drives, brakes, recovers, shifts the floating origin, and restarts.
-- `lada_hood_fits_skoda_by_source_part_types` fits a Lada hood to the Skoda. Both cars use the source `mediumcar` type.
-- No browser check covers the Skoda.
+The final fix on `codex/correct-driving-physics` follows review base `6f8118162ece6d9ee24c811719c0935af433487a`.
+The controller owns its scoped re-review. Earlier full-suite results describe `05bbf7b`.
+Native critical checks cover shift rules, clutch attenuation, signed RPM/stall, both-car seat transitions, and saved gears/assists.
+The full native suite retains 108 known failures. These checks do not establish source handling parity.
+
+The controller verified normal menu actions, paused save, full reload, restored choices, and visible New game assist defaults.
+IAB refused pointer capture. Both-car driving, normal launch, recovery, restart, and handling-rate acceptance remain open.
+The older `production_skoda_drives_switches_recovers_and_rebases` test describes a controlled Rust route with exported assets.
+The current run passes Skoda movement checks, then fails the inactive Lada trip bound.
+Parked drift and preparation sleep checks also fail. These ignored cases lack a complete prior baseline.
+See [current verification](verification.md#driving-branch-verification-2026-10-14) for command results and retained evidence.
 
 ## Add the next car
 

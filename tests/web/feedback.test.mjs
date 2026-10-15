@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {formatTank,FeedbackState,selectIcon} from '../../web/feedback.js';
+import {formatGear,formatTank,FeedbackState,selectIcon} from '../../web/feedback.js';
 const tank=(amount,capacity=39)=>({amount,capacity,quantities:[amount,0,0,0,0,0],hasName:false,name:'',fluidName:'',noText:false});
 test('empty_full_and_fractional_source_format',()=>{
  assert.equal(formatTank(tank(Math.fround(.05))),'empty');
@@ -53,7 +53,14 @@ test('light_switch_uses_source_icon_without_changing_mechanism_feedback',()=>{
 
 test('radio_feedback_uses_source_values_without_playback',async()=>{
  const {createAudio,installAudioBridge}=await import('../../web/audio.js');
- const a=createAudio({}),bridge={};installAudioBridge(bridge,a);
+ const warnings=[],originalWarn=console.warn;
+ let a;
+ console.warn=message=>warnings.push(message);
+ try{
+  a=createAudio({});
+  assert.deepEqual(warnings,['Audio disabled: Invalid audio data']);
+ }finally{console.warn=originalWarn;}
+ const bridge={};installAudioBridge(bridge,a);
  bridge.gameAudioRadio(false,false,94.5,.3,0,0,0,0,0,0,0,0,0);
  const m=new FeedbackState(),r={...tank(0),noText:true,name:'RadioColVolume',actions:128,context:11,radioVolume:a.radioFrame.volume};
  assert.equal(m.update(r),true);assert.equal(m.fluidText,'Volume: 03');assert.equal(m.targetName,'Volume +/-');assert.equal(m.update(r),false);
@@ -87,4 +94,8 @@ test('paint_count_cache_tracks_integer_boundary_with_same_held_tool',()=>{
  assert.equal(fluid.update(f),true);
  assert.equal(fluid.update({...f,amount:37.49,quantities:[37.49,0,0,0,0,0]}),false);
  assert.match(fluid.fluidText,/37.5 \/ 100 L/);
+});
+
+test('source_gear_display_uses_reverse_neutral_and_forward_numbers',()=>{
+ assert.equal(formatGear(-1),'R');assert.equal(formatGear(0),'N');assert.equal(formatGear(4),'4');
 });

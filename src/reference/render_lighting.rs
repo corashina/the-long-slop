@@ -207,9 +207,9 @@ impl RendererRecord {
                 && finite(&self.bounds_center)
                 && finite(&self.bounds_extents)
                 && self.bounds_extents.iter().all(|v| *v >= 0.)
-                && self.cast_shadows <= 1
+                && self.cast_shadows <= 3
                 && self.reflection_probe_usage <= 1
-                && self.motion_vectors == 1
+                && self.motion_vectors <= 2
                 && self.sorting_layer == 0
                 && self.sorting_order == 0,
             &format!("renderer {}:{}", self.source.file, self.source.path_id),
@@ -229,7 +229,7 @@ impl RendererRecord {
                 self.bounds_extents[1],
                 self.bounds_extents[2],
                 f32::from(
-                    self.cast_shadows
+                    u8::from(self.cast_shadows != 0)
                         | ((self.receive_shadows as u8) << 1)
                         | (self.motion_vectors << 2),
                 ),

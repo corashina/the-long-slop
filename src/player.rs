@@ -634,6 +634,9 @@ impl PlayerState {
     pub fn pitch_degrees(&self) -> f32 {
         self.pitch
     }
+    pub fn standing_shape(&self) -> &dyn rapier3d::parry::shape::Shape {
+        self.standing.as_ref()
+    }
     pub fn body_handle(&self) -> RigidBodyHandle {
         self.body
     }

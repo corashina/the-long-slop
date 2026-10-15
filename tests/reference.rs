@@ -172,9 +172,9 @@ fn rejects_invalid_seat_hit_nodes_and_empty_use_mask() {
 fn production_export_matches_installed_contract() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let manifest = ReferenceManifest::from_json(&bytes).unwrap();
-    fn digest(path: &str) -> String {
+    fn digest(path: impl AsRef<std::path::Path>) -> String {
         let output = std::process::Command::new("sha256sum")
-            .arg(path)
+            .arg(path.as_ref())
             .output()
             .unwrap();
         assert!(output.status.success());
@@ -185,18 +185,41 @@ fn production_export_matches_installed_contract() {
             .unwrap()
             .to_owned()
     }
+    let library_root = std::env::var_os("REFERENCE_LIBRARY_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("web/assets/library"));
+    let library: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(library_root.join("manifest.json")).unwrap())
+            .unwrap();
+    let records = library_root.join(library["records_root"].as_str().unwrap());
+    let stage = records.parent().unwrap();
     assert_eq!(
         manifest.library.manifest_sha256,
-        digest("web/assets/library/manifest.json")
+        digest(library_root.join("manifest.json"))
     );
     assert_eq!(
         manifest.library.catalog_sha256,
-        digest(".cache/reference-library/catalog.json")
+        digest(stage.join("catalog.json"))
     );
     assert_eq!(
         manifest.library.source_manifest_sha256,
-        digest(".cache/reference-library/source-manifest.json")
+        digest(stage.join("source-manifest.json"))
     );
+    assert_eq!(manifest.world.generators.len(), 4);
+    assert_eq!(manifest.world.buildings.types.len(), 11);
+    assert_eq!(manifest.world.catalog.items.len(), 402);
+    assert_eq!(manifest.world.catalog.categories.len(), 90);
+    for prototype in manifest
+        .world
+        .prototypes
+        .iter()
+        .filter(|p| p.role == my_summer_slop::reference::WorldPrototypeRole::Road)
+    {
+        assert_eq!(prototype.controls.len(), 10);
+        assert_eq!(prototype.skins[0].positions.len(), 88);
+        assert_eq!(prototype.skins[0].bones.len(), 11);
+        assert_eq!(prototype.skins[0].bind_poses.len(), 11);
+    }
     for asset in &manifest.assets {
         assert_eq!(asset.sha256, digest(&format!("web/assets/{}", asset.path)));
         for dependency in &asset.dependencies {
@@ -592,5 +615,115 @@ fn requires_current_library_provenance() {
     ] {
         input["library"] = value;
         assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    }
+}
+
+#[test]
+fn driving_reference_rejects_invalid_gear_curve_and_mass() {
+    let mut input = fixture();
+    assert!(input.get("driving").is_some(), "required driving contract");
+    input["vehicles"][0]["driving"]["initial_gear"] = serde_json::json!(999);
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    for (field, value) in [("wheel_mass_kg", 0.0), ("rotational_damping", -1.0)] {
+        let mut input = fixture();
+        input["wheel_slots"][0][field] = serde_json::json!(value);
+        assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    }
+    for field in [
+        "extremum_slip",
+        "extremum_value",
+        "asymptote_slip",
+        "asymptote_value",
+        "stiffness",
+    ] {
+        let mut input = fixture();
+        input["wheel_slots"][0]["forward_friction"][field] = serde_json::json!(-1.0);
+        assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+    }
+    let mut input = fixture();
+    input["wheel_slots"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("hub");
+    assert!(ReferenceManifest::from_json(&serde_json::to_vec(&input).unwrap()).is_err());
+}
+
+#[test]
+fn driving_reference_rejects_nonfinite_values_and_unresolved_bindings() {
+    let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        for field in 0..12 {
+            let mut manifest = original.clone();
+            let wheel = &mut manifest.wheel_slots[0];
+            match field {
+                0 => manifest.driving.pedal_rate = value,
+                1 => manifest.driving.min_motor_torque_nm = value,
+                2 => wheel.wheel_mass_kg = value,
+                3 => wheel.rotational_damping = value,
+                4 => wheel.force_application_distance_m = value,
+                5 => wheel.sideways_stiffness_modifier = value,
+                6 => wheel.hub.radius_m = value,
+                7 => wheel.hub.mass_kg = value,
+                8 => wheel.hub.forward_stiffness = value,
+                9 => wheel.hub.sideways_stiffness = value,
+                10 => wheel.forward_friction.extremum_slip = value,
+                _ => wheel.sideways_friction.stiffness = value,
+            }
+            assert!(manifest.validate().is_err(), "nonfinite field {field}");
+        }
+    }
+    let mut manifest = original.clone();
+    manifest.driving.default_assists.automatic_clutch = false;
+    manifest.driving.default_assists.automatic_gears = true;
+    assert!(manifest.validate().is_err());
+    let mut manifest = original.clone();
+    manifest.driving.bindings[0].codes = vec!["Unresolved".into()];
+    assert!(manifest.validate().is_err());
+    let mut manifest = original;
+    manifest.wheel_slots[0].forward_friction.asymptote_slip = 0.1;
+    assert!(manifest.validate().is_err());
+}
+
+#[test]
+fn suspension_bounds_accept_endpoints_and_zero_coefficients() {
+    let original =
+        ReferenceManifest::from_json(include_bytes!("../web/assets/reference/manifest.json"))
+            .unwrap();
+    assert_eq!(original.vehicles.len(), 2);
+    let mut cases = vec![
+        (0, -0.01, false),
+        (0, 1.01, false),
+        (0, 0., true),
+        (0, 1., true),
+        (1, -1., false),
+        (1, 0., true),
+        (2, -1., false),
+        (2, 0., true),
+        (3, 0., false),
+        (4, 0., false),
+    ];
+    for field in 0..5 {
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            cases.push((field, value, false));
+        }
+    }
+    for vehicle in &original.vehicles {
+        for &(field, value, valid) in &cases {
+            let mut manifest = original.clone();
+            let wheel = &mut manifest.wheel_slots[vehicle.wheel_slots[0].0 as usize];
+            match field {
+                0 => wheel.target_position = value,
+                1 => wheel.spring = value,
+                2 => wheel.damper = value,
+                3 => wheel.radius = value,
+                _ => wheel.suspension_distance = value,
+            }
+            assert_eq!(
+                manifest.validate().is_ok(),
+                valid,
+                "vehicle {:?}, field {field}, value {value}",
+                vehicle.source
+            );
+        }
     }
 }

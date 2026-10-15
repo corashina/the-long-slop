@@ -423,11 +423,21 @@ pub(crate) fn prepare_instruments(
                         ))
                     })
                     .clone();
-                let sort = authored.sort_data(key, &renderer.0, primitive)?;
+                let sort = authored
+                    .sort_data(
+                        key,
+                        &renderer.0,
+                        serde_json::from_str::<serde_json::Value>(&primitive.value)
+                            .expect("validated primitive")["submesh"]
+                            .as_u64()
+                            .expect("validated submesh") as u32,
+                    )
+                    .map_err(|e| e.to_string())?;
                 let mut warm = commands.spawn((
                     mesh.clone(),
                     MeshMaterial3d(material.clone()),
                     crate::presentation::materials::SourceMaterialWarmup,
+                    renderer.clone(),
                     far,
                     Visibility::Visible,
                     bevy::light::NotShadowCaster,

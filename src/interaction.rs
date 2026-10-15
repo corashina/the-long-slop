@@ -7,6 +7,7 @@ pub mod fluid_contact;
 pub mod items;
 pub mod labels;
 pub mod mechanisms;
+pub(crate) mod memory;
 pub mod parts;
 pub mod push;
 pub mod storage;
@@ -153,6 +154,8 @@ pub struct InteractionState {
     pub cleaning: cleaning::CleaningTools,
     sounds: [Option<InteractionSound>; 64],
     sound_count: usize,
+    next_generated_collider: u32,
+    next_generated_light: u32,
     light_controls: HashMap<ColliderId, LightControlId>,
     held_controls: HashMap<ItemId, LightControlId>,
     pub storage: storage::StorageLocks,
@@ -186,6 +189,7 @@ pub struct InteractionState {
     action_masks: ActionMasks,
     scroll_sensitivity: f32,
     supplies: HashSet<ItemId>,
+    source_supply_emission: HashMap<ItemId, [f32; 2]>,
     tank_rules: HashMap<ItemId, TankRules>,
     slow_oil_modifier: f32,
     drink_flow_liters_per_second: f32,
@@ -265,6 +269,30 @@ impl InteractionState {
     ) -> Result<Option<crate::save::CarrySnapshot>, crate::save::SaveError> {
         self.carry.capture_save(ids)
     }
+    pub(crate) fn retained_binding_bytes(&self) -> usize {
+        use memory::{map, set, vector};
+        map(&self.light_controls)
+            + map(&self.light_nodes)
+            + set(&self.usable_light_controls)
+            + map(&self.kinds)
+            + map(&self.slot_fits)
+            + self.slot_fits.values().map(set).sum::<usize>()
+            + set(&self.tire_fits)
+            + map(&self.pickup_layers)
+            + map(&self.removal_layers)
+            + set(&self.usable_items)
+            + set(&self.filling_items)
+            + map(&self.collider_bindings)
+            + map(&self.mechanism_bodies)
+            + vector(&self.openings)
+            + set(&self.supplies)
+            + map(&self.source_supply_emission)
+            + map(&self.tank_rules)
+            + self.carry.retained_binding_bytes()
+            + self.parts.retained_binding_bytes()
+            + self.mechanisms.retained_binding_bytes()
+    }
+
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut openings = Vec::with_capacity(reference.openings.len());
         for opening in &reference.openings {
@@ -458,6 +486,7 @@ impl InteractionState {
             .collect();
         Ok(Self {
             cleaning: cleaning::CleaningTools::new(reference)?,
+            source_supply_emission: HashMap::new(),
             light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
             light_controls,
             held_controls: reference
@@ -470,6 +499,21 @@ impl InteractionState {
             storage: storage::StorageLocks::new(reference)?,
             cabin_doors,
             seat_action_latched: false,
+            next_generated_light: reference
+                .lighting
+                .controllers
+                .iter()
+                .map(|c| c.id.0)
+                .max()
+                .unwrap_or(0)
+                + 1,
+            next_generated_collider: reference
+                .colliders
+                .iter()
+                .map(|c| c.id.0)
+                .max()
+                .unwrap_or(0)
+                + 1,
             fill_opening: None,
             usable_light_controls: reference
                 .lighting
@@ -606,61 +650,408 @@ impl InteractionState {
         self.carry.pickup(item, point, player, items, physics)?;
         Ok(item)
     }
+    pub fn allocate_generated_light(&mut self) -> Result<LightControlId, ReferenceError> {
+        let id = self.next_generated_light;
+        self.next_generated_light = id
+            .checked_add(1)
+            .ok_or_else(|| ReferenceError("Generated light identity exhausted".into()))?;
+        Ok(LightControlId(id))
+    }
+    pub fn bind_generated_light(&mut self, control: LightControlId, collider: ColliderId) {
+        self.light_controls.insert(collider, control);
+        self.light_nodes.insert(collider, NodeId(collider.0));
+        self.usable_light_controls.insert(control);
+    }
+    pub fn remove_generated_light(&mut self, control: LightControlId) {
+        self.light_nodes
+            .retain(|id, _| self.light_controls.get(id) != Some(&control));
+        self.light_controls.retain(|_, id| *id != control);
+        self.usable_light_controls.remove(&control);
+    }
+    pub fn allocate_generated_collider(&mut self) -> Result<ColliderId, ReferenceError> {
+        let id = self.next_generated_collider;
+        self.next_generated_collider = id
+            .checked_add(1)
+            .ok_or_else(|| ReferenceError("Generated collider identity exhausted".into()))?;
+        Ok(ColliderId(id))
+    }
+    pub fn register_generated_part_kind(&mut self, item: ItemId, layers: u32) {
+        self.removal_layers.insert(item, layers);
+        for binding in self.collider_bindings.values_mut() {
+            if binding.pickup_owner == Some(item) {
+                binding.removal_owner = Some(item);
+            }
+        }
+    }
+    pub fn register_generated_wheel(
+        &mut self,
+        rule: &crate::reference::WheelPartReference,
+        rim: bool,
+        rules: &[crate::reference::WheelPartReference],
+        reference: &ReferenceManifest,
+    ) {
+        self.kinds
+            .insert(rule.item, if rim { ItemKind::Rim } else { ItemKind::Tire });
+        for slot in &reference.wheel_slots {
+            if rim
+                && wheels::fits(
+                    &slot.rim_main_types,
+                    &slot.rim_types,
+                    &rule.main_types,
+                    &rule.part_types,
+                )
+            {
+                self.slot_fits.entry(slot.id).or_default().insert(rule.item);
+            }
+        }
+        for old in rules {
+            if old.item == rule.item {
+                continue;
+            }
+            let old_rim = self
+                .kinds
+                .get(&old.item)
+                .is_some_and(|kind| matches!(kind, ItemKind::Rim | ItemKind::Wheel));
+            if rim
+                && !old_rim
+                && wheels::fits(
+                    &rule.tire_main_types,
+                    &rule.tire_types,
+                    &old.main_types,
+                    &old.part_types,
+                )
+            {
+                self.tire_fits.insert((rule.item, old.item));
+            }
+            if !rim
+                && old_rim
+                && wheels::fits(
+                    &old.tire_main_types,
+                    &old.tire_types,
+                    &rule.main_types,
+                    &rule.part_types,
+                )
+            {
+                self.tire_fits.insert((old.item, rule.item));
+            }
+        }
+    }
+    /// Remove only bindings owned by this generated instance.
+    pub fn unbind_generated(&mut self, id: ItemId, colliders: &[ColliderHandle]) {
+        for collider in colliders {
+            if self.collider_bindings.get(collider).is_some_and(|binding| {
+                [
+                    binding.use_owner,
+                    binding.pickup_owner,
+                    binding.removal_owner,
+                    binding.push_owner,
+                ]
+                .contains(&Some(id))
+            }) {
+                self.collider_bindings.remove(collider);
+            }
+        }
+        if let Some(body) = self.mechanism_bodies.remove(&id) {
+            self.bodies.remove(&body);
+        }
+        if self
+            .latched_mechanism
+            .is_some_and(|(item, _, _, _)| item == id)
+        {
+            self.latched_mechanism = None;
+        }
+        self.carry.unregister_generated(id);
+        for fits in self.slot_fits.values_mut() {
+            fits.remove(&id);
+        }
+        self.tire_fits
+            .retain(|(rim, tire)| *rim != id && *tire != id);
+        self.kinds.remove(&id);
+        self.pickup_layers.remove(&id);
+        self.removal_layers.remove(&id);
+        self.usable_items.remove(&id);
+        self.filling_items.remove(&id);
+        self.supplies.remove(&id);
+        self.source_supply_emission.remove(&id);
+        self.tank_rules.remove(&id);
+        self.openings
+            .retain(|opening| opening.reference.tank != id && opening.reference.cap != id);
+        if self.fill_opening.is_some_and(|opening| {
+            !self
+                .openings
+                .iter()
+                .any(|state| state.reference.id == opening)
+        }) {
+            self.fill_opening = None;
+        }
+        if self.tuning_opening.is_some_and(|opening| {
+            !self
+                .openings
+                .iter()
+                .any(|state| state.reference.id == opening)
+        }) {
+            self.tuning_opening = None;
+        }
+    }
+
+    pub fn register_generated_mechanism(
+        &mut self,
+        item: ItemId,
+        body: RigidBodyHandle,
+        colliders: &[(crate::reference::SourceId, ColliderHandle)],
+    ) -> Result<(), ReferenceError> {
+        let id = BodyId(
+            self.bodies
+                .keys()
+                .map(|b| b.0)
+                .max()
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or_else(|| ReferenceError("Generated body identity exhausted".into()))?,
+        );
+        self.bodies.insert(id, body);
+        self.mechanism_bodies.insert(item, id);
+        self.usable_items.insert(item);
+        for (_, handle) in colliders {
+            if let Some(binding) = self.collider_bindings.get_mut(handle) {
+                binding.use_owner = Some(item);
+            }
+        }
+        Ok(())
+    }
+    pub fn bind_generated_mechanism_surface(
+        &mut self,
+        item: ItemId,
+        handle: ColliderHandle,
+        collider: ColliderId,
+    ) {
+        let binding = self
+            .collider_bindings
+            .entry(handle)
+            .or_insert(ActionBinding {
+                collider,
+                use_owner: None,
+                pickup_owner: None,
+                removal_owner: None,
+                push_owner: None,
+            });
+        binding.use_owner = Some(item);
+    }
+    pub fn register_generated_pickup(
+        &mut self,
+        id: ItemId,
+        rule: crate::reference::PickupReference,
+        layers: u32,
+        container: bool,
+    ) {
+        self.carry.register_generated(id, rule);
+        self.pickup_layers.insert(id, layers);
+        self.kinds.insert(
+            id,
+            if container {
+                ItemKind::Container
+            } else {
+                ItemKind::Decoration
+            },
+        );
+    }
+    pub fn generated_opening(&self, cap: ItemId) -> Option<OpeningId> {
+        self.openings
+            .iter()
+            .find(|o| o.reference.cap == cap)
+            .map(|o| o.reference.id)
+    }
+    pub fn generated_valve(&self, cap: ItemId) -> Option<f32> {
+        self.openings
+            .iter()
+            .find(|opening| opening.reference.cap == cap)
+            .map(|opening| opening.valve)
+    }
+    pub fn restore_generated_valve(
+        &mut self,
+        cap: ItemId,
+        valve: f32,
+    ) -> Result<(), ReferenceError> {
+        if !valve.is_finite() || !(0.0..=1.0).contains(&valve) {
+            return Err(ReferenceError("Invalid generated valve snapshot".into()));
+        }
+        let opening = self
+            .openings
+            .iter_mut()
+            .find(|opening| opening.reference.cap == cap)
+            .ok_or_else(|| ReferenceError("Missing generated valve".into()))?;
+        opening.valve = valve;
+        Ok(())
+    }
+
     pub fn register_supply(&mut self, item: ItemId) {
         self.supplies.insert(item);
     }
-    pub fn register_pump(&mut self, item: ItemId, flow: f32) -> Result<(), ReferenceError> {
-        if !flow.is_finite() || flow <= 0.0 {
-            return Err(ReferenceError("Invalid pump flow".into()));
-        }
-        if let Some(opening) = self
+    /// Bind checked source contents and opening rules once per generated instance.
+    pub fn register_generated_supply(
+        &mut self,
+        tank: ItemId,
+        cap: ItemId,
+        definition: &crate::world::SupplyDefinition,
+        point: &crate::world::SupplyPoint,
+        reference: &ReferenceManifest,
+    ) -> Result<(), ReferenceError> {
+        if self
             .openings
-            .iter_mut()
-            .find(|opening| opening.reference.cap == item)
+            .iter()
+            .any(|opening| opening.reference.cap == cap)
         {
-            if !self.supplies.contains(&item) {
-                return Err(ReferenceError("Pump ID overlaps another opening".into()));
-            }
-            opening.reference.flow_liters_per_second = flow;
-            return Ok(());
+            return if self.source_supply_emission.contains_key(&cap) {
+                Ok(())
+            } else {
+                Err(ReferenceError(
+                    "Generated cap overlaps an imported opening".into(),
+                ))
+            };
         }
-        self.kinds.insert(item, ItemKind::Cap);
-        self.filling_items.insert(item);
-        self.tank_rules.insert(
-            item,
-            TankRules {
-                no_drink: true,
-                no_fill_this: true,
-                no_fill_from: false,
-                slow_oil: false,
-            },
-        );
-        self.supplies.insert(item);
+        let get = |source: &crate::reference::SourceId| {
+            reference
+                .world
+                .records
+                .iter()
+                .find(|record| &record.source == source)
+                .ok_or_else(|| {
+                    ReferenceError(format!(
+                        "Missing source supply {}:{}",
+                        source.file, source.path_id
+                    ))
+                })
+        };
+        let cap_record = get(&definition.cap)?;
+        let tank_record = get(&definition.tank)?;
+        let number = |record: &crate::reference::WorldSourceRecord,
+                      name: &str|
+         -> Result<f32, ReferenceError> {
+            use crate::reference::WorldValue;
+            let value = match record.fields.get(name) {
+                Some(WorldValue::Number(value)) => *value as f32,
+                Some(WorldValue::Integer(value)) => *value as f32,
+                Some(WorldValue::Bool(value)) => u8::from(*value) as f32,
+                _ => {
+                    return Err(ReferenceError(format!(
+                        "Missing source supply field {name}"
+                    )));
+                }
+            };
+            if !value.is_finite() {
+                return Err(ReferenceError(format!(
+                    "Nonfinite source supply field {name}"
+                )));
+            }
+            Ok(value)
+        };
+        let radius = number(cap_record, "radius")?;
+        let flow =
+            radius * radius * std::f32::consts::PI * 0.025 * reference.fluid_rules.pour_speed;
+        let valve = number(cap_record, "valve")?;
+        let can_toggle = number(cap_record, "canToggle")? != 0.0;
+        let can_tune = number(cap_record, "canTune")? != 0.0;
+        let rules = OpeningRules {
+            id: OpeningId(
+                self.openings
+                    .iter()
+                    .map(|opening| opening.reference.id.0)
+                    .max()
+                    .unwrap_or(0)
+                    .checked_add(1)
+                    .ok_or_else(|| ReferenceError("Opening identity space exhausted".into()))?,
+            ),
+            tank,
+            cap,
+            flow_liters_per_second: flow,
+            tilt_degrees: number(cap_record, "defPourAngle")?,
+            angle_disabled: number(cap_record, "noAngle")? != 0.0,
+            spill_disabled: definition.no_pour,
+            tube_connected: number(cap_record, "tube")? != 0.0,
+            can_toggle,
+            can_tune,
+            tune_rate: number(cap_record, "tuneSpeed")? * reference.fluid_rules.fluid_tune_speed,
+        };
+        let tank_rules = TankRules {
+            no_drink: number(tank_record, "noDrink")? != 0.0,
+            no_fill_this: definition.no_fill_this,
+            no_fill_from: definition.no_fill_from,
+            slow_oil: number(tank_record, "slowOil")? != 0.0,
+        };
+        // Subtract in f64 before conversion, so distant bindings retain local precision.
+        let relative = VehiclePose {
+            position: std::array::from_fn(|a| {
+                (point.cap_pose.position[a] - point.tank_pose.position[a]) as f32
+            }),
+            rotation: point.cap_pose.rotation,
+        };
+        let tank_rotation = to_rapier(VehiclePose {
+            position: [0.0; 3],
+            rotation: point.tank_pose.rotation,
+        });
         self.openings.push(OpeningState {
-            reference: OpeningRules {
-                id: OpeningId(item.0),
-                tank: item,
-                cap: item,
-                flow_liters_per_second: flow,
-                tilt_degrees: 0.0,
-                angle_disabled: true,
-                spill_disabled: true,
-                tube_connected: false,
-                can_toggle: false,
-                can_tune: false,
-                tune_rate: 0.0,
-            },
-            local_pose: Pose::IDENTITY,
-            tilt_axis: Vector::Y,
-            valve: 1.0,
+            reference: rules,
+            local_pose: tank_rotation.inverse() * to_rapier(relative),
+            tilt_axis: -Vector::Z,
+            valve,
             flow: None,
             fill_called: false,
             empty_pour: false,
             particles: None,
             contact: None,
         });
+        self.source_supply_emission.insert(
+            cap,
+            [definition.emission_min_rate, definition.emission_max_rate],
+        );
+        self.tank_rules.insert(tank, tank_rules);
+        self.kinds.insert(cap, ItemKind::Cap);
+        if can_toggle || can_tune {
+            self.usable_items.insert(cap);
+        }
+        self.filling_items.insert(cap);
+        self.supplies.insert(tank);
         Ok(())
     }
+
+    /// A movable container shares source opening rules but is not a fixed supply nozzle.
+    pub fn register_generated_container(
+        &mut self,
+        tank: ItemId,
+        cap: ItemId,
+        definition: &crate::world::SupplyDefinition,
+        point: &crate::world::SupplyPoint,
+        reference: &ReferenceManifest,
+    ) -> Result<(), ReferenceError> {
+        self.register_generated_supply(tank, cap, definition, point, reference)?;
+        self.supplies.remove(&tank);
+        self.kinds.insert(tank, ItemKind::Container);
+        Ok(())
+    }
+    pub fn bind_generated_cap(&mut self, handle: ColliderHandle, cap: ItemId) {
+        let binding = self
+            .collider_bindings
+            .entry(handle)
+            .or_insert(ActionBinding {
+                collider: ColliderId(0),
+                use_owner: None,
+                pickup_owner: None,
+                removal_owner: None,
+                push_owner: None,
+            });
+        binding.use_owner = Some(cap);
+    }
+    fn sound(&mut self, sound: InteractionSound) {
+        if self.sound_count < self.sounds.len() {
+            self.sounds[self.sound_count] = Some(sound);
+            self.sound_count += 1;
+        }
+    }
+
+    pub fn completed_action(&mut self, action: InteractionAction) {
+        self.sound(InteractionSound::Action(action));
+    }
+
     pub fn pop_sound(&mut self) -> Option<InteractionSound> {
         if self.sound_count == 0 {
             return None;
@@ -671,35 +1062,19 @@ impl InteractionState {
         self.sounds[self.sound_count] = None;
         sound
     }
-    pub fn completed_action(&mut self, action: InteractionAction) {
-        self.sound(InteractionSound::Action(action));
-    }
-    fn sound(&mut self, sound: InteractionSound) {
-        if self.sound_count < self.sounds.len() {
-            self.sounds[self.sound_count] = Some(sound);
-            self.sound_count += 1;
-        }
-    }
+
     pub fn opening_flow(&self, id: OpeningId) -> Option<(bool, f32)> {
         self.openings
             .iter()
             .find(|o| o.reference.id == id)
             .and_then(|o| o.flow)
     }
+
     pub fn opening_audio_flags(&self, id: OpeningId) -> (bool, bool) {
         self.openings
             .iter()
             .find(|o| o.reference.id == id)
             .map_or((false, false), |o| (o.fill_called, o.empty_pour))
-    }
-    pub(crate) fn restore_pump_valve(&mut self, item: ItemId, valve: f32) {
-        if let Some(opening) = self
-            .openings
-            .iter_mut()
-            .find(|opening| opening.reference.cap == item)
-        {
-            opening.valve = valve;
-        }
     }
     pub fn opening_is_open(&self, id: OpeningId) -> bool {
         self.opening_valve(id) > 0.0
@@ -930,6 +1305,12 @@ impl InteractionState {
                 action = Some(InteractionAction::Seat(seat.id));
             }
         } else if let Some(target) = use_target {
+            if input.held & keys::USE != 0
+                || input.pressed & (keys::USE | keys::PRIMARY) != 0
+                || input.wheel != 0.
+            {
+                items.mark_dirty(target.item);
+            }
             if input.pressed & keys::USE != 0
                 || (!held_switch_pressed
                     && input.pressed & keys::PRIMARY != 0
@@ -938,6 +1319,7 @@ impl InteractionState {
                 for opening in &mut self.openings {
                     if opening.reference.cap == target.item && opening.reference.can_toggle {
                         let previous = opening.valve;
+                        items.mark_dirty(target.item);
                         opening.valve = if opening.valve > 0.0 { 0.0 } else { 1.0 };
                         cap_sounds[0] = Some(InteractionSound::Cap {
                             id: opening.reference.id,
@@ -967,6 +1349,7 @@ impl InteractionState {
                     self.tuning_opening = Some(opening.reference.id);
                 }
                 if delta.is_finite() && delta != 0.0 {
+                    items.mark_dirty(target.item);
                     let previous = opening.valve;
                     let requested = delta * dt * opening.reference.tune_rate;
                     opening.valve = (opening.valve + requested).clamp(0.0, 1.0);

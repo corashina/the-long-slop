@@ -11,6 +11,16 @@ from tools.reference.collision import bake_points
 
 
 class ReferenceExportTests(unittest.TestCase):
+    def test_validator_reads_utf8_node_names(self):
+        import json
+        from tools.reference.gltf import validate_gltf
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'scene.gltf'
+            path.write_text(json.dumps({'asset': {'version': '2.0'},
+                                        'nodes': [{'name': 'Łódź'}]}, ensure_ascii=False),
+                            encoding='utf-8')
+            validate_gltf(path)
+
     def test_required_switch_callbacks_reject_unknown_methods_and_skip_audio(self):
         from types import SimpleNamespace
         from tools.reference.mechanisms import recover_turn

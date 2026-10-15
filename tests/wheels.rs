@@ -122,7 +122,7 @@ fn removed_wheel_has_no_support() {
     let mut wheels = WheelAssemblies::new(&reference).unwrap();
     wheels.sync(&mut area.items, &mut physics).unwrap();
     for _ in 0..120 {
-        physics.apply_vehicle_forces(0, DriveInput::default(), 0.0);
+        physics.apply_vehicle_forces(0, DriveInput::default(), Default::default());
         physics.step_physics();
         wheels.sync(&mut area.items, &mut physics).unwrap();
     }
@@ -143,7 +143,7 @@ fn removed_wheel_has_no_support() {
     let id = wheels.remove(slot, &mut area.items, &mut physics).unwrap();
     assert_eq!(id, mounted.rim);
     assert_eq!(physics.wheel_support_count(0), 3);
-    physics.apply_vehicle_forces(0, DriveInput::default(), 0.0);
+    physics.apply_vehicle_forces(0, DriveInput::default(), Default::default());
     physics.step_physics();
     assert!(!physics.snapshot(0).wheels_contact[0]);
     let part = area.items.get(id).unwrap();
@@ -235,7 +235,7 @@ fn rebase_and_reattachment_keep_contact_and_identity() {
         .install(id, slot, &mut area.items, &mut physics)
         .unwrap();
     for _ in 0..120 {
-        physics.apply_vehicle_forces(0, DriveInput::default(), 0.0);
+        physics.apply_vehicle_forces(0, DriveInput::default(), Default::default());
         physics.step_physics();
         wheels.sync(&mut area.items, &mut physics).unwrap();
     }

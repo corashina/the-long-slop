@@ -153,6 +153,7 @@ pub(crate) fn prepare_pass_order(
     functions: Res<DrawFunctions<Transparent3d>>,
     status: Res<SourceLightingStatus>,
     particles: Res<super::weather::ExtractedParticles>,
+    lighting: Res<super::lighting::ExtractedLighting>,
 ) {
     if !loading.is_ready() || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
         for (_, mut order) in &mut views {
@@ -173,8 +174,15 @@ pub(crate) fn prepare_pass_order(
         let Some(phase) = phases.get(&view.retained_view_entity) else {
             continue;
         };
+        let required = phase.items.len() * 2;
+        if order.entries.capacity() < required {
+            order.entries.reserve_exact(required);
+        }
         let camera = view.world_from_view.translation().to_array();
         for (index, item) in phase.items.values().enumerate() {
+            if item.batch_range().is_empty() || lighting.is_warmup(item.main_entity()) {
+                continue;
+            }
             if materials
                 .instances
                 .get(&item.main_entity())
@@ -185,13 +193,16 @@ pub(crate) fn prepare_pass_order(
                 continue;
             }
             let Some((_, data)) = metadata.0.get(&item.main_entity().id()) else {
-                *status.0.lock().unwrap() =
-                    RenderingState::Failed("Source transparent sort metadata is missing".into());
+                *status.0.lock().unwrap() = RenderingState::Failed(format!(
+                    "Source transparent sort metadata is missing: entity {:?}, material {:?}",
+                    item.main_entity(),
+                    materials
+                        .instances
+                        .get(&item.main_entity())
+                        .map(|m| m.asset_id),
+                ));
                 return;
             };
-            if item.batch_range().is_empty() {
-                continue;
-            }
             let TransparentSortingInfo3d::Sorted {
                 mesh_center,
                 depth_bias,

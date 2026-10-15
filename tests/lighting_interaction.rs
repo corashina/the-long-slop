@@ -394,15 +394,14 @@ fn exported_house_controls_use_native_confirmed_poses() {
         ReferenceManifest::from_json(&std::fs::read("web/assets/reference/manifest.json").unwrap())
             .unwrap();
     let source = GarageRuntime::new(&r).unwrap();
-    for c in r
-        .lighting
-        .controllers
-        .iter()
-        .filter(|c| {
-            c.kind == LightControllerKind::Switch
-                && !r.flashlights.instances.iter().any(|item| item.controller == c.id)
-        })
-    {
+    for c in r.lighting.controllers.iter().filter(|c| {
+        c.kind == LightControllerKind::Switch
+            && !r
+                .flashlights
+                .instances
+                .iter()
+                .any(|item| item.controller == c.id)
+    }) {
         let collider = source
             .physics
             .rapier()
@@ -607,8 +606,8 @@ fn exported_cabin_and_headlight_controls_work_from_driver_seat() {
             },
         );
         assert_eq!(runtime.area.player.seat(), seat);
-        for _ in 0..3 {
-            runtime.advance_light_fades(&r, 0.1);
+        for _ in 0..18 {
+            runtime.step(&r, FrameInput::default());
         }
         let light = c.states[1].lights[0];
         assert!(

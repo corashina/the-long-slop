@@ -1,4 +1,4 @@
-#import bevy_pbr::forward_io::Vertex
+struct Vertex { @location(0) position: vec3<f32> }
 #import source_float_store::half2
 struct MotionCamera {
     raster_vp: mat4x4<f32>, current_vp: mat4x4<f32>, previous_vp: mat4x4<f32>,

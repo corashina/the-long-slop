@@ -18,9 +18,35 @@ use std::collections::HashMap;
 #[derive(Resource, Default)]
 pub struct SurfacePasses {
     inspected: usize,
+    isolated: std::collections::HashSet<CachedRenderPipelineId>,
     partners: HashMap<CachedRenderPipelineId, Option<CachedRenderPipelineId>>,
 }
 impl SurfacePasses {
+    pub fn revisit(&mut self, id: CachedRenderPipelineId) {
+        self.inspected = self.inspected.min(id.id());
+    }
+    pub fn companion_state(
+        &self,
+        base: CachedRenderPipelineId,
+        cache: &PipelineCache,
+    ) -> Option<Result<bool, String>> {
+        self.partners.get(&base).map(|partner| {
+            let Some(id) = partner else {
+                return Ok(true);
+            };
+            match cache.get_render_pipeline_state(*id) {
+                CachedPipelineState::Ok(_) => Ok(true),
+                CachedPipelineState::Err(
+                    ShaderCacheError::ShaderNotLoaded(_)
+                    | ShaderCacheError::ShaderImportNotYetAvailable,
+                ) => Ok(false),
+                CachedPipelineState::Err(error) => {
+                    Err(format!("Source additive pipeline: {error}"))
+                }
+                _ => Ok(false),
+            }
+        })
+    }
     pub fn counts(&self) -> (usize, usize) {
         (
             self.partners.len(),
@@ -32,10 +58,14 @@ impl SurfacePasses {
     }
     pub fn ready(&self, cache: &PipelineCache) -> bool {
         !self.partners.is_empty()
-            && self.partners.iter().all(|(base, add)| {
-                cache.get_render_pipeline(*base).is_some()
-                    && add.is_none_or(|id| cache.get_render_pipeline(id).is_some())
-            })
+            && self
+                .partners
+                .iter()
+                .filter(|(base, _)| !self.isolated.contains(base))
+                .all(|(base, add)| {
+                    cache.get_render_pipeline(*base).is_some()
+                        && add.is_none_or(|id| cache.get_render_pipeline(id).is_some())
+                })
     }
 }
 fn flag(definitions: &[ShaderDefVal], name: &str) -> bool {
@@ -48,7 +78,10 @@ pub fn prepare_surface_passes(
     mut passes: ResMut<SurfacePasses>,
     cache: Res<PipelineCache>,
     status: Res<SourceLightingStatus>,
+    isolation: Res<super::world::pipelines::PipelineIsolation>,
+    owners: Res<super::pipeline_ownership::PipelineOwners>,
 ) {
+    passes.isolated.clone_from(&isolation.0);
     if matches!(
         *status.0.lock().expect("source lighting status lock"),
         RenderingState::Failed(_)
@@ -58,6 +91,12 @@ pub fn prepare_surface_passes(
     let first = passes.inspected;
     for (index, pipeline) in cache.pipelines().enumerate().skip(first) {
         passes.inspected = index + 1;
+        let base_id = CachedRenderPipelineId::new(index);
+        if passes.partners.contains_key(&base_id)
+            || owners.owner(base_id).is_some_and(|o| o.cancelled())
+        {
+            continue;
+        }
         let PipelineDescriptor::RenderPipelineDescriptor(descriptor) = &pipeline.descriptor else {
             continue;
         };
@@ -72,6 +111,17 @@ pub fn prepare_surface_passes(
         let base = CachedRenderPipelineId::new(index);
         // Installed Unlit/Color and stained glass have no ForwardAdd pass.
         let partner = if flag(&fragment.shader_defs, "SOURCE_STANDARD") {
+            let _queue = if let Some(owner) = owners.owner(base) {
+                match super::pipeline_ownership::queue_scope(&cache) {
+                    Ok(scope) => Some(scope),
+                    Err(error) => {
+                        owner.fail(error.into());
+                        continue;
+                    }
+                }
+            } else {
+                None
+            };
             let mut add = descriptor.clone();
             add.label = Some("source_surface_add".into());
             let fragment = add.fragment.as_mut().unwrap();
@@ -100,13 +150,19 @@ pub fn prepare_surface_passes(
             let depth = add.depth_stencil.as_mut().expect("source surface depth");
             depth.depth_write_enabled = Some(false);
             depth.depth_compare = Some(CompareFunction::GreaterEqual);
-            Some(cache.queue_render_pipeline(*add))
+            let id = cache.queue_render_pipeline(*add);
+            owners.companion(&cache, base, id);
+            Some(id)
         } else {
             None
         };
         passes.partners.insert(base, partner);
     }
-    for (base, add) in &passes.partners {
+    for (base, add) in passes
+        .partners
+        .iter()
+        .filter(|(base, _)| !passes.isolated.contains(base))
+    {
         for id in std::iter::once(*base).chain(*add) {
             match cache.get_render_pipeline_state(id) {
                 CachedPipelineState::Err(

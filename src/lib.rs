@@ -1,4 +1,5 @@
 //! Shared driving simulation and browser application.
+#![recursion_limit = "256"]
 
 #[cfg(target_arch = "wasm32")]
 pub mod app;

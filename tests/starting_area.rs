@@ -875,23 +875,6 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
             .sqrt()
             < reference.player.aim_reach
     );
-    let station = my_summer_slop::world::nearest_station(
-        runtime.stream.seed,
-        -runtime
-            .stream
-            .origin
-            .absolute(runtime.physics.snapshot(0).pose.position)[2],
-        &reference.stations,
-    );
-    let car = runtime
-        .stream
-        .origin
-        .absolute(runtime.physics.snapshot(0).pose.position);
-    let road = my_summer_slop::world::road_sample(
-        runtime.stream.seed,
-        my_summer_slop::world::Station::distance(station.id),
-    );
-    assert!(((car[0] - road.center[0]).powi(2) + (car[2] - road.center[2]).powi(2)).sqrt() < 0.01);
     // Stage the same source can as trunk cargo. Recovery must preserve its car-relative pose.
     let body = runtime.area.items.get(can).unwrap().body.unwrap();
     let mut cargo = my_summer_slop::vehicle::to_rapier(runtime.physics.snapshot(0).pose);
@@ -933,21 +916,17 @@ fn production_dry_recovery_keeps_source_can_and_cargo() {
 #[test]
 fn walking_far_keeps_a_parked_road_car_supported() {
     let mut physics = common::world();
-    let mut stream = my_summer_slop::world::WorldStream::new(
-        my_summer_slop::world::DEFAULT_SEED,
-        &common::reference().stations,
-    )
-    .unwrap();
+    let mut stream = my_summer_slop::world::WorldStream::new(my_summer_slop::world::DEFAULT_SEED);
     let pose = stream.reset_pose(640.0, false, &mut physics);
     physics.reset(0, pose);
     for _ in 0..180 {
         physics.apply_vehicle_forces(
             0,
             my_summer_slop::simulation::DriveInput {
-                handbrake: true,
+                handbrake: 1.0,
                 ..Default::default()
             },
-            0.0,
+            Default::default(),
         );
         physics.step_physics();
     }
@@ -958,10 +937,10 @@ fn walking_far_keeps_a_parked_road_car_supported() {
         physics.apply_vehicle_forces(
             0,
             my_summer_slop::simulation::DriveInput {
-                handbrake: true,
+                handbrake: 1.0,
                 ..Default::default()
             },
-            0.0,
+            Default::default(),
         );
         physics.step_physics();
     }
@@ -2245,17 +2224,23 @@ fn production_fuel_can_lifts_and_follows_after_recenter() {
 }
 
 #[test]
-fn active_cycle_is_independent_of_physics_cap() {
+fn active_cycle_uses_accepted_physics_steps() {
     let (reference, mut runtime) = initial();
     runtime.started = true;
     let mut clock = my_summer_slop::simulation::StepClock::default();
-    runtime.advance_lighting(&reference, 1.0);
-    let steps = clock.advance(1.0);
-    for _ in 0..steps {
+    clock.accept_frame(1.0);
+    let mut steps = 0;
+    while clock.take_step(runtime.clock_factors(&reference).time_scale) {
         runtime.step(&reference, FrameInput::default());
+        steps += 1;
     }
-    assert_eq!(runtime.lighting.cycle.elapsed_seconds(), 1.0);
-    assert!(steps <= 6);
+    assert_eq!(steps, 6);
+    assert!(
+        (runtime.lighting.cycle.elapsed_seconds()
+            - steps as f64 * f64::from(my_summer_slop::simulation::FIXED_DT))
+        .abs()
+            < 1e-9
+    );
 }
 #[test]
 fn lighting_lifecycle_preserves_and_resets_owned_state() {
@@ -2267,14 +2252,20 @@ fn lighting_lifecycle_preserves_and_resets_owned_state() {
         &reference.lighting,
         my_summer_slop::reference::LightControlId(1),
     );
-    runtime.advance_lighting(&reference, 1100.);
-    runtime.advance_light_fades(&reference, 0.001);
-    runtime.advance_light_fades(&reference, 0.01);
+    runtime.lighting.cycle.advance(
+        &reference.lighting.cycle,
+        my_summer_slop::lighting::CycleAdvance {
+            simulation_delta: 1100.,
+            cycle_extra: 0.,
+            cloud_scale: 1.,
+            sleep_progress: None,
+        },
+    );
+    runtime.lighting.advance_fades(&reference.lighting, 0.001);
+    runtime.lighting.advance_fades(&reference.lighting, 0.01);
     let active = lighting_snapshot(&runtime);
     assert_ne!(active, startup);
     runtime.paused = true;
-    runtime.advance_lighting(&reference, 20.);
-    runtime.advance_light_fades(&reference, 20.);
     runtime.step(
         &reference,
         FrameInput {
@@ -2286,7 +2277,7 @@ fn lighting_lifecycle_preserves_and_resets_owned_state() {
     runtime.paused = false;
     runtime.recover(&reference);
     assert_eq!(lighting_snapshot(&runtime), active);
-    runtime.advance_light_fades(&reference, 0.005);
+    runtime.lighting.advance_fades(&reference.lighting, 0.005);
     assert_ne!(
         lighting_snapshot(&runtime),
         active,

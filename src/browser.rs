@@ -88,6 +88,10 @@ extern "C" {
 
     #[wasm_bindgen(js_namespace = window, js_name = gameLoading)]
     pub fn game_loading();
+    #[wasm_bindgen(js_namespace = window, js_name = gameLoadingProgress)]
+    pub fn game_loading_progress(roads: u32, total: u32, rendering: bool, world: bool);
+    #[wasm_bindgen(js_namespace = window, js_name = gameLoadingBudget)]
+    pub fn game_loading_budget(name: &str, used: f64, limit: f64, unit: &str);
     #[wasm_bindgen(js_namespace=window,js_name=gameSurvival)]
     pub fn game_survival(
         hp: f32,
@@ -108,6 +112,13 @@ extern "C" {
         cooldown_remaining: f64,
         progress: f32,
     );
+    #[wasm_bindgen(js_namespace = window, js_name = gameNow)]
+    pub fn game_now() -> f64;
+    #[wasm_bindgen(js_namespace = window, js_name = gameMeasureRequested)]
+    pub fn game_measure_requested() -> bool;
+    #[wasm_bindgen(js_namespace = window, js_name = gameMeasurements)]
+    pub fn game_measurements(json: &str);
+
     #[wasm_bindgen(js_namespace = window, js_name = gameReady)]
     pub fn game_ready();
     #[wasm_bindgen(js_namespace = window, js_name = gameFailure)]
@@ -126,6 +137,10 @@ extern "C" {
     pub fn game_wheel() -> f32;
     #[wasm_bindgen(js_namespace = window, js_name = gameActions)]
     pub fn game_actions() -> u32;
+    #[wasm_bindgen(js_namespace = window, js_name = gameDrivingAssists)]
+    pub fn game_driving_assists() -> u32;
+    #[wasm_bindgen(js_namespace = window, js_name = gameDrivingState)]
+    pub fn game_driving_state(gear: i32, assists: u32, seated: bool);
     #[wasm_bindgen(js_namespace = window, js_name = gameUpdate)]
     pub fn game_update(
         speed: f32,
@@ -135,7 +150,7 @@ extern "C" {
         z: f32,
         contacts: u32,
         steps: u32,
-        chunks: u32,
+        surfaces: u32,
         colliders: u32,
         absolute_x: f64,
         absolute_y: f64,
@@ -145,7 +160,7 @@ extern "C" {
         origin_z: f64,
         rebases: u32,
         travel: f64,
-        lateral_band: f64,
+        prepared_roads: f64,
         fuel: f32,
         paused: bool,
         started: bool,

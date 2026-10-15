@@ -1,6 +1,34 @@
 # Verification record
 
-## Cleaning and painting: 2026-10-15
+## Cleaning and current master integration: 2026-10-15
+
+We merged source-world, source driving, startup, and cleaning owners under strict save schema 4.
+Master already used version 3. The combined contract rejects versions 1, 2, and 3.
+The contract includes world changes, source spawn state, selected gears, driving assists, and semantic conditions.
+Imported items use ConditionStore. Generated items retain their source-world quality without a duplicate imported save scalar.
+Candidate loads reserve condition records and commit the retained spare material bank at the scene boundary.
+
+The required check stops at six web failures also reproduced on master `45d0474`.
+The focused browser checks passed: 50 tests for feedback, save sessions, storage, and menus.
+The full native command stops compiling obsolete save_capture world APIs, also reproduced on that master.
+The unchanged world_source target uses removed field APIs and does not compile.
+The remaining focused native set ran: 30 passed, 123 failed, and 35 ignored.
+Master's fixture lacks the required world field. Most failed tests stop before their behavior assertions.
+The new imported tire and generated quality tests also stop at that fixture boundary.
+One reference test embeds the previous feature export and rejects its obsolete station_prototype usage.
+Current-master lib and drivetrain runs reproduce the missing-world failure.
+We did not replace source inputs, weaken assertions, or repair these baseline defects.
+
+Python condition/world/export unit checks passed: 20 tests. They do not validate a complete merged export.
+Fresh runtime export is blocked: the checked `.cache/world-source/samples.json` is missing.
+The actual merged world verifier rejected that missing prerequisite in the primary retained directory.
+Historical package receipts below do not establish a matching merged runtime/package or active gameplay acceptance.
+The local merge report records compiler results, package hashes, and exact logs.
+Cleaning and painting remains Partial. Active input, source comparisons, and retained GPU acceptance remain open.
+
+These feature receipts predate the master integration. They do not verify the merged package.
+
+## Historical feature package: Cleaning and painting, 2026-10-15
 
 Branch: `codex/cleaning-painting`. Frozen code head: `1b51c38834aa88b907d53a684ba317211395e194`.
 Frozen tree: `464373cf565e3e7c4bd235f638af6ce51554a01f`. Scoped re-review remains open.
@@ -133,6 +161,184 @@ The particle sweep retains the shared FluidContact non-sensor filter as an expli
 Native particle trigger membership needs matched source proof; ray queriesHitTriggers does not establish it.
 Native cache/shape ordering, collision messages, and world tank-fill callbacks remain outside the shared particle route.
 The controller owns independent whole-branch review and branch integration.
+
+## Driving branch verification: 2026-10-14
+
+Status: partial acceptance on `codex/correct-driving-physics`.
+The final fix follows review base `6f8118162ece6d9ee24c811719c0935af433487a`.
+The whole-branch review required seat-transition and suspension-bound fixes.
+The controller also traced missing-engine ownership and required an automatic-control fix.
+The implementation addresses these findings. Scoped re-review and current-package browser checks remain with the controller.
+The earlier full suite ran on `05bbf7bf5726d91bc1a0cdec2adf900753028dc9`, tree `be156d38886e62c60180c5a948db30e923631e53`.
+Final-fix checks cover the changed behavior; they do not replace that full-suite record.
+Earlier entries below describe their named revisions. The current driving save schema is 2.
+
+### Final fix checks
+
+Seat changes clear pedal ramps, pending shift edges, and ignition holds before vehicle input routing.
+The engine clears its input without a release event. Selected gears and mechanical state remain per car.
+The transition path retains the existing push-grip owner.
+`DrivetrainState::step` takes `Option<EngineOutput>` from the existing mounted-engine check.
+`None` skips automatic gear, pedal inversion, ignition, and RPM clutch rules. Manual rules keep their source conditions.
+Rust rejects suspension targets outside `[0,1]` and negative spring or damping values.
+It accepts both target endpoints and zero coefficients. Radius and travel must remain positive.
+The exporter calls this same validator before accepting runtime output.
+The feedback test captures its expected invalid-audio warning during setup and restores `console.warn` in `finally`.
+
+Fresh logs and exact commands reside in [final-fix evidence](../.cache/driving-physics/acceptance/final-fix/commands.jsonl).
+Red checks reproduce pending entry shifts, an exit ignition toggle, invalid suspension acceptance, and automatic shifts without an engine.
+Green checks cover both cars through real `GarageRuntime::step` entry and exit, plus normal engine-part removal.
+The lifecycle fixture isolates collisions and door access. It does not establish native driving or garage access parity.
+The suspension table validates both current exported cars through the public manifest contract.
+Three Python checks pass, including accepted exports and rejection through the exporter's Rust validation path.
+The audio and feedback selection passes 37 tests. Production warnings remain enabled.
+Full native compilation and the release package checks use the final fix; see the final-fix command receipt.
+The earlier full native result remains 261 passed, 108 failed, and 66 ignored on `05bbf7b`.
+The final fix does not repeat that suite or classify its unresolved failures.
+
+### Gameplay rules
+
+Tasks 1–3 passed their scoped code reviews.
+The branch adds required source controls/wheel records, fixed-step pedal ramps, manual gears, clutch, and two saved assists.
+The engine owner applies clutch engagement once. The drivetrain applies gear and final-drive ratios once.
+The wheel owner distributes final axle torque by active driven-wheel count and installed radius.
+Ordinary wheel updates add no allocation or physics object creation.
+The branch removes obsolete gear/force APIs and adds no old save reader or migration.
+
+Critical native checks cover engine/stall rules, transmission order, both-car seat transitions, saved gears/assists, and obsolete-save rejection.
+Rust validates a save before candidate creation and scene publication.
+The browser Prepare decoder rejects obsolete fields through strict decoding before candidate creation.
+That browser path bypasses `SaveSnapshot::from_json`'s version preflight; the independent native check covers the preflight.
+See [source controls and adapter limits](vehicles.md#driving-controls) and the
+[Task 3 review](../.superpowers/sdd/2026-10-14-correct-driving-physics/task-3-review.md).
+
+At exact zero driven-wheel RPM, the endpoint-clamped port can retain neutral.
+Its fallback samples exceed both cars' curve endpoints. The native direction check uses 100 RPM.
+Source `CalcTorque` calls `torqueCurve.Evaluate(_wrpm)` without a clamp or floor wrapper.
+Serialized `m_PreInfinity` and `m_PostInfinity` values of 2 do not establish the public `WrapMode` mapping.
+We have no measured native curve behavior outside the source key times. Source boundary parity remains conditional.
+The Skoda Rust test passes movement assertions within a failing test. We observed no launch deadlock.
+Normal-input browser launch for both cars remains unverified.
+
+### Commands and exits
+
+Workdir: `C:/Users/Corashina/.codex/worktrees/correct-driving-physics/the-long-drive-wasm`.
+Fresh outputs and retained Task 3 evidence reside under `.cache/driving-physics/acceptance/`.
+The [exact commands](../.cache/driving-physics/acceptance/commands.md) record Docker mounts, toolchain identity, and bounded concurrency.
+The [gate receipt](../.cache/driving-physics/acceptance/gates.json) records each fresh command and exit.
+
+| Gate | Exit | Result | Evidence under acceptance/ |
+| --- | ---: | --- | --- |
+| `./scripts/check.ps1` | 1 | 96 web checks pass; existing module-order format failure stops native/build stages | `check.log` |
+| Python exporter discovery | 1 | 194 run: 181 pass, four failures, eight errors, one skip | `exporter.log`, `exporter-triage.md` |
+| Source archive `--stage source --verify` | 0 | Accepted archive verifies without a source receipt change | `source-verify.log` |
+| Runtime `--stage runtime --verify` | 0 | Full library and runtime contract verify; 798.635 seconds | `runtime-verify.log` |
+| Installed-source ignored selection | 101 | Initial 13 pass/five fail; two mount retries pass; three physical failures remain | `installed-source.log` |
+| Two mount-blocked source checks, corrected read-only mounts | 0 each | Both pass; original selection remains failed | `mount-retry.json`, two retry logs |
+| Full native compile and suite, reused final code | 101 | Compile passes; 261 pass, 108 fail, 66 ignored | `reused-layer-3/native-full.log` |
+| Critical driving sequence and WASM check, reused final code | 0 | Engine nine, drivetrain six, driving saves two, obsolete schema one pass | `reused-layer-3/critical-green.log` |
+| Full web/HUD, reused final code | 0 | 97 pass | `reused-layer-3/web-full.log` |
+| Release build and wasm-bindgen, reused final package | 0 | Same `scripts/build.ps1` command body, with two compiler jobs | `reused-layer-3/package.log` |
+| Documentation links, fragments, scope, and whitespace | 0 | New links/fragments, five-file scope, and whitespace pass | `docs-check.log`, `diff-check.log` |
+
+The 108 native failure names match the retained Task 0 inventory through the Task 2/3 comparisons.
+The [native comparison](../.cache/driving-physics/acceptance/reused-layer-3/native-comparison.json) has empty added/removed lists.
+The aggregate check remains unmet. Focused checks do not replace its failed format/native gates.
+
+The exporter suite has no complete Task 0 baseline.
+Its failures concern audio fixture data, resource hashes, selected scenes, fleet counts, a switch link, and shelter validation.
+The failing test files and error-producing validator functions are unchanged across the branch.
+Relevant shared fixture sections also match the pre-task values.
+These facts do not establish an unchanged full exporter baseline.
+The [exporter triage](../.cache/driving-physics/acceptance/exporter-triage.md) preserves all twelve names and causes.
+The installed-source selection ran eighteen Rust cases using exported assets.
+Two checks passed after corrected read-only mounts for external Windows junction targets.
+The initial aggregate exit remains 101; fifteen test cases pass across the run and affected retries.
+Three physical cases remain unresolved: parked drift, failure to sleep before the exit route, and inactive Lada trip accumulation.
+The Skoda test passes its movement assertions before failing the inactive Lada bound.
+These ignored cases have no complete prior source-test baseline. They remain separate from the 108-name native comparison.
+Read the [source-test triage](../.cache/driving-physics/acceptance/installed-source-triage.md) for names, values, and retry commands.
+Task 6 changes no product code or failing assertion.
+
+### Source and physical comparison
+
+Reference: Steam build `11140890`, Unity `2021.3.18f1`.
+Primary evidence: [driving receipt](../web/assets/reference/driving-evidence.json),
+[source recovery](../tools/reference/driving.py), and [driving research](research/2026-10-11-rea-driving-audit.md#driving-branch-update-2026-10-14).
+Accepted source identities:
+
+| Input | SHA256 |
+| --- | --- |
+| `Assembly-CSharp.dll` | `9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e` |
+| `Assembly-CSharp.cs` | `22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee` |
+
+The [source measurement audit](../.superpowers/sdd/2026-10-14-correct-driving-physics/source-measurement-audit.md)
+found zero qualifying repeated native observations for each required metric, for both cars.
+The user confirmed that no source measurements are available.
+Acceleration, coast-down, service braking, combined braking, turning, suspension settling, tire/rim changes, and empty hubs lack measured intervals.
+Static fields, formula probes, Rust fixtures, and browser audits supply no native repeatability or measurement resolution.
+Task 4 cannot pass. Task 5 remains unscheduled. Measured source deltas are unavailable.
+The retained [audit copy](../.cache/driving-physics/acceptance/source-measurement-audit.md) records inspected locations and source gate gaps.
+
+The adapter supplies eligible summed brake inputs.
+The stock solver excludes simultaneous motor force and brake impulse on one wheel.
+Tire/rim friction, hub support, suspension, and wheel spin remain incomplete.
+We cannot claim Unity WheelCollider behavior, matched stopping distances, or source handling parity.
+
+### Browser input and lifecycle
+
+Earlier controller route: Codex IAB `browser2/tab2`, loopback port 4187, Task 3 package.
+These observations predate the final fix. The controller owns the current-package browser check.
+The tool did not provide an exact browser version.
+Desktop viewport: 1280x720. Narrow viewport: 800x600. The controller restored the default viewport afterward.
+The controller used normal UI actions and the existing read-only render audit. The controller injected no product state.
+Read the [route log](../.cache/driving-physics/acceptance/reused-layer-3/controller-browser.md) and retained screenshots.
+
+| Check | Observed result |
+| --- | --- |
+| Reload and New game | Ready garage; both visible assists true |
+| Obsolete schema 1 Load | Rejected before candidate publication; paused scene retained |
+| Disable Automatic clutch | Both choices false; Automatic gears disabled |
+| Paused Save and full reload Load | Save complete; Game loaded; false/false restored |
+| Desktop and narrow Controls | Controls fit; source key help wraps within the scroll area |
+| Pause-menu New game after Load | Visible assists reset from false/false to true/true |
+| Recover | Selected once; no visible result proved recovery |
+| Continue | IAB refused real pointer capture |
+| Read-only render audit | Ready, scene 2, master state 1; warmup false, mirrors true, motion validated |
+
+Capture error: `The root document of this element is not valid for pointer lock`.
+The read-only motion flag describes renderer readiness. It does not establish a driving route.
+No normal launch, both-car continuous driving, manual/assisted shifts, pedal releases, neutral coast, reverse, or live stall/restart route passed.
+The 30/60/120 FPS checks cover fixed-step input samples in native tests. Browser handling routes remain unavailable.
+Live gear feedback, lights/instruments/audio during driving, part exchange, seat switching, recovery, restart, and rebasing remain unverified here.
+The old-save error persists when Controls opens until another menu action resets it; the controller retained that screenshot.
+The schema 2 test save remains in localhost:4187 storage.
+
+### Code and artifact identities
+
+The final fix rebuilds WASM: 60,419,042 bytes, SHA256 `c271113f1d771898216832d9ea3e1edb560e8f580c07d8ffc5525d230963906f`.
+The bindings remain 109,237 bytes, SHA256 `eb7ebf28feb5c37de871cd76d6255ba4ba851a4f894867697a884db894b0662f`.
+Eleven of the twelve artifact hashes match Task 3; only WASM changed. The current package receipt is [final-fix hashes](../.cache/driving-physics/acceptance/final-fix/hashes.json).
+Its [source receipt check](../.cache/driving-physics/acceptance/final-fix/source-receipts.json) retains the accepted inputs.
+We reuse the unchanged 262,784-record source archive scan.
+
+The following table records the earlier Task 3 package. Task 6 rechecked its twelve hashes and byte lengths.
+They matched at that revision. The [full hash receipt](../.cache/driving-physics/acceptance/hashes-checked.json) identifies each file.
+Four accepted source/library receipts also remain unchanged; see
+[source receipts](../.cache/driving-physics/acceptance/source-receipts-checked.json).
+
+| File | Bytes | SHA256 |
+| --- | ---: | --- |
+| `web/assets/reference/manifest.json` | 15962156 | `ac34fccde1d23e0ae773d1aa22ec6134d0822670c81518b0ea6125c63a238bf4` |
+| `web/assets/reference/driving-evidence.json` | 19734 | `8cebfdc2b0c040437c2cfc9e490b929b565500ea9f0ea3fb6d13d6b918d1d04c` |
+| `web/assets/reference/library-selection.json` | 1214615 | `7ea4d10cd024fedb66d89330ce8ad3eb375560d3f8eb918e789133552ecda666` |
+| `tests/common/reference.json` | 10534215 | `c81a1900e641854d8ff3cfd74b1a983d56b89992a1e0cc92578f47209bcc0e50` |
+| `web/pkg/my_summer_slop.js` | 109237 | `eb7ebf28feb5c37de871cd76d6255ba4ba851a4f894867697a884db894b0662f` |
+| `web/pkg/my_summer_slop_bg.wasm` | 60418464 | `f2585cc290d6e3b3a377c4367c006e33a8884e2d8e98b92c8bf6bf7126d658b1` |
+
+The whole-branch review reported changes required. The final fix addresses its confirmed findings.
+The controller owns one scoped re-review. Driving acceptance remains incomplete.
+Retain the isolated worktree and evidence. Merge and push remain outside this task.
 
 ## Rendering merge: 2026-10-12
 
@@ -1241,447 +1447,124 @@ Package and export hashes:
 - `web/pkg/my_summer_slop_bg.wasm`: `02c9c4a33f9f3e2b5c96b22155c4187fef9a3977f8e1f8a98b31408f0fc71451`; 53733353 bytes.
 - `web/assets/reference/manifest.json`: `d62630828b68c154c9351203b11f67427916390bd9a3eac1b911fda8efb5c74e`; 5712654 bytes.
 
-## Source audio checkpoint: 2026-10-12
+## Source-world implementation: 2026-10-13
 
-The audio branch implements source vehicle sounds, interaction sounds, and the Lada radio.
-The assembled browser produced a captured door effect after trusted Start.
-Device listening and the ten full acceptance scenarios remain incomplete.
-The user requested "skip tests" during the listening check. Further checks stopped; no missing result counts as passed.
+The source-world branch replaces the old sine road, fixed stations, chunk bands, simple props, and lamp sampling.
+It keeps one generator and one required world contract. Startup randomness retains its existing arithmetic in `starting_area.rs`.
+The checked context uses build 11140890, Unity 2021.3.18f1, seed 42, and saved 5,000-metre default settings.
+Generation and replay retain the frozen checked initialization frame. Runtime rebasing does not change that frame.
+The road contains 50,000 segments. Off-road grids have no finite extent.
 
-The Python audio suite passed seven cases. The corrected browser audio suite passed 29 cases with zero skipped.
-The earlier full check and release build passed. That default native check excluded 46 installed cases.
-A later run included installed cases: all 31 audio and 11 radio cases passed.
-The user stopped that run during reference validation, after 226 tests passed in completed targets.
-Normal runtime verification stopped at 260,000 of 262,784 records without a final receipt.
-Whole-branch review remains with the controller.
+The final layer uses static source tracing and native/WASM product compilation.
+Current-source native compilation passed in 3.81 seconds on 2026-10-14, without warnings.
+Release WASM compilation passed in 2m02s. `scripts/build.ps1` also completed wasm-bindgen packaging with exit code 0.
+Final logs are `.cache/world-source/task-9-resume-final-native.log` and `.cache/world-source/task-9-resume-final-package.log`.
+The earlier Task 9 final logs predate two source edits and do not cover the committed source.
+The user directed Ignore tests. No final tests, fixtures, captures, source comparisons, browser checks, or traversal ran.
+No 100-kilometre route, full-extent traversal, continuous drive, seam, rebase, recovery, restart, or revisit acceptance ran.
+Historical browser evidence above describes earlier layers. It does not validate the current source-world runtime.
+Task 2's historical startup capture still contains an unresolved 404 URL and GPU warnings.
+The accepted qualification remains in the retained Task 2 report. No recapture ran.
 
-The [audio verification report](research/2026-10-12-audio-verification.md) lists evidence and each remaining scenario.
-Earlier verification entries retain their historical scope and results.
-## Live mirror acceptance, 2026-10-12
+World numeric, runtime, visual, and physics parity remain unverified.
+The supported initialization order does not prove Unity scheduling or original game-wide random timing.
+Terrain uses the accepted shared illumination API. Global reflection and SH-volume contributions remain outside this world layer.
+Canonical grass ordering does not prove source-device primitive ordering.
 
-Status: Equipment branch implementation passed source, native, GPU, lifecycle, and full product checks. Whole-branch review passed at `9abb5e7`.
-The user approved the mirror spec and plan and chose subagent execution.
-The selected source is Steam build `11140890`, Unity `2021.3.18f1`.
-The checked managed source hash is `22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee`.
+### Ownership and bounds
 
-| Source link | Checked ID |
-| --- | --- |
-| Mirror components | `level1:66131`, `level1:67237`, `level1:70638` |
-| Source cameras | `40260`, `40324`, `40222` |
-| Screen renderers | `43665`, `40735`, `44371` |
-| Plane transforms | `28414`, `38060`, `32190` |
-| Camera transforms | `39254`, `31061`, `26965` |
-| Render target | `sharedassets1.assets:4495` |
-| Live and disabled materials | `sharedassets1.assets:624`, `sharedassets0.assets:116` |
+| Owner | Limit |
+| --- | ---: |
+| Active geometry, CPU and logical GPU | 128 MiB each |
+| Shared world prototypes, CPU / logical GPU | 256 MiB / 512 MiB |
+| Pending world work | 32 MiB, two jobs, 32 requests |
+| Checkpoints, spatial indices, and first-call source history | 16 MiB |
+| Road / near terrain / each distant tier | 512 / 512 / 256 |
+| Generated object instances | 8192 |
+| Registered light proxies, including fixed lights | 32 |
+| Shadow slots | 100 |
+| Actual change records | No fixed cap |
 
-The exporter regenerated five selected scenes from the checked accepted library.
-It verified 262,784 library owners against receipt `92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99`.
-The worktree manifest hash is `4ac150e8880ef3cef9f7e7e0ca7e465acac2677ca1ac10215a1d3214c987fe8e`.
-The Lada glTF and binary hashes are `b2e4a65efe377ef85f82cabd45fbe6845fa8f84647266eda1645455c0a3e27d0` and `f79b68feb818e7489f67ec0fa70561f4f2f2338a50ed2391ce3d80bd4beb81e7`.
-The primary source hashes and modification times stayed unchanged.
-The export receipt is `.cache/equipment-checks/task-5-export-receipt.json`.
+Road checkpoints occur every 256 segments. Building checkpoints occur every 32 selections.
+First-call source history stores parent/caller identity, random state, phase, and required cursor inputs.
+This history grows with first encounters and can exhaust its limit before full-extent travel.
+Actual changed identities have a separate map and byte counter. Physics motion counts as a change.
 
-`MirrorViewRole` distinguishes the normal view from each `Capture(index)` view.
-The runtime reads plane and camera nodes after physics, mechanism updates, and origin transport.
-It updates capture poses after transform propagation and before camera and frustum updates.
-It tests normal-view visibility before scheduling captures by source rank ahead of the normal view.
-The producer uses the player body for rank and the active normal camera for reflection and FOV.
-It retains the source five-mirror cutoff and previous-far capture order.
-Loading computes current pose validity without advancing source rank or far state, including started restarts.
-Warmup and gameplay reject invalid vectors and invalid clipping. Valid hidden mirrors can warm.
-Loading prepares mesh/material pairs, hidden lamp choices, owner substitutions, sky banks, and both view keys.
-Normal frames select cached pipelines through three fixed view slots. Pipeline failures remain visible after readiness.
+Task 7's decoded world, catalog, and material ownership was 132,704,763 bytes.
+Its conservative static selected-owner peak was 227,638,888 bytes before Task 9's additional owner-table and identity charges.
+Those figures describe allocation formulas for the checked inputs. They are not process, WASM, driver, or route measurements.
+Task 9 also charges stream maps, supply metadata, structure handle buffers, and retained placement identities.
+Runtime admission remains required for each selected region.
 
-Each selected instance owns one 256 by 256 linear RGBA8 target, one D24S8 capture depth, and live and disabled materials.
-The source mask is `73113395`; source camera postprocessing, depth effects, and heat haze are empty.
-Sky time and world lighting stay shared. Each view computes its own flare projection and occlusion.
-Normal exposure, jitter, motion history, and completion state stay separate.
-The owner screen uses its disabled source material during its capture.
-Other mirrors can use completed targets. The complete material-bank audit found no writable target in sampled bindings.
-Mirror reset advances the instance ID and releases old cameras, images, materials, and depth storage.
-Preparation and completion reject stale IDs.
+Pending staging overlaps active/prototype reservations. Do not add those counters as disjoint process memory.
+The JavaScript bootstrap has separate text, parse, fetch, and hash lifetimes.
+One dependency verifier replaces the earlier two workers.
+Input chunk views and their contiguous copy can overlap by twice the dependency length, at most 64 MiB.
+This bounds visible payload bytes. Chunk backing buffers and hash copies can require more memory.
+The 32 MiB world staging limit does not bound JavaScript bootstrap memory.
+The full manifest text and JavaScript object can overlap Rust input and decoded ownership.
+Browser internals, allocator high-water memory, and driver overhead remain unavailable.
 
-| Check | Result and evidence |
-| --- | --- |
-| Recovery | Four Python mirror/staging tests passed; `.cache/equipment-checks/final-python.log` |
-| Final suite | Formatting, 22 web tests, 245 native tests, and release WASM passed; `.cache/equipment-checks/final-full-check.log` |
-| Installed parts | Ten mirror tests passed; `.cache/equipment-checks/final-native-check.log`. Installed binding checks: `.cache/equipment-checks/final-installed.log` |
-| Finite clip | GPU projection tests covered near, far, and outside bounds; invalid source far suspended capture, with RED 26 and GREEN 0 failures |
-| Feedback | Task 3 drew all nine owner/view pairs; three changing targets had zero GL errors; each owner used its disabled screen |
-| Vectors | Invalid-axis RED failed; corrected GPU GREEN rejected coincident, invalid-axis, and nonfinite inputs for ten frames each, then recovered |
-| Source scene | Final current run passed 45 actual-Lada stages, including part changes, carry/drop, rebase, pause, resize, and restart |
-| Epochs | Final current run rejected two stale epochs and released prior cameras and images across three lifecycle cycles |
-| Sky | Opposite normal and capture directions changed flare visibility while shared cycle time stayed fixed |
-| Final product startup | `/diagnostic?task=final-product` reached ready=true, errors=0, glErrors=0, and 377 warmup capture draws; the idle count stayed fixed |
+### Development snapshots
 
-The labelled actual-Lada driving scene used the production seat entry pose, vehicle physics, and mirror producer.
-The diagnostic held FORWARD and IGNITION after seating; the normal input sampler still ran each frame.
-At tick 60 it set a post-seat baseline. At tick 300 the car moved 0.549 m, the mounted camera anchor moved 0.491 m, and the capture pose moved 0.491 m.
-Two captures were eligible. Root saw the cabin and mirrors, with zero browser and GL errors.
-The run had a running engine and released handbrake, but did not measure gear or output torque.
-Its near-zero final speed does not prove sustained powered driving. Trusted driving remains unproved.
+Call `await window.measureWorld()` from development tools after the runtime starts.
+The next application frame returns the snapshot. No technical player interface was added.
+`world` contains capacity charges, reservations, source history, changes, preparation counts, and road replay call timings.
+`assets` counts unique mesh/image handles across imported baseline, prototypes, active world, pending world, and other renderer assets.
+Shared caster and instance handles count once. Mesh byte metadata survives CPU extraction and retires with its asset.
+Texture bytes include complete mip/layer dimensions. CPU payload counts use retained vector capacities.
+Logical handle bytes do not prove GPU upload completion, allocator storage, or resident VRAM.
+Missing mesh metadata or unsupported texture formats increment `unknown_gpu_handles`.
+The imported baseline covers asset payloads. It excludes complete imported reference, ECS, physics, skins, and uniform ownership.
+The snapshot names those limits and keeps process and driver fields null.
+Measurement-cache capacity has its own counter. Requested snapshot maps and JSON are transient development allocations.
 
-The final current run kept three capture cameras, three owned color targets, three depth attachments, six mirror materials, and 32 sky materials.
-Loading prepared 46 capture variants and 109 total pipeline IDs. Those counts stayed fixed from first readiness through three transaction cycles.
-All post-readiness backend samples kept 56 GL programs. Three new source mesh assets reused supported layouts without pipeline growth.
-Cold pair snapshots held 498 entries at startup and 504 on each restart. Owner mappings stayed at 6.
-Settled backend counts were 149 textures, 7 renderbuffers, and 11 target textures.
-Requested target storage was 82,268,768 bytes. Six 256-square capture and HDR textures used 2,359,296 bytes.
-These are requested GL storage bytes, not measured driver memory.
-Mirror inputs retain capacity 3. The renderer uses three fixed view slots and has no render job Vec.
-No whole-engine allocation trace was run. See `.cache/equipment-checks/final-current-result.json` and `final-current-browser.jsonl`.
+Browser fields include WASM linear memory, available JavaScript heap data, initial Start readiness, and peak application-frame interval.
+WASM linear memory is committed capacity. JavaScript heap data depends on browser support.
+Frame intervals include pauses and background scheduling. Replay timings cover road checkpoint replay calls only.
+No snapshot values were collected during this task.
 
-Task 3's isolated scene used a moving red cube and three spaced mirror screens.
-Its target readbacks changed, and the finite projection test clipped outside near and far bounds.
-The native signed-transform test checks capture direction under asymmetric parent and local rotations.
-These checks do not establish a matched source image or every production view orientation.
+### Durable evidence
 
-Controller rulings applied during implementation:
+Completion evidence remains ignored under `.cache/world-source/completion/2026-10-13/`.
+The `sdd` copy preserves the ledger, task briefs, reports, review records, and rulings with their recorded costs.
+The same directory keeps copies of the approved specification and plan.
+The Task 9 report records final commands, package hashes, deleted coverage, static review, and unperformed acceptance.
+Immutable original records and receipts remain under `.cache/world-source/task-7-input-provenance/`.
+The original receipt sidecar SHA256 is `2c20e3d2c2d62a4123eeb0e1208c806ae9e0f0c7cdf4094699110321d02e6a8c`.
+The original record sidecar SHA256 is `65a0309fa1fca84d78a8d4051e3c8a0fb54d5ef70745a675a4eea8f076c20b96`.
+Recovered assets, source, captures, and local completion evidence stay outside Git.
 
-1. Runtime export staging uses the selected output parent. Otherwise export could write into the read-only accepted cache.
-2. Signed scale affects hierarchy positions and meshes. Unity `Transform.up` and `Transform.forward` use rotation alone. A wrong ruling would change camera direction.
-3. Mirror inputs use runtime coordinates. A second source-axis Z conversion could reverse capture orientation.
-4. Invalid source far at or below near suspends capture and selects the disabled material. Clamping would change source clipping.
-5. Individual mirror removal keeps its world plane and resets controls. Door removal retains mirror controls. A wrong ruling would change mounting behavior.
-6. Native critical interaction tests and labelled actual-Lada browser checks satisfy equipment implementation acceptance. Trusted input, sustained powered travel, and matched appearance remain unproved. A real-input or integrated driving defect may need follow-up.
+## Source-world final review fixes: 2026-10-14
 
-The installed Unity handling of invalid far is unknown.
-The in-app browser refused pointer lock after a trusted Start click. Windows UI control stopped at its URL-confidence limit.
-The visible part, lifecycle, and seated-motion scenes used labelled deterministic input. Native critical interaction tests passed. These checks satisfy equipment implementation acceptance.
-Trusted walk, adjustment, removal, mounting, and driving traversal remain unproved. Sustained powered road travel also remains unproved.
-No matched native and target camera images exist, so source appearance parity remains unclaimed.
-Export and verification failures now remove only their fresh staging directory.
-Injected checks preserved accepted output, prior recovery folders, and failed-promotion staging. Existing recovery folders were not deleted.
-The final scoped whole-branch review passed at `9abb5e7`.
-No plate or portable flashlight work belongs to this mirror acceptance.
+The Task 9 evidence above covers the 2026-10-13 implementation before final review fixes.
+This section records the later F1, F2, and F3 corrections.
 
-Final product package: WASM SHA-256 `4bfd7937d3eb621e252b72c299b5d06eca7bb6c166ad14a16cee5bfa6d243bf0`.
-The product JS SHA-256 is `66ed491671ed5b9c04daee673d371aab42bbaa01dc26b2e70701fe8a632a2c75`. Fresh release compilation took 2m 15s after source restoration. The WASM contains no diagnostic marker.
-The source and package hashes are in `.cache/equipment-checks/final-package-pairing.json`.
-The command report is `.superpowers/sdd/2026-10-12-live-mirrors/final-fix-report.md`.
-Controller screenshots are in `C:/Users/Corashina/.codex/visualizations/2026/10/12/01a12ea6-fdca-7740-aa22-558ee084f1ee/`.
-Current lifecycle proof is `mirror-final-lifecycle-pass.jpg`. Earlier checks retain `mirror-gpu-scene.jpg`, `mirror-invalid-clip-pass.jpg`, and `mirror-seated-motion-pass.jpg`.
+- Resource admission now uses verified glTF input sizes and bounded PNG decode overlap.
+  Retained generation protects 19,826,124 bytes for resource preparation within the shared 32 MiB cap.
+  Replay keeps that headroom. Existing grass work can release its slot while displacement writers wait.
+  Synchronous collision and binding work can use total free staging after dependencies are ready.
+- Generated render transforms subtract the double-precision origin before float conversion.
+  Retained local matrices handle bodies, parent transforms, nodes, rebases, and displacement writers.
+  Separate source matrices preserve procedural shader inputs.
+- Both startup loaders and scene spawning select the three imported asset usages explicitly.
+  Painting materials load for selected variants and release with their last dynamic owner.
 
+The final native build passed with `native_exit=0` in 0.21 seconds.
+The final `scripts/build.ps1` run passed with `package_exit=0`; release compilation took 2 minutes 6 seconds.
+That script built release WASM and ran wasm-bindgen browser packaging.
+Both JavaScript files passed syntax parsing. Git whitespace validation passed.
+These builds cover every final code edit. No shader source changed.
 
-## Save integration with both vehicles
+Final logs and package hashes remain ignored under `.cache/world-source/`:
 
-The master merge retains the Lada, Skoda, and three existing Lada mirror captures.
-Each vehicle has one save record for its body, engine, gear, handbrake, trip distance, and headlights.
-Vehicle and seat records use source instance identities. The selected vehicle returns after an on-foot save.
-Load checks assets for both dashboards. New game and Load reset the mirror capture epoch.
+- `final-fix-complete-native.log`
+- `final-fix-complete-package.log`
+- `final-fix-js-parse.log`
+- `final-fix-input-metadata.json`
+- `final-fix-package-evidence.json`
 
-The merged checks passed: 55 web tests, 270 native tests, formatting, and the release WASM build.
-The normal native run skipped 54 installed-source checks.
-Twelve Python mirror recovery and export staging tests passed.
-Logs: `.cache/save-merge/check-capacity-final.log` and `.cache/save-merge/export-tests.log`.
-
-The driven/rebase test found a false changed-body record for source `level1:1`.
-Changing the origin during load added `5.96e-8` metres to its recovered absolute Y coordinate.
-Capture now compares active source poses in the current local frame. Dormant records keep their absolute positions.
-The existing snapshot comparison passed after this fix.
-
-The new installed-source fleet checks cover distinct vehicle states, reordered records, Skoda selection on foot, seats, dormancy, and recovery.
-Cross-car wheel checks restore each rim under its current vehicle owner.
-The seven installed save checks passed against the merged source export.
-The Skoda driving and recovery check, three mirror checks, and existing dormant cargo recovery check also passed.
-Logs: `.cache/save-merge/final-source-package.log`, `.cache/save-merge/installed-tests.log`, and `.cache/save-merge/recovery-tests.log`.
-
-The accepted export contains both vehicles, 633 colliders, and 223 items.
-Its manifest SHA-256 is `11fcb21d76fba0222a13582996e2eac669a1dfa8e53424e21c367dc6008c5e57`.
-The exporter verified the accepted library and selected inputs before native validation and atomic promotion.
-Both vehicle scenes now use the shared source mirror material mapping.
-
-Skoda source mechanism `level1:71713` starts at 90 degrees outside its drag range.
-Save validation accepts the exact source startup value or a value inside that range.
-A focused check rejects the adjacent value of 89 degrees.
-
-Distant recovery now selects the absolute road destination before waking a dormant vehicle.
-It hibernates source bodies before moving the origin to that destination.
-The fleet check recovers the Skoda from coordinates of ten billion metres and preserves the dormant Lada record.
-The browser fixture adds `Both cars, save, reload` for distinct engine, trip, brake, and headlight states.
-These controlled fixtures do not establish uninterrupted trusted mouse capture or source appearance parity.
-
-The merged source needs 25 fixed lights and 15 streamed road lamp slots.
-The CPU and shader arrays now hold 40 lights. The 100 shadow slots remain sufficient.
-A focused check confirms matching array counts and a 16,080-byte uniform within the 16,384-byte WebGL2 limit.
-Log: `.cache/save-merge/lighting-capacity-test.log`.
-
-The production package passed startup and six browser session checks with both source vehicles.
-The WASM SHA-256 was `06ef87e571bfbc7e0564d20f518767eaf19faa1dc271d0ba46e5e391bd56ee0c`.
-Repeated session replacement reset mirrors and still allowed Continue.
-A manual save survived a full page reload. Continue resumed that restored session.
-The snapshot comparison measured maximum position error of `3.33786e-6` metres and quaternion component error of `3e-7`.
-The visible Load action returned to pause with `Game loaded`. Save returned `Save complete`, with actions enabled.
-No GPU error appeared during these checks. The default package had no fixture hooks.
-
-The controlled fleet checks used fixture WASM SHA-256 `7a784ad083d8e965ebc67775a301b11d18a656120b8d0fb4c87042369033af6b`.
-They used the same accepted source manifest listed above.
-Both distinct vehicle records survived a manual save and full page reload.
-The Skoda remained selected by stable source identity `level1:69517` while the player stayed on foot.
-Both engines resumed from elapsed time 10 to 10.216663 seconds.
-The two trip values remained 1234.5 and 1634.5000001192093 metres.
-The restored runtime had 114 bodies, 701 colliders, four wheel supports, no owner errors, and no duplicate supports.
-Maximum position error was `3.33786e-6` metres; quaternion component error was `3e-7`.
-
-The controlled driving check covered a rebase, manual save, full page reload, and resumed road contact.
-Travel reached 46.78494750846679 metres. Total fuel changed from 23 to 22.98723856 litres.
-The selected trip reached 46.86606230050236 metres.
-Maximum position error was `2.49744e-5` metres; quaternion component error was `3e-7`.
-The runtime retained 114 bodies and four wheel supports, with no owner errors or duplicate supports.
-Its 704 colliders became 701 after the streamed window updated on resume.
-All four wheels reported contact before resume. Resumed motion preserved stable chassis height.
-
-The parts check covered removal, held parts, fluids, cycle state, full page reload, resume, and the normal F drop action.
-It restored 116 bodies, 701 colliders, three wheel supports, and one carry joint.
-Eleven part colliders had the correct source owner. No owner errors or duplicate supports appeared.
-Maximum position error was `3.33786e-6` metres; quaternion component error was `2.9e-7`.
-Fluid transfer moved 0.25 litres from volumes [2, 0.5] to [1.75, 0.75].
-A second transfer after load reached [1.5, 1].
-Cycle time crossed from 1499.95 to 0.1886 seconds with its fade state preserved.
-The F action removed carry state and left zero throw charge. The dropped body remained active.
-
-Active-session storage fault checks also passed on the fixture package.
-An aborted write preserved the previous slot and active session.
-Corrupt data, source mismatch, unavailable storage, and missing metadata each preserved the active session.
-The checks compared the complete normalized snapshot, camera, origin, and required source record.
-These controlled inputs do not prove uninterrupted trusted pointer lock or matched source appearance.
-
-The scoped integration review found no issues in code commit `6935e23f751222296085c228d99f7768f6c3b44a`.
-The review covered merge resolutions, fleet save ownership, dormant recovery, mirror integration, and the light-capacity fix.
-Later commits record verification only.
-
-## Rendering merge verification, 2026-10-13
-
-The user authorized merging rendering commit `67798ec` into local master `a5b9778`.
-The merge combines source rendering, both vehicles, save/load, audio assets, and three Lada mirrors.
-The verification date is 2026-10-13. Logs dated 2026-10-12 record earlier checks in this merge.
-
-| Check | Result and evidence |
-| --- | --- |
-| Native suite | 318 passed; 58 installed checks ignored in the normal run; `.cache/rendering-merge/native-final.log` |
-| Installed source | 58 passed across `.cache/rendering-merge/package-fixed.log` and `package-final2.log` |
-| Web suite | 87 passed; `.cache/rendering-merge/web-final.log` |
-| Exporter suite | 182 passed; `.cache/rendering-merge/exporter-tests-final.log` |
-| Final export fixes | Six library checks and one renderer metadata check passed; `export-finish-unit.log` and `renderer-metadata-after.log` |
-| Asset validation | Native manifest, receipts, geometry, audio, lighting, and inventory passed; `.cache/rendering-merge/verify-candidate-v4.log` |
-
-The native log contains a later failed installed garage check.
-After correcting that check, the team reran it and the two remaining wheel checks in `package-final2.log`.
-Those three checks passed. The earlier installed run passed the other 55 checks.
-
-The accepted source manifest SHA-256 is `deeb0fbcf4e5fd933a78a0c2906f15ca5f6d320e05b002160d7ff1fc2be3f2cd`.
-The export contains 1,632 files, two vehicles, three mirrors, 196 audio clips, 258 materials, and two probes.
-The accepted library manifest SHA-256 remains `92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99`.
-The team preserved the accepted library and prior runtime export under `.cache/rendering-merge/reference-before`.
-
-The merged renderer has 12 fixed views: three main views, six shared probe capture views, and three mirror views.
-Each vehicle probe owns six 64-square faces and seven mip levels. Each probe keeps its own publication state.
-The runtime requests exact eight-sample HDR and D24S8 depth storage on the accepted hardware.
-Source fetches share an eight-request limit through the existing `async-lock` dependency.
-
-The team corrected paused mirror warmup and reset probe elapsed time during scene replacement.
-Atomic face stamps removed conflicting mutable probe queries.
-Load now warms live mirror mesh IDs and removes stale terrain pairs from the prior scene.
-The renderer retains supported material variants during that reset.
-
-Production Load and repeated Load passed before the final default rebuild.
-The mirror audit reached stage 5, with bank mask 63, 23 pipelines, and three validated submissions.
-Load removed 11 obsolete mesh/material pairs. Both probes published, and all three main views completed.
-The motion pool retained 953 slots. Reuse increased from 698 to 1,047 across the two Load audits.
-Evidence: `.cache/rendering-merge/mirror-fixed-load.json` and `browser-repeated-load.json`.
-
-The final fixture lifecycle check passed six checks on 2026-10-13.
-The checks covered same-frame pause with Save, New Game, and Load.
-They also covered queued cancellation, dispatched completion, and usable Continue.
-Evidence: `.cache/rendering-merge/lifecycle-final.json`.
-
-The controlled fleet check passed a manual save and full page reload on 2026-10-13.
-It restored both vehicle records and kept Skoda source identity `level1:69517` selected while on foot.
-Maximum position error was `3.337860107421875e-6` metres. Maximum quaternion component error was `3e-7`.
-The restored scene had 114 bodies, 701 colliders, and four wheel supports.
-The audit found zero bad collider owners and zero duplicate assembly bodies.
-Both engines resumed from elapsed time 10 to 10.23333 seconds.
-Their distinct trip values reached 1634.5000423569968 and 1234.500024261401 metres.
-The renderer returned to Ready, completed all three main views, and published both probes.
-Its mirrors reached stage 5 with three validated submissions. The motion pool retained 953 slots.
-Evidence: `.cache/rendering-merge/fleet-final.json` and `fleet-renderer-final.json`.
-
-The final default release build and `wasm-bindgen` packaging passed on 2026-10-13 in 3m 08s.
-The build used `cargo build --release --target wasm32-unknown-unknown --locked --lib`.
-The default JS exports contain no `testsFixture` or `saveFixture` hooks.
-The WASM has 58,725,410 bytes and SHA-256 `484317a045ea038630dff6c0732baf430713f4135d9e8529578e007ec5f4f49d`.
-The JS SHA-256 is `e3f0f40cd8369b4a27a1aae2de7674dd75a22eb1f710bae3504fe7560f46f2a6`.
-Build output: `.cache/rendering-merge/stock-final-build-current.log`.
-Source and package hashes: `.cache/rendering-merge/stock-final-package-current.json`.
-
-The final default package passed browser startup and the visible Load action on 2026-10-13.
-The garage reached Ready. Load returned `Game loaded` with Continue enabled.
-Load restored the saved Skoda record with trip distance 1634.5 metres.
-Both audits reported Ready, main-view mask 7, two published probes, and three validated mirror submissions.
-The Load audit reached mirror stage 5 and removed 11 obsolete mesh/material pairs.
-The team found zero browser ERROR entries during the final default checks.
-Evidence: `.cache/rendering-merge/stock-startup-final.json` and `stock-load-final.json`.
-The final Load screenshot is `.cache/rendering-merge/final-rendering.jpg`.
-
-Matched native pixels, exact native blend rounding, and continuous trusted pointer capture remain unverified.
-The earlier audible acceptance limit remains unchanged. See `research/2026-10-12-audio-verification.md`.
-## Source plate lifecycle, 2026-10-12
-
-The equipment branch retains two imported text entities and two mesh handles.
-Both plates share the checked source font atlas and one plate material.
-Restart replaces each mesh payload under its existing handle.
-Bevy frees old vertex and index allocations before replacement in `MeshAllocator::free_meshes`.
-
-Restart now clears game readiness. Input and physics wait for current plate and mirror preparation.
-The first ready callback opens the start menu. Later ready transitions keep the existing restart menu state.
-`GarageRuntime::restart` starts the new game. The player can pause it through the existing menu.
-Plate binding uses an exclusive world system. It has no queued asynchronous binding work.
-Plate reset advances its instance and invalidates mesh revisions. Mirror preparation rejects earlier instances.
-
-The user asked to skip further tests. No new assertions, Python suites, installed checks, or full checks ran.
-The release product and ignored browser probe builds completed.
-The controller uses held browser stages for loading restart, plate transactions, pause, resize, and three restart cycles.
-The ignored observer counts live GL buffers and requested bytes without changing GL state.
-The source and product package receipts are in `.cache/equipment-checks/plate-lifecycle-pairing.json`.
-Source library, font, atlas, and scene receipts are in `plate-lifecycle-source-receipts.json` in the same directory.
-
-These browser checks use scripted camera poses and item transactions.
-Trusted mouse capture and matched Unity appearance remain unproved.
-The source TMP shader uses the supported forward path. Full Unity deferred shader behavior remains outside this work.
-
-The controller observed four ready states across three restart cycles, with plate instances 3, 4,5,6.
-Each retained 251 meshes, 130 images, one plate material, 297 source materials, 1373 GL buffers, and 11029400 requested buffer bytes.
-The backend retained 152 textures, 58 programs, 11 target textures, and three RGBA8 capture targets plus three HDR intermediates.
-Current main targets resized from 1280x720 to 1024x576 and returned. Target storage returned to 82268768 bytes.
-The readiness logs retained 48 capture variants. The controller found no warning, runtime error, or GL error.
-The visible front, rear, carry, drop, remount, bumper, plate removal, and origin-shift labels remained readable.
-The loading hold covered game readiness; synchronous text binding could finish before release.
-The first mirror placement screenshot proves placement only. It does not prove readable text in a capture.
-
-The final held resume view reported paused=false twice. Physics steps increased from 44 to 1527.
-The active source mirror showed partial DG/DGR glyphs from the selected plate through the existing capture path.
-Full mirror label readability remains unproved because the string was clipped or occluded.
-The controller restored production and observed ready=true with Start and Controls enabled, errors 0, and glErrors 0.
-The controller verified all 85 source/package/asset hash entries after restoration.
-Final screenshots include plate-lifecycle-resumed.png, plate-source-mirror-text-settled.png, and plate-final-production.png.
-
-## Portable flashlights, 2026-10-13
-
-Source: Steam build `11140890`, Unity `2021.3.18f1`. Branch: `codex/equipment`.
-The selected export includes the older active garage flashlight and the inactive newer scene object.
-The older controller starts OFF. The newer controller and body start disabled.
-The newer model has no gameplay acquisition route.
-
-The older source spot uses 0.85 intensity, a 12 m range, a 90 degree cone, and cookie 3.
-The newer source spot uses 1.5 intensity, a 15 m range, an 80 degree cone, and cookie 4.
-Both lights use source shadow strength 1, bias 0.05, normal bias 0.4, and near plane 0.2 m.
-The renderer keeps 34 light slots, 100 shadow slots, and the 4000 pixel source atlas.
-One 512 by 512 three-layer cookie array holds the prior custom cookie and both flashlight cookies.
-Normal, mirror, and plate materials share its checked array binding.
-
-Source storage uses mask `8388609`, a 1 second drop delay, and a scan interval above 1.5 seconds.
-The source locks a flashlight only when its collider appears in the preceding and current scans.
-The trunk and hood slots apply source restrictions. Storage types 5 and 7 cannot lock.
-Loading yields twice and runs three QuickFreeze passes. Only the first pass prescans.
-Readiness waits for all five frames, source lighting, plates, and three mirror targets.
-The runtime syncs wheel mass and item poses only when a storage frame changes ownership.
-The constructor sets initial poses before those loading frames.
-
-The user skipped further automated tests and assertions. Task 4 uses release builds and visible browser review.
-The corrected release build passed. WASM SHA-256: `216e4317410fa35e37d5c31664fe9573cb8d7d1e1eb9a711d9baba4106949d52`.
-JS SHA-256: `a6a58cad9b9e2df83c335255e6a6238f60da9a702c640bd075d04bb9e57be40e`.
-The current export manifest is `3e1914fe710147da8b7d39cc17518a78c8a5502ca9b94adbd96a49bfe33db7f2`.
-The source library stays at `92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99`.
-The model glTF is `015a25dfb58694d7ca8700b40886b6aa43165a186bbbf9251f88593432158191`.
-The 36-entry `.cache/equipment-checks/flashlight-final-fix-receipts.json` records code, models, cookies, and source shaders together.
-The ignored probe restore record is `.cache/equipment-checks/flashlight-lifecycle-stage-pairing.json`.
-The ignored lifecycle route labels scripted placement, fixed input, active physics, and the inactive-model prototype.
-Its reports use `.cache/equipment-checks/`; captures use the task visualization directory.
-In the labelled newer-model stage, the yellow and black model and a white wall beam were visible.
-The model root, body, and item pose matched `[37.781, 3.415, -69.666]`; the gameplay body stayed disabled.
-Two model meshes were visible. The garage startup still kept the newer item inactive.
-The captures are `flashlight-task3-new-model.png` and `flashlight-task3-new-beam.png` in the task visualization directory.
-The active mirror showed the reflected car, interior, and lighting. Its direct white beam detail was not readable.
-The prototype does not prove source-matched beam pixels, cone, cookie, or shadow shape.
-The first ready route had five models, 309 source materials, 137 images, 29 bound lights, and 257 mesh assets.
-It had 1,317 mesh entities and three mirror cameras. The backend retained 159 textures and 58 programs.
-The 11 target textures requested 82,268,768 bytes; 1,422 buffers requested 11,217,648 bytes.
-The targets included one 4000 by 4000 shadow atlas and three 256 by 256 RGBA8 mirror colors.
-Three 256 by 256 HDR intermediates came from Bevy. These byte counts describe requests, not driver memory.
-The mirror cache held 48 capture variants and 113 total pipeline IDs at first readiness.
-The startup queue skipped 1,826 unknown capture keys. That count stayed fixed during the observed ready interval.
-Three native restart cycles restored old/new OFF, the older World, newer inactive, mass 961.60004 kg, and origin zero.
-The matching garage snapshots after all three cycles kept the same model, material, image, light, mesh, buffer, target, and program counts.
-All three cycles kept 48 mirror variants, 113 total pipeline IDs, and the same unknown-key counter.
-Texture creation and deletion reached 186 and 27; 159 textures remained live.
-At 1024 by 576, live textures, programs, targets, and buffers stayed at 159, 58, 11, and 1,422.
-Requested target storage fell to 78,287,456 bytes. Buffer requests stayed at 11,217,648 bytes.
-At the restored 1280 by 720 size, requested target storage returned to 82,268,768 bytes.
-The six 256 by 256 mirror and HDR targets kept their size. Texture totals reached 192 created and 33 deleted.
-Live textures stayed at 159. Capture variants stayed at 48, pipeline IDs at 113, and unknown keys at 1,826.
-The visible startup had old OFF, newer OFF and inactive, and storage ready after its fifth frame.
-World E and held LMB selected old control 10. Held LMB changed ON to OFF to ON.
-Three scripted native carry steps changed the held item rotation. Competing world LMB changed only control 10.
-An actual drop stayed loose 0.45 seconds later in the earlier build.
-The earlier trunk lock and first-scan hood lock used an inverted overlap rule. These results are superseded.
-In the corrected build, an actual drop occurred at native clock `2.0162654` seconds.
-The first eligible scan ran after `1.5333319` seconds and found the torch in the current scan only.
-The torch stayed World. The next scan ran after `3.0166783` seconds and found it in both scans.
-That scan locked it to owner 27 in trunk volume 6.
-The probe held the loose body at the source trunk center during active physics.
-Its scripted pose hold kept the collider inside the volume across both scans.
-In a second drop, the early scan ran after `0.34999466` seconds with both memberships true.
-The torch stayed World until a later scan at age `1.8499718` seconds locked it.
-The native clock and storage scheduler advanced through resumed frames in both routes.
-The corrected trunk lock changed owner 27, collider parent, and chassis mass by 1 kg.
-The prior build checked trunk release, blocked type 5, allowed hood type 4, and origin shift.
-Those checks did not run again after the overlap fix.
-The corrected build rejected stored pickup with the old light ON and kept owner, body, collider parent, mass, and ON.
-Valid pickup restored Held, loose body 7, collider parent 7, mass `961.60004` kg, and ON.
-Held LMB changed OFF to ON once per press. Native restart returned both lights OFF and restored the starting item state.
-It reached storage readiness with origin zero and mass `961.60004` kg.
-The prior build kept its clock fixed during pause with the old light ON and item Held. Resume advanced physics.
-After corrected restart, the route retained five models, 309 materials, 137 images, 29 lights, and 257 mesh assets.
-It retained 1,317 mesh entities, three capture cameras, 48 capture variants, and 113 pipeline IDs.
-It kept 1,422 buffers, 159 textures, 58 programs, and 11 targets at 1280 by 720.
-The buffers requested 11,217,648 bytes; targets requested 82,268,768 bytes.
-The targets included one 4000-square shadow atlas and six 256-square mirror and HDR textures.
-The unknown capture-key count stayed at 1,826 during corrected play.
-The parent rehashed all 36 current receipts without mismatch.
-The restored corrected production route reached garage readiness with Start and Controls enabled and three mirror previews.
-It reported 387 capture draws, zero browser errors, and zero GL errors.
-The corrected captures are in the task visualization directory.
-The earlier scripted origin shift checked item ownership, physics, and the garage area. It does not prove full world streaming.
-These checks cannot prove trusted continuous input, exact native callback timing, or matched Unity pixels.
-
-## Equipment integration into master, 2026-10-13
-
-The merge joins equipment `b9749b7` with master `c924e89`.
-It retains both vehicles and the current rendering, audio, save, survival, and weather systems.
-The selected source export has two plate objects, two flashlight records, and eight storage volumes.
-The Lada plate slots remain empty. The checked Skoda plate objects retain their source targets.
-
-Flashlight feedback uses bit 2097152. Food and drink keep their existing bits.
-The shared light uniform has 42 entries and requests 16,368 bytes, below the 16 KiB limit.
-Stored item mass and collider flags use the actual parent vehicle.
-Plate glyphs use the current camera, lighting, sorting, and depth bindings in scene and mirror passes.
-Required sorting values come from the source renderer even when its editor glyph mesh is omitted.
-
-The browser check found two current renderer lifecycle faults during integration.
-Cube copies passed `TEXTURE_CUBE_MAP` as a framebuffer face and produced GL error 1280.
-Retained render copies now use native cube face bases and nearest texel centers for all three copy boundaries.
-New food scenes could become visible before source material conversion.
-They now stay hidden until every native mesh has its source material binding.
-
-Fresh source derivation, native contract validation, and the release build passed.
-The runtime manifest SHA-256 is `5a09eede8ca78fd95ded997ccabaf6c5e32d8c69e58941f1a147c236d3408963`.
-The WASM SHA-256 is `377b5f1102540c70b9d82101ad135378e5f404dacd3f360190a254f6109ac75b`.
-The JS SHA-256 is `8cf3aea78cd0b6dda377e8168225b91eab9449be5d6ef55760c6686f736f1173`.
-Command logs, source receipts, and browser records are in `.cache/equipment-merge/`.
-
-The final browser route reached readiness, New game, Save complete, and Game loaded.
-It reported zero browser errors and zero GL errors after each lifecycle change.
-The final draw-only observer uses no framebuffer readback or fault-consuming trace.
-The screenshot is `equipment-master-merged.png` in the task visualization directory.
-Automated tests and assertions were skipped under the user's instruction.
-These checks do not prove matched Unity pixels, trusted continuous input, or changed equipment ownership persistence.
+The full fix report remains at `.superpowers/sdd/2026-10-12-source-world/final-fix-report.md`.
+Earlier failed and intermediate logs remain historical evidence.
+No tests, simulations, captures, browser checks, or driving checks ran under the current user instruction.
+Runtime parity, memory plateau, long travel, restart, revisit, and rebase acceptance remain unverified.

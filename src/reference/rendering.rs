@@ -499,7 +499,10 @@ impl RenderingRecord {
                 .filter(|record| record.asset == asset.id)
                 .count();
             require(
-                count > 0 && (0..count as u32).all(|index| bindings.contains(&(asset.id, index))),
+                (count > 0 || asset.usage == super::AssetUsage::WorldPrototype)
+                    && (asset.usage != super::AssetUsage::WorldPrototype
+                        || count == asset.material_count as usize)
+                    && (0..count as u32).all(|index| bindings.contains(&(asset.id, index))),
                 "missing glTF material binding",
             )?;
         }
@@ -525,7 +528,18 @@ pub struct ShaderReference {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct LightingTextureChunk {
+    pub data: ResourceReference,
+    pub mip: u32,
+    pub row: u32,
+    pub width: u32,
+    pub rows: u32,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LightingTextureRecord {
+    #[serde(default)]
+    pub chunks: Vec<LightingTextureChunk>,
     pub mip_data: ResourceReference,
     pub source_data: ResourceReference,
     pub id: u32,

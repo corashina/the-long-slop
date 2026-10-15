@@ -18,6 +18,7 @@ use bevy::render::{
     extract_resource::{ExtractResource, ExtractResourcePlugin},
     render_resource::*,
 };
+use bevy::shader::ShaderCacheError;
 use bevy::{ecs as bevy_ecs, prelude::*, render as bevy_render};
 use std::{
     collections::{HashMap, HashSet},
@@ -1057,14 +1058,17 @@ fn queue_capture_meshes(
                         opaque_phase.update_cache(*visible_entity, None);
                         continue;
                     }
-                    let draw_function =
-                        if selected.type_id() == std::any::TypeId::of::<SourceMaterial>() {
-                            draw_opaque
-                                .read()
-                                .id::<super::source_lighting::DrawSourceMaterial>()
-                        } else {
-                            draw_opaque.read().id::<DrawMirrorMaterial>()
-                        };
+                    let draw_function = if selected.type_id()
+                        == std::any::TypeId::of::<SourceMaterial>()
+                        || selected.type_id()
+                            == std::any::TypeId::of::<super::materials::specular::SpecularMaterial>(
+                            ) {
+                        draw_opaque
+                            .read()
+                            .id::<super::source_lighting::DrawSourceMaterial>()
+                    } else {
+                        if [std::any::TypeId::of::<super::materials::terrain::TerrainMaterial>(),std::any::TypeId::of::<super::materials::impostor::ImpostorMaterial>(),std::any::TypeId::of::<super::materials::grass::material::GrassMaterial>()].contains(&selected.type_id()) {draw_opaque.read().id::<super::source_lighting::DrawSourceWorld>()} else {draw_opaque.read().id::<DrawMirrorMaterial>()}
+                    };
                     let batch_set_key = Opaque3dBatchSetKey {
                         pipeline: pipeline_id,
                         draw_function,
@@ -1091,14 +1095,17 @@ fn queue_capture_meshes(
                 }
                 // Alpha mask
                 RenderPhaseType::AlphaMask => {
-                    let draw_function =
-                        if selected.type_id() == std::any::TypeId::of::<SourceMaterial>() {
-                            draw_mask
-                                .read()
-                                .id::<super::source_lighting::DrawSourceMaterial>()
-                        } else {
-                            draw_mask.read().id::<DrawMirrorMaterial>()
-                        };
+                    let draw_function = if selected.type_id()
+                        == std::any::TypeId::of::<SourceMaterial>()
+                        || selected.type_id()
+                            == std::any::TypeId::of::<super::materials::specular::SpecularMaterial>(
+                            ) {
+                        draw_mask
+                            .read()
+                            .id::<super::source_lighting::DrawSourceMaterial>()
+                    } else {
+                        if [std::any::TypeId::of::<super::materials::terrain::TerrainMaterial>(),std::any::TypeId::of::<super::materials::impostor::ImpostorMaterial>(),std::any::TypeId::of::<super::materials::grass::material::GrassMaterial>()].contains(&selected.type_id()) {draw_mask.read().id::<super::source_lighting::DrawSourceWorld>()} else {draw_mask.read().id::<DrawMirrorMaterial>()}
+                    };
                     let batch_set_key = OpaqueNoLightmap3dBatchSetKey {
                         draw_function,
                         pipeline: pipeline_id,
@@ -1286,7 +1293,13 @@ fn finish_capture_frame(
     for id in &captures.sources {
         match pipelines.get_render_pipeline_state(*id) {
             CachedPipelineState::Ok(_) => {}
-            CachedPipelineState::Err(error) => {
+            CachedPipelineState::Err(error)
+                if !matches!(
+                    error,
+                    ShaderCacheError::ShaderNotLoaded(_)
+                        | ShaderCacheError::ShaderImportNotYetAvailable
+                ) =>
+            {
                 status.failure = Some(format!("Mirror capture pipeline: {error}"));
                 status.ready = false;
                 return;

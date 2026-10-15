@@ -1,4 +1,4 @@
-mod save;
+pub(crate) mod save;
 #[cfg(feature = "save-fixture")]
 mod save_fixture;
 use crate::browser::*;
@@ -8,7 +8,6 @@ use crate::presentation::{
     self,
     camera::{CameraMode, DriveCamera},
     reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
-    world::{ChunkVisual, WorldVisuals},
 };
 use crate::reference::{ItemId, OpeningId, ReferenceManifest};
 use crate::simulation::instruments::{InstrumentSample, InstrumentState};
@@ -131,7 +130,23 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
             presentation::source_lighting::SourceLightingPlugin,
             presentation::frame_graph::SourceFramePlugin,
             presentation::weather::SourceWeatherPlugin,
+            presentation::world::prototypes::SourcePrototypePlugin,
+            presentation::world::pipelines::WorldPipelinePlugin,
         ))
+        .init_resource::<presentation::save::CandidateImportedPoses>()
+        .init_resource::<presentation::world::SourceWorldVisuals>()
+        .init_resource::<presentation::world::instances::SourceInstances>()
+        .init_resource::<presentation::world::grass_jobs::GrassJobs>()
+        .init_resource::<presentation::world::runtime::SourcePresentationAllocation>()
+        .init_resource::<crate::world::metrics::browser::MeshMeasurements>()
+        .add_systems(
+            Last,
+            (
+                crate::world::metrics::browser::collect_mesh_bytes,
+                crate::world::metrics::browser::publish,
+            )
+                .chain(),
+        )
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -151,6 +166,7 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
                 presentation::lighting::sync_control_visuals,
                 update_camera,
                 presentation::frame_graph::sync_stack_cameras,
+                publish_loading,
                 update_hud,
             )
                 .chain(),
@@ -175,26 +191,17 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
 
 fn setup(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<presentation::materials::SourceMaterial>>,
+
     mut images: ResMut<Assets<Image>>,
     server: Res<AssetServer>,
     gltf_extensions: Res<bevy::gltf::extensions::GltfExtensionHandlers>,
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
 ) {
-    let mut visuals = WorldVisuals::new(&mut meshes, &mut materials);
-    visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
-    commands.insert_resource(visuals);
     commands.insert_resource(InstrumentVisuals::default());
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
-    presentation::materials::load_materials(
-        &mut commands,
-        &server,
-        &reference.0.rendering,
-        &reference.0.plates.material,
-    );
-    presentation::lighting::load_lighting(&mut commands, &server, &reference.0);
+    presentation::materials::load_materials(&mut commands, &server, &reference.0);
+    presentation::lighting::load_lighting(&mut commands, &server, &reference.0.lighting);
     presentation::lighting_assets::load_lighting(
         &mut commands,
         &server,
@@ -358,6 +365,9 @@ fn check_ready(
             if materials.state != presentation::materials::RenderingState::Ready {
                 return;
             }
+            if !drive.runtime.world_supported() || !drive.runtime.stream.window_ready() {
+                return;
+            }
             if !mirrors.ready() || !plates.ready() {
                 return;
             }
@@ -397,6 +407,13 @@ fn read_input(
     mut drive: ResMut<Drive>,
     requests: Res<save::SaveRequests>,
 ) {
+    let runtime = &drive.runtime;
+    let assists = runtime.driving_assists;
+    game_driving_state(
+        runtime.vehicles[runtime.vehicle].drivetrain.gear() as i32 - 1,
+        assists.automatic_clutch as u32 | ((assists.automatic_gears as u32) << 1),
+        runtime.area.player.driving(),
+    );
     let actions = game_actions();
     let frame = FrameInput {
         held: game_keys(),
@@ -426,6 +443,15 @@ fn read_input(
         drive.runtime.recover(&reference.0);
         drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
         clear_input(&mut drive);
+    }
+    let requested = game_driving_assists();
+    if requested & 4 != 0 && !requests.pending() {
+        let _ = drive
+            .runtime
+            .set_driving_assists(crate::reference::DrivingAssists {
+                automatic_clutch: requested & 1 != 0,
+                automatic_gears: requested & 2 != 0,
+            });
     }
     if !drive.ready || !drive.runtime.started || drive.runtime.paused {
         drive.input.clear();
@@ -499,20 +525,117 @@ fn advance_physics(
         presentation::interpolate(drive.previous, drive.current, drive.clock.alpha(scale));
 }
 fn sync_world(
-    drive: Res<Drive>,
-    mut visuals: ResMut<WorldVisuals>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut chunks: Query<(&ChunkVisual, &mut Transform)>,
+    reference: Res<RuntimeReference>,
+    mut drive: ResMut<Drive>,
+    mut presentation: presentation::world::runtime::WorldPresentation,
+    requests: Res<save::SaveRequests>,
+    camera: Query<(&Projection, &GlobalTransform), With<DriveCamera>>,
+    windows: Query<&Window>,
 ) {
-    visuals.sync(&drive.runtime.stream, &mut commands, &mut meshes);
-    for (chunk, mut transform) in &mut chunks {
-        let translation = Vec3::from_array(drive.runtime.stream.origin.local(chunk.0));
-        if transform.translation != translation {
-            transform.translation = translation;
+    if requests.freezes_world() {
+        return;
+    }
+    let Ok((projection, camera_transform)) = camera.single() else {
+        return;
+    };
+    let origin = drive.runtime.stream.origin;
+    let position = Vec3::from_array(
+        origin
+            .absolute(camera_transform.translation().to_array())
+            .map(|v| v as f32),
+    );
+    let source_from_runtime = Mat4::from_scale(Vec3::new(1., 1., -1.));
+    let mut camera_world = camera_transform.to_matrix();
+    camera_world.w_axis = position.extend(1.);
+    let clip = projection.get_clip_from_view() * camera_world.inverse() * source_from_runtime;
+    let rows = clip.transpose();
+    let planes = [
+        rows.w_axis + rows.x_axis,
+        rows.w_axis - rows.x_axis,
+        rows.w_axis + rows.y_axis,
+        rows.w_axis - rows.y_axis,
+    ]
+    .map(|p| p / p.truncate().length());
+    let view = presentation::materials::grass::GrassView {
+        position: position * Vec3::new(1., 1., -1.),
+        screen_height: windows.single().map_or(1., |w| w.physical_height() as f32),
+        clip_planes: planes,
+    };
+    let lod_view = presentation::world::lod::LodView {
+        position: camera_transform.translation(),
+        fov_degrees: reference.0.player.field_of_view_degrees,
+        ortho_size: match projection {
+            Projection::Orthographic(p) => Some(p.area.height() * 0.5),
+            _ => None,
+        },
+    };
+    let inverse_clip = (projection.get_clip_from_view() * camera_world.inverse()).inverse();
+    let mut min = Vec3::splat(f32::MAX);
+    let mut max = Vec3::splat(f32::MIN);
+    for x in [-1., 1.] {
+        for y in [-1., 1.] {
+            for z in [0.00001, 1.] {
+                let point = inverse_clip.project_point3(Vec3::new(x, y, z));
+                min = min.min(point);
+                max = max.max(point);
+            }
+        }
+    }
+    let mut receivers = [crate::world::WorldBounds {
+        min: min.to_array().map(|v| v as f64),
+        max: max.to_array().map(|v| v as f64),
+    }; 2];
+    let receiver_count = if let Some(bounds) = drive.runtime.stream.recovery_window() {
+        receivers[1] = bounds;
+        2
+    } else {
+        1
+    };
+    let runtime = &mut drive.runtime;
+    let enabled = runtime
+        .lighting
+        .road_lamp_output(&reference.0.lighting)
+        .enabled;
+    let result = presentation
+        .prepare(
+            &mut runtime.stream,
+            &reference.0,
+            &mut runtime.physics,
+            &mut runtime.area,
+            &mut runtime.wheels,
+            view,
+            runtime.lighting.cycle.output().shader_time_seconds as f32,
+            lod_view,
+            &receivers[..receiver_count],
+            enabled,
+        )
+        .and_then(|_| runtime.align_startup(&reference.0).map(|_| ()))
+        .and_then(|_| {
+            if runtime.has_deferred_save_links() {
+                runtime
+                    .advance_saved_restore(&reference.0)
+                    .map_err(|e| crate::reference::ReferenceError(e.to_string()))?;
+            }
+            runtime
+                .sync_world_activity(&reference.0)
+                .map_err(|e| crate::reference::ReferenceError(e.to_string()))?;
+            runtime.advance_recovery(&reference.0)
+        });
+    match result {
+        Ok(moved) => {
+            if moved {
+                drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
+                clear_input(&mut drive);
+            }
+        }
+        Err(error) => {
+            game_failure(&error.to_string());
+            drive.runtime.stream.fail(error);
+            drive.runtime.clear_input();
         }
     }
 }
+
 fn sync_imported(
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
@@ -531,10 +654,21 @@ fn sync_imported(
         ),
         Without<BodyVisual>,
     >,
-    mut caps: Query<(&CapVisual, &mut Transform), (Without<BodyVisual>, Without<ItemVisual>)>,
+    mut caps: Query<
+        (&CapVisual, &mut Transform),
+        (
+            Without<BodyVisual>,
+            Without<ItemVisual>,
+            Without<presentation::save::HiddenWorld>,
+        ),
+    >,
     mut visibility: Query<
         (&ValveVisibility, &mut Visibility),
-        (Without<BodyVisual>, Without<ItemVisual>),
+        (
+            Without<BodyVisual>,
+            Without<ItemVisual>,
+            Without<presentation::save::HiddenWorld>,
+        ),
     >,
 ) {
     presentation::reference::sync(
@@ -558,7 +692,10 @@ pub(crate) fn advance_tools(reference: Res<RuntimeReference>, mut drive: ResMut<
     let frame = crate::interaction::cleaning::ToolFrame {
         held: drive.runtime.area.interaction.held(),
         lmb: drive.tool_lmb,
-        active: drive.ready && drive.tool_delta_seconds > 0.,
+        active: drive.ready
+            && !drive.runtime.recovering
+            && drive.runtime.world_supported()
+            && drive.tool_delta_seconds > 0.,
         dt: drive.tool_delta_seconds,
         view: drive.rendered,
         origin: drive.runtime.stream.origin.offset,
@@ -634,6 +771,45 @@ fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveC
         *transform = active_camera(&drive);
     }
 }
+fn publish_loading(
+    drive: Res<Drive>,
+    visuals: Res<ReferenceVisuals>,
+    materials: Res<presentation::materials::SourceMaterials>,
+    lighting: Res<presentation::lighting::SourceLighting>,
+    source_lighting: Res<presentation::source_lighting::SourceLighting>,
+    mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
+    plates: Res<presentation::plates::PlateTextStatus>,
+    time: Res<Time<Real>>,
+    mut last: Local<f64>,
+) {
+    let now = time.elapsed_secs_f64();
+    if drive.ready || visuals.failed || now - *last < 0.5 {
+        return;
+    }
+    *last = now;
+    let stream = &drive.runtime.stream;
+    let rendering = visuals.bound
+        && materials.state == presentation::materials::RenderingState::Ready
+        && lighting.state == presentation::lighting::RenderingState::Ready
+        && source_lighting.state == presentation::materials::RenderingState::Ready
+        && mirrors.ready()
+        && plates.ready();
+    game_loading_progress(
+        stream.metrics().prepared_roads,
+        crate::world::ROAD_SEGMENTS,
+        rendering,
+        drive.runtime.world_supported() && stream.window_ready(),
+    );
+    for budget in stream.presentation_budgets(stream.presentation_allocation()) {
+        game_loading_budget(
+            budget.name,
+            budget.used as f64,
+            budget.limit as f64,
+            budget.unit,
+        );
+    }
+}
+
 fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let needs = drive.runtime.needs_output();
     game_survival(
@@ -680,7 +856,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         position[2],
         contacts,
         drive.frame_steps,
-        runtime.stream.chunks().count() as u32,
+        runtime.stream.frame().surfaces.len() as u32,
         runtime.physics.collider_count() as u32,
         absolute[0],
         absolute[1],
@@ -690,7 +866,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         origin[2],
         runtime.rebases,
         current.trip_m,
-        runtime.stream.lateral_band() as f64,
+        runtime.stream.metrics().prepared_roads as f64,
         fuel,
         runtime.paused,
         runtime.started,
@@ -730,7 +906,15 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     }
     let condition = available
         .item
-        .and_then(|id| runtime.area.conditions.item_quality(id))
+        .and_then(|id| {
+            runtime.area.conditions.item_quality(id).or_else(|| {
+                runtime
+                    .area
+                    .items
+                    .get(id)
+                    .and_then(|i| i.generated_condition)
+            })
+        })
         .unwrap_or(-1.0);
     let held = runtime.area.interaction.held();
     let notice = if !runtime.notice.is_empty() {

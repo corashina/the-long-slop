@@ -35,10 +35,9 @@ pub enum InstanceId {
     Initial {
         source: SourceKey,
     },
-    Station {
-        seed: String,
-        index: String,
-        role: String,
+    Generated {
+        #[serde(with = "lossless")]
+        id: crate::world::GeneratedId,
     },
 }
 impl InstanceId {
@@ -47,21 +46,12 @@ impl InstanceId {
             source: source.into(),
         }
     }
-    pub fn station(&self) -> Result<(u64, i64), SaveError> {
-        match self {
-            Self::Station { seed, index, role } if role == "pump" => {
-                Ok((unsigned(seed)?, signed(index)?))
-            }
-            _ => Err(SaveError::InvalidLinks(
-                "Unknown station role or identity".into(),
-            )),
-        }
-    }
 }
 
 /// Reference types have separate maps because source objects can have several roles.
 pub struct IdentityMap {
     pub items: HashMap<SourceKey, ItemId>,
+    pub generated: HashMap<crate::world::GeneratedId, ItemId>,
     pub bodies: HashMap<SourceKey, BodyId>,
     pub nodes: HashMap<SourceKey, NodeId>,
     pub anchors: HashMap<SourceKey, AnchorId>,
@@ -77,6 +67,7 @@ pub struct IdentityMap {
 impl IdentityMap {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, SaveError> {
         Ok(Self {
+            generated: HashMap::new(),
             items: index(reference.items.iter().map(|r| (&r.source, r.id)))?,
             bodies: index(reference.bodies.iter().map(|r| (&r.source, r.id)))?,
             nodes: index(reference.nodes.iter().map(|r| (&r.source, r.id)))?,
@@ -101,7 +92,18 @@ impl IdentityMap {
                 .collect(),
         })
     }
+    pub fn bind_generated(&mut self, items: &crate::interaction::items::ItemStore) {
+        self.generated.clear();
+        self.generated.extend(
+            items
+                .generated_bindings()
+                .map(|(key, item)| (key.clone(), item.id)),
+        );
+    }
     pub fn item_instance(&self, id: ItemId) -> Result<InstanceId, SaveError> {
+        if let Some((key, _)) = self.generated.iter().find(|(_, value)| **value == id) {
+            return Ok(InstanceId::Generated { id: key.clone() });
+        }
         Ok(InstanceId::Initial {
             source: source_key(&self.items, id)?,
         })
@@ -113,9 +115,11 @@ impl IdentityMap {
                 .get(source)
                 .copied()
                 .ok_or_else(|| SaveError::InvalidLinks(format!("Unknown item {source:?}"))),
-            InstanceId::Station { .. } => Err(SaveError::InvalidLinks(
-                "Station item needs a generated runtime binding".into(),
-            )),
+            InstanceId::Generated { id } => {
+                self.generated.get(id).copied().ok_or_else(|| {
+                    SaveError::InvalidLinks("Generated item binding is pending".into())
+                })
+            }
         }
     }
 }
@@ -157,4 +161,65 @@ pub(crate) fn unsigned(value: &str) -> Result<u64, SaveError> {
         .ok()
         .filter(|number| number.to_string() == value)
         .ok_or_else(|| SaveError::InvalidLinks("Invalid unsigned decimal identity".into()))
+}
+
+/// Browser storage parses and stringifies JSON. Source i64 identities use decimal strings.
+pub(crate) mod lossless {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::DeserializeOwned};
+    use serde_json::Value;
+    fn convert(value: &mut Value, encode: bool) -> Result<(), String> {
+        match value {
+            Value::Array(values) => {
+                for value in values {
+                    convert(value, encode)?;
+                }
+            }
+            Value::Object(fields) => {
+                for (name, value) in fields {
+                    if name == "path_id" {
+                        scalar(value, encode)?;
+                    } else if name == "unit" {
+                        let values = value.as_array_mut().ok_or("Invalid generated unit")?;
+                        for value in values {
+                            scalar(value, encode)?;
+                        }
+                    } else {
+                        convert(value, encode)?;
+                    }
+                }
+            }
+            _ => (),
+        }
+        Ok(())
+    }
+    fn scalar(value: &mut Value, encode: bool) -> Result<(), String> {
+        if encode {
+            *value = Value::String(value.as_i64().ok_or("Invalid source integer")?.to_string());
+        } else {
+            let text = value
+                .as_str()
+                .ok_or("Source identity must be a decimal string")?;
+            let number = text.parse::<i64>().map_err(|_| "Invalid source integer")?;
+            if number.to_string() != text {
+                return Err("Noncanonical source integer".into());
+            }
+            *value = Value::Number(number.into());
+        }
+        Ok(())
+    }
+    pub fn serialize<T: Serialize, S: Serializer>(
+        value: &T,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut value = serde_json::to_value(value).map_err(serde::ser::Error::custom)?;
+        convert(&mut value, true).map_err(serde::ser::Error::custom)?;
+        value.serialize(serializer)
+    }
+    pub fn deserialize<'de, T: DeserializeOwned, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<T, D::Error> {
+        let mut value = Value::deserialize(deserializer)?;
+        convert(&mut value, false).map_err(serde::de::Error::custom)?;
+        serde_json::from_value(value).map_err(serde::de::Error::custom)
+    }
 }
