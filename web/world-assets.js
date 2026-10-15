@@ -38,20 +38,22 @@ export async function readAsset(base,receipt,signal){
  const url=assetUrl(base,receipt.file);let received=0;
  try{
   const response=await fetch(url,{signal});
-  if(!response.ok)throw Error('Asset HTTP '+response.status+': '+receipt.file);
-  const declared=response.headers.get('content-length');
-  if(declared!==null&&(!/^\d+$/.test(declared)||Number(declared)!==receipt.bytes)){
-   await response.body?.cancel();throw Error('Asset declared size differs: '+receipt.file);
-  }
-  if(!response.body)throw Error('Missing asset body.');
-  const bytes=new Uint8Array(receipt.bytes),reader=response.body.getReader();let length=0;
+  let bytes,reader,length=0;
   try{
+   if(!response.ok)throw Error('Asset HTTP '+response.status+': '+receipt.file);
+   const declared=response.headers.get('content-length');
+   if(declared!==null&&(!/^\d+$/.test(declared)||Number(declared)!==receipt.bytes))throw Error('Asset declared size differs: '+receipt.file);
+   if(!response.body)throw Error('Missing asset body.');
+   bytes=new Uint8Array(receipt.bytes);reader=response.body.getReader();
    for(;;){const {done,value}=await reader.read();if(done)break;
     received+=value.byteLength;
     if(value.byteLength>receipt.bytes-length)throw Error('Asset length exceeds receipt: '+receipt.file);
     bytes.set(value,length);length+=value.byteLength;
    }
-  }finally{await reader.cancel();reader.releaseLock();}
+  }finally{
+   if(reader){try{await reader.cancel();}finally{reader.releaseLock();}}
+   else await response.body?.cancel();
+  }
   if(length!==receipt.bytes)throw Error('Asset length differs: '+receipt.file);
   const digest=await crypto.subtle.digest('SHA-256',bytes);
   const hash=Array.from(new Uint8Array(digest),v=>v.toString(16).padStart(2,'0')).join('');

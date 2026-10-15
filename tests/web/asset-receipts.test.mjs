@@ -51,3 +51,23 @@ test('large audio receipts keep their declared bound outside world staging',asyn
  t.mock.method(globalThis,'fetch',async()=>new Response(new Uint8Array(2),{headers:{'Content-Length':'2'}}));
  await assert.rejects(readAsset('./assets/runtime/package/',large),/declared size differs/);
 });
+
+test('response failures retain ownership until physical cancellation completes',async t=>{
+ const entry=receipt('reference/selected.bin',new Uint8Array(2));
+ for(const [options,message] of [[{status:503},/HTTP 503/],[{headers:{'Content-Length':'3'}},/declared size/]]){
+  let finishCancel,cancelStarted=false,settled=false;
+  const cancelled=new Promise(resolve=>{finishCancel=resolve;});
+  t.mock.method(globalThis,'fetch',async()=>new Response(new ReadableStream({
+   start(controller){controller.enqueue(new Uint8Array(2));},
+   cancel(){cancelStarted=true;return cancelled;},
+  }),options));
+  const pending=readAsset('./assets/runtime/package/',entry).finally(()=>{settled=true;});
+  const failure=assert.rejects(pending,message);
+  try{
+   await new Promise(resolve=>setImmediate(resolve));
+   assert.equal(cancelStarted,true,'failure must cancel the response body');
+   assert.equal(settled,false,'ownership must remain until physical cancellation completes');
+  }finally{finishCancel();await failure;}
+  assert.equal(settled,true);
+ }
+});
