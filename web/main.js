@@ -36,12 +36,18 @@ window.gameMeasurements=json=>{
  for(const resolve of measurementWaiters.splice(0))resolve(snapshot);
 };
 let input,survival,dead=false,sleeping=false,audio,menu,feedback,failed=false,worldAdmitted=false,actions=0,frame,renderFailure;
+const inventory={selected:0,slots:[0,0,0,0],progress:0};
+window.gameInventory=(selected,a,b,c,d,progress)=>{
+ inventory.selected=selected;inventory.slots[0]=a;inventory.slots[1]=b;inventory.slots[2]=c;inventory.slots[3]=d;inventory.progress=progress;
+ window.gameState.inventory=inventory;feedback?.inventory(inventory);
+};
 const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',condition:-1,held:'',throwCharge:0,throwActive:false,radioVolume:undefined,radioFrequency:undefined,radioAm:false,quantities:[0,0,0,0,0,0]};
 const settleSave=window.gameSaveResult;
 window.gameSaveResult=(id,kind,payload,error)=>{
  if(kind==='Commit'&&!error){input.clear();actions=0;}
  settleSave(id,kind,payload,error);
 };
+window.gameInventoryKeys=()=>frame.inventoryHeld|(frame.inventoryReleased<<4);
 window.gameKeys=()=>{frame=input.takeFrame();return frame.held;};
 window.gamePressed=()=>frame.pressed;window.gameReleased=()=>frame.released;
 window.gameMouseX=()=>frame.mouseX;window.gameMouseY=()=>frame.mouseY;window.gameWheel=()=>frame.wheel;
@@ -126,7 +132,7 @@ async function load(){
  menu=createMenu({canvas,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,audio,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  const switchIconUrl='./assets/'+manifest.lighting.switch_icon.path;
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
- feedback=createFeedback(manifest.ui,switchIconUrl);
+ feedback=createFeedback(manifest.ui,switchIconUrl,manifest);
  admitWorldAssets(manifest);worldAdmitted=true;
  if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
  run(bytes,manifestHash);

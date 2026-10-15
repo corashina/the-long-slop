@@ -591,85 +591,95 @@ impl WeatherReference {
                     )?;
                 }
             }
-            check(p.materials.len() == 1, "materials")?;
-            let material = &p.materials[0];
-            check(
-                material.textures.iter().any(|t| t.property == "_MainTex"),
-                "materials.textures._MainTex",
-            )?;
-            let tint = if material.shader.name == "Legacy Shaders/Particles/Alpha Blended" {
-                "_TintColor"
-            } else {
-                "_Color"
-            };
-            check(
-                material.colors.get(tint).is_some_and(|v| finite(v)),
-                &format!("materials.colors.{tint}"),
-            )?;
-            for (name, c) in &p.curves {
-                check(
-                    (c.mode != 1 && c.mode != 2 || !c.max_curve.keys.is_empty())
-                        && (c.mode != 2 || !c.min_curve.keys.is_empty()),
-                    name,
-                )?;
-            }
+            p.validate_data(2)?;
+        }
+        Ok(())
+    }
+}
 
-            require(
-                p.capacity > 0
-                    && p.capacity <= 1_000_000
-                    && p.scalars.get("InitialModule.maxNumParticles") == Some(&(p.capacity as f32)),
-                "particle capacity",
+impl ParticleReference {
+    pub fn validate_data(&self, simulation_space: u8) -> Result<(), ReferenceError> {
+        let p = self;
+        let check =
+            |valid: bool, field: &str| require(valid, &format!("particle {} {field}", p.role));
+        require(
+            p.capacity > 0
+                && p.capacity <= 1_000_000
+                && p.scalars.get("InitialModule.maxNumParticles") == Some(&(p.capacity as f32)),
+            "particle capacity",
+        )?;
+        require(
+            finite(&[p.rate_over_time, p.rate_over_distance, p.duration])
+                && p.rate_over_time >= 0.
+                && p.rate_over_distance >= 0.
+                && p.duration > 0.
+                && p.simulation_space == simulation_space
+                && transform(&p.local_pose),
+            "particle rates",
+        )?;
+        require(
+            p.module_flags.get("InitialModule") == Some(&true)
+                && p.curves.contains_key("InitialModule.startLifetime")
+                && !p.materials.is_empty(),
+            "particle modules",
+        )?;
+        for (name, value) in &p.scalars {
+            check(value.is_finite(), name)?;
+        }
+        for (name, value) in &p.vectors {
+            check(finite(value), name)?;
+        }
+        for (name, c) in &p.curves {
+            check(
+                c.mode <= 3
+                    && finite(&[c.scalar, c.min_scalar])
+                    && curve_valid(&c.min_curve)
+                    && curve_valid(&c.max_curve),
+                name,
             )?;
-            require(
-                finite(&[p.rate_over_time, p.rate_over_distance, p.duration])
-                    && p.rate_over_time >= 0.
-                    && p.rate_over_distance >= 0.
-                    && p.duration > 0.
-                    && p.simulation_space == 2
-                    && transform(&p.local_pose),
-                "particle rates",
+        }
+        for (name, c) in &p.colors {
+            check(
+                c.mode <= 4
+                    && finite(&c.min_color)
+                    && finite(&c.max_color)
+                    && gradient_valid(&c.min_gradient)
+                    && gradient_valid(&c.max_gradient),
+                name,
             )?;
-            require(
-                p.module_flags.get("InitialModule") == Some(&true)
-                    && p.curves.contains_key("InitialModule.startLifetime")
-                    && !p.materials.is_empty(),
-                "particle modules",
+        }
+        check(p.materials.len() == 1, "materials")?;
+        let material = &p.materials[0];
+        check(
+            material.textures.iter().any(|t| t.property == "_MainTex"),
+            "materials.textures._MainTex",
+        )?;
+        let tint = if material.shader.name == "Legacy Shaders/Particles/Alpha Blended" {
+            "_TintColor"
+        } else {
+            "_Color"
+        };
+        check(
+            material.colors.get(tint).is_some_and(|v| finite(v)),
+            &format!("materials.colors.{tint}"),
+        )?;
+        for (name, c) in &p.curves {
+            check(
+                (c.mode != 1 && c.mode != 2 || !c.max_curve.keys.is_empty())
+                    && (c.mode != 2 || !c.min_curve.keys.is_empty()),
+                name,
             )?;
-            for (name, value) in &p.scalars {
-                check(value.is_finite(), name)?;
-            }
-            for (name, value) in &p.vectors {
-                check(finite(value), name)?;
-            }
-            for (name, c) in &p.curves {
-                check(
-                    c.mode <= 3
-                        && finite(&[c.scalar, c.min_scalar])
-                        && curve_valid(&c.min_curve)
-                        && curve_valid(&c.max_curve),
-                    name,
-                )?;
-            }
-            for (name, c) in &p.colors {
-                check(
-                    c.mode <= 4
-                        && finite(&c.min_color)
-                        && finite(&c.max_color)
-                        && gradient_valid(&c.min_gradient)
-                        && gradient_valid(&c.max_gradient),
-                    name,
-                )?;
-            }
-            for l in &p.limits {
-                require(
-                    l.source == p.source
-                        && (p.module_flags.get(&l.module) == Some(&true)
-                            || l.module == "material.soft_particles"
-                            || l.module == "material.distortion")
-                        && !l.visible_effect.is_empty(),
-                    "particle limit",
-                )?;
-            }
+        }
+
+        for l in &p.limits {
+            require(
+                l.source == p.source
+                    && (p.module_flags.get(&l.module) == Some(&true)
+                        || l.module == "material.soft_particles"
+                        || l.module == "material.distortion")
+                    && !l.visible_effect.is_empty(),
+                "particle limit",
+            )?;
         }
         Ok(())
     }

@@ -204,7 +204,10 @@ impl GarageRuntime {
             .interaction
             .cleaning
             .restore_save(reference, &saved.conditions.tools)?;
-        candidate.area.items.restore_save(&ids, &saved.items)?;
+        candidate
+            .area
+            .items
+            .restore_save(&ids, &saved.items, reference)?;
         candidate
             .wheels
             .refresh_conditions(&candidate.area.conditions, &candidate.area.items);
@@ -230,7 +233,20 @@ impl GarageRuntime {
             .interaction
             .sync_parts(&mut candidate.area.items, &mut candidate.physics)?;
         // Assembly setup may change local poses. The snapshot owns their saved frames.
-        candidate.area.items.restore_save(&ids, &saved.items)?;
+        candidate
+            .area
+            .items
+            .restore_save(&ids, &saved.items, reference)?;
+        candidate.area.inventory.selected = saved.inventory.selected;
+        for (slot, instance) in candidate
+            .area
+            .inventory
+            .slots
+            .iter_mut()
+            .zip(&saved.inventory.slots)
+        {
+            *slot = instance.as_ref().map(|id| ids.item(id)).transpose()?;
+        }
         candidate.stream.restore_save(&saved.world)?;
         candidate.stream.origin.offset = saved.player.pose.position;
         candidate.area.sync_origin(candidate.stream.origin.offset);
@@ -266,7 +282,10 @@ impl GarageRuntime {
         candidate
             .wheels
             .sync(&mut candidate.area.items, &mut candidate.physics)?;
-        candidate.area.items.restore_save(&ids, &saved.items)?;
+        candidate
+            .area
+            .items
+            .restore_save(&ids, &saved.items, reference)?;
         candidate.area.items.sync_poses(&candidate.physics);
         // Rapier defers collider and additional-mass updates until a step or recomputation.
         // Commit them while paused, before restoring motion and sleep.
@@ -335,6 +354,30 @@ impl GarageRuntime {
                 &mut candidate.physics,
             )?;
         }
+        if let Some(instance) = &saved.inventory.equipped {
+            let id = ids.item(instance)?;
+            candidate.area.interaction.equipment.retrieve(
+                id,
+                &mut candidate.area.items,
+                &mut candidate.physics,
+            );
+        }
+        let starter = reference.survival.starter_food;
+        if candidate.area.items.get(starter).is_some_and(|i| i.removed) {
+            candidate.area.items.get_mut(starter).unwrap().removed = false;
+            candidate.remove_consumable(starter)?;
+        } else {
+            super::survival::sync_consumable_colliders(
+                reference,
+                &candidate.area,
+                &mut candidate.physics,
+                starter,
+            );
+        }
+        candidate
+            .area
+            .sync_equipment(reference, &mut candidate.physics);
+        candidate.area.items.sync_poses(&candidate.physics);
         candidate.vehicle = ids
             .vehicles
             .iter()
@@ -475,6 +518,7 @@ impl GarageRuntime {
             },
             driving_assists: self.driving_assists,
             schema_version: SAVE_SCHEMA_VERSION,
+            inventory: self.area.capture_inventory(&ids)?,
             saved_at: saved_at.into(),
             source: source.clone(),
             world,
@@ -581,6 +625,8 @@ impl StartingArea {
                 item.location,
                 crate::interaction::items::ItemLocation::World
                     | crate::interaction::items::ItemLocation::Held
+                    | crate::interaction::items::ItemLocation::Stored(_)
+                    | crate::interaction::items::ItemLocation::Equipped
             ) {
                 continue;
             }

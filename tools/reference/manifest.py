@@ -17,10 +17,10 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     assets=[]
     for asset_id,(name,readers) in enumerate(roots.items(),1):
         report=reports[name]
-        assets.append({'id':asset_id,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'food_prototype' if name=='food' else 'road_lamp_prototype' if name=='road_lamp' else 'sky_prototype' if name=='sky' else 'unique_scene','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
+        assets.append({'id':asset_id,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'player_prototype' if name=='player' else 'item_prototype' if name.startswith('item_') else 'food_prototype' if name=='food' else 'road_lamp_prototype' if name=='road_lamp' else 'sky_prototype' if name=='sky' else 'unique_scene','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(readers[0]),'dependencies':report['dependencies']})
         records=[]
         for root in readers:records.extend(source.hierarchy(root,activate_root=True))
-        for entry,record in zip(report['nodes'],records):
+        for entry,record in zip(report['nodes'],records,strict=True):
             identity=key(record['reader']);node_id=len(nodes)+1
             if identity in by_source:raise ValueError(f'Duplicate node identity: {identity}')
             by_source[identity]=node_id;node_readers[node_id]=record['reader'];objects[node_id]=record

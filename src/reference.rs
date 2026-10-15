@@ -38,7 +38,15 @@ pub mod plates;
 pub use plates::*;
 pub mod mirrors;
 pub use mirrors::*;
+pub mod clothing;
+pub use clothing::*;
+pub mod item_prototypes;
+pub use item_prototypes::*;
+pub mod acquisition;
+pub use acquisition::*;
+pub mod inventory;
 pub mod survival;
+pub use inventory::*;
 pub mod weather;
 pub use survival::*;
 pub use weather::*;
@@ -107,6 +115,9 @@ pub enum AssetUsage {
     FoodPrototype,
     WorldPrototype,
     WorldMaterial,
+    ItemPrototype,
+    PlayerPrototype,
+    StationPrototype,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -369,6 +380,16 @@ pub struct PickupReference {
     pub use_recenter_rotation: bool,
     pub recenter_rotation: [f32; 4],
     pub recenter_distance: f32,
+    pub can_inventory: bool,
+    pub can_hold_right_hand: bool,
+    pub disable_rh_fix: bool,
+    pub right_hand_position: [f32; 3],
+    pub right_hand_rotation: [f32; 4],
+    pub right_hand_grip: Option<SourceId>,
+    pub left_hand_grip: Option<SourceId>,
+    pub disable_when_stored: Option<SourceId>,
+    pub keep_when_stored: Option<SourceId>,
+    pub inventory_icon: Option<SourceId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -817,6 +838,10 @@ pub const MAX_MANIFEST_BYTES: usize = 256 * 1024 * 1024;
 pub struct ReferenceManifest {
     pub conditions: ConditionRecord,
     pub driving: DrivingReference,
+    pub clothing: ClothingReference,
+    pub item_prototypes: Vec<ItemPrototype>,
+    pub inventory: InventoryReference,
+    pub acquisition: AcquisitionReference,
     pub audio: serde_json::Value,
     pub survival: SurvivalReference,
     pub sleep: SleepReference,
@@ -929,6 +954,14 @@ impl ReferenceManifest {
     fn validate_gameplay(&self) -> Result<(), ReferenceError> {
         self.driving.validate(self)?;
         require(
+            self.assets
+                .iter()
+                .filter(|a| a.usage == AssetUsage::PlayerPrototype)
+                .count()
+                == 1,
+            "exactly one inactive player asset",
+        )?;
+        require(
             self.library.schema_version == 1
                 && hash(&self.library.manifest_sha256)
                 && hash(&self.library.catalog_sha256)
@@ -944,6 +977,13 @@ impl ReferenceManifest {
         self.mirrors.validate(self)?;
         self.render_lighting.validate(&self.nodes)?;
         self.survival.validate(self)?;
+        for food in &self.survival.foods {
+            food.pickup.validate_links(self, food.asset)?;
+        }
+        self.clothing.validate(self)?;
+        self.inventory.validate(self)?;
+        self.acquisition.validate(self)?;
+        item_prototypes::validate_prototypes(self)?;
         AudioGameplayReference::from_value(&self.audio)?;
         self.sleep.validate(self)?;
         self.weather.validate(self)?;
@@ -1330,6 +1370,13 @@ impl ReferenceManifest {
         }
         for item in &self.items {
             if let Some(pickup) = &item.pickup {
+                let asset = self
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == item.node)
+                    .ok_or_else(|| ReferenceError("pickup node".into()))?
+                    .asset;
+                pickup.validate_links(self, asset)?;
                 require(
                     finite(&pickup.recenter_position)
                         && finite(&pickup.recenter_rotation)

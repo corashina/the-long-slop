@@ -362,7 +362,13 @@ impl PersistentWorld {
                         .items
                         .get(id)
                         .filter(|item| {
-                            matches!(item.location, ItemLocation::World | ItemLocation::Held)
+                            matches!(
+                                item.location,
+                                ItemLocation::World
+                                    | ItemLocation::Held
+                                    | ItemLocation::Stored(_)
+                                    | ItemLocation::Equipped
+                            )
                         })
                         .and_then(|item| item.body),
                 };
@@ -405,8 +411,15 @@ impl PersistentWorld {
                     .items
                     .iter()
                     .any(|item| item.body == Some(handle) && item.pending_attachment);
+                let inventory = area.inventory_body(handle);
+                let stored = matches!(inventory, Some(ItemLocation::Stored(_)));
                 let active = if pending_attachment {
                     false
+                } else if matches!(
+                    inventory,
+                    Some(ItemLocation::Stored(_) | ItemLocation::Equipped | ItemLocation::Held)
+                ) {
+                    true
                 } else if let Some(parent) = parent {
                     area.bodies
                         .get(&parent)
@@ -449,6 +462,9 @@ impl PersistentWorld {
                         {
                             item.inactive_pose = None;
                         }
+                    }
+                    if stored {
+                        physics.rapier_mut().bodies[handle].set_enabled(false);
                     }
                 } else if physics.body_active(handle) {
                     changed = true;

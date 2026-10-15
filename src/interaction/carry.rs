@@ -216,6 +216,9 @@ impl CarryState {
             })
             .transpose()
     }
+    pub(super) fn rule(&self, id: ItemId) -> Option<&PickupReference> {
+        self.rules.get(&id)
+    }
     pub fn held(&self) -> Option<ItemId> {
         self.held.as_ref().map(|held| held.item)
     }

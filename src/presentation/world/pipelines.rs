@@ -7,8 +7,7 @@ use bevy::{
     ecs as bevy_ecs,
     material::key::{ErasedMaterialPipelineKey, ErasedMeshPipelineKey},
     pbr::{
-        MeshPipelineKey, PreparedMaterial, ViewKeyCache, alpha_mode_pipeline_key,
-        base_specialize,
+        MeshPipelineKey, PreparedMaterial, ViewKeyCache, alpha_mode_pipeline_key, base_specialize,
     },
     prelude::*,
     render as bevy_render,
@@ -441,7 +440,9 @@ fn compile(world: &mut World) {
                 {
                     match result {
                         Ok(value) => {
-                            if !value { waiting = "caster pipeline"; }
+                            if !value {
+                                waiting = "caster pipeline";
+                            }
                             ready &= value;
                         }
                         Err(error) => {
@@ -456,7 +457,9 @@ fn compile(world: &mut World) {
                 {
                     match result {
                         Ok(value) => {
-                            if !value { waiting = "surface pipeline"; }
+                            if !value {
+                                waiting = "surface pipeline";
+                            }
                             ready &= value;
                         }
                         Err(error) => {

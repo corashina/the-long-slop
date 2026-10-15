@@ -89,6 +89,8 @@ def runtime_resources(manifest):
     collect(manifest.get('lighting', {}))
     collect(manifest.get('weather', {}))
     collect(manifest.get('conditions', {}))
+    collect(manifest.get('clothing', {}))
+    for p in manifest.get('item_prototypes',[]):collect(p.get('consumable'))
     for item in manifest.get('render_lighting', {}).get('dependencies', []):
         collect({'path':item['file'],'sha256':item['sha256']})
     world=manifest.get('world', {})
@@ -134,7 +136,8 @@ def validate_runtime_paths(manifest):
     world = manifest.get('world')
     if not world or not world.get('prototypes'):
         raise ValueError('Missing required source world dependency')
-    expected = {f'reference/{name}.gltf' for name in ('home',*CARS,'items','road_lamp','sky','food')}
+    from .item_prototypes import SELECTED
+    expected = {f'reference/{name}.gltf' for name in ('home',*CARS,'items','road_lamp','sky','food','player',*(p[3] for p in SELECTED))}
     prototype_ids={p['asset'] for p in world['prototypes']}
     material_ids={p['asset'] for p in world['painting_materials']}
     expected.update(a['path'] for a in manifest['assets'] if a['id'] in material_ids and a['usage']=='world_material')
@@ -201,6 +204,8 @@ def verify_reference(output: Path, library) -> None:
         raise ValueError('Missing or mismatched runtime library provenance')
     if manifest['library']['schema_version'] != 1 or any(not re.fullmatch('[0-9a-f]{64}', manifest['library'][k]) for k in ('manifest_sha256','catalog_sha256','source_manifest_sha256')):
         raise ValueError('Unsupported runtime provenance')
+    from .acquisition import validate_acquisition
+    validate_acquisition(manifest['acquisition'], manifest)
     validate_runtime_manifest(content)
     validate_runtime_paths(manifest)
     selection=json.loads((output/'library-selection.json').read_bytes())
@@ -229,6 +234,8 @@ def verify_reference(output: Path, library) -> None:
         if not required <= declared or declared - required - resources:
             raise ValueError('Runtime scene dependencies differ from selected receipts')
         validate_gltf(scene)
+    from .clothing import validate_player_export
+    validate_player_export(manifest['clothing'],manifest,output)
     for sprite in [*manifest.get('ui', {}).get('sprites', []), *manifest.get('audio', {}).get('clips', [])]:
         name = sprite['path'].removeprefix('reference/')
         path = output / name
@@ -310,8 +317,12 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     roots['sky']=[clouds]
     roots['food']=food_roots
     source.lighting_prototype_roots.update(key(root) for root in food_roots)
+    from .item_prototypes import prepare_item_prototypes, recover_item_prototypes, validate_item_prototypes
+    prepare_item_prototypes(source, roots)
     recover_survival(source,roots,output)
     recover_weather(source,output)
+    roots['player']=[source.get('level1',39843)]
+    source.lighting_prototype_roots.add(('level1',39843))
     report = {}
     for name, readers in roots.items():
         report[name] = export_gltf((source,readers),output/f'{name}.gltf',library,list(roots).index(name)+1,name!='sky')
@@ -337,20 +348,31 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     (output/'mirror-evidence.json').write_text(json.dumps(mirror_source_evidence(source,manifest['mirrors']),indent=2,allow_nan=False),encoding='utf-8')
     from .world import recover_world
     from .manifest import attach_world
-    attach_world(manifest,recover_world(source,library,output))
+    attach_world(manifest,recover_world(source,library,output,len(manifest['assets'])+1))
     report['world']=[{'source':p['source'],'asset':p['asset'],'node_count':len(p['nodes']),'body_count':len(p['bodies']),'collider_count':len(p['colliders']),'control_count':len(p['controls']),'skin_bone_counts':[len(s['bones']) for s in p['skins']]} for p in manifest['world']['prototypes']]
     (output/'geometry-evidence.json').write_text(json.dumps(report,indent=2,allow_nan=False),encoding='utf-8')
     (output/'material-evidence.json').write_text(json.dumps(list(source.material_evidence.values()),indent=2,allow_nan=False),encoding='utf-8')
     manifest['library']=provenance(library.receipt)
+    from .inventory import recover_inventory
+    manifest['inventory'] = recover_inventory(source, manifest)
     bind_survival(source,manifest)
     bind_weather(source,manifest)
+    manifest['item_prototypes'] = recover_item_prototypes(source, manifest, output)
+    from .clothing import recover_clothing,validate_clothing
+    manifest['clothing'] = recover_clothing(source,manifest,output)
+    manifest['lighting']['textures']=list(source.lighting_textures.values())
     resources={entry['file'] for entry in manifest['assets'][0]['dependencies']}
     manifest['assets'][0]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in runtime_resources(manifest) if r['path'] not in resources)
     manifest['ui']=export_ui(source,output,library)
     for index,name in enumerate(CARS):
         manifest['vehicles'][index]['instruments']=recover_instruments(source,manifest,report,name,roots[name][0])
-    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if name not in CARS or name == 'lada'},manifest,library,output)
+    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if (name not in CARS or name == 'lada') and not name.startswith('item_') and name!='player'},manifest,library,output)
     bind_condition_audio(manifest['conditions'],manifest['audio'])
+    from .acquisition import recover_acquisition, validate_acquisition
+    manifest['acquisition'] = recover_acquisition(source, manifest)
+    validate_acquisition(manifest['acquisition'], manifest)
+    validate_item_prototypes(manifest['item_prototypes'], manifest)
+    validate_clothing(manifest['clothing'],manifest)
     evidence=json.loads((output/'conditions-evidence.json').read_bytes())
     evidence['conditions']=manifest['conditions']
     (output/'conditions-evidence.json').write_text(json.dumps(evidence,indent=2,allow_nan=False),encoding='utf-8')

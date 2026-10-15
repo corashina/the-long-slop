@@ -47,6 +47,8 @@ pub struct FrameInput {
     pub held: u32,
     pub pressed: u32,
     pub released: u32,
+    pub inventory_held: u8,
+    pub inventory_released: u8,
     pub mouse: [f32; 2],
     pub wheel: f32,
 }
@@ -56,6 +58,8 @@ impl FrameInput {
         self.held = frame.held;
         self.pressed |= frame.pressed;
         self.released |= frame.released;
+        self.inventory_held = frame.inventory_held;
+        self.inventory_released |= frame.inventory_released;
         for (pending, delta) in self.mouse.iter_mut().zip(frame.mouse) {
             if delta.is_finite() {
                 *pending += delta;
@@ -70,6 +74,7 @@ impl FrameInput {
         let step = *self;
         *self = Self {
             held: step.held,
+            inventory_held: step.inventory_held,
             ..Self::default()
         };
         step

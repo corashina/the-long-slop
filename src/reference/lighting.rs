@@ -441,7 +441,12 @@ impl LightingRecord {
             "startup overrides",
         )?;
         sky(&self.skybox)?;
-        for particle in &manifest.weather.particles {
+        for particle in manifest.weather.particles.iter().chain(
+            manifest
+                .item_prototypes
+                .iter()
+                .filter_map(|p| p.consumable.as_ref().map(|c| &c.ember.particle)),
+        ) {
             for material in &particle.materials {
                 sky(material)?;
             }

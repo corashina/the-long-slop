@@ -120,10 +120,25 @@ def recover_pickup(source, reader):
     from .gltf import convert_point, convert_rotation
     from .collision import quaternion_product
     fields = source.read(reader)
-    angles = [math.radians(v) * .5 for v in vector(fields['recenterRot'])]
-    x, y, z = angles
-    rotation = quaternion_product((0., math.sin(y), 0., math.cos(y)),
-        quaternion_product((math.sin(x), 0., 0., math.cos(x)), (0., 0., math.sin(z), math.cos(z))))
+    def rotation_of(field):
+        x, y, z = [math.radians(v) * .5 for v in vector(fields[field])]
+        return convert_rotation(quaternion_product((0., math.sin(y), 0., math.cos(y)),
+            quaternion_product((math.sin(x), 0., 0., math.cos(x)), (0., 0., math.sin(z), math.cos(z)))))
+    def link(field, kind):
+        target = source.resolve(reader, fields[field])
+        if target is None:
+            return None
+        if target.type.name != kind:
+            raise ValueError(f'pickupable.{field}: expected {kind}: {key(reader)}')
+        if kind == 'Sprite':
+            if not hasattr(source, 'pickup_icons'): source.pickup_icons = set()
+            source.pickup_icons.add(key(target))
+        return source_id(target)
+    owner = source.transform_for(source.resolve(reader, fields['m_GameObject']))
+    stored = link('disableThisWhenStored', 'Transform')
+    # pickupable.FStart assigns the owner Transform when this pointer is null.
+    if stored is None:
+        stored = source_id(owner)
     return {'source': source_id(reader), 'cant_pickup': bool(fields['cantPickup']),
         'cant_pickup_while_mounted': bool(fields['cantPickupWhileMount']),
         'cant_pickup_while_seated': bool(fields['cantPickupWhileSitting']),
@@ -131,7 +146,12 @@ def recover_pickup(source, reader):
         'use_recenter_position': bool(fields['useRecenter']),
         'recenter_position': convert_point(vector(fields['recenterPos'])),
         'use_recenter_rotation': bool(fields['useRecenterRot']),
-        'recenter_rotation': convert_rotation(rotation), 'recenter_distance': fields['recenterDist']}
+        'recenter_rotation': rotation_of('recenterRot'), 'recenter_distance': fields['recenterDist'],
+        'can_inventory': bool(fields['canInventory']), 'can_hold_right_hand': bool(fields['canHoldRightHand']),
+        'disable_rh_fix': bool(fields['disableRHFix']), 'right_hand_position': convert_point(vector(fields['RHP'])),
+        'right_hand_rotation': rotation_of('RHR'), 'right_hand_grip': link('RightHandPos', 'Transform'),
+        'left_hand_grip': link('LeftHandPos', 'Transform'), 'disable_when_stored': stored,
+        'keep_when_stored': link('dontDisableWhenStored', 'Transform'), 'inventory_icon': link('invImg', 'Sprite')}
 
 
 def recover_pushables(source, nodes, components, item_nodes, colliders, bodies, mask):
