@@ -68,11 +68,55 @@ struct FeedbackStamp {
     engine_flags: [bool; 5],
 }
 
+/// Manifest fields the browser shell reads. Copies them without parsing the world records.
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ManifestShell<'a> {
+    #[serde(borrow)]
+    app_id: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    build_id: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    source_hashes: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    driving: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    ui: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    sleep: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    audio: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    lighting: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    assets: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    rendering: RenderingShell<'a>,
+    #[serde(borrow)]
+    world: WorldShell<'a>,
+}
+#[derive(serde::Deserialize, serde::Serialize)]
+struct RenderingShell<'a> {
+    #[serde(borrow)]
+    materials: &'a serde_json::value::RawValue,
+}
+#[derive(serde::Deserialize, serde::Serialize)]
+struct WorldShell<'a> {
+    #[serde(borrow)]
+    prototypes: &'a serde_json::value::RawValue,
+}
+
 #[wasm_bindgen]
-pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue> {
+pub fn manifest_shell(reference_json: &[u8]) -> Result<String, JsValue> {
+    let shell: ManifestShell =
+        serde_json::from_slice(reference_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    serde_json::to_string(&shell).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
     let reference = Arc::new(
-        ReferenceManifest::from_runtime_json(reference_json.as_bytes())
+        ReferenceManifest::from_runtime_json(reference_json)
             .map_err(|e| JsValue::from_str(&e.to_string()))?,
     );
     if let Err(error) = crate::reference::AudioReference::from_value(&reference.audio, &reference) {
