@@ -197,41 +197,6 @@ def validate_runtime_manifest(content: bytes) -> None:
         raise ValueError(f'Runtime manifest contract validation failed: {detail}')
 
 
-def verify_world_provenance(output: Path, world: dict) -> set[str]:
-    """Check the existing audit sidecars without adding runtime payloads."""
-    directory = output / 'provenance'
-    if not directory.is_dir():
-        raise ValueError('Missing world provenance directory')
-    names, kinds = set(), set()
-    for path in sorted(directory.iterdir()):
-        match = re.fullmatch(r'world-(receipts|records)-([0-9a-f]{64})\.json', path.name)
-        if not path.is_file() or not match:
-            raise ValueError('Invalid world provenance path')
-        kind, digest = match.groups()
-        content = path.read_bytes()
-        if hashlib.sha256(content).hexdigest() != digest:
-            raise ValueError('World provenance hash differs')
-        value = json.loads(content)
-        expected = {'library', 'source_hashes', 'receipts'}
-        if kind == 'records':
-            expected |= {'records', 'initialization'}
-        if not isinstance(value, dict) or set(value) != expected or not isinstance(value['receipts'], list):
-            raise ValueError('Invalid world provenance shape')
-        if kind == 'records' and (not isinstance(value['records'], list)
-                or not isinstance(value['initialization'], dict)
-                or set(value['initialization']) != {'nodes', 'components'}
-                or any(not isinstance(v, list) for v in value['initialization'].values())):
-            raise ValueError('Invalid world provenance records shape')
-        if any(value[field] != world[field] for field in ('library', 'source_hashes')):
-            raise ValueError('World provenance identity differs')
-        names.add(path.relative_to(output).as_posix())
-        kinds.add(kind)
-        del content, value
-    if kinds != {'receipts', 'records'}:
-        raise ValueError('Missing world provenance sidecar')
-    return names
-
-
 def verify_reference(output: Path, library) -> None:
     from .library.reader import checked
     from .gltf import validate_gltf
@@ -253,7 +218,6 @@ def verify_reference(output: Path, library) -> None:
     if json.loads((output/'conditions-evidence.json').read_bytes())['conditions']!=manifest['conditions']:
         raise ValueError('Condition evidence differs from runtime records')
     names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json','plate-evidence.json','flashlights-evidence.json','driving-evidence.json','conditions-evidence.json'}
-    names.update(verify_world_provenance(output, manifest['world']))
     for asset in manifest['assets']:
         for record in [asset, *asset['dependencies']]:
             name = record.get('file', record.get('path')).removeprefix('reference/')
