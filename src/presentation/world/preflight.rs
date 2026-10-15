@@ -1,4 +1,5 @@
 //! Selected plan assets use the same checked reader as their geometry.
+pub mod selected;
 use crate::reference::prototype_plan::PrototypePlan;
 use crate::reference::{FileCatalog, ReferenceError, SourceId};
 use bevy::{
@@ -35,7 +36,7 @@ pub fn configure_staging(
     )
 }
 #[derive(Asset, TypePath)]
-pub struct SourcePlan(pub PrototypePlan);
+pub struct SourcePlan(pub std::sync::Arc<PrototypePlan>);
 #[derive(Default, TypePath)]
 pub struct SourcePlanLoader;
 impl AssetLoader for SourcePlanLoader {
@@ -65,10 +66,10 @@ impl AssetLoader for SourcePlanLoader {
         let plan: PrototypePlan =
             serde_json::from_slice(&bytes).map_err(|e| invalid(e.to_string()))?;
         plan.reservation().map_err(|e| invalid(e.to_string()))?;
-        if plan.retained_bytes() > size * 18 {
+        if selected::retained_plan_bytes(&plan) > size * 18 {
             return Err(invalid("Plan exceeds metadata reservation".into()));
         }
-        Ok(SourcePlan(plan))
+        Ok(SourcePlan(std::sync::Arc::new(plan)))
     }
 }
 /// The caller owns metadata CPU, input staging, and one job until this handle settles.
@@ -86,6 +87,31 @@ pub fn load_plan(
         .load_builder()
         .with_settings(move |target: &mut usize| *target = size)
         .load(input.file.clone()))
+}
+
+/// Root completion follows the checked reader's physical completion.
+pub fn plan_terminal(
+    server: &AssetServer,
+    plans: &Assets<SourcePlan>,
+    handle: &Handle<SourcePlan>,
+) -> bool {
+    plans.contains(handle.id())
+        || matches!(
+            server.load_state(handle.id()),
+            bevy::asset::LoadState::Failed(_)
+        )
+}
+pub fn poll_plan(
+    server: &AssetServer,
+    plans: &Assets<SourcePlan>,
+    handle: &Handle<SourcePlan>,
+) -> Result<Option<std::sync::Arc<PrototypePlan>>, ReferenceError> {
+    if let bevy::asset::LoadState::Failed(error) = server.load_state(handle.id()) {
+        return Err(ReferenceError(format!("Source plan: {error}")));
+    }
+    Ok(plans
+        .get(handle.id())
+        .map(|SourcePlan(plan)| std::sync::Arc::clone(plan)))
 }
 
 /// Only checked startup assignments may replace a serialized null material.

@@ -241,10 +241,15 @@ impl WorldPresentation<'_, '_> {
         if let Some(error) = stream.frame().failure {
             return Err(ReferenceError(error.to_owned()));
         }
+        self.surfaces
+            .request_descriptors(stream, reference, &mut self.prototypes)?;
+        self.instances
+            .request_descriptors(stream, reference, &mut self.prototypes)?;
         self.surfaces.prepare_bindings(
             stream,
             reference,
             &mut self.prototypes,
+            &self.server,
             &mut self.materials.cache,
             &mut self.materials.primary,
             &mut self.terrain,
@@ -254,6 +259,7 @@ impl WorldPresentation<'_, '_> {
             stream,
             reference,
             &mut self.prototypes,
+            &self.server,
             &self.assets,
             &mut self.meshes,
             &mut self.materials,

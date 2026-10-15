@@ -10,11 +10,24 @@ use crate::{
 };
 use bevy::prelude::*;
 impl SourceWorldVisuals {
+    pub fn request_descriptors(
+        &self,
+        stream: &mut WorldStream,
+        reference: &ReferenceManifest,
+        prototypes: &mut SourcePrototypes,
+    ) -> Result<(), ReferenceError> {
+        // Request every selected road descriptor before any material admission.
+        for source in &reference.world.road.prototypes {
+            prototypes.request(stream, source)?;
+        }
+        Ok(())
+    }
     pub fn prepare_bindings(
         &mut self,
         stream: &mut WorldStream,
         reference: &ReferenceManifest,
         prototypes: &mut SourcePrototypes,
+        server: &AssetServer,
         cache: &mut SourceMaterials,
         materials: &mut Assets<SourceMaterial>,
         terrain: &mut Assets<TerrainMaterial>,
@@ -24,7 +37,16 @@ impl SourceWorldVisuals {
             if self.road_materials.contains_key(source) {
                 continue;
             }
-            prototypes.request(stream, source)?;
+            if prototypes
+                .plan(stream.frame().request.session, source)
+                .is_none()
+            {
+                continue;
+            }
+            // Task 2B inserts the combined descriptor check before this call.
+            if !prototypes.admit_payload(stream, reference, server, source)? {
+                continue;
+            }
             let prototype = reference
                 .world
                 .prototypes

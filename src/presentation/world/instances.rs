@@ -113,11 +113,34 @@ impl SourceInstances {
             .flat_map(|i| i.renderers.iter().map(move |r| (r.mesh.id(), !i.ready)))
     }
 
+    pub fn request_descriptors(
+        &self,
+        stream: &mut WorldStream,
+        reference: &ReferenceManifest,
+        prototypes: &mut SourcePrototypes,
+    ) -> Result<(), ReferenceError> {
+        // Discover selected descriptors before material or payload readiness.
+        for index in 0..stream.pending_structures().len() {
+            let source = &stream.pending_structures()[index].prototype;
+            if prototypes.requested(source) {
+                continue;
+            }
+            let prototype = reference
+                .world
+                .prototypes
+                .iter()
+                .find(|p| p.source == *source)
+                .ok_or_else(|| ReferenceError("Missing generated structure prototype".into()))?;
+            prototypes.request(stream, &prototype.source)?;
+        }
+        Ok(())
+    }
     pub fn prepare(
         &mut self,
         stream: &mut WorldStream,
         reference: &ReferenceManifest,
         prototypes: &mut SourcePrototypes,
+        server: &AssetServer,
         assets: &Assets<SourceGltf>,
         meshes: &mut Assets<Mesh>,
         materials: &mut InstanceMaterials,
@@ -145,6 +168,15 @@ impl SourceInstances {
                 })
                 .cloned();
         }
+        if let Some(placement) = self.pending.as_ref() {
+            if prototypes
+                .plan(stream.frame().request.session, &placement.prototype)
+                .is_some()
+            {
+                // Task 2B inserts the combined descriptor check before this call.
+                prototypes.admit_payload(stream, reference, server, &placement.prototype)?;
+            }
+        }
         // Full pending ownership must drain through publication before another instance starts.
         // Continue polling existing renderer work below, including its readiness transfer.
         if let Some(placement) = self
@@ -158,8 +190,10 @@ impl SourceInstances {
                 .iter()
                 .find(|p| p.source == placement.prototype)
                 .ok_or_else(|| ReferenceError("Missing generated structure prototype".into()))?;
-            prototypes.request(stream, &placement.prototype)?;
-            let admitted = materials.admit(stream, reference, prototype, &placement.id)?;
+            let admitted = prototypes
+                .plan(stream.frame().request.session, &placement.prototype)
+                .is_some()
+                && materials.admit(stream, reference, prototype, &placement.id)?;
             if admitted {
                 if let Some(loaded) =
                     prototypes.loaded(stream.frame().request.session, &placement.prototype)

@@ -1,6 +1,9 @@
 //! Selected prototype ownership. Reservations precede every accessor or scene allocation.
 use super::{
-    preflight::{SourcePlan, SourcePlanLoader, load_plan},
+    preflight::{
+        SourcePlan, SourcePlanLoader, load_plan,
+        selected::{IoLedger, Reservation, SelectedMetadata, control_bytes, retained_plan_bytes},
+    },
     prototype_loader::{SourceGltf, SourceGltfLoader, SourceGltfSettings},
 };
 use crate::{
@@ -12,19 +15,9 @@ use bevy::{
 };
 use std::sync::Arc;
 
-pub struct LoadedPrototype {
-    pub plan: PrototypePlan,
-    pub asset: Handle<SourceGltf>,
-}
-enum State {
-    Queued,
-    PlanLoading(Handle<SourcePlan>),
-    Loading {
-        plan: PrototypePlan,
-        asset: Handle<SourceGltf>,
-    },
-    Ready(Arc<LoadedPrototype>),
-}
+pub type LoadedPrototype =
+    super::preflight::selected::LoadedPrototype<Handle<SourcePlan>, Handle<SourceGltf>>;
+type State = SelectedMetadata<Handle<SourcePlan>, Handle<SourceGltf>>;
 struct Entry {
     source: SourceId,
     session: u64,
@@ -43,9 +36,8 @@ pub struct SourcePrototypes {
     stale_cpu: usize,
     stale_gpu: usize,
     retired_sources: Vec<SourceId>,
-    accounted_jobs: usize,
-    accounted_pending: usize,
-    accounted_staging: usize,
+    io: IoLedger,
+    control_cpu: usize,
 }
 pub struct SourcePrototypePlugin;
 impl Plugin for SourcePrototypePlugin {
@@ -86,22 +78,16 @@ impl SourcePrototypes {
         plans: &Assets<SourcePlan>,
     ) -> bool {
         for e in &mut self.entries {
-            match &mut e.state {
-                State::PlanLoading(job) => {
-                    if !plans.contains(job.id())
-                        && !matches!(server.load_state(job.id()), LoadState::Failed(_))
-                    {
-                        return false;
-                    }
-                }
+            let terminal = match &e.state {
+                State::PlanLoading(job) => super::preflight::plan_terminal(server, plans, job),
                 State::Loading { asset, .. } => {
-                    if !assets.contains(asset.id())
-                        && !matches!(server.load_state(asset.id()), LoadState::Failed(_))
-                    {
-                        return false;
-                    }
+                    assets.contains(asset.id())
+                        || matches!(server.load_state(asset.id()), LoadState::Failed(_))
                 }
-                _ => {}
+                _ => true,
+            };
+            if !e.state.can_retire(terminal) {
+                return false;
             }
         }
         true
@@ -109,14 +95,11 @@ impl SourcePrototypes {
     pub fn release_all(
         self,
         assets: &mut Assets<SourceGltf>,
-        plans: &mut Assets<SourcePlan>,
+        _plans: &mut Assets<SourcePlan>,
         meshes: &mut Assets<Mesh>,
         skins: &mut Assets<SkinnedMeshInverseBindposes>,
     ) {
         for e in self.entries {
-            if let State::PlanLoading(handle) = &e.state {
-                plans.remove(handle.id());
-            }
             let asset = match e.state {
                 State::Ready(loaded) if Arc::strong_count(&loaded) == 1 => {
                     Some(loaded.asset.clone())
@@ -155,21 +138,25 @@ impl SourcePrototypes {
         if !self.settled() {
             return Err(ReferenceError("Source prototype loads are pending".into()));
         }
+        let session = stream.frame().request.session;
+        let control_cpu = control_bytes::<Entry>(
+            self.entries.len(),
+            self.entries.iter().map(|e| e.source.file.len()).sum(),
+            self.entries.len(),
+            0,
+        );
         let mut allocation = stream.presentation_allocation();
-        allocation.prototype_cpu += self.entries.len() * std::mem::size_of::<Entry>()
-            + self
-                .entries
-                .iter()
-                .map(|e| e.source.file.len())
-                .sum::<usize>();
+        allocation.prototype_cpu += control_cpu;
         stream.set_presentation_allocation(allocation)?;
         let mut copy = Self {
             entries: Vec::with_capacity(self.entries.len()),
+            retired_sources: Vec::with_capacity(self.entries.len()),
+            control_cpu,
+            accounted_session: session,
             ..default()
         };
-        let session = stream.frame().request.session;
         for e in &self.entries {
-            let State::Ready(loaded) = &e.state else {
+            let State::Ready(_) = &e.state else {
                 unreachable!()
             };
             stream.reserve_prototype(e.source.clone(), e.cpu, e.gpu)?;
@@ -182,9 +169,10 @@ impl SourcePrototypes {
                 cpu: e.cpu,
                 gpu: e.gpu,
                 staging: 0,
-                state: State::Ready(Arc::clone(loaded)),
+                state: e.state.fork_ready().unwrap(),
             });
         }
+        copy.account(stream)?;
         Ok(copy)
     }
 
@@ -194,17 +182,35 @@ impl SourcePrototypes {
         source: &SourceId,
     ) -> Result<(), ReferenceError> {
         let session = stream.frame().request.session;
+        self.account(stream)?;
         if self.entries.iter().any(|e| e.source == *source) {
+            return Ok(());
+        }
+        if stream.metrics().pending_work >= 32 {
             return Ok(());
         }
         if self.entries.len() >= 8192 {
             return Err(ReferenceError("Source prototype owner limit".into()));
         }
+        // Reserve container storage before extending the selected owner list.
+        let retired_capacity = self.entries.len() + self.retired_sources.len() + 1;
+        let extra = usize::from(self.entries.len() == self.entries.capacity())
+            * std::mem::size_of::<Entry>()
+            + source.file.len()
+            + retired_capacity.saturating_sub(self.retired_sources.capacity())
+                * std::mem::size_of::<SourceId>();
         let mut allocation = stream.presentation_allocation();
+        allocation.prototype_cpu += extra;
         allocation.pending += 1;
         stream.set_presentation_allocation(allocation)?;
-        self.accounted_pending += 1;
+        self.io.pending += 1;
         self.next_request = self.next_request.wrapping_add(1);
+        self.control_cpu += extra;
+        self.entries.reserve_exact(1);
+        if self.retired_sources.capacity() < retired_capacity {
+            self.retired_sources
+                .reserve_exact(retired_capacity - self.retired_sources.len());
+        }
         self.entries.push(Entry {
             source: source.clone(),
             session,
@@ -216,6 +222,88 @@ impl SourcePrototypes {
             state: State::Queued,
         });
         Ok(())
+    }
+    pub fn plan(&self, session: u64, source: &SourceId) -> Option<&PrototypePlan> {
+        self.entries
+            .iter()
+            .find(|e| e.session == session && e.source == *source && !e.retired)
+            .and_then(|e| e.state.plan())
+    }
+    pub fn admit_payload(
+        &mut self,
+        stream: &mut WorldStream,
+        reference: &ReferenceManifest,
+        server: &AssetServer,
+        source: &SourceId,
+    ) -> Result<bool, ReferenceError> {
+        self.account(stream)?;
+        let session = stream.frame().request.session;
+        let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|e| e.session == session && e.source == *source && !e.retired)
+        else {
+            return Ok(false);
+        };
+        let State::Planned(plan) = &entry.state else {
+            return Ok(matches!(
+                entry.state,
+                State::Loading { .. } | State::Ready(_)
+            ));
+        };
+        let prototype = reference
+            .world
+            .prototypes
+            .iter()
+            .find(|p| p.source == *source)
+            .ok_or_else(|| ReferenceError("Missing checked source prototype".into()))?;
+        let record = reference
+            .assets
+            .iter()
+            .find(|a| a.id == prototype.asset)
+            .ok_or_else(|| ReferenceError("Missing prototype asset".into()))?;
+        let reservation = entry.state.payload_reservation()?;
+        if !reservation.fits(
+            &stream.metrics(),
+            stream.available_external_jobs(),
+            stream.available_dependency_staging_bytes(),
+            entry.cpu,
+            entry.gpu,
+            false,
+        ) {
+            return Ok(false);
+        }
+        let settings = SourceGltfSettings {
+            json_bytes: plan.json_bytes,
+            buffer_bytes: plan.buffer_bytes,
+            mesh_bytes: plan.mesh_bytes,
+        };
+        let allocation = stream.presentation_allocation();
+        stream.set_presentation_allocation(reservation.allocation(allocation, false))?;
+        if let Err(error) = stream.resize_prototype(source, reservation.cpu, reservation.gpu) {
+            stream.set_presentation_allocation(allocation)?;
+            return Err(error);
+        }
+        let asset = server
+            .load_builder()
+            .with_settings(move |target: &mut SourceGltfSettings| {
+                *target = SourceGltfSettings {
+                    json_bytes: settings.json_bytes,
+                    buffer_bytes: settings.buffer_bytes,
+                    mesh_bytes: settings.mesh_bytes,
+                };
+            })
+            .load::<SourceGltf>(record.path.clone());
+        entry.state.start_payload(asset);
+        entry.cpu = reservation.cpu;
+        entry.gpu = reservation.gpu;
+        entry.staging = reservation.staging;
+        self.io.add(IoLedger {
+            jobs: 1,
+            pending: 1,
+            staging: reservation.staging,
+        });
+        Ok(true)
     }
     pub fn loaded(&self, session: u64, source: &SourceId) -> Option<&LoadedPrototype> {
         self.entries.iter().find_map(|entry| {
@@ -301,9 +389,8 @@ impl SourcePrototypes {
     fn account(&mut self, stream: &mut WorldStream) -> Result<(), ReferenceError> {
         let session = stream.frame().request.session;
         if self.accounted_session != session {
-            self.accounted_jobs = 0;
-            self.accounted_pending = 0;
-            self.accounted_staging = 0;
+            self.io = IoLedger::default();
+            self.control_cpu = 0;
             self.stale_cpu = 0;
             self.stale_gpu = 0;
             self.accounted_session = session;
@@ -320,45 +407,30 @@ impl SourcePrototypes {
             .filter(|e| e.session != session)
             .map(|e| e.gpu)
             .sum::<usize>();
-        let jobs = self
-            .entries
-            .iter()
-            .filter(|entry| matches!(entry.state, State::PlanLoading(_) | State::Loading { .. }))
-            .count();
-        let pending = self
-            .entries
-            .iter()
-            .filter(|entry| !matches!(entry.state, State::Ready(_)))
-            .count();
-        let staging = self
-            .entries
-            .iter()
-            .map(|entry| match &entry.state {
-                State::PlanLoading(_) | State::Loading { .. } => entry.staging,
-                _ => 0,
-            })
-            .sum::<usize>();
+        let mut io = IoLedger::default();
+        for entry in &self.entries {
+            io.add(entry.state.io(entry.staging));
+        }
+        let control_cpu = control_bytes::<Entry>(
+            self.entries.capacity(),
+            self.entries.iter().map(|e| e.source.file.capacity()).sum(),
+            self.retired_sources.capacity(),
+            self.retired_sources.iter().map(|s| s.file.capacity()).sum(),
+        );
         let mut allocation = stream.presentation_allocation();
-        allocation.prototype_cpu =
-            allocation.prototype_cpu.saturating_sub(self.stale_cpu) + stale_cpu;
+        allocation.prototype_cpu = allocation
+            .prototype_cpu
+            .saturating_sub(self.stale_cpu + self.control_cpu)
+            + stale_cpu
+            + control_cpu;
         allocation.prototype_gpu =
             allocation.prototype_gpu.saturating_sub(self.stale_gpu) + stale_gpu;
-        allocation.staging_bytes = allocation
-            .staging_bytes
-            .saturating_sub(self.accounted_staging)
-            + staging;
-        allocation.dependency_staging_bytes = allocation
-            .dependency_staging_bytes
-            .saturating_sub(self.accounted_staging)
-            + staging;
-        allocation.jobs = allocation.jobs.saturating_sub(self.accounted_jobs) + jobs;
-        allocation.pending = allocation.pending.saturating_sub(self.accounted_pending) + pending;
+        allocation = io.replace(self.io, allocation);
         stream.set_presentation_allocation(allocation)?;
         self.stale_cpu = stale_cpu;
         self.stale_gpu = stale_gpu;
-        self.accounted_staging = staging;
-        self.accounted_jobs = jobs;
-        self.accounted_pending = pending;
+        self.io = io;
+        self.control_cpu = control_cpu;
         Ok(())
     }
     pub fn prepare(
@@ -381,72 +453,44 @@ impl SourcePrototypes {
         for index in 0..self.entries.len() {
             let entry = &mut self.entries[index];
             match &mut entry.state {
-                State::Queued => {
+                State::Queued | State::Planned(_) => {
                     if entry.retired {
                         completed = Some(index);
                         break;
                     }
                 }
                 State::PlanLoading(job) => {
-                    if let LoadState::Failed(error) = server.load_state(job.id()) {
+                    let result = super::preflight::poll_plan(server, plans, job);
+                    if let Err(error) = result {
                         if entry.retired {
                             completed = Some(index);
                             break;
                         }
                         entry.retired = true;
-                        return Err(ReferenceError(format!("Source plan: {error}")));
+                        return Err(error);
                     }
-                    let Some(SourcePlan(plan)) = plans.remove(job.id()) else {
+                    let Some(plan) = result.unwrap() else {
                         continue;
                     };
                     if entry.retired {
                         completed = Some(index);
                         break;
                     }
-                    // A consumed plan result cannot keep an unfinished job alive.
-                    // On any admission error the next update retires this queued entry.
-                    entry.state = State::Queued;
-                    entry.retired = true;
+                    entry.state.complete_metadata(plan);
+                    let plan = entry.state.plan().unwrap();
                     let prototype = reference
                         .world
                         .prototypes
                         .iter()
                         .find(|p| p.source == entry.source)
                         .ok_or_else(|| ReferenceError("Missing checked source prototype".into()))?;
-                    validate_plan(&plan, prototype, reference)?;
-                    let record = reference
-                        .assets
-                        .iter()
-                        .find(|a| a.id == prototype.asset)
-                        .ok_or_else(|| ReferenceError("Missing prototype asset".into()))?;
-                    let (cpu, gpu) = plan.reservation()?;
-                    let cpu = cpu
-                        .checked_add(plan.retained_bytes())
-                        .ok_or_else(|| ReferenceError("Plan ownership overflow".into()))?;
-                    stream.resize_prototype(&entry.source, cpu, gpu)?;
+                    entry.retired = true;
+                    validate_plan(plan, prototype, reference)?;
+                    let cpu = retained_plan_bytes(plan);
+                    stream.resize_prototype(&entry.source, cpu, 0)?;
                     entry.cpu = cpu;
-                    entry.gpu = gpu;
-                    if 2 * (plan.json_bytes + plan.buffer_bytes) > entry.staging {
-                        return Err(ReferenceError(
-                            "Source prototype exceeds shared staging cap".into(),
-                        ));
-                    }
-                    let settings = SourceGltfSettings {
-                        json_bytes: plan.json_bytes,
-                        buffer_bytes: plan.buffer_bytes,
-                        mesh_bytes: plan.mesh_bytes,
-                    };
-                    let asset = server
-                        .load_builder()
-                        .with_settings(move |target: &mut SourceGltfSettings| {
-                            *target = SourceGltfSettings {
-                                json_bytes: settings.json_bytes,
-                                buffer_bytes: settings.buffer_bytes,
-                                mesh_bytes: settings.mesh_bytes,
-                            }
-                        })
-                        .load::<SourceGltf>(record.path.clone());
-                    entry.state = State::Loading { plan, asset };
+                    entry.gpu = 0;
+                    entry.staging = 0;
                     entry.retired = false;
                 }
                 State::Loading { plan, asset } => {
@@ -496,19 +540,16 @@ impl SourcePrototypes {
                     // Keep both main-world data and render extraction/upload copies charged.
                     let cpu = loaded.mesh_bytes * 2
                         + loaded.skin_bytes * 2
-                        + plan.retained_bytes()
+                        + retained_plan_bytes(plan)
+                        + State::ready_control_bytes()
                         + plan.scene_bytes
                         + loaded.meshes.len() * 4096;
                     let gpu = loaded.mesh_bytes + loaded.skin_bytes + loaded.meshes.len() * 8;
                     stream.resize_prototype(&entry.source, cpu, gpu)?;
                     entry.cpu = cpu;
                     entry.gpu = gpu;
-                    let State::Loading { plan, asset } =
-                        std::mem::replace(&mut entry.state, State::Queued)
-                    else {
-                        unreachable!()
-                    };
-                    entry.state = State::Ready(Arc::new(LoadedPrototype { plan, asset }));
+                    entry.state.complete_payload();
+                    entry.staging = 0;
                     entry.retired = false;
                 }
                 State::Ready(_) => {
@@ -524,7 +565,7 @@ impl SourcePrototypes {
             // Active geometry must release its owners before prototype resources retire.
             stream.release_prototype(&entry.source)?;
             let entry = self.entries.remove(index);
-            self.retired_sources.push(entry.source.clone());
+            self.retired_sources.push(entry.source);
             let asset = match entry.state {
                 State::Ready(loaded) => {
                     if Arc::strong_count(&loaded) > 1 {
@@ -567,48 +608,40 @@ impl SourcePrototypes {
                 .iter()
                 .find(|a| a.id == prototype.asset)
                 .ok_or_else(|| ReferenceError("Missing prototype asset".into()))?;
-            let input = reference.file_catalog.plan(&record.path)?;
-            let plan_staging = (input.bytes as usize)
-                .checked_mul(2)
-                .ok_or_else(|| ReferenceError("Plan staging overflow".into()))?;
-            let staging = reference
-                .file_catalog
-                .prototype_staging(record)?
-                .max(plan_staging);
-            if staging == 0 || staging > 32 * 1024 * 1024 {
-                return Err(ReferenceError(
-                    "Prototype input overlap exceeds staging cap".into(),
-                ));
-            }
-            if staging > stream.available_dependency_staging_bytes() {
+            let reservation = Reservation::metadata(&reference.file_catalog, &record.path)?;
+            if !reservation.fits(
+                &stream.metrics(),
+                stream.available_external_jobs(),
+                stream.available_dependency_staging_bytes(),
+                entry.cpu,
+                entry.gpu,
+                true,
+            ) || reservation.cpu > stream.prototype_headroom(&entry.source)
+            {
                 return Ok(());
             }
-            let budget = (input.bytes as usize)
-                .checked_mul(18)
-                .ok_or_else(|| ReferenceError("Plan metadata overflow".into()))?;
-            if budget > stream.prototype_headroom(&entry.source) {
-                return Err(ReferenceError(
-                    "No source prototype metadata admission capacity".into(),
-                ));
+            let allocation = stream.presentation_allocation();
+            stream.set_presentation_allocation(reservation.allocation(allocation, true))?;
+            if stream
+                .reserve_prototype(entry.source.clone(), reservation.cpu, 0)
+                .is_err()
+            {
+                stream.set_presentation_allocation(allocation)?;
+                return Ok(());
             }
-            stream.reserve_prototype(entry.source.clone(), budget, 0)?;
-            entry.cpu = budget;
-            entry.gpu = 0;
-            let mut allocation = stream.presentation_allocation();
-            allocation.jobs += 1;
-            allocation.staging_bytes += staging;
-            allocation.dependency_staging_bytes += staging;
-            stream.set_presentation_allocation(allocation)?;
-            self.accounted_jobs += 1;
-            self.accounted_staging += staging;
-            entry.staging = staging;
-            entry.state = State::PlanLoading(load_plan(
+            let handle = load_plan(
                 server,
                 &reference.file_catalog,
                 &record.path,
-                budget,
-                staging,
-            )?);
+                reservation.cpu,
+                reservation.staging,
+            )?;
+            entry.cpu = reservation.cpu;
+            entry.gpu = 0;
+            entry.staging = reservation.staging;
+            entry.state = State::PlanLoading(handle);
+            self.io.jobs += 1;
+            self.io.staging += reservation.staging;
         }
         Ok(())
     }
