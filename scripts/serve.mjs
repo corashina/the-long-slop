@@ -39,10 +39,17 @@ createServer(async (request, response) => {
       response.writeHead(404).end('Not found');
       return;
     }
+    // The browser keeps files and revalidates them, so repeat requests skip the body.
+    const etag = `"${file.size}-${file.mtimeMs}"`;
+    if (request.headers['if-none-match'] === etag) {
+      response.writeHead(304, { ETag: etag, 'Cache-Control': 'no-cache' }).end();
+      return;
+    }
     response.writeHead(200, {
       'Content-Type': types.get(extname(path)) ?? 'application/octet-stream',
       'Content-Length': file.size,
-      'Cache-Control': 'no-store',
+      'Cache-Control': 'no-cache',
+      ETag: etag,
     });
     if (request.method === 'HEAD') {
       response.end();

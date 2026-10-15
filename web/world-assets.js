@@ -5,7 +5,8 @@ export function worldInputBytes(path){const bytes=inputSizes.get(path);if(!bytes
 export function worldPrototypeStaging(path){const bytes=prototypeStaging.get(path);if(!bytes)throw Error("Missing checked prototype size: "+path);return bytes;}
 export function worldDependencyReserve(){if(!dependencyReserve)throw Error("Missing world dependency reservation.");return dependencyReserve;}
 export function worldInputMetadataBytes(){return inputMetadataBytes;}
-export const worldBootstrapMeasurements={dependencyWorkers:1,maxDependencyBytes:0,dependencyPayloadCopyBytes:0};
+const WORKERS=6;
+export const worldBootstrapMeasurements={dependencyWorkers:WORKERS,maxDependencyBytes:0,dependencyPayloadCopyBytes:0};
 
 async function checkedBytes(response,maxBytes=MAX_FILE_BYTES){
  const reader=response.body.getReader(),chunks=[];
@@ -25,6 +26,7 @@ async function checkedBytes(response,maxBytes=MAX_FILE_BYTES){
 }
 
 // Check catalog bytes without decoding meshes or textures into resident assets.
+// The glTF loader hashes prototype glTF and buffer bytes, so this pass reads only their sizes.
 export async function admitWorldAssets(manifest,onProgress){
  if(!manifest.world||!manifest.world.prototypes?.length)throw Error('Missing required world contract.');
  const files=new Map(),pngMips=new Map(),prototypeInputs=new Map();
@@ -41,34 +43,50 @@ export async function admitWorldAssets(manifest,onProgress){
  }
  if(!files.size)throw Error('Missing required world prototype assets.');
  let completed=0;onProgress(completed,files.size);
- const pending=files.values(),controller=new AbortController();
- async function worker(){
-  for(let next=pending.next();!next.done;next=pending.next()){
-   const entry=next.value;
-   try{
+ const controller=new AbortController(),buffers=new Set();
+ async function check(entry){
+  try{
+   if(buffers.has(entry.file)){
+    // A HEAD request reads the size without the body.
+    const response=await fetch('./assets/'+entry.file,{method:'HEAD',signal:controller.signal});
+    if(!response.ok)throw Error('HTTP '+response.status);
+    const length=Number(response.headers.get('Content-Length'));
+    if(!Number.isSafeInteger(length)||length<=0)throw Error('Missing size');
+    if(length>MAX_FILE_BYTES)throw Error('World dependency exceeds 32 MiB.');
+    inputSizes.set(entry.file,length);
+   }else{
     const response=await fetch('./assets/'+entry.file,{signal:controller.signal});
     if(!response.ok)throw Error('HTTP '+response.status);
     const bytes=await checkedBytes(response);
     worldBootstrapMeasurements.maxDependencyBytes=Math.max(worldBootstrapMeasurements.maxDependencyBytes,bytes.byteLength);
     worldBootstrapMeasurements.dependencyPayloadCopyBytes=2*worldBootstrapMeasurements.maxDependencyBytes;
-    const digest=await crypto.subtle.digest('SHA-256',bytes);
-    const hash=Array.from(new Uint8Array(digest),v=>v.toString(16).padStart(2,'0')).join('');
-    if(hash!==entry.sha256)throw Error('SHA-256 mismatch');
-    const mip=pngMips.get(entry.file);
-    if(mip)checkPngInput(bytes,mip);
-    inputSizes.set(entry.file,bytes.byteLength);
     if(prototypePaths.has(entry.file)){
      const gltf=JSON.parse(new TextDecoder().decode(bytes));
      prototypeInputs.set(entry.file,(gltf.buffers??[]).map(buffer=>{
       if(!/^[a-zA-Z0-9_.-]+$/.test(buffer.uri)||!Number.isSafeInteger(buffer.byteLength)||buffer.byteLength<0)throw Error('Invalid checked prototype buffer.');
       return {file:'reference/'+buffer.uri,bytes:buffer.byteLength};
      }));
+    }else{
+     await verifyWorldBytes(bytes,entry.sha256);
+     const mip=pngMips.get(entry.file);
+     if(mip)checkPngInput(bytes,mip);
     }
-    onProgress(++completed,files.size);
-   }catch(error){throw Error('Cannot load dependencies for '+entry.owner+': '+entry.file+' ('+error.message+').');}
-  }
+    inputSizes.set(entry.file,bytes.byteLength);
+   }
+   onProgress(++completed,files.size);
+  }catch(error){throw Error('Cannot load dependencies for '+entry.owner+': '+entry.file+' ('+error.message+').');}
  }
- try{await worker();}finally{controller.abort();}
+ async function run(entries){
+  const pending=entries.values();
+  async function worker(){for(let next=pending.next();!next.done;next=pending.next())await check(next.value);}
+  await Promise.all(Array.from({length:WORKERS},worker));
+ }
+ try{
+  const all=[...files.values()];
+  await run(all.filter(entry=>prototypePaths.has(entry.file)));
+  for(const inputs of prototypeInputs.values())for(const input of inputs)if(!pngMips.has(input.file)&&!prototypePaths.has(input.file))buffers.add(input.file);
+  await run(all.filter(entry=>!prototypePaths.has(entry.file)));
+ }finally{controller.abort();}
  // One dependency can always advance while generation retains its own bounded share.
  dependencyReserve=5*(1024*1024+16);
  for(const [path,buffers] of prototypeInputs){
@@ -108,9 +126,7 @@ export async function preflightWorldPrototype(path,sha256,budget,key){
  const bytes=await checkedBytes(response,worldInputBytes(path));
  // Input chunks, contiguous input, decoded text, parser nodes, and returned metadata overlap.
  if(bytes.byteLength!==worldInputBytes(path)||bytes.byteLength*18>budget)throw Error('Prototype metadata exceeds its staging reservation.');
- const digest=await crypto.subtle.digest('SHA-256',bytes);
- const hash=Array.from(new Uint8Array(digest),v=>v.toString(16).padStart(2,'0')).join('');
- if(hash!==sha256)throw Error('Prototype SHA-256 mismatch.');
+ // The glTF loader hashes these bytes before it uses them.
  const gltf=JSON.parse(new TextDecoder().decode(bytes));
  const accessors=gltf.accessors??[];let meshBytes=0,bufferBytes=0;
  const primitives=[];

@@ -21,6 +21,9 @@ use bevy::prelude::*;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
+/// World generation time per frame while the loading panel shows.
+const LOADING_BUDGET_MS: f64 = 12.;
+
 #[derive(Resource)]
 pub(crate) struct RuntimeReference(pub Arc<ReferenceManifest>);
 #[derive(Resource)]
@@ -591,6 +594,8 @@ fn sync_world(
     } else {
         1
     };
+    // The loading panel covers the screen, so generation can use most of each frame.
+    let budget_ms = if drive.ready { 0. } else { LOADING_BUDGET_MS };
     let runtime = &mut drive.runtime;
     let enabled = runtime
         .lighting
@@ -608,6 +613,7 @@ fn sync_world(
             lod_view,
             &receivers[..receiver_count],
             enabled,
+            budget_ms,
         )
         .and_then(|_| runtime.align_startup(&reference.0).map(|_| ()))
         .and_then(|_| {
