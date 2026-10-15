@@ -117,6 +117,7 @@ def validate_motion(m, manifest):
     _integer(m['target'])
     node=next((n for n in manifest['nodes'] if n['id']==m['target']),{})
     if node.get('source')!={'file':'level1','path_id':23118} or m['coordinate_space']!='unity_parent_local':raise ValueError('Shovel motion target or coordinate space differs')
+    for identity in _list(m['clip_slots']):_source(identity)
     if m['clip_slots']!=[{'file':'sharedassets1.assets','path_id':pid} for pid in CLIPS]:raise ValueError('Shovel clip slot links differ')
     parameters={}
     for p,name in zip(_list(m['parameters']),PARAMETERS,strict=True):
@@ -156,6 +157,7 @@ def validate_motion(m, manifest):
             raise ValueError('Shovel state operation differs')
         if (s['name'],s['name_id'],s['clip_duration'])!=STATE_BINDINGS[i]:raise ValueError('Shovel state source fields differ')
         callback=None if i==0 else {'file':'sharedassets1.assets','path_id':(130091,130154,130160,130158,130156)[i-1]}
+        if s['callback'] is not None:_source(s['callback'])
         if s['callback']!=callback:raise ValueError('Shovel attack callback target differs')
         if len(_list(s['transitions']))!=(5 if i==0 else 0):raise ValueError('Shovel state transitions incomplete')
         for t in s['transitions']:transition(t)

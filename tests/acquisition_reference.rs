@@ -73,7 +73,42 @@ fn rejects_malformed_acquisition_in_strict_and_runtime_paths() {
     let fixture: Value = serde_json::from_slice(include_bytes!("common/reference.json")).unwrap();
     ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
     ReferenceManifest::from_runtime_json(include_bytes!("common/reference.json")).unwrap();
+    let mut reversed_categories = fixture["acquisition"]["categories"]
+        .as_array()
+        .unwrap()
+        .clone();
+    reversed_categories.reverse();
     let mutations = [
+        ("/acquisition/holiday_pumpkin/path_id", json!(82.0)),
+        (
+            "/acquisition/stations/0/ordinary/0/entries/0/selection/prototype/path_id",
+            json!(75443.0),
+        ),
+        (
+            "/acquisition/categories/31/prototypes/0/path_id",
+            json!(
+                fixture["acquisition"]["categories"][31]["prototypes"][0]["path_id"]
+                    .as_i64()
+                    .unwrap() as f64
+            ),
+        ),
+        (
+            "/acquisition/shovel/motion/clip_slots/0/path_id",
+            json!(3998.0),
+        ),
+        (
+            "/acquisition/shovel/motion/states/1/callback/path_id",
+            json!(130091.0),
+        ),
+        (
+            "/acquisition/stations/0/misc4/0/path_id",
+            json!(
+                fixture["acquisition"]["stations"][0]["misc4"][0]["path_id"]
+                    .as_i64()
+                    .unwrap() as f64
+            ),
+        ),
+        ("/acquisition/categories", json!(reversed_categories)),
         ("/acquisition/stations/0/ordinary/0/chance", json!(0.9)),
         (
             "/acquisition/stations/0/ordinary/0/marker/node",

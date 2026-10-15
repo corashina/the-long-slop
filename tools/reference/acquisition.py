@@ -364,6 +364,7 @@ def _validate_acquisition(a, manifest):
     validate_rules(a['rules'],a['evidence'])
     if type(a['pack_item_id']) is not int or a['pack_item_id']!=74 or type(a['cigarette_item_id']) is not int or a['cigarette_item_id']!=230:
         raise ValueError('Acquisition item identities differ')
+    _source(a['holiday_pumpkin'])
     if a['holiday_pumpkin']!={'file':'level1','path_id':82}:raise ValueError('Acquisition holiday identity differs')
     nodes={n['id']:n for n in manifest['nodes']}
     prototypes={p['item_id']:p for p in manifest['item_prototypes'] if p['item_id'] is not None}
@@ -398,6 +399,7 @@ def _validate_acquisition(a, manifest):
                 if s['source']['file']!='sharedassets1.assets' or SOURCE_PREFABS.get(s['source']['path_id'])!=(s['name'],s['item_id']):raise ValueError('Acquisition direct prefab source item link differs')
                 expected_root=SUPPORTED_PREFABS.get((s['source']['file'],s['source']['path_id']))
                 expected=by_root.get(expected_root) if expected_root else None
+            if s['prototype'] is not None:_source(s['prototype'])
             if s['prototype']!=(expected['id'] if expected else None):raise ValueError('Acquisition selected prototype differs')
             if kind=='item' and ITEM_NAMES.get(s['name'])!=s['item_id']:raise ValueError('Acquisition item enum differs')
         else:raise ValueError('Acquisition selector operation differs')
@@ -421,6 +423,7 @@ def _validate_acquisition(a, manifest):
         if len(_list(c['prototypes']))!=len(c['children']):raise ValueError('Acquisition leaf prototype count differs')
         invalid=[]
         for index,(child,pid) in enumerate(zip(c['children'],c['prototypes'],strict=True)):
+            if pid is not None:_source(pid)
             if c['categories']:
                 if pid is not None:raise ValueError('Category must not resolve as prototype')
                 if child not in categories:
@@ -432,7 +435,7 @@ def _validate_acquisition(a, manifest):
         for v in _list(c['invalid_children']):
             _shape(v,'ordinal target failure');_integer(v['ordinal']);_integer(v['target'])
         if c['invalid_children']!=invalid:raise ValueError('Native invalid-category terminal differs')
-    if set(categories)!=set(CATEGORY_CONTRACTS):raise ValueError('Incomplete selected category closure')
+    if list(categories)!=list(CATEGORY_CONTRACTS):raise ValueError('Selected category closure or order differs')
     if len(_list(a['stations']))!=3:raise ValueError('Selected station count differs')
     for index,(s,station) in enumerate(zip(a['stations'],manifest['stations']['types'],strict=True)):
         _shape(s,'source building asset root item_spawn_distance building_chance initial_items_spawned to_start ordinary underground misc4 flyers')
@@ -485,6 +488,7 @@ def _validate_acquisition(a, manifest):
                 for fluid in _list(v['fluids']):
                     _shape(fluid,'type weight authored_threshold');_integer(fluid['type']);_number(fluid['weight']);_number(fluid['authored_threshold'])
             if any(e['selection'].get('category_id')==35 for e in o['entries']):misc.append(o['source'])
+        for identity in _list(s['misc4']):_source(identity)
         if s['misc4']!=misc or len(misc)!=(18,6,38)[index]:raise ValueError('misc4 subset differs')
         if len(_list(s['underground']))!=1:raise ValueError('Underground spawner count differs')
         u=s['underground'][0];_shape(u,'source center chance count radius vertical table');_source(u['source']);marker(u['center'],s['asset'])

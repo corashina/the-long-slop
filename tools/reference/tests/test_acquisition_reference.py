@@ -64,6 +64,13 @@ class AcquisitionTests(unittest.TestCase):
         a=self.manifest['acquisition']
         validate_acquisition(a,self.manifest)
         cases=[
+            ('holiday_pumpkin/path_id',82.0),
+            ('stations/0/ordinary/0/entries/0/selection/prototype/path_id',75443.0),
+            ('categories/31/prototypes/0/path_id',float(a['categories'][31]['prototypes'][0]['path_id'])),
+            ('shovel/motion/clip_slots/0/path_id',3998.0),
+            ('shovel/motion/states/1/callback/path_id',130091.0),
+            ('stations/0/misc4/0/path_id',float(a['stations'][0]['misc4'][0]['path_id'])),
+            ('categories',list(reversed(a['categories']))),
             ('stations/0/ordinary/0/chance',.9),('stations/0/ordinary/0/marker/node',4294967295),
             ('stations/0/ordinary/0/entries/0/selection/source/path_id',1),
             ('stations/0/ordinary/0/entries/0/selection/item_id',230),
