@@ -23,7 +23,7 @@ const canvas=document.querySelector('#game'),status=document.querySelector('#sta
 const loading=createLoading();
 performance.setResourceTimingBufferSize?.(16000);
 const startup=createStartupTrace(()=>performance.now());
-let startupFailureDetails=null,startupDone=false;
+let startupFailureDetails=null,startupDone=false,startupReady=false,presentedFrames=0;
 function fetched(record){
  const entry=performance.getEntriesByName?.(new URL(record.path,location.href).href)?.at(-1);
  startup.fetched({...record,cache:entry?entry.transferSize===0?'hit':'miss':'unknown',downloadMs:entry?entry.responseEnd-entry.requestStart:null});
@@ -101,9 +101,11 @@ window.gameSleep=(phase,eligible,charge,cooldownRemaining,progress)=>{
  sleep.phase=phase;sleep.eligible=eligible;sleep.charge=charge;sleep.cooldownRemaining=cooldownRemaining;sleep.progress=progress;sleep.held=(input.state.held&262144)!==0;sleep.dead=dead;sleeping=phase===2;survival?.updateSleep(sleep,feedback?.state.enabled);
 };
 function fail(message,notifyRenderer=true){if(failed)return;failed=true;startup.reconcile(performance.getEntriesByType('resource'));startup.fail({...startupFailureDetails,message,loading:loading.snapshot()});startupDone=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
+function finishStartup(){if(failed||startupDone||!startupReady||presentedFrames<2||!input||!menu)return;startup.reconcile(performance.getEntriesByType('resource'));startup.finish({presentedFrames,inputReady:true});startupDone=true;}
 window.gameFailure=message=>fail(message,false);
 window.gameLoading=()=>{if(failed)return;loading.start();loading.stage('Loading the garage...');menu.loading();};
-window.gameReady=()=>{if(failed||!worldAdmitted)return;if(initialReadyMs===null)initialReadyMs=performance.now()-bootStarted;loading.finish();menu.ready();requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(()=>{if(!failed){startup.reconcile(performance.getEntriesByType('resource'));startup.finish({presentedFrames:2,inputReady:Boolean(input&&menu)});startupDone=true;}})));};
+window.gameReady=()=>{if(failed||!worldAdmitted)return;if(initialReadyMs===null)initialReadyMs=performance.now()-bootStarted;loading.finish();menu.ready();startupReady=true;finishStartup();};
+window.gameStartupPresentedFrame=count=>{presentedFrames=Math.max(presentedFrames,count);finishStartup();};
 window.addEventListener('error',event=>fail(event.message||'The runtime stopped.'));
 window.addEventListener('unhandledrejection',event=>fail(event.reason?.message||String(event.reason)));
 canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();fail('The graphics context was lost.');});

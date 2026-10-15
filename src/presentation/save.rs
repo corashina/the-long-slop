@@ -291,6 +291,7 @@ impl PreparedPresentation {
                 lod,
                 &receivers,
                 false,
+                candidate.lighting.light_outputs(),
             ),
             Err(e) => Err(crate::reference::ReferenceError(e.to_string())),
         };

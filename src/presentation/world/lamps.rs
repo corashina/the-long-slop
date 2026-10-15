@@ -524,6 +524,9 @@ pub(crate) fn source_lamp_admission(
     frame: &crate::world::WorldFrame<'_>,
     receivers: &[crate::world::WorldBounds],
     source: &mut SourceLighting,
+    reference: &crate::reference::ReferenceManifest,
+    light_outputs: &[crate::lighting::LightOutput],
+    biome_enabled: bool,
 ) -> Result<(usize, usize, usize), crate::reference::ReferenceError> {
     source.road_lamps.preflight_ready = false;
     source.road_lamps.allocation.fill(None);
@@ -567,8 +570,19 @@ pub(crate) fn source_lamp_admission(
                         "sourceId": light.record.source,
                         "prototypeId": light.prototype,
                         "shadowFaces": faces,
-                        "controllerOutput": {"enabled": light.enabled, "intensity": light.intensity},
+                        "controllerOutput": {"enabled": light.enabled && (light.biome.is_none() || biome_enabled), "intensity": light.intensity},
                     })
+                })
+            }).collect();
+            let fixed_entries: Vec<_> = source.lights.iter().take(source.road_lamps.fixed_lights).map(|bound| {
+                let record = &reference.lighting.lights[bound.source_index];
+                let output = &light_outputs[bound.source_index];
+                serde_json::json!({
+                    "id": bound.id,
+                    "sourceId": record.source,
+                    "shadowFaces": if record.shadows.kind == 0 || record.kind == crate::reference::LightKind::Directional { 0 }
+                        else if record.kind == crate::reference::LightKind::Point { 6 } else { 1 },
+                    "controllerOutput": {"enabled": output.enabled, "intensity": output.intensity},
                 })
             }).collect();
             crate::browser::game_startup_failure_details(&serde_json::json!({
@@ -581,6 +595,7 @@ pub(crate) fn source_lamp_admission(
                 "availableNewShadowFaces": shadow_capacity.saturating_sub(source.road_lamps.overlap.1),
                 "fixedLightEntries": source.road_lamps.fixed_lights,
                 "fixedShadowFaces": source.road_lamps.fixed_shadows,
+                "fixedEntries": fixed_entries,
                 "retainedOverlap": {"lightEntries": source.road_lamps.overlap.0, "shadowFaces": source.road_lamps.overlap.1},
                 "entries": entries,
             }).to_string());

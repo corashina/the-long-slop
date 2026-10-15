@@ -75,6 +75,7 @@ impl WorldPresentation<'_, '_> {
         lod_view: super::lod::LodView,
         receivers: &[WorldBounds],
         enabled: bool,
+        light_outputs: &[crate::lighting::LightOutput],
     ) -> Result<(), ReferenceError> {
         super::preflight::configure_staging(stream)?;
         if self.allocation.session != stream.frame().request.session {
@@ -268,8 +269,14 @@ impl WorldPresentation<'_, '_> {
         );
         self.surfaces
             .prepare_surface(stream, &mut self.meshes, &mut self.pipelines)?;
-        let lamps =
-            super::lamps::source_lamp_admission(&stream.frame(), receivers, &mut self.lights)?;
+        let lamps = super::lamps::source_lamp_admission(
+            &stream.frame(),
+            receivers,
+            &mut self.lights,
+            reference,
+            light_outputs,
+            enabled,
+        )?;
         let old = self.allocation.lamps;
         let mut a = stream.presentation_allocation();
         a.active_cpu = a.active_cpu.saturating_sub(old.0) + lamps.0;

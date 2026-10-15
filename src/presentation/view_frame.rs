@@ -32,6 +32,9 @@ impl SourceSubmissionAcks {
     pub fn main_submitted(&self, token: u32) {
         self.0.main.fetch_max(token, Ordering::Release);
     }
+    pub fn main_submitted_token(&self) -> u32 {
+        self.0.main.load(Ordering::Acquire)
+    }
     pub fn probe_submitted(&self, token: u32) {
         self.0.probe.fetch_max(token, Ordering::Release);
     }

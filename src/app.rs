@@ -148,6 +148,7 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
             (
                 initialize_storage,
                 check_ready,
+                trace_presented_frames,
                 read_input,
                 save::dispatch,
                 presentation::lighting::bind_lighting,
@@ -378,6 +379,27 @@ fn check_ready(
     }
 }
 
+fn trace_presented_frames(
+    drive: Res<Drive>,
+    acks: Res<presentation::view_frame::SourceSubmissionAcks>,
+    mut observed: Local<Option<(u32, u32)>>,
+) {
+    if !drive.ready {
+        *observed = None;
+        return;
+    }
+    let token = acks.main_submitted_token();
+    let Some((last, count)) = observed.as_mut() else {
+        *observed = Some((token, 0));
+        return;
+    };
+    if token > *last && *count < 2 {
+        *last = token;
+        *count += 1;
+        game_startup_presented_frame(*count);
+    }
+}
+
 fn clear_input(drive: &mut Drive) {
     drive.input.clear();
     drive.runtime.clear_input();
@@ -588,6 +610,7 @@ fn sync_world(
             lod_view,
             &receivers[..receiver_count],
             enabled,
+            runtime.lighting.light_outputs(),
         )
         .and_then(|_| runtime.align_startup(&reference.0).map(|_| ()))
         .and_then(|_| {
