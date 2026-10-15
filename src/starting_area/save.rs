@@ -130,6 +130,8 @@ impl GarageRuntime {
         self.area
             .interaction
             .sync_parts(&mut self.area.items, &mut self.physics)?;
+        self.wheels
+            .refresh_conditions(&self.area.conditions, &self.area.items);
         self.wheels.sync(&mut self.area.items, &mut self.physics)?;
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, true);
