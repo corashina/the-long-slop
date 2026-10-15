@@ -75,7 +75,8 @@ def validate_player_source(reader, shader_reader, data, shader):
         raise ValueError(f'{identity}: unsupported player material')
     if source_id(shader_reader) != {'file': 'sharedassets0.assets', 'path_id': 719}:
         raise ValueError(f'{identity}: player shader source')
-    properties = shader['m_ParsedForm']['m_PropInfo']['m_Props']
+    parsed = shader.get('m_ParsedForm', {})
+    properties = parsed.get('m_PropInfo', {}).get('m_Props', [])
     if {p['m_Name']: p['m_Type'] for p in properties} != PLAYER_PROPERTIES or len(properties) != 8:
         raise ValueError(f'{identity}: unsupported player shader properties')
     saved = data['m_SavedProperties']
@@ -99,6 +100,30 @@ def validate_player_source(reader, shader_reader, data, shader):
         raise ValueError(f'{identity}: unsupported player state')
     if data['m_ValidKeywords'] or data['disabledShaderPasses']:
         raise ValueError(f'{identity}: unsupported player keyword or disabled pass')
+    subshaders = parsed.get('m_SubShaders', [])
+    tags = [('IGNOREPROJECTOR', 'true'), ('QUEUE', 'AlphaTest'), ('RenderType', 'TransparentCutout')]
+    if len(subshaders) != 1 or subshaders[0].get('m_LOD') != 200 or subshaders[0].get('m_Tags') != {'tags': tags}:
+        raise ValueError(f'{identity}: unsupported player subshader')
+    passes = subshaders[0].get('m_Passes', [])
+    expected_passes = [('FORWARDBASE', 'FORWARD', 2, 1, 0), ('FORWARDADD', 'FORWARD', 2, 0, 1),
+        ('DEFERRED', 'DEFERRED', 2, 1, 0), ('SHADOWCASTER', 'ShadowCaster', 2, 1, 0), ('META', 'Meta', 0, 1, 0)]
+    if len(passes) != len(expected_passes):
+        raise ValueError(f'{identity}: unsupported player pass count')
+    for render_pass, (mode, name, cull, z_write, dst_blend) in zip(passes, expected_passes):
+        state = render_pass.get('m_State', {})
+        pass_tags = [tags[0], ('LIGHTMODE', mode), *tags[1:]]
+        if mode in ('FORWARDBASE', 'FORWARDADD', 'SHADOWCASTER'):
+            pass_tags.append(('SHADOWSUPPORT', 'true'))
+        if (render_pass.get('m_Type') != 0 or render_pass.get('m_Name') != ''
+                or render_pass.get('m_Tags') != {'tags': []} or state.get('m_Name') != name
+                or state.get('m_LOD') != 200 or state.get('m_Tags') != {'tags': pass_tags}):
+            raise ValueError(f'{identity}: unsupported player {mode} pass identity')
+        for owner, values in ((state, {'culling': cull, 'zWrite': z_write, 'zTest': 4}),
+                (state.get('rtBlend0', {}), {'srcBlend': 1, 'destBlend': dst_blend, 'colMask': 15})):
+            for field, expected_value in values.items():
+                if owner.get(field) != {'name': '<noninit>', 'val': expected_value}:
+                    raise ValueError(f'{identity}: unsupported player {mode} {field} state')
+
 
 
 def required_pointer(source, owner, pointer, property_name):
@@ -233,8 +258,6 @@ def recover_material(source, reader, color_override=None, condition=None):
         pass_values = dict(cull=value(pass_state['culling']), z_write=value(pass_state['zWrite']),
             z_test=value(pass_state['zTest']), src_blend=value(pass_state['rtBlend0']['srcBlend']),
             dst_blend=value(pass_state['rtBlend0']['destBlend']))
-        if family == 'player_model' and pass_values != dict(cull=2, z_write=1, z_test=4, src_blend=1, dst_blend=0):
-            raise ValueError(f'{source_id(reader)}: unsupported player pass state')
         state.update({key: bool(value) if key == 'z_write' else int(value) for key, value in pass_values.items()})
     if family == 'player_model' and condition is not None:
         raise ValueError(f'{source_id(reader)}: unsupported player condition')

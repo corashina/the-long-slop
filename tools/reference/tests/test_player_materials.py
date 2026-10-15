@@ -42,6 +42,8 @@ class PlayerMaterialTests(unittest.TestCase):
                 evidence = self.source.material_evidence[f'sharedassets0.assets:{identity}']
                 self.assertEqual(evidence['shader'],dict(file='sharedassets0.assets',path_id=719))
                 self.assertEqual(len(evidence['passes']),5)
+                source_passes = self.source.read(self.source.get('sharedassets0.assets',719))['m_ParsedForm']['m_SubShaders'][0]['m_Passes']
+                self.assertEqual([p['state'] for p in evidence['passes']], [p['m_State'] for p in source_passes])
                 self.assertEqual(evidence['required_operations'][0]['operation'],'camera_distance_clip')
                 self.assertIn('_BumpStrength',evidence['channels']['_BumpMap'])
 
@@ -132,14 +134,51 @@ class PlayerMaterialTests(unittest.TestCase):
             with self.subTest(field=field, value=value), self.assertRaises(ValueError):
                 self.recover_with_mutation(57, 346, lambda d: d['m_TextureSettings'].update({field: value}))
 
-    def test_player_forward_base_state(self):
-        for field, value in [('culling', 0), ('zWrite', 0), ('zTest', 2),
-                ('srcBlend', 5), ('destBlend', 1)]:
-            def mutate(shader):
-                state = shader['m_ParsedForm']['m_SubShaders'][0]['m_Passes'][0]['m_State']
-                (state['rtBlend0'] if field in ('srcBlend', 'destBlend') else state)[field]['val'] = value
-            with self.subTest(field=field), self.assertRaises(ValueError):
-                self.recover_with_mutation(57, 719, mutate)
+    def test_player_source_pass_states(self):
+        for index, name in enumerate(('FORWARDBASE', 'FORWARDADD', 'DEFERRED', 'SHADOWCASTER', 'META')):
+            for field in ('culling', 'zWrite', 'zTest', 'srcBlend', 'destBlend', 'colMask'):
+                for change in ('value', 'missing', 'binding'):
+                    def mutate(shader):
+                        state = shader['m_ParsedForm']['m_SubShaders'][0]['m_Passes'][index]['m_State']
+                        owner = state['rtBlend0'] if field in ('srcBlend', 'destBlend', 'colMask') else state
+                        if change == 'missing':
+                            del owner[field]
+                        elif change == 'binding':
+                            owner[field]['name'] = '_ZWrite'
+                        else:
+                            owner[field]['val'] += 1
+                    with self.subTest(render_pass=name, field=field, change=change), self.assertRaises(ValueError):
+                        self.recover_with_mutation(57, 719, mutate)
+
+    def test_player_source_pass_structure(self):
+        for label, mutate in [
+            ('missing subshaders', lambda s: s.pop('m_SubShaders')),
+            ('empty subshaders', lambda s: s.update(m_SubShaders=[])),
+            ('extra subshader', lambda s: s['m_SubShaders'].append(copy.deepcopy(s['m_SubShaders'][0]))),
+            ('subshader LOD', lambda s: s['m_SubShaders'][0].update(m_LOD=100)),
+            ('missing subshader tags', lambda s: s['m_SubShaders'][0].pop('m_Tags')),
+            ('queue tag', lambda s: s['m_SubShaders'][0]['m_Tags']['tags'].__setitem__(1, ('QUEUE', 'Geometry'))),
+            ('render tag', lambda s: s['m_SubShaders'][0]['m_Tags']['tags'].__setitem__(2, ('RenderType', 'Opaque'))),
+            ('missing passes', lambda s: s['m_SubShaders'][0].pop('m_Passes')),
+            ('empty passes', lambda s: s['m_SubShaders'][0].update(m_Passes=[])),
+            ('missing pass', lambda s: s['m_SubShaders'][0]['m_Passes'].pop()),
+            ('extra pass', lambda s: s['m_SubShaders'][0]['m_Passes'].append(copy.deepcopy(s['m_SubShaders'][0]['m_Passes'][0]))),
+            ('pass order', lambda s: s['m_SubShaders'][0]['m_Passes'].reverse()),
+        ]:
+            with self.subTest(structure=label), self.assertRaises(ValueError):
+                self.recover_with_mutation(57, 719, lambda shader: mutate(shader['m_ParsedForm']))
+        for index in range(5):
+            for label, mutate in [
+                ('type', lambda p: p.update(m_Type=1)),
+                ('missing state', lambda p: p.pop('m_State')),
+                ('name', lambda p: p['m_State'].update(m_Name='OTHER')),
+                ('LOD', lambda p: p['m_State'].update(m_LOD=0)),
+                ('identity', lambda p: p['m_State']['m_Tags']['tags'].__setitem__(1, ('LIGHTMODE', 'OTHER'))),
+                ('missing identity', lambda p: p['m_State']['m_Tags']['tags'].pop(1)),
+            ]:
+                with self.subTest(render_pass=index, structure=label), self.assertRaises(ValueError):
+                    self.recover_with_mutation(57, 719,
+                        lambda shader: mutate(shader['m_ParsedForm']['m_SubShaders'][0]['m_Passes'][index]))
 
     def test_player_normal_multiplies_red_and_alpha(self):
         from PIL import Image
