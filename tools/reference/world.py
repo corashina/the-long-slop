@@ -563,6 +563,10 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
         name=f'world-{identity[0].replace(".","-")}-{identity[1]}'
         exporter=GltfExporter(source,output/f'{name}.gltf',reader,index)
         report=exporter.export([root])
+        for material in report['materials']:
+            selected.receipt(source.get(material['source']['file'],material['source']['path_id']))
+            for texture in material['properties']['textures']:
+                selected.receipt(source.get(texture['source']['file'],texture['source']['path_id']))
         for material in report['deferred_materials']:
             selected.record(source.get(material['source']['file'],material['source']['path_id']))
         hierarchy=source.hierarchy(root,activate_root=True)

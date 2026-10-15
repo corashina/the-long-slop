@@ -3,6 +3,42 @@ from types import SimpleNamespace as NS
 from tools.reference.world import Selection, required_record
 
 class WorldTests(unittest.TestCase):
+    def test_prototype_material_and_texture_keep_checked_source_receipts(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from tools.reference.world import export_world_prototypes
+        from tools.reference.world_spawn import project_runtime_receipts
+        file = NS(name='fixture', source_container_path='fixture')
+        readers = {i: NS(assets_file=file, path_id=i, type=NS(name=kind))
+                   for i, kind in ((1, 'Transform'), (2, 'Material'), (3, 'Texture2D'))}
+        root = readers[1]
+        data = {1: dict(m_LocalPosition=dict(x=0., y=0., z=0.),
+                        m_LocalRotation=dict(x=0., y=0., z=0., w=1.),
+                        m_LocalScale=dict(x=1., y=1., z=1.)),
+                2: {'m_Name': 'material'}, 3: {'m_Name': 'texture'}}
+        source = NS(read=lambda r: data[r.path_id], get=lambda f, i: readers[i],
+                    hierarchy=lambda *args, **kwargs: [], chain=lambda r: [root])
+        library = NS(record_files={f'fixture/{i}.json': {'sha256': str(i) * 64} for i in readers})
+        selected = Selection(source, library)
+        selected.receipt(root)
+        material = dict(source=dict(file='fixture', path_id=2),
+                        properties=dict(textures=[dict(source=dict(file='fixture', path_id=3))]))
+        report = dict(deferred_materials=[], nodes=[], materials=[material],
+                      material_count=1, sha256='a' * 64, dependencies=[])
+        with TemporaryDirectory() as directory, redirect_stdout(StringIO()):
+            with patch('tools.reference.world.GltfExporter', return_value=NS(export=lambda roots: report)):
+                prototypes = export_world_prototypes(source, library, selected, Path(directory),
+                    {('fixture', 1): root}, {('fixture', 1): 'prop'}, {}, 1)
+            world = dict(library={}, source_hashes=[], prototypes=prototypes,
+                         receipts=list(selected.receipts.values()))
+            project_runtime_receipts(world, directory)
+        self.assertEqual({r['source']['path_id']: r['sha256'] for r in world['receipts']},
+                         {i: str(i) * 64 for i in readers})
+        self.assertEqual(selected.records, {})
+
     def test_renderer_export_keeps_two_sided_source_shadows(self):
         from tools.reference.render_lighting import recover_renderer
         file = NS(name='fixture', source_container_path='fixture')
