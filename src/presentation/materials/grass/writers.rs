@@ -481,6 +481,17 @@ fn complete(pass: Res<WriterPass>, hidden: Res<HiddenWriterPass>, queue: Res<Ren
 }
 
 impl GrassWriters {
+    pub(crate) fn startup_audit(&self) -> serde_json::Value {
+        serde_json::json!({
+            "revision": self.revision.load(Ordering::Acquire),
+            "deferred": self.deferred,
+            "pending": self.pending.len(),
+            "writers": self.writers.len(),
+            "gpu_pending": self.pending_gpu.load(Ordering::Acquire),
+            "status": format!("{:?}", *self.status.lock().unwrap()),
+            "ready": self.ready().ok(),
+        })
+    }
     pub fn release_all(&mut self) {
         self.writers.clear();
         self.pending.clear();
@@ -558,7 +569,7 @@ impl GrassWriters {
             return Ok(());
         }
         // Callers request every frame. `ready` stays false until this writer is admitted.
-        if !stream.pending_room() {
+        if !stream.pending_room(1) {
             self.deferred = true;
             return Ok(());
         }

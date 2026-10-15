@@ -18,12 +18,14 @@ const MIB: usize = 1024 * 1024;
 const MAX_ROADS: usize = 512;
 const MAX_NEAR: usize = 512;
 const MAX_DISTANT: usize = 256;
-const MAX_OBJECTS: usize = 8192;
+const MAX_OBJECTS: usize = 32768;
 const MAX_PENDING: usize = 32;
-const ACTIVE_CPU: usize = 128 * MIB;
+// A surface can wait for an instance, grass expansion, and a material pipeline.
+const PRESENTATION_PENDING_RESERVE: usize = 4;
+const ACTIVE_CPU: usize = 256 * MIB;
 const ACTIVE_GPU: usize = 128 * MIB;
-const PROTOTYPE_CPU: usize = 256 * MIB;
-const PROTOTYPE_GPU: usize = 512 * MIB;
+const PROTOTYPE_CPU: usize = 512 * MIB;
+const PROTOTYPE_GPU: usize = 1024 * MIB;
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -757,9 +759,9 @@ impl WorldStream {
             + self.presentation.pending
             + self.overlap.pending_work
     }
-    /// Presentation callers check this before they add pending work. A full queue waits.
-    pub fn pending_room(&self) -> bool {
-        self.pending_work() < MAX_PENDING
+    /// Reserve this stage and its downstream work before admitting a request.
+    pub fn pending_room(&self, slots: usize) -> bool {
+        self.pending_work().saturating_add(slots) <= MAX_PENDING
     }
     pub fn available_external_jobs(&self) -> usize {
         if !self.indices_ready {
@@ -775,6 +777,16 @@ impl WorldStream {
     pub(crate) fn startup_job_audit(&self) -> serde_json::Value {
         serde_json::json!({
             "presentation": self.presentation.jobs,
+            "pending": {
+                "presentation": self.presentation.pending,
+                "structures": self.ready_structures.len(),
+                "contents": self.contents.pending_requests(),
+                "props": self.props.pending_requests(),
+                "surface": self.ready.is_some(),
+                "terrain": self.terrain_work.is_some(),
+                "replays": self.replay_roots.len(),
+                "overlap": self.overlap.pending_work,
+            },
             "terrain": self.terrain_work.is_some(),
             "contents": self.contents.has_replay(),
             "available": self.available_external_jobs(),
@@ -800,6 +812,10 @@ impl WorldStream {
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn available_prototype_cpu_bytes(&self) -> usize {
         PROTOTYPE_CPU.saturating_sub(self.metrics().prototype_cpu_bytes)
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn available_prototype_gpu_bytes(&self) -> usize {
+        PROTOTYPE_GPU.saturating_sub(self.metrics().prototype_gpu_bytes)
     }
     /// Reserve decoded bytes before loading an admitted prototype or terrain material.
     pub fn reserve_prototype(
@@ -1121,7 +1137,8 @@ impl WorldStream {
     }
     fn prepare_prop_layer(&mut self) {
         let budget = self.props.allocation_bound();
-        let can_request = self.pending_room() && self.admit_generation(budget);
+        let can_request =
+            self.pending_room(PRESENTATION_PENDING_RESERVE + 1) && self.admit_generation(budget);
         if self.failure.is_some() {
             return;
         }
@@ -1204,7 +1221,7 @@ impl WorldStream {
         self.contents
             .retain_requests(&self.wanted_structures, &self.replay_roots);
         let metrics = self.metrics();
-        let limit = MAX_PENDING
+        let limit = (MAX_PENDING - PRESENTATION_PENDING_RESERVE)
             .saturating_sub(metrics.pending_work)
             .min(MAX_OBJECTS.saturating_sub(metrics.generated_objects));
         if limit == 0 {
@@ -1398,7 +1415,7 @@ impl WorldStream {
         });
         // Selected keys are not work requests. Admit one caller at a time and
         // leave capacity for its first phase. Retry admission even with cached bounds.
-        if !self.replay_roots.is_empty() || self.pending_work() >= MAX_PENDING - 1 {
+        if !self.replay_roots.is_empty() || !self.pending_room(PRESENTATION_PENDING_RESERVE + 2) {
             return;
         }
         for key in &self.replay_keys {
@@ -1504,7 +1521,9 @@ impl WorldStream {
         self.roads.segments_in(query, &mut self.road_candidates);
         self.refresh_structures();
         if self.wanted_structures.len() > MAX_OBJECTS {
-            return Err(ReferenceError("Source object count exceeds8192".into()));
+            return Err(ReferenceError(format!(
+                "Source object count exceeds {MAX_OBJECTS}"
+            )));
         }
         for (tier, tile) in self.tiles.iter().enumerate() {
             let radius = tile.draw_distance as i64;
@@ -1611,7 +1630,7 @@ impl WorldStream {
             self.wanted_lights.push(index);
         }
         if self.metrics().generated_objects > MAX_OBJECTS {
-            self.failure = Some("Source object count exceeds 8192".into());
+            self.failure = Some(format!("Source object count exceeds {MAX_OBJECTS}"));
             return true;
         }
         if !self.road_focus.into_iter().any(|p| {
@@ -2324,7 +2343,9 @@ impl WorldStream {
                 .supplies_for_building(placement.id.unit[0] as u32, &mut points);
         }
         if self.metrics().generated_objects + 1 + points.len() * 2 > MAX_OBJECTS {
-            return Err(ReferenceError("Source object count exceeds 8192".into()));
+            return Err(ReferenceError(format!(
+                "Source object count exceeds {MAX_OBJECTS}"
+            )));
         }
         if self
             .metrics()

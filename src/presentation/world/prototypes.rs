@@ -195,7 +195,7 @@ impl SourcePrototypes {
             return Err(ReferenceError("Source prototype owner limit".into()));
         }
         // Callers poll `loaded`, so a full queue retries on a later frame.
-        if !stream.pending_room() {
+        if !stream.pending_room(1) {
             return Ok(());
         }
         let mut allocation = stream.presentation_allocation();

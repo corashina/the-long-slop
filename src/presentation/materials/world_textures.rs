@@ -438,8 +438,15 @@ impl WorldTextures {
         }) || gpu.is_none_or(|v| v > gpu_available)
         {
             return Err(ReferenceError(format!(
-                "Source texture budget {}:{}",
-                material.source.file, material.source.path_id
+                "Source texture budget {}:{}: CPU {} / {}, GPU {} / {} bytes",
+                material.source.file,
+                material.source.path_id,
+                self.cpu_reserved
+                    .saturating_add(self.metadata_bytes())
+                    .saturating_add(metadata),
+                cpu_available,
+                self.gpu_reserved.saturating_add(added),
+                gpu_available
             )));
         }
         self.cpu_reserved = cpu.unwrap();

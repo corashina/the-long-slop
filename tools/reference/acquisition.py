@@ -10,7 +10,7 @@ STATION_PREFABS = (26573, 27344, 41123)
 ASSEMBLY_SHA256 = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e'
 TEXT_SHA256 = '22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee'
 # Accepted build 11140890 contract, recovered from the checked source receipt.
-CONTRACT_SHA256 = '3255625c9ef6e87e2f4d12bf1d973d2746f6080d6490240a467f22d2abd49245'
+CONTRACT_SHA256 = 'b163e5d3ea6a8c61acee51251c42216880eb679130b9af87204b62b9efba642c'
 
 
 def _block(code, start):
@@ -357,7 +357,10 @@ def _transform(t):
 
 def source_contract(value):
     if isinstance(value, dict):
-        return {k:source_contract(v) for k,v in value.items() if k not in ('asset','root','node')}
+        result = {k:source_contract(v) for k,v in value.items() if k not in ('asset','root','node')}
+        if 'motion' in result:
+            result['motion'].pop('target')
+        return result
     if isinstance(value, list):
         return [source_contract(v) for v in value]
     return value

@@ -80,6 +80,7 @@ fn snapshot_models(
     output.frame = 0;
     output.rows.clear();
     if !master.materials_prepared
+        || master.warming
         || frame.views[1].is_none()
         || frame.main_token == 0
         || shadow.capacity() == 0

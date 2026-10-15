@@ -573,7 +573,6 @@ impl SourceMaterials {
         if self.world_textures.admitted(&material.source) {
             return Ok(());
         }
-        let metrics = stream.metrics();
         let (cpu, gpu) = self.world_textures.bytes();
         self.world_textures.admit(
             material,
@@ -588,8 +587,8 @@ impl SourceMaterials {
             } else {
                 &reference.world.material_textures
             },
-            (256 * 1024 * 1024usize).saturating_sub(metrics.prototype_cpu_bytes) + cpu,
-            (512 * 1024 * 1024usize).saturating_sub(metrics.prototype_gpu_bytes) + gpu,
+            stream.available_prototype_cpu_bytes() + cpu,
+            stream.available_prototype_gpu_bytes() + gpu,
         )?;
         self.account_deferred(
             stream,
@@ -615,9 +614,7 @@ impl SourceMaterials {
         stream.set_presentation_allocation(allocation)?;
         self.world_deferred.jobs += free;
         self.world_deferred.staging += staging_available;
-        let available_cpu = (256 * 1024 * 1024usize)
-            .saturating_sub(stream.metrics().prototype_cpu_bytes)
-            + self.world_textures.bytes().0;
+        let available_cpu = stream.available_prototype_cpu_bytes() + self.world_textures.bytes().0;
         let result =
             self.world_textures
                 .prepare(server, images, free, staging_available, available_cpu);

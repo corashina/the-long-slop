@@ -1,6 +1,6 @@
 // TMP Surface programs 4 and 20, installed build 11140890.
 #import bevy_pbr::{mesh_functions, mesh_view_bindings::view}
-#import source_surface::{lamp_lighting, receiver, source_shadow, attenuation, attenuation_sampler, default_cookie, default_sampler, cookies, cookie_sampler}
+#import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, source_shadow, attenuation, attenuation_sampler, default_cookie, default_sampler, cookies, cookie_sampler}
 #import source_view_lighting::{lighting, diffuse_sh, direct_attenuation, fog_factor, sun_cookie, sun_cookie_sampler}
 struct PlateUniform { face:vec4<f32>, outline:vec4<f32>, sdf:vec4<f32>, scale:vec4<f32>, bevel:vec4<f32>, bump:vec4<f32>, specular:vec4<f32> }
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> plate:PlateUniform;

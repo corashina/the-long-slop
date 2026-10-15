@@ -270,7 +270,6 @@ impl AsBindGroup for GrassMaterial {
             receiver_mask: self.receiver_mask,
         };
         let mut result = extension.unprepared_bind_group(layout, device, &mut params.0, true)?;
-        result.bindings.0.retain(|(index, _)| *index <= 113);
         let mut data = encase::UniformBuffer::new(Vec::new());
         data.write(&self.uniform).expect("Grass uniform");
         result.bindings.0.push((
@@ -298,7 +297,6 @@ impl AsBindGroup for GrassMaterial {
     fn bind_group_layout_entries(device: &RenderDevice, force: bool) -> Vec<BindGroupLayoutEntry> {
         use binding_types::*;
         let mut result = SourceReceiver::bind_group_layout_entries(device, force);
-        result.retain(|entry| entry.binding <= 113);
         result.extend(
             BindGroupLayoutEntries::sequential(
                 ShaderStages::VERTEX_FRAGMENT,

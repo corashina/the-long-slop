@@ -129,7 +129,7 @@ impl WorldPipelines {
         material: &Handle<M>,
         shadows: bool,
     ) -> Result<Option<PipelineTicket>, ReferenceError> {
-        if stream.available_external_jobs() == 0 || !stream.pending_room() {
+        if stream.available_external_jobs() == 0 || !stream.pending_room(1) {
             return Ok(None);
         }
         let mut allocation = stream.presentation_allocation();

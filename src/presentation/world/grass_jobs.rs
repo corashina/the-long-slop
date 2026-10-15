@@ -98,6 +98,14 @@ fn pending_allocation(
     stream.set_presentation_allocation(next)
 }
 impl GrassJobs {
+    pub(crate) fn startup_audit(&self) -> serde_json::Value {
+        serde_json::json!({
+            "idle": self.instances.iter().filter(|i| !i.ready && i.pending.is_none()).count(),
+            "queued": self.instances.iter().filter(|i| matches!(i.pending, Some(Pending::Queued))).count(),
+            "expanding": self.instances.iter().filter(|i| matches!(i.pending, Some(Pending::Expand(_)))).count(),
+            "uploading": self.instances.iter().filter(|i| matches!(i.pending, Some(Pending::Upload { .. }))).count(),
+        })
+    }
     pub fn release_all(
         &mut self,
         meshes: &mut Assets<Mesh>,
@@ -160,7 +168,7 @@ impl GrassJobs {
             instance.latest = view;
             if instance.pending.is_none()
                 && instance.accepted_view != Some(view)
-                && stream.pending_room()
+                && stream.pending_room(2)
             {
                 allocation(stream, 0, 0, 0, 1)?;
                 instance.pending = Some(Pending::Queued);
@@ -206,7 +214,7 @@ impl GrassJobs {
             instance.latest = view;
             if instance.pending.is_none()
                 && instance.accepted_view != Some(view)
-                && stream.pending_room()
+                && stream.pending_room(2)
             {
                 allocation(stream, 0, 0, 0, 1)?;
                 instance.pending = Some(Pending::Queued);
@@ -231,7 +239,7 @@ impl GrassJobs {
         }
         let metadata = std::mem::size_of::<Instance>();
         // A full queue leaves the instance idle. `request_view` queues it on a later frame.
-        let queued = stream.pending_room();
+        let queued = stream.pending_room(2);
         allocation(stream, metadata, 0, 0, i32::from(queued))?;
         self.instances.push(Instance {
             entity,
