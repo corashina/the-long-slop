@@ -24,6 +24,8 @@ use bevy::{
 #[derive(Resource, Default)]
 pub struct SourcePresentationAllocation {
     session: u64,
+    pub(crate) fixed: crate::reference::fixed_reservation::FixedAllocation,
+    pub(crate) lighting_cpu: usize,
     lamps: (usize, usize, usize),
     imported_writers: Vec<(Entity, Handle<Mesh>)>,
     writers_bound: bool,
@@ -57,7 +59,13 @@ pub struct WorldPresentation<'w, 's> {
     pub images: ResMut<'w, Assets<Image>>,
     pub server: Res<'w, AssetServer>,
     pub lights: ResMut<'w, SourceLighting>,
-    pub imported: Res<'w, crate::presentation::reference::ReferenceVisuals>,
+    pub imported: ResMut<'w, crate::presentation::reference::ReferenceVisuals>,
+    pub fixed: ResMut<'w, crate::presentation::fixed_assets::SourceFixedAssets>,
+    pub gltfs: Res<'w, Assets<bevy::gltf::Gltf>>,
+    pub gltf_meshes: Res<'w, Assets<bevy::gltf::GltfMesh>>,
+    pub shaders: Res<'w, Assets<Shader>>,
+    pub dither: ResMut<'w, Assets<crate::presentation::lighting_assets::CasterDitherBytes>>,
+    pub lighting_assets: ResMut<'w, crate::presentation::lighting_assets::LightingAssets>,
     pub imported_meshes: Query<'w, 's, (Entity, &'static ChildOf, &'static Mesh3d)>,
     pub world_poses: Query<'w, 's, &'static GlobalTransform>,
     pub saved_poses: Res<'w, crate::presentation::save::CandidateImportedPoses>,
@@ -79,6 +87,23 @@ impl WorldPresentation<'_, '_> {
         light_outputs: &[crate::lighting::LightOutput],
     ) -> Result<(), ReferenceError> {
         super::preflight::configure_staging(stream, &reference.file_catalog)?;
+        let mut failure = self
+            .fixed
+            .poll(
+                stream,
+                &mut self.allocation.fixed,
+                reference,
+                &self.server,
+                &self.gltfs,
+                &self.gltf_meshes,
+                &self.shaders,
+                &self.meshes,
+                &mut self.images,
+                &mut self.dither,
+                &mut self.lights,
+                &mut self.lighting_assets,
+            )
+            .err();
         if self.allocation.session != stream.frame().request.session {
             self.allocation.session = stream.frame().request.session;
             self.allocation.lamps = (0, 0, 0);
@@ -109,7 +134,45 @@ impl WorldPresentation<'_, '_> {
             &mut self.writers,
         )?;
         self.prototypes.retire_unused(stream, reference);
-        let mut failure = self.pipelines.prepare(stream).err();
+        let lighting_cpu = self.lights.clone_bytes();
+        let mut controls = stream.presentation_allocation();
+        controls.active_cpu = controls
+            .active_cpu
+            .checked_sub(self.allocation.lighting_cpu)
+            .and_then(|n| n.checked_add(lighting_cpu))
+            .ok_or_else(|| ReferenceError("Fixed lighting control accounting".into()))?;
+        stream.set_presentation_allocation(controls)?;
+        self.allocation.lighting_cpu = lighting_cpu;
+        if let Err(error) = self.fixed.prepare_metadata(
+            stream,
+            &mut self.allocation.fixed,
+            reference,
+            &self.server,
+            &self.plans,
+        ) {
+            failure.get_or_insert(error);
+        }
+        if failure.is_some() || stream.frame().failure.is_some() {
+            self.materials.cache.cancel_fixed();
+        }
+        if failure.is_none() && stream.frame().failure.is_none() && self.fixed.descriptors_ready() {
+            if let Err(error) = self.fixed.admit_payloads(
+                stream,
+                &mut self.allocation.fixed,
+                reference,
+                &self.server,
+                &mut self.imported,
+                &mut self.materials.cache,
+                &mut self.lights,
+                &mut self.lighting_assets,
+                &mut self.images,
+            ) {
+                failure.get_or_insert(error);
+            }
+        }
+        if let Err(error) = self.pipelines.prepare(stream) {
+            failure.get_or_insert(error);
+        }
         self.writers.configure(stream, &reference.world)?;
         self.writers.update_frame(
             view.position,
@@ -245,6 +308,11 @@ impl WorldPresentation<'_, '_> {
             .request_descriptors(stream, reference, &mut self.prototypes)?;
         self.instances
             .request_descriptors(stream, reference, &mut self.prototypes)?;
+        // MaterialProperties resolves ShaderRef::Path during preparation.
+        // Descriptor discovery stays available while fixed shader inputs wait.
+        if !self.fixed.shaders_ready() {
+            return Ok(());
+        }
         self.surfaces.prepare_bindings(
             stream,
             reference,

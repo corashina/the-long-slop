@@ -41,7 +41,10 @@ pub struct PreparedPresentation {
 }
 impl PreparedPresentation {
     pub fn can_start(world: &World) -> bool {
-        world.resource::<SourcePrototypes>().settled()
+        world
+            .resource::<super::fixed_assets::SourceFixedAssets>()
+            .payloads_ready()
+            && world.resource::<SourcePrototypes>().settled()
             && world.resource::<materials::SourceMaterials>().settled()
             && world
                 .resource::<WorldPipelines>()
@@ -89,7 +92,14 @@ impl PreparedPresentation {
         overlap.prototype_gpu_bytes = overlap
             .prototype_gpu_bytes
             .saturating_sub(prototype.1 + material.1);
+        world
+            .resource::<super::fixed_assets::SourceFixedAssets>()
+            .allocation_for_overlap(&mut overlap)?;
         candidate.stream.set_overlap(overlap)?;
+        let mut fixed_snapshot = crate::reference::fixed_reservation::FixedAllocation::default();
+        world
+            .resource::<super::fixed_assets::SourceFixedAssets>()
+            .account(&mut candidate.stream, &mut fixed_snapshot)?;
         let mesh_count = world.query::<&Mesh3d>().iter(world).count();
         let mut admitted = candidate.stream.presentation_allocation();
         admitted.active_cpu += super::candidate_upload::UPLOAD_CONTROL_BYTES
@@ -128,9 +138,15 @@ impl PreparedPresentation {
             writers: default(),
             materials,
             lighting,
-            allocation: SourcePresentationAllocation::for_session(
-                candidate.stream.frame().request.session,
-            ),
+            allocation: {
+                let mut allocation = SourcePresentationAllocation::for_session(
+                    candidate.stream.frame().request.session,
+                );
+                allocation.fixed = fixed_snapshot;
+                allocation.lighting_cpu =
+                    world.resource::<lighting::SourceLighting>().clone_bytes();
+                allocation
+            },
             system: SystemState::new(world),
             updates: Vec::with_capacity(reference.nodes.len()),
             roots: Vec::with_capacity(8192),
@@ -171,6 +187,10 @@ impl PreparedPresentation {
         overlap.prototype_gpu_bytes = overlap
             .prototype_gpu_bytes
             .saturating_sub(prototype.1 + material.1);
+        world
+            .resource::<super::fixed_assets::SourceFixedAssets>()
+            .allocation_for_overlap(&mut overlap)
+            .expect("charged fixed overlap");
         overlap
     }
     pub fn advance(

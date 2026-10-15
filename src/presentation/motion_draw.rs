@@ -333,8 +333,6 @@ fn prepare_models(
     objects.frame = scene.frame;
 }
 
-#[derive(Resource)]
-struct MotionShader(Handle<Shader>);
 #[derive(Resource, Default)]
 pub struct MotionPipelines {
     inspected: usize,
@@ -440,7 +438,13 @@ pub fn prepare_world_motion(
                 .get_layout(&[Mesh::ATTRIBUTE_POSITION.at_shader_location(0)])
                 .map_err(|e| e.to_string())?,
         ];
-        let shader = world.resource::<MotionShader>().0.clone();
+        let Some(shader) = world
+            .resource::<super::fixed_assets::AdmittedShaders>()
+            .get("shaders/source_motion_objects.wgsl")
+            .cloned()
+        else {
+            return Ok(false);
+        };
         descriptor.vertex.shader = shader.clone();
         descriptor.vertex.entry_point = Some("object_vertex".into());
         let fragment = descriptor.fragment.as_mut().unwrap();
@@ -504,13 +508,16 @@ fn source_flag(defs: &[ShaderDefVal], name: &str) -> bool {
 }
 fn prepare_pipelines(
     mut pipelines: ResMut<MotionPipelines>,
-    shader: Res<MotionShader>,
+    shaders: Res<super::fixed_assets::AdmittedShaders>,
     cache: Res<PipelineCache>,
     loading: Res<MaterialLoading>,
     status: Res<SourceLightingStatus>,
     isolation: Res<super::world::pipelines::PipelineIsolation>,
     owners: Res<super::pipeline_ownership::PipelineOwners>,
 ) {
+    let Some(shader) = shaders.get("shaders/source_motion_objects.wgsl") else {
+        return;
+    };
     pipelines.isolated.clone_from(&isolation.0);
     if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
         return;
@@ -565,10 +572,10 @@ fn prepare_pipelines(
         descriptor.layout[1] = SourceMotionPass::object_camera_layout();
         descriptor.layout[3] = SourceMotionPass::object_layout();
         descriptor.multisample = MultisampleState::default();
-        descriptor.vertex.shader = shader.0.clone();
+        descriptor.vertex.shader = shader.clone();
         descriptor.vertex.entry_point = Some("object_vertex".into());
         let fragment = descriptor.fragment.as_mut().unwrap();
-        fragment.shader = shader.0.clone();
+        fragment.shader = shader.clone();
         fragment.entry_point = Some("object_fragment".into());
         fragment.targets = vec![Some(ColorTargetState {
             format: TextureFormat::Rg16Float,
@@ -919,16 +926,11 @@ pub fn render_objects(
 }
 
 pub fn install(app: &mut App) {
-    let shader = app
-        .world()
-        .resource::<AssetServer>()
-        .load("shaders/source_motion_objects.wgsl");
     app.init_resource::<MotionScene>().add_systems(
         PostUpdate,
         snapshot_models.after(super::shadow_scene::prepare_scene),
     );
     app.sub_app_mut(RenderApp)
-        .insert_resource(MotionShader(shader))
         .init_resource::<MotionScene>()
         .init_resource::<MotionObjects>()
         .init_resource::<MotionPipelines>()

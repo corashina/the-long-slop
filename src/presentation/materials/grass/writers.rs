@@ -5,7 +5,7 @@ use bevy::{
     mesh::VertexBufferLayout,
     prelude::*,
     render::{
-        Extract, ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems,
+        Extract, ExtractSchedule, Render, RenderApp, RenderSystems,
         render_resource::*,
         renderer::{RenderContext, RenderDevice, RenderQueue},
     },
@@ -72,22 +72,21 @@ struct WriterPass {
     writer_layout: BindGroupLayout,
     writers: HashMap<Entity, WriterGpu>,
 }
-#[derive(Resource)]
-struct WriterShader(Handle<Shader>);
 #[derive(Resource, Default)]
 struct HiddenWriterPass(Option<WriterPass>);
 pub struct GrassDisplacementPlugin;
 impl Plugin for GrassDisplacementPlugin {
     fn build(&self, app: &mut App) {
-        let shader = app
-            .world()
-            .resource::<AssetServer>()
-            .load("shaders/source_grass_displacement.wgsl");
         app.init_resource::<GrassWriters>();
         app.sub_app_mut(RenderApp)
-            .insert_resource(WriterShader(shader))
-            .add_systems(RenderStartup, init)
-            .add_systems(ExtractSchedule, extract)
+            .init_resource::<GrassGpu>()
+            .init_resource::<HiddenWriterPass>()
+            .add_systems(
+                ExtractSchedule,
+                (init, extract)
+                    .chain()
+                    .after(crate::presentation::fixed_assets::FixedShaderExtraction),
+            )
             .add_systems(Render, complete.in_set(RenderSystems::Cleanup))
             .add_systems(
                 crate::presentation::shadows::SourceShadowPass,
@@ -99,8 +98,15 @@ fn init(
     mut commands: Commands,
     _device: Res<RenderDevice>,
     cache: Res<PipelineCache>,
-    shader: Res<WriterShader>,
+    shaders: Res<crate::presentation::fixed_assets::AdmittedShaders>,
+    pass: Option<Res<WriterPass>>,
 ) {
+    if pass.is_some() {
+        return;
+    }
+    let Some(shader) = shaders.get("shaders/source_grass_displacement.wgsl") else {
+        return;
+    };
     use binding_types::*;
 
     let frame_layout = BindGroupLayoutDescriptor::new(
@@ -120,7 +126,7 @@ fn init(
         label: Some("source Unlit/Color displacement".into()),
         layout: vec![frame_layout, writer_layout],
         vertex: VertexState {
-            shader: shader.0.clone(),
+            shader: shader.clone(),
             entry_point: Some("vertex".into()),
             buffers: vec![VertexBufferLayout {
                 array_stride: 12,
@@ -134,7 +140,7 @@ fn init(
             ..default()
         },
         fragment: Some(FragmentState {
-            shader: shader.0.clone(),
+            shader: shader.clone(),
             entry_point: Some("fragment".into()),
             targets: vec![Some(ColorTargetState {
                 format: TextureFormat::Rgba8Unorm,
@@ -157,8 +163,6 @@ fn init(
         }),
         ..default()
     });
-    commands.init_resource::<GrassGpu>();
-    commands.init_resource::<HiddenWriterPass>();
     commands.insert_resource(WriterPass {
         session: 0,
         active: false,
@@ -178,12 +182,15 @@ fn init(
 fn extract(
     input: Extract<Res<GrassWriters>>,
     requests: Extract<Res<crate::app::save::SaveRequests>>,
-    mut pass: ResMut<WriterPass>,
+    pass: Option<ResMut<WriterPass>>,
     mut hidden: ResMut<HiddenWriterPass>,
     mut gpu: ResMut<GrassGpu>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
 ) {
+    let Some(mut pass) = pass else {
+        return;
+    };
     if hidden
         .0
         .as_ref()
@@ -317,7 +324,7 @@ fn extract_one(
     }
 }
 fn draw(
-    pass: Res<WriterPass>,
+    pass: Option<Res<WriterPass>>,
     hidden: Res<HiddenWriterPass>,
     gpu: Res<GrassGpu>,
     cache: Res<PipelineCache>,
@@ -326,6 +333,9 @@ fn draw(
     candidate: Res<crate::presentation::world::pipelines::CandidatePipelines>,
     mut context: RenderContext,
 ) {
+    let Some(pass) = pass else {
+        return;
+    };
     draw_one(&pass, &gpu, &cache, &mut context);
     if let Some(hidden) = &hidden.0 {
         if !hidden.active
@@ -457,7 +467,10 @@ fn encode<'a>(
     }
 }
 
-fn complete(pass: Res<WriterPass>, hidden: Res<HiddenWriterPass>, queue: Res<RenderQueue>) {
+fn complete(pass: Option<Res<WriterPass>>, hidden: Res<HiddenWriterPass>, queue: Res<RenderQueue>) {
+    let Some(pass) = pass else {
+        return;
+    };
     for pass in std::iter::once(&*pass).chain(hidden.0.as_ref()) {
         if !pass.encoded.load(Ordering::Acquire)
             || pass.callback_registered.swap(true, Ordering::AcqRel)

@@ -6,7 +6,7 @@ pub mod lod;
 pub mod primary;
 pub mod specular;
 pub mod terrain;
-mod upload_receipt;
+pub(crate) mod upload_receipt;
 mod world_texture_upload;
 pub mod world_textures;
 use crate::reference::{
@@ -15,9 +15,7 @@ use crate::reference::{
 };
 use bevy::asset::{AssetId, LoadState, RenderAssetUsages, UntypedAssetId};
 use bevy::gltf::{GltfExtras, GltfMaterialExtras};
-use bevy::image::{
-    ImageAddressMode, ImageFilterMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor,
-};
+use bevy::image::{ImageAddressMode, ImageLoaderSettings};
 use bevy::material::key::{ErasedMaterialPipelineKey, ErasedMeshPipelineKey};
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{
@@ -125,11 +123,13 @@ struct SourceTexture {
     owner: Arc<()>,
     upload: upload_receipt::UploadReceipt,
     failed: bool,
-    eager: bool,
+    persistent: bool,
     users: usize,
     record: Arc<TextureRecord>,
     levels: Vec<Handle<Image>>,
     input_staging: Vec<usize>,
+    pixel_bytes: usize,
+    cpu_reservation: usize,
     image: Option<Handle<Image>>,
     label: String,
 }
@@ -145,7 +145,8 @@ pub struct SourceMaterials {
     textures: Vec<SourceTexture>,
     texture_indices: HashMap<String, usize>,
     pub handles: HashMap<(source::AssetId, u32, bool, u32), Handle<SourceMaterial>>,
-    shaders: [Handle<Shader>; 3],
+    pub(crate) shaders: [Handle<Shader>; 3],
+    pub(crate) fixed_admitted: bool,
     pub state: RenderingState,
     pub bound: bool,
     pub texture_bytes: usize,
@@ -293,7 +294,7 @@ impl SourceMaterials {
     }
     pub(crate) fn owns_image(&self, id: AssetId<Image>) -> bool {
         self.textures.iter().any(|t| {
-            !t.eager
+            !t.persistent
                 && Arc::strong_count(&t.owner) == 1
                 && t.image.as_ref().is_some_and(|h| h.id() == id)
         }) || self.world_textures.owns_image(id)
@@ -315,6 +316,7 @@ impl Plugin for SourceMaterialPlugin {
             MaterialPlugin::<grass::material::GrassMaterial>::default(),
             grass::writers::GrassDisplacementPlugin,
             world_texture_upload::WorldTextureUploadPlugin,
+            super::fixed_assets::FixedAssetsPlugin,
             super::candidate_upload::CandidateUploadPlugin,
         ))
         .insert_resource(MaterialLoading(Arc::new(Mutex::new(LoadingData {
@@ -362,9 +364,9 @@ impl Plugin for SourceMaterialPlugin {
 
 pub fn load_materials(
     commands: &mut Commands,
-    server: &AssetServer,
+    _server: &AssetServer,
     reference: &ReferenceManifest,
-) {
+) -> Result<(), source::ReferenceError> {
     let mut sort_data = HashMap::new();
     let mut sort_identities = HashMap::<String, u32>::new();
     let mut shader_identities = HashMap::<String, i32>::new();
@@ -411,7 +413,7 @@ pub fn load_materials(
             },
         );
     }
-    let eager_assets: HashSet<_> = reference
+    let fixed_assets: HashSet<_> = reference
         .assets
         .iter()
         .filter(|asset| {
@@ -429,7 +431,7 @@ pub fn load_materials(
         .rendering
         .materials
         .iter()
-        .filter(|record| eager_assets.contains(&record.asset))
+        .filter(|record| fixed_assets.contains(&record.asset))
         .map(|record| Arc::new(record.clone()))
         .collect();
     let mut textures = Vec::new();
@@ -439,30 +441,29 @@ pub fn load_materials(
             if texture_indices.contains_key(&texture.file) {
                 continue;
             }
-            let srgb = texture.color_space == TextureColorSpace::Srgb;
-            let levels = texture
+            let levels = Vec::with_capacity(texture.mips.len());
+            let input_staging = texture
                 .mips
                 .iter()
-                .map(|mip| {
-                    server
-                        .load_builder()
-                        .with_settings(move |settings: &mut ImageLoaderSettings| {
-                            settings.is_srgb = srgb;
-                            settings.asset_usage = RenderAssetUsages::MAIN_WORLD;
-                        })
-                        .load(mip.file.clone())
-                })
-                .collect();
+                .map(primary::png_staging)
+                .collect::<Result<Vec<_>, _>>()?;
+            let pixel_bytes = source::fixed_reservation::png_pixels(&texture.mips)?;
+            let cpu_reservation = source::fixed_reservation::png_cpu(
+                pixel_bytes,
+                input_staging.iter().copied().max().unwrap_or(0),
+            )?;
             texture_indices.insert(texture.file.clone(), textures.len());
             textures.push(SourceTexture {
                 owner: Arc::new(()),
                 upload: default(),
                 failed: false,
-                eager: true,
+                persistent: true,
                 users: 0,
                 record: Arc::new(texture.clone()),
                 levels,
-                input_staging: Vec::new(),
+                input_staging,
+                pixel_bytes,
+                cpu_reservation,
                 image: None,
                 label: format!(
                     "material {}:{} {}",
@@ -475,35 +476,35 @@ pub fn load_materials(
         if texture_indices.contains_key(&texture.file) {
             continue;
         }
-        let srgb = texture.color_space == TextureColorSpace::Srgb;
-        let levels = texture
+        let levels = Vec::with_capacity(texture.mips.len());
+        let input_staging = texture
             .mips
             .iter()
-            .map(|mip| {
-                server
-                    .load_builder()
-                    .with_settings(move |settings: &mut ImageLoaderSettings| {
-                        settings.is_srgb = srgb;
-                        settings.asset_usage = RenderAssetUsages::MAIN_WORLD;
-                    })
-                    .load(mip.file.clone())
-            })
-            .collect();
+            .map(primary::png_staging)
+            .collect::<Result<Vec<_>, _>>()?;
+        let pixel_bytes = source::fixed_reservation::png_pixels(&texture.mips)?;
+        let cpu_reservation = source::fixed_reservation::png_cpu(
+            pixel_bytes,
+            input_staging.iter().copied().max().unwrap_or(0),
+        )?;
+
         texture_indices.insert(texture.file.clone(), textures.len());
         textures.push(SourceTexture {
             owner: Arc::new(()),
             upload: default(),
             failed: false,
-            eager: true,
+            persistent: true,
             users: 0,
             record: Arc::new(texture.clone()),
             levels,
-            input_staging: Vec::new(),
+            input_staging,
+            pixel_bytes,
+            cpu_reservation,
             image: None,
             label: format!("source texture {}", texture.file),
         });
     }
-    commands.insert_resource(SourceMaterials {
+    let mut source = SourceMaterials {
         preparation: default(),
         world_textures: world_textures::WorldTextures::default(),
         world_primary: primary::PrimaryOwnership::default(),
@@ -514,21 +515,20 @@ pub fn load_materials(
         textures,
         texture_indices,
         handles: HashMap::new(),
-        shaders: [
-            server.load("shaders/source_surface.wgsl"),
-            server.load("shaders/source_mesh.wgsl"),
-            server.load("shaders/source_glass.wgsl"),
-        ],
+        shaders: default(),
+        fixed_admitted: false,
         state: RenderingState::Loading,
         bound: false,
         texture_bytes: 0,
-    });
+    };
+    source.select_lighting_textures(reference)?;
+    commands.insert_resource(source);
+    Ok(())
 }
 
 pub fn material_readiness(
     server: Res<AssetServer>,
     mut source: ResMut<SourceMaterials>,
-    mut images: ResMut<Assets<Image>>,
     loading: Res<MaterialLoading>,
 ) {
     if source.state != RenderingState::Loading {
@@ -540,13 +540,6 @@ pub fn material_readiness(
             return;
         }
     }
-    match assemble_textures(&mut source.textures, &server, &mut images, true) {
-        Ok(bytes) => source.texture_bytes += bytes,
-        Err(error) => {
-            source.state = RenderingState::Failed(error.0);
-            return;
-        }
-    }
     if source.bound {
         source.state = loading.0.lock().unwrap().state.clone();
     }
@@ -555,23 +548,17 @@ fn assemble_textures(
     textures: &mut [SourceTexture],
     server: &AssetServer,
     images: &mut Assets<Image>,
-    eager: bool,
 ) -> Result<usize, source::ReferenceError> {
     for texture in textures
         .iter_mut()
-        .filter(|texture| texture.eager == eager && texture.image.is_none() && !texture.failed)
+        .filter(|texture| texture.image.is_none() && !texture.failed)
     {
-        for (level, handle) in texture.levels.iter().enumerate() {
-            if let LoadState::Failed(error) = server.load_state(handle.id()) {
-                // Dynamic owners drain terminal loads in prepare_world_primary before reporting.
-                if !eager {
-                    continue;
-                }
-                return Err(source::ReferenceError(format!(
-                    "{} mip {level}: {error}",
-                    texture.label
-                )));
-            }
+        if texture
+            .levels
+            .iter()
+            .any(|h| matches!(server.load_state(h.id()), LoadState::Failed(_)))
+        {
+            continue;
         }
         if texture.levels.len() != texture.record.mips.len()
             || !texture
@@ -581,60 +568,13 @@ fn assemble_textures(
         {
             continue;
         }
-        let byte_count = texture
-            .record
-            .mips
-            .iter()
-            .map(|mip| mip.width as usize * mip.height as usize * 4)
-            .sum();
-        // Validate every mip before removing any admitted source image.
-        for (handle, mip) in texture.levels.iter().zip(&texture.record.mips) {
-            let image = images.get(handle.id()).unwrap();
-            let expected = mip.width as usize * mip.height as usize * 4;
-            if image.width() != mip.width
-                || image.height() != mip.height
-                || image.data.as_ref().map(Vec::len) != Some(expected)
-            {
-                return Err(source::ReferenceError(format!(
-                    "{}: invalid decoded mip {}",
-                    texture.label, mip.file
-                )));
-            }
-        }
-        let mut bytes = Vec::with_capacity(byte_count);
-        let mut assembled = None;
-        for handle in &texture.levels {
-            let mut image = images.remove(handle.id()).unwrap();
-            bytes.append(image.data.as_mut().unwrap());
-            if assembled.is_none() {
-                assembled = Some(image);
-            }
-        }
-        let mut image =
-            assembled.ok_or_else(|| source::ReferenceError("Missing authored mip chain".into()))?;
-        image.data = Some(bytes);
-        image.texture_descriptor.mip_level_count = texture.record.sampler.mip_count;
-        image.asset_usage = RenderAssetUsages::RENDER_WORLD;
-        let settings = &texture.record.sampler;
-        let filter = if settings.filter == 0 {
-            ImageFilterMode::Nearest
-        } else {
-            ImageFilterMode::Linear
-        };
-        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-            address_mode_u: wrap(settings.wrap_u),
-            address_mode_v: wrap(settings.wrap_v),
-            mag_filter: filter,
-            min_filter: filter,
-            mipmap_filter: if settings.filter == 2 || settings.aniso > 1 {
-                ImageFilterMode::Linear
-            } else {
-                ImageFilterMode::Nearest
-            },
-            anisotropy_clamp: u16::from(settings.aniso.max(1)),
-            lod_max_clamp: (settings.mip_count - 1) as f32,
-            ..default()
-        });
+        let (image, byte_count) = super::source_images::assemble_mips(
+            &texture.levels,
+            &texture.record.mips,
+            &texture.record.sampler,
+            images,
+        )
+        .map_err(source::ReferenceError)?;
         texture.image = Some(images.add(image));
         texture.levels.clear();
         return Ok(byte_count);
@@ -2254,12 +2194,7 @@ impl SourceMaterials {
     pub(crate) fn measurement_images(&self) -> impl Iterator<Item = (AssetId<Image>, bool)> + '_ {
         self.textures
             .iter()
-            .flat_map(|t| {
-                t.image
-                    .iter()
-                    .chain(&t.levels)
-                    .map(move |h| (h.id(), !t.eager))
-            })
+            .flat_map(|t| t.image.iter().chain(&t.levels).map(move |h| (h.id(), true)))
             .chain(
                 self.world_textures
                     .measurement_images()
@@ -2272,11 +2207,12 @@ impl SourceMaterials {
     pub fn drain_ready(&self, server: &AssetServer, images: &Assets<Image>) -> bool {
         self.world_textures.drain_ready(server, images)
             && self.textures.iter().all(|t| {
-                t.image.is_some()
-                    || t.levels.iter().all(|h| {
-                        images.contains(h.id())
-                            || matches!(server.load_state(h.id()), LoadState::Failed(_))
-                    })
+                (t.image.is_some() && primary::pending_texture_cpu(t) == 0)
+                    || (t.image.is_none()
+                        && t.levels.iter().all(|h| {
+                            images.contains(h.id())
+                                || matches!(server.load_state(h.id()), LoadState::Failed(_))
+                        }))
             })
     }
     pub fn release_all(
@@ -2293,7 +2229,9 @@ impl SourceMaterials {
         Ok(())
     }
     pub fn settled(&self) -> bool {
-        self.textures.iter().all(|t| !t.failed && t.image.is_some())
+        self.textures
+            .iter()
+            .all(|t| !t.failed && t.image.is_some() && primary::pending_texture_cpu(t) == 0)
             && self.world_textures.settled()
     }
     pub fn shared_bytes(&self) -> (usize, usize) {
@@ -2306,29 +2244,19 @@ impl SourceMaterials {
         let pixels: usize = self
             .textures
             .iter()
-            .filter(|t| !t.eager && (!shared || Arc::strong_count(&t.owner) > 1))
-            .map(|t| {
-                t.record
-                    .mips
-                    .iter()
-                    .map(|m| m.width as usize * m.height as usize * 4)
-                    .sum::<usize>()
-            })
+            .filter(|t| !shared || Arc::strong_count(&t.owner) > 1)
+            .map(|t| t.pixel_bytes)
             .sum();
         let record_bytes: usize = self
             .records
             .iter()
-            .filter(|r| {
-                (!shared || Arc::strong_count(r) > 1)
-                    && self.world_primary.assets.contains_key(&r.asset)
-                    && !self.world_primary.borrowed_records.contains(&r.asset)
-            })
+            .filter(|r| !shared || Arc::strong_count(r) > 1)
             .map(|r| primary::record_bytes(r))
             .sum();
         let texture_metadata: usize = self
             .textures
             .iter()
-            .filter(|t| !t.eager && (!shared || Arc::strong_count(&t.record) > 1))
+            .filter(|t| !shared || Arc::strong_count(&t.record) > 1)
             .map(|t| primary::texture_metadata(&t.record))
             .sum();
         let (cpu, gpu) = if shared {
@@ -2337,7 +2265,14 @@ impl SourceMaterials {
             self.world_textures.fork_shared_bytes()
         };
         (
-            cpu + pixels * 2 + record_bytes + texture_metadata,
+            cpu + self
+                .textures
+                .iter()
+                .filter(|t| !shared || Arc::strong_count(&t.owner) > 1)
+                .map(primary::pending_texture_cpu)
+                .sum::<usize>()
+                + record_bytes
+                + texture_metadata,
             gpu + pixels,
         )
     }

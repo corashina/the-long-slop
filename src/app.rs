@@ -198,15 +198,23 @@ fn setup(
 ) {
     commands.insert_resource(InstrumentVisuals::default());
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
-    presentation::materials::load_materials(&mut commands, &server, &reference.0);
+    if let Err(error) =
+        presentation::materials::load_materials(&mut commands, &server, &reference.0)
+    {
+        game_failure(&error.to_string());
+        return;
+    }
     presentation::lighting::load_lighting(&mut commands, &server, &reference.0.lighting);
-    presentation::lighting_assets::load_lighting(
-        &mut commands,
-        &server,
-        &reference.0.render_lighting,
-    );
+    presentation::lighting_assets::load_lighting(&mut commands, &server, Arc::clone(&reference.0));
     presentation::lighting::load_lamp_materials(&mut commands, &gltf_extensions, &reference.0);
     presentation::reference::load(&mut commands, &server, &reference.0);
+    match presentation::fixed_assets::SourceFixedAssets::new(&reference.0) {
+        Ok(fixed) => commands.insert_resource(fixed),
+        Err(error) => {
+            game_failure(&error.to_string());
+            return;
+        }
+    };
     presentation::frame_graph::spawn_cameras(
         &mut commands,
         &mut images,
@@ -245,12 +253,13 @@ fn check_ready(
     lighting: (
         Res<presentation::lighting::SourceLighting>,
         Res<presentation::source_lighting::SourceLighting>,
+        Res<presentation::fixed_assets::SourceFixedAssets>,
     ),
     mut materials: ResMut<presentation::materials::SourceMaterials>,
     mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
     plates: Res<presentation::plates::PlateTextStatus>,
 ) {
-    let (lighting, source_lighting) = lighting;
+    let (lighting, source_lighting, fixed) = lighting;
     if let Some(error) = mirrors.failure() {
         game_failure(&error);
         visuals.failed = true;
@@ -280,6 +289,9 @@ fn check_ready(
     }
     if drive.ready {
         *readiness = 0;
+        return;
+    }
+    if !fixed.payloads_ready() || !materials.fixed_textures_ready() {
         return;
     }
     if !drive

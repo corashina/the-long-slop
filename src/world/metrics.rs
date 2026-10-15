@@ -198,7 +198,7 @@ pub(crate) mod browser {
             Unorm8x4Bgra
         )
     }
-    fn mesh_payload(mesh: &Mesh) -> usize {
+    pub(crate) fn mesh_payload(mesh: &Mesh) -> usize {
         mesh.try_attributes().map_or(0, |attributes| {
             attributes.map(|(_, v)| attribute_bytes(v)).sum::<usize>()
         }) + mesh

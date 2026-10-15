@@ -1,3 +1,4 @@
+pub mod fixed_assets;
 pub mod camera;
 pub mod consumables;
 pub mod gpu_prepare;

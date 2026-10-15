@@ -61,25 +61,23 @@ pub(crate) fn source_gltf_settings(settings: &mut GltfLoaderSettings) {
     });
 }
 
-pub fn load(commands: &mut Commands, server: &AssetServer, reference: &ReferenceManifest) {
-    let mut visuals = ReferenceVisuals {
+pub fn load(commands: &mut Commands, _server: &AssetServer, reference: &ReferenceManifest) {
+    let count = reference
+        .assets
+        .iter()
+        .filter(|a| {
+            matches!(
+                a.usage,
+                AssetUsage::UniqueScene | AssetUsage::RoadLampPrototype | AssetUsage::SkyPrototype
+            )
+        })
+        .count();
+    commands.insert_resource(ReferenceVisuals {
         expected_instances: reference.expected_instances(),
+        handles: Vec::with_capacity(count),
+        gltfs: Vec::with_capacity(count),
         ..Default::default()
-    };
-    for asset in reference.assets.iter().filter(|asset| {
-        matches!(
-            asset.usage,
-            AssetUsage::UniqueScene | AssetUsage::RoadLampPrototype | AssetUsage::SkyPrototype
-        )
-    }) {
-        let handle = server
-            .load_builder()
-            .with_settings(source_gltf_settings)
-            .load(asset.path.clone());
-        visuals.handles.push((asset.path.clone(), handle.clone()));
-        visuals.gltfs.push((asset.id, handle));
-    }
-    commands.insert_resource(visuals);
+    });
 }
 
 pub fn spawn_scenes(

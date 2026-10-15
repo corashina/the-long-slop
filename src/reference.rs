@@ -1,5 +1,6 @@
 //! Validated installed-build data. Geometry uses converted body-local meters.
 
+pub mod fixed_reservation;
 pub mod package;
 pub mod prototype_plan;
 pub use package::{FileCatalog, FileReceipt, PlanReceipt};

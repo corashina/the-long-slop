@@ -51,9 +51,9 @@ pub struct SkyState {
     pub fade: [[f32; 3]; 4],
 }
 impl SkyState {
-    pub fn new(server: &AssetServer, lighting: &crate::reference::LightingRecord) -> Self {
+    pub fn new(lighting: &crate::reference::LightingRecord) -> Self {
         Self {
-            shader: server.load("shaders/source_sky.wgsl"),
+            shader: default(),
             uniform: SkyUniform {
                 parameters: Vec4::new(
                     0.,

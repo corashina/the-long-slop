@@ -591,3 +591,146 @@ pub struct MaterialBindingReference {
     pub gltf_material: u32,
     pub source: SourceId,
 }
+
+impl LightingTextureRecord {
+    /// Validate complete ordered rows before allocation or loading.
+    pub fn validate_chunks(&self) -> Result<usize, ReferenceError> {
+        require(
+            self.width > 0
+                && self.height > 0
+                && self.mip_count > 0
+                && self.mip_count <= 32 - self.width.max(self.height).leading_zeros(),
+            "source texture dimensions",
+        )?;
+        let mut index = 0usize;
+        let mut total = 0usize;
+        for mip in 0..self.mip_count {
+            let width = (self.width >> mip).max(1);
+            let height = (self.height >> mip).max(1);
+            total = total
+                .checked_add(row_bytes(width, height)?)
+                .ok_or_else(chunk_overflow)?;
+            let mut row = 0u32;
+            while row < height {
+                let chunk = self
+                    .chunks
+                    .get(index)
+                    .ok_or_else(|| ReferenceError("Missing source texture chunk".into()))?;
+                require(
+                    chunk.mip == mip
+                        && chunk.row == row
+                        && chunk.width == width
+                        && chunk.rows > 0
+                        && chunk.rows <= height - row
+                        && row_bytes(width, chunk.rows)? <= 1024 * 1024
+                        && chunk.data.source == self.source,
+                    "source texture chunk coverage",
+                )?;
+                row = row.checked_add(chunk.rows).ok_or_else(chunk_overflow)?;
+                index = index.checked_add(1).ok_or_else(chunk_overflow)?;
+            }
+        }
+        require(index == self.chunks.len(), "extra source texture chunks")?;
+        Ok(total)
+    }
+
+    pub fn chunk_range(&self, index: usize) -> Result<std::ops::Range<usize>, ReferenceError> {
+        self.validate_chunks()?;
+        self.validated_chunk_range(index)
+    }
+
+    fn validated_chunk_range(
+        &self,
+        index: usize,
+    ) -> Result<std::ops::Range<usize>, ReferenceError> {
+        let chunk = self
+            .chunks
+            .get(index)
+            .ok_or_else(|| ReferenceError("Missing source texture chunk".into()))?;
+        let mut start = 0usize;
+        for mip in 0..chunk.mip {
+            start = start
+                .checked_add(row_bytes(
+                    (self.width >> mip).max(1),
+                    (self.height >> mip).max(1),
+                )?)
+                .ok_or_else(chunk_overflow)?;
+        }
+        start = start
+            .checked_add(row_bytes(chunk.width, chunk.row)?)
+            .ok_or_else(chunk_overflow)?;
+        let end = start
+            .checked_add(row_bytes(chunk.width, chunk.rows)?)
+            .ok_or_else(chunk_overflow)?;
+        Ok(start..end)
+    }
+
+    pub fn copy_chunk(
+        &self,
+        index: usize,
+        pixels: &[u8],
+        output: &mut [u8],
+    ) -> Result<(), ReferenceError> {
+        let total = self.validate_chunks()?;
+        let range = self.validated_chunk_range(index)?;
+        require(
+            output.len() == total && pixels.len() == range.len(),
+            "source texture chunk copy length",
+        )?;
+        output
+            .get_mut(range)
+            .ok_or_else(chunk_overflow)?
+            .copy_from_slice(pixels);
+        Ok(())
+    }
+}
+fn row_bytes(width: u32, rows: u32) -> Result<usize, ReferenceError> {
+    usize::try_from(width)
+        .ok()
+        .and_then(|w| w.checked_mul(usize::try_from(rows).ok()?))
+        .and_then(|n| n.checked_mul(4))
+        .ok_or_else(chunk_overflow)
+}
+fn chunk_overflow() -> ReferenceError {
+    ReferenceError("Source texture chunk size overflow".into())
+}
+
+impl LightingTextureRecord {
+    pub fn validate_chunk_receipts(
+        &self,
+        catalog: &super::FileCatalog,
+    ) -> Result<usize, ReferenceError> {
+        let pixels = self.validate_chunks()?;
+        for (index, chunk) in self.chunks.iter().enumerate() {
+            let receipt = catalog.file(&chunk.data.path)?;
+            let bytes = self
+                .validated_chunk_range(index)?
+                .len()
+                .checked_add(16)
+                .ok_or_else(chunk_overflow)?;
+            require(
+                receipt.bytes as usize == bytes && receipt.sha256 == chunk.data.sha256,
+                "fixed row file receipt",
+            )?;
+        }
+        Ok(pixels)
+    }
+    pub fn copy_smip_chunk(
+        &self,
+        index: usize,
+        input: &[u8],
+        output: &mut [u8],
+    ) -> Result<(), ReferenceError> {
+        let chunk = self.chunks.get(index).ok_or_else(chunk_overflow)?;
+        require(
+            input.len() >= 16 && &input[..4] == b"SMIP",
+            "fixed row SMIP header",
+        )?;
+        let word = |start| u32::from_le_bytes(input[start..start + 4].try_into().unwrap());
+        require(
+            word(4) == chunk.width && word(8) == chunk.rows && word(12) == 1,
+            "fixed row SMIP dimensions",
+        )?;
+        self.copy_chunk(index, &input[16..], output)
+    }
+}

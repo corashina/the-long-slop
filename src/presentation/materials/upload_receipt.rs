@@ -5,7 +5,7 @@ use std::sync::{
 
 /// Shared by material forks, CPU accounting, and the render queue callback.
 #[derive(Clone, Default)]
-pub(super) struct UploadReceipt(Arc<AtomicU8>);
+pub(crate) struct UploadReceipt(Arc<AtomicU8>);
 
 impl UploadReceipt {
     pub fn cpu_bytes(&self, reservation: usize, started: bool) -> usize {
@@ -15,6 +15,8 @@ impl UploadReceipt {
             0
         }
     }
+
+    pub fn completed(&self) -> bool { self.0.load(Ordering::Acquire) == 2 }
 
     pub fn register(&self) -> bool {
         self.0

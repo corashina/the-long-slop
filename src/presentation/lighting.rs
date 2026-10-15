@@ -301,42 +301,10 @@ impl Plugin for SourceLightingPlugin {
             .add_systems(Render, check_pipelines.in_set(RenderSystems::Cleanup));
     }
 }
-pub fn load_lighting(commands: &mut Commands, server: &AssetServer, lighting: &LightingRecord) {
-    let textures = lighting
-        .textures
-        .iter()
-        .map(|texture| {
-            let (srgb, filter, wrap_u, wrap_v) = (
-                texture.color_space != 0,
-                texture.filter_mode,
-                texture.wrap_u,
-                texture.wrap_v,
-            );
-            let handle = server
-                .load_builder()
-                .with_settings(move |settings: &mut super::textures::SourceImageSettings| {
-                    *settings = super::textures::SourceImageSettings {
-                        srgb,
-                        filter,
-                        wrap_u,
-                        wrap_v,
-                        main_world_only: false,
-                        decoded_bytes: 0,
-                    };
-                })
-                .load(texture.mip_data.path.clone());
-            (
-                texture.id,
-                format!(
-                    "{}:{} {}",
-                    texture.source.file, texture.source.path_id, texture.mip_data.path
-                ),
-                handle,
-            )
-        })
-        .collect();
+pub fn load_lighting(commands: &mut Commands, _server: &AssetServer, lighting: &LightingRecord) {
+    let textures = Vec::with_capacity(lighting.textures.len());
     commands.insert_resource(SourceLighting {
-        sky: super::sky::SkyState::new(server, lighting),
+        sky: super::sky::SkyState::new(lighting),
         road_lamps: super::world::RoadLamps::new(),
         materials: Vec::new(),
         material_loads: None,
@@ -352,7 +320,7 @@ pub fn load_lighting(commands: &mut Commands, server: &AssetServer, lighting: &L
         lights: Vec::with_capacity(MAX_LIGHTS),
         uniform: LightingUniform::default(),
         textures,
-        shader: server.load("shaders/source_surface.wgsl"),
+        shader: default(),
         cookie_handles: None,
         status: Arc::new(Mutex::new(RenderingState::Loading)),
     });
@@ -391,6 +359,21 @@ impl bevy::gltf::extensions::GltfExtensionHandler for SourceMaterialCapture {
         }
     }
 }
+impl SourceLighting {
+    pub(crate) fn release_failed_capture(&mut self, path: &str) {
+        if let Some(capture) = &self.material_loads {
+            for entry in capture
+                .0
+                .lock()
+                .unwrap()
+                .iter_mut()
+                .filter(|e| e.path == path)
+            {
+                entry.handle = None;
+            }
+        }
+    }
+}
 pub fn load_lamp_materials(
     commands: &mut Commands,
     extensions: &bevy::gltf::extensions::GltfExtensionHandlers,
@@ -424,7 +407,7 @@ pub fn load_lamp_materials(
 }
 
 /// Keep all custom source cookies in the existing single sampled texture slot.
-fn pack_custom_cookies(
+pub(crate) fn pack_custom_cookies(
     images: &mut Assets<Image>,
     handles: [&Handle<Image>; 3],
 ) -> Result<Handle<Image>, String> {
@@ -499,16 +482,53 @@ fn pack_custom_cookies(
     Ok(images.add(array))
 }
 
+pub(crate) fn cookie_ids(reference: &crate::reference::ReferenceManifest) -> [u32; 5] {
+    let r = &reference.lighting;
+    let portable = [
+        &reference.flashlights.instances[0],
+        &reference.flashlights.instances[1],
+    ]
+    .map(|instance| {
+        let c = r
+            .controllers
+            .iter()
+            .find(|c| c.id == instance.controller)
+            .unwrap();
+        r.lights
+            .iter()
+            .find(|l| l.id == c.states[0].lights[0])
+            .unwrap()
+            .cookie
+            .unwrap()
+    });
+    [
+        r.cycle.cloud_shadow_cookie,
+        r.default_spot_cookie,
+        r.lights
+            .iter()
+            .find(|l| l.kind == LightKind::Spot && l.cookie.is_some())
+            .unwrap()
+            .cookie
+            .unwrap(),
+        portable[0],
+        portable[1],
+    ]
+}
 pub(crate) fn bind_lighting(
     mut commands: Commands,
     reference: Res<RuntimeReference>,
     visuals: Res<ReferenceVisuals>,
     mut source: ResMut<SourceLighting>,
-    mut images: ResMut<Assets<Image>>,
+    images: Res<Assets<Image>>,
     drive: Res<Drive>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
 ) {
-    if source.bound || !visuals.bound || matches!(source.state, RenderingState::Failed(_)) {
+    if source.bound
+        || !visuals.bound
+        || source.textures.len() != reference.0.lighting.textures.len()
+        || source.cookie_handles.is_none()
+        || matches!(source.state, RenderingState::Failed(_))
+    {
         return;
     }
     if source
@@ -519,6 +539,7 @@ pub(crate) fn bind_lighting(
         return;
     }
     let r = &reference.0.lighting;
+    let cookie_ids = cookie_ids(&reference.0);
     let directional_cookie = r
         .textures
         .iter()
@@ -529,59 +550,6 @@ pub(crate) fn bind_lighting(
             "Source directional cookie requires repeat wrapping on both axes".into(),
         );
         return;
-    }
-    let portable_cookies = [
-        &reference.0.flashlights.instances[0],
-        &reference.0.flashlights.instances[1],
-    ]
-    .map(|instance| {
-        let controller = r
-            .controllers
-            .iter()
-            .find(|control| control.id == instance.controller)
-            .expect("validated flashlight controller");
-        let id = controller.states[0].lights[0];
-        r.lights
-            .iter()
-            .find(|light| light.id == id)
-            .and_then(|light| light.cookie)
-            .expect("validated flashlight cookie")
-    });
-    let cookie_ids = [
-        r.cycle.cloud_shadow_cookie,
-        r.default_spot_cookie,
-        r.lights
-            .iter()
-            .find(|light| light.kind == LightKind::Spot && light.cookie.is_some())
-            .and_then(|light| light.cookie)
-            .expect("validated source spot cookie"),
-        portable_cookies[0],
-        portable_cookies[1],
-    ];
-    if source.cookie_handles.is_none() {
-        let handle = |id| {
-            source
-                .textures
-                .iter()
-                .find(|(key, _, _)| *key == id)
-                .expect("validated source cookie texture")
-                .2
-                .clone()
-        };
-        let sun = handle(cookie_ids[0]);
-        let default = handle(cookie_ids[1]);
-        let custom = [
-            handle(cookie_ids[2]),
-            handle(cookie_ids[3]),
-            handle(cookie_ids[4]),
-        ];
-        match pack_custom_cookies(&mut images, custom.each_ref()) {
-            Ok(array) => source.cookie_handles = Some([sun, default, array]),
-            Err(error) => {
-                source.state = RenderingState::Failed(error);
-                return;
-            }
-        }
     }
     if !source.materials_prepared {
         for (output_index, output) in drive.runtime.lighting.material_outputs().iter().enumerate() {
@@ -988,13 +956,19 @@ pub(crate) fn sync_lighting(
         gpu.cookie_from_world = cookie_from_world;
     }
 }
-pub fn lighting_readiness(
+pub(crate) fn lighting_readiness(
     mut commands: Commands,
     server: Res<AssetServer>,
     mut source: ResMut<SourceLighting>,
     visuals: Res<ReferenceVisuals>,
+    images: Res<Assets<Image>>,
+    reference: Res<RuntimeReference>,
+    fixed: Res<super::fixed_assets::SourceFixedAssets>,
 ) {
     if matches!(source.state, RenderingState::Failed(_)) {
+        return;
+    }
+    if !fixed.payloads_ready() || source.textures.len() != reference.0.lighting.textures.len() {
         return;
     }
     for (_, name, handle) in &source.textures {
@@ -1002,7 +976,7 @@ pub fn lighting_readiness(
             source.state = RenderingState::Failed(format!("Cannot load {name}: {error}"));
             return;
         }
-        if !server.is_loaded_with_dependencies(handle.id()) {
+        if !images.contains(handle.id()) {
             return;
         }
     }

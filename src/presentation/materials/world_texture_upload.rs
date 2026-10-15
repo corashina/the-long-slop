@@ -71,7 +71,7 @@ fn extract(
         .into_iter()
         .chain(requests.hidden().map(|p| &p.materials))
     {
-        for texture in materials.textures.iter().filter(|t| !t.eager) {
+        for texture in materials.textures.iter() {
             if texture
                 .image
                 .as_ref()
