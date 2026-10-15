@@ -3522,6 +3522,7 @@ mod renderer_pending_checks {
             .unwrap();
         accounting.admitted(&cancelled);
         tickets.push(cancelled.clone());
+        let returning_placement = stream.wanted_structures[1].clone();
         stream.request_at([10000., 0., 10000.], [10000., 0., 10000.]);
         assert!(stream.prepared_surface().is_none());
         assert!(stream.ready.is_some());
@@ -3566,6 +3567,61 @@ mod renderer_pending_checks {
         accounting
             .reconcile(&mut stream, tickets.iter().cloned(), cpu, staging)
             .unwrap();
+        assert_eq!(stream.metrics().pending_work, 0);
+
+        // Leave, return before upload completion, then drain the old child and parent.
+        use crate::world::renderer_pending::RendererRetirement;
+        stream.wanted_structures.push(returning_placement.clone());
+        let mut old_parent = stream
+            .reserve_instance_renderer(stream.request, &returning_placement.id, 0, 0, 0)
+            .unwrap();
+        let mut old_child = stream.reserve_grass_renderer(91, 0).unwrap();
+        let upload = UploadReceipt::default();
+        old_child.watch_upload(upload.clone());
+        let child_pipeline = old_child.start(&mut stream, cpu, staging).unwrap().unwrap();
+        accounting.admitted(&child_pipeline);
+        tickets.push(child_pipeline.clone());
+        let mut parent_retirement = RendererRetirement::default();
+        let mut child_retirement = RendererRetirement::default();
+        assert!(parent_retirement.keep(true));
+        assert!(!parent_retirement.keep(false));
+        assert!(!child_retirement.keep(false));
+        assert!(!parent_retirement.drained(old_parent.drained(), old_child.drained()));
+        let retained = stream.metrics();
+        assert!(
+            !parent_retirement.keep(true),
+            "Returning sources cannot keep the retiring parent"
+        );
+        assert!(parent_retirement.started());
+        assert!(child_retirement.started());
+        assert!(stream.release_grass_renderer(91, &mut old_child).is_err());
+        assert_eq!(stream.metrics().pending_work, retained.pending_work);
+        assert_eq!(stream.metrics().pending_bytes, retained.pending_bytes);
+        child_pipeline.physical.complete();
+        assert!(!child_retirement.drained(old_child.drained(), true));
+        assert!(!parent_retirement.drained(old_parent.drained(), old_child.drained()));
+        upload.complete();
+        accounting
+            .reconcile(&mut stream, tickets.iter().cloned(), cpu, staging)
+            .unwrap();
+        assert!(child_retirement.drained(old_child.drained(), true));
+        stream.release_grass_renderer(91, &mut old_child).unwrap();
+        assert!(parent_retirement.drained(old_parent.drained(), true));
+        stream.release_renderer_pending(&mut old_parent).unwrap();
+        assert_eq!(
+            (
+                stream.metrics().pending_work,
+                stream.metrics().generation_jobs,
+                stream.metrics().pending_bytes
+            ),
+            (0, 0, 0)
+        );
+        let mut replacement = stream
+            .reserve_instance_renderer(stream.request, &returning_placement.id, 0, 0, 0)
+            .unwrap();
+        assert!(old_parent.start(&mut stream, cpu, staging).is_err());
+        assert!(RendererRetirement::default().keep(true));
+        stream.release_renderer_pending(&mut replacement).unwrap();
         assert_eq!(stream.metrics().pending_work, 0);
     }
 }

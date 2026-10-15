@@ -42,6 +42,7 @@ struct Renderer {
     settings: Option<GrassSettings>,
 }
 struct Instance {
+    retirement: crate::world::renderer_pending::RendererRetirement,
     continuation: Option<crate::world::renderer_pending::PipelineContinuation>,
     upload: Option<Arc<crate::presentation::fixed_assets::MeshUpload>>,
     caps_bound: bool,
@@ -75,7 +76,9 @@ impl SourceInstances {
             .all(|i| i.continuation.as_ref().is_none_or(|c| c.drained()))
     }
     pub fn ready(&self) -> bool {
-        self.instances.iter().all(|i| i.ready && i.visible)
+        self.instances
+            .iter()
+            .all(|i| !i.retirement.started() && i.ready && i.visible)
     }
     pub(crate) fn uses_prototype(&self, source: &crate::reference::SourceId) -> bool {
         self.instances
@@ -750,6 +753,7 @@ impl SourceInstances {
                                 }
                             }
                             Ok(Instance {
+                                retirement: Default::default(),
                                 continuation: None,
                                 upload: None,
                                 caps_bound: false,
@@ -808,7 +812,8 @@ impl SourceInstances {
             }
         }
         for instance in &mut self.instances {
-            if instance.ready
+            if instance.retirement.started()
+                || instance.ready
                 || instance.session != stream.frame().request.session
                 || !stream
                     .pending_structures()
@@ -895,6 +900,9 @@ impl SourceInstances {
         self.rebase(stream.origin, commands);
         let frame = stream.frame();
         for instance in &mut self.instances {
+            if instance.retirement.started() {
+                continue;
+            }
             if !stream.bindings_ready(&instance.placement.id) {
                 if instance.visible {
                     commands.entity(instance.root).insert(Visibility::Hidden);
@@ -1138,6 +1146,9 @@ impl SourceInstances {
         grass: &mut GrassJobs,
     ) {
         for instance in &mut self.instances {
+            if instance.retirement.started() {
+                continue;
+            }
             let prototype = reference
                 .world
                 .prototypes
@@ -1202,6 +1213,9 @@ impl SourceInstances {
         meshes: &Assets<Mesh>,
     ) -> Result<(), ReferenceError> {
         for instance in &self.instances {
+            if instance.retirement.started() {
+                continue;
+            }
             let prototype = reference
                 .world
                 .prototypes
@@ -1236,6 +1250,9 @@ impl SourceInstances {
         view: GrassView,
     ) -> Result<(), ReferenceError> {
         for instance in &self.instances {
+            if instance.retirement.started() {
+                continue;
+            }
             for renderer in &instance.renderers {
                 if renderer.settings.is_some() {
                     grass.request_view(stream, renderer.entity, view)?;
@@ -1256,22 +1273,14 @@ impl SourceInstances {
         let mut index = 0;
         while index < self.instances.len() {
             let id = &self.instances[index].placement.id;
-            if self.instances[index].session == stream.frame().request.session
+            let wanted = self.instances[index].session == stream.frame().request.session
                 && (stream.pending_structures().iter().any(|p| &p.id == id)
                     || stream
                         .frame()
                         .structures
                         .iter()
-                        .any(|s| &s.placement.id == id))
-            {
-                index += 1;
-                continue;
-            }
-            if self.instances[index]
-                .continuation
-                .as_ref()
-                .is_some_and(|c| !c.drained())
-            {
+                        .any(|s| &s.placement.id == id));
+            if self.instances[index].retirement.keep(wanted) {
                 index += 1;
                 continue;
             }
@@ -1280,7 +1289,14 @@ impl SourceInstances {
                 grass_drained &=
                     grass.retire(stream, renderer.entity, meshes, &mut materials.grass)?;
             }
-            if !grass_drained {
+            let parent_drained = self.instances[index]
+                .continuation
+                .as_ref()
+                .is_none_or(|c| c.drained());
+            if !self.instances[index]
+                .retirement
+                .drained(parent_drained, grass_drained)
+            {
                 index += 1;
                 continue;
             }

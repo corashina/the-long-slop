@@ -148,3 +148,54 @@ impl PipelineAccounting {
         Ok(())
     }
 }
+
+/// Physical drain checks inspect every admitted operation, including siblings after a failure.
+#[derive(Clone, Copy)]
+pub(crate) enum PhysicalPipelineState {
+    Queued,
+    Compiling,
+    Retryable,
+    Ready,
+    Failed,
+}
+pub(crate) fn pipeline_states_drained(states: impl Iterator<Item = PhysicalPipelineState>) -> bool {
+    states.fold(true, |drained, state| {
+        matches!(
+            state,
+            PhysicalPipelineState::Ready | PhysicalPipelineState::Failed
+        ) & drained
+    })
+}
+/// Once retirement starts, a returning source must wait for a new parent record.
+#[derive(Default)]
+pub(crate) struct RendererRetirement(bool);
+impl RendererRetirement {
+    pub(crate) fn keep(&mut self, wanted: bool) -> bool {
+        self.0 |= !wanted;
+        !self.0
+    }
+    pub(crate) fn started(&self) -> bool {
+        self.0
+    }
+    pub(crate) fn drained(&self, parent: bool, children: bool) -> bool {
+        self.0 && parent && children
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::{PhysicalPipelineState::*, pipeline_states_drained};
+    #[test]
+    fn failed_caster_keeps_unfinished_sibling_live() {
+        for unfinished in [Queued, Compiling, Retryable] {
+            for states in [[Failed, unfinished], [unfinished, Failed]] {
+                let mut inspected = 0;
+                assert!(!pipeline_states_drained(
+                    states.into_iter().inspect(|_| inspected += 1)
+                ));
+                assert_eq!(inspected, 2);
+            }
+        }
+        assert!(pipeline_states_drained([Failed, Ready].into_iter()));
+        assert!(pipeline_states_drained([Failed, Failed].into_iter()));
+    }
+}

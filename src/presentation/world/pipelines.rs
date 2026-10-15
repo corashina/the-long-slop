@@ -548,8 +548,7 @@ fn physical_pipelines_settled(world: &World, job: &PipelineJob) -> bool {
                 .physically_settled(*id, cache)
             && world
                 .resource::<crate::presentation::caster::CasterPasses>()
-                .companion_state(*id, cache)
-                .is_none_or(|r| !matches!(r, Ok(false)))
+                .physically_settled(*id, cache)
             && world
                 .resource::<crate::presentation::surface_pass::SurfacePasses>()
                 .companion_state(*id, cache)
@@ -562,5 +561,20 @@ fn finish_physical(world: &World, job: &PipelineJob) {
         world
             .resource::<RenderQueue>()
             .on_submitted_work_done(move || receipt.complete());
+    }
+}
+
+pub(crate) fn physical_pipeline_state(
+    state: &CachedPipelineState,
+) -> crate::world::renderer_pending::PhysicalPipelineState {
+    use crate::world::renderer_pending::PhysicalPipelineState;
+    match state {
+        CachedPipelineState::Queued => PhysicalPipelineState::Queued,
+        CachedPipelineState::Creating(_) => PhysicalPipelineState::Compiling,
+        CachedPipelineState::Ok(_) => PhysicalPipelineState::Ready,
+        CachedPipelineState::Err(
+            ShaderCacheError::ShaderNotLoaded(_) | ShaderCacheError::ShaderImportNotYetAvailable,
+        ) => PhysicalPipelineState::Retryable,
+        CachedPipelineState::Err(_) => PhysicalPipelineState::Failed,
     }
 }

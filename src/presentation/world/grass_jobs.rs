@@ -42,7 +42,7 @@ enum Pending {
 struct Instance {
     continuation: Option<crate::world::renderer_pending::PipelineContinuation>,
     upload: Option<Arc<crate::presentation::fixed_assets::MeshUpload>>,
-    retiring: bool,
+    retirement: crate::world::renderer_pending::RendererRetirement,
     entity: Entity,
     parent: Entity,
     last_started: u64,
@@ -249,7 +249,7 @@ impl GrassJobs {
         self.instances.push(Instance {
             continuation,
             upload: None,
-            retiring: false,
+            retirement: Default::default(),
             entity,
             parent,
             last_started: 0,
@@ -295,7 +295,7 @@ impl GrassJobs {
                                     < (self.instances[index].last_started, index)))
                 });
             let instance = &mut self.instances[index];
-            if instance.retiring || instance.session != stream.frame().request.session {
+            if instance.retirement.started() || instance.session != stream.frame().request.session {
                 continue;
             }
             if group_idle
@@ -481,12 +481,12 @@ impl GrassJobs {
         let Some(index) = self.instances.iter().position(|i| i.entity == entity) else {
             return Ok(true);
         };
-        self.instances[index].retiring = true;
-        if self.instances[index]
+        self.instances[index].retirement.keep(false);
+        let physical = self.instances[index]
             .continuation
             .as_ref()
-            .is_some_and(|c| !c.drained())
-        {
+            .is_none_or(|c| c.drained());
+        if !self.instances[index].retirement.drained(physical, true) {
             return Ok(false);
         }
         let mut instance = self.instances.swap_remove(index);

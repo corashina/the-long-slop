@@ -107,6 +107,24 @@ impl CasterPasses {
     pub fn revisit(&mut self, id: CachedRenderPipelineId) {
         self.inspected = self.inspected.min(id.id());
     }
+    pub(crate) fn physically_settled(
+        &self,
+        base: CachedRenderPipelineId,
+        cache: &PipelineCache,
+    ) -> bool {
+        crate::world::renderer_pending::pipeline_states_drained(
+            self.variants
+                .get(&base)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|id| {
+                    super::world::pipelines::physical_pipeline_state(
+                        cache.get_render_pipeline_state(*id),
+                    )
+                }),
+        )
+    }
     pub fn companion_state(
         &self,
         base: CachedRenderPipelineId,
