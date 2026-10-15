@@ -55,6 +55,8 @@ struct Instance {
     worlds: Vec<DMat4>,
     // Frozen source frame for procedural color, wind, and Grass inputs only.
     source_worlds: Vec<Mat4>,
+    // VehiclePose changes position and rotation. Retain the original composed scales.
+    scales: Vec<(Vec3, Vec3)>,
     renderers: Vec<Renderer>,
     lods: Vec<LodGroup>,
     ready: bool,
@@ -74,6 +76,19 @@ impl SourceInstances {
         self.instances
             .iter()
             .all(|i| i.continuation.as_ref().is_none_or(|c| c.drained()))
+    }
+    pub(crate) fn startup_audit(&self, grass: &GrassJobs) -> serde_json::Value {
+        serde_json::json!({
+            "pending_owner": self.pending.as_ref().map(|p| &p.prototype),
+            "unready": self.instances.iter().filter(|i| !i.ready).count(),
+            "grass_waits": self.instances.iter().filter(|i| !i.ready).flat_map(|i| &i.renderers)
+                .filter(|r| r.settings.is_some() && !grass.ready(r.entity)).count(),
+            "unready_renderers": self.instances.iter().filter(|i| !i.ready).flat_map(|i| &i.renderers)
+                .take(4).map(|r| serde_json::json!({
+                    "grass": r.settings.is_some(),
+                    "tickets": r.tickets.each_ref().map(|t| t.as_ref().map(|t| format!("{:?}", t.state()))),
+                })).collect::<Vec<_>>(),
+        })
     }
     pub fn ready(&self) -> bool {
         self.instances
@@ -238,7 +253,11 @@ impl SourceInstances {
                             })
                             .sum::<usize>();
                         // Reservations include ECS storage, transforms, material bind groups, and LOD membership.
-                        let mut cpu = count * (2048 + std::mem::size_of::<DMat4>())
+                        let mut cpu = count
+                            * (2048
+                                + std::mem::size_of::<DMat4>()
+                                + std::mem::size_of::<(Vec3, Vec3)>())
+                            + std::mem::size_of::<Vec<()>>()
                             + primitives * (8192 + crate::presentation::caster_material::CPU_BYTES);
                         let mut gpu =
                             primitives * (2048 + crate::presentation::caster_material::gpu_bytes());
@@ -769,6 +788,16 @@ impl SourceInstances {
                                     })
                                     .collect(),
                                 nodes,
+                                scales: worlds
+                                    .iter()
+                                    .zip(&source_worlds)
+                                    .map(|(world, source)| {
+                                        (
+                                            world.as_mat4().to_scale_rotation_translation().0,
+                                            source.to_scale_rotation_translation().0,
+                                        )
+                                    })
+                                    .collect(),
                                 worlds,
                                 source_worlds,
                                 renderers,
@@ -1077,6 +1106,8 @@ impl SourceInstances {
                             }
                         }
                     }
+                    instance.worlds[index] = world;
+                    instance.source_worlds[index] = source_world;
                     let parent = if let Some(parent) = node.parent {
                         instance.worlds[prototype.nodes[parent as usize].gltf_node as usize]
                     } else {
@@ -1093,9 +1124,7 @@ impl SourceInstances {
                     continue;
                 };
                 let index = node.gltf_node as usize;
-                let (scale, _, _) = instance.worlds[index]
-                    .as_mat4()
-                    .to_scale_rotation_translation();
+                let scale = instance.scales[index].0;
                 let world = Mat4::from_scale_rotation_translation(
                     scale,
                     Quat::from_array(pose.rotation),
@@ -1103,8 +1132,7 @@ impl SourceInstances {
                 )
                 .as_dmat4();
                 instance.worlds[index] = world;
-                let (source_scale, _, _) =
-                    instance.source_worlds[index].to_scale_rotation_translation();
+                let source_scale = instance.scales[index].1;
                 instance.source_worlds[index] = Mat4::from_scale_rotation_translation(
                     source_scale,
                     Quat::from_array(pose.rotation),

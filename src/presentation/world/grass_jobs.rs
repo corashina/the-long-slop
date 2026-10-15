@@ -103,6 +103,14 @@ fn pending_allocation(
     stream.set_presentation_allocation(next)
 }
 impl GrassJobs {
+    pub(crate) fn startup_audit(&self) -> serde_json::Value {
+        serde_json::json!({
+            "idle": self.instances.iter().filter(|i| !i.ready && i.pending.is_none()).count(),
+            "queued": self.instances.iter().filter(|i| matches!(i.pending, Some(Pending::Queued))).count(),
+            "expanding": self.instances.iter().filter(|i| matches!(i.pending, Some(Pending::Expand(_)))).count(),
+            "uploading": self.instances.iter().filter(|i| matches!(i.pending, Some(Pending::Upload { .. }))).count(),
+        })
+    }
     pub fn release_all(
         &mut self,
         meshes: &mut Assets<Mesh>,

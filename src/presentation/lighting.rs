@@ -23,10 +23,11 @@ use bevy::render::{
 use bevy::shader::Shader;
 use std::sync::{Arc, Mutex};
 
-// Both source vehicles and the full streamed road lamp window fit the 16 KiB uniform limit.
-pub const MAX_LIGHTS: usize = 42;
-pub const SHADOW_SLOTS: usize = 100;
-pub const ATLAS_SIZE: u32 = 4000;
+// Separate buffers retain every source shadow face within the 16 KiB binding limit.
+pub const MAX_LIGHTS: usize = 64;
+pub const SHADOW_SLOTS: usize = 289;
+pub const SHADOW_BANK_SIZE: usize = 145;
+pub const ATLAS_SIZE: u32 = 6800;
 pub const TILE_SIZE: u32 = 400;
 #[derive(Clone, Debug, PartialEq)]
 pub enum RenderingState {
@@ -53,7 +54,6 @@ pub struct GpuShadow {
 #[derive(Clone, Copy, ShaderType)]
 pub struct LightingUniform {
     pub lights: [GpuLight; MAX_LIGHTS],
-    pub shadows: [GpuShadow; SHADOW_SLOTS],
     pub ambient: Vec4,
     pub fog: Vec4,
     pub counts: UVec4,
@@ -62,10 +62,20 @@ impl Default for LightingUniform {
     fn default() -> Self {
         Self {
             lights: [GpuLight::default(); MAX_LIGHTS],
-            shadows: [GpuShadow::default(); SHADOW_SLOTS],
             ambient: Vec4::ZERO,
             fog: Vec4::ZERO,
             counts: UVec4::ZERO,
+        }
+    }
+}
+#[derive(Clone, Copy, ShaderType)]
+pub struct ShadowUniform<const N: usize> {
+    pub shadows: [GpuShadow; N],
+}
+impl<const N: usize> Default for ShadowUniform<N> {
+    fn default() -> Self {
+        Self {
+            shadows: [GpuShadow::default(); N],
         }
     }
 }
@@ -184,7 +194,6 @@ impl SourceLighting {
             commands.entity(light.entity).despawn();
         }
         self.uniform.lights.fill(GpuLight::default());
-        self.uniform.shadows.fill(GpuShadow::default());
         self.uniform.counts.x = 0;
         self.uniform.counts.y = 0;
         for material in &mut self.lamp_materials {
@@ -196,6 +205,8 @@ impl SourceLighting {
 #[derive(Resource)]
 pub struct LightingGpu {
     pub uniform: UniformBuffer<LightingUniform>,
+    pub shadow_a: UniformBuffer<ShadowUniform<SHADOW_BANK_SIZE>>,
+    pub shadow_b: UniformBuffer<ShadowUniform<{ SHADOW_SLOTS - SHADOW_BANK_SIZE }>>,
     pub atlas: Texture,
     pub atlas_view: TextureView,
     pub shadow_sampler: Sampler,
@@ -881,7 +892,7 @@ pub(crate) fn sync_lighting(
         }
         pose.set_if_neq(next_pose);
         global.set_if_neq(GlobalTransform::from(next_pose));
-        let enabled = active && (source.warming || output.enabled);
+        let enabled = source.warming || (active && output.enabled);
         if marker.enabled != enabled {
             marker.enabled = enabled;
         }
@@ -1064,7 +1075,10 @@ pub(crate) fn lighting_readiness(
 }
 fn init_gpu(mut commands: Commands, device: Res<RenderDevice>, queue: Res<RenderQueue>) {
     let limits = device.limits();
-    let bytes = LightingUniform::min_size().get();
+    let bytes = LightingUniform::min_size()
+        .get()
+        .max(ShadowUniform::<SHADOW_BANK_SIZE>::min_size().get())
+        .max(ShadowUniform::<{ SHADOW_SLOTS - SHADOW_BANK_SIZE }>::min_size().get());
     let supported = limits.max_texture_dimension_2d >= ATLAS_SIZE
         && u64::from(limits.max_uniform_buffer_binding_size) >= bytes;
     let state = if supported {
@@ -1116,11 +1130,17 @@ fn init_gpu(mut commands: Commands, device: Res<RenderDevice>, queue: Res<Render
         &crate::lighting::attenuation_table(),
     );
     let mut uniform = UniformBuffer::default();
+    let mut shadow_a = UniformBuffer::default();
+    let mut shadow_b = UniformBuffer::default();
     if supported {
         uniform.write_buffer(&device, &queue);
+        shadow_a.write_buffer(&device, &queue);
+        shadow_b.write_buffer(&device, &queue);
     }
     commands.insert_resource(LightingGpu {
         uniform,
+        shadow_a,
+        shadow_b,
         atlas,
         atlas_view,
         shadow_sampler: device.create_sampler(&SamplerDescriptor {
@@ -1212,10 +1232,10 @@ fn upload_lighting(
     }
     gpu.source_shader = extracted.shader;
     gpu.sky_shader = extracted.sky_shader;
-    let shadows = gpu.uniform.get().shadows;
     gpu.uniform.set(extracted.uniform);
-    gpu.uniform.get_mut().shadows = shadows;
     gpu.uniform.write_buffer(&device, &queue);
+    gpu.shadow_a.write_buffer(&device, &queue);
+    gpu.shadow_b.write_buffer(&device, &queue);
     if gpu.cookies.is_none() {
         if let Some(ids) = extracted.cookies {
             if ids.iter().all(|id| images.get(*id).is_some()) {

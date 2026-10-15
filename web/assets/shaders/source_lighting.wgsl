@@ -9,13 +9,16 @@ struct SourceLight {
 }
 struct SourceShadow { clip_from_world: mat4x4<f32>, rect: vec4<f32>, bias: vec4<f32> }
 struct SourceLighting {
-    lights: array<SourceLight,42>,
-    shadows: array<SourceShadow,100>,
+    lights: array<SourceLight,64>,
     ambient: vec4<f32>,
     fog: vec4<f32>,
     counts: vec4<u32>,
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> lamp_lighting: SourceLighting;
+struct ShadowBankA { shadows: array<SourceShadow,145> }
+struct ShadowBankB { shadows: array<SourceShadow,144> }
+@group(#{MATERIAL_BIND_GROUP}) @binding(114) var<uniform> shadow_bank_a: ShadowBankA;
+@group(#{MATERIAL_BIND_GROUP}) @binding(115) var<uniform> shadow_bank_b: ShadowBankB;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var shadow_atlas: texture_depth_2d;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var shadow_sampler: sampler_comparison;
 @group(#{MATERIAL_BIND_GROUP}) @binding(103) var cookies: texture_2d_array<f32>;
@@ -38,7 +41,10 @@ fn source_shadow(light:SourceLight,position:vec3<f32>,normal:vec3<f32>,view_dept
         else if a.y>=a.z { face=select(2u,3u,delta.y<0.0); }
         else { face=select(4u,5u,delta.z<0.0); }
     }
-    let shadow=lamp_lighting.shadows[u32(light.shadow.x)+face];
+    let slot=u32(light.shadow.x)+face;
+    var shadow:SourceShadow;
+    if slot<145u { shadow=shadow_bank_a.shadows[slot]; }
+    else { shadow=shadow_bank_b.shadows[slot-145u]; }
     var distance=1.;var to_light=-light.direction_kind.xyz;
     if light.direction_kind.w!=0. {
         let delta=light.position_range.xyz-position;to_light=normalize(delta);

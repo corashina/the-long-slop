@@ -417,8 +417,8 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     world['records']=list(records.values())
     from .world_spawn import project_runtime_receipts
     from .world_fields import project_runtime_fields
-    project_runtime_receipts(world,output)
-    project_runtime_fields(world,output)
+    project_runtime_receipts(world,world_probe.PROBE_ROOT)
+    project_runtime_fields(world,world_probe.PROBE_ROOT)
     return world
 
 def recover_catalog(source, reader, selected, database):

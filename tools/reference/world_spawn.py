@@ -1,5 +1,6 @@
 """Retain nested caller inputs and export only missing supported pool prototypes."""
 import copy
+from . import world_probe
 from .source import key, source_id
 from .world import Selection, RULE_CLASSES, EDIBLE_COMPONENTS, selected_actions, _source_root, source_material, export_world_prototypes
 
@@ -182,10 +183,10 @@ def extend_spawn_closure(source, reader, output, world):
     world['records']=list(selected.records.values());world['receipts']=list(selected.receipts.values())
     files={r['source']['file'] for r in world['receipts']}
     world['source_hashes']=[{'file':f,'sha256':reader.source_files[f'TheLongDrive_Data/{f}'].sha256} for f in sorted(files)]
-    compact_initialization(world,baseline,source,reader,output)
+    compact_initialization(world,baseline,source,reader)
     return added
 
-def compact_initialization(world, baseline, source, reader, output):
+def compact_initialization(world, baseline, source, reader):
     """Store added caller hierarchy and fields without duplicate dynamic graph links."""
     records={tuple(r['source'].values()):r for r in world['records']}
     selection=Selection(source,reader)
@@ -218,7 +219,7 @@ def compact_initialization(world, baseline, source, reader, output):
     if ancestors.records:
         from .world_fields import project_runtime_fields
         projection=dict(library=world['library'],source_hashes=world['source_hashes'],records=list(ancestors.records.values()),initialization=dict(nodes=[],components=[]),receipts=list(ancestors.receipts.values()))
-        project_runtime_fields(projection,output)
+        project_runtime_fields(projection,world_probe.PROBE_ROOT)
     world['records']=[r for r in world['records'] if tuple(r['source'].values()) not in moved]
     print(f'Compact initialization: {len(nodes)} nodes, {len(components)} components; original graph {len(world["records"])} records',flush=True)
 

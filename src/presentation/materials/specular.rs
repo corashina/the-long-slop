@@ -265,7 +265,6 @@ impl AsBindGroup for SpecularMaterial {
             receiver_mask: self.receiver_mask,
         };
         let mut result = extension.unprepared_bind_group(layout, device, &mut params.0, true)?;
-        result.bindings.0.retain(|(index, _)| *index <= 113);
         let base = self
             .base
             .unprepared_bind_group(layout, device, &mut params.2, true)?;
@@ -295,7 +294,6 @@ impl AsBindGroup for SpecularMaterial {
     fn bind_group_layout_entries(device: &RenderDevice, force: bool) -> Vec<BindGroupLayoutEntry> {
         use binding_types::*;
         let mut result = SourceReceiver::bind_group_layout_entries(device, force);
-        result.retain(|entry| entry.binding <= 113);
         result.extend(
             StandardMaterial::bind_group_layout_entries(device, true)
                 .into_iter()

@@ -1564,6 +1564,24 @@ impl AsBindGroup for SourceReceiver {
                     ),
                 ),
                 (
+                    114,
+                    OwnedBindingResource::Buffer(
+                        gpu.shadow_a
+                            .buffer()
+                            .ok_or(AsBindGroupError::RetryNextUpdate)?
+                            .clone(),
+                    ),
+                ),
+                (
+                    115,
+                    OwnedBindingResource::Buffer(
+                        gpu.shadow_b
+                            .buffer()
+                            .ok_or(AsBindGroupError::RetryNextUpdate)?
+                            .clone(),
+                    ),
+                ),
+                (
                     101,
                     OwnedBindingResource::TextureView(
                         TextureViewDimension::D2,
@@ -1661,6 +1679,20 @@ impl AsBindGroup for SourceReceiver {
                 (
                     100,
                     uniform_buffer::<super::lighting::LightingUniform>(false),
+                ),
+                (
+                    114,
+                    uniform_buffer::<
+                        super::lighting::ShadowUniform<{ super::lighting::SHADOW_BANK_SIZE }>,
+                    >(false),
+                ),
+                (
+                    115,
+                    uniform_buffer::<
+                        super::lighting::ShadowUniform<
+                            { super::lighting::SHADOW_SLOTS - super::lighting::SHADOW_BANK_SIZE },
+                        >,
+                    >(false),
                 ),
                 (101, texture_2d(TextureSampleType::Depth)),
                 (102, sampler(SamplerBindingType::Comparison)),

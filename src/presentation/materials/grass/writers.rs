@@ -494,6 +494,17 @@ fn complete(pass: Option<Res<WriterPass>>, hidden: Res<HiddenWriterPass>, queue:
 }
 
 impl GrassWriters {
+    pub(crate) fn startup_audit(&self) -> serde_json::Value {
+        serde_json::json!({
+            "revision": self.revision.load(Ordering::Acquire),
+            "deferred": self.deferred,
+            "pending": self.pending.len(),
+            "writers": self.writers.len(),
+            "gpu_pending": self.pending_gpu.load(Ordering::Acquire),
+            "status": format!("{:?}", *self.status.lock().unwrap()),
+            "ready": self.ready().ok(),
+        })
+    }
     pub fn release_all(&mut self) {
         self.writers.clear();
         self.pending.clear();

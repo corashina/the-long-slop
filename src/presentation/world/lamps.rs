@@ -560,7 +560,7 @@ pub(crate) fn source_lamp_admission(
             }
         })
         .sum();
-    if required + source.road_lamps.overlap.0 > light_capacity.min(32)
+    if required + source.road_lamps.overlap.0 > light_capacity
         || shadow_count + source.road_lamps.overlap.1 > shadow_capacity
     {
         #[cfg(target_arch = "wasm32")]
@@ -594,9 +594,9 @@ pub(crate) fn source_lamp_admission(
                 "kind": "sourceLightAdmission",
                 "requiredLightEntries": required,
                 "requiredShadowFaces": shadow_count,
-                "availableLightEntries": light_capacity.min(32),
+                "availableLightEntries": light_capacity,
                 "availableShadowFaces": shadow_capacity,
-                "availableNewLightEntries": light_capacity.min(32).saturating_sub(source.road_lamps.overlap.0),
+                "availableNewLightEntries": light_capacity.saturating_sub(source.road_lamps.overlap.0),
                 "availableNewShadowFaces": shadow_capacity.saturating_sub(source.road_lamps.overlap.1),
                 "fixedLightEntries": source.road_lamps.fixed_lights,
                 "fixedShadowFaces": source.road_lamps.fixed_shadows,
