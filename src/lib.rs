@@ -18,6 +18,8 @@ pub mod save;
 pub mod simulation;
 pub mod sleep;
 pub mod starting_area;
+#[cfg(any(target_arch = "wasm32", test))]
+mod startup_receipts;
 pub mod survival;
 pub mod vehicle;
 pub mod weather;

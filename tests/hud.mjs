@@ -18,7 +18,7 @@ function fixture(){
  return {elements,window,update,browserFrames};
 }
 
-test('startup waits for two renderer submissions after readiness',()=>{
+test('startup waits for two validated renderer frames after readiness',()=>{
  const {window,browserFrames}=fixture();
  window.testReady();
  for(let step=0;step<4;step++)for(const callback of browserFrames.splice(0))callback();

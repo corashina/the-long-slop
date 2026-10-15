@@ -1006,6 +1006,7 @@ fn submitted(
             state.first_jitter = state.jitter;
         }
         acks.main_submitted(state.token);
+        gate.watch_startup_frame(frame.scene, state.token, &queue);
         if state.validation == 0 {
             state.validation = gate.watch_submission(&queue);
         }

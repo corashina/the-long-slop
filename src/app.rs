@@ -382,21 +382,33 @@ fn check_ready(
 fn trace_presented_frames(
     drive: Res<Drive>,
     acks: Res<presentation::view_frame::SourceSubmissionAcks>,
+    frame: Res<presentation::view_frame::SourceViewFrame>,
+    gate: Res<presentation::source_lighting::SourceExecutionGate>,
+    status: Res<presentation::source_lighting::SourceLightingStatus>,
+    epoch: Res<presentation::view_frame::SourceSceneEpoch>,
     mut observed: Local<Option<(u32, u32)>>,
 ) {
-    if !drive.ready {
+    let render_status = status.0.lock().unwrap();
+    if !drive.ready
+        || !matches!(
+            *render_status,
+            presentation::materials::RenderingState::Ready
+        )
+    {
         *observed = None;
         return;
     }
-    let token = acks.main_submitted_token();
-    let Some((last, count)) = observed.as_mut() else {
-        *observed = Some((token, 0));
+    if observed.as_ref().is_none_or(|(scene, _)| *scene != epoch.0) {
+        gate.arm_startup_frames(epoch.0, acks.main_submitted_token().max(frame.main_token));
+        *observed = Some((epoch.0, 0));
         return;
-    };
-    if token > *last && *count < 2 {
-        *last = token;
-        *count += 1;
-        game_startup_presented_frame(*count);
+    }
+    let count = gate.validated_startup_frames(epoch.0, &render_status);
+    drop(render_status);
+    let (_, published) = observed.as_mut().unwrap();
+    while *published < count {
+        *published += 1;
+        game_startup_presented_frame(*published);
     }
 }
 

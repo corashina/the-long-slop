@@ -1,6 +1,7 @@
 //! Source per-view lighting bindings. Scene and probe views never share writable uniforms.
 
 use super::materials::{RenderingState, SourceMaterial};
+use crate::startup_receipts::StartupFrames;
 use bevy::core_pipeline::core_3d::{AlphaMask3d, Opaque3d, Transparent3d};
 use bevy::ecs as bevy_ecs;
 use bevy::ecs::query::ROQueryItem;
@@ -302,12 +303,30 @@ struct ExecutionProgress {
     requested: AtomicU32,
     completed: AtomicU32,
     validated: AtomicU32,
+    startup: Mutex<StartupFrames>,
 }
 
 /// Startup and resize submissions need completion plus a later Bevy error poll.
 #[derive(Resource, Clone, Default)]
 pub struct SourceExecutionGate(Arc<ExecutionProgress>);
 impl SourceExecutionGate {
+    pub fn arm_startup_frames(&self, scene: u32, after_token: u32) {
+        self.0.startup.lock().unwrap().arm(scene, after_token);
+    }
+    pub fn watch_startup_frame(&self, scene: u32, token: u32, queue: &RenderQueue) {
+        let mut frames = self.0.startup.lock().unwrap();
+        if frames.accepts(scene, token) {
+            let generation = self.watch_submission(queue);
+            frames.record(scene, token, generation);
+        }
+    }
+    pub fn validated_startup_frames(&self, scene: u32, status: &RenderingState) -> u32 {
+        self.0.startup.lock().unwrap().validated_count(
+            scene,
+            self.validated_generation(),
+            matches!(status, RenderingState::Ready),
+        )
+    }
     /// Call after submitting the complete required startup or resize work.
     pub fn watch_submission(&self, queue: &RenderQueue) -> u32 {
         let generation = self.0.requested.fetch_add(1, Ordering::AcqRel) + 1;
@@ -324,6 +343,13 @@ impl SourceExecutionGate {
     pub fn submission_validated(&self, generation: u32) -> bool {
         generation != 0 && self.validated_generation() >= generation
     }
+    fn promote_completed(&self) {
+        let requested = self.0.requested.load(Ordering::Acquire);
+        let completed = self.0.completed.load(Ordering::Acquire).min(requested);
+        if completed != 0 {
+            self.0.validated.store(completed, Ordering::Release);
+        }
+    }
     pub fn validated(&self) -> bool {
         let requested = self.0.requested.load(Ordering::Acquire);
         requested != 0 && self.0.validated.load(Ordering::Acquire) == requested
@@ -331,12 +357,9 @@ impl SourceExecutionGate {
 }
 fn validate_completed_submissions(gate: Res<SourceExecutionGate>) {
     // Render First only runs after Bevy polls its DeviceErrorHandler and remains Ready.
-    let requested = gate.0.requested.load(Ordering::Acquire);
-    let completed = gate.0.completed.load(Ordering::Acquire).min(requested);
-    if completed != 0 {
-        gate.0.validated.store(completed, Ordering::Release);
-    }
+    gate.promote_completed();
 }
+
 fn sync_lighting_readiness(
     mut lighting: ResMut<SourceLighting>,
     materials: Option<Res<super::materials::SourceMaterials>>,
