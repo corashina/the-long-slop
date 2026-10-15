@@ -116,6 +116,17 @@ impl PropLayers {
             .filter(|c| !c.candidates.is_empty())
             .count()
     }
+    pub fn discovery_ready(&self, focus: [[f64; 3]; 2]) -> bool {
+        self.layers.iter().all(|layer| {
+            let size = layer.generator.reference.chunk_dist;
+            focus.into_iter().enumerate().all(|(j, point)| {
+                let center = [point[0] as f32, -point[2] as f32]
+                    .map(|v| (v / size).round_ties_even() * size);
+                layer.centers[j] == center && layer.next[j] == layer.offsets.len()
+            })
+        }) && self.chunks.iter().all(|c| c.candidates.is_empty())
+            && self.retiring.is_empty()
+    }
     pub fn placements(&self) -> &[Placement] {
         &self.placements
     }
@@ -125,7 +136,27 @@ impl PropLayers {
     /// Reserve a complete candidate buffer before any source generation work.
     pub fn allocation_bound(&self) -> usize {
         self.layers[self.layer].generator.candidate_count() * std::mem::size_of::<PropCandidate>()
-            + 1024
+            + (self.chunks.capacity() + 1) * std::mem::size_of::<Chunk>()
+            + (self.placements.capacity() + 1) * std::mem::size_of::<Placement>()
+            + self
+                .chunks
+                .iter()
+                .map(|c| (c.placed.capacity() + 1) * std::mem::size_of::<super::GeneratedId>())
+                .max()
+                .unwrap_or(0)
+            + self
+                .chunks
+                .iter()
+                .map(|c| c.placed.len())
+                .max()
+                .map_or(0, |count| {
+                    if self.retiring.len() + count > self.retiring.capacity() {
+                        (self.retiring.len() + count) * std::mem::size_of::<super::GeneratedId>()
+                    } else {
+                        0
+                    }
+                })
+            + 2 * self.layers[self.layer].generator.retained_bytes()
     }
     pub fn advance(
         &mut self,
@@ -171,6 +202,9 @@ impl PropLayers {
             let offset = layer.offsets[layer.next[j]];
             let unit = std::array::from_fn(|a| (layer.centers[j][a] + offset[a]) as i64);
             if !self.chunks.iter().any(|c| c.layer == i && c.unit == unit) {
+                self.chunks
+                    .try_reserve_exact(1)
+                    .map_err(|_| ReferenceError("Source prop chunk allocation failed".into()))?;
                 let mut candidates = Vec::with_capacity(layer.generator.candidate_count());
                 for ordinal in 0..layer.generator.candidate_count() {
                     if let Some(c) = layer.generator.candidate(unit, ordinal) {
@@ -204,7 +238,14 @@ impl PropLayers {
             }
         }
         if let Some((chunk_index, candidate_index)) = nearest {
+            self.placements
+                .try_reserve_exact(1)
+                .map_err(|_| ReferenceError("Source prop placement allocation failed".into()))?;
             let chunk = &mut self.chunks[chunk_index];
+            chunk
+                .placed
+                .try_reserve_exact(1)
+                .map_err(|_| ReferenceError("Source prop identity allocation failed".into()))?;
             let candidate = chunk.candidates[candidate_index];
             if let Some(placement) = layer.generator.place(chunk.unit, candidate, context) {
                 if self.placements.len() >= max_objects {

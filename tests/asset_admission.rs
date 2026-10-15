@@ -863,3 +863,52 @@ fn selected_shader_inputs_have_one_checked_owner() {
         }
     }
 }
+
+#[test]
+fn retained_descriptor_set_exceeds_request_window() {
+    let mut states = Vec::<State>::new();
+    let mut allocation = PresentationAllocation::default();
+    let mut retained_cpu = 0;
+    for i in 0..40 {
+        let reservation = Reservation::metadata(&catalog(), "reference/selected.gltf").unwrap();
+        let mut state = State::PlanLoading(i);
+        let io = state.io(reservation.staging);
+        allocation = io.replace(IoLedger::default(), allocation);
+        allocation.prototype_cpu += reservation.cpu;
+        assert_eq!((allocation.pending, allocation.jobs), (1, 1));
+        state.complete_metadata(Arc::new(plan()));
+        let cpu = retained_plan_bytes(state.plan().unwrap()) + control_bytes::<State>(1, 0, 0, 0);
+        retained_cpu += cpu;
+        allocation.prototype_cpu = allocation.prototype_cpu - reservation.cpu + cpu;
+        allocation = state.io(0).replace(io, allocation);
+        states.push(state);
+        assert_eq!(
+            (
+                allocation.pending,
+                allocation.jobs,
+                allocation.staging_bytes
+            ),
+            (0, 0, 0)
+        );
+    }
+    assert_eq!(states.len(), 40);
+    assert!(retained_cpu > 0);
+    assert_eq!(allocation.prototype_cpu, retained_cpu);
+    assert!(states.iter().all(|s| s.plan().is_some()));
+    let reservation = states[39].payload_reservation().unwrap();
+    assert!(reservation.fits(
+        &WorldMetrics {
+            prototype_cpu_bytes: retained_cpu,
+            ..Default::default()
+        },
+        2,
+        32 * 1024 * 1024,
+        0,
+        0,
+        false
+    ));
+    let allocation = reservation.allocation(allocation, false);
+    states[39].start_payload(40);
+    assert_eq!((allocation.pending, allocation.jobs), (1, 1));
+    assert!(states.iter().all(|s| s.plan().is_some()));
+}

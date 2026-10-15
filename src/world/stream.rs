@@ -100,6 +100,10 @@ struct PreparedSurface {
     request: WorldRequest,
     published: PublishedSurface,
 }
+struct SelectedRoad {
+    segment: RoadSegment,
+    light: Option<super::WorldLight>,
+}
 struct TerrainWork {
     pending_bytes: usize,
     request: WorldRequest,
@@ -158,9 +162,12 @@ pub struct WorldStream {
     road_layers: [u8; 3],
     indices_ready: bool,
     plan_revision: u64,
+    selection_inputs: u64,
     road_focus: [[f64; 3]; 2],
     road_candidates: Vec<u32>,
     next_road: usize,
+    selected_roads: Vec<SelectedRoad>,
+    next_geometry: usize,
     wanted_roads: Vec<u32>,
     wanted_tiles: Vec<SurfaceKey>,
     road_points: Vec<TerrainRoadPoint>,
@@ -391,7 +398,10 @@ impl WorldStream {
             })
     }
     pub fn select_source_car(&mut self, car_id: i32) {
-        self.contents.state.context.current_car = car_id;
+        if self.contents.state.context.current_car != car_id {
+            self.contents.state.context.current_car = car_id;
+            self.revise_selection();
+        }
     }
     pub fn seed(&self) -> i32 {
         self.seed
@@ -528,16 +538,19 @@ impl WorldStream {
             ],
             indices_ready: false,
             plan_revision: 0,
+            selection_inputs: 0,
             road_focus: [[f64::INFINITY; 3]; 2],
             road_candidates: Vec::new(),
             next_road: 0,
+            selected_roads: Vec::new(),
+            next_geometry: 0,
             wanted_roads: Vec::with_capacity(MAX_ROADS),
             wanted_tiles: Vec::with_capacity(MAX_NEAR + 2 * MAX_DISTANT),
             road_points: Vec::with_capacity(MAX_ROADS * super::ROAD_CONTROLS),
             structures: Vec::new(),
             recipes: HashMap::new(),
             supplies: Vec::new(),
-            wanted_structures: Vec::new(),
+            wanted_structures: Vec::with_capacity(MAX_OBJECTS),
             ready_structures: Vec::with_capacity(32),
             startup: None,
             startup_candidates: Vec::new(),
@@ -704,7 +717,11 @@ impl WorldStream {
         if bytes > 32 * MIB - self.dependency_staging_reserve
             || self.metrics().active_cpu_bytes.saturating_add(bytes) > ACTIVE_CPU
         {
-            self.failure = Some("Source generation allocation exceeds its resource budget".into());
+            self.failure = Some(format!(
+                "Source generation budget exceeded: CPU requested {} bytes, limit {ACTIVE_CPU} bytes; staging requested {bytes} bytes, limit {} bytes",
+                self.metrics().active_cpu_bytes.saturating_add(bytes),
+                32 * MIB - self.dependency_staging_reserve
+            ));
             return false;
         }
         bytes <= self.available_staging_bytes()
@@ -747,7 +764,6 @@ impl WorldStream {
         self.dependency_metadata = metadata;
         Ok(())
     }
-    #[cfg(any(target_arch = "wasm32", test))]
     pub(crate) fn can_request_independent(&self, claims: usize) -> bool {
         self.metrics()
             .pending_work
@@ -939,24 +955,34 @@ impl WorldStream {
         if moved && self.indices_ready {
             self.refresh_structures();
         }
-        if changed {
-            self.request.revision = self.request.revision.wrapping_add(1);
-            if self.ready.as_ref().is_none_or(|w| !w.renderer_reserved) {
-                self.ready = None;
-            }
-            self.terrain_work = None;
-            self.failure = None;
+        if changed || moved {
+            self.revise_selection();
         }
     }
-    pub fn prepare(&mut self) {
+    fn revise_selection(&mut self) {
+        self.request.revision = self.request.revision.wrapping_add(1);
+        if self.ready.as_ref().is_none_or(|w| !w.renderer_reserved) {
+            self.ready = None;
+        }
+        self.terrain_work = None;
+        self.failure = None;
+    }
+    /// Advance source discovery once per ordinary application Update.
+    pub fn prepare_descriptors(&mut self) {
         self.publication_available = true;
         self.last_road_work = 0;
         self.last_terrain_work = 0;
-        if self.failure.is_some() || self.ready.is_some() || self.presentation.jobs >= 2 {
+        if self.selection_inputs != self.contents.input_revision()
+            || (self.change_bounds.is_some() && self.change_revision != self.changes.revision())
+        {
+            self.revise_selection();
+        }
+        if self.failure.is_some() {
             return;
         }
         if !self.indices_ready {
-            let slots = 2usize.saturating_sub(self.presentation.jobs);
+            let slots =
+                2usize.saturating_sub(self.presentation.jobs + self.overlap.generation_jobs);
             let before = self.roads.prepared_segments();
             let road_work = usize::from(before < super::ROAD_SEGMENTS);
             let road_ready = self.roads.prepare(if slots > 0 { 256 } else { 0 });
@@ -968,24 +994,80 @@ impl WorldStream {
             return;
         }
         if self.startup.is_none() {
-            self.prepare_startup();
+            if self.available_external_jobs() > 0 {
+                self.prepare_startup();
+            }
             return;
         }
         if self.plan_revision != self.request.revision {
             if let Err(error) = self.plan() {
                 self.failure = Some(error.0);
             }
-            return;
+            if self.failure.is_some() || self.plan_revision != self.request.revision {
+                return;
+            }
         }
         if self.next_road < self.road_candidates.len() {
-            self.prepare_road();
+            self.discover_road();
+        }
+        // Placement needs the complete selected road-point set.
+        if self.next_road == self.road_candidates.len() {
+            self.prepare_props();
+            self.prepare_contents();
+        }
+    }
+    /// Keep payload construction and renderer publication downstream from source selection.
+    pub fn prepare_geometry(&mut self) {
+        if self.failure.is_some()
+            || self.ready.is_some()
+            || !self.indices_ready
+            || self.startup.is_none()
+            || self.plan_revision != self.request.revision
+            || self.next_road != self.road_candidates.len()
+        {
             return;
         }
-        self.prepare_props();
-        self.prepare_contents();
-        if self.failure.is_none() {
+        if self.next_geometry < self.wanted_roads.len() {
+            self.prepare_road();
+        } else {
             self.prepare_terrain();
         }
+    }
+    pub fn prepare(&mut self) {
+        self.prepare_descriptors();
+        self.prepare_geometry();
+    }
+    pub fn descriptor_window_ready(&self) -> bool {
+        self.failure.is_none()
+            && self.indices_ready
+            && self.startup.is_some()
+            && self.selection_inputs == self.contents.input_revision()
+            && self.plan_revision == self.request.revision
+            && self.next_road == self.road_candidates.len()
+            && self
+                .props
+                .discovery_ready([self.request.player, self.request.vehicle])
+            && self.change_revision == self.changes.revision()
+            && self.change_bounds.is_some()
+            && self
+                .contents
+                .discovery_ready(&self.reference, &self.wanted_structures, &self.replay_roots)
+                .unwrap_or(false)
+            && self.replay_keys.iter().all(|key| {
+                self.changes.get(key).is_none_or(|change| {
+                    change.snapshot.is_none()
+                        || change.replay.as_ref().is_none_or(|root| {
+                            self.contents.replay_finished(&root.id)
+                                || change.instance.as_ref().is_some_and(|id| {
+                                    self.contents
+                                        .active
+                                        .iter()
+                                        .chain(&self.static_controls)
+                                        .any(|c| &c.content.placement.id == id)
+                                })
+                        })
+                })
+            })
     }
     fn prepare_startup(&mut self) {
         if self.startup_candidates.is_empty() && self.startup_next == 0 {
@@ -1046,14 +1128,16 @@ impl WorldStream {
                     .into_iter()
                     .any(|p| source_distance_squared(p, position) < radius * radius)
             });
-        self.wanted_structures
-            .extend(self.props.placements().iter().cloned());
-        self.wanted_structures.extend(
-            self.contents
-                .active
-                .iter()
-                .map(|c| c.content.placement.clone()),
-        );
+        for placement in self
+            .props
+            .placements()
+            .iter()
+            .chain(self.contents.active.iter().map(|c| &c.content.placement))
+        {
+            if !self.wanted_structures.iter().any(|p| p.id == placement.id) {
+                self.wanted_structures.push(placement.clone());
+            }
+        }
         if let Err(error) = super::building_extras::append_ramps(
             &self.reference,
             &self.contents.rules,
@@ -1097,7 +1181,10 @@ impl WorldStream {
     }
     fn prepare_prop_layer(&mut self) {
         let budget = self.props.allocation_bound();
-        let can_request = self.metrics().pending_work < 32 && self.admit_generation(budget);
+        if !self.admit_generation(budget) {
+            return;
+        }
+        let can_request = self.metrics().pending_work < 32;
         if self.failure.is_some() {
             return;
         }
@@ -1170,20 +1257,28 @@ impl WorldStream {
         if self.failure.is_some() {
             return;
         }
-        if !self.contents.has_replay() && self.available_external_jobs() == 0 {
-            return;
-        }
         self.select_changed_destinations();
         if self.failure.is_some() {
             return;
         }
         self.contents
+            .select_revision(self.request.session, self.request.revision);
+        self.contents
             .retain_requests(&self.wanted_structures, &self.replay_roots);
         let metrics = self.metrics();
-        let limit = 32usize
-            .saturating_sub(metrics.pending_work)
-            .min(MAX_OBJECTS.saturating_sub(metrics.generated_objects));
+        let pending = 32usize.saturating_sub(metrics.pending_work);
+        let limit = 32usize.min(MAX_OBJECTS.saturating_sub(metrics.generated_objects));
         if limit == 0 {
+            if !self
+                .contents
+                .discovery_ready(&self.reference, &self.wanted_structures, &self.replay_roots)
+                .unwrap_or(false)
+            {
+                self.failure = Some(format!(
+                    "Source content object budget exceeded: requested {}, limit {MAX_OBJECTS}",
+                    metrics.generated_objects + 1
+                ));
+            }
             return;
         }
         let reservation = self
@@ -1195,13 +1290,19 @@ impl WorldStream {
         let available = (16 * MIB).saturating_sub(
             self.roads.retained_index_bytes() + self.placements.retained_index_bytes(),
         );
+        let replay_admission = self.contents.has_replay() || self.available_external_jobs() > 0;
         if let Err(error) = self.contents.advance(
             &self.reference,
             &self.wanted_structures,
-            &self.replay_roots,
+            if replay_admission {
+                &self.replay_roots
+            } else {
+                &[]
+            },
             [self.request.player, self.request.vehicle],
             available,
             limit,
+            pending,
             reservation,
         ) {
             self.failure = Some(error.0);
@@ -1241,6 +1342,54 @@ impl WorldStream {
                     })
                 })
         });
+        let missing = |p: &Placement| !self.wanted_structures.iter().any(|w| w.id == p.id);
+        let missing_light = |l: &super::WorldLight| !self.lights.iter().any(|w| w.id == l.id);
+        let count = self
+            .contents
+            .instances()
+            .filter(|c| missing(&c.placement))
+            .count();
+        let light_count = self
+            .contents
+            .instances()
+            .flat_map(|c| &c.lights)
+            .filter(|l| missing_light(l))
+            .count();
+        let selected_bytes = self
+            .contents
+            .instances()
+            .filter(|c| missing(&c.placement))
+            .map(|c| super::contents::placement_heap(&c.placement))
+            .sum::<usize>()
+            + self
+                .contents
+                .instances()
+                .flat_map(|c| &c.lights)
+                .filter(|l| missing_light(l))
+                .map(super::WorldLight::heap_bytes)
+                .sum::<usize>();
+        let allocation = selected_bytes
+            + if self.wanted_structures.len() + count > self.wanted_structures.capacity() {
+                (self.wanted_structures.len() + count + self.wanted_structures.capacity())
+                    * std::mem::size_of::<Placement>()
+            } else {
+                0
+            }
+            + if self.lights.len() + light_count > self.lights.capacity() {
+                (self.lights.len() + light_count + self.lights.capacity())
+                    * std::mem::size_of::<super::WorldLight>()
+            } else {
+                0
+            };
+        if !self.admit_generation(allocation) {
+            return;
+        }
+        if self.wanted_structures.try_reserve_exact(count).is_err()
+            || self.lights.try_reserve_exact(light_count).is_err()
+        {
+            self.failure = Some("Selected content descriptor allocation failed".into());
+            return;
+        }
         for content in self.contents.instances() {
             let key = super::ObjectKey::Generated(content.placement.id.clone());
             let selected = self.replay_keys.iter().any(|key| {
@@ -1374,7 +1523,10 @@ impl WorldStream {
         });
         // Selected keys are not work requests. Admit one caller at a time and
         // leave capacity for its first phase. Retry admission even with cached bounds.
-        if !self.replay_roots.is_empty() || self.metrics().pending_work >= 31 {
+        if !self.replay_roots.is_empty()
+            || self.metrics().pending_work >= 31
+            || self.available_external_jobs() == 0
+        {
             return;
         }
         for key in &self.replay_keys {
@@ -1464,12 +1616,6 @@ impl WorldStream {
         self.props.material(placement)
     }
     fn plan(&mut self) -> Result<(), ReferenceError> {
-        self.road_candidates.clear();
-        self.next_road = 0;
-        self.wanted_roads.clear();
-        self.wanted_lights.clear();
-        self.road_points.clear();
-        self.wanted_tiles.clear();
         let road_distance =
             self.reference.distances["RoadGenDist"] as f64 + self.road_light.influence_margin();
         // One union query retains both support windows without copying full index arrays.
@@ -1477,7 +1623,37 @@ impl WorldStream {
             window(self.road_focus[0], road_distance),
             window(self.road_focus[1], road_distance),
         );
+        let candidates = self.roads.candidate_count(query);
+        let bytes =
+            candidates.saturating_add(self.road_candidates.capacity()) * std::mem::size_of::<u32>();
+        if !self.admit_generation(bytes) {
+            return Ok(());
+        }
+        self.road_candidates.clear();
+        self.next_road = 0;
+        self.next_geometry = 0;
+        self.wanted_roads.clear();
+        self.wanted_lights.clear();
+        self.road_points.clear();
+        self.wanted_tiles.clear();
+        self.road_candidates
+            .try_reserve_exact(candidates)
+            .map_err(|_| ReferenceError("Selected road index allocation failed".into()))?;
         self.roads.segments_in(query, &mut self.road_candidates);
+        let radius = self.reference.distances["RoadGenDist"];
+        let margin = self.road_light.influence_margin();
+        self.selected_roads.retain(|r| {
+            self.road_candidates.contains(&r.segment.index)
+                && (self
+                    .road_focus
+                    .into_iter()
+                    .any(|p| source_distance_squared(p, r.segment.position()) <= radius * radius)
+                    || [self.request.player, self.request.vehicle]
+                        .into_iter()
+                        .any(|p| {
+                            intersects(r.segment.bounds, window(p, f64::from(radius) + margin))
+                        }))
+        });
         self.refresh_structures();
         if self.wanted_structures.len() > MAX_OBJECTS {
             return Err(ReferenceError("Source object count exceeds8192".into()));
@@ -1524,18 +1700,132 @@ impl WorldStream {
             }
         }
         self.plan_revision = self.request.revision;
+        self.selection_inputs = self.contents.input_revision();
         Ok(())
+    }
+    fn discover_road(&mut self) {
+        if self.available_external_jobs() == 0 {
+            return;
+        }
+        let index = self.road_candidates[self.next_road];
+        let existing = self
+            .selected_roads
+            .iter()
+            .position(|r| r.segment.index == index);
+        let segment = if let Some(i) = existing {
+            self.selected_roads[i].segment
+        } else {
+            let segment = self.roads.prepare_segment(index, 8);
+            self.last_road_work = self.roads.replay_work();
+            let Some(segment) = segment else {
+                return;
+            };
+            segment
+        };
+        let radius = self.reference.distances["RoadGenDist"];
+        let geometry = self
+            .road_focus
+            .into_iter()
+            .any(|p| source_distance_squared(p, segment.position()) <= radius * radius);
+        let selected = geometry
+            || [self.request.player, self.request.vehicle]
+                .into_iter()
+                .any(|p| {
+                    intersects(
+                        segment.bounds,
+                        window(p, f64::from(radius) + self.road_light.influence_margin()),
+                    )
+                });
+        if !selected {
+            self.next_road += 1;
+            return;
+        }
+        if existing.is_none() {
+            if self.selected_roads.len() >= MAX_ROADS {
+                self.failure = Some("Selected road descriptors exceed 512 roads".into());
+                return;
+            }
+            // Reserve retained output, vector overlap, the light identity, and pole placement before selection.
+            let prototype = self
+                .reference
+                .prototypes
+                .iter()
+                .find(|p| p.source == self.reference.road.prototypes[segment.biome as usize])
+                .unwrap();
+            let light_heap = self.road_light.retained_bytes()
+                + prototype
+                    .nodes
+                    .iter()
+                    .map(|n| n.source.file.capacity())
+                    .sum::<usize>();
+            let bytes = (self.selected_roads.capacity() + 1) * std::mem::size_of::<SelectedRoad>()
+                + prototype.nodes.len() * std::mem::size_of::<super::road::RoadFrame>()
+                + 2 * (std::mem::size_of::<super::WorldLight>() + light_heap)
+                + (self.wanted_structures.capacity() + 1) * std::mem::size_of::<Placement>()
+                + 2 * light_heap;
+            if !self.admit_generation(bytes) {
+                return;
+            }
+            if self.selected_roads.try_reserve_exact(1).is_err() {
+                self.failure = Some("Selected road descriptor allocation failed".into());
+                return;
+            }
+            if self.wanted_structures.try_reserve_exact(1).is_err() {
+                self.failure = Some("Selected pole placement allocation failed".into());
+                return;
+            }
+            let light = self.road_light.place(&self.reference, &segment);
+            self.selected_roads.push(SelectedRoad { segment, light });
+        }
+        let retained = self
+            .selected_roads
+            .iter()
+            .find(|r| r.segment.index == index)
+            .unwrap();
+        if let Some(light) = &retained.light {
+            if !self.lights.iter().any(|l| l.id == light.id) {
+                self.lights.push(light.clone());
+            }
+            self.wanted_lights.push(index);
+        }
+        self.refresh_poles();
+        if self.metrics().generated_objects > MAX_OBJECTS {
+            self.failure = Some("Source object count exceeds 8192".into());
+            return;
+        }
+        if geometry {
+            if self.wanted_roads.len() == MAX_ROADS {
+                self.failure = Some("Source road count exceeds 512".into());
+                return;
+            }
+            self.wanted_roads.push(index);
+            append_road_points(
+                &mut self.road_points,
+                segment,
+                self.reference.road.def_point_range,
+            );
+        }
+        self.next_road += 1;
     }
     fn prepare_road(&mut self) {
         if self.available_external_jobs() == 0 {
             return;
         }
-        let index = self.road_candidates[self.next_road];
-        let segment = self.roads.prepare_segment(index, 8);
-        self.last_road_work = self.roads.replay_work();
-        let Some(segment) = segment else {
-            return;
+        let index = self.wanted_roads[self.next_geometry];
+        let segment = self
+            .selected_roads
+            .iter()
+            .find(|r| r.segment.index == index)
+            .unwrap()
+            .segment;
+        let key = SurfaceKey {
+            layer: WorldLayer::Road,
+            unit: [index as i64, 0],
         };
+        if self.surfaces.iter().any(|s| s.key == key) {
+            self.next_geometry += 1;
+            return;
+        }
         if !self
             .admissions
             .get(&self.reference.road.prototypes[segment.biome as usize])
@@ -1543,76 +1833,13 @@ impl WorldStream {
         {
             return;
         }
-        let radius = self.reference.distances["RoadGenDist"];
-        let needs_output = self
-            .road_focus
-            .into_iter()
-            .any(|p| source_distance_squared(p, segment.position()) <= radius * radius)
-            && !self
-                .surfaces
-                .iter()
-                .any(|s| s.key.layer == WorldLayer::Road && s.key.unit[0] == index as i64);
         let pending_bytes = super::road::road_surface_bound(&self.reference, segment.biome);
-        if needs_output && !self.admit_generation(pending_bytes) {
-            return;
-        }
-        self.next_road += 1;
-        let radius = self.reference.distances["RoadGenDist"] as f64;
-        if !self
-            .lights
-            .iter()
-            .any(|light| light.id.unit[0] == index as i64)
-        {
-            if let Some(light) = self.road_light.place(&self.reference, &segment) {
-                if [self.request.player, self.request.vehicle]
-                    .into_iter()
-                    .any(|point| {
-                        intersects(
-                            segment.bounds,
-                            window(point, radius + self.road_light.influence_margin()),
-                        )
-                    })
-                {
-                    self.lights.push(light);
-                    self.refresh_poles();
-                }
-            }
-        }
-        if self
-            .lights
-            .iter()
-            .any(|light| light.id.unit[0] == index as i64)
-        {
-            self.wanted_lights.push(index);
-        }
-        if self.metrics().generated_objects > MAX_OBJECTS {
-            self.failure = Some("Source object count exceeds 8192".into());
-            return;
-        }
-        if !self.road_focus.into_iter().any(|p| {
-            source_distance_squared(p, segment.position()) <= (radius as f32) * (radius as f32)
-        }) {
-            return;
-        }
-        if self.wanted_roads.len() == MAX_ROADS {
-            self.failure = Some("Source road count exceeds512".into());
-            return;
-        }
-        self.wanted_roads.push(index);
-        append_road_points(
-            &mut self.road_points,
-            segment,
-            self.reference.road.def_point_range,
-        );
-        let key = SurfaceKey {
-            layer: WorldLayer::Road,
-            unit: [index as i64, 0],
-        };
-        if self.surfaces.iter().any(|s| s.key == key) {
+        if !self.can_request_independent(1) || !self.admit_generation(pending_bytes) {
             return;
         }
         let mut surface = WorldSurface::default();
         deform_road(&self.reference, &segment, &mut surface);
+        self.next_geometry += 1;
         self.ready = Some(PreparedSurface {
             pending_bytes,
             renderer_ready: false,
@@ -3093,6 +3320,13 @@ impl WorldStream {
                     .iter()
                     .map(super::contents::identity_heap)
                     .sum::<usize>()
+                + self.selected_roads.capacity() * std::mem::size_of::<SelectedRoad>()
+                + self
+                    .selected_roads
+                    .iter()
+                    .filter_map(|r| r.light.as_ref())
+                    .map(super::WorldLight::heap_bytes)
+                    .sum::<usize>()
                 + self.road_candidates.capacity() * std::mem::size_of::<u32>()
                 + self.wanted_roads.capacity() * std::mem::size_of::<u32>()
                 + self.wanted_lights.capacity() * std::mem::size_of::<u32>()
@@ -3127,7 +3361,24 @@ impl WorldStream {
                 .chain(&self.static_controls)
                 .map(|c| c.bindings.len() + usize::from(c.item.is_some()))
                 .sum::<usize>()
+                + self
+                    .contents
+                    .active
+                    .iter()
+                    .filter(|c| {
+                        c.item.is_none()
+                            && !self
+                                .wanted_structures
+                                .iter()
+                                .any(|p| p.id == c.content.placement.id)
+                    })
+                    .count()
                 + self.structures.len()
+                + self
+                    .wanted_structures
+                    .iter()
+                    .filter(|p| !self.structures.iter().any(|s| s.placement.id == p.id))
+                    .count()
                 + self.supplies.len() * 2
                 + self.lights.len()
                 + self.presentation.objects,
@@ -3623,5 +3874,205 @@ mod renderer_pending_checks {
         assert!(RendererRetirement::default().keep(true));
         stream.release_renderer_pending(&mut replacement).unwrap();
         assert_eq!(stream.metrics().pending_work, 0);
+    }
+}
+
+#[cfg(test)]
+mod descriptor_checks {
+    use super::*;
+    #[test]
+    #[ignore = "requires the installed checked source export"]
+    fn first_surface_does_not_end_descriptor_discovery() {
+        let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+        let reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();
+        let mut stream = WorldStream::new(&reference, reference.world.terrain.seed).unwrap();
+        stream.request_at([0.; 3], [0.; 3]);
+        while !stream.indices_ready {
+            stream.prepare_descriptors();
+        }
+        while stream.startup.is_none() {
+            stream.prepare_descriptors();
+        }
+        stream.plan().unwrap();
+        assert!(!stream.road_candidates.is_empty());
+        stream.ready = Some(PreparedSurface {
+            pending_bytes: 0,
+            renderer_ready: false,
+            renderer_reserved: false,
+            request: stream.request,
+            published: PublishedSurface {
+                key: SurfaceKey {
+                    layer: WorldLayer::Road,
+                    unit: [0, 0],
+                },
+                surface: WorldSurface::default(),
+                prototype: None,
+                bounds: window([0.; 3], 1.),
+                collider: None,
+                collision_bytes: 0,
+                road: None,
+            },
+        });
+        for _ in 0..12000 {
+            stream.prepare_descriptors();
+            if stream.descriptor_window_ready() || stream.failure.is_some() {
+                break;
+            }
+        }
+        assert!(stream.failure.is_none(), "{:?}", stream.failure);
+        assert!(
+            stream.descriptor_window_ready(),
+            "roads {}/{}, props {}, cursors ready {:?}",
+            stream.next_road,
+            stream.road_candidates.len(),
+            stream
+                .props
+                .discovery_ready([stream.request.player, stream.request.vehicle]),
+            stream.contents.discovery_ready(
+                &stream.reference,
+                &stream.wanted_structures,
+                &stream.replay_roots
+            )
+        );
+        assert!(
+            stream.next_road > 0,
+            "a waiting surface stalled road discovery"
+        );
+        assert!(
+            !stream.lights.is_empty(),
+            "later road lights must be discovered"
+        );
+        assert!(
+            !stream.props.placements().is_empty(),
+            "prop discovery must advance"
+        );
+        assert!(
+            !stream.contents.state.boundaries().is_empty(),
+            "content Starts must advance"
+        );
+        assert!(
+            stream.admissions.is_empty(),
+            "descriptor discovery must not admit payloads"
+        );
+        assert!(
+            stream
+                .ready
+                .as_ref()
+                .unwrap()
+                .published
+                .surface
+                .vertices
+                .is_empty()
+        );
+    }
+    #[test]
+    #[ignore = "requires the installed checked source export"]
+    fn discovery_keeps_selected_output_and_rng() {
+        let reference = ReferenceManifest::from_runtime_json(
+            &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+        )
+        .unwrap();
+        let seed = reference.world.terrain.seed;
+        let mut stream = WorldStream::new(&reference, seed).unwrap();
+        stream.request_at([0.; 3], [0.; 3]);
+        // Supply bounded numeric coverage through the production index owners.
+        // This check does not activate the Task 5 frontier or claim full-world coverage.
+        stream.roads.prepare(256);
+        stream.placements.prepare(256);
+        stream.indices_ready = true;
+        for _ in 0..2048 {
+            stream.prepare_descriptors();
+            if stream.next_road > 0 {
+                break;
+            }
+            assert!(stream.failure.is_none(), "{:?}", stream.failure);
+        }
+        let selected = stream
+            .selected_roads
+            .iter()
+            .map(|r| r.segment)
+            .collect::<Vec<_>>();
+        let random = stream.contents.state.live_state();
+        let phase = stream.next_road;
+        let mut allocation = stream.presentation_allocation();
+        allocation.jobs = 2;
+        stream.set_presentation_allocation(allocation).unwrap();
+        for _ in 0..4 {
+            stream.prepare_descriptors();
+        }
+        assert_eq!(stream.next_road, phase);
+        assert_eq!(stream.contents.state.live_state(), random);
+        assert_eq!(
+            stream
+                .selected_roads
+                .iter()
+                .map(|r| r.segment)
+                .collect::<Vec<_>>(),
+            selected
+        );
+        allocation.jobs = 0;
+        stream.set_presentation_allocation(allocation).unwrap();
+        for _ in 0..2048 {
+            stream.prepare_descriptors();
+            assert!(stream.failure.is_none(), "{:?}", stream.failure);
+            if stream.next_road == stream.road_candidates.len() {
+                break;
+            }
+        }
+        assert_eq!(stream.next_road, stream.road_candidates.len());
+        let selected = stream
+            .selected_roads
+            .iter()
+            .map(|r| r.segment)
+            .collect::<Vec<_>>();
+        assert!(!selected.is_empty());
+        let mut sequence = RoadSequence::new(&reference.world, seed).unwrap();
+        let terrain = TerrainEvaluator::new(&reference.world, seed);
+        let lamps = super::super::source_lights::SourceRoadLight::new(&reference, seed).unwrap();
+        for index in 0..=selected.iter().map(|r| r.index).max().unwrap() {
+            let segment = sequence.advance(&terrain).unwrap();
+            if let Some(retained) = stream
+                .selected_roads
+                .iter()
+                .find(|r| r.segment.index == index)
+            {
+                assert_eq!(retained.segment, segment);
+                let expected = lamps.place(&reference.world, &segment);
+                assert_eq!(
+                    retained
+                        .light
+                        .as_ref()
+                        .map(|l| (&l.id, l.pose, l.enabled, l.intensity)),
+                    expected
+                        .as_ref()
+                        .map(|l| (&l.id, l.pose, l.enabled, l.intensity))
+                );
+            }
+        }
+        // Geometry consumes retained output. This test supplies an already admitted prototype.
+        for source in &reference.world.road.prototypes {
+            stream.admissions.insert(
+                source.clone(),
+                PrototypeAllocation {
+                    cpu: 0,
+                    gpu: 0,
+                    ready: true,
+                },
+            );
+        }
+        let work = stream.roads.replay_work();
+        let random = stream.contents.state.live_state();
+        stream.prepare_geometry();
+        assert!(stream.ready.is_some());
+        assert_eq!(stream.roads.replay_work(), work);
+        assert_eq!(stream.contents.state.live_state(), random);
+        assert_eq!(
+            stream
+                .selected_roads
+                .iter()
+                .map(|r| r.segment)
+                .collect::<Vec<_>>(),
+            selected
+        );
     }
 }

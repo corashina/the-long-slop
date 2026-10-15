@@ -14,7 +14,8 @@ struct DeferredBatch {
 struct Cursor {
     replay_only: bool,
     parent: Placement,
-    building: SourceId,
+    building: Option<SourceId>,
+    initial_eligible: Option<bool>,
     callers: Vec<SourceId>,
     next: usize,
     chance: Option<f32>,
@@ -135,6 +136,8 @@ pub(crate) struct SourceContents {
     pub active: Vec<ContentInstance>,
     next: usize,
     update: u64,
+    selection: Option<(u64, u64)>,
+    input_revision: u64,
     deferred: Vec<DeferredBatch>,
 }
 impl SourceContents {
@@ -145,7 +148,9 @@ impl SourceContents {
                 || !self.cursors.iter().any(|c| {
                     c.replay_only
                         && c.parent.id == content.origin.id
-                        && c.next >= c.callers.len().max(1)
+                        && (c.building.is_none()
+                            || c.initial_eligible == Some(false)
+                            || c.next >= c.callers.len().max(1))
                         && !self.deferred.iter().any(|b| b.owner == c.parent.id)
                 })
         });
@@ -164,7 +169,7 @@ impl SourceContents {
             .find(|c| &c.parent.id == id && c.replay_only)
             .is_some_and(|c| {
                 c.root.is_some()
-                    && c.next >= c.callers.len().max(1)
+                    && (c.building.is_none() || c.next >= c.callers.len().max(1))
                     && !self
                         .deferred
                         .iter()
@@ -205,10 +210,31 @@ impl SourceContents {
             active: Vec::new(),
             deferred: Vec::new(),
             update: 0,
+            selection: None,
+            input_revision: 0,
             next: 0,
         }
     }
-    fn admit_queues(&mut self, limit: usize, staging: usize) -> Result<usize, ReferenceError> {
+    pub fn input_revision(&self) -> u64 {
+        self.input_revision
+    }
+    pub fn select_revision(&mut self, session: u64, revision: u64) {
+        if self.selection != Some((session, revision)) {
+            self.selection = Some((session, revision));
+            // A newly selected region performs its first check without simulating timed polling.
+            for cursor in &mut self.cursors {
+                if cursor.initial_eligible == Some(false) && cursor.building.is_some() {
+                    cursor.initial_eligible = None;
+                }
+            }
+        }
+    }
+    fn admit_queues(
+        &mut self,
+        limit: usize,
+        deferred: usize,
+        staging: usize,
+    ) -> Result<usize, ReferenceError> {
         fn overlap<T>(values: &Vec<T>, extra: usize) -> usize {
             let required = values.len().saturating_add(extra);
             if required > values.capacity() {
@@ -217,7 +243,7 @@ impl SourceContents {
                 0
             }
         }
-        let bytes = overlap(&self.active, limit).saturating_add(overlap(&self.deferred, 1));
+        let bytes = overlap(&self.active, limit).saturating_add(overlap(&self.deferred, deferred));
         if bytes > staging {
             return Err(ReferenceError(
                 "Source continuation queues exceed staging".into(),
@@ -227,7 +253,7 @@ impl SourceContents {
             .try_reserve_exact(limit)
             .map_err(|_| ReferenceError("Source content queue allocation failed".into()))?;
         self.deferred
-            .try_reserve_exact(1)
+            .try_reserve_exact(deferred)
             .map_err(|_| ReferenceError("Source continuation queue allocation failed".into()))?;
         Ok(staging - bytes)
     }
@@ -253,9 +279,10 @@ impl SourceContents {
         focus: [[f64; 3]; 2],
         available_index_bytes: usize,
         limit: usize,
+        pending: usize,
         staging: usize,
     ) -> Result<(), ReferenceError> {
-        let staging = self.admit_queues(limit, staging)?;
+        let initial_pending = self.deferred.len();
         self.update = self.update.wrapping_add(1);
         let eligible = self
             .deferred
@@ -272,7 +299,18 @@ impl SourceContents {
             if remaining == 0 || available == 0 {
                 return Ok(());
             }
-            self.advance_deferred(reference, available_index_bytes, remaining, available)?;
+            let pending = pending
+                .saturating_add(initial_pending)
+                .saturating_sub(self.deferred.len());
+            if !self.advance_deferred(
+                reference,
+                available_index_bytes,
+                remaining,
+                pending,
+                available,
+            )? {
+                return Ok(());
+            }
         }
         let limit = limit.saturating_sub(self.active.len().saturating_sub(initial_count));
         let staging = staging.saturating_sub(self.retained_bytes().saturating_sub(initial_bytes));
@@ -287,30 +325,33 @@ impl SourceContents {
             .chain(replays.iter().take(1).map(|p| (p, true)))
         {
             let p = instance;
-            if !p.id.children.is_empty()
-                || self
-                    .cursors
-                    .iter()
-                    .any(|c| c.parent.id == p.id && c.replay_only == replay_only)
+            if self
+                .cursors
+                .iter()
+                .any(|c| c.parent.id == p.id && c.replay_only == replay_only)
             {
                 continue;
             }
             if replay_only && self.has_replay() {
                 continue;
             }
-            let Some(building) = self
+            let building = self
                 .rules
-                .component(reference, &p.prototype, "buildingscript")?
-            else {
+                .component(reference, &p.prototype, "buildingscript")?;
+            if !p.id.children.is_empty() && building.is_none() {
                 continue;
-            };
+            }
+            let existing = self.active.iter().find(|c| c.content.placement.id == p.id);
             let bound = self.rules.initialization_bound(
                 reference,
                 &p.prototype,
                 identity_heap(&p.id),
                 0,
             )? + (self.cursors.capacity() + self.cursors.len() + 1)
-                * std::mem::size_of::<Cursor>();
+                * std::mem::size_of::<Cursor>()
+                + existing.map_or(0, |c| {
+                    spawned_heap(&c.content) + c.content.inputs.retained_bytes()
+                });
             if bound > staging.saturating_sub(self.retained_bytes().saturating_sub(cursor_before)) {
                 return Err(ReferenceError(
                     "Source caller cursor exceeds staging".into(),
@@ -320,13 +361,15 @@ impl SourceContents {
                 .try_reserve_exact(1)
                 .map_err(|_| ReferenceError("Source cursor allocation failed".into()))?;
             let mut callers = Vec::new();
-            self.rules.children(
-                reference,
-                &p.prototype,
-                "newRandomStuffSpawnScript",
-                true,
-                &mut callers,
-            )?;
+            if building.is_some() {
+                self.rules.children(
+                    reference,
+                    &p.prototype,
+                    "newRandomStuffSpawnScript",
+                    true,
+                    &mut callers,
+                )?;
+            }
             let mut eligible = Vec::new();
             for source in callers {
                 if !flag(self.rules.get(reference, source)?.fields, "dontSpawn")? {
@@ -336,22 +379,29 @@ impl SourceContents {
             self.cursors.push(Cursor {
                 replay_only,
                 parent: p.clone(),
-                building: building.source.clone(),
+                building: building.map(|b| b.source.clone()),
+                initial_eligible: None,
                 callers: eligible,
                 next: 0,
                 chance: None,
-                root: None,
-                inputs: super::spawn_state::SpawnInitialization::default(),
+                root: existing.map(|c| c.content.clone()),
+                inputs: existing
+                    .map(|c| c.content.inputs.for_parent(&p.id))
+                    .unwrap_or_default(),
             });
         }
         let staging = staging.saturating_sub(self.retained_bytes().saturating_sub(cursor_before));
         if let Some(index) = self.cursors.iter().position(|c| c.root.is_none()) {
+            if pending.saturating_add(initial_pending) <= self.deferred.len() {
+                return Ok(());
+            }
+            let staging = self.admit_queues(limit, 1, staging)?;
             let cursor = &self.cursors[index];
             let parent = &cursor.parent;
             if cursor.replay_only
                 && !self.state.has_boundary(
                     &parent.id,
-                    &cursor.building,
+                    cursor.building.as_ref().unwrap_or(&cursor.parent.prototype),
                     0,
                     SpawnPhase::ComponentStart,
                 )
@@ -362,7 +412,7 @@ impl SourceContents {
             }
             let (mut output, deferred, inputs) = self.state.invoke(
                 &parent.id,
-                &cursor.building,
+                cursor.building.as_ref().unwrap_or(&cursor.parent.prototype),
                 0,
                 SpawnPhase::ComponentStart,
                 available_index_bytes,
@@ -392,6 +442,13 @@ impl SourceContents {
                 },
             )?;
             self.cursors[index].root = Some(output.remove(0));
+            self.cursors[index].initial_eligible = Some(
+                self.cursors[index].replay_only
+                    || (self.cursors[index].building.is_some()
+                        && focus.iter().any(|f| {
+                            distance(*f, self.cursors[index].parent.pose.position) < spawn * spawn
+                        })),
+            );
             self.cursors[index].inputs = inputs.for_parent(&self.cursors[index].parent.id);
             if !deferred.is_empty() {
                 self.deferred.push(DeferredBatch {
@@ -447,12 +504,17 @@ impl SourceContents {
             }
             let index = self.next % self.cursors.len();
             self.next = (index + 1) % self.cursors.len();
-            let staging = self.admit_queues(limit, staging)?;
+            if self.cursors[index].initial_eligible.is_none() {
+                self.cursors[index].initial_eligible = Some(
+                    self.cursors[index].replay_only
+                        || focus.iter().any(|f| {
+                            distance(*f, self.cursors[index].parent.pose.position) < spawn * spawn
+                        }),
+                );
+            }
             let cursor = &self.cursors[index];
-            if (!cursor.replay_only
-                && focus
-                    .iter()
-                    .all(|f| distance(*f, cursor.parent.pose.position) >= spawn * spawn))
+            if cursor.building.is_none()
+                || cursor.initial_eligible != Some(true)
                 || self
                     .deferred
                     .iter()
@@ -461,9 +523,16 @@ impl SourceContents {
             {
                 continue;
             }
+            // This synchronous phase can create one new deferred owner.
+            if pending.saturating_add(initial_pending) <= self.deferred.len() {
+                self.next = index;
+                break;
+            }
+            let staging = self.admit_queues(limit, 1, staging)?;
+            let cursor = &self.cursors[index];
             let first = cursor.next == 0;
             let source = if first {
-                &cursor.building
+                cursor.building.as_ref().unwrap()
             } else {
                 &cursor.callers[cursor.next]
             };
@@ -507,7 +576,7 @@ impl SourceContents {
                         evaluation.output.push(root.clone());
                     }
                     let chance = if first {
-                        evaluation.building(parent, &cursor.building)?
+                        evaluation.building(parent, cursor.building.as_ref().unwrap())?
                     } else {
                         context.chance_bits.map(f32::from_bits)
                     };
@@ -587,15 +656,18 @@ impl SourceContents {
         reference: &WorldReference,
         available_index_bytes: usize,
         limit: usize,
+        pending: usize,
         staging: usize,
-    ) -> Result<(), ReferenceError> {
-        let staging = self.admit_queues(limit, staging)?;
+    ) -> Result<bool, ReferenceError> {
         let Some(index) = self.deferred.iter().position(|b| b.eligible <= self.update) else {
-            return Ok(());
+            return Ok(false);
         };
-        self.deferred
-            .try_reserve_exact(1)
-            .map_err(|_| ReferenceError("Source continuation allocation failed".into()))?;
+        let final_task = self.deferred[index].next + 1 == self.deferred[index].tasks.len();
+        let delta = usize::from(!final_task);
+        if pending < delta {
+            return Ok(false);
+        }
+        let staging = self.admit_queues(limit, delta, staging)?;
         let batch = &self.deferred[index];
         let (parent, source) = &batch.tasks[batch.next];
         let replay_only = batch.replay_only;
@@ -659,24 +731,7 @@ impl SourceContents {
         {
             cursor.inputs = initialization.for_parent(&cursor.parent.id);
         }
-        let batch = &mut self.deferred[index];
-        batch.next += 1;
-        batch.inputs = initialization;
-        if !deferred.is_empty() {
-            // A newly started slot always yields past this update.
-            let next = DeferredBatch {
-                replay_only,
-                owner: batch.owner.clone(),
-                tasks: deferred,
-                inputs: batch.inputs.clone(),
-                next: 0,
-                eligible: self.update.wrapping_add(1),
-            };
-            self.deferred.push(next);
-        }
-        if self.deferred[index].next == self.deferred[index].tasks.len() {
-            self.deferred.remove(index);
-        }
+        self.complete_deferred(index, deferred, initialization, final_task);
         for content in output {
             if let Some(cursor) = self
                 .cursors
@@ -714,7 +769,39 @@ impl SourceContents {
                 });
             }
         }
-        Ok(())
+        Ok(true)
+    }
+    fn complete_deferred(
+        &mut self,
+        index: usize,
+        deferred: Vec<(Placement, SourceId)>,
+        initialization: super::spawn_state::SpawnInitialization,
+        final_task: bool,
+    ) {
+        let batch = &mut self.deferred[index];
+        batch.next += 1;
+        batch.inputs = initialization;
+        if final_task {
+            if deferred.is_empty() {
+                self.deferred.remove(index);
+            } else {
+                // Transfer the same counted claim. No transient owner 33 exists.
+                let batch = &mut self.deferred[index];
+                batch.tasks = deferred;
+                batch.next = 0;
+                batch.eligible = self.update.wrapping_add(1);
+            }
+        } else if !deferred.is_empty() {
+            let batch = &self.deferred[index];
+            self.deferred.push(DeferredBatch {
+                replay_only: batch.replay_only,
+                owner: batch.owner.clone(),
+                tasks: deferred,
+                inputs: batch.inputs.clone(),
+                next: 0,
+                eligible: self.update.wrapping_add(1),
+            });
+        }
     }
     pub fn lamp_states(&self) -> impl Iterator<Item = &(GeneratedId, SourceId, bool)> {
         self.instances().flat_map(|c| &c.inputs.lamps)
@@ -766,6 +853,7 @@ impl SourceContents {
         evaluation.bake_lamps()?;
         evaluation.check_staging(staging)?;
         let content = evaluation.output.pop().unwrap();
+        self.input_revision = self.input_revision.wrapping_add(1);
         if let Some(cursor) = self.cursors.iter_mut().find(|c| &c.parent.id == parent) {
             cursor.inputs = evaluation.initialization;
         }
@@ -794,6 +882,22 @@ impl SourceContents {
         }
         Ok(())
     }
+    fn deferred_bytes(&self) -> usize {
+        self.deferred.capacity() * std::mem::size_of::<DeferredBatch>()
+            + self
+                .deferred
+                .iter()
+                .map(|b| {
+                    identity_heap(&b.owner)
+                        + b.tasks.capacity() * std::mem::size_of::<(Placement, SourceId)>()
+                        + b.inputs.retained_bytes()
+                        + b.tasks
+                            .iter()
+                            .map(|(p, s)| placement_heap(p) + s.file.capacity())
+                            .sum::<usize>()
+                })
+                .sum::<usize>()
+    }
     pub fn pending_bytes(&self) -> usize {
         self.cursors
             .iter()
@@ -810,23 +914,73 @@ impl SourceContents {
                         + spawned_heap(&c.content)
                 })
                 .sum::<usize>()
-            + self.deferred.capacity() * std::mem::size_of::<DeferredBatch>()
-            + self
-                .deferred
-                .iter()
-                .map(|b| {
-                    identity_heap(&b.owner)
-                        + b.tasks.capacity() * std::mem::size_of::<(Placement, SourceId)>()
-                        + b.inputs.retained_bytes()
-                        + b.tasks
-                            .iter()
-                            .map(|(p, s)| placement_heap(p) + s.file.capacity())
-                            .sum::<usize>()
-                })
-                .sum::<usize>()
+            + self.deferred_bytes()
     }
     pub fn pending_requests(&self) -> usize {
         self.deferred.len()
+    }
+    pub fn discovery_ready(
+        &self,
+        reference: &WorldReference,
+        selected: &[Placement],
+        replays: &[Placement],
+    ) -> Result<bool, ReferenceError> {
+        for (parent, replay) in selected
+            .iter()
+            .map(|p| (p, false))
+            .chain(replays.iter().map(|p| (p, true)))
+        {
+            if !parent.id.children.is_empty()
+                && self
+                    .rules
+                    .component(reference, &parent.prototype, "buildingscript")?
+                    .is_none()
+            {
+                // Synchronous descendants retain their completed Starts with their selected output.
+                if self
+                    .active
+                    .iter()
+                    .any(|c| c.content.placement.id == parent.id)
+                {
+                    if self
+                        .deferred
+                        .iter()
+                        .any(|b| b.tasks[b.next..].iter().any(|(p, _)| p.id == parent.id))
+                    {
+                        return Ok(false);
+                    }
+                    continue;
+                }
+                // Checked helper placements have no building lifecycle.
+                if self
+                    .rules
+                    .component(reference, &parent.prototype, "buildingscript")?
+                    .is_none()
+                {
+                    continue;
+                }
+            }
+            let Some(cursor) = self
+                .cursors
+                .iter()
+                .find(|c| c.parent.id == parent.id && c.replay_only == replay)
+            else {
+                return Ok(false);
+            };
+            if cursor.root.is_none()
+                || cursor.initial_eligible.is_none()
+                || (cursor.building.is_some()
+                    && cursor.initial_eligible == Some(true)
+                    && cursor.next < cursor.callers.len().max(1))
+                || self
+                    .deferred
+                    .iter()
+                    .any(|b| b.owner == parent.id && b.replay_only == replay)
+            {
+                return Ok(false);
+            }
+        }
+        Ok(self.deferred.is_empty())
     }
     pub fn initialized(&self, id: &GeneratedId) -> bool {
         self.cursors
@@ -879,7 +1033,8 @@ impl SourceContents {
         self.active.iter().any(|c| c.content.placement.id == *id)
     }
     pub fn retained_bytes(&self) -> usize {
-        self.cursors.capacity() * std::mem::size_of::<Cursor>()
+        self.deferred_bytes()
+            + self.cursors.capacity() * std::mem::size_of::<Cursor>()
             + self.cursors.iter().map(cursor_heap).sum::<usize>()
             + self.active.capacity() * std::mem::size_of::<ContentInstance>()
             + self
@@ -985,7 +1140,7 @@ fn spawned_heap(content: &SpawnedContent) -> usize {
 }
 fn cursor_heap(cursor: &Cursor) -> usize {
     placement_heap(&cursor.parent)
-        + cursor.building.file.capacity()
+        + cursor.building.as_ref().map_or(0, |s| s.file.capacity())
         + cursor.inputs.retained_bytes()
         + cursor.root.as_ref().map_or(0, spawned_heap)
         + cursor.callers.capacity() * std::mem::size_of::<SourceId>()
@@ -994,4 +1149,459 @@ fn cursor_heap(cursor: &Cursor) -> usize {
             .iter()
             .map(|s| s.file.capacity())
             .sum::<usize>()
+}
+
+#[cfg(test)]
+mod discovery_checks {
+    use super::*;
+    #[test]
+    #[ignore = "requires the installed checked source export"]
+    fn descriptor_closure_requires_started_content_cursor() {
+        let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+        let manifest = crate::reference::ReferenceManifest::from_runtime_json(&bytes).unwrap();
+        let reference = &manifest.world;
+        let contents = SourceContents::new(reference);
+        let prototype = reference
+            .prototypes
+            .iter()
+            .find(|p| {
+                contents
+                    .rules
+                    .component(reference, &p.source, "buildingscript")
+                    .unwrap()
+                    .is_some()
+            })
+            .unwrap();
+        let parent = Placement {
+            id: GeneratedId {
+                layer: super::super::WorldLayer::Building,
+                generator: prototype.source.clone(),
+                unit: [0, 0],
+                ordinal: 0,
+                children: Vec::new(),
+            },
+            prototype: prototype.source.clone(),
+            pose: super::super::AbsolutePose {
+                position: [0.; 3],
+                rotation: [0., 0., 0., 1.],
+            },
+            scale: [1.; 3],
+            bounds: super::super::WorldBounds {
+                min: [-1.; 3],
+                max: [1.; 3],
+            },
+            object_seed: 0,
+        };
+        assert!(
+            !contents
+                .discovery_ready(reference, &[parent.clone()], &[])
+                .unwrap(),
+            "a selected building without a cursor is incomplete"
+        );
+    }
+    fn installed() -> crate::reference::ReferenceManifest {
+        crate::reference::ReferenceManifest::from_runtime_json(
+            &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+        )
+        .unwrap()
+    }
+    fn parent(source: SourceId, ordinal: u32) -> Placement {
+        Placement {
+            id: GeneratedId {
+                layer: super::super::WorldLayer::Building,
+                generator: source.clone(),
+                unit: [0, 0],
+                ordinal,
+                children: Vec::new(),
+            },
+            prototype: source,
+            pose: super::super::AbsolutePose {
+                position: [0.; 3],
+                rotation: [0., 0., 0., 1.],
+            },
+            scale: [1.; 3],
+            bounds: super::super::WorldBounds {
+                min: [-1.; 3],
+                max: [1.; 3],
+            },
+            object_seed: 0,
+        }
+    }
+    #[test]
+    #[ignore = "requires the installed checked source export"]
+    fn full_pending_contents_continuation_progresses() {
+        let manifest = installed();
+        let reference = &manifest.world;
+        let mut contents = SourceContents::new(reference);
+        let source = reference
+            .initialization
+            .components
+            .iter()
+            .find(|c| {
+                c.class_name == "partslotscript"
+                    && !flag(
+                        contents.rules.get(reference, &c.source).unwrap().fields,
+                        "enableSpawn",
+                    )
+                    .unwrap()
+            })
+            .unwrap()
+            .source
+            .clone();
+        let root = contents.rules.root(reference, &source).unwrap().clone();
+        for i in 0..32 {
+            let p = parent(root.clone(), i);
+            contents.deferred.push(DeferredBatch {
+                replay_only: false,
+                owner: p.id.clone(),
+                tasks: vec![(p, source.clone())],
+                inputs: Default::default(),
+                next: 0,
+                eligible: 1,
+            });
+        }
+        // A nonfinal task needs one possible child owner. It cannot draw at full ownership.
+        let extra = contents.deferred[0].tasks[0].clone();
+        contents.deferred[0].tasks.push(extra);
+        let random = contents.state.live_state();
+        contents
+            .advance(
+                reference,
+                &[],
+                &[],
+                [[0.; 3]; 2],
+                16 * 1024 * 1024,
+                32,
+                0,
+                8 * 1024 * 1024,
+            )
+            .unwrap();
+        assert_eq!(contents.pending_requests(), 32);
+        assert_eq!(contents.deferred[0].next, 0);
+        assert_eq!(contents.state.live_state(), random);
+        assert!(contents.state.boundaries().is_empty());
+        contents.deferred[0].tasks.pop();
+        // Use actual source Start output to check the same-owner child transfer at 32.
+        let p = contents.deferred[0].tasks[0].0.clone();
+        let mut rng = super::super::UnityRandom::restore(random);
+        let mut pools = Vec::new();
+        let mut evaluation = SpawnEvaluation::new(
+            reference,
+            &contents.rules,
+            &mut rng,
+            contents.state.context,
+            &mut pools,
+            32,
+        );
+        evaluation.staging = 8 * 1024 * 1024;
+        evaluation.admit_initialization(&p).unwrap();
+        evaluation.queue_start(p.clone(), None);
+        evaluation.finish_starts().unwrap();
+        assert!(!evaluation.deferred.is_empty());
+        let deferred = evaluation.deferred;
+        let inputs = evaluation.initialization;
+        let retained = inputs.clone();
+        let owner = contents.deferred[0].owner.clone();
+        contents.complete_deferred(0, deferred, inputs, true);
+        assert_eq!(contents.pending_requests(), 32);
+        assert_eq!(contents.deferred[0].owner, owner);
+        assert_eq!(contents.deferred[0].inputs, retained);
+        assert_eq!(contents.deferred[0].eligible, contents.update + 1);
+        // Polling closure cannot cross the source frame barrier.
+        let update = contents.update;
+        for _ in 0..20 {
+            assert!(!contents.discovery_ready(reference, &[], &[]).unwrap());
+        }
+        assert_eq!(contents.update, update);
+        assert_eq!(contents.state.live_state(), random);
+        // Each existing final task can finish with zero new pending allowance.
+        contents
+            .advance(
+                reference,
+                &[],
+                &[],
+                [[0.; 3]; 2],
+                16 * 1024 * 1024,
+                32,
+                0,
+                8 * 1024 * 1024,
+            )
+            .unwrap();
+        assert_eq!(contents.pending_requests(), 0);
+        assert_eq!(contents.state.boundary_count(), 32);
+    }
+    #[test]
+    #[ignore = "requires the installed checked source export"]
+    fn initial_ineligible_building_and_absent_component_complete() {
+        let manifest = installed();
+        let reference = &manifest.world;
+        let mut contents = SourceContents::new(reference);
+        let building = reference
+            .prototypes
+            .iter()
+            .find(|p| {
+                contents
+                    .rules
+                    .component(reference, &p.source, "buildingscript")
+                    .unwrap()
+                    .is_some()
+            })
+            .unwrap();
+        let mut selected = parent(building.source.clone(), 0);
+        selected.pose.position = [1e9; 3];
+        contents
+            .advance(
+                reference,
+                &[selected.clone()],
+                &[],
+                [[0.; 3]; 2],
+                16 * 1024 * 1024,
+                32,
+                32,
+                8 * 1024 * 1024,
+            )
+            .unwrap();
+        for _ in 0..256 {
+            if contents
+                .discovery_ready(reference, &[selected.clone()], &[])
+                .unwrap()
+            {
+                break;
+            }
+            contents
+                .advance(
+                    reference,
+                    &[selected.clone()],
+                    &[],
+                    [[0.; 3]; 2],
+                    16 * 1024 * 1024,
+                    32,
+                    32,
+                    8 * 1024 * 1024,
+                )
+                .unwrap();
+        }
+        assert!(
+            contents
+                .discovery_ready(reference, &[selected.clone()], &[])
+                .unwrap()
+        );
+        assert_eq!(contents.cursors[0].initial_eligible, Some(false));
+        assert_eq!(contents.cursors[0].next, 0);
+        let history = contents.state.capture_history();
+        for _ in 0..3 {
+            contents
+                .advance(
+                    reference,
+                    &[selected.clone()],
+                    &[],
+                    [[0.; 3]; 2],
+                    16 * 1024 * 1024,
+                    32,
+                    32,
+                    8 * 1024 * 1024,
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            serde_json::to_value(contents.state.capture_history()).unwrap(),
+            serde_json::to_value(history).unwrap()
+        );
+        let no_building = reference
+            .prototypes
+            .iter()
+            .find(|p| {
+                contents
+                    .rules
+                    .component(reference, &p.source, "buildingscript")
+                    .unwrap()
+                    .is_none()
+            })
+            .unwrap();
+        let selected = parent(no_building.source.clone(), 1);
+        contents
+            .advance(
+                reference,
+                &[selected.clone()],
+                &[],
+                [[0.; 3]; 2],
+                16 * 1024 * 1024,
+                32,
+                32,
+                8 * 1024 * 1024,
+            )
+            .unwrap();
+        for _ in 0..256 {
+            if contents
+                .discovery_ready(reference, &[selected.clone()], &[])
+                .unwrap()
+            {
+                break;
+            }
+            contents
+                .advance(
+                    reference,
+                    &[selected.clone()],
+                    &[],
+                    [[0.; 3]; 2],
+                    16 * 1024 * 1024,
+                    32,
+                    32,
+                    8 * 1024 * 1024,
+                )
+                .unwrap();
+        }
+        assert!(
+            contents
+                .discovery_ready(reference, &[selected], &[])
+                .unwrap()
+        );
+        assert!(
+            contents
+                .cursors
+                .iter()
+                .any(|c| c.building.is_none() && c.root.is_some())
+        );
+    }
+
+    #[test]
+    #[ignore = "requires the installed checked source export"]
+    fn budget_waits_keep_selected_initialization_and_rng() {
+        let manifest = installed();
+        let reference = &manifest.world;
+        let mut direct = SourceContents::new(reference);
+        let mut bounded = SourceContents::new(reference);
+        let prototype = reference
+            .prototypes
+            .iter()
+            .find(|p| {
+                direct
+                    .rules
+                    .component(reference, &p.source, "buildingscript")
+                    .unwrap()
+                    .is_some()
+            })
+            .unwrap();
+        let selected = [
+            parent(prototype.source.clone(), 0),
+            parent(prototype.source.clone(), 1),
+        ];
+        for _ in 0..1024 {
+            direct
+                .advance(
+                    reference,
+                    &selected,
+                    &[],
+                    [[0.; 3]; 2],
+                    16 * 1024 * 1024,
+                    32,
+                    32,
+                    8 * 1024 * 1024,
+                )
+                .unwrap();
+            if direct.discovery_ready(reference, &selected, &[]).unwrap() {
+                break;
+            }
+        }
+        assert!(direct.discovery_ready(reference, &selected, &[]).unwrap());
+        let initial = bounded.state.live_state();
+        for _ in 0..4 {
+            bounded
+                .advance(
+                    reference,
+                    &selected,
+                    &[],
+                    [[0.; 3]; 2],
+                    16 * 1024 * 1024,
+                    32,
+                    0,
+                    8 * 1024 * 1024,
+                )
+                .unwrap();
+        }
+        assert_eq!(bounded.state.live_state(), initial);
+        assert!(bounded.state.boundaries().is_empty());
+        for _ in 0..selected.len() {
+            bounded
+                .advance(
+                    reference,
+                    &selected,
+                    &[],
+                    [[0.; 3]; 2],
+                    16 * 1024 * 1024,
+                    32,
+                    32,
+                    8 * 1024 * 1024,
+                )
+                .unwrap();
+        }
+        let phase = bounded.next;
+        let history = bounded.state.capture_history();
+        bounded
+            .advance(
+                reference,
+                &selected,
+                &[],
+                [[0.; 3]; 2],
+                16 * 1024 * 1024,
+                32,
+                0,
+                8 * 1024 * 1024,
+            )
+            .unwrap();
+        assert_eq!(bounded.next, phase);
+        assert_eq!(bounded.state.capture_history(), history);
+
+        for _ in 0..1024 {
+            bounded
+                .advance(
+                    reference,
+                    &selected,
+                    &[],
+                    [[0.; 3]; 2],
+                    16 * 1024 * 1024,
+                    32,
+                    32,
+                    8 * 1024 * 1024,
+                )
+                .unwrap();
+            if bounded.discovery_ready(reference, &selected, &[]).unwrap() {
+                break;
+            }
+        }
+        assert!(bounded.discovery_ready(reference, &selected, &[]).unwrap());
+        assert_eq!(
+            bounded.state.capture_history(),
+            direct.state.capture_history()
+        );
+        assert_eq!(bounded.cursors[0].inputs, direct.cursors[0].inputs);
+        assert_eq!(
+            bounded
+                .active
+                .iter()
+                .map(|c| (&c.content.placement, &c.content.inputs))
+                .collect::<Vec<_>>(),
+            direct
+                .active
+                .iter()
+                .map(|c| (&c.content.placement, &c.content.inputs))
+                .collect::<Vec<_>>()
+        );
+        // A refused allocation cannot consume a phase or a source draw.
+        let mut refused = SourceContents::new(reference);
+        refused
+            .advance(
+                reference,
+                &selected,
+                &[],
+                [[0.; 3]; 2],
+                16 * 1024 * 1024,
+                32,
+                32,
+                0,
+            )
+            .unwrap();
+        assert_eq!(refused.state.live_state(), initial);
+        assert!(refused.state.boundaries().is_empty());
+    }
 }
