@@ -2,7 +2,7 @@
 use super::{
     lighting::{RenderingState, SourceLighting},
     lighting_assets::{CasterDitherBytes, LightingAssets, LightingShaders},
-    materials::{SourceMaterials, upload_receipt::UploadReceipt},
+    materials::SourceMaterials,
     reference::ReferenceVisuals,
     world::preflight::{
         self, SourcePlan,
@@ -15,7 +15,7 @@ use crate::{
         fixed_reservation::{FixedAllocation, FixedImageOwnership, FixedReservation},
         prototype_plan::PrototypePlan,
     },
-    world::WorldStream,
+    world::{WorldStream, upload_receipt::UploadReceipt},
 };
 use bevy::{
     asset::{LoadState, RenderAssetUsages},
@@ -47,9 +47,9 @@ struct Root {
     meshes: Vec<Handle<Mesh>>,
     fence: Option<Arc<MeshUpload>>,
 }
-struct MeshUpload {
+pub(crate) struct MeshUpload {
     meshes: Vec<Handle<Mesh>>,
-    receipt: UploadReceipt,
+    pub(crate) receipt: UploadReceipt,
 }
 #[derive(Default)]
 struct Uploads {
@@ -95,6 +95,22 @@ pub struct SourceFixedAssets {
     failure: Option<String>,
 }
 impl SourceFixedAssets {
+    pub(crate) fn watch_meshes(
+        &self,
+        meshes: impl Iterator<Item = Handle<Mesh>>,
+    ) -> Arc<MeshUpload> {
+        let fence = Arc::new(MeshUpload {
+            meshes: meshes.collect(),
+            receipt: default(),
+        });
+        let mut uploads = self.uploads.lock().unwrap();
+        uploads
+            .meshes
+            .retain(|f| !f.receipt.completed() || Arc::strong_count(f) > 1);
+        uploads.meshes.push(Arc::clone(&fence));
+        fence
+    }
+
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         for path in SHADERS {
             shader_input(&reference.file_catalog, path)?;
@@ -151,7 +167,7 @@ impl SourceFixedAssets {
             .collect::<Result<Vec<_>, ReferenceError>>()?;
         let root_slots = roots
             .len()
-            .checked_add(1)
+            .checked_add(1 + 32)
             .ok_or_else(|| ReferenceError("Fixed root control overflow".into()))?;
         let image_slots = rows
             .len()
@@ -1100,7 +1116,10 @@ fn complete_uploads(
     queue: Res<RenderQueue>,
 ) {
     let Some(uploads) = &uploads.0 else { return };
-    let uploads = uploads.lock().unwrap();
+    let mut uploads = uploads.lock().unwrap();
+    uploads
+        .meshes
+        .retain(|f| !f.receipt.completed() || Arc::strong_count(f) > 1);
     for fence in &uploads.meshes {
         if fence.meshes.iter().all(|h| {
             meshes.get(h.id()).is_some_and(|mesh| {

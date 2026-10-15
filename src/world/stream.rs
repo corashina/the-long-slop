@@ -14,6 +14,9 @@ use std::{
     },
 };
 
+#[cfg(any(target_arch = "wasm32", test))]
+use super::renderer_pending::{PipelineContinuation, RendererOwner};
+
 const MIB: usize = 1024 * 1024;
 const MAX_ROADS: usize = 512;
 const MAX_NEAR: usize = 512;
@@ -744,6 +747,13 @@ impl WorldStream {
         self.dependency_metadata = metadata;
         Ok(())
     }
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn can_request_independent(&self, claims: usize) -> bool {
+        self.metrics()
+            .pending_work
+            .checked_add(claims)
+            .is_some_and(|count| count <= 32)
+    }
     pub fn available_external_jobs(&self) -> usize {
         if !self.indices_ready {
             return 0;
@@ -931,7 +941,9 @@ impl WorldStream {
         }
         if changed {
             self.request.revision = self.request.revision.wrapping_add(1);
-            self.ready = None;
+            if self.ready.as_ref().is_none_or(|w| !w.renderer_reserved) {
+                self.ready = None;
+            }
             self.terrain_work = None;
             self.failure = None;
         }
@@ -1769,20 +1781,24 @@ impl WorldStream {
     pub fn prepared_surface(&self) -> Option<(WorldRequest, &PublishedSurface)> {
         self.ready
             .as_ref()
+            .filter(|work| same_request(work.request, self.request))
             .map(|work| (work.request, &work.published))
     }
-    pub fn reserve_surface_renderer(
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn reserve_surface_renderer(
         &mut self,
         request: WorldRequest,
         key: SurfaceKey,
-    ) -> Result<(), ReferenceError> {
+    ) -> Result<PipelineContinuation, ReferenceError> {
         let work = self
             .ready
             .as_ref()
             .filter(|work| same_request(work.request, request) && work.published.key == key)
             .ok_or_else(|| ReferenceError("Stale source renderer reservation".into()))?;
         if work.renderer_reserved {
-            return Ok(());
+            return Err(ReferenceError(
+                "Source renderer already owns its claim".into(),
+            ));
         }
         let metrics = self.metrics();
         if surface_render_cpu(&work.published.surface) > self.available_staging_bytes()
@@ -1800,19 +1816,45 @@ impl WorldStream {
             ));
         }
         self.ready.as_mut().unwrap().renderer_reserved = true;
+        Ok(PipelineContinuation::counted(RendererOwner::Surface(
+            request, key,
+        )))
+    }
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn discard_surface_renderer(
+        &mut self,
+        claim: &mut PipelineContinuation,
+    ) -> Result<(), ReferenceError> {
+        let RendererOwner::Surface(request, key) = claim.owner else {
+            return Err(ReferenceError("Wrong surface claim".into()));
+        };
+        if !self
+            .ready
+            .as_ref()
+            .is_some_and(|w| same_request(w.request, request) && w.published.key == key)
+        {
+            return Err(ReferenceError("Missing draining surface claim".into()));
+        }
+        claim.release()?;
+        self.ready = None;
         Ok(())
     }
-    pub fn accept_surface_renderer(
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn accept_surface_renderer(
         &mut self,
         request: WorldRequest,
         key: SurfaceKey,
+        claim: &PipelineContinuation,
     ) -> Result<(), ReferenceError> {
         let work = self
             .ready
             .as_mut()
             .filter(|work| same_request(work.request, request) && work.published.key == key)
             .ok_or_else(|| ReferenceError("Stale source renderer preparation".into()))?;
-        if !work.renderer_reserved {
+        if !work.renderer_reserved
+            || !claim.drained()
+            || !matches!(claim.owner, RendererOwner::Surface(r, owner) if same_request(r, request) && owner == key)
+        {
             return Err(ReferenceError("Unreserved source renderer".into()));
         }
         work.renderer_ready = true;
@@ -1858,7 +1900,9 @@ impl WorldStream {
             .as_ref()
             .is_some_and(|work| !same_request(work.request, self.request))
         {
-            self.ready = None;
+            if self.ready.as_ref().is_some_and(|w| !w.renderer_reserved) {
+                self.ready = None;
+            }
             return Ok(());
         }
         // Hold the surface until every required owner publishes. Drain individually ready
@@ -2230,23 +2274,119 @@ impl WorldStream {
         Ok(())
     }
 
-    pub fn accept_structure_renderer(
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn reserve_instance_renderer(
         &mut self,
         request: WorldRequest,
         id: &super::GeneratedId,
-    ) -> Result<(), ReferenceError> {
+        cpu: usize,
+        gpu: usize,
+        objects: usize,
+    ) -> Result<PipelineContinuation, ReferenceError> {
         if request.session != self.request.session
             || !self.wanted_structures.iter().any(|p| p.id == *id)
         {
-            return Err(ReferenceError("Stale structure renderer".into()));
+            return Err(ReferenceError("Stale instance renderer admission".into()));
         }
-        if !self.ready_structures.contains(id) {
-            if self.ready_structures.len() >= 32 {
-                return Err(ReferenceError("Structure publication queue cap".into()));
+        let mut next = self.presentation;
+        next.active_cpu += cpu;
+        next.active_gpu += gpu;
+        next.objects += objects;
+        next.pending += 1;
+        self.set_presentation_allocation(next)?;
+        Ok(PipelineContinuation::counted(RendererOwner::Structure(
+            request,
+            id.clone(),
+        )))
+    }
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn reserve_grass_renderer(
+        &mut self,
+        entity: u64,
+        cpu: usize,
+    ) -> Result<PipelineContinuation, ReferenceError> {
+        let mut next = self.presentation;
+        next.active_cpu += cpu;
+        next.pending += 1;
+        self.set_presentation_allocation(next)?;
+        Ok(PipelineContinuation::counted(RendererOwner::Grass(
+            self.request,
+            entity,
+        )))
+    }
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn release_renderer_pending(
+        &mut self,
+        claim: &mut PipelineContinuation,
+    ) -> Result<(), ReferenceError> {
+        if matches!(claim.owner, RendererOwner::Surface(..)) {
+            return Err(ReferenceError(
+                "Surface claim belongs to its ready owner".into(),
+            ));
+        }
+        if !claim.drained() {
+            return Err(ReferenceError("Renderer physical work remains live".into()));
+        }
+        let mut next = self.presentation;
+        next.pending = next
+            .pending
+            .checked_sub(1)
+            .ok_or_else(|| ReferenceError("Missing renderer pending claim".into()))?;
+        // Validate before changing the single-use proof.
+        for budget in self.presentation_budgets(next) {
+            if budget.used > budget.limit {
+                return Err(ReferenceError("Renderer release exceeds budget".into()));
             }
-            self.ready_structures.push(id.clone());
         }
+        claim.release()?;
+        self.presentation = next;
         Ok(())
+    }
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn accept_structure_renderer(
+        &mut self,
+        request: WorldRequest,
+        id: &super::GeneratedId,
+        claim: &mut PipelineContinuation,
+    ) -> Result<(), ReferenceError> {
+        if request.session != self.request.session
+            || !self.wanted_structures.iter().any(|p| p.id == *id)
+            || !matches!(&claim.owner, RendererOwner::Structure(r, owner) if *owner == *id && same_request(*r, request))
+            || self.ready_structures.contains(id)
+            || self.ready_structures.len() >= 32
+            || !claim.drained()
+        {
+            return Err(ReferenceError(
+                "Stale or live structure renderer claim".into(),
+            ));
+        }
+        let pending = self
+            .presentation
+            .pending
+            .checked_sub(1)
+            .ok_or_else(|| ReferenceError("Missing instance renderer claim".into()))?;
+        // No caller can observe the ready queue without its matching claim transfer.
+        claim.release()?;
+        self.presentation.pending = pending;
+        self.ready_structures.push(id.clone());
+        debug_assert!(self.metrics().pending_work <= 32);
+        Ok(())
+    }
+    fn release_structure_renderer(&mut self, id: &super::GeneratedId) -> bool {
+        let count = self.ready_structures.len();
+        self.ready_structures.retain(|entry| entry != id);
+        self.ready_structures.len() != count
+    }
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn release_grass_renderer(
+        &mut self,
+        entity: u64,
+        claim: &mut PipelineContinuation,
+    ) -> Result<(), ReferenceError> {
+        if !matches!(claim.owner, RendererOwner::Grass(_, owner) if owner == entity) {
+            return Err(ReferenceError("Wrong Grass renderer claim".into()));
+        }
+        self.release_renderer_pending(claim)
     }
     fn publish_structure(
         &mut self,
@@ -2376,8 +2516,7 @@ impl WorldStream {
                 baselines: None,
             });
         }
-        self.ready_structures
-            .retain(|id| *id != instance.placement.id);
+        self.release_structure_renderer(&instance.placement.id);
         self.structures.push(instance);
         self.binding_reserved = binding_reservation;
         self.publication_available = false;
@@ -3174,3 +3313,259 @@ pub(crate) mod content_bindings;
 
 #[path = "content_lamps.rs"]
 mod content_lamps;
+
+#[cfg(test)]
+mod renderer_pending_checks {
+    use super::*;
+    use crate::world::{
+        GeneratedId,
+        renderer_pending::{PipelineAccounting, PipelineOperation},
+        upload_receipt::UploadReceipt,
+    };
+
+    #[test]
+    #[ignore = "requires the installed checked source export"]
+    fn full_pending_pipeline_continuation_progresses() {
+        let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+        let reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();
+        let mut stream = WorldStream::new(&reference, reference.world.terrain.seed).unwrap();
+        // Install a completed generation output. This test performs no payload or metadata IO.
+        stream.indices_ready = true;
+        stream.plan_revision = stream.request.revision;
+        let request = stream.request;
+        let key = SurfaceKey {
+            layer: WorldLayer::Terrain,
+            unit: [0, 0],
+        };
+        stream.ready = Some(PreparedSurface {
+            pending_bytes: 0,
+            renderer_ready: false,
+            renderer_reserved: false,
+            request,
+            published: PublishedSurface {
+                key,
+                surface: WorldSurface::default(),
+                prototype: None,
+                bounds: WorldBounds {
+                    min: [0.; 3],
+                    max: [0.; 3],
+                },
+                collider: None,
+                collision_bytes: 0,
+                road: None,
+            },
+        });
+        let mut surface = stream.reserve_surface_renderer(request, key).unwrap();
+        assert!(stream.reserve_surface_renderer(request, key).is_err());
+        let mut instances = Vec::new();
+        for ordinal in 0..30 {
+            let id = GeneratedId {
+                layer: WorldLayer::Prop,
+                generator: SourceId {
+                    file: "renderer-check".into(),
+                    path_id: 1,
+                },
+                unit: [0, 0],
+                ordinal,
+                children: Vec::new(),
+            };
+            stream.wanted_structures.push(Placement {
+                id: id.clone(),
+                prototype: id.generator.clone(),
+                pose: AbsolutePose {
+                    position: [0.; 3],
+                    rotation: [0., 0., 0., 1.],
+                },
+                scale: [1.; 3],
+                bounds: WorldBounds {
+                    min: [0.; 3],
+                    max: [0.; 3],
+                },
+                object_seed: 0,
+            });
+            instances.push(
+                stream
+                    .reserve_instance_renderer(request, &id, 0, 0, 0)
+                    .unwrap(),
+            );
+        }
+        let mut grass = stream.reserve_grass_renderer(7, 4096).unwrap();
+        assert_eq!(stream.metrics().pending_work, 32);
+        assert_eq!(stream.metrics().generation_jobs, 0);
+        assert_eq!(stream.metrics().pending_bytes, 0);
+        // GrassWriters and independent pipelines use this same production capacity gate.
+        assert!(!stream.can_request_independent(1));
+        assert!(!stream.can_request_independent(2));
+        let cpu = 4096;
+        let staging = 64 * 1024;
+        let mut accounting = PipelineAccounting::default();
+        let mut tickets = Vec::new();
+        assert!(
+            PipelineOperation::independent(&mut stream, cpu, staging)
+                .unwrap()
+                .is_none()
+        );
+        let first = surface.start(&mut stream, cpu, staging).unwrap().unwrap();
+        accounting.admitted(&first);
+        tickets.push(first.clone());
+        let shared = first.clone();
+        assert!(!first.owns_pending);
+        assert_eq!(first.physical.cpu_bytes(staging, true), staging);
+        assert!(surface.start(&mut stream, cpu, staging).unwrap().is_none());
+        assert!(
+            stream
+                .accept_surface_renderer(request, key, &surface)
+                .is_err()
+        );
+        let visible = instances[0]
+            .start(&mut stream, cpu, staging)
+            .unwrap()
+            .unwrap();
+        accounting.admitted(&visible);
+        tickets.push(visible.clone());
+        assert!(grass.start(&mut stream, cpu, staging).unwrap().is_none());
+        assert_eq!(
+            (
+                stream.metrics().pending_work,
+                stream.metrics().generation_jobs
+            ),
+            (32, 2)
+        );
+        assert_eq!(stream.metrics().pending_bytes, 2 * staging);
+        // Cancellation keeps the real ready owner and its staging until the physical callback.
+        assert!(stream.discard_surface_renderer(&mut surface).is_err());
+        assert_eq!(stream.metrics().pending_work, 32);
+        assert!(!surface.drained());
+        assert!(first.physical.register());
+        assert!(!shared.physical.register());
+        assert!(!surface.drained());
+        shared.physical.complete();
+        assert!(surface.drained());
+        stream
+            .accept_surface_renderer(request, key, &surface)
+            .unwrap();
+        accounting
+            .reconcile(&mut stream, tickets.iter().cloned(), cpu, staging)
+            .unwrap();
+        // Finish serialized instance caster/variant work before the atomic ready transfer.
+        visible.physical.complete();
+        accounting
+            .reconcile(&mut stream, tickets.iter().cloned(), cpu, staging)
+            .unwrap();
+        for _ in 0..3 {
+            let next = instances[0]
+                .start(&mut stream, cpu, staging)
+                .unwrap()
+                .unwrap();
+            accounting.admitted(&next);
+            tickets.push(next.clone());
+            assert_eq!(stream.metrics().pending_work, 32);
+            next.physical.complete();
+            accounting
+                .reconcile(&mut stream, tickets.iter().cloned(), cpu, staging)
+                .unwrap();
+        }
+        let id = stream.wanted_structures[0].id.clone();
+        let wrong = stream.wanted_structures[1].id.clone();
+        assert!(
+            stream
+                .accept_structure_renderer(request, &wrong, &mut instances[0])
+                .is_err()
+        );
+        let before = stream.metrics().pending_work;
+        stream
+            .accept_structure_renderer(request, &id, &mut instances[0])
+            .unwrap();
+        assert_eq!(stream.metrics().pending_work, before);
+        assert_eq!(stream.presentation.pending, 30);
+        assert_eq!(stream.ready_structures, vec![id.clone()]);
+        assert!(
+            stream
+                .accept_structure_renderer(request, &id, &mut instances[0])
+                .is_err()
+        );
+        assert!(instances[0].start(&mut stream, cpu, staging).is_err());
+        let grass_upload = UploadReceipt::default();
+        grass.watch_upload(grass_upload.clone());
+        let grass_ticket = grass.start(&mut stream, cpu, staging).unwrap().unwrap();
+        accounting.admitted(&grass_ticket);
+        tickets.push(grass_ticket.clone());
+        assert!(stream.release_renderer_pending(&mut grass).is_err());
+        grass_ticket.physical.complete();
+        assert!(stream.release_renderer_pending(&mut grass).is_err());
+        assert!(grass_upload.register());
+        grass_upload.complete();
+        accounting
+            .reconcile(&mut stream, tickets.iter().cloned(), cpu, staging)
+            .unwrap();
+        assert!(stream.release_grass_renderer(8, &mut grass).is_err());
+        stream.release_grass_renderer(7, &mut grass).unwrap();
+        assert!(stream.release_renderer_pending(&mut grass).is_err());
+        assert!(stream.can_request_independent(1));
+        assert!(!stream.can_request_independent(2));
+        assert!(stream.release_structure_renderer(&id));
+        assert!(stream.can_request_independent(2));
+        assert!(!stream.release_structure_renderer(&id));
+        // A new preparation of the same source ID/session cannot reuse the old proof.
+        let mut replacement = stream
+            .reserve_instance_renderer(request, &id, 0, 0, 0)
+            .unwrap();
+        assert!(
+            stream
+                .accept_structure_renderer(request, &id, &mut instances[0])
+                .is_err()
+        );
+        stream.release_renderer_pending(&mut replacement).unwrap();
+        let cancelled = instances[1]
+            .start(&mut stream, cpu, staging)
+            .unwrap()
+            .unwrap();
+        accounting.admitted(&cancelled);
+        tickets.push(cancelled.clone());
+        stream.request_at([10000., 0., 10000.], [10000., 0., 10000.]);
+        assert!(stream.prepared_surface().is_none());
+        assert!(stream.ready.is_some());
+        let live = stream.metrics();
+        assert!(stream.release_renderer_pending(&mut instances[1]).is_err());
+        assert_eq!(stream.metrics().pending_work, live.pending_work);
+        assert_eq!(stream.metrics().pending_bytes, live.pending_bytes);
+        cancelled.physical.complete();
+        accounting
+            .reconcile(&mut stream, tickets.iter().cloned(), cpu, staging)
+            .unwrap();
+        stream.discard_surface_renderer(&mut surface).unwrap();
+        assert!(stream.discard_surface_renderer(&mut surface).is_err());
+        for parent in instances.iter_mut().skip(1) {
+            stream.release_renderer_pending(parent).unwrap();
+        }
+        // Publication removes the transferred ready queue claim once.
+        stream.release_structure_renderer(&id);
+        assert!(!stream.release_structure_renderer(&id));
+        assert_eq!(
+            (
+                stream.metrics().pending_work,
+                stream.metrics().generation_jobs,
+                stream.metrics().pending_bytes
+            ),
+            (0, 0, 0)
+        );
+        assert_eq!(stream.presentation.prototype_cpu, accounting.tickets * cpu);
+        tickets.clear();
+        accounting
+            .reconcile(&mut stream, tickets.iter().cloned(), cpu, staging)
+            .unwrap();
+        assert_eq!(stream.presentation.prototype_cpu, 0);
+        let independent = PipelineOperation::independent(&mut stream, cpu, staging)
+            .unwrap()
+            .unwrap();
+        accounting.admitted(&independent);
+        tickets.push(independent.clone());
+        let clone = independent.clone();
+        assert_eq!(stream.metrics().pending_work, 1);
+        clone.physical.complete();
+        accounting
+            .reconcile(&mut stream, tickets.iter().cloned(), cpu, staging)
+            .unwrap();
+        assert_eq!(stream.metrics().pending_work, 0);
+    }
+}

@@ -191,6 +191,11 @@ impl GrassExpansion {
             }
         }
     }
+    pub fn finish(self) -> (GrassView, GrassMeshData, usize) {
+        let scratch =
+            std::mem::size_of::<Self>() + self.plans.capacity() * std::mem::size_of::<PatchPlan>();
+        (self.view, self.output, scratch)
+    }
     pub fn retained_bytes(&self) -> usize {
         self.plans.capacity() * std::mem::size_of::<PatchPlan>() + self.output.retained_bytes()
     }

@@ -6,7 +6,7 @@ pub mod lod;
 pub mod primary;
 pub mod specular;
 pub mod terrain;
-pub(crate) mod upload_receipt;
+use crate::world::upload_receipt;
 mod world_texture_upload;
 pub mod world_textures;
 use crate::reference::{

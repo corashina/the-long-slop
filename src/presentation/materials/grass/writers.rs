@@ -568,6 +568,9 @@ impl GrassWriters {
             writer.pose = pose;
             return Ok(());
         }
+        if !stream.can_request_independent(1) {
+            return Ok(());
+        }
         let mesh_data = meshes
             .get(&mesh)
             .ok_or_else(|| ReferenceError("Missing admitted displacement mesh".into()))?;

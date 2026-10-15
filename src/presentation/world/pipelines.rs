@@ -1,14 +1,15 @@
 //! Compile admitted material variants before collision and visual publication.
+use crate::world::renderer_pending::{PipelineAccounting, PipelineContinuation, PipelineOperation};
 use crate::{
     presentation::materials::RenderingState, reference::ReferenceError, world::WorldStream,
 };
+use bevy::render::renderer::RenderQueue;
 use bevy::{
     asset::{AssetId, UntypedAssetId},
     ecs as bevy_ecs,
     material::key::{ErasedMaterialPipelineKey, ErasedMeshPipelineKey},
     pbr::{
-        MeshPipelineKey, PreparedMaterial, ViewKeyCache, alpha_mode_pipeline_key,
-        base_specialize,
+        MeshPipelineKey, PreparedMaterial, ViewKeyCache, alpha_mode_pipeline_key, base_specialize,
     },
     prelude::*,
     render as bevy_render,
@@ -24,6 +25,7 @@ use bevy::{
 };
 use std::sync::{Arc, Mutex};
 struct PipelineJob {
+    operation: PipelineOperation,
     session: u64,
     mesh: AssetId<Mesh>,
     motion_mesh: AssetId<Mesh>,
@@ -41,14 +43,18 @@ impl PipelineTicket {
         self.0.lock().unwrap().motion_mesh = mesh.id();
     }
     pub fn state(&self) -> RenderingState {
-        self.0.lock().unwrap().state.clone()
+        let job = self.0.lock().unwrap();
+        if job.state == RenderingState::Ready && !job.operation.physical.completed() {
+            RenderingState::Loading
+        } else {
+            job.state.clone()
+        }
     }
 }
 #[derive(Resource, Clone, ExtractResource, Default)]
 pub struct WorldPipelines {
     jobs: Arc<Mutex<Vec<PipelineTicket>>>,
-    accounted_jobs: usize,
-    accounted_tickets: usize,
+    accounting: PipelineAccounting,
     cache_reserved: bool,
 }
 #[derive(Resource, Clone, ExtractResource, Default)]
@@ -130,24 +136,44 @@ impl WorldPipelines {
         material: &Handle<M>,
         shadows: bool,
     ) -> Result<Option<PipelineTicket>, ReferenceError> {
-        if stream.available_external_jobs() == 0 {
+        self.request_owned(stream, None, mesh, material, shadows)
+    }
+    pub(crate) fn request_continuation<M: Material>(
+        &mut self,
+        stream: &mut WorldStream,
+        parent: &mut PipelineContinuation,
+        mesh: &Handle<Mesh>,
+        material: &Handle<M>,
+        shadows: bool,
+    ) -> Result<Option<PipelineTicket>, ReferenceError> {
+        self.request_owned(stream, Some(parent), mesh, material, shadows)
+    }
+    fn request_owned<M: Material>(
+        &mut self,
+        stream: &mut WorldStream,
+        parent: Option<&mut PipelineContinuation>,
+        mesh: &Handle<Mesh>,
+        material: &Handle<M>,
+        shadows: bool,
+    ) -> Result<Option<PipelineTicket>, ReferenceError> {
+        let cpu = ticket_bytes()
+            + if self.cache_reserved {
+                0
+            } else {
+                super::super::pipeline_ownership::CACHE_BYTES
+            };
+        let staging = super::super::pipeline_ownership::DESCRIPTOR_BYTES;
+        let operation = match parent {
+            Some(parent) => parent.start(stream, cpu, staging)?,
+            None => PipelineOperation::independent(stream, cpu, staging)?,
+        };
+        let Some(operation) = operation else {
             return Ok(None);
-        }
-        let mut allocation = stream.presentation_allocation();
-        if !self.cache_reserved {
-            allocation.prototype_cpu += super::super::pipeline_ownership::CACHE_BYTES;
-        }
-        allocation.jobs += 1;
-        allocation.pending += 1;
-        allocation.staging_bytes += super::super::pipeline_ownership::DESCRIPTOR_BYTES;
-        // Two keys per view plus directional and spot shadow variants remain reserved.
-        allocation.prototype_cpu +=
-            std::mem::size_of::<PipelineJob>() + 32 * std::mem::size_of::<CachedRenderPipelineId>();
-        stream.set_presentation_allocation(allocation)?;
+        };
         self.cache_reserved = true;
-        self.accounted_jobs += 1;
-        self.accounted_tickets += 1;
+        self.accounting.admitted(&operation);
         let ticket = PipelineTicket(Arc::new(Mutex::new(PipelineJob {
+            operation,
             session: stream.frame().request.session,
             mesh: mesh.id(),
             motion_mesh: mesh.id(),
@@ -161,39 +187,34 @@ impl WorldPipelines {
         self.jobs.lock().unwrap().push(ticket.clone());
         Ok(Some(ticket))
     }
+    pub(crate) fn drained(&self) -> bool {
+        self.jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|t| t.0.lock().unwrap().operation.physical.completed())
+    }
     pub fn prepare(&mut self, stream: &mut WorldStream) -> Result<(), ReferenceError> {
-        let session = stream.frame().request.session;
         let mut jobs = self.jobs.lock().unwrap();
         jobs.retain(|ticket| {
             let mut job = ticket.0.lock().unwrap();
-            if job.session != session {
+            if job.session != stream.frame().request.session {
                 job.state = RenderingState::Failed("Stale source material job".into());
             }
-            job.state == RenderingState::Loading || Arc::strong_count(&ticket.0) > 1
+            !job.operation.physical.completed() || Arc::strong_count(&ticket.0) > 1
         });
-        let count = jobs
-            .iter()
-            .filter(|ticket| ticket.0.lock().unwrap().state == RenderingState::Loading)
-            .count();
-        let retained = jobs.len();
-        drop(jobs);
-        let mut allocation = stream.presentation_allocation();
-        allocation.jobs = allocation.jobs.saturating_sub(self.accounted_jobs) + count;
-        allocation.pending = allocation.pending.saturating_sub(self.accounted_jobs) + count;
-        allocation.staging_bytes = allocation.staging_bytes.saturating_sub(
-            self.accounted_jobs * super::super::pipeline_ownership::DESCRIPTOR_BYTES,
-        ) + count * super::super::pipeline_ownership::DESCRIPTOR_BYTES;
-        let unit =
-            std::mem::size_of::<PipelineJob>() + 32 * std::mem::size_of::<CachedRenderPipelineId>();
-        allocation.prototype_cpu = allocation
-            .prototype_cpu
-            .saturating_sub(self.accounted_tickets * unit)
-            + retained * unit;
-        stream.set_presentation_allocation(allocation)?;
-        self.accounted_jobs = count;
-        self.accounted_tickets = retained;
-        Ok(())
+        self.accounting.reconcile(
+            stream,
+            jobs.iter()
+                .map(|ticket| ticket.0.lock().unwrap().operation.clone()),
+            ticket_bytes(),
+            super::super::pipeline_ownership::DESCRIPTOR_BYTES,
+        )
     }
+}
+fn ticket_bytes() -> usize {
+    // Include the ticket Arc/Mutex and the shared physical receipt control blocks.
+    std::mem::size_of::<PipelineJob>() + 64 + 32 * std::mem::size_of::<CachedRenderPipelineId>()
 }
 fn compile(world: &mut World) {
     let Some(input) = world.get_resource::<WorldPipelines>().cloned() else {
@@ -208,7 +229,32 @@ fn compile(world: &mut World) {
         let tickets = input.jobs.lock().unwrap();
         for ticket in tickets.iter() {
             let mut job = ticket.0.lock().unwrap();
-            if job.state != RenderingState::Loading {
+            if job.operation.physical.completed() {
+                continue;
+            }
+            let candidate_owner = (bank != 0).then(|| {
+                world
+                    .resource::<CandidatePipelines>()
+                    .1
+                    .as_ref()
+                    .unwrap()
+                    .clone()
+            });
+            if candidate_owner.as_ref().is_some_and(|o| o.cancelled()) {
+                job.state = RenderingState::Failed("Cancelled source material job".into());
+                if candidate_owner.as_ref().unwrap().drained() {
+                    finish_physical(world, &job);
+                }
+                continue;
+            }
+            if matches!(job.state, RenderingState::Failed(_)) {
+                if physical_pipelines_settled(world, &job) {
+                    finish_physical(world, &job);
+                }
+                continue;
+            }
+            if job.state == RenderingState::Ready {
+                finish_physical(world, &job);
                 continue;
             }
             if job.material.type_id()
@@ -441,7 +487,9 @@ fn compile(world: &mut World) {
                 {
                     match result {
                         Ok(value) => {
-                            if !value { waiting = "caster pipeline"; }
+                            if !value {
+                                waiting = "caster pipeline";
+                            }
                             ready &= value;
                         }
                         Err(error) => {
@@ -456,7 +504,9 @@ fn compile(world: &mut World) {
                 {
                     match result {
                         Ok(value) => {
-                            if !value { waiting = "surface pipeline"; }
+                            if !value {
+                                waiting = "surface pipeline";
+                            }
                             ready &= value;
                         }
                         Err(error) => {
@@ -473,7 +523,44 @@ fn compile(world: &mut World) {
                 job.state = RenderingState::Failed(error);
             } else if ready {
                 job.state = RenderingState::Ready;
+                finish_physical(world, &job);
             }
         }
+    }
+}
+
+// A failure flag does not release descriptor staging or the counted owner.
+fn physical_pipelines_settled(world: &World, job: &PipelineJob) -> bool {
+    let cache = world.resource::<PipelineCache>();
+    let published = cache.pipelines().count();
+    job.ids.iter().all(|id| {
+        id.id() < published
+            && match cache.get_render_pipeline_state(*id) {
+                CachedPipelineState::Err(
+                    ShaderCacheError::ShaderNotLoaded(_)
+                    | ShaderCacheError::ShaderImportNotYetAvailable,
+                ) => false,
+                CachedPipelineState::Ok(_) | CachedPipelineState::Err(_) => true,
+                _ => false,
+            }
+            && world
+                .resource::<crate::presentation::motion_draw::MotionPipelines>()
+                .physically_settled(*id, cache)
+            && world
+                .resource::<crate::presentation::caster::CasterPasses>()
+                .companion_state(*id, cache)
+                .is_none_or(|r| !matches!(r, Ok(false)))
+            && world
+                .resource::<crate::presentation::surface_pass::SurfacePasses>()
+                .companion_state(*id, cache)
+                .is_none_or(|r| !matches!(r, Ok(false)))
+    })
+}
+fn finish_physical(world: &World, job: &PipelineJob) {
+    if job.operation.physical.register() {
+        let receipt = job.operation.physical.clone();
+        world
+            .resource::<RenderQueue>()
+            .on_submitted_work_done(move || receipt.complete());
     }
 }

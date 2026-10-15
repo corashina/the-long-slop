@@ -364,11 +364,17 @@ impl SourcePrototypes {
             .iter()
             .any(|e| !e.retired && e.source == *source)
     }
-    pub fn retire_unused(&mut self, stream: &WorldStream, reference: &ReferenceManifest) {
+    pub fn retire_unused(
+        &mut self,
+        stream: &WorldStream,
+        reference: &ReferenceManifest,
+        instances: &super::instances::SourceInstances,
+    ) {
         let frame = stream.frame();
         for entry in &mut self.entries {
             if matches!(&entry.state, State::Ready(loaded) if Arc::strong_count(loaded)>1)
                 || reference.world.road.prototypes.contains(&entry.source)
+                || instances.uses_prototype(&entry.source)
             {
                 continue;
             }

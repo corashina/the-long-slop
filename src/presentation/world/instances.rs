@@ -42,6 +42,8 @@ struct Renderer {
     settings: Option<GrassSettings>,
 }
 struct Instance {
+    continuation: Option<crate::world::renderer_pending::PipelineContinuation>,
+    upload: Option<Arc<crate::presentation::fixed_assets::MeshUpload>>,
     caps_bound: bool,
     placement: Placement,
     session: u64,
@@ -67,8 +69,18 @@ pub struct SourceInstances {
     pending: Option<Placement>,
 }
 impl SourceInstances {
+    pub(crate) fn drained(&self) -> bool {
+        self.instances
+            .iter()
+            .all(|i| i.continuation.as_ref().is_none_or(|c| c.drained()))
+    }
     pub fn ready(&self) -> bool {
         self.instances.iter().all(|i| i.ready && i.visible)
+    }
+    pub(crate) fn uses_prototype(&self, source: &crate::reference::SourceId) -> bool {
+        self.instances
+            .iter()
+            .any(|i| i.placement.prototype == *source)
     }
     pub fn roots(&self) -> impl Iterator<Item = Entity> + '_ {
         self.instances.iter().map(|i| i.root)
@@ -146,6 +158,7 @@ impl SourceInstances {
         materials: &mut InstanceMaterials,
         grass: &mut GrassJobs,
         pipelines: &mut WorldPipelines,
+        fixed: &crate::presentation::fixed_assets::SourceFixedAssets,
         commands: &mut Commands,
         view: GrassView,
     ) -> Result<(), ReferenceError> {
@@ -179,11 +192,19 @@ impl SourceInstances {
         }
         // Full pending ownership must drain through publication before another instance starts.
         // Continue polling existing renderer work below, including its readiness transfer.
-        if let Some(placement) = self
-            .pending
-            .as_ref()
-            .filter(|_| stream.metrics().pending_work < 32)
-        {
+        if let Some(placement) = self.pending.as_ref().filter(|placement| {
+            let child = reference
+                .world
+                .prototypes
+                .iter()
+                .find(|p| p.source == placement.prototype)
+                .is_some_and(|p| {
+                    p.deferred_materials
+                        .iter()
+                        .any(|m| m.shader.name == "Stix Games/Grass")
+                });
+            stream.can_request_independent(1 + usize::from(child))
+        }) {
             let prototype = reference
                 .world
                 .prototypes
@@ -219,12 +240,13 @@ impl SourceInstances {
                         let mut gpu =
                             primitives * (2048 + crate::presentation::caster_material::gpu_bytes());
                         let objects = count + primitives;
-                        let mut a = stream.presentation_allocation();
-                        a.active_cpu += cpu;
-                        a.active_gpu += gpu;
-                        a.objects += objects;
-                        a.pending += 1;
-                        stream.set_presentation_allocation(a)?;
+                        let mut continuation = stream.reserve_instance_renderer(
+                            stream.frame().request,
+                            &placement.id,
+                            cpu,
+                            gpu,
+                            objects,
+                        )?;
                         let root_pose = local_root(placement, stream.origin);
                         let root = commands
                             .spawn((
@@ -697,6 +719,7 @@ impl SourceInstances {
                                             grass.request(
                                                 stream,
                                                 entity,
+                                                root,
                                                 Arc::clone(&patches),
                                                 mesh.clone(),
                                                 settings,
@@ -727,6 +750,8 @@ impl SourceInstances {
                                 }
                             }
                             Ok(Instance {
+                                continuation: None,
+                                upload: None,
                                 caps_bound: false,
                                 placement: placement.clone(),
                                 session: stream.frame().request.session,
@@ -753,7 +778,15 @@ impl SourceInstances {
                             })
                         })();
                         match construction {
-                            Ok(instance) => self.instances.push(instance),
+                            Ok(mut instance) => {
+                                let upload = fixed.watch_meshes(
+                                    instance.renderers.iter().map(|r| r.mesh.clone()),
+                                );
+                                continuation.watch_upload(upload.receipt.clone());
+                                instance.continuation = Some(continuation);
+                                instance.upload = Some(upload);
+                                self.instances.push(instance);
+                            }
                             Err(error) => {
                                 commands.entity(root).despawn();
                                 for (entity, binding) in owned_bindings {
@@ -764,8 +797,8 @@ impl SourceInstances {
                                 a.active_cpu = a.active_cpu.saturating_sub(cpu);
                                 a.active_gpu = a.active_gpu.saturating_sub(gpu);
                                 a.objects = a.objects.saturating_sub(objects);
-                                a.pending = a.pending.saturating_sub(1);
                                 stream.set_presentation_allocation(a)?;
+                                stream.release_renderer_pending(&mut continuation)?;
                                 return Err(error);
                             }
                         }
@@ -794,6 +827,7 @@ impl SourceInstances {
                     renderer.tickets[0] = renderer.binding.visible.warm(
                         stream,
                         pipelines,
+                        instance.continuation.as_mut().unwrap(),
                         &renderer.mesh,
                         renderer.shadow,
                     )?;
@@ -804,6 +838,7 @@ impl SourceInstances {
                         variant.tickets[0] = variant.binding.visible.warm(
                             stream,
                             pipelines,
+                            instance.continuation.as_mut().unwrap(),
                             &renderer.mesh,
                             renderer.shadow,
                         )?;
@@ -811,28 +846,38 @@ impl SourceInstances {
                     complete &= ready(&variant.tickets[0])?;
                     if let Some(caster) = &variant.binding.caster {
                         if variant.tickets[1].is_none() {
-                            variant.tickets[1] =
-                                pipelines.request(stream, &renderer.mesh, caster, true)?;
+                            variant.tickets[1] = pipelines.request_continuation(
+                                stream,
+                                instance.continuation.as_mut().unwrap(),
+                                &renderer.mesh,
+                                caster,
+                                true,
+                            )?;
                         }
                         complete &= ready(&variant.tickets[1])?;
                     }
                 }
                 if let Some(caster) = &renderer.binding.caster {
                     if renderer.tickets[1].is_none() {
-                        renderer.tickets[1] =
-                            pipelines.request(stream, &renderer.mesh, caster, true)?;
+                        renderer.tickets[1] = pipelines.request_continuation(
+                            stream,
+                            instance.continuation.as_mut().unwrap(),
+                            &renderer.mesh,
+                            caster,
+                            true,
+                        )?;
                     }
                     complete &= ready(&renderer.tickets[1])?;
                 }
             }
-            if complete {
+            if complete && instance.continuation.as_ref().unwrap().drained() {
                 stream.bind_prototype(&instance.placement.prototype)?;
                 stream.bind_structure_recipe(&instance.placement.prototype)?;
-                stream.accept_structure_renderer(stream.frame().request, &instance.placement.id)?;
+                let claim = instance.continuation.as_mut().unwrap();
+                stream.accept_structure_renderer(claim.request(), &instance.placement.id, claim)?;
                 instance.ready = true;
-                let mut a = stream.presentation_allocation();
-                a.pending -= 1;
-                stream.set_presentation_allocation(a)?;
+                instance.continuation = None;
+                instance.upload = None;
             }
         }
         Ok(())
@@ -1222,7 +1267,24 @@ impl SourceInstances {
                 index += 1;
                 continue;
             }
-            let instance = self.instances.swap_remove(index);
+            if self.instances[index]
+                .continuation
+                .as_ref()
+                .is_some_and(|c| !c.drained())
+            {
+                index += 1;
+                continue;
+            }
+            let mut grass_drained = true;
+            for renderer in &self.instances[index].renderers {
+                grass_drained &=
+                    grass.retire(stream, renderer.entity, meshes, &mut materials.grass)?;
+            }
+            if !grass_drained {
+                index += 1;
+                continue;
+            }
+            let mut instance = self.instances.swap_remove(index);
             commands.entity(instance.root).despawn();
             for renderer in instance.renderers {
                 writers.retire(stream, renderer.entity)?;
@@ -1236,8 +1298,10 @@ impl SourceInstances {
             a.active_cpu = a.active_cpu.saturating_sub(instance.cpu);
             a.active_gpu = a.active_gpu.saturating_sub(instance.gpu);
             a.objects = a.objects.saturating_sub(instance.objects);
-            a.pending = a.pending.saturating_sub(usize::from(!instance.ready));
             stream.set_presentation_allocation(a)?;
+            if let Some(claim) = instance.continuation.as_mut() {
+                stream.release_renderer_pending(claim)?;
+            }
         }
         Ok(())
     }

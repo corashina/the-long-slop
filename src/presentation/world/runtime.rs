@@ -133,7 +133,9 @@ impl WorldPresentation<'_, '_> {
             &mut self.grass,
             &mut self.writers,
         )?;
-        self.prototypes.retire_unused(stream, reference);
+        self.surfaces.retire_stale(stream, &mut self.meshes)?;
+        self.prototypes
+            .retire_unused(stream, reference, &self.instances);
         let lighting_cpu = self.lights.clone_bytes();
         let mut controls = stream.presentation_allocation();
         controls.active_cpu = controls
@@ -333,6 +335,7 @@ impl WorldPresentation<'_, '_> {
             &mut self.materials,
             &mut self.grass,
             &mut self.pipelines,
+            &self.fixed,
             &mut self.commands,
             view,
         )?;
@@ -343,8 +346,12 @@ impl WorldPresentation<'_, '_> {
             &mut self.materials,
             &mut self.grass,
         );
-        self.surfaces
-            .prepare_surface(stream, &mut self.meshes, &mut self.pipelines)?;
+        self.surfaces.prepare_surface(
+            stream,
+            &mut self.meshes,
+            &mut self.pipelines,
+            &self.fixed,
+        )?;
         let lamps = super::lamps::source_lamp_admission(
             &stream.frame(),
             receivers,
@@ -444,6 +451,7 @@ impl WorldPresentation<'_, '_> {
             &mut self.meshes,
             &mut self.materials.grass,
             &mut self.pipelines,
+            &self.fixed,
         )?;
         self.instances
             .request_grass(stream, &mut self.grass, view)?;
@@ -457,7 +465,8 @@ impl WorldPresentation<'_, '_> {
             &mut self.grass,
             &mut self.writers,
         )?;
-        self.prototypes.retire_unused(stream, reference);
+        self.prototypes
+            .retire_unused(stream, reference, &self.instances);
         Ok(())
     }
 }

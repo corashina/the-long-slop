@@ -366,6 +366,29 @@ impl MotionPipelines {
                 .filter(|id| !cache.render_pipeline_is_held(**id))
                 .all(|id| cache.get_render_pipeline(*id).is_some())
     }
+    pub(crate) fn physically_settled(
+        &self,
+        base: CachedRenderPipelineId,
+        cache: &PipelineCache,
+    ) -> bool {
+        self.variants
+            .get(&base)
+            .into_iter()
+            .chain(
+                self.world_variants
+                    .iter()
+                    .filter(|((owner, _), _)| *owner == base)
+                    .map(|(_, id)| id),
+            )
+            .all(|id| match cache.get_render_pipeline_state(*id) {
+                CachedPipelineState::Err(
+                    bevy::shader::ShaderCacheError::ShaderNotLoaded(_)
+                    | bevy::shader::ShaderCacheError::ShaderImportNotYetAvailable,
+                ) => false,
+                CachedPipelineState::Ok(_) | CachedPipelineState::Err(_) => true,
+                _ => false,
+            })
+    }
     pub fn failure(&self, cache: &PipelineCache) -> Option<String> {
         self.variants
             .iter()

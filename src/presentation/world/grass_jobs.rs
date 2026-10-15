@@ -40,7 +40,12 @@ enum Pending {
     },
 }
 struct Instance {
+    continuation: Option<crate::world::renderer_pending::PipelineContinuation>,
+    upload: Option<Arc<crate::presentation::fixed_assets::MeshUpload>>,
+    retiring: bool,
     entity: Entity,
+    parent: Entity,
+    last_started: u64,
     session: u64,
     settings: GrassSettings,
     patches: Arc<[GrassPatch]>,
@@ -115,6 +120,11 @@ impl GrassJobs {
         }
         self.domains = None;
     }
+    pub(crate) fn drained(&self) -> bool {
+        self.instances
+            .iter()
+            .all(|i| i.continuation.as_ref().is_none_or(|c| c.drained()))
+    }
     pub fn settled(&self) -> bool {
         self.instances
             .iter()
@@ -152,16 +162,12 @@ impl GrassJobs {
 
     pub fn request_view(
         &mut self,
-        stream: &mut WorldStream,
+        _stream: &mut WorldStream,
         entity: Entity,
         view: GrassView,
     ) -> Result<(), ReferenceError> {
         if let Some(instance) = self.instances.iter_mut().find(|i| i.entity == entity) {
             instance.latest = view;
-            if instance.pending.is_none() && instance.accepted_view != Some(view) {
-                allocation(stream, 0, 0, 0, 1)?;
-                instance.pending = Some(Pending::Queued);
-            }
         }
         Ok(())
     }
@@ -190,6 +196,7 @@ impl GrassJobs {
         &mut self,
         stream: &mut WorldStream,
         entity: Entity,
+        parent: Entity,
         patches: Arc<[GrassPatch]>,
         authored_mesh: Handle<Mesh>,
         settings: GrassSettings,
@@ -199,10 +206,18 @@ impl GrassJobs {
         shadow_entity: Option<Entity>,
         bounds: bevy::camera::primitives::Aabb,
     ) -> Result<(), ReferenceError> {
+        let group_idle = !self
+            .instances
+            .iter()
+            .any(|i| i.parent == parent && i.pending.is_some());
         if let Some(instance) = self.instances.iter_mut().find(|i| i.entity == entity) {
             instance.latest = view;
-            if instance.pending.is_none() && instance.accepted_view != Some(view) {
-                allocation(stream, 0, 0, 0, 1)?;
+            if group_idle
+                && instance.pending.is_none()
+                && instance.accepted_view != Some(view)
+                && stream.can_request_independent(1)
+            {
+                instance.continuation = Some(stream.reserve_grass_renderer(entity.to_bits(), 0)?);
                 instance.pending = Some(Pending::Queued);
             }
             return Ok(());
@@ -224,9 +239,20 @@ impl GrassJobs {
             ]));
         }
         let metadata = std::mem::size_of::<Instance>();
-        allocation(stream, metadata, 0, 0, 1)?;
+        let continuation = if group_idle && stream.can_request_independent(1) {
+            Some(stream.reserve_grass_renderer(entity.to_bits(), metadata)?)
+        } else {
+            allocation(stream, metadata, 0, 0, 0)?;
+            None
+        };
+        let queued = continuation.is_some();
         self.instances.push(Instance {
+            continuation,
+            upload: None,
+            retiring: false,
             entity,
+            parent,
+            last_started: 0,
             session: stream.frame().request.session,
             settings,
             patches,
@@ -238,7 +264,7 @@ impl GrassJobs {
             latest: view,
             accepted_view: None,
             accepted: None,
-            pending: Some(Pending::Queued),
+            pending: queued.then_some(Pending::Queued),
             pending_cpu: 0,
             pending_gpu: 0,
             metadata,
@@ -254,16 +280,39 @@ impl GrassJobs {
         meshes: &mut Assets<Mesh>,
         materials: &mut Assets<GrassMaterial>,
         pipelines: &mut WorldPipelines,
+        fixed: &crate::presentation::fixed_assets::SourceFixedAssets,
     ) -> Result<(), ReferenceError> {
-        for instance in &mut self.instances {
-            if instance.session != stream.frame().request.session {
+        for index in 0..self.instances.len() {
+            let needs_child = self.instances[index].pending.is_none()
+                && self.instances[index].accepted_view != Some(self.instances[index].latest);
+            let parent = self.instances[index].parent;
+            let group_idle = needs_child
+                && !self.instances.iter().enumerate().any(|(other, i)| {
+                    i.parent == parent
+                        && (i.pending.is_some()
+                            || (i.accepted_view != Some(i.latest)
+                                && (i.last_started, other)
+                                    < (self.instances[index].last_started, index)))
+                });
+            let instance = &mut self.instances[index];
+            if instance.retiring || instance.session != stream.frame().request.session {
                 continue;
+            }
+            if group_idle
+                && instance.pending.is_none()
+                && instance.accepted_view != Some(instance.latest)
+                && stream.can_request_independent(1)
+            {
+                instance.continuation =
+                    Some(stream.reserve_grass_renderer(instance.entity.to_bits(), 0)?);
+                instance.pending = Some(Pending::Queued);
             }
             if writers_ready
                 && matches!(instance.pending, Some(Pending::Queued))
                 && stream.available_external_jobs() > 0
             {
                 self.revision = self.revision.wrapping_add(1);
+                instance.last_started = self.revision;
                 let mut cpu = 0;
                 let job = GrassExpansion::new(
                     instance.session,
@@ -299,24 +348,38 @@ impl GrassJobs {
                         unreachable!()
                     };
 
+                    let (view, output, scratch) = job.finish();
+                    let mut next = stream.presentation_allocation();
+                    next.active_cpu = next.active_cpu.checked_sub(scratch).unwrap();
+                    next.staging_bytes = next.staging_bytes.checked_sub(scratch).unwrap();
+                    stream.set_presentation_allocation(next)?;
+                    instance.pending_cpu = instance.pending_cpu.checked_sub(scratch).unwrap();
                     let mut mesh = Mesh::new(
                         PrimitiveTopology::TriangleList,
                         RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
                     );
-                    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, job.output.anchors);
-                    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, job.output.uvs);
-                    mesh.insert_attribute(BLADE_ATTRIBUTE, job.output.blades);
-                    mesh.insert_indices(Indices::U32(job.output.indices));
+                    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, output.anchors);
+                    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, output.uvs);
+                    mesh.insert_attribute(BLADE_ATTRIBUTE, output.blades);
+                    mesh.insert_indices(Indices::U32(output.indices));
                     let mut material = materials
                         .get(&instance.material)
                         .ok_or_else(|| ReferenceError("Missing Grass material owner".into()))?
                         .clone();
-                    material.uniform.camera = job.view.position.extend(job.view.screen_height);
+                    material.uniform.camera = view.position.extend(view.screen_height);
+                    let mesh = meshes.add(mesh);
+                    let upload = fixed.watch_meshes(std::iter::once(mesh.clone()));
+                    instance
+                        .continuation
+                        .as_mut()
+                        .unwrap()
+                        .watch_upload(upload.receipt.clone());
+                    instance.upload = Some(upload);
                     instance.pending = Some(Pending::Upload {
-                        mesh: meshes.add(mesh),
+                        mesh,
                         material: materials.add(material),
-                        view: job.view,
-                        patches: job.output.patches,
+                        view,
+                        patches: output.patches,
                         ticket: None,
                     });
                 }
@@ -329,7 +392,13 @@ impl GrassJobs {
             }) = &mut instance.pending
             {
                 if ticket.is_none() {
-                    *ticket = pipelines.request(stream, mesh, material, instance.shadows)?;
+                    *ticket = pipelines.request_continuation(
+                        stream,
+                        instance.continuation.as_mut().unwrap(),
+                        mesh,
+                        material,
+                        instance.shadows,
+                    )?;
                     if let Some(ticket) = ticket {
                         ticket.set_motion_mesh(&instance.authored_mesh);
                     }
@@ -340,7 +409,10 @@ impl GrassJobs {
                         RenderingState::Loading => continue,
                         RenderingState::Ready => {}
                     }
-                    if !writers_ready || !stream.take_presentation_publication() {
+                    if !instance.continuation.as_ref().unwrap().drained()
+                        || !writers_ready
+                        || !stream.take_presentation_publication()
+                    {
                         continue;
                     }
                     let Some(Pending::Upload {
@@ -388,7 +460,12 @@ impl GrassJobs {
                     instance.pending_cpu = 0;
                     instance.pending_gpu = 0;
                     instance.ready = true;
-                    allocation(stream, 0, 0, 0, -1)?;
+                    stream.release_grass_renderer(
+                        instance.entity.to_bits(),
+                        instance.continuation.as_mut().unwrap(),
+                    )?;
+                    instance.continuation = None;
+                    instance.upload = None;
                 }
             }
         }
@@ -400,11 +477,19 @@ impl GrassJobs {
         entity: Entity,
         meshes: &mut Assets<Mesh>,
         materials: &mut Assets<GrassMaterial>,
-    ) -> Result<(), ReferenceError> {
+    ) -> Result<bool, ReferenceError> {
         let Some(index) = self.instances.iter().position(|i| i.entity == entity) else {
-            return Ok(());
+            return Ok(true);
         };
-        let instance = self.instances.swap_remove(index);
+        self.instances[index].retiring = true;
+        if self.instances[index]
+            .continuation
+            .as_ref()
+            .is_some_and(|c| !c.drained())
+        {
+            return Ok(false);
+        }
+        let mut instance = self.instances.swap_remove(index);
         let mut cpu = instance.metadata + instance.pending_cpu;
         let mut gpu = instance.pending_gpu;
         if let Some(old) = instance.accepted {
@@ -421,13 +506,14 @@ impl GrassJobs {
         next.active_cpu = next.active_cpu.saturating_sub(cpu);
         next.staging_bytes = next.staging_bytes.saturating_sub(instance.pending_cpu);
         next.active_gpu = next.active_gpu.saturating_sub(gpu);
-        next.pending = next
-            .pending
-            .saturating_sub(usize::from(instance.pending.is_some()));
         next.jobs = next.jobs.saturating_sub(usize::from(matches!(
             instance.pending,
             Some(Pending::Expand(_))
         )));
-        stream.set_presentation_allocation(next)
+        stream.set_presentation_allocation(next)?;
+        if let Some(claim) = instance.continuation.as_mut() {
+            stream.release_grass_renderer(instance.entity.to_bits(), claim)?;
+        }
+        Ok(true)
     }
 }

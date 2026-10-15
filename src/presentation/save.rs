@@ -412,6 +412,10 @@ impl PreparedPresentation {
     }
     pub fn drained(&mut self, world: &World) -> bool {
         self.materials.preparation.drained()
+            && self.pipelines.drained()
+            && self.surfaces.drained()
+            && self.instances.drained()
+            && self.grass.drained()
             && self.writers.drained()
             && self.prototypes.drain_ready(
                 world.resource::<AssetServer>(),

@@ -16,7 +16,9 @@ impl UploadReceipt {
         }
     }
 
-    pub fn completed(&self) -> bool { self.0.load(Ordering::Acquire) == 2 }
+    pub fn completed(&self) -> bool {
+        self.0.load(Ordering::Acquire) == 2
+    }
 
     pub fn register(&self) -> bool {
         self.0
