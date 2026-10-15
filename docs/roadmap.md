@@ -220,7 +220,7 @@ Seven final export checks passed. The final default release package built and pa
 Controlled lifecycle checks passed six stages. Both vehicle records survived a manual save and full page reload.
 Both probes published. Three main views completed, and three mirror submissions passed GPU validation.
 The merged motion pool retained 953 slots through the checked scene replacements.
-See the [implementation plan](superpowers/plans/2026-10-11-rendering-completion.md) and [verification record](verification.md).
+See the [execution ledger](research/2026-10-12-rendering-completion-ledger.md) and [verification record](verification.md).
 
 Local evidence remains in the rendering worktree under `.superpowers/sdd/2026-10-11-rendering-completion/` and `.cache/layer*-browser/`.
 Installed source reports remain under `.superpowers/evidence/material-parity/reports/`.
