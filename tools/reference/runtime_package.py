@@ -1,6 +1,7 @@
 """Receipts and selected scene plans for the immutable runtime package."""
 import hashlib
 import json
+import re
 import shutil
 import struct
 from pathlib import Path, PurePosixPath
@@ -16,9 +17,9 @@ def checked(value):
 
 
 def canonical(value):
-    path = PurePosixPath(value)
-    if not value or str(path) != value or path.is_absolute() or any(
-            part in ('..', '.') for part in path.parts) or '\\' in value or ':' in value:
+    if not isinstance(value, str) or not re.fullmatch(r'[a-zA-Z0-9_./ -]+', value) or any(
+            not part or part in ('.', '..') or part.startswith(' ') or part.endswith(' ')
+            for part in value.split('/')):
         raise ValueError('Invalid package path')
     return value
 

@@ -39,9 +39,11 @@ impl FileReceipt {
                     !part.is_empty()
                         && part != "."
                         && part != ".."
+                        && !part.starts_with(' ')
+                        && !part.ends_with(' ')
                         && part
                             .bytes()
-                            .all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b))
+                            .all(|b| b.is_ascii_alphanumeric() || b"_.- ".contains(&b))
                 }),
             "package file path",
         )?;

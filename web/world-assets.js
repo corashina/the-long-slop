@@ -1,7 +1,7 @@
 const MAX_WORLD_STAGING=32*1024*1024;
 let contentBase,files=new Map(),plans=new Map(),onFetched=()=>{};
 export const worldBootstrapMeasurements={dependencyWorkers:0,maxDependencyBytes:0,dependencyPayloadCopyBytes:0,inputMetadataBytes:0,dependencyStagingReserve:0};
-function canonical(path){return typeof path==='string'&&/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/.test(path)&&!path.split('/').some(p=>p==='.'||p==='..');}
+function canonical(path){return typeof path==='string'&&!/[^a-zA-Z0-9_.\/ -]/.test(path)&&!path.split('/').some(p=>!p||p==='.'||p==='..'||p.startsWith(' ')||p.endsWith(' '));}
 export function assetUrl(base,path){
  if(typeof base!=='string'||!/^\.?\/?assets\/runtime\/[a-zA-Z0-9_-]+\/$/.test(base)||!canonical(path))throw Error('Invalid package path.');
  return base+path;

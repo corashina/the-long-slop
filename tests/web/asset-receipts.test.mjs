@@ -6,7 +6,7 @@ import {assetUrl, readAsset, configureAssetCatalog,checkImageSize} from '../../w
 const receipt=(file,bytes)=>({file,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});
 test('selected reads use checked bytes; unused catalog entries cause no requests',async t=>{
  const bytes=new TextEncoder().encode('selected payload');
- const selectedReceipt=receipt('reference/selected.bin',bytes),unusedReceipt=receipt('reference/unused.bin',bytes);
+ const selectedReceipt=receipt('reference/lighting-unity default resources-10001.smip',bytes),unusedReceipt=receipt('reference/unused.bin',bytes);
  const fetchCounts=new Map();
  t.mock.method(globalThis,'fetch',async url=>{const path=String(url).split('/package/')[1];fetchCounts.set(path,(fetchCounts.get(path)??0)+1);return new Response(bytes);});
  configureAssetCatalog('./assets/runtime/package/',{files:[selectedReceipt,unusedReceipt],plans:[],dependency_staging_reserve:5242960});
@@ -17,6 +17,26 @@ test('selected reads use checked bytes; unused catalog entries cause no requests
  let decoderCallsAfterInvalidReceipt=0;
  await assert.rejects(async()=>{await readAsset('./assets/runtime/package/',{...selectedReceipt,sha256:'0'.repeat(64)});decoderCallsAfterInvalidReceipt++;},/SHA-256/);
  assert.equal(decoderCallsAfterInvalidReceipt, 0);
+});
+test('package paths preserve internal spaces and reject unsafe paths',()=>{
+ const base='./assets/runtime/package/',bytes=new Uint8Array([1,2,3]);
+ const entry=receipt('reference/lighting-unity default resources-10001.smip',bytes);
+ assert.equal(assetUrl(base,entry.file),base+entry.file);
+ for(const path of ['reference/a_b-0.1','reference/internal  spaces.bin','shaders/source_mesh.wgsl'])assert.equal(assetUrl(base,path),base+path);
+ for(const path of [
+  '', '/reference/file.bin', 'reference/', 'reference//file.bin',
+  'reference/./file.bin', 'reference/../file.bin', '../file.bin', './reference/file.bin',
+  'reference\\file.bin', 'C:/reference/file.bin', 'reference/%2e%2e/file.bin',
+  'reference/file%20name.bin', 'reference/file.bin?x=1', 'reference/file.bin#x',
+  'reference/ file.bin', 'reference/file.bin ', ' reference/file.bin', 'reference /file.bin',
+  'reference/\tfile.bin', 'reference/file\tname.bin', 'reference/file.bin\n',
+  'reference/file\rname.bin', 'reference/file\0.bin', 'reference/caf\u00e9.bin',
+  'reference/file+name.bin', 'reference/file~name.bin',
+ ]){
+  assert.throws(()=>assetUrl(base,path),/path/,JSON.stringify(path));
+  assert.throws(()=>configureAssetCatalog(base,{files:[{...entry,file:path}],plans:[],dependency_staging_reserve:5242960}),/receipt|path/,JSON.stringify(path));
+ }
+ for(const invalidBase of ['https://example.com/assets/runtime/package/','../assets/runtime/package/','./assets/runtime/../'])assert.throws(()=>assetUrl(invalidBase,entry.file),/path/);
 });
 test('bounded reads reject overflow, truncation and bad PNG dimensions',async t=>{
  const bytes=new Uint8Array(60),entry=receipt('reference/input.bin',bytes);

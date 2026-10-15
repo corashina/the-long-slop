@@ -1,6 +1,61 @@
 use my_summer_slop::reference::{MAX_MANIFEST_BYTES, ReferenceManifest};
 
 #[test]
+fn package_receipts_preserve_internal_spaces_and_reject_unsafe_paths() {
+    use my_summer_slop::reference::FileReceipt;
+    let mut receipt = FileReceipt {
+        file: "reference/lighting-unity default resources-10001.smip".into(),
+        bytes: 3,
+        sha256: "a".repeat(64),
+        image_size: None,
+    };
+    receipt.validate().unwrap();
+    for path in [
+        "reference/a_b-0.1",
+        "reference/internal  spaces.bin",
+        "shaders/source_mesh.wgsl",
+    ] {
+        receipt.file = path.into();
+        receipt.validate().unwrap();
+    }
+    for path in [
+        "",
+        "/reference/file.bin",
+        "reference/",
+        "reference//file.bin",
+        "reference/./file.bin",
+        "reference/../file.bin",
+        "../file.bin",
+        "./reference/file.bin",
+        "reference\\file.bin",
+        "C:/reference/file.bin",
+        "reference/%2e%2e/file.bin",
+        "reference/file%20name.bin",
+        "reference/file.bin?x=1",
+        "reference/file.bin#x",
+        "reference/ file.bin",
+        "reference/file.bin ",
+        " reference/file.bin",
+        "reference /file.bin",
+        "reference/\tfile.bin",
+        "reference/file\tname.bin",
+        "reference/file.bin\n",
+        "reference/file\rname.bin",
+        "reference/file\0.bin",
+        "reference/caf\u{e9}.bin",
+        "reference/file+name.bin",
+        "reference/file~name.bin",
+    ] {
+        receipt.file = path.into();
+        assert_eq!(
+            receipt.validate().unwrap_err().to_string(),
+            "Invalid reference field: package file path",
+            "{path:?}"
+        );
+    }
+}
+
+#[test]
 fn receipt_catalog_rejects_oversize_images_and_unreserved_selected_plans() {
     use my_summer_slop::reference::{FileCatalog, FileReceipt};
     let receipt = |file: &str, bytes| serde_json::json!({"file":file,"bytes":bytes,"sha256":"a".repeat(64),"image_size":null});

@@ -8,6 +8,33 @@ from tools.reference.runtime_package import (build_file_catalog, build_prototype
 
 
 class RuntimePackageTests(unittest.TestCase):
+    def test_package_paths_preserve_internal_spaces_and_reject_unsafe_paths(self):
+        import hashlib
+        from tools.reference.runtime_package import canonical
+        name = 'reference/lighting-unity default resources-10001.smip'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / Path(name).name
+            payload = b'checked source texture bytes'
+            path.write_bytes(payload)
+            receipt = file_receipt(path, name)
+            self.assertEqual(receipt, {'file': name, 'bytes': len(payload),
+                'sha256': hashlib.sha256(payload).hexdigest(), 'image_size': None})
+            self.assertEqual(path.read_bytes(), payload)
+        for path in (name, 'reference/a_b-0.1', 'reference/internal  spaces.bin', 'shaders/source_mesh.wgsl'):
+            self.assertEqual(canonical(path), path)
+        for path in (
+            '', '/reference/file.bin', 'reference/', 'reference//file.bin',
+            'reference/./file.bin', 'reference/../file.bin', '../file.bin', './reference/file.bin',
+            'reference\\file.bin', 'C:/reference/file.bin', 'reference/%2e%2e/file.bin',
+            'reference/file%20name.bin', 'reference/file.bin?x=1', 'reference/file.bin#x',
+            'reference/ file.bin', 'reference/file.bin ', ' reference/file.bin', 'reference /file.bin',
+            'reference/\tfile.bin', 'reference/file\tname.bin', 'reference/file.bin\n',
+            'reference/file\rname.bin', 'reference/file\0.bin', 'reference/caf\u00e9.bin',
+            'reference/file+name.bin', 'reference/file~name.bin',
+        ):
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, 'package path'):
+                canonical(path)
+
     def test_world_provenance_accepts_only_checked_known_sidecars(self):
         import hashlib
         from tools.reference.export import verify_world_provenance
