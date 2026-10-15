@@ -8,6 +8,54 @@ from tools.reference.runtime_package import (build_file_catalog, build_prototype
 
 
 class RuntimePackageTests(unittest.TestCase):
+    def test_world_provenance_accepts_only_checked_known_sidecars(self):
+        import hashlib
+        from tools.reference.export import verify_world_provenance
+        world = {'library': {'schema_version': 1, 'manifest_sha256': 'a' * 64},
+                 'source_hashes': [{'file': 'level1', 'sha256': 'b' * 64}]}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            evidence = output / 'provenance'
+            evidence.mkdir()
+            def write(kind, **fields):
+                value = dict(world, receipts=[], **fields)
+                content = json.dumps(value, separators=(',', ':')).encode()
+                path = evidence / f'world-{kind}-{hashlib.sha256(content).hexdigest()}.json'
+                path.write_bytes(content)
+                return path
+            receipts = write('receipts')
+            records = write('records', records=[], initialization={'nodes': [], 'components': []})
+            expected = {str(p.relative_to(output).as_posix()) for p in (receipts, records)}
+            self.assertEqual(verify_world_provenance(output, world), expected)
+            ancestor = write('records', records=[], initialization={'nodes': [{'source': {'file': 'level1', 'path_id': 1}}], 'components': []})
+            self.assertEqual(verify_world_provenance(output, world), expected | {ancestor.relative_to(output).as_posix()})
+            ancestor.unlink()
+            self.assertEqual(build_file_catalog({'assets': []}, output)['files'], [])
+            records.write_bytes(records.read_bytes() + b' ')
+            with self.assertRaisesRegex(ValueError, 'hash'):
+                verify_world_provenance(output, world)
+            records.unlink()
+            records = write('records', records=[], initialization={'nodes': [], 'components': []})
+            for name in ('unknown.json', 'world-records-not-a-hash.json'):
+                extra = evidence / name
+                extra.write_bytes(b'{}')
+                with self.assertRaisesRegex(ValueError, 'path'):
+                    verify_world_provenance(output, world)
+                extra.unlink()
+            nested = evidence / 'nested'
+            nested.mkdir()
+            with self.assertRaisesRegex(ValueError, 'path'):
+                verify_world_provenance(output, world)
+            nested.rmdir()
+            extra = write('records', records=[], initialization={'nodes': [], 'components': []}, unknown=True)
+            with self.assertRaisesRegex(ValueError, 'shape'):
+                verify_world_provenance(output, world)
+            extra.unlink()
+            for field in ('library', 'source_hashes'):
+                changed = dict(world, **{field: {}})
+                with self.assertRaisesRegex(ValueError, 'identity'):
+                    verify_world_provenance(output, changed)
+
     def test_receipts_and_selected_plans(self):
         from PIL import Image
         with tempfile.TemporaryDirectory() as directory:

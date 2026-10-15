@@ -193,6 +193,41 @@ def validate_runtime_manifest(content: bytes) -> None:
         raise ValueError(f'Runtime manifest contract validation failed: {detail}')
 
 
+def verify_world_provenance(output: Path, world: dict) -> set[str]:
+    """Check the existing audit sidecars without adding runtime payloads."""
+    directory = output / 'provenance'
+    if not directory.is_dir():
+        raise ValueError('Missing world provenance directory')
+    names, kinds = set(), set()
+    for path in sorted(directory.iterdir()):
+        match = re.fullmatch(r'world-(receipts|records)-([0-9a-f]{64})\.json', path.name)
+        if not path.is_file() or not match:
+            raise ValueError('Invalid world provenance path')
+        kind, digest = match.groups()
+        content = path.read_bytes()
+        if hashlib.sha256(content).hexdigest() != digest:
+            raise ValueError('World provenance hash differs')
+        value = json.loads(content)
+        expected = {'library', 'source_hashes', 'receipts'}
+        if kind == 'records':
+            expected |= {'records', 'initialization'}
+        if not isinstance(value, dict) or set(value) != expected or not isinstance(value['receipts'], list):
+            raise ValueError('Invalid world provenance shape')
+        if kind == 'records' and (not isinstance(value['records'], list)
+                or not isinstance(value['initialization'], dict)
+                or set(value['initialization']) != {'nodes', 'components'}
+                or any(not isinstance(v, list) for v in value['initialization'].values())):
+            raise ValueError('Invalid world provenance records shape')
+        if any(value[field] != world[field] for field in ('library', 'source_hashes')):
+            raise ValueError('World provenance identity differs')
+        names.add(path.relative_to(output).as_posix())
+        kinds.add(kind)
+        del content, value
+    if kinds != {'receipts', 'records'}:
+        raise ValueError('Missing world provenance sidecar')
+    return names
+
+
 def verify_reference(output: Path, library) -> None:
     from .library.reader import checked
     from .gltf import validate_gltf
@@ -205,6 +240,7 @@ def verify_reference(output: Path, library) -> None:
     validate_runtime_manifest(content)
     validate_runtime_paths(manifest)
     names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json','plate-evidence.json','flashlights-evidence.json','driving-evidence.json'}
+    names.update(verify_world_provenance(output, manifest['world']))
     for asset in manifest['assets']:
         for record in [asset, *asset['dependencies']]:
             name = record.get('file', record.get('path')).removeprefix('reference/')
@@ -338,7 +374,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     (output/'mirror-evidence.json').write_text(json.dumps(mirror_source_evidence(source,manifest['mirrors']),indent=2,allow_nan=False),encoding='utf-8')
     from .world import recover_world
     from .manifest import attach_world
-    attach_world(manifest,recover_world(source,library,output))
+    attach_world(manifest,recover_world(source,library,output,len(manifest['assets'])+1))
     report['world']=[{'source':p['source'],'asset':p['asset'],'node_count':len(p['nodes']),'body_count':len(p['bodies']),'collider_count':len(p['colliders']),'control_count':len(p['controls']),'skin_bone_counts':[len(s['bones']) for s in p['skins']]} for p in manifest['world']['prototypes']]
     (output/'geometry-evidence.json').write_text(json.dumps(report,indent=2,allow_nan=False),encoding='utf-8')
     (output/'material-evidence.json').write_text(json.dumps(list(source.material_evidence.values()),indent=2,allow_nan=False),encoding='utf-8')

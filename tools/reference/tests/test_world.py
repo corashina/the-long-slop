@@ -11,6 +11,8 @@ class WorldTests(unittest.TestCase):
         from unittest.mock import patch
         from tools.reference.world import export_world_prototypes
         from tools.reference.world_spawn import project_runtime_receipts
+        from tools.reference.manifest import attach_world
+        from copy import deepcopy
         file = NS(name='fixture', source_container_path='fixture')
         readers = {i: NS(assets_file=file, path_id=i, type=NS(name=kind))
                    for i, kind in ((1, 'Transform'), (2, 'Material'), (3, 'Texture2D'))}
@@ -28,16 +30,26 @@ class WorldTests(unittest.TestCase):
                         properties=dict(textures=[dict(source=dict(file='fixture', path_id=3))]))
         report = dict(deferred_materials=[], nodes=[], materials=[material],
                       material_count=1, sha256='a' * 64, dependencies=[])
+        manifest = {'assets': [{'id': i} for i in range(1, 8)], 'rendering': {'materials': []}}
         with TemporaryDirectory() as directory, redirect_stdout(StringIO()):
-            with patch('tools.reference.world.GltfExporter', return_value=NS(export=lambda roots: report)):
+            with patch('tools.reference.world.GltfExporter', return_value=NS(export=lambda roots: report)) as exporter:
                 prototypes = export_world_prototypes(source, library, selected, Path(directory),
-                    {('fixture', 1): root}, {('fixture', 1): 'prop'}, {}, 1)
+                    {('fixture', 1): root}, {('fixture', 1): 'prop'}, {}, len(manifest['assets']) + 1)
+                self.assertEqual(exporter.call_args.args[-1], 8)
             world = dict(library={}, source_hashes=[], prototypes=prototypes,
-                         receipts=list(selected.receipts.values()))
+                         receipts=list(selected.receipts.values()), painting_materials=[])
             project_runtime_receipts(world, directory)
         self.assertEqual({r['source']['path_id']: r['sha256'] for r in world['receipts']},
                          {i: str(i) * 64 for i in readers})
         self.assertEqual(selected.records, {})
+        wrong = deepcopy(world)
+        wrong['prototypes'][0]['asset_record']['id'] = 6
+        with self.assertRaisesRegex(ValueError, 'world asset index'):
+            attach_world(deepcopy(manifest), wrong)
+        attach_world(manifest, world)
+        self.assertEqual([asset['id'] for asset in manifest['assets']], list(range(1, 9)))
+        self.assertEqual(world['prototypes'][0]['asset'], 8)
+        self.assertEqual(manifest['rendering']['materials'][0]['asset'], 8)
 
     def test_renderer_export_keeps_two_sided_source_shadows(self):
         from tools.reference.render_lighting import recover_renderer

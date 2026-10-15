@@ -150,7 +150,7 @@ def source_material(source, selected, owner, output, texture_source):
         'texture_coordinates':{name:[env['m_Scale'][c] for c in ('x','y')]+[env['m_Offset'][c] for c in ('x','y')] for name,env in props['m_TexEnvs']}}
 
 
-def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) -> dict:
+def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, first_asset: int) -> dict:
     print("Verifying retained world samples",flush=True)
     world_probe.verify(world_probe.PROBE_ROOT)
     samples=json.loads((world_probe.PROBE_ROOT/'samples.json').read_text())
@@ -366,7 +366,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path) ->
     source.world_material_source=copy.copy(source)
     source.world_material_source.lighting_textures={}
     source.world_material_export=lambda material:source_material(source,selected,material,output,source.world_material_source)
-    prototypes=export_world_prototypes(source,reader,selected,output,roots,roles,scope_cache,6)
+    prototypes=export_world_prototypes(source,reader,selected,output,roots,roles,scope_cache,first_asset)
     physics=next(owner for owner in source.objects.values() if owner.type.name=='PhysicsManager')
     selected.record(physics)
     collision_rows=source.read(physics)['m_LayerCollisionMatrix']
