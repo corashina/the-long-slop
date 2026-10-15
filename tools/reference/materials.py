@@ -64,6 +64,10 @@ KEYWORDS = {'_NORMALMAP', '_DETAIL_MULX2', '_METALLICGLOSSMAP', '_EMISSION',
     '_GLOSSYREFLECTIONS_OFF', '_ALPHATEST_ON', '_ALPHABLEND_ON', '_ALPHAPREMULTIPLY_ON'}
 
 
+PLAYER_TEXTURES = {54:(155,None),55:(169,None),57:(346,168),58:(169,None),59:(284,168),
+    60:(346,168),61:(219,168),62:(169,None),63:(357,None),64:(355,None),65:(175,168),
+    66:(233,168),67:(169,None),68:(290,168),69:(270,168),70:(362,236),71:(281,350),
+    72:(281,350),73:(329,236),74:(212,225),75:(212,225)}
 PLAYER_FLOATS = {'_BumpStrength': 5., '_Glossiness': 1., '_Metallic': 1., '_Dist': 10., '_Cutoff': 1.}
 PLAYER_PROPERTIES = {'_Color': 0, '_MainTex': 4, '_BumpMap': 4,
     **{name: 3 for name in PLAYER_FLOATS}}
@@ -71,7 +75,7 @@ PLAYER_PROPERTIES = {'_Color': 0, '_MainTex': 4, '_BumpMap': 4,
 
 def validate_player_source(reader, shader_reader, data, shader):
     identity = source_id(reader)
-    if identity['file'] != 'sharedassets0.assets' or identity['path_id'] not in (57, 59, 61, 75):
+    if identity['file'] != 'sharedassets0.assets' or identity['path_id'] not in PLAYER_TEXTURES:
         raise ValueError(f'{identity}: unsupported player material')
     if source_id(shader_reader) != {'file': 'sharedassets0.assets', 'path_id': 719}:
         raise ValueError(f'{identity}: player shader source')
@@ -81,7 +85,7 @@ def validate_player_source(reader, shader_reader, data, shader):
         raise ValueError(f'{identity}: unsupported player shader properties')
     saved = data['m_SavedProperties']
     floats = dict(saved['m_Floats'])
-    expected = set(STANDARD_FLOATS) | set(PLAYER_FLOATS) | ({'_Red'} if identity['path_id'] == 61 else set())
+    expected = (set() if identity['path_id'] in (63,64) else set(STANDARD_FLOATS)) | set(PLAYER_FLOATS) | ({'_Red'} if identity['path_id'] in (61,69) else set())
     if set(floats) - expected:
         raise ValueError(f'{identity}: unsupported player properties')
     for field in expected:
@@ -91,10 +95,11 @@ def validate_player_source(reader, shader_reader, data, shader):
         if not 0 <= floats[field] <= maximum:
             raise ValueError(f'{identity}: {field} outside player range')
     colors = dict(saved['m_Colors'])
-    for field in ('_Color', '_EmissionColor'):
+    expected_colors = {'_Color'} if identity['path_id'] in (63,64) else {'_Color','_EmissionColor'}
+    for field in expected_colors:
         if field not in colors:
             raise ValueError(f'{identity}: missing {field}')
-    if set(colors) != {'_Color', '_EmissionColor'}:
+    if set(colors) != expected_colors:
         raise ValueError(f'{identity}: unsupported player colors')
     if data['m_EnableInstancingVariants'] or data['m_CustomRenderQueue'] != -1:
         raise ValueError(f'{identity}: unsupported player state')
@@ -159,7 +164,7 @@ def recover_material(source, reader, color_override=None, condition=None):
     shader_name = shader['m_Name'] or shader['m_ParsedForm']['m_Name']
     family = FAMILIES.get(shader_name)
     if family is None: raise ValueError(f'{source_id(reader)} required shader: {shader_name}')
-    if source_id(reader)['file'] == 'sharedassets0.assets' and reader.path_id in (57, 59, 61, 75) and family != 'player_model':
+    if source_id(reader)['file'] == 'sharedassets0.assets' and reader.path_id in PLAYER_TEXTURES and family != 'player_model':
         raise ValueError(f'{source_id(reader)}: player shader family')
     if family == 'player_model': validate_player_source(reader, shader_reader, data, shader)
     keywords = sorted(data.get('m_ValidKeywords', data.get('m_ShaderKeywords', '').split()))
@@ -195,7 +200,8 @@ def recover_material(source, reader, color_override=None, condition=None):
         pointer = env['m_Texture'] if env else {'m_PathID': 0}
         texture_reader = required_pointer(source, reader, pointer, slot)
         if texture_reader is None:
-            if family == 'player_model': raise ValueError(f'{source_id(reader)} {slot}: required source texture')
+            if family == 'player_model' and not (slot == '_BumpMap' and PLAYER_TEXTURES[reader.path_id][1] is None and env is not None and defaults[slot] == 'bump'):
+                raise ValueError(f'{source_id(reader)} {slot}: required source texture')
             active_defaults[slot] = defaults[slot]; continue
         if texture_reader.type.name == 'RenderTexture':
             raise ValueError(f'{source_id(reader)} {slot}: unsupported RenderTexture {source_id(texture_reader)}')
@@ -225,7 +231,7 @@ def recover_material(source, reader, color_override=None, condition=None):
         name = f'texture-{texture_reader.assets_file.name}-{texture_reader.path_id}-{color_space}{suffix}.png'
         width, height = texture['m_Width'], texture['m_Height']
         if family == 'player_model':
-            main, bump = {57: (346, 168), 59: (284, 168), 61: (219, 168), 75: (212, 225)}[reader.path_id]
+            main, bump = PLAYER_TEXTURES[reader.path_id]
             expected = {'file': 'sharedassets0.assets', 'path_id': bump if slot == '_BumpMap' else main}
             if source_id(texture_reader) != expected or color_space != ('linear' if encoding else 'srgb'):
                 raise ValueError(f'{source_id(reader)} {slot}: player texture source or color space')
@@ -384,6 +390,7 @@ def material_source_evidence(source, reader, record):
             '3a6dc70fae785e22a66269ba660c7960e87975db890f97b08e2bfaedd6108768',
             'a873c329305fc3f24007c8c1708b58a26652825b2e8c5a10b68113510b6d2432',
             'fbc1da7ea386966e3bff8eb51930af5135fe88313aebb3f729b7262a8b9df30e']))
+        evidence['authored_null_textures'] = [slot for slot, env in data['m_SavedProperties']['m_TexEnvs'] if slot in ('_MainTex','_BumpMap') and not env['m_Texture']['m_PathID']]
         evidence['unused_saved_properties'] = sorted(set(record['properties']['floats']) - set(PLAYER_FLOATS))
         evidence['transport_limits'] = ['Inactive source contract. Active player material preparation is rejected.',
             'Camera distance clipping, custom normal blending, and matched game views are not implemented or measured.']

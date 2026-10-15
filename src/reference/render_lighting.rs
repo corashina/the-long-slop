@@ -201,7 +201,7 @@ pub struct RendererRecord {
     pub sorting_order: i16,
 }
 impl RendererRecord {
-    fn validate_fields(&self) -> Result<(), ReferenceError> {
+    pub(super) fn validate_fields(&self) -> Result<(), ReferenceError> {
         require(
             valid_source(&self.source)
                 && finite(&self.bounds_center)

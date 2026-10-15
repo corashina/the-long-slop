@@ -29,7 +29,8 @@ fn checked_player_material_contract_is_inactive() {
     ))
     .unwrap();
     for record in &manifest.rendering.materials {
-        record.validate_active_use().unwrap();
+        let player = record.shader_family == my_summer_slop::reference::ShaderFamily::PlayerModel;
+        assert_eq!(record.validate_active_use().is_err(), player);
     }
 }
 
@@ -82,4 +83,50 @@ fn rag_is_exclusive_to_the_player_contract() {
     let (_, assets) = player_fixture();
     manifest.assets.extend(assets);
     assert_eq!(manifest.expected_instances(), count);
+}
+
+#[test]
+fn selected_player_default_variants_reject_missing_or_foreign_inputs() {
+    use my_summer_slop::reference::{ReferenceManifest, TextureDefault};
+    let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
+    for (pid, change) in [(63, 0), (64, 1), (69, 2), (67, 3), (70, 4)] {
+        let mut m = original.clone();
+        let record = m
+            .rendering
+            .materials
+            .iter_mut()
+            .find(|r| r.source.file == "sharedassets0.assets" && r.source.path_id == pid)
+            .unwrap();
+        match change {
+            0 => {
+                record.properties.floats.remove("_Dist");
+            }
+            1 => {
+                record
+                    .properties
+                    .colors
+                    .insert("_EmissionColor".into(), [0.; 4]);
+            }
+            2 => {
+                record.properties.floats.remove("_Red");
+            }
+            3 => {
+                record
+                    .properties
+                    .defaults
+                    .insert("_BumpMap".into(), TextureDefault::White);
+            }
+            _ => {
+                record
+                    .properties
+                    .textures
+                    .iter_mut()
+                    .find(|t| t.slot == "_BumpMap")
+                    .unwrap()
+                    .source
+                    .path_id = 168;
+            }
+        }
+        assert!(m.validate().is_err(), "material {pid}");
+    }
 }

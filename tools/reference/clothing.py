@@ -87,12 +87,23 @@ def recover_clothing(source,manifest,output):
             'colliders':[local_colliders[key(source.resolve(reader,p))] for p in d['c']],
             'renderers':links(reader,d['Renderers']),'use_center_object':bool(d['useCenterObj']),
             'center':node(center) if center else None,'selectors':selectors,'lenses':lenses})
+    from .player_pose import recover_player_pose
+    result['characters'],result['selected_character']=recover_characters(source,manifest,output)
+    result['pose']=recover_player_pose(source,manifest)
+    outfit=source.get('level1',70544)
+    result['outfit_source']=source_id(outfit)
+    result['invisible_material']=source_id(source.resolve(outfit,source.read(outfit)['defInvisible']))
     return result
 
 
 def validate_clothing(clothing,manifest):
     from .postprocessing import validate_glasses_profiles
     finite_record(clothing)
+    from .player_pose import validate_player_pose
+    validate_characters(clothing,manifest)
+    if clothing['outfit_source']!={'file':'level1','path_id':70544} or clothing['invisible_material']!={'file':'sharedassets0.assets','path_id':56}:raise ValueError('Player outfit appearance source')
+    if not any(m['asset']==clothing['characters'][0]['asset'] and m['source']==clothing['invisible_material'] for m in manifest['rendering']['materials']):raise ValueError('Player invisible material dependency')
+    validate_player_pose(clothing['pose'],manifest)
     sid=lambda pid,file='sharedassets1.assets':{'file':file,'path_id':pid}
     if clothing['wearable_type_count']!=5 or clothing['player_root']!=sid(39843,'level1') or clothing['anchors']!=[sid(p,'level1') for p in ANCHORS]:raise ValueError('Wearable anchor identities')
     anchor_nodes=clothing['anchor_nodes'];expected=(*ANCESTRY,*ANCHORS)
@@ -176,3 +187,176 @@ def descendant(nodes,node,root):
     return False
 
 MATERIAL_RULES={132932: {'DontUseWorn': 1, 'disableColor': 1, 'enableOverrideMax': 0, 'enableOverrideMin': 0, 'isChild': 0, 'loaded': 0, 'noInheritState': 0, 'overRideMax': 0, 'overRideMin': 0, 'randomMax': 2, 'randomMin': 0, 'sameStateAsParent': 0, 'useMatListDontCreateNewMaterial': 1}, 150967: {'DontUseWorn': 1, 'disableColor': 1, 'enableOverrideMax': 0, 'enableOverrideMin': 0, 'isChild': 1, 'loaded': 0, 'noInheritState': 0, 'overRideMax': 0, 'overRideMin': 0, 'randomMax': 2, 'randomMin': 0, 'sameStateAsParent': 0, 'useMatListDontCreateNewMaterial': 1}}
+
+CHARACTER_RENDERERS = ((58557,58502,43612,44815),
+    (58487,58545,58525,58478,58512,58561,58491,58529,58531,58516,58540,58511,58500,58523,58489,58535,42694,41622))
+
+
+def player_renderers(source):
+    result=[]
+    for pid,expected in zip((71215,67763),CHARACTER_RENDERERS,strict=True):
+        reader=source.get('level1',pid)
+        values=[source.resolve(reader,p) for p in source.read(reader)['ch']['renderers']]
+        if [key(r) for r in values]!=[('level1',i) for i in expected]:raise ValueError('Complete character renderer membership')
+        result.extend(values)
+    return result
+
+
+def recover_characters(source,manifest,output):
+    import json
+    import colorsys
+    from pathlib import Path
+    from .player_pose import resolved_transform
+    from .gltf import validate_gltf, convert_point
+    from .source import vector
+    asset=next(a for a in manifest['assets'] if a['usage']=='player_prototype')
+    path=(Path(output) if output is not None else Path('web/assets/reference'))/Path(asset['path']).name
+    document=validate_gltf(path)
+    nodes={key(source.get(n['source']['file'],n['source']['path_id'])):n for n in manifest['nodes'] if n['asset']==asset['id']}
+    def node(r):
+        r=resolved_transform(source,r)
+        if key(r) not in nodes:raise ValueError('Character source outside player asset')
+        return nodes[key(r)]
+    accessor=lambda index:skin_accessor(document,index)
+    outfit=source.get('level1',70544);od=source.read(outfit)
+    if [key(source.resolve(outfit,p)) for p in od['characters']]!=[('level1',71215),('level1',67763)]:raise ValueError('Outfit character order')
+    player_renderers(source)
+    characters=[]
+    for pointer in od['characters']:
+        reader=source.resolve(outfit,pointer);d=source.read(reader)['ch'];root=node(reader)
+        character={'source':source_id(reader),'asset':asset['id'],'root':root['id'],'gltf_accessor_count':len(document.accessors),'gltf_mesh_count':len(document.meshes),'renderers':[],'skins':[],'segments':[]}
+        for pointer in d['renderers']:
+            r=source.resolve(reader,pointer);v=source.read(r);n=node(r);gn=document.nodes[n['gltf_node']]
+            mesh_owner=r if r.type.name=='SkinnedMeshRenderer' else next(c for c in source.components(resolved_transform(source,r))[1] if c.type.name=='MeshFilter')
+            mesh=source.resolve(mesh_owner,source.read(mesh_owner)['m_Mesh'])
+            if mesh is None or gn.mesh is None:raise ValueError('Required character geometry')
+            materials=[source_id(source.resolve(r,p)) for p in v['m_Materials']]
+            bounds=v['m_AABB'] if r.type.name=='SkinnedMeshRenderer' else source.read(mesh)['m_LocalAABB']
+            state={'source':source_id(r),'bounds_center':list(convert_point(vector(bounds['m_Center']))),'bounds_extents':list(vector(bounds['m_Extent'])),
+                'cast_shadows':v['m_CastShadows'],'receive_shadows':bool(v['m_ReceiveShadows']),
+                'reflection_probe_usage':v['m_ReflectionProbeUsage'],'motion_vectors':v['m_MotionVectors'],
+                'sorting_layer':v['m_SortingLayer'],'sorting_order':v['m_SortingOrder']}
+            skin=None
+            if r.type.name=='SkinnedMeshRenderer':
+                if gn.skin is None:raise ValueError('Missing intact character skin')
+                actual=document.skins[gn.skin]
+                joints=[node(source.resolve(r,p))['id'] for p in v['m_Bones']]
+                skeleton=node(source.resolve(r,v['m_RootBone']))['id']
+                lookup={n['gltf_node']:n['id'] for n in nodes.values()}
+                if [lookup[j] for j in actual.joints]!=joints or lookup[actual.skeleton]!=skeleton:raise ValueError('Authored character skin joints')
+                skin={'node':n['id'],'index':gn.skin,'joints':joints,'skeleton':skeleton,
+                    'inverse_bind':accessor(actual.inverseBindMatrices),
+                    'attributes':[{'joints':accessor(p.attributes.JOINTS_0),'weights':accessor(p.attributes.WEIGHTS_0)} for p in document.meshes[gn.mesh].primitives]}
+                character['skins'].append(skin)
+            character['renderers'].append({'source':source_id(r),'node':n['id'],'mesh':source_id(mesh),
+                'gltf_mesh':gn.mesh,'materials':materials,'state':state,'enabled':bool(v['m_Enabled']),
+                'skin':gn.skin,'update_when_offscreen':bool(v['m_UpdateWhenOffscreen']) if skin else None,
+                'skinned_motion_vectors':bool(v['m_SkinnedMotionVectors']) if skin else None,
+                'quality':v['m_Quality'] if skin else None})
+            exported=document.meshes[gn.mesh].primitives
+            if len(exported)!=len(materials) or [document.materials[p.material].extras['source'] for p in exported]!=materials:raise ValueError('Exact character renderer material slots')
+        for seg in d['segments']:
+            if len(seg['Renderer'])!=len(seg['materialSlotNums']):raise ValueError('Unequal character renderer-slot arrays')
+            color=[seg['defColor'][c] for c in 'rgba'];current=[seg['Ccolor'][c] for c in 'rgba']
+            character['segments'].append({'name':seg['name'],'language_name':seg['languageName'],
+                'renderers':[{'node':node(source.resolve(reader,p))['id'],'slot':slot} for p,slot in zip(seg['Renderer'],seg['materialSlotNums'],strict=True)],
+                'default_material':source_id(source.resolve(reader,seg['defMat'])),
+                'default_enabled':bool(seg['defEnabled']),'enabled':bool(seg['BEnabled']),'disable_able':bool(seg['disableAble']),
+                'default_color':color,'color':current,'default_hsv':list(colorsys.rgb_to_hsv(*color[:3]))})
+        characters.append(character)
+    return characters,od['selectedCharacter']
+
+
+def validate_characters(clothing,manifest):
+    import colorsys
+    nodes={n['id']:n for n in manifest['nodes']}
+    characters=clothing['characters']
+    if clothing['selected_character']!=0 or len(characters)!=2:raise ValueError('Character selection')
+    for index,c in enumerate(characters):
+        asset=next((a for a in manifest['assets'] if a['id']==c['asset']),None)
+        if asset is None or asset['usage']!='player_prototype' or c['source']!={'file':'level1','path_id':(71215,67763)[index]}:raise ValueError('Character identity')
+        def local(n):return n in nodes and nodes[n]['asset']==c['asset'] and descendant(nodes,n,c['root'])
+        if not local(c['root']) or nodes[c['root']]['source']!={'file':'level1','path_id':(29438,31145)[index]}:raise ValueError('Character root')
+        if [r['source'] for r in c['renderers']]!=[{'file':'level1','path_id':i} for i in CHARACTER_RENDERERS[index]]:raise ValueError('Character renderer order')
+        if c['gltf_accessor_count']<=0 or c['gltf_mesh_count']<=0 or any(not 0<=r['gltf_mesh']<c['gltf_mesh_count'] for r in c['renderers']):raise ValueError('Character glTF counts')
+        renderers={r['node']:r for r in c['renderers']}
+        for r,expected in zip(c['renderers'],CHARACTER_BINDINGS[index],strict=True):
+            transform_id,mesh_id,materials=expected
+            if nodes.get(r['node'],{}).get('source')!={'file':'level1','path_id':transform_id} or r['mesh']!={'file':'sharedassets0.assets','path_id':mesh_id} or r['materials']!=[{'file':'sharedassets0.assets','path_id':p} for p in materials]:raise ValueError('Exact character renderer bindings')
+        if len(renderers)!=len(c['renderers']) or any(not local(r['node']) or not r['materials'] for r in c['renderers']):raise ValueError('Character renderer nodes')
+        for r in c['renderers']:
+            if r['state']['source']!=r['source'] or not r['enabled']:raise ValueError('Character renderer state')
+            for material in r['materials']:
+                if not any(m['asset']==c['asset'] and m['source']==material for m in manifest['rendering']['materials']):raise ValueError('Character material dependency')
+        if len(c['skins'])!=(2,16)[index] or len({s['index'] for s in c['skins']})!=len(c['skins']):raise ValueError('Complete character skins')
+        for s in c['skins']:
+            if not 0<=s['index']<18 or not 0<=s['inverse_bind']['index']<c['gltf_accessor_count']:raise ValueError('Character glTF skin and accessor index')
+            if s['node'] not in renderers or renderers[s['node']]['skin']!=s['index'] or len(s['joints'])!=53 or len(set(s['joints']))!=53:raise ValueError('Character skin links')
+            if not local(s['skeleton']) or any(not local(j) or not descendant(nodes,j,s['skeleton']) for j in s['joints']):raise ValueError('Foreign character joint')
+            if [nodes[j]['source'] for j in s['joints']]!=[{'file':'level1','path_id':p} for p in CHARACTER_JOINTS[index]]:raise ValueError('Ordered character joints')
+            a=s['inverse_bind']
+            if a['shape']!='MAT4' or a['component_type']!=5126 or a['count']!=53 or a['byte_stride']!=64 or a['view_byte_length']<53*64:raise ValueError('Character inverse bind accessor')
+            if len(s['attributes'])!=len(renderers[s['node']]['materials']):raise ValueError('Character skin primitive count')
+            for pair in s['attributes']:
+                j,w=pair['joints'],pair['weights']
+                if any(not 0<=a['index']<c['gltf_accessor_count'] for a in (j,w)):raise ValueError('Character glTF attribute index')
+                if j['shape']!='VEC4' or w['shape']!='VEC4' or j['component_type'] not in (5121,5123) or w['component_type']!=5126 or not j['count'] or j['count']!=w['count']:raise ValueError('Character joint and weight accessors')
+        names=('Hair','Eyebrows','Eyes','Mustache','Skin','Shirt','Pants','Shoes') if index==0 else ('Hair','Eyebrows','Eyelashes','Eyes','Skin','Shirt','Pants','Shoes')
+        if [s['name'] for s in c['segments']]!=list(names):raise ValueError('Character segment order')
+        for segment,expected in zip(c['segments'],CHARACTER_SEGMENTS[index],strict=True):
+            label,material,optional,color,pairs=expected
+            actual_pairs=[(next((r['source']['path_id'] for r in c['renderers'] if r['node']==b['node']),None),b['slot']) for b in segment['renderers']]
+            if segment['language_name']!=label or segment['default_material']!={'file':'sharedassets0.assets','path_id':material} or segment['default_enabled']!=optional or segment['disable_able']!=optional or segment['enabled'] or segment['default_color']!=color or segment['color']!=([0.,0.,0.,0.] if index==0 else [0.,0.,0.,1.]) or actual_pairs!=pairs:raise ValueError('Exact character appearance defaults')
+            if len(segment['default_hsv'])!=3 or any(abs(a-b)>1e-6 for a,b in zip(segment['default_hsv'],colorsys.rgb_to_hsv(*segment['default_color'][:3]),strict=True)):raise ValueError('Character HSV order')
+            if not segment['renderers']:raise ValueError('Empty character segment')
+            for binding in segment['renderers']:
+                r=renderers.get(binding['node'])
+                if r is None or not 0<=binding['slot']<len(r['materials']):raise ValueError('Character segment material slot')
+            if len(segment['default_color'])!=4 or len(segment['color'])!=4 or len(segment['default_hsv'])!=3 or any(not 0<=v<=1 for f in ('default_color','color','default_hsv') for v in segment[f]):raise ValueError('Character appearance values')
+    for anchor in clothing['anchor_nodes']:
+        n=next((n for n in nodes.values() if n['source']==anchor['source']),None)
+        if n is None or n['asset']!=characters[0]['asset'] or n['transform']!=anchor['transform'] or (nodes[n['parent']]['source'] if n['parent'] else None)!=anchor['parent']:raise ValueError('Retained wearable anchor hierarchy')
+
+
+def skin_accessor(document,index):
+    a=document.accessors[index];v=document.bufferViews[a.bufferView]
+    return {'index':index,'count':a.count,'component_type':a.componentType,'shape':a.type,
+        'buffer_view':a.bufferView,'byte_offset':(v.byteOffset or 0)+(a.byteOffset or 0),
+        'byte_stride':v.byteStride or {'MAT4':64,'VEC4':4*{5121:1,5123:2,5126:4}[a.componentType]}[a.type],
+        'view_byte_length':v.byteLength}
+
+
+def validate_player_export(clothing,manifest,output):
+    """Bind typed skin records to actual glTF nodes, accessors, and binary validation."""
+    from pathlib import Path
+    from .gltf import validate_gltf
+    asset=next(a for a in manifest['assets'] if a['usage']=='player_prototype')
+    document=validate_gltf(Path(output)/Path(asset['path']).name)
+    nodes={n['id']:n for n in manifest['nodes'] if n['asset']==asset['id']}
+    if len(document.nodes)!=len(nodes) or len(document.skins)!=18:raise ValueError('Complete exported player hierarchy and skins')
+    parents={child:i for i,n in enumerate(document.nodes) for child in n.children}
+    for n in nodes.values():
+        actual=document.nodes[n['gltf_node']]
+        expected_parent=nodes[n['parent']]['gltf_node'] if n['parent'] is not None else None
+        if actual.extras['reference_id']!=n['source'] or parents.get(n['gltf_node'])!=expected_parent or any(getattr(actual,f)!=n['transform'][f] for f in ('translation','rotation','scale')):raise ValueError('Exported authored player node differs')
+    selected=set()
+    for character in clothing['characters']:
+        if character['gltf_accessor_count']!=len(document.accessors) or character['gltf_mesh_count']!=len(document.meshes):raise ValueError('Exported character glTF counts')
+        for renderer in character['renderers']:
+            gn=document.nodes[nodes[renderer['node']]['gltf_node']];selected.add(nodes[renderer['node']]['gltf_node'])
+            if gn.mesh!=renderer['gltf_mesh'] or gn.skin!=renderer['skin']:raise ValueError('Exported character renderer binding')
+            primitives=document.meshes[gn.mesh].primitives
+            if [document.materials[p.material].extras['source'] for p in primitives]!=renderer['materials']:raise ValueError('Exported character material slots')
+        for skin in character['skins']:
+            gs=document.skins[skin['index']]
+            if gs.joints!=[nodes[n]['gltf_node'] for n in skin['joints']] or gs.skeleton!=nodes[skin['skeleton']]['gltf_node'] or skin_accessor(document,gs.inverseBindMatrices)!=skin['inverse_bind']:raise ValueError('Exported character skin metadata')
+            gn=document.nodes[nodes[skin['node']]['gltf_node']]
+            expected=[{'joints':skin_accessor(document,p.attributes.JOINTS_0),'weights':skin_accessor(document,p.attributes.WEIGHTS_0)} for p in document.meshes[gn.mesh].primitives]
+            if expected!=skin['attributes']:raise ValueError('Exported character skin accessors')
+    if selected!={i for i,n in enumerate(document.nodes) if n.mesh is not None}:raise ValueError('Unselected player geometry')
+
+CHARACTER_BINDINGS = [[(32922, 473, [75, 74, 59, 55, 58, 61, 57, 60, 73]), (25876, 473, [9, 9, 9, 9, 9, 9, 9, 9, 9]), (36602, 697, [54, 58]), (25048, 645, [58, 54])], [(38614, 690, [65]), (23205, 648, [66]), (27836, 627, [71]), (22144, 637, [72]), (30679, 375, [69]), (23000, 429, [62]), (31080, 618, [67]), (39486, 494, [68]), (32302, 700, [70]), (30051, 613, [63]), (29368, 705, [64]), (37355, 627, [9]), (39907, 637, [9]), (30182, 375, [9]), (30613, 494, [9]), (36960, 700, [9]), (23849, 697, [54, 58]), (40180, 645, [58, 54])]]
+
+CHARACTER_JOINTS = [[26068, 29799, 36277, 36234, 27719, 38049, 32657, 37442, 38141, 26362, 32161, 28124, 24366, 33505, 31941, 28814, 25713, 40017, 33934, 39475, 28176, 25893, 40029, 26243, 25710, 34390, 29634, 40075, 36258, 35131, 24021, 23985, 35295, 36207, 29479, 23595, 23917, 36203, 37854, 27055, 28283, 26010, 25415, 37236, 35291, 26925, 26072, 35908, 39681, 38757, 28290, 36314, 36283], [25455, 30383, 37943, 37865, 28293, 39700, 32025, 36794, 39866, 24604, 32753, 27265, 22453, 31901, 32533, 27041, 24970, 38256, 35588, 38783, 27677, 25383, 38246, 24558, 24975, 35109, 30279, 38321, 37965, 34393, 22219, 22159, 33593, 37927, 31273, 23075, 22202, 37896, 36151, 28886, 27730, 25376, 26108, 36480, 33594, 28693, 25452, 37612, 38100, 39393, 27722, 36856, 37937]]
+
+CHARACTER_SEGMENTS = [[(0, 59, True, [0.2745097875595093, 0.1921568512916565, 0.12549015879631042, 1.0], [(58557, 2)]), (0, 57, True, [0.501960813999176, 0.44705885648727417, 0.3490195870399475, 1.0], [(58557, 6)]), (0, 58, False, [0.5098038911819458, 0.31372547149658203, 0.07843134552240372, 1.0], [(58557, 4), (43612, 1), (44815, 0)]), (0, 60, True, [0.501960813999176, 0.44705885648727417, 0.3490195870399475, 1.0], [(58557, 7)]), (0, 61, False, [0.9528301358222961, 0.7646114826202393, 0.5842826962471008, 1.0], [(58557, 5)]), (0, 75, False, [0.5550907254219055, 0.6712933778762817, 0.7264150977134705, 1.0], [(58557, 0)]), (0, 74, False, [0.6698113083839417, 0.5059859752655029, 0.3159486949443817, 1.0], [(58557, 1)]), (0, 73, False, [0.5283018946647644, 0.29349106550216675, 0.0647917166352272, 1.0], [(58557, 8)])], [(101, 68, True, [0.5999999642372131, 0.4469999670982361, 0.14999999105930328, 1.0], [(58529, 0)]), (102, 65, True, [0.4399999976158142, 0.31679999828338623, 0.13199999928474426, 1.0], [(58487, 0)]), (429, 66, True, [0.5099999904632568, 0.3129359781742096, 0.08160001039505005, 1.0], [(58545, 0)]), (104, 67, False, [0.5099999904632568, 0.3129359781742096, 0.08160001039505005, 1.0], [(58491, 0), (42694, 1), (41622, 0)]), (108, 69, False, [0.949999988079071, 0.7622799873352051, 0.5889999866485596, 1.0], [(58512, 0)]), (105, 72, False, [0.8700000047683716, 0.4948560297489166, 0.44370001554489136, 1.0], [(58478, 0)]), (106, 71, False, [0.5224999785423279, 0.7960999608039856, 0.949999988079071, 1.0], [(58525, 0)]), (107, 70, False, [0.5999999642372131, 0.5999999642372131, 0.5999999642372131, 1.0], [(58531, 0)])]]

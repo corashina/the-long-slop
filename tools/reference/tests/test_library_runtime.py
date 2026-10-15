@@ -18,7 +18,7 @@ class RuntimeTests(unittest.TestCase):
         from tools.reference.export import validate_runtime_paths
         with self.assertRaises(ValueError): validate_runtime_paths({'assets':[{'path':'library/models/unused.gltf','dependencies':[]}]})
         manifest = {'assets': [{'path': f'reference/{name}.gltf', 'dependencies': []}
-                               for name in ('home', 'lada', 'skoda', 'items', 'road_lamp', 'sky', 'food', 'station_benzinkut01', 'station_legjobbbenzinkut', 'station_nagybenzinkut', 'item_pack', 'item_box', 'item_shovel', 'item_box_debris', 'item_box_debris_reduced', 'item_sunglasses', 'item_hat', 'item_cap', 'item_cone', 'item_pumpkin', 'item_cigarette')]}
+                               for name in ('home', 'lada', 'skoda', 'items', 'road_lamp', 'sky', 'food', 'station_benzinkut01', 'station_legjobbbenzinkut', 'station_nagybenzinkut', 'item_pack', 'item_box', 'item_shovel', 'item_box_debris', 'item_box_debris_reduced', 'item_sunglasses', 'item_hat', 'item_cap', 'item_cone', 'item_pumpkin', 'item_cigarette', 'player')]}
         manifest['plates']={'material':{'shader':{'path':'reference/plate-fixture.json','sha256':'a'*64},'compiled_shader':{'path':'reference/plate-fixture.bin','sha256':'a'*64},'resources':[]}}
         validate_runtime_paths(manifest)
         manifest['ui']={'sprites':[{'path':'reference/ui-test-3.png','source':{'file':'test','path_id':3}}]}
@@ -32,7 +32,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_lighting_dependency_receipts_require_matching_typed_hashes(self):
         from tools.reference.export import validate_runtime_paths
-        manifest={'assets':[{'path':f'reference/{name}.gltf','dependencies':[]} for name in ('home', 'lada', 'skoda', 'items', 'road_lamp', 'sky', 'food', 'station_benzinkut01', 'station_legjobbbenzinkut', 'station_nagybenzinkut', 'item_pack', 'item_box', 'item_shovel', 'item_box_debris', 'item_box_debris_reduced', 'item_sunglasses', 'item_hat', 'item_cap', 'item_cone', 'item_pumpkin', 'item_cigarette')]}
+        manifest={'assets':[{'path':f'reference/{name}.gltf','dependencies':[]} for name in ('home', 'lada', 'skoda', 'items', 'road_lamp', 'sky', 'food', 'station_benzinkut01', 'station_legjobbbenzinkut', 'station_nagybenzinkut', 'item_pack', 'item_box', 'item_shovel', 'item_box_debris', 'item_box_debris_reduced', 'item_sunglasses', 'item_hat', 'item_cap', 'item_cone', 'item_pumpkin', 'item_cigarette', 'player')]}
         resource={'path':'reference/lighting-test-1.smip','sha256':'a'*64}
         manifest['plates']={'material':{'shader':{'path':'reference/plate-fixture.json','sha256':'a'*64},'compiled_shader':{'path':'reference/plate-fixture.bin','sha256':'a'*64},'resources':[]}}
         manifest['lighting']={'textures':[resource]}
@@ -289,9 +289,12 @@ class RuntimeContractTests(unittest.TestCase):
         (root/'manifest.json').write_text(json.dumps(manifest))
 
     def test_runtime_contract_accepts_current_fixture(self):
-        with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'):
+        # Empty glTF fixtures cover acceptance wiring; checked player tests cover geometry.
+        with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'), \
+                patch('tools.reference.clothing.validate_player_export') as player_export:
             root=Path(tmp);manifest,receipt=self.runtime(root);self.save(root,manifest)
             verify_reference(root,receipt)
+            player_export.assert_called_once_with(manifest['clothing'],manifest,root)
 
     def test_runtime_contract_rejects_missing_records(self):
         with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'):

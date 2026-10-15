@@ -927,6 +927,14 @@ impl ReferenceManifest {
 
     fn validate_gameplay(&self) -> Result<(), ReferenceError> {
         require(
+            self.assets
+                .iter()
+                .filter(|a| a.usage == AssetUsage::PlayerPrototype)
+                .count()
+                == 1,
+            "exactly one inactive player asset",
+        )?;
+        require(
             self.library.schema_version == 1
                 && hash(&self.library.manifest_sha256)
                 && hash(&self.library.catalog_sha256)

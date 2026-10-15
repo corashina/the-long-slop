@@ -129,7 +129,7 @@ def validate_runtime_paths(manifest):
     assets = manifest.get('assets', [])
     from .stations import STATIONS
     from .item_prototypes import SELECTED
-    if {a['path'] for a in assets} != {f'reference/{name}.gltf' for name in ('home',*CARS,'items','road_lamp','sky','food',*STATIONS,*(p[3] for p in SELECTED))} or len(assets) != 5+len(CARS)+len(STATIONS)+len(SELECTED):
+    if {a['path'] for a in assets} != {f'reference/{name}.gltf' for name in ('home',*CARS,'items','road_lamp','sky','food','player',*STATIONS,*(p[3] for p in SELECTED))} or len(assets) != 6+len(CARS)+len(STATIONS)+len(SELECTED):
         raise ValueError('Runtime must contain only the selected scenes')
     from .plates import plate_resources
     resources = {item['path']:item['sha256'] for item in [*lighting_resources(manifest), *plate_resources(manifest['plates'])]}
@@ -211,6 +211,8 @@ def verify_reference(output: Path, library) -> None:
         if uris | material_mips != declared:
             raise ValueError('Runtime scene dependencies differ from selected receipts')
         validate_gltf(scene)
+    from .clothing import validate_player_export
+    validate_player_export(manifest['clothing'],manifest,output)
     for sprite in [*manifest.get('ui', {}).get('sprites', []), *manifest.get('audio', {}).get('clips', [])]:
         name = sprite['path'].removeprefix('reference/')
         path = output / name
@@ -299,6 +301,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     prepare_item_prototypes(source, roots)
     recover_survival(source,roots,output)
     recover_weather(source,output)
+    roots['player']=[source.get('level1',39843)]
+    source.lighting_prototype_roots.add(('level1',39843))
     report = {}
     for name, readers in roots.items():
         report[name] = export_gltf((source,readers),output/f'{name}.gltf',library,list(roots).index(name)+1,name!='sky')
@@ -338,7 +342,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     manifest['ui']=export_ui(source,output,library)
     for index,name in enumerate(CARS):
         manifest['vehicles'][index]['instruments']=recover_instruments(source,manifest,report,name,roots[name][0])
-    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if (name not in CARS or name == 'lada') and name not in STATIONS and not name.startswith('item_')},manifest,library,output)
+    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if (name not in CARS or name == 'lada') and name not in STATIONS and not name.startswith('item_') and name!='player'},manifest,library,output)
     validate_item_prototypes(manifest['item_prototypes'], manifest)
     validate_clothing(manifest['clothing'],manifest)
     validate_lighting_export(manifest,output)

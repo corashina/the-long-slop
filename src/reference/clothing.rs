@@ -1,9 +1,16 @@
+pub mod pose;
 use super::postprocessing::GlassesProfile;
 use super::*;
+pub use pose::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClothingReference {
+    pub characters: Vec<CharacterReference>,
+    pub pose: PlayerPoseReference,
+    pub selected_character: u32,
+    pub outfit_source: SourceId,
+    pub invisible_material: SourceId,
     pub wearable_type_count: u32,
     pub player_root: SourceId,
     pub anchor_nodes: Vec<SourceAnchorNode>,
@@ -146,6 +153,17 @@ fn scene(path_id: i64) -> SourceId {
 }
 impl ClothingReference {
     pub fn validate(&self, m: &ReferenceManifest) -> Result<(), ReferenceError> {
+        require(
+            self.outfit_source == scene(70544)
+                && self.invisible_material
+                    == SourceId {
+                        file: "sharedassets0.assets".into(),
+                        path_id: 56,
+                    },
+            "outfit appearance source",
+        )?;
+        self.pose.validate(m)?;
+        self.validate_characters(m)?;
         const ANCESTRY: [i64; 6] = [39843, 39851, 39811, 22249, 39820, 25362];
         const ANCHORS: [i64; 5] = [26477, 28766, 35477, 36615, 39162];
         require(
@@ -552,3 +570,592 @@ fn descendant(m: &ReferenceManifest, mut node: NodeId, root: NodeId) -> bool {
     }
     false
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CharacterReference {
+    pub gltf_accessor_count: u32,
+    pub gltf_mesh_count: u32,
+    pub source: SourceId,
+    pub asset: AssetId,
+    pub root: NodeId,
+    pub renderers: Vec<CharacterRendererReference>,
+    pub skins: Vec<SkinReference>,
+    pub segments: Vec<CharacterSegmentReference>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CharacterRendererReference {
+    pub source: SourceId,
+    pub node: NodeId,
+    pub mesh: SourceId,
+    pub gltf_mesh: u32,
+    pub materials: Vec<SourceId>,
+    pub state: render_lighting::RendererRecord,
+    pub enabled: bool,
+    pub skin: Option<u32>,
+    pub update_when_offscreen: Option<bool>,
+    pub skinned_motion_vectors: Option<bool>,
+    pub quality: Option<u32>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkinAccessorReference {
+    pub index: u32,
+    pub count: u32,
+    pub component_type: u32,
+    pub shape: String,
+    pub buffer_view: u32,
+    pub byte_offset: u64,
+    pub byte_stride: u32,
+    pub view_byte_length: u64,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkinAttributesReference {
+    pub joints: SkinAccessorReference,
+    pub weights: SkinAccessorReference,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkinReference {
+    pub node: NodeId,
+    pub index: u32,
+    pub joints: Vec<NodeId>,
+    pub skeleton: NodeId,
+    pub inverse_bind: SkinAccessorReference,
+    pub attributes: Vec<SkinAttributesReference>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CharacterSegmentReference {
+    pub name: String,
+    pub language_name: u32,
+    pub renderers: Vec<VariantMaterialSlot>,
+    pub default_material: SourceId,
+    pub default_enabled: bool,
+    pub enabled: bool,
+    pub disable_able: bool,
+    pub default_color: [f32; 4],
+    pub color: [f32; 4],
+    pub default_hsv: [f32; 3],
+}
+impl CharacterSegmentReference {
+    pub fn visible(&self) -> bool {
+        !self.disable_able || self.enabled
+    }
+}
+impl SkinAccessorReference {
+    fn validate(&self, shape: &str, components: &[u32]) -> Result<(), ReferenceError> {
+        let size = match self.component_type {
+            5121 => 1,
+            5123 => 2,
+            5126 => 4,
+            _ => 0,
+        };
+        let width = if shape == "MAT4" { 16 } else { 4 };
+        require(
+            self.shape == shape
+                && components.contains(&self.component_type)
+                && self.count > 0
+                && self.byte_stride >= width * size
+                && self.byte_offset.is_multiple_of(u64::from(size.max(1)))
+                && u64::from(self.count - 1) * u64::from(self.byte_stride)
+                    + u64::from(width * size)
+                    <= self.view_byte_length,
+            "skin accessor layout",
+        )
+    }
+}
+impl ClothingReference {
+    fn validate_characters(&self, m: &ReferenceManifest) -> Result<(), ReferenceError> {
+        require(
+            self.characters.len() == 2 && self.selected_character == 0,
+            "player character selection",
+        )?;
+        let node = |id| m.nodes.iter().find(|n| n.id == id);
+        require(
+            self.characters
+                .iter()
+                .map(|c| c.source.clone())
+                .eq([scene(71215), scene(67763)]),
+            "character source order",
+        )?;
+        for c in &self.characters {
+            c.validate(m)?;
+        }
+        require(
+            self.characters[0].asset == self.characters[1].asset,
+            "one complete player asset",
+        )?;
+        require(
+            m.rendering.materials.iter().any(|v| {
+                v.asset == self.characters[0].asset && v.source == self.invisible_material
+            }),
+            "player invisible material",
+        )?;
+        for a in &self.anchor_nodes {
+            let n = m
+                .nodes
+                .iter()
+                .find(|n| n.source == a.source)
+                .ok_or_else(|| ReferenceError("retained wearable anchor".into()))?;
+            require(
+                n.asset == self.characters[0].asset
+                    && pose::same_pose(&n.transform, &a.transform)
+                    && n.parent.and_then(node).map(|n| &n.source) == a.parent.as_ref(),
+                "retained wearable anchor ancestry",
+            )?;
+        }
+        Ok(())
+    }
+}
+
+const CHARACTER_RENDERERS: &[&[(i64, i64, i64, &[i64])]] = &[
+    &[
+        (58557, 32922, 473, &[75, 74, 59, 55, 58, 61, 57, 60, 73]),
+        (58502, 25876, 473, &[9, 9, 9, 9, 9, 9, 9, 9, 9]),
+        (43612, 36602, 697, &[54, 58]),
+        (44815, 25048, 645, &[58, 54]),
+    ],
+    &[
+        (58487, 38614, 690, &[65]),
+        (58545, 23205, 648, &[66]),
+        (58525, 27836, 627, &[71]),
+        (58478, 22144, 637, &[72]),
+        (58512, 30679, 375, &[69]),
+        (58561, 23000, 429, &[62]),
+        (58491, 31080, 618, &[67]),
+        (58529, 39486, 494, &[68]),
+        (58531, 32302, 700, &[70]),
+        (58516, 30051, 613, &[63]),
+        (58540, 29368, 705, &[64]),
+        (58511, 37355, 627, &[9]),
+        (58500, 39907, 637, &[9]),
+        (58523, 30182, 375, &[9]),
+        (58489, 30613, 494, &[9]),
+        (58535, 36960, 700, &[9]),
+        (42694, 23849, 697, &[54, 58]),
+        (41622, 40180, 645, &[58, 54]),
+    ],
+];
+const CHARACTER_JOINTS: &[&[i64]] = &[
+    &[
+        26068, 29799, 36277, 36234, 27719, 38049, 32657, 37442, 38141, 26362, 32161, 28124, 24366,
+        33505, 31941, 28814, 25713, 40017, 33934, 39475, 28176, 25893, 40029, 26243, 25710, 34390,
+        29634, 40075, 36258, 35131, 24021, 23985, 35295, 36207, 29479, 23595, 23917, 36203, 37854,
+        27055, 28283, 26010, 25415, 37236, 35291, 26925, 26072, 35908, 39681, 38757, 28290, 36314,
+        36283,
+    ],
+    &[
+        25455, 30383, 37943, 37865, 28293, 39700, 32025, 36794, 39866, 24604, 32753, 27265, 22453,
+        31901, 32533, 27041, 24970, 38256, 35588, 38783, 27677, 25383, 38246, 24558, 24975, 35109,
+        30279, 38321, 37965, 34393, 22219, 22159, 33593, 37927, 31273, 23075, 22202, 37896, 36151,
+        28886, 27730, 25376, 26108, 36480, 33594, 28693, 25452, 37612, 38100, 39393, 27722, 36856,
+        37937,
+    ],
+];
+
+const CHARACTER_SEGMENTS: &[&[(&str, u32, i64, bool, [f32; 4], &[(i64, u32)])]] = &[
+    &[
+        (
+            "Hair",
+            0,
+            59,
+            true,
+            [
+                0.2745097875595093,
+                0.1921568512916565,
+                0.12549015879631042,
+                1.0,
+            ],
+            &[(58557, 2)],
+        ),
+        (
+            "Eyebrows",
+            0,
+            57,
+            true,
+            [
+                0.501960813999176,
+                0.44705885648727417,
+                0.3490195870399475,
+                1.0,
+            ],
+            &[(58557, 6)],
+        ),
+        (
+            "Eyes",
+            0,
+            58,
+            false,
+            [
+                0.5098038911819458,
+                0.31372547149658203,
+                0.07843134552240372,
+                1.0,
+            ],
+            &[(58557, 4), (43612, 1), (44815, 0)],
+        ),
+        (
+            "Mustache",
+            0,
+            60,
+            true,
+            [
+                0.501960813999176,
+                0.44705885648727417,
+                0.3490195870399475,
+                1.0,
+            ],
+            &[(58557, 7)],
+        ),
+        (
+            "Skin",
+            0,
+            61,
+            false,
+            [
+                0.9528301358222961,
+                0.7646114826202393,
+                0.5842826962471008,
+                1.0,
+            ],
+            &[(58557, 5)],
+        ),
+        (
+            "Shirt",
+            0,
+            75,
+            false,
+            [
+                0.5550907254219055,
+                0.6712933778762817,
+                0.7264150977134705,
+                1.0,
+            ],
+            &[(58557, 0)],
+        ),
+        (
+            "Pants",
+            0,
+            74,
+            false,
+            [
+                0.6698113083839417,
+                0.5059859752655029,
+                0.3159486949443817,
+                1.0,
+            ],
+            &[(58557, 1)],
+        ),
+        (
+            "Shoes",
+            0,
+            73,
+            false,
+            [
+                0.5283018946647644,
+                0.29349106550216675,
+                0.0647917166352272,
+                1.0,
+            ],
+            &[(58557, 8)],
+        ),
+    ],
+    &[
+        (
+            "Hair",
+            101,
+            68,
+            true,
+            [
+                0.5999999642372131,
+                0.4469999670982361,
+                0.14999999105930328,
+                1.0,
+            ],
+            &[(58529, 0)],
+        ),
+        (
+            "Eyebrows",
+            102,
+            65,
+            true,
+            [
+                0.4399999976158142,
+                0.31679999828338623,
+                0.13199999928474426,
+                1.0,
+            ],
+            &[(58487, 0)],
+        ),
+        (
+            "Eyelashes",
+            429,
+            66,
+            true,
+            [
+                0.5099999904632568,
+                0.3129359781742096,
+                0.08160001039505005,
+                1.0,
+            ],
+            &[(58545, 0)],
+        ),
+        (
+            "Eyes",
+            104,
+            67,
+            false,
+            [
+                0.5099999904632568,
+                0.3129359781742096,
+                0.08160001039505005,
+                1.0,
+            ],
+            &[(58491, 0), (42694, 1), (41622, 0)],
+        ),
+        (
+            "Skin",
+            108,
+            69,
+            false,
+            [
+                0.949999988079071,
+                0.7622799873352051,
+                0.5889999866485596,
+                1.0,
+            ],
+            &[(58512, 0)],
+        ),
+        (
+            "Shirt",
+            105,
+            72,
+            false,
+            [
+                0.8700000047683716,
+                0.4948560297489166,
+                0.44370001554489136,
+                1.0,
+            ],
+            &[(58478, 0)],
+        ),
+        (
+            "Pants",
+            106,
+            71,
+            false,
+            [
+                0.5224999785423279,
+                0.7960999608039856,
+                0.949999988079071,
+                1.0,
+            ],
+            &[(58525, 0)],
+        ),
+        (
+            "Shoes",
+            107,
+            70,
+            false,
+            [
+                0.5999999642372131,
+                0.5999999642372131,
+                0.5999999642372131,
+                1.0,
+            ],
+            &[(58531, 0)],
+        ),
+    ],
+];
+
+impl CharacterReference {
+    pub fn validate(&self, m: &ReferenceManifest) -> Result<(), ReferenceError> {
+        let c = self;
+        let i = match (c.source.file.as_str(), c.source.path_id) {
+            ("level1", 71215) => 0,
+            ("level1", 67763) => 1,
+            _ => return Err(ReferenceError("character source".into())),
+        };
+        let node = |id| m.nodes.iter().find(|n| n.id == id);
+        require(
+            c.source == scene([71215, 67763][i])
+                && node(c.root)
+                    .is_some_and(|n| n.source == scene([29438, 31145][i]) && n.asset == c.asset)
+                && m.assets
+                    .iter()
+                    .any(|a| a.id == c.asset && a.usage == AssetUsage::PlayerPrototype),
+            "character identity",
+        )?;
+        let local = |id| node(id).is_some_and(|n| n.asset == c.asset) && descendant(m, id, c.root);
+        require(
+            c.renderers.len() == CHARACTER_RENDERERS[i].len()
+                && c.skins.len() == [2, 16][i]
+                && c.segments.len() == 8,
+            "complete character contract",
+        )?;
+        ids(
+            c.renderers.iter().map(|r| r.node),
+            "duplicate character renderer",
+        )?;
+        ids(c.skins.iter().map(|s| s.index), "duplicate character skin")?;
+        for (r, (source, transform_id, mesh, materials)) in
+            c.renderers.iter().zip(CHARACTER_RENDERERS[i])
+        {
+            require(
+                r.source == scene(*source)
+                    && local(r.node)
+                    && node(r.node).is_some_and(|n| n.source == scene(*transform_id))
+                    && r.gltf_mesh < c.gltf_mesh_count
+                    && r.mesh
+                        == SourceId {
+                            file: "sharedassets0.assets".into(),
+                            path_id: *mesh,
+                        }
+                    && r.enabled
+                    && r.materials.len() == materials.len()
+                    && r.materials
+                        .iter()
+                        .zip(*materials)
+                        .all(|(m, p)| m.file == "sharedassets0.assets" && m.path_id == *p),
+                "character renderer source bindings",
+            )?;
+            r.state.validate_fields()?;
+            let shadow = matches!(source, 58502 | 58511 | 58500 | 58523 | 58489 | 58535);
+            let skinned = !matches!(source, 43612 | 44815 | 42694 | 41622);
+            require(
+                r.state.source == r.source
+                    && r.state.cast_shadows
+                        == if shadow {
+                            3
+                        } else if skinned {
+                            0
+                        } else {
+                            1
+                        }
+                    && r.state.receive_shadows == !shadow
+                    && r.state.reflection_probe_usage == if skinned { 0 } else { 1 }
+                    && r.update_when_offscreen == skinned.then_some(true)
+                    && r.skinned_motion_vectors == skinned.then_some(true)
+                    && r.quality == skinned.then_some(0)
+                    && r.skin.is_some() == skinned,
+                "character renderer flags",
+            )?;
+            for material in &r.materials {
+                require(
+                    m.rendering
+                        .materials
+                        .iter()
+                        .any(|v| v.asset == c.asset && &v.source == material),
+                    "character material dependency",
+                )?;
+            }
+        }
+        for s in &c.skins {
+            let r = c
+                .renderers
+                .iter()
+                .find(|r| r.node == s.node)
+                .ok_or_else(|| ReferenceError("skin renderer".into()))?;
+            require(
+                s.index < 18
+                    && r.skin == Some(s.index)
+                    && local(s.skeleton)
+                    && node(s.skeleton).is_some_and(|n| n.source == scene([26068, 25455][i]))
+                    && s.joints.len() == 53
+                    && s.joints.iter().zip(CHARACTER_JOINTS[i]).all(|(n, p)| {
+                        local(*n)
+                            && descendant(m, *n, s.skeleton)
+                            && node(*n).is_some_and(|v| v.source == scene(*p))
+                    }),
+                "ordered character joints",
+            )?;
+            require(
+                s.inverse_bind.index < c.gltf_accessor_count,
+                "inverse bind accessor index",
+            )?;
+            s.inverse_bind.validate("MAT4", &[5126])?;
+            require(
+                s.inverse_bind.count == 53 && s.attributes.len() == r.materials.len(),
+                "skin inverse binds and primitive count",
+            )?;
+            for a in &s.attributes {
+                require(
+                    a.joints.index < c.gltf_accessor_count
+                        && a.weights.index < c.gltf_accessor_count,
+                    "skin attribute index",
+                )?;
+                a.joints.validate("VEC4", &[5121, 5123])?;
+                a.weights.validate("VEC4", &[5126])?;
+                require(a.joints.count == a.weights.count, "skin joint weight count")?;
+            }
+        }
+        for ((segment, (name, label, material, optional, color, pairs)), hsv) in c
+            .segments
+            .iter()
+            .zip(CHARACTER_SEGMENTS[i])
+            .zip(CHARACTER_HSV[i])
+        {
+            require(
+                segment.name == *name
+                    && segment.language_name == *label
+                    && segment.default_material
+                        == SourceId {
+                            file: "sharedassets0.assets".into(),
+                            path_id: *material,
+                        }
+                    && segment.default_enabled == *optional
+                    && segment.disable_able == *optional
+                    && !segment.enabled
+                    && segment.default_color == *color
+                    && segment.color == if i == 0 { [0.; 4] } else { [0., 0., 0., 1.] }
+                    && segment
+                        .default_hsv
+                        .iter()
+                        .zip(hsv)
+                        .all(|(a, b)| (a - b).abs() < 1e-6)
+                    && finite(&segment.default_hsv)
+                    && segment.default_hsv.iter().all(|v| (0. ..=1.).contains(v))
+                    && segment.renderers.len() == pairs.len(),
+                "character appearance defaults",
+            )?;
+            for (binding, (renderer, slot)) in segment.renderers.iter().zip(*pairs) {
+                require(
+                    binding.slot == *slot
+                        && c.renderers.iter().any(|r| {
+                            r.node == binding.node
+                                && r.source == scene(*renderer)
+                                && (binding.slot as usize) < r.materials.len()
+                        }),
+                    "character appearance slot",
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+const CHARACTER_HSV: &[&[[f32; 3]]] = &[
+    &[
+        [0.07456142192883357, 0.5428572514227523, 0.2745097875595093],
+        [0.10683763015434052, 0.30468758256392414, 0.501960813999176],
+        [0.09090909483450015, 0.84615388999765, 0.5098038911819458],
+        [0.10683763015434052, 0.30468758256392414, 0.501960813999176],
+        [0.08154933260016389, 0.3867923837832201, 0.9528301358222961],
+        [0.5536231546236953, 0.23584913478648908, 0.7264150977134705],
+        [0.08950614970498984, 0.5283019396810823, 0.6698113083839417],
+        [0.08223456560658511, 0.8773585381965344, 0.5283018946647644],
+    ],
+    &[
+        [0.10999999768204145, 0.75, 0.5999999642372131],
+        [0.09999999999999999, 0.7, 0.4399999976158142],
+        [0.08999999165201016, 0.8399999766256291, 0.5099999904632568],
+        [0.08999999165201016, 0.8399999766256291, 0.5099999904632568],
+        [0.08, 0.3800000062741732, 0.949999988079071],
+        [0.02000000605880368, 0.4899999849275612, 0.8700000047683716],
+        [0.5600000092950711, 0.450000015685433, 0.949999988079071],
+        [0.0, 0.0, 0.5999999642372131],
+    ],
+];

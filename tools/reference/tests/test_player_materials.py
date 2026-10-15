@@ -212,3 +212,25 @@ class PlayerMaterialTests(unittest.TestCase):
             data=copy.deepcopy(self.source.read(target));mutate(data);read=self.source.read
             with self.subTest(source=identity),patch.object(self.source,'read',side_effect=lambda r:data if r is target else read(r)):
                 with self.assertRaisesRegex(ValueError,label):recover_material(self.source,reader)
+
+    def test_complete_selected_player_material_variants(self):
+        from tools.reference.materials import PLAYER_TEXTURES
+        for pid,(main,bump) in PLAYER_TEXTURES.items():
+            with self.subTest(material=pid):
+                reader=self.source.get('sharedassets0.assets',pid)
+                record=recover_material(self.source,reader)
+                self.assertEqual(record['properties']['defaults'],{'_BumpMap':'bump'} if bump is None else {})
+                self.assertEqual([(t['slot'],t['source']['path_id']) for t in record['properties']['textures']],
+                    [('_MainTex',main)]+([('_BumpMap',bump)] if bump else []))
+                for texture in record['properties']['textures']:self.source.library.texture(ObjectId(**texture['source']))
+                self.assertEqual('_EmissionColor' in record['properties']['colors'],pid not in (63,64))
+                self.assertEqual('_Red' in record['properties']['floats'],pid in (61,69))
+                material_source_evidence(self.source,reader,record)
+                self.assertEqual(self.source.material_evidence[f'sharedassets0.assets:{pid}']['authored_null_textures'],['_BumpMap'] if bump is None else [])
+        for pid,mutate in [(63,lambda d:d['m_SavedProperties']['m_Floats'].pop()),
+                (64,lambda d:d['m_SavedProperties']['m_Colors'].append(('_EmissionColor',dict(r=0.,g=0.,b=0.,a=0.)))),
+                (69,lambda d:d['m_SavedProperties']['m_Floats'].__setitem__(slice(None),[v for v in d['m_SavedProperties']['m_Floats'] if v[0]!='_Red'])),
+                (67,lambda d:dict(d['m_SavedProperties']['m_TexEnvs'])['_BumpMap']['m_Texture'].update(m_PathID=168,m_FileID=0)),
+                (70,lambda d:dict(d['m_SavedProperties']['m_TexEnvs'])['_BumpMap']['m_Texture'].update(m_PathID=168,m_FileID=0)),
+                (71,lambda d:dict(d['m_SavedProperties']['m_TexEnvs'])['_BumpMap']['m_Texture'].update(m_PathID=0))]:
+            with self.subTest(malformed=pid),self.assertRaises(ValueError):self.recover_with_mutation(pid,pid,mutate)

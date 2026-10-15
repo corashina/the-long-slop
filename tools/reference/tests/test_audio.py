@@ -97,6 +97,16 @@ class SelectedAudio(unittest.TestCase):
             'v':0,'radius':0.05,'LM':{'m_Bits':8192}})
         add('level1',80125,'MonoBehaviour',{'defInteriorM':0.5,'interiorLerpM':2,
             'FCarSoundM':1.4,'outsideVolume':0})
+        # The selected exporter also follows mandatory survival audio pointers.
+        add('level1',70770,'MonoBehaviour',{'clips':[{'clips':[ptr(clip)]} for _ in range(3)]},'soundMainScript')
+        add('sharedassets1.assets',158276,'MonoBehaviour',{'source':ptr(prefab)})
+        records[key(main)].update({'soundEat':[ptr(clip),ptr(clip)],'eatVolume':1.,'SdeathBell':ptr(clip)})
+        records['level1',80125].update({'m_GameObject':ptr(go),'SBurp':ptr(prefab),'SFart':ptr(prefab),
+            'SDeathBellSource':ptr(prefab),'SleepCamSource':ptr(prefab),'deathbellGroup':ptr(group),
+            'minBurpVolume':.5,'maxBurpVolume':1.,'minFartVolume':.5,'maxFartVolume':1.,
+            'minBurpPitch':.8,'maxBurpPitch':1.2,'minFartPitch':.8,'maxFartPitch':1.2})
+        records[key(cycle)].update({'sandStormSource':ptr(prefab),'DayAmbientSound':[ptr(prefab)],'NightAmbientSound':[ptr(prefab)]})
+        records[key(transform)].update({'m_LocalRotation':{'x':0,'y':0,'z':0,'w':1},'m_LocalScale':{'x':1,'y':1,'z':1}})
         components=[idle,motor,horn,*radio_voices,engine,car,radio]
         def seal_records():
             for (file,path_id),data in records.items():
@@ -119,6 +129,7 @@ class SelectedAudio(unittest.TestCase):
                 if not pointer['m_PathID']:return None
                 return self.get(pointer.get('file',owner.assets_file.source_container_path),pointer['m_PathID'])
             def transform_for(self,game_object):return transform
+            def chain(self,reader):return [self.read(reader)]
             def hierarchy(self,selected):return [{'components':components}]
             def components(self,selected):return None,[prefab]
             def class_name(self,obj):return classes[key(obj)]
@@ -154,6 +165,9 @@ class SelectedAudio(unittest.TestCase):
                 self.assertEqual(audio['radio']['tuning_repeat_seconds'],0.2)
                 self.assertEqual(audio['radio']['holiday_ranges'],[[10,15,11,15],[12,15,1,15]])
                 self.assertEqual(audio['radio']['controls']['volume'],{'source':{'file':'level1','path_id':306},'node':1,'item':1,'enabled':True,'tune':True,'turnable':False})
+                self.assertEqual(audio['mixer_controls']['outside']['sensor']['node'],1)
+                self.assertTrue(audio['mixer_controls']['outside']['sensor']['player'])
+                self.assertEqual([r['role'] for r in audio['survival']],['eat','burp','fart','shit','death','sleep','storm','storm_inside','ambient_day','ambient_night'])
                 self.assertIn(ObjectId('level1',301),library.selected_records)
                 self.assertIn(ObjectId('sharedassets1.assets',4423),library.selected_records)
                 engine['SAlap']={'file':'level1','m_PathID':999999}

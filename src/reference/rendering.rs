@@ -259,7 +259,7 @@ impl RenderingRecord {
                 )?;
             }
             let player_source = material.source.file == "sharedassets0.assets"
-                && matches!(material.source.path_id, 57 | 59 | 61 | 75);
+                && matches!(material.source.path_id, 54 | 55 | 57..=75);
             require(
                 !player_source || material.shader_family == ShaderFamily::PlayerModel,
                 &format!("{label}: player shader family"),
@@ -384,6 +384,9 @@ impl RenderingRecord {
                         &format!("{label}: player prototype usage"),
                     )?;
                     let floats = &material.properties.floats;
+                    let compact = matches!(material.source.path_id, 63 | 64);
+                    let default_normal =
+                        matches!(material.source.path_id, 54 | 55 | 58 | 62 | 63 | 64 | 67);
                     for field in [
                         "_Dist",
                         "_Cutoff",
@@ -404,7 +407,19 @@ impl RenderingRecord {
                         "_UVSec",
                         "_ZWrite",
                     ] {
-                        require(floats.contains_key(field), &format!("{label}: {field}"))?;
+                        require(
+                            floats.contains_key(field)
+                                == (!compact
+                                    || matches!(
+                                        field,
+                                        "_Dist"
+                                            | "_Cutoff"
+                                            | "_BumpStrength"
+                                            | "_Glossiness"
+                                            | "_Metallic"
+                                    )),
+                            &format!("{label}: {field}"),
+                        )?;
                     }
                     require(
                         floats.keys().all(|field| {
@@ -439,8 +454,10 @@ impl RenderingRecord {
                             && (0. ..=5.).contains(&floats["_BumpStrength"])
                             && (0. ..=1.).contains(&floats["_Glossiness"])
                             && (0. ..=1.).contains(&floats["_Metallic"])
-                            && floats.contains_key("_Red") == (material.source.path_id == 61)
+                            && floats.contains_key("_Red")
+                                == matches!(material.source.path_id, 61 | 69)
                             && material.properties.colors.contains_key("_EmissionColor")
+                                == !compact
                             && material
                                 .properties
                                 .colors
@@ -449,7 +466,16 @@ impl RenderingRecord {
                             && keywords.is_empty()
                             && !material.enable_instancing
                             && material.condition.is_none()
-                            && material.properties.defaults.is_empty()
+                            && if default_normal {
+                                material.properties.defaults.len() == 1
+                                    && material
+                                        .properties
+                                        .defaults
+                                        .get("_BumpMap")
+                                        .is_some_and(|v| *v == TextureDefault::Bump)
+                            } else {
+                                material.properties.defaults.is_empty()
+                            }
                             && material.properties.exclusions.is_empty()
                             && state.alpha_mode == AlphaMode::Mask
                             && state.cull == 2
@@ -462,13 +488,33 @@ impl RenderingRecord {
                     )?;
                     active.extend(["_MainTex", "_BumpMap"]);
                     for texture in &material.properties.textures {
-                        let expected = match (material.source.path_id, texture.slot.as_str()) {
-                            (57, "_MainTex") => 346,
-                            (59, "_MainTex") => 284,
-                            (61, "_MainTex") => 219,
-                            (75, "_MainTex") => 212,
-                            (75, "_BumpMap") => 225,
-                            (_, "_BumpMap") => 168,
+                        let (main, bump) = match material.source.path_id {
+                            54 => (155, 0),
+                            55 => (169, 0),
+                            57 => (346, 168),
+                            58 => (169, 0),
+                            59 => (284, 168),
+                            60 => (346, 168),
+                            61 => (219, 168),
+                            62 => (169, 0),
+                            63 => (357, 0),
+                            64 => (355, 0),
+                            65 => (175, 168),
+                            66 => (233, 168),
+                            67 => (169, 0),
+                            68 => (290, 168),
+                            69 => (270, 168),
+                            70 => (362, 236),
+                            71 => (281, 350),
+                            72 => (281, 350),
+                            73 => (329, 236),
+                            74 => (212, 225),
+                            75 => (212, 225),
+                            _ => (0, 0),
+                        };
+                        let expected = match texture.slot.as_str() {
+                            "_MainTex" => main,
+                            "_BumpMap" => bump,
                             _ => 0,
                         };
                         require(
