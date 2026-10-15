@@ -1,5 +1,9 @@
 //! Validated installed-build data. Geometry uses converted body-local meters.
 
+pub mod package;
+pub mod prototype_plan;
+pub use package::{FileCatalog, FileReceipt, PlanReceipt};
+
 pub mod driving;
 pub use driving::*;
 
@@ -114,7 +118,7 @@ pub struct AssetRecord {
     pub path: String,
     pub sha256: String,
     pub root: SourceId,
-    pub dependencies: Vec<SourceHash>,
+    pub dependencies: Vec<FileReceipt>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -810,6 +814,8 @@ pub const MAX_MANIFEST_BYTES: usize = 256 * 1024 * 1024;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceManifest {
+    pub content_base: String,
+    pub file_catalog: std::sync::Arc<FileCatalog>,
     pub driving: DrivingReference,
     pub audio: serde_json::Value,
     pub survival: SurvivalReference,
@@ -899,16 +905,18 @@ impl ReferenceManifest {
     }
     pub fn from_json(bytes: &[u8]) -> Result<Self, ReferenceError> {
         require(bytes.len() <= MAX_MANIFEST_BYTES, "manifest size")?;
-        let manifest: Self =
+        let mut manifest: Self =
             serde_json::from_slice(bytes).map_err(|e| ReferenceError(e.to_string()))?;
+        std::sync::Arc::make_mut(&mut manifest.file_catalog).admit()?;
         manifest.validate()?;
         Ok(manifest)
     }
 
     pub fn from_runtime_json(bytes: &[u8]) -> Result<Self, ReferenceError> {
         require(bytes.len() <= MAX_MANIFEST_BYTES, "manifest size")?;
-        let manifest: Self =
+        let mut manifest: Self =
             serde_json::from_slice(bytes).map_err(|e| ReferenceError(e.to_string()))?;
+        std::sync::Arc::make_mut(&mut manifest.file_catalog).admit()?;
         manifest.validate_gameplay()?;
         Ok(manifest)
     }
@@ -919,6 +927,32 @@ impl ReferenceManifest {
     }
 
     fn validate_gameplay(&self) -> Result<(), ReferenceError> {
+        let package = self
+            .content_base
+            .strip_prefix("assets/runtime/")
+            .and_then(|v| v.strip_suffix('/'));
+        require(
+            package.is_some_and(|v| {
+                v.len() == 64
+                    && v.bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            }),
+            "content base",
+        )?;
+        for asset in &self.assets {
+            require(
+                self.file_catalog.file(&asset.path)?.sha256 == asset.sha256,
+                "asset receipt hash",
+            )?;
+            self.file_catalog.plan(&asset.path)?;
+            for receipt in &asset.dependencies {
+                require(
+                    self.file_catalog.file(&receipt.file)? == receipt,
+                    "asset dependency receipt",
+                )?;
+            }
+        }
+
         self.driving.validate(self)?;
         require(
             self.library.schema_version == 1

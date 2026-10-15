@@ -73,7 +73,7 @@ impl PreparedPresentation {
         world.resource_scope(|world, mut pipelines: Mut<WorldPipelines>| {
             pipelines.reserve_cache(&mut world.resource_mut::<crate::app::Drive>().runtime.stream)
         })?;
-        super::world::preflight::configure_staging(&mut candidate.stream)?;
+        super::world::preflight::configure_staging(&mut candidate.stream, &reference.file_catalog)?;
         let mut overlap = world
             .resource::<crate::app::Drive>()
             .runtime
@@ -396,6 +396,7 @@ impl PreparedPresentation {
             && self.prototypes.drain_ready(
                 world.resource::<AssetServer>(),
                 world.resource::<Assets<super::world::prototype_loader::SourceGltf>>(),
+                world.resource::<Assets<super::world::preflight::SourcePlan>>(),
             )
             && self.materials.drain_ready(
                 world.resource::<AssetServer>(),
@@ -417,7 +418,7 @@ impl PreparedPresentation {
         }
         self.system.apply(world);
         self.exchange(world);
-        world.resource_scope(|world,mut assets:Mut<Assets<super::world::prototype_loader::SourceGltf>>|world.resource_scope(|world,mut meshes:Mut<Assets<Mesh>>|{self.prototypes.release_all(&mut assets,&mut meshes,&mut world.resource_mut::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>());}));
+        world.resource_scope(|world,mut assets:Mut<Assets<super::world::prototype_loader::SourceGltf>>|world.resource_scope(|world,mut plans:Mut<Assets<super::world::preflight::SourcePlan>>|world.resource_scope(|world,mut meshes:Mut<Assets<Mesh>>|{self.prototypes.release_all(&mut assets,&mut plans,&mut meshes,&mut world.resource_mut::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>());})));
         world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
             world.resource_scope(
                 |world, mut materials: Mut<Assets<materials::SourceMaterial>>| {

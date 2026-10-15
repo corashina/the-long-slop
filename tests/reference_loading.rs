@@ -1,6 +1,50 @@
 use my_summer_slop::reference::{MAX_MANIFEST_BYTES, ReferenceManifest};
 
 #[test]
+fn receipt_catalog_rejects_oversize_images_and_unreserved_selected_plans() {
+    use my_summer_slop::reference::{FileCatalog, FileReceipt};
+    let receipt = |file: &str, bytes| serde_json::json!({"file":file,"bytes":bytes,"sha256":"a".repeat(64),"image_size":null});
+    let input = receipt("reference/mesh.plan.json", 100);
+    let mut catalog: FileCatalog = serde_json::from_value(serde_json::json!({
+        "files":[receipt("reference/mesh.gltf", 200), input.clone()],
+        "plans":[{"asset_file":"reference/mesh.gltf","input":input}],
+        "dependency_staging_reserve":5242960
+    }))
+    .unwrap();
+    catalog.admit().unwrap();
+    assert_eq!(catalog.file("reference/mesh.gltf").unwrap().bytes, 200);
+    assert!(catalog.file("reference/unused.bin").is_err());
+    assert!(
+        catalog
+            .check_plan_reservation("reference/mesh.gltf", 1799, 200)
+            .is_err()
+    );
+    assert!(
+        catalog
+            .check_plan_reservation("reference/mesh.gltf", 1800, 199)
+            .is_err()
+    );
+    catalog
+        .check_plan_reservation("reference/mesh.gltf", 1800, 200)
+        .unwrap();
+    assert!(catalog.retained_bytes() > 200);
+    let mut png: FileReceipt = serde_json::from_value(receipt("reference/a.png", 30)).unwrap();
+    assert!(png.validate().is_err());
+    png.image_size = Some([u32::MAX, 2]);
+    assert!(png.validate().is_err());
+    png.image_size = Some([2, 3]);
+    png.validate().unwrap();
+    let audio: FileReceipt = serde_json::from_value(receipt("reference/radio.wav", 57_418_028)).unwrap();
+    audio.validate().unwrap();
+    let mut plan: my_summer_slop::reference::prototype_plan::PrototypePlan = serde_json::from_value(serde_json::json!({
+        "json_bytes":1,"buffer_bytes":0,"mesh_bytes":0,"scene_bytes":0,"nodes":[],"primitives":[]
+    })).unwrap();
+    assert_eq!(plan.reservation().unwrap(), (18, 0));
+    plan.mesh_bytes = usize::MAX;
+    assert!(plan.reservation().is_err());
+}
+
+#[test]
 #[ignore = "requires the installed source export"]
 fn installed_manifest_checks_lod_bounds_and_initializes_runtime() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();

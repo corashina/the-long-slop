@@ -11,3 +11,5 @@
 /tools/reference/.venv/
 __pycache__/
 /web/assets/library/
+
+/web/assets/runtime/

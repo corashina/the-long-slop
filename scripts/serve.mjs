@@ -69,11 +69,21 @@ createServer(async (request, response) => {
       response.writeHead(404).end('Not found');
       return;
     }
+    const etag = `W/"${file.size.toString(16)}-${file.mtimeMs.toString(16)}"`;
+    const cache = pathname.startsWith('/assets/runtime/') ? 'public, max-age=31536000, immutable' : 'no-cache';
+    const headers = {
+      ETag: etag,
+      'Cache-Control': cache,
+    };
+    if (request.headers['if-none-match']?.split(',').map(value => value.trim()).some(value => value === etag || value === '*')) {
+      response.writeHead(304, headers).end();
+      return;
+    }
     response.writeHead(200, {
+      ...headers,
       'Content-Type': types.get(extname(path)) ?? 'application/octet-stream',
       'Content-Length': file.size,
       'Last-Modified': file.mtime.toUTCString(),
-      'Cache-Control': 'no-store',
     });
     if (request.method === 'HEAD') {
       response.end();

@@ -1,3 +1,4 @@
+import {readPackageAsset,assetReceipt,checkImageSize} from './world-assets.js';
 export function layoutBox(layout,width,height) {
  const c=layout.canvas,[rw,rh]=c.resolution;
  const x=width/rw,y=height/rh;
@@ -22,12 +23,10 @@ export function rgba(c){return 'rgba('+Math.round(c[0]*255)+','+Math.round(c[1]*
 export async function loadUiAssets(ui) {
  const urls=[];
  for(const sprite of ui.sprites){
-  const response=await fetch('./assets/'+sprite.path);if(!response.ok)throw Error('Missing UI sprite '+sprite.role+' ('+sprite.path+')');
-  const bytes=await response.arrayBuffer();const digest=await crypto.subtle.digest('SHA-256',bytes);
-  const hash=Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('');
-  if(hash!==sprite.sha256)throw Error('Invalid UI sprite hash: '+sprite.role);
+  const bytes=await readPackageAsset(sprite.path);
   const url=URL.createObjectURL(new Blob([bytes],{type:'image/png'}));urls.push(url);
   const image=new Image();image.src=url;await image.decode();
+  checkImageSize(assetReceipt(sprite.path),image.naturalWidth,image.naturalHeight);
  }
  await document.fonts.load('16px "Liberation Sans"');
  const tinted=new Map();

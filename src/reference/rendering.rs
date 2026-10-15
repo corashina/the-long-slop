@@ -443,10 +443,10 @@ impl RenderingRecord {
                             && paths.insert(&mip.file)
                             && mip.width > 0
                             && mip.height > 0
-                            && asset
-                                .dependencies
-                                .iter()
-                                .any(|dependency| dependency.file == mip.file),
+                            && asset.dependencies.iter().any(|dependency| {
+                                dependency.file == mip.file
+                                    && dependency.image_size == Some([mip.width, mip.height])
+                            }),
                         &field,
                     )?;
                     if let Some((width, height)) = dimensions {

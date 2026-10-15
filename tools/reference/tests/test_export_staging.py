@@ -8,7 +8,7 @@ from tools.reference.export import derive_reference
 
 class ExportStagingTests(unittest.TestCase):
     def test_failed_export_cleans_only_its_stage(self):
-        for failure in ('export', 'verify', 'promote'):
+        for failure in ('export', 'verify', 'publish', 'promote'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp).resolve()
                 output = root / 'runtime' / 'reference'
@@ -30,8 +30,10 @@ class ExportStagingTests(unittest.TestCase):
                     if failure == 'verify': raise ValueError('injected verify')
                 def promote(*args):
                     raise ValueError('injected promote')
+                def publish(*args):
+                    if failure == 'publish': raise ValueError('injected publish')
                 before = accepted.stat().st_mtime_ns
-                with patch('tools.reference.library.reader.LibraryReader', return_value=reader), patch('tools.reference.source.LibrarySource'), patch('tools.reference.library.storage.check_space'), patch('tools.reference.export._export_selected', side_effect=selected), patch('tools.reference.export.verify_reference', side_effect=verify), patch('tools.reference.export.promote_reference', side_effect=promote):
+                with patch('tools.reference.library.reader.LibraryReader', return_value=reader), patch('tools.reference.source.LibrarySource'), patch('tools.reference.library.storage.check_space'), patch('tools.reference.export._export_selected', side_effect=selected), patch('tools.reference.export.verify_reference', side_effect=verify), patch('tools.reference.export.promote_reference', side_effect=promote), patch('tools.reference.runtime_package.publish_package', side_effect=publish):
                     with self.assertRaisesRegex(ValueError, 'injected '+failure):
                         derive_reference(snapshot, receipt, output)
                 self.assertEqual(accepted.read_bytes(), b'accepted')

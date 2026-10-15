@@ -98,11 +98,14 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
             last_feedback: None,
         })
         .insert_resource(ClearColor(Color::BLACK))
-        .add_plugins(presentation::source_io::SourceIoPlugin)
+        .add_plugins(presentation::source_io::SourceIoPlugin::new(
+            reference.content_base.clone(),
+            Arc::clone(&reference.file_catalog),
+        ))
         .add_plugins(
             DefaultPlugins
                 .set(AssetPlugin {
-                    file_path: "assets".into(),
+                    file_path: reference.content_base.clone(),
                     meta_check: AssetMetaCheck::Never,
                     ..default()
                 })

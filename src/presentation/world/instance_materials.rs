@@ -1,8 +1,6 @@
 //! Generated renderer materials retain source identity and per-instance LOD inputs.
-use super::{
-    pipelines::{PipelineTicket, WorldPipelines},
-    preflight::PlanPrimitive,
-};
+use super::pipelines::{PipelineTicket, WorldPipelines};
+use crate::reference::prototype_plan::PlanPrimitive;
 use crate::{
     presentation::materials::{
         self, RenderingState, SourceMaterial, SourceMaterials,

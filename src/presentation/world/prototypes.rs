@@ -1,12 +1,10 @@
 //! Selected prototype ownership. Reservations precede every accessor or scene allocation.
 use super::{
-    preflight::{
-        PrototypePlan, PrototypePreflight, checked_input_bytes, checked_prototype_staging,
-    },
+    preflight::{SourcePlan, SourcePlanLoader, load_plan},
     prototype_loader::{SourceGltf, SourceGltfLoader, SourceGltfSettings},
 };
 use crate::{
-    reference::{ReferenceError, ReferenceManifest, SourceId},
+    reference::{ReferenceError, ReferenceManifest, SourceId, prototype_plan::PrototypePlan},
     world::WorldStream,
 };
 use bevy::{
@@ -20,7 +18,7 @@ pub struct LoadedPrototype {
 }
 enum State {
     Queued,
-    Preflight(PrototypePreflight),
+    PlanLoading(Handle<SourcePlan>),
     Loading {
         plan: PrototypePlan,
         asset: Handle<SourceGltf>,
@@ -54,6 +52,8 @@ impl Plugin for SourcePrototypePlugin {
     fn build(&self, app: &mut App) {
         app.init_asset::<SourceGltf>()
             .init_asset_loader::<SourceGltfLoader>()
+            .init_asset::<SourcePlan>()
+            .init_asset_loader::<SourcePlanLoader>()
             .init_resource::<SourcePrototypes>();
     }
 }
@@ -77,18 +77,20 @@ impl SourcePrototypes {
     pub fn cancel(&mut self) {
         for e in &mut self.entries {
             e.retired = true;
-            if let State::Preflight(job) = &e.state {
-                job.cancel();
-            }
         }
     }
-    pub fn drain_ready(&mut self, server: &AssetServer, assets: &Assets<SourceGltf>) -> bool {
+    pub fn drain_ready(
+        &mut self,
+        server: &AssetServer,
+        assets: &Assets<SourceGltf>,
+        plans: &Assets<SourcePlan>,
+    ) -> bool {
         for e in &mut self.entries {
             match &mut e.state {
-                State::Preflight(job) => {
-                    if job.take().is_some() {
-                        e.state = State::Queued;
-                    } else {
+                State::PlanLoading(job) => {
+                    if !plans.contains(job.id())
+                        && !matches!(server.load_state(job.id()), LoadState::Failed(_))
+                    {
                         return false;
                     }
                 }
@@ -107,10 +109,14 @@ impl SourcePrototypes {
     pub fn release_all(
         self,
         assets: &mut Assets<SourceGltf>,
+        plans: &mut Assets<SourcePlan>,
         meshes: &mut Assets<Mesh>,
         skins: &mut Assets<SkinnedMeshInverseBindposes>,
     ) {
         for e in self.entries {
+            if let State::PlanLoading(handle) = &e.state {
+                plans.remove(handle.id());
+            }
             let asset = match e.state {
                 State::Ready(loaded) if Arc::strong_count(&loaded) == 1 => {
                     Some(loaded.asset.clone())
@@ -229,9 +235,6 @@ impl SourcePrototypes {
         for entry in &mut self.entries {
             if entry.source == *source {
                 entry.retired = true;
-                if let State::Preflight(job) = &entry.state {
-                    job.cancel();
-                }
             }
         }
     }
@@ -293,9 +296,6 @@ impl SourcePrototypes {
                 continue;
             }
             entry.retired = true;
-            if let State::Preflight(job) = &entry.state {
-                job.cancel();
-            }
         }
     }
     fn account(&mut self, stream: &mut WorldStream) -> Result<(), ReferenceError> {
@@ -323,7 +323,7 @@ impl SourcePrototypes {
         let jobs = self
             .entries
             .iter()
-            .filter(|entry| matches!(entry.state, State::Preflight(_) | State::Loading { .. }))
+            .filter(|entry| matches!(entry.state, State::PlanLoading(_) | State::Loading { .. }))
             .count();
         let pending = self
             .entries
@@ -334,7 +334,7 @@ impl SourcePrototypes {
             .entries
             .iter()
             .map(|entry| match &entry.state {
-                State::Preflight(_) | State::Loading { .. } => entry.staging,
+                State::PlanLoading(_) | State::Loading { .. } => entry.staging,
                 _ => 0,
             })
             .sum::<usize>();
@@ -367,6 +367,7 @@ impl SourcePrototypes {
         reference: &ReferenceManifest,
         server: &AssetServer,
         assets: &mut Assets<SourceGltf>,
+        plans: &mut Assets<SourcePlan>,
         meshes: &mut Assets<Mesh>,
         skins: &mut Assets<SkinnedMeshInverseBindposes>,
     ) -> Result<(), ReferenceError> {
@@ -374,9 +375,6 @@ impl SourcePrototypes {
         for entry in &mut self.entries {
             if entry.session != session {
                 entry.retired = true;
-                if let State::Preflight(job) = &entry.state {
-                    job.cancel();
-                }
             }
         }
         let mut completed = None;
@@ -389,17 +387,26 @@ impl SourcePrototypes {
                         break;
                     }
                 }
-                State::Preflight(job) => {
-                    let Some(result) = job.take() else { continue };
+                State::PlanLoading(job) => {
+                    if let LoadState::Failed(error) = server.load_state(job.id()) {
+                        if entry.retired {
+                            completed = Some(index);
+                            break;
+                        }
+                        entry.retired = true;
+                        return Err(ReferenceError(format!("Source plan: {error}")));
+                    }
+                    let Some(SourcePlan(plan)) = plans.remove(job.id()) else {
+                        continue;
+                    };
                     if entry.retired {
                         completed = Some(index);
                         break;
                     }
-                    // A consumed preflight result cannot keep an unfinished job alive.
+                    // A consumed plan result cannot keep an unfinished job alive.
                     // On any admission error the next update retires this queued entry.
                     entry.state = State::Queued;
                     entry.retired = true;
-                    let plan = result?;
                     let prototype = reference
                         .world
                         .prototypes
@@ -413,6 +420,9 @@ impl SourcePrototypes {
                         .find(|a| a.id == prototype.asset)
                         .ok_or_else(|| ReferenceError("Missing prototype asset".into()))?;
                     let (cpu, gpu) = plan.reservation()?;
+                    let cpu = cpu
+                        .checked_add(plan.retained_bytes())
+                        .ok_or_else(|| ReferenceError("Plan ownership overflow".into()))?;
                     stream.resize_prototype(&entry.source, cpu, gpu)?;
                     entry.cpu = cpu;
                     entry.gpu = gpu;
@@ -425,8 +435,6 @@ impl SourcePrototypes {
                         json_bytes: plan.json_bytes,
                         buffer_bytes: plan.buffer_bytes,
                         mesh_bytes: plan.mesh_bytes,
-                        sha256: record.sha256.clone(),
-                        dependencies: record.dependencies.clone(),
                     };
                     let asset = server
                         .load_builder()
@@ -435,8 +443,6 @@ impl SourcePrototypes {
                                 json_bytes: settings.json_bytes,
                                 buffer_bytes: settings.buffer_bytes,
                                 mesh_bytes: settings.mesh_bytes,
-                                sha256: settings.sha256.clone(),
-                                dependencies: settings.dependencies.clone(),
                             }
                         })
                         .load::<SourceGltf>(record.path.clone());
@@ -561,8 +567,14 @@ impl SourcePrototypes {
                 .iter()
                 .find(|a| a.id == prototype.asset)
                 .ok_or_else(|| ReferenceError("Missing prototype asset".into()))?;
-            let json_bytes = checked_input_bytes(&record.path)?;
-            let staging = checked_prototype_staging(&record.path)?;
+            let input = reference.file_catalog.plan(&record.path)?;
+            let plan_staging = (input.bytes as usize)
+                .checked_mul(2)
+                .ok_or_else(|| ReferenceError("Plan staging overflow".into()))?;
+            let staging = reference
+                .file_catalog
+                .prototype_staging(record)?
+                .max(plan_staging);
             if staging == 0 || staging > 32 * 1024 * 1024 {
                 return Err(ReferenceError(
                     "Prototype input overlap exceeds staging cap".into(),
@@ -571,7 +583,9 @@ impl SourcePrototypes {
             if staging > stream.available_dependency_staging_bytes() {
                 return Ok(());
             }
-            let budget = 18 * json_bytes;
+            let budget = (input.bytes as usize)
+                .checked_mul(18)
+                .ok_or_else(|| ReferenceError("Plan metadata overflow".into()))?;
             if budget > stream.prototype_headroom(&entry.source) {
                 return Err(ReferenceError(
                     "No source prototype metadata admission capacity".into(),
@@ -588,13 +602,13 @@ impl SourcePrototypes {
             self.accounted_jobs += 1;
             self.accounted_staging += staging;
             entry.staging = staging;
-            entry.state = State::Preflight(PrototypePreflight::start(
-                entry.session,
-                entry.request,
-                record.path.clone(),
-                record.sha256.clone(),
+            entry.state = State::PlanLoading(load_plan(
+                server,
+                &reference.file_catalog,
+                &record.path,
                 budget,
-            ));
+                staging,
+            )?);
         }
         Ok(())
     }

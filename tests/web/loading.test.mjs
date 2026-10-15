@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createLoading,formatBudget} from '../../web/loading.js';
-import {admitWorldAssets} from '../../web/world-assets.js';
+import {configureAssetCatalog,readPackageAsset} from '../../web/world-assets.js';
 
 test('loading keeps counts and budgets on failure, then resets for the next load',t=>{
  let now=0;t.mock.method(performance,'now',()=>now);
@@ -36,13 +36,13 @@ test('loading keeps counts and budgets on failure, then resets for the next load
  assert.equal(formatBudget(3,2,'jobs'),'3 / 2');
 });
 
-test('asset progress counts verified files',async t=>{
+test('asset progress counts selected verified bytes',async t=>{
  const bytes=new TextEncoder().encode('{"buffers":[]}');
  const hash=Buffer.from(await crypto.subtle.digest('SHA-256',bytes)).toString('hex');
  t.mock.method(globalThis,'fetch',async()=>new Response(bytes));
  const samples=[];
- await admitWorldAssets({world:{prototypes:[{}]},rendering:{materials:[]},assets:[{
-  id:1,path:'reference/progress.gltf',sha256:hash,usage:'world_prototype',dependencies:[],
- }]},(done,total)=>samples.push([done,total]));
- assert.deepEqual(samples,[[0,1],[1,1]]);
+ configureAssetCatalog('./assets/runtime/progress/',{files:[{file:'reference/progress.gltf',sha256:hash,bytes:bytes.length}],plans:[],dependency_staging_reserve:5242960},record=>samples.push(record));
+ assert.deepEqual(samples,[]);
+ await readPackageAsset('reference/progress.gltf');
+ assert.deepEqual(samples,[{path:'./assets/runtime/progress/reference/progress.gltf',requiredBytes:bytes.length,receivedBytes:bytes.length}]);
 });

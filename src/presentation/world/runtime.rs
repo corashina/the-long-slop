@@ -51,6 +51,7 @@ pub struct WorldPresentation<'w, 's> {
     pub terrain: ResMut<'w, Assets<TerrainMaterial>>,
     pub casters: ResMut<'w, Assets<crate::presentation::materials::lod::SurfaceCasterMaterial>>,
     pub assets: ResMut<'w, Assets<SourceGltf>>,
+    pub plans: ResMut<'w, Assets<super::preflight::SourcePlan>>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub skins: ResMut<'w, Assets<SkinnedMeshInverseBindposes>>,
     pub images: ResMut<'w, Assets<Image>>,
@@ -77,7 +78,7 @@ impl WorldPresentation<'_, '_> {
         enabled: bool,
         light_outputs: &[crate::lighting::LightOutput],
     ) -> Result<(), ReferenceError> {
-        super::preflight::configure_staging(stream)?;
+        super::preflight::configure_staging(stream, &reference.file_catalog)?;
         if self.allocation.session != stream.frame().request.session {
             self.allocation.session = stream.frame().request.session;
             self.allocation.lamps = (0, 0, 0);
@@ -135,6 +136,7 @@ impl WorldPresentation<'_, '_> {
             reference,
             &self.server,
             &mut self.assets,
+            &mut self.plans,
             &mut self.meshes,
             &mut self.skins,
         ) {

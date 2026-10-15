@@ -228,7 +228,8 @@ def export_material_textures(source, owner, record, output):
         for mip in entry['mips']:
             path = output / mip['file'].removeprefix('reference/')
             if not path.is_file(): raise ValueError(f'{record["source"]} {entry["slot"]}: missing {mip["file"]}')
-            dependencies[mip['file']] = {'file': mip['file'], 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+            from .runtime_package import file_receipt
+            dependencies[mip['file']] = file_receipt(path, mip['file'])
     return list(dependencies.values())
 
 

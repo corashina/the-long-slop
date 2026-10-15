@@ -92,7 +92,7 @@ class MirrorRecoveryTests(unittest.TestCase):
             def selected(source,staged,library,selected_snapshot):
                 self.assertEqual(staged.parent,output.parent)
                 (staged/'result').write_bytes(b'new')
-            with patch('tools.reference.library.reader.LibraryReader',return_value=reader), patch('tools.reference.source.LibrarySource'), patch('tools.reference.library.storage.check_space') as space, patch('tools.reference.export._export_selected',side_effect=selected), patch('tools.reference.export.verify_reference'), patch('tools.reference.export.promote_reference') as promote:
+            with patch('tools.reference.library.reader.LibraryReader',return_value=reader), patch('tools.reference.source.LibrarySource'), patch('tools.reference.library.storage.check_space') as space, patch('tools.reference.export._export_selected',side_effect=selected), patch('tools.reference.export.verify_reference'), patch('tools.reference.export.promote_reference') as promote, patch('tools.reference.runtime_package.publish_package'):
                 derive_reference(snapshot,receipt,output)
                 self.assertEqual(space.call_args.args[1],output.parent)
                 self.assertEqual(promote.call_args.args[1],output)
