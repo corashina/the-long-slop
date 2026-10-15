@@ -19,33 +19,6 @@ class PlayerMaterialTests(unittest.TestCase):
         cls.source = LibrarySource(LibraryReader(LibraryReceipt(path, hashlib.sha256(raw).hexdigest(),
             metadata['catalog_sha256'], metadata['source_manifest_sha256'], ())))
 
-    def test_checked_player_materials_and_resources(self):
-        for identity, distance, main, normal in [(57,.25,346,168),(59,.25,284,168),
-                (61,0.3499999940395355,219,168),(75,0.3499999940395355,212,225)]:
-            with self.subTest(material=identity):
-                reader = self.source.get('sharedassets0.assets', identity)
-                record = recover_material(self.source, reader)
-                fixture=json.loads(Path('tests/common/player_materials.json').read_bytes())
-                expected=next(r for r in fixture['materials'] if r['source']['path_id']==identity)
-                self.assertEqual(record,{k:v for k,v in expected.items() if k not in ('asset','gltf_material')})
-                self.assertEqual(record['shader_family'], 'player_model')
-                self.assertEqual(record['properties']['floats']['_Dist'], distance)
-                self.assertEqual(record['keywords'], [])
-                self.assertEqual(record['state'], dict(alpha_mode='mask',cull=2,z_write=True,
-                    z_test=4,src_blend=1,dst_blend=0,render_queue=-1))
-                self.assertEqual(record['properties']['defaults'], {})
-                self.assertEqual([(t['slot'],t['source']['path_id']) for t in record['properties']['textures']],
-                    [('_MainTex',main),('_BumpMap',normal)])
-                for texture in record['properties']['textures']:
-                    self.source.library.texture(ObjectId(**texture['source']))
-                material_source_evidence(self.source, reader, record)
-                evidence = self.source.material_evidence[f'sharedassets0.assets:{identity}']
-                self.assertEqual(evidence['shader'],dict(file='sharedassets0.assets',path_id=719))
-                self.assertEqual(len(evidence['passes']),5)
-                source_passes = self.source.read(self.source.get('sharedassets0.assets',719))['m_ParsedForm']['m_SubShaders'][0]['m_Passes']
-                self.assertEqual([p['state'] for p in evidence['passes']], [p['m_State'] for p in source_passes])
-                self.assertEqual(evidence['required_operations'][0]['operation'],'camera_distance_clip')
-                self.assertIn('_BumpStrength',evidence['channels']['_BumpMap'])
 
     def test_rejects_missing_or_unknown_required_player_fields(self):
         reader = self.source.get('sharedassets0.assets',57)

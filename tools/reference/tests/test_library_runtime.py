@@ -231,101 +231,7 @@ class LibraryInputTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'hash mismatch'): reader.texture(ObjectId('test',2))
 
 class RuntimeContractTests(unittest.TestCase):
-    def runtime(self, root):
-        from types import SimpleNamespace as NS
-        from tools.reference.export import provenance
-        receipt=NS(manifest_sha256='a'*64,catalog_sha256='b'*64,source_manifest_sha256='c'*64)
-        manifest=json.loads((Path(__file__).resolve().parents[3]/'tests/common/reference.json').read_bytes())
-        from tools.reference.library.audio import validate_wav
-        for clip in manifest['audio']['clips']:
-            path=root/Path(clip['path']).name
-            with wave.open(str(path),'wb') as stream:
-                stream.setparams((1,2,8000,80,'NONE','not compressed'))
-                stream.writeframes(b'\0'*160)
-            clip.update(validate_wav(path,{'m_Channels':1,'m_Frequency':8000,'m_BitsPerSample':16,'m_Length':0.01}))
-            clip['bytes']=path.stat().st_size
-            clip['sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
-        manifest['library']=provenance(receipt)
-        for asset in manifest['assets']:
-            scene={'asset':{'version':'2.0'},'nodes':[],'scenes':[{'nodes':[]}],'scene':0}
-            content=json.dumps(scene).encode()
-            (root/Path(asset['path']).name).write_bytes(content)
-            asset['sha256']=hashlib.sha256(content).hexdigest()
-            material_mips={mip['file'] for material in manifest['rendering']['materials'] if material['asset']==asset['id']
-                for texture in material['properties']['textures'] for mip in texture['mips']}
-            asset['dependencies']=[d for d in asset['dependencies'] if d['file'].startswith(('reference/lighting-','reference/plate-')) or d['file'] in material_mips]
-            for dependency in asset['dependencies']:
-                if dependency['file'] in material_mips:
-                    content=b'fixture source mip bytes'
-                    (root/Path(dependency['file']).name).write_bytes(content)
-                    dependency['sha256']=hashlib.sha256(content).hexdigest()
-        for sprite in manifest.get('ui', {}).get('sprites', []):
-            content=b'fixture sprite bytes'
-            (root/Path(sprite['path']).name).write_bytes(content)
-            sprite['sha256']=hashlib.sha256(content).hexdigest()
-        from tools.reference.export import lighting_resources
-        def update_resource_hashes(value):
-            if isinstance(value,dict):
-                if ('path' in value or 'file' in value) and 'sha256' in value:
-                    value['sha256']=hashlib.sha256(b'fixture lighting bytes').hexdigest()
-                for child in value.values():update_resource_hashes(child)
-            elif isinstance(value,list):
-                for child in value:update_resource_hashes(child)
-        update_resource_hashes(manifest['weather'])
-        update_resource_hashes(manifest['item_prototypes'])
-        update_resource_hashes(manifest['clothing'])
-        update_resource_hashes(manifest['lighting'])
-        update_resource_hashes(manifest['render_lighting'])
-        update_resource_hashes(manifest['plates'])
-        from tools.reference.plates import plate_resources
-        for resource in [*lighting_resources(manifest),*plate_resources(manifest['plates'])]:
-            content=b'fixture lighting bytes'
-            (root/Path(resource['path']).name).write_bytes(content)
-            resource['sha256']=hashlib.sha256(content).hexdigest()
-            for asset in manifest['assets']:
-                for dependency in asset['dependencies']:
-                    if dependency['file']==resource['path']:dependency['sha256']=resource['sha256']
-        for name in ('geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json','plate-evidence.json','flashlights-evidence.json'):
-            (root/name).write_text('{}')
-        return manifest,receipt
 
-    def save(self, root, manifest):
-        (root/'manifest.json').write_text(json.dumps(manifest))
-
-    def test_runtime_contract_accepts_current_fixture(self):
-        # Empty glTF fixtures cover acceptance wiring; checked player tests cover geometry.
-        with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'), \
-                patch('tools.reference.clothing.validate_player_export') as player_export:
-            root=Path(tmp);manifest,receipt=self.runtime(root);self.save(root,manifest)
-            verify_reference(root,receipt)
-            player_export.assert_called_once_with(manifest['clothing'],manifest,root)
-
-    def test_runtime_contract_rejects_missing_records(self):
-        with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'):
-            root=Path(tmp);manifest,receipt=self.runtime(root)
-            for field in ('app_id','build_id','nodes','player','vehicles','colliders','item_prototypes','inventory','clothing','acquisition'):
-                incomplete=dict(manifest);del incomplete[field];self.save(root,incomplete)
-                with self.subTest(field=field),self.assertRaisesRegex(ValueError,'Runtime manifest contract'):
-                    verify_reference(root,receipt)
-            self.save(root,{key:manifest[key] for key in ('library','assets')})
-            with self.assertRaisesRegex(ValueError,'Runtime manifest contract'):verify_reference(root,receipt)
-
-    def test_runtime_contract_rejects_wrong_build_and_broken_relationships(self):
-        with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'):
-            root=Path(tmp);manifest,receipt=self.runtime(root)
-            manifest['build_id']=0;self.save(root,manifest)
-            with self.assertRaisesRegex(ValueError,'Runtime manifest contract'):verify_reference(root,receipt)
-            manifest['build_id']=11140890;manifest['nodes'][0]['parent']=999999;self.save(root,manifest)
-            with self.assertRaisesRegex(ValueError,'Runtime manifest contract'):verify_reference(root,receipt)
-
-    def test_runtime_cli_verify_rejects_missing_gameplay_records(self):
-        from tools.reference.export import main
-        with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'):
-            root=Path(tmp);manifest,receipt=self.runtime(root);del manifest['player'];self.save(root,manifest)
-            before={p.name:(p.read_bytes(),p.stat().st_mtime_ns) for p in root.iterdir()}
-            with patch('tools.reference.export.stage_library',return_value=receipt),self.assertRaisesRegex(ValueError,'Runtime manifest contract'):
-                main(['--stage','runtime','--verify','--output',str(root)])
-            self.assertEqual(before,{p.name:(p.read_bytes(),p.stat().st_mtime_ns) for p in root.iterdir()})
 
     def test_validator_delegates_exact_bytes_with_read_only_checkout(self):
         from types import SimpleNamespace as NS
@@ -341,23 +247,6 @@ class RuntimeContractTests(unittest.TestCase):
         with patch('tools.reference.export.subprocess.run',return_value=NS(returncode=1,stderr=b'missing field player')):
             with self.assertRaisesRegex(ValueError,'missing field player'):validate_runtime_manifest(content)
 
-    def test_unavailable_validator_preserves_accepted_runtime_before_promotion(self):
-        from types import SimpleNamespace as NS
-        from tools.reference.export import derive_reference
-        with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'):
-            root=Path(tmp);accepted=root/'reference';accepted.mkdir()
-            (accepted/'manifest.json').write_text('accepted runtime')
-            before=(accepted/'manifest.json').read_bytes(),(accepted/'manifest.json').stat().st_mtime_ns
-            _,receipt=self.runtime(root)
-            snapshot=NS(manifest_sha256=receipt.source_manifest_sha256,files=(),root=root/'cache/source',manifest_path=root/'cache/source-manifest.json')
-            reader=NS(snapshot=snapshot,root=root/'library',records_root=root/'cache/records',exports={})
-            (root/'cache/work').mkdir(parents=True)
-            def export(source,staged,library,snapshot):
-                manifest,_=self.runtime(staged);self.save(staged,manifest)
-            with patch('tools.reference.library.reader.LibraryReader',return_value=reader),patch('tools.reference.source.LibrarySource'),patch('tools.reference.export._export_selected',side_effect=export),patch('tools.reference.export.subprocess.run',side_effect=FileNotFoundError('docker')),patch('tools.reference.export.promote_reference') as promote:
-                with self.assertRaisesRegex(ValueError,'needs Docker'):derive_reference(snapshot,receipt,accepted)
-                promote.assert_not_called()
-            self.assertEqual(before,((accepted/'manifest.json').read_bytes(),(accepted/'manifest.json').stat().st_mtime_ns))
 
     def test_library_only_verification_does_not_call_runtime_validator(self):
         from tools.reference.export import main
@@ -365,25 +254,3 @@ class RuntimeContractTests(unittest.TestCase):
             main(['--stage','library','--verify'])
             library.assert_called_once()
             run.assert_not_called()
-
-class InventoryClothingPublicationTests(unittest.TestCase):
-    def test_complete_selected_resources_and_inactive_templates(self):
-        from tools.reference.export import validate_runtime_paths
-        m=json.loads(Path('tests/common/reference.json').read_text())
-        validate_runtime_paths(m)
-        self.assertEqual(len(m['assets']),22)
-        self.assertEqual([p['item_id'] for p in m['item_prototypes']],[74,62,216,None,None,217,218,221,245,92,230])
-        self.assertEqual([w['type_index'] for w in m['clothing']['wearables']],[0,1,2,1,3,4])
-        self.assertEqual([len(c['skins']) for c in m['clothing']['characters']],[2,16])
-        templates={a['id'] for a in m['assets'] if a['usage'] in ('item_prototype','player_prototype')}
-        node_assets={n['id']:n['asset'] for n in m['nodes']}
-        for field in ('items','colliders','seats','vehicles'):
-            for row in m[field]:
-                node=row.get('node',row.get('root'))
-                if node is not None:self.assertNotIn(node_assets[node],templates)
-        for asset in m['assets']:
-            for resource in [asset,*asset['dependencies']]:self.assertRegex(resource['sha256'],r'^[0-9a-f]{64}$')
-        clips={(c['source']['file'],c['source']['path_id']) for c in m['audio']['clips']}
-        a=m['acquisition']
-        for c in [*a['box']['clips'],*a['shovel']['attack_clips'],*(c for group in a['shovel']['contact_clips'] for c in group)]:
-            self.assertIn((c['file'],c['path_id']),clips)

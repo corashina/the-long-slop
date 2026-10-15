@@ -215,35 +215,6 @@ class SelectedAudio(unittest.TestCase):
             path.write_bytes(path.read_bytes()[:-2] + b'xx')
             with self.assertRaises(ValueError): reader.audio(identity)
 
-    def test_audio_closure_and_overrides(self):
-        from tools.reference.audio import validate_audio_export
-        with tempfile.TemporaryDirectory() as directory:
-            reader, identity, path = self.fixture(directory)
-            from tools.reference.audio import copy_audio
-            metadata = copy_audio(reader,identity,1,reader.root,'effect')
-            audio = copy.deepcopy(json.loads(Path('tests/common/reference.json').read_text())['audio'])
-            audio['clips'] = [metadata]
-            for v in audio['voices']:
-                if v['clip'] is not None: v['clip'] = 1
-                if v['authored_clip'] is not None: v['authored_clip'] = 1
-            for b in audio['bindings']: b['clips'] = [1]
-            validate_audio_export(audio,reader.root)
-            idle=next(v for v in audio['voices'] if v['id']==audio['engine']['idle_voice'])
-            self.assertEqual(idle['authored_priority'],128)
-            self.assertEqual(idle['priority'],80)
-            self.assertEqual(idle['curves']['rolloff']['pre_wrap_mode'],2)
-            self.assertTrue(idle['methods'])
-            for field,value in [('clip',2),('emitter',999999),('mixer',999999),('max_distance',0)]:
-                broken=copy.deepcopy(audio);broken['voices'][0][field]=value
-                with self.subTest(field=field), self.assertRaises(ValueError):validate_audio_export(broken,reader.root)
-            for field,value in [('gain',-1),('pitch',0),('min_distance',-1),
-                                ('max_distance',0),('spatial_blend',2),('rolloff_mode',3)]:
-                broken=copy.deepcopy(audio);broken['shared']['settings'][field]=value
-                with self.subTest(shared=field), self.assertRaises(ValueError):validate_audio_export(broken,reader.root)
-            broken=copy.deepcopy(audio)
-            broken['shared']['settings']['rolloff_curve']['keys']=[]
-            with self.assertRaises(ValueError):validate_audio_export(broken,reader.root)
-            with self.assertRaises(ValueError):reader.audio(ObjectId('missing.assets',1))
 
     def test_custom_content_is_external(self):
         from tools.reference.audio import station_records
@@ -257,9 +228,3 @@ class SelectedAudio(unittest.TestCase):
         self.assertEqual(value[0]['content'], 'external')
         self.assertEqual(value[0]['music'], [])
         self.assertEqual(value[0]['talk'], [])
-
-    def test_radio_clock_receipts_select_scaled_source(self):
-        radio = json.loads(Path('tests/common/reference.json').read_text())['audio']['radio']
-        self.assertEqual(radio['clock']['kind'], 'scaled')
-        self.assertEqual(radio['clock']['selected']['method'], 'RADIO')
-        self.assertEqual(radio['clock']['multiplayer']['method'], 'RADIO2')

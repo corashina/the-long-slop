@@ -191,6 +191,8 @@ def verify_reference(output: Path, library) -> None:
         raise ValueError('Missing or mismatched runtime library provenance')
     if manifest['library']['schema_version'] != 1 or any(not re.fullmatch('[0-9a-f]{64}', manifest['library'][k]) for k in ('manifest_sha256','catalog_sha256','source_manifest_sha256')):
         raise ValueError('Unsupported runtime provenance')
+    from .acquisition import validate_acquisition
+    validate_acquisition(manifest['acquisition'], manifest)
     validate_runtime_manifest(content)
     validate_runtime_paths(manifest)
     names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json','plate-evidence.json','flashlights-evidence.json'}

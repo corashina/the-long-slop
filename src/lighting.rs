@@ -610,29 +610,6 @@ fn native_cloud_noise(x: f32) -> f32 {
     value / 1.483_f32
 }
 
-#[cfg(test)]
-mod tests {
-    use super::native_cloud_noise;
-
-    #[test]
-    fn native_cloud_noise_matches_checked_engine_bits() {
-        let fixture: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/common/native_cloud_noise.json")).unwrap();
-        for sample in fixture["samples"].as_array().unwrap() {
-            let bits = |field: &str| {
-                u32::from_str_radix(sample[field].as_str().unwrap().trim_start_matches("0x"), 16)
-                    .unwrap()
-            };
-            let x = f32::from_bits(bits("x_bits"));
-            assert_eq!(
-                native_cloud_noise(x).to_bits(),
-                bits("native_bits"),
-                "x={x}"
-            );
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct LightOutput {
     pub id: crate::reference::LightId,

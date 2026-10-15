@@ -1,5 +1,27 @@
 # Verification record
 
+## Inventory branch simplification: 2026-10-15
+
+Feature work remains paused. Task 2 edits are saved under ignored `.cache/inventory-clothing/simplification-backup`.
+Tasks 3-10 remain stopped. The working files use the accepted Task 1 gameplay baseline.
+
+This cleanup removes committed test fixtures and tests that depend on them.
+Older test commands and browser fixture links below describe historical checks.
+Use `scripts/check.ps1` for the remaining small tests and release compilation.
+Use the runtime exporter verifier for source agreement and asset integrity.
+Check gameplay, save/load, and mirrors in the browser after runtime changes.
+
+The exporter checks one acquisition checksum instead of duplicate expected-data tables.
+Rust retains typed structure, graph, weight, and reference checks.
+The real export retains all source values, geometry, and motion tracks.
+Only descriptive acquisition flow records leave the runtime manifest.
+
+Formatting, 13 native checks, 39 source/export checks, and 97 browser JavaScript checks passed.
+The release build and installed export verification passed.
+Headless Chrome passed Ready, walking, save/load, and live mirror checks.
+These checks do not prove matched native-game parity.
+
+
 ## Rendering merge: 2026-10-12
 
 The user authorized a local merge of rendering commit `67798ec` into master `a5b9778`.
@@ -822,21 +844,21 @@ No independent-review Minor findings remain deferred.
 
 Master `5d4cc16` integrates interaction worktree commit `c2d0fe6`.
 The merge keeps source menus, feedback, instruments, mechanisms, parts, carry, push, grip, and throw.
-Source `fpscontroller.MountFunc` lines 5544�5557 install on F release.
+Source `fpscontroller.MountFunc` lines 5544Ã¯Â¿Â½5557 install on F release.
 Its callers at lines 3396 and 4325 require charge below the throw minimum.
 Charged release over a valid slot throws. Blocked installation keeps the held part and clears charge.
 Target names and source fluid labels use separate fields.
 Wheel compatibility and occupancy share one rule for selection, feedback, and execution.
 
 Headlight state now drives the high-beam indicator and odometer illumination.
-Source evidence: `carscript.cs` lines 1197�1208, 2437�2445, and 2559�2584, plus `forgoszamlap.TurnOn/TurnOff`.
+Source evidence: `carscript.cs` lines 1197Ã¯Â¿Â½1208, 2437Ã¯Â¿Â½2445, and 2559Ã¯Â¿Â½2584, plus `forgoszamlap.TurnOn/TurnOff`.
 Digit material handles remain cached.
 
 Fresh checks passed: 157 native tests, 31 installed-source tests, 20 browser unit tests, and 19 exporter tests.
 Formatting, the release WASM build, and browser package generation passed.
 The combined export contains 417 colliders and 127 items.
 
-An isolated Linux Chromium 151.0.7922.34 check passed at 960 � 540.
+An isolated Linux Chromium 151.0.7922.34 check passed at 960 Ã¯Â¿Â½ 540.
 Start enabled after 6 seconds. A trusted click captured the mouse. Physics advanced at least 12 steps.
 Escape paused play and released capture. The browser and internal server then closed.
 No page errors or gameplay asset HTTP errors occurred. The console recorded one 404 for the excluded favicon request.

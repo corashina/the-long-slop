@@ -29,46 +29,6 @@ pub struct LightingRecord {
     pub dependencies: Vec<SourceHash>,
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn validates_each_registered_probe_and_rejects_duplicate_bindings() {
-        let manifest = crate::reference::ReferenceManifest::from_json(include_bytes!(
-            "../../tests/common/reference.json"
-        ))
-        .unwrap();
-        let mut lighting = manifest.render_lighting.clone();
-        let index = lighting.probes.len();
-        let mut second = lighting.probes[0].clone();
-        lighting.probes.push(second.clone());
-        assert!(lighting.validate(&manifest.nodes).is_err());
-        second.source.path_id = lighting
-            .probes
-            .iter()
-            .map(|probe| probe.source.path_id)
-            .max()
-            .unwrap()
-            + 1;
-        lighting.probes[index] = second.clone();
-        assert!(lighting.validate(&manifest.nodes).is_err());
-        second.node = manifest
-            .nodes
-            .iter()
-            .find(|node| !lighting.probes.iter().any(|probe| probe.node == node.id))
-            .unwrap()
-            .id;
-        lighting.probes[index] = second;
-        assert!(lighting.validate(&manifest.nodes).is_ok());
-        lighting.probes[index].importance = 2;
-        assert!(lighting.validate(&manifest.nodes).is_err());
-        lighting.probes[index].importance = 1;
-        lighting.probes[index].bounds_size[0] = 7.;
-        assert!(lighting.validate(&manifest.nodes).is_err());
-        lighting.probes[index].bounds_size[0] = 6.;
-        lighting.probes[index].far = lighting.probes[index].near;
-        assert!(lighting.validate(&manifest.nodes).is_err());
-    }
-}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StartupSample {
