@@ -1,5 +1,6 @@
 //! Rigid motion reuses each prepared opaque instance and its original draw ID.
 use super::{
+    lighting::ExtractedLighting,
     lighting_scene::SourceWorldOrigin,
     materials::{MaterialLoading, RenderingState},
     motion_vectors::{MotionMode, MotionModelHistory, MotionObjectParams, SourceMotionPass},
@@ -657,6 +658,7 @@ impl<P: CachedRenderPipelinePhaseItem> RenderCommand<P> for SelectMotion {
         SRes<PipelineCache>,
         SRes<MotionObjects>,
         SRes<RenderAssets<RenderMesh>>,
+        SRes<ExtractedLighting>,
     );
     type ViewQuery = &'static MotionDrawView;
     type ItemQuery = ();
@@ -664,11 +666,15 @@ impl<P: CachedRenderPipelinePhaseItem> RenderCommand<P> for SelectMotion {
         item: &P,
         view: ROQueryItem<'w, '_, Self::ViewQuery>,
         _: Option<()>,
-        (pipelines, cache, objects, meshes): SystemParamItem<'w, '_, Self::Param>,
+        (pipelines, cache, objects, meshes, lighting): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let objects = objects.into_inner();
         let Some(object) = objects.get(item.main_entity().id()) else {
+            // Material warmups draw in the main view but have no motion model.
+            if lighting.warming() {
+                return RenderCommandResult::Skip;
+            }
             return RenderCommandResult::Failure("Source motion object is missing");
         };
         if !object.eligible || object.frame != objects.frame {
@@ -807,6 +813,7 @@ pub(crate) fn split_draw<'w, P: MotionBatchItem>(
         .ok_or(DrawError::InvalidViewQuery)?;
     let keys = item.keys();
     let objects = world.resource::<MotionObjects>();
+    let warming = world.resource::<ExtractedLighting>().warming();
     if let Some(bin) = phase.batchable_meshes.get(&keys) {
         let start = bin.entities().get_index_of(&item.main_entity()).ok_or(
             DrawError::RenderCommandFailure("Source motion batch representative is missing"),
@@ -819,11 +826,15 @@ pub(crate) fn split_draw<'w, P: MotionBatchItem>(
             if instances.mesh_asset_id(*main).is_none() {
                 continue;
             }
-            let object = objects
-                .get(main.id())
-                .ok_or(DrawError::RenderCommandFailure(
+            let Some(object) = objects.get(main.id()) else {
+                if warming {
+                    slot += 1;
+                    continue;
+                }
+                return Err(DrawError::RenderCommandFailure(
                     "Source motion batch model is missing",
-                ))?;
+                ));
+            };
             if object.eligible && object.frame == objects.frame {
                 let single = P::new(
                     keys.0.clone(),

@@ -265,6 +265,9 @@ impl ExtractedLighting {
     pub(crate) fn is_warmup(&self, entity: bevy::render::sync_world::MainEntity) -> bool {
         self.warming && self.warmups.iter().any(|(warmup, _)| *warmup == entity)
     }
+    pub(crate) fn warming(&self) -> bool {
+        self.warming
+    }
 }
 
 pub struct SourceLightingPlugin;
@@ -913,7 +916,8 @@ pub(crate) fn sync_lighting(
         }
         pose.set_if_neq(next_pose);
         global.set_if_neq(GlobalTransform::from(next_pose));
-        let enabled = active && (source.warming || output.enabled);
+        // Warmup needs every shadow view, including lights on bodies that are not active yet.
+        let enabled = source.warming || (active && output.enabled);
         if marker.enabled != enabled {
             marker.enabled = enabled;
         }

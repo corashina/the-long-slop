@@ -624,11 +624,16 @@ fn sync_world(
         },
     };
     let inverse_clip = (projection.get_clip_from_view() * camera_world.inverse()).inverse();
+    // Reverse-Z clip depth of the far plane. Lights past it cannot reach visible surfaces.
+    let far_depth = match projection {
+        Projection::Perspective(p) => p.near / p.far,
+        _ => 0.,
+    };
     let mut min = Vec3::splat(f32::MAX);
     let mut max = Vec3::splat(f32::MIN);
     for x in [-1., 1.] {
         for y in [-1., 1.] {
-            for z in [0.00001, 1.] {
+            for z in [far_depth, 1.] {
                 let point = inverse_clip.project_point3(Vec3::new(x, y, z));
                 min = min.min(point);
                 max = max.max(point);
