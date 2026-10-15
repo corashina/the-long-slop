@@ -19,6 +19,7 @@ const MAX_ROADS: usize = 512;
 const MAX_NEAR: usize = 512;
 const MAX_DISTANT: usize = 256;
 const MAX_OBJECTS: usize = 8192;
+const MAX_PENDING: usize = 32;
 const ACTIVE_CPU: usize = 128 * MIB;
 const ACTIVE_GPU: usize = 128 * MIB;
 const PROTOTYPE_CPU: usize = 256 * MIB;
@@ -654,7 +655,7 @@ impl WorldStream {
             ResourceBudget {
                 name: "Pending work",
                 used: pending,
-                limit: 32,
+                limit: MAX_PENDING,
                 unit: "requests",
             },
             ResourceBudget {
@@ -743,6 +744,22 @@ impl WorldStream {
         self.set_presentation_allocation(allocation)?;
         self.dependency_metadata = metadata;
         Ok(())
+    }
+    fn pending_work(&self) -> usize {
+        self.replay_roots
+            .len()
+            .max(usize::from(self.contents.has_replay()))
+            + self.contents.pending_requests()
+            + self.props.pending_requests()
+            + self.ready_structures.len()
+            + usize::from(self.ready.is_some())
+            + usize::from(self.terrain_work.is_some())
+            + self.presentation.pending
+            + self.overlap.pending_work
+    }
+    /// Presentation callers check this before they add pending work. A full queue waits.
+    pub fn pending_room(&self) -> bool {
+        self.pending_work() < MAX_PENDING
     }
     pub fn available_external_jobs(&self) -> usize {
         if !self.indices_ready {
@@ -1085,7 +1102,7 @@ impl WorldStream {
     }
     fn prepare_prop_layer(&mut self) {
         let budget = self.props.allocation_bound();
-        let can_request = self.metrics().pending_work < 32 && self.admit_generation(budget);
+        let can_request = self.pending_room() && self.admit_generation(budget);
         if self.failure.is_some() {
             return;
         }
@@ -1168,7 +1185,7 @@ impl WorldStream {
         self.contents
             .retain_requests(&self.wanted_structures, &self.replay_roots);
         let metrics = self.metrics();
-        let limit = 32usize
+        let limit = MAX_PENDING
             .saturating_sub(metrics.pending_work)
             .min(MAX_OBJECTS.saturating_sub(metrics.generated_objects));
         if limit == 0 {
@@ -1362,7 +1379,7 @@ impl WorldStream {
         });
         // Selected keys are not work requests. Admit one caller at a time and
         // leave capacity for its first phase. Retry admission even with cached bounds.
-        if !self.replay_roots.is_empty() || self.metrics().pending_work >= 31 {
+        if !self.replay_roots.is_empty() || self.pending_work() >= MAX_PENDING - 1 {
             return;
         }
         for key in &self.replay_keys {
@@ -2860,16 +2877,7 @@ impl WorldStream {
                 + usize::from(self.terrain_work.is_some())
                 + usize::from(self.contents.has_replay()),
             pending_bytes: self.presentation.staging_bytes + self.generation_pending_bytes(),
-            pending_work: self
-                .replay_roots
-                .len()
-                .max(usize::from(self.contents.has_replay()))
-                + self.contents.pending_requests()
-                + self.props.pending_requests()
-                + self.ready_structures.len()
-                + usize::from(self.ready.is_some())
-                + usize::from(self.terrain_work.is_some())
-                + self.presentation.pending,
+            pending_work: self.pending_work(),
             spawn_parents: self.contents.state.parent_count(),
             spawn_boundaries: self.contents.state.boundary_count(),
             spawn_boundary_bytes: self.contents.state.retained_bytes(),
@@ -3061,7 +3069,6 @@ impl WorldStream {
         metrics.prototype_cpu_bytes += self.overlap.prototype_cpu_bytes;
         metrics.prototype_gpu_bytes += self.overlap.prototype_gpu_bytes;
         metrics.pending_bytes += self.overlap.pending_bytes;
-        metrics.pending_work += self.overlap.pending_work;
         metrics.generation_jobs += self.overlap.generation_jobs;
         metrics.generated_objects += self.overlap.generated_objects;
         metrics.checkpoint_bytes += self.overlap.checkpoint_bytes;

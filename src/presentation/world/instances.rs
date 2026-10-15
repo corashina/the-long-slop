@@ -147,11 +147,7 @@ impl SourceInstances {
         }
         // Full pending ownership must drain through publication before another instance starts.
         // Continue polling existing renderer work below, including its readiness transfer.
-        if let Some(placement) = self
-            .pending
-            .as_ref()
-            .filter(|_| stream.metrics().pending_work < 32)
-        {
+        if let Some(placement) = self.pending.as_ref().filter(|_| stream.pending_room()) {
             let prototype = reference
                 .world
                 .prototypes
