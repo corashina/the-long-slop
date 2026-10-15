@@ -834,6 +834,7 @@ fn make_material(
                 ShaderFamily::UnlitColor => 1,
                 ShaderFamily::StainedGlass => 2,
                 ShaderFamily::AmplifyRope => unreachable!("rope uses its master surface"),
+                ShaderFamily::PlayerModel => unreachable!("inactive player material"),
             },
             factor("_UVSec", 0.) as u32,
         ),
@@ -891,6 +892,9 @@ fn make_material(
             }
         }
     }
+    record
+        .validate_active_use()
+        .expect("validated active material usage");
     let alpha_mode = match record.state.alpha_mode {
         source::AlphaMode::Opaque => AlphaMode::Opaque,
         source::AlphaMode::Mask => AlphaMode::Mask(data.factors.w),

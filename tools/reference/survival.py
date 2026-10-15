@@ -26,7 +26,7 @@ def managed_evidence(source, assertions):
     content=(root/'Assembly-CSharp.cs').read_bytes()
     if len(content)!=receipt['output']['bytes'] or hashlib.sha256(content).hexdigest()!=receipt['output']['sha256']:
         raise ValueError('Managed output hash mismatch')
-    code=content.decode('utf-8-sig')
+    code=content.decode('utf-8-sig').replace('\r\n','\n')
     for text in assertions:
         if text not in code: raise ValueError(f'Required managed source assertion absent: {text}')
     return {'assembly_sha256':receipt['input']['sha256'], 'methods':assertions}
@@ -213,3 +213,109 @@ def validate_clock_export(manifest: dict, library) -> None:
         'starSpeed * Time.fixedDeltaTime + tekerve',
         'currentTempM = Mathf.Lerp(0f, outsideTempM, Mathf.InverseLerp(napszak.tempNights[0], napszak.tempDays[0] + napszak.tempAddNoons[0], napszak.temp));',
     ])
+
+CIGARETTE_METHODS=[
+    'public void UpdParts(bool _updMulti)\n\t{\n\t\tif (continous)\n\t\t{\n\t\t\tfor (int i = 0; i < parts.Length; i++)\n\t\t\t{\n\t\t\t\tparts[i].transform.position = Vector3.Lerp(end[i].position, start[i].position, hp);\n\t\t\t\tparts[i].transform.rotation = Quaternion.Lerp(end[i].rotation, start[i].rotation, hp);\n\t\t\t\tparts[i].transform.localScale = Vector3.Lerp(end[i].localScale, start[i].localScale, hp);\n\t\t\t}\n\t\t}\n\t\telse if (moreParts)',
+    'if (!ateOnce)\n\t\t{\n\t\t\thp = 1f;',
+    'float num = ((!auto) ? (eatSpeed * Time.deltaTime) : (autoEatSpeed * Time.deltaTime));',
+    'hp = Mathf.Clamp(hp - num, 0f, 1f);',
+    'if (ember != null && (!auto || emberInAuto))',
+    'if (hp <= 0f)\n\t\t\t\t{\n\t\t\t\t\tember.End();',
+    'parts[i].transform.position = Vector3.Lerp(end[i].position, start[i].position, hp);',
+    'Eat(out var _, out var _, out var _, _playSound: true, auto: true);',
+    'survival.Eat(weared[i].edible.Eat(out tempShitValue, out tempHpValue, out tempWaterValue, _playSound: true), tempShitValue, tempHpValue, tempWaterValue);',
+    'if (!(weared[num3] == null) && weared[num3].edible != null)\n\t\t\t\t{\n\t\t\t\t\tTakeOff(num3);',
+]
+
+
+def recover_cigarette(source,root,manifest,output):
+    from tempfile import TemporaryDirectory
+    from .weather import particle
+    from .gltf import converted_transform
+    from .lighting import rgba
+    reader=component(source,root,'ediblescript');d=source.read(reader)
+    nodes={(n['source']['file'],n['source']['path_id']):n['id'] for n in manifest['nodes']}
+    def node(reader):
+        if reader.type.name=='GameObject':reader=source.transform_for(reader)
+        elif reader.type.name!='Transform':reader=source.transform_for(source.resolve(reader,source.read(reader)['m_GameObject']))
+        return nodes[key(reader)]
+    def link(owner,field):return source.resolve(owner,source.read(owner)[field])
+    ember=link(reader,'ember');e=source.read(ember);light=link(ember,'feny');ld=source.read(light);shadow=ld['m_Shadows']
+    emitter=link(ember,'ps');pd=source.read(emitter);render=component(source,source.transform_for(source.resolve(emitter,pd['m_GameObject'])),'ParticleSystemRenderer')
+    source.lighting_textures=getattr(source,'lighting_textures',{(t['source']['file'],t['source']['path_id']):t for t in manifest['lighting']['textures']})
+    if output is None:
+        with TemporaryDirectory(prefix='checked-cigarette-') as temp:p=particle(source,emitter,'cigarette',e['startParticle'],Path(temp),root)
+    else:p=particle(source,emitter,'cigarette',e['startParticle'],output,root)
+    light_transform=source.transform_for(source.resolve(light,ld['m_GameObject']))
+    if ld['m_Cookie']['m_PathID']:raise ValueError('Unaudited cigarette light cookie')
+    l={'id':1,'source':source_id(light),'node':node(light),'pose':converted_transform(source.read(light_transform)),
+        'kind':{0:'spot',1:'directional',2:'point',3:'area'}[ld['m_Type']],'color':rgba(ld['m_Color']),
+        'serialized_intensity':ld['m_Intensity'],'startup_intensity':e['startLightIntensity'],'range_meters':ld['m_Range'],
+        'full_cone_degrees':ld['m_SpotAngle'],'inner_cone_degrees':ld['m_InnerSpotAngle'],'enabled':bool(ld['m_Enabled']),
+        'culling_mask':ld['m_CullingMask']['m_Bits'],'shadows':{'kind':shadow['m_Type'],'strength':shadow['m_Strength'],
+        'bias':shadow['m_Bias'],'normal_bias':shadow['m_NormalBias'],'near_plane':shadow['m_NearPlane'],'resolution':shadow['m_Resolution'],'custom_resolution':shadow['m_CustomResolution']},'cookie':None,'cookie_size':ld['m_CookieSize']}
+    result={'source':source_id(reader),'continuous':bool(d['continous']),'automatic':bool(d['continousAuto']),
+        'destroy_on_end':bool(d['destroyOnEnd']),'ate_once':bool(d['ateOnce']),'serialized_hp':d['hp'],'startup_hp':d['hp'] if d['ateOnce'] else 1.,
+        'eat_speed':d['eatSpeed'],'auto_eat_speed':d['autoEatSpeed'],'effect':dict(food=d['foodValue'],water=d['waterValue'],bowel=d['shitValue'],hp=d['hpValue']),
+        'parts':[node(source.resolve(reader,v)) for v in d['parts']], 'start':[node(source.resolve(reader,v)) for v in d['start']], 'end':[node(source.resolve(reader,v)) for v in d['end']],
+        'index':d['index'],'is_smoke':bool(d['isSmoke']),'has_particle':bool(d['hasParticle']),'particle_position':node(link(reader,'particlePos')),
+        'particle_type':d['particleType'],'min_particle':d['minParticle'],'max_particle':d['maxParticle'],'sound':d['sound'],'text':d['text'],
+        'dont_show_stats':bool(d['dontShowStats']),'ember_in_auto':bool(d['emberInAuto']),
+        'ember':{'source':source_id(ember),'renderer':node(link(ember,'r')),'renderer_source':source_id(link(ember,'r')),
+            'material':source_id(link(ember,'material')),'light':l,'particle':p,'particle_node':node(emitter),'particle_renderer':source_id(render),
+            'colors':[rgba(e[k+'C']) for k in ('start','min','max','end')],
+            'light_intensities':[e[k+'LightIntensity'] for k in ('start','min','max','end')],
+            'particle_rates':[e[k+'Particle'] for k in ('start','min','max','end')],'speed_up':e['speedUp'],'speed_down':e['speedDown'],'lerp':e['lerp']},
+        'evidence':managed_evidence(source,CIGARETTE_METHODS)}
+    return result
+
+
+def validate_cigarette(c,p,m):
+    from .validation import record,array,number,u32,i32,boolean,string,source
+    from .weather import validate_particle_data
+    from .lighting import validate_light_payload
+    def effect(v):record(v,dict.fromkeys(('food','water','bowel','hp'),number))
+    def evidence(v):record(v,{'assembly_sha256':string,'methods':array(string)})
+    def ember(v):
+        record(v,{'source':source,'renderer':u32,'renderer_source':source,'material':source,
+                  'light':validate_light_payload,'particle':lambda p:validate_particle_data(p,1),'particle_node':u32,
+                  'particle_renderer':source,'colors':array(array(number,4),4),'light_intensities':array(number,4),
+                  'particle_rates':array(number,4),'speed_up':number,'speed_down':number,'lerp':number})
+    record(c,{'source':source,**dict.fromkeys(('continuous','automatic','destroy_on_end','ate_once','is_smoke','has_particle','dont_show_stats','ember_in_auto'),boolean),
+              **dict.fromkeys(('serialized_hp','startup_hp','eat_speed','auto_eat_speed'),number),
+              **dict.fromkeys(('index','particle_position','particle_type','sound','text'),u32),
+              'min_particle':i32,'max_particle':i32,'effect':effect,'parts':array(u32),'start':array(u32),'end':array(u32),
+              'ember':ember,'evidence':evidence})
+    finite_record(c);sid=lambda i:{'file':'sharedassets1.assets','path_id':i}
+    nodes={n['id']:n for n in m['nodes'] if n['asset']==p['asset']}
+    if c['source']!=sid(134642) or not c['continuous'] or not c['automatic'] or c['destroy_on_end'] or c['ate_once'] or c['serialized_hp']!=0 or c['startup_hp']!=1 or c['min_particle']!=-100 or c['max_particle']!=1 or c['ember_in_auto']:raise ValueError('Cigarette source consumption')
+    for field,expected in [('parts',[78874,87786]),('start',[73923,74031]),('end',[50758,78154])]:
+        if [nodes.get(n,{}).get('source') for n in c[field]]!=[sid(i) for i in expected]:raise ValueError('Cigarette part links')
+    if nodes.get(c['particle_position'],{}).get('source')!=sid(84276):raise ValueError('Cigarette particle position')
+    if any(c[k]!=v for k,v in {'eat_speed': 0.019999999552965164, 'auto_eat_speed': 0.0020833334419876337, 'index': 0, 'is_smoke': 1, 'has_particle': 1, 'particle_type': 3, 'sound': 0, 'text': 324, 'dont_show_stats': 0}.items()) or c['effect']!={'food': -0.00019999999494757503, 'water': -0.00019999999494757503, 'bowel': 0.00019999999494757503, 'hp': 0.0}:raise ValueError('Cigarette exact rates and flags')
+    e=c['ember']
+    if e['source']!=sid(156940) or e['renderer_source']!=sid(94155) or e['material']!=sid(460) or not any(r['node']==e['renderer'] and r['source']==e['renderer_source'] for r in p['renderers']):raise ValueError('Cigarette ember renderer')
+    if not any(r['asset']==p['asset'] and r['source']==e['material'] for r in m['rendering']['materials']):raise ValueError('Cigarette ember material')
+    if e['light']['source']!=sid(123875) or nodes.get(e['light']['node'],{}).get('source')!=sid(85874) or e['light']['startup_intensity']!=0 or e['light']['kind']!='point':raise ValueError('Cigarette local light')
+    if e['light_intensities']!=[0.,0.10000000149011612,0.25,0.] or e['particle_rates']!=[0.,100.,0.,0.] or e['speed_up']!=1 or e['speed_down']!=1 or e['lerp']!=0:raise ValueError('Cigarette ember source rates')
+    particle=e['particle']
+    if particle['source']!=sid(128014) or e['particle_renderer']!=sid(128908) or nodes.get(e['particle_node'],{}).get('source')!=sid(87786) or particle['simulation_space']!=1 or particle['role']!='cigarette':raise ValueError('Cigarette local particles')
+    if particle['module_flags']!=CIGARETTE_PARTICLE_MODULES:raise ValueError('Cigarette source particle modules')
+    if particle['materials'][0]['source']!=sid(60) or particle['materials'][0]['shader']['name']!='Legacy Shaders/Particles/Alpha Blended':raise ValueError('Cigarette particle material')
+    if any(sorted(particle[k])!=v for k,v in CIGARETTE_PARTICLE_KEYS.items()) or particle['flags']!=CIGARETTE_PARTICLE_FLAGS or particle['links']!={'m_GameObject':sid(37823)}:raise ValueError('Cigarette required particle data')
+    if any(particle['scalars'][k]!=v for k,v in CIGARETTE_PARTICLE_OPERATIONS.items()):raise ValueError('Cigarette source particle operation')
+    if any(c[k][w]!=2 for c in particle['curves'].values() for k in ('min_curve','max_curve') for w in ('pre_wrap_mode','post_wrap_mode')):raise ValueError('Cigarette source curve wrap operation')
+    if e['light']['cookie'] is not None:raise ValueError('Cigarette light cookie')
+    if c['evidence']['assembly_sha256']!='9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e':raise ValueError('Cigarette method assembly')
+    textures={t['id'] for t in m['lighting']['textures']}
+    if any(t['texture'] not in textures for mat in particle['materials'] for t in mat['textures']):raise ValueError('Cigarette particle texture')
+    if c['evidence']['methods']!=CIGARETTE_METHODS:raise ValueError('Cigarette consumption method evidence')
+    if any(l['source']==e['light']['source'] for l in m['lighting']['lights']) or any(x['source']==particle['source'] for x in m['weather']['particles']):raise ValueError('Cigarette active effects publication')
+
+CIGARETTE_PARTICLE_MODULES={'ClampVelocityModule': False, 'CollisionModule': False, 'ColorBySpeedModule': False, 'ColorModule': True, 'CustomDataModule': False, 'EmissionModule': True, 'ExternalForcesModule': False, 'ForceModule': True, 'InheritVelocityModule': False, 'InitialModule': True, 'LifetimeByEmitterSpeedModule': False, 'LightsModule': False, 'NoiseModule': False, 'RotationBySpeedModule': False, 'RotationModule': False, 'ShapeModule': True, 'SizeBySpeedModule': False, 'SizeModule': True, 'SubModule': False, 'TrailModule': False, 'TriggerModule': False, 'UVModule': False, 'VelocityModule': True}
+
+CIGARETTE_PARTICLE_KEYS={'curves': ['EmissionModule.rateOverDistance', 'EmissionModule.rateOverTime', 'ForceModule.x', 'ForceModule.y', 'ForceModule.z', 'InitialModule.gravityModifier', 'InitialModule.startLifetime', 'InitialModule.startRotation', 'InitialModule.startRotationX', 'InitialModule.startRotationY', 'InitialModule.startSize', 'InitialModule.startSizeY', 'InitialModule.startSizeZ', 'InitialModule.startSpeed', 'ShapeModule.arc.speed', 'ShapeModule.m_MeshSpawn.speed', 'ShapeModule.radius.speed', 'SizeModule.curve', 'SizeModule.y', 'SizeModule.z', 'VelocityModule.orbitalOffsetX', 'VelocityModule.orbitalOffsetY', 'VelocityModule.orbitalOffsetZ', 'VelocityModule.orbitalX', 'VelocityModule.orbitalY', 'VelocityModule.orbitalZ', 'VelocityModule.radial', 'VelocityModule.speedModifier', 'VelocityModule.x', 'VelocityModule.y', 'VelocityModule.z', 'startDelay'], 'colors': ['ColorModule.gradient', 'InitialModule.startColor'], 'vectors': ['InitialModule.customEmitterVelocity', 'ShapeModule.boxThickness', 'ShapeModule.m_Position', 'ShapeModule.m_Rotation', 'ShapeModule.m_Scale', 'renderer.m_Flip', 'renderer.m_Pivot'], 'scalars': ['EmissionModule.m_BurstCount', 'InitialModule.maxNumParticles', 'InitialModule.randomizeRotationDirection', 'ShapeModule.angle', 'ShapeModule.arc.mode', 'ShapeModule.arc.spread', 'ShapeModule.arc.value', 'ShapeModule.donutRadius', 'ShapeModule.length', 'ShapeModule.m_MeshMaterialIndex', 'ShapeModule.m_MeshNormalOffset', 'ShapeModule.m_MeshSpawn.mode', 'ShapeModule.m_MeshSpawn.spread', 'ShapeModule.m_TextureClipChannel', 'ShapeModule.m_TextureClipThreshold', 'ShapeModule.m_TextureUVChannel', 'ShapeModule.placementMode', 'ShapeModule.radius.mode', 'ShapeModule.radius.spread', 'ShapeModule.radius.value', 'ShapeModule.radiusThickness', 'ShapeModule.randomDirectionAmount', 'ShapeModule.randomPositionAmount', 'ShapeModule.sphericalDirectionAmount', 'ShapeModule.type', 'cullingMode', 'emitterVelocityMode', 'gameObject.layer', 'lengthInSec', 'moveWithTransform', 'randomSeed', 'renderer.m_CameraVelocityScale', 'renderer.m_LengthScale', 'renderer.m_MaxParticleSize', 'renderer.m_MinParticleSize', 'renderer.m_RenderAlignment', 'renderer.m_RenderMode', 'renderer.m_SortMode', 'renderer.m_SortingFudge', 'renderer.m_VelocityScale', 'ringBufferLoopRange.x', 'ringBufferLoopRange.y', 'ringBufferMode', 'scalingMode', 'simulationSpeed', 'stopAction']}
+CIGARETTE_PARTICLE_FLAGS={'ColorModule.enabled': True, 'EmissionModule.enabled': True, 'ForceModule.enabled': True, 'ForceModule.inWorldSpace': True, 'ForceModule.randomizePerFrame': True, 'InitialModule.enabled': True, 'InitialModule.rotation3D': False, 'InitialModule.size3D': False, 'ShapeModule.alignToDirection': False, 'ShapeModule.enabled': True, 'ShapeModule.m_TextureAlphaAffectsParticles': True, 'ShapeModule.m_TextureBilinearFiltering': False, 'ShapeModule.m_TextureColorAffectsParticles': True, 'ShapeModule.m_UseMeshColors': True, 'ShapeModule.m_UseMeshMaterialIndex': False, 'SizeModule.enabled': True, 'SizeModule.separateAxes': False, 'VelocityModule.enabled': True, 'VelocityModule.inWorldSpace': True, 'autoRandomSeed': True, 'looping': True, 'playOnAwake': True, 'prewarm': False, 'useUnscaledTime': False, 'gameObject.active': True, 'renderer.enabled': True}
+
+# Checked ParticleSystem128014 and ParticleSystemRenderer128908 operation selectors.
+CIGARETTE_PARTICLE_OPERATIONS={'ShapeModule.type': 0, 'ShapeModule.arc.mode': 0, 'ShapeModule.radius.mode': 0, 'ShapeModule.m_MeshSpawn.mode': 0, 'ShapeModule.placementMode': 0, 'ShapeModule.m_TextureClipChannel': 3, 'ShapeModule.m_TextureUVChannel': 0, 'renderer.m_RenderMode': 0, 'renderer.m_RenderAlignment': 0, 'renderer.m_SortMode': 0, 'cullingMode': 0, 'emitterVelocityMode': 1, 'ringBufferMode': 0, 'scalingMode': 1, 'stopAction': 0, 'moveWithTransform': 1, 'EmissionModule.m_BurstCount': 0}

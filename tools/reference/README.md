@@ -145,13 +145,18 @@ The exporter maps supported Unity materials to glTF PBR and retains source prope
 The source renderer ports the approved lighting, cookie, shadow, sky, cloud, and flare paths.
 Verify rendered appearance against a matched live source view before claiming pixel parity.
 
-`tests/common/reference.json` contains recovered scalar values and synthetic geometry.
-It supports native tests. It does not replace the installed export.
+Keep small tests independent of recovered asset snapshots.
+Use the installed export for source checks. Do not commit test asset fixtures.
+The runtime verifier checks source provenance, typed contracts, and asset hashes before promotion.
+It also checks the accepted acquisition contract checksum against build `11140890`.
+That checksum covers source spawners, weights, disabled groups, poses, motion, and method evidence.
+The verifier checks runtime asset and node indices against the current world tables.
+Regenerate it only after a source audit approves a contract change.
 
 Run the installed export check after extraction:
 
 ```powershell
-docker run --rm --mount "type=bind,source=$PWD,target=/workspace" --mount "type=volume,source=tld-wasm-cargo,target=/cargo" --mount "type=volume,source=tld-wasm-target,target=/target" my-summer-slop-toolchain cargo test --locked --test reference -- --ignored
+./tools/reference/.venv/Scripts/python.exe -m tools.reference.export --verify
 ```
 
 Pinned package metadata: [pygltflib](https://pypi.org/pypi/pygltflib/json).
@@ -180,14 +185,8 @@ The headlight controllers retain 50-metre low beams and 250-metre high beams.
 Road poles retain 100-metre source spacing, 20-metre lamp range, and a 120-degree full cone.
 Road pole and light transforms stay local to the prototype during loading.
 
-Run installed lighting and lifecycle checks in the Docker toolchain:
-
-```sh
-cargo test --locked --test lighting_reference --test lighting_interaction --test starting_area -- --include-ignored
-```
-
-`production_lighting_records_match_selected_scene` checks source values, material links, and exported file hashes.
-It uses the toolchain's `sha256sum` utility. It adds no runtime dependency.
+Run the runtime verifier for installed lighting records and file hashes.
+Check scene lighting and lifecycle behavior in the browser after runtime changes.
 The validator filters one exact pinned pygltflib provisional notice. Other warnings and validation errors remain visible.
 Keep source recovery, analysis, scenario patches, and captures outside Git.
 

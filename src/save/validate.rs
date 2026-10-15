@@ -25,6 +25,36 @@ impl SaveSnapshot {
         for item in &self.items {
             let id = ids.item(&item.instance)?;
             links(items.insert(id, item).is_none(), "Duplicate item")?;
+            if id == reference.survival.starter_food {
+                let food = item
+                    .food
+                    .as_ref()
+                    .ok_or_else(|| invalid("Missing food progress"))?;
+                let source = reference
+                    .survival
+                    .foods
+                    .iter()
+                    .find(|p| p.kind == r::FoodKind::Sausage)
+                    .unwrap();
+                links(
+                    food.source == SourceKey::from(&source.source),
+                    "Food source",
+                )?;
+                data(
+                    food.bite <= source.bites
+                        && item.removed == (source.destroy_on_end && food.bite == source.bites),
+                    "Food progress",
+                )?;
+            } else {
+                links(
+                    item.food.is_none() && !item.removed,
+                    "Unexpected removed item or food progress",
+                )?;
+            }
+            links(
+                !item.removed || item.location == ItemLocationSave::World,
+                "Removed item ownership",
+            )?;
             absolute(&item.pose)?;
             local(&item.local_pose)?;
             data(
@@ -55,6 +85,7 @@ impl SaveSnapshot {
         links(items.len() == reference.items.len(), "Missing source items")?;
         let parents = self.validate_attachments(reference, &ids, &items)?;
         self.validate_player(reference, &ids, &items, &parents)?;
+        self.validate_inventory(reference, &ids, &items)?;
         self.validate_bodies(reference, &ids, &items)?;
         self.validate_mechanisms(reference, &ids)?;
         self.validate_lighting(reference, &ids)?;
@@ -400,7 +431,9 @@ impl SaveSnapshot {
                 }
                 ItemLocationSave::GeneratedAttachment { .. }
                 | ItemLocationSave::World
-                | ItemLocationSave::Held => (),
+                | ItemLocationSave::Held
+                | ItemLocationSave::Stored { .. }
+                | ItemLocationSave::Equipped => (),
             }
         }
         for &start in items.keys() {
@@ -560,6 +593,80 @@ impl SaveSnapshot {
         Ok(())
     }
 
+    fn validate_inventory(
+        &self,
+        reference: &ReferenceManifest,
+        ids: &IdentityMap,
+        items: &HashMap<r::ItemId, &ItemSnapshot>,
+    ) -> Result<(), SaveError> {
+        let saved = &self.inventory;
+        data(saved.selected < 4, "Selected inventory slot")?;
+        let mut members = HashMap::new();
+        for (slot, instance) in saved.slots.iter().enumerate() {
+            if let Some(instance) = instance {
+                let id = ids.item(instance)?;
+                links(
+                    members.insert(id, slot as u8).is_none(),
+                    "Duplicate inventory member",
+                )?;
+                let rule = reference
+                    .items
+                    .iter()
+                    .find(|i| i.id == id)
+                    .and_then(|i| i.pickup.as_ref());
+                links(
+                    rule.is_some_and(|p| p.can_inventory && !p.cant_pickup) && !items[&id].removed,
+                    "Item cannot enter inventory",
+                )?;
+                let location = &items[&id].location;
+                links(
+                    if slot as u8 == saved.selected {
+                        matches!(
+                            location,
+                            ItemLocationSave::Held | ItemLocationSave::Equipped
+                        )
+                    } else {
+                        *location == ItemLocationSave::Stored { slot: slot as u8 }
+                    },
+                    "Inventory location",
+                )?;
+            }
+        }
+        let equipped = saved.equipped.as_ref().map(|i| ids.item(i)).transpose()?;
+        for (&id, item) in items {
+            match item.location {
+                ItemLocationSave::Stored { slot } => {
+                    links(members.get(&id) == Some(&slot), "Unlisted stored item")?
+                }
+                ItemLocationSave::Equipped => {
+                    links(equipped == Some(id), "Unlisted equipped item")?
+                }
+                _ => (),
+            }
+        }
+        if let Some(id) = equipped {
+            let rule = reference
+                .items
+                .iter()
+                .find(|i| i.id == id)
+                .and_then(|i| i.pickup.as_ref());
+            links(
+                rule.is_some_and(|p| p.can_hold_right_hand && !p.cant_pickup)
+                    && !items[&id].removed
+                    && items[&id].location == ItemLocationSave::Equipped,
+                "Equipment ownership",
+            )?;
+            links(
+                self.player
+                    .carry
+                    .as_ref()
+                    .is_none_or(|c| saved.equipped.as_ref() != Some(&c.item)),
+                "Carry and equipment share an item",
+            )?;
+        }
+        Ok(())
+    }
+
     fn validate_bodies(
         &self,
         reference: &ReferenceManifest,
@@ -603,7 +710,10 @@ impl SaveSnapshot {
                     links(
                         matches!(
                             items[&id].location,
-                            ItemLocationSave::World | ItemLocationSave::Held
+                            ItemLocationSave::World
+                                | ItemLocationSave::Held
+                                | ItemLocationSave::Stored { .. }
+                                | ItemLocationSave::Equipped
                         ),
                         "Assembly root is attached",
                     )?;
@@ -619,7 +729,10 @@ impl SaveSnapshot {
         {
             if matches!(
                 items[&part].location,
-                ItemLocationSave::World | ItemLocationSave::Held
+                ItemLocationSave::World
+                    | ItemLocationSave::Held
+                    | ItemLocationSave::Stored { .. }
+                    | ItemLocationSave::Equipped
             ) {
                 links(assemblies.contains(&part), "Missing detached assembly body")?;
             }

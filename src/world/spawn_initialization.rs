@@ -137,7 +137,10 @@ impl SpawnEvaluation<'_> {
             empty = if default_empty { 1. } else { 0. };
             mix = 0.;
         }
-        let mut result = FluidContainer::new(number(fields(value(f, "F")?)?, "maxC")?, FluidMixture::default());
+        let mut result = FluidContainer::new(
+            number(fields(value(f, "F")?)?, "maxC")?,
+            FluidMixture::default(),
+        );
         let mut total = 0.;
         for fluid in fluids {
             total += number(fields(fluid)?, "chance")?;

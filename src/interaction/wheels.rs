@@ -1170,37 +1170,3 @@ fn item_pose(
 fn error(message: &str) -> ReferenceError {
     ReferenceError(message.into())
 }
-
-#[cfg(test)]
-mod condition_tests {
-    use super::*;
-    #[test]
-    fn imported_tire_quality_reaches_installed_support() {
-        let mut reference =
-            ReferenceManifest::from_json(include_bytes!("../../tests/common/reference.json"))
-                .unwrap();
-        let tire = reference.wheel_slots[0].tire;
-        let mut surface = reference.conditions.surfaces[0].clone();
-        surface.id.0 = 9000;
-        surface.source.file = "merged-wheel-condition".into();
-        surface.source.path_id = 9000;
-        surface.item = Some(tire);
-        surface.node = reference.items.iter().find(|i| i.id == tire).unwrap().node;
-        surface.renderers.clear();
-        surface.startup.state = 3;
-        reference
-            .conditions
-            .surfaces
-            .retain(|s| s.item != Some(tire));
-        reference.conditions.surfaces.push(surface);
-        let conditions = crate::conditions::ConditionStore::new(&reference).unwrap();
-        let mut items = ItemStore::new(&reference).unwrap();
-        let poses = crate::starting_area::initial_vehicle_poses(&reference).unwrap();
-        let mut physics = PhysicsWorld::new(&reference, &poses).unwrap();
-        let mut wheels = WheelAssemblies::new(&reference).unwrap();
-        wheels.refresh_conditions(&conditions, &items);
-        wheels.sync(&mut items, &mut physics).unwrap();
-        assert_eq!(wheels.slots[0].last_support.unwrap().1, 0.25);
-        assert_eq!(items.get(tire).unwrap().generated_condition, None);
-    }
-}

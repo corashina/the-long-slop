@@ -27,3 +27,5 @@ pub mod world;
 
 #[cfg(target_arch = "wasm32")]
 pub mod presentation;
+
+pub mod inventory;

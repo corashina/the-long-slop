@@ -29,39 +29,6 @@ pub struct LightingRecord {
     pub dependencies: Vec<SourceHash>,
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn validates_each_registered_probe_and_rejects_duplicate_bindings() {
-        let manifest = crate::reference::ReferenceManifest::from_json(include_bytes!(
-            "../../tests/common/reference.json"
-        ))
-        .unwrap();
-        let mut lighting = manifest.render_lighting.clone();
-        let mut second = lighting.probes[0].clone();
-        lighting.probes.push(second.clone());
-        assert!(lighting.validate(&manifest.nodes).is_err());
-        second.source.path_id = 59660;
-        lighting.probes[1] = second.clone();
-        assert!(lighting.validate(&manifest.nodes).is_err());
-        second.node = manifest
-            .nodes
-            .iter()
-            .find(|node| node.id != second.node)
-            .unwrap()
-            .id;
-        lighting.probes[1] = second;
-        assert!(lighting.validate(&manifest.nodes).is_ok());
-        lighting.probes[1].importance = 2;
-        assert!(lighting.validate(&manifest.nodes).is_err());
-        lighting.probes[1].importance = 1;
-        lighting.probes[1].bounds_size[0] = 7.;
-        assert!(lighting.validate(&manifest.nodes).is_err());
-        lighting.probes[1].bounds_size[0] = 6.;
-        lighting.probes[1].far = lighting.probes[1].near;
-        assert!(lighting.validate(&manifest.nodes).is_err());
-    }
-}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StartupSample {

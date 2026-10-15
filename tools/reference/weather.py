@@ -201,3 +201,41 @@ def validate_particle_export(record, manifest, library):
         recovered.extend(recover_outlet_particles(checked,manifest,Path(temp)))
     if record['particles']!=recovered:
         raise ValueError('Selected particle source records differ')
+
+
+def validate_curve(c):
+    from .validation import record,array,number,i32,integer
+    def key(k):
+        record(k,{**dict.fromkeys(('time','value','in_tangent','out_tangent','in_weight','out_weight'),number),
+                  'weighted_mode':integer(0,3)})
+    record(c,{'keys':array(key),'pre_wrap_mode':i32,'post_wrap_mode':i32})
+    if any(a['time']>=b['time'] for a,b in zip(c['keys'],c['keys'][1:])):raise ValueError('Unordered curve keys')
+
+
+def validate_particle_data(p, simulation_space):
+    from .validation import record,array,mapping,number,u32,integer,boolean,string,source,pose
+    from .lighting import validate_gradient,validate_sky_material
+    def particle_curve(c):
+        record(c,{'mode':integer(0,3),'min_scalar':number,'scalar':number,'min_curve':validate_curve,'max_curve':validate_curve})
+        if c['mode'] in (1,2) and not c['max_curve']['keys'] or c['mode']==2 and not c['min_curve']['keys']:
+            raise ValueError('Missing particle curve keys')
+    def particle_color(c):
+        record(c,{'mode':integer(0,4),'min_color':array(number,4),'max_color':array(number,4),
+                  'min_gradient':validate_gradient,'max_gradient':validate_gradient})
+    def limit(l):record(l,{'source':source,'module':string,'visible_effect':string})
+    record(p,{'source':source,'role':string,'capacity':u32,'rate_over_time':number,'rate_over_distance':number,
+              'duration':number,'simulation_space':integer(0,255),'local_pose':pose,'module_flags':mapping(boolean),
+              'curves':mapping(particle_curve),'colors':mapping(particle_color),'vectors':mapping(array(number,3)),
+              'scalars':mapping(number),'flags':mapping(boolean),'links':mapping(source),
+              'materials':array(validate_sky_material,1),'limits':array(limit)})
+    if not 0<p['capacity']<=1000000 or p['scalars'].get('InitialModule.maxNumParticles')!=p['capacity']:
+        raise ValueError('Particle capacity')
+    if p['rate_over_time']<0 or p['rate_over_distance']<0 or p['duration']<=0 or p['simulation_space']!=simulation_space:
+        raise ValueError('Particle rates and simulation space')
+    if p['module_flags'].get('InitialModule') is not True or 'InitialModule.startLifetime' not in p['curves']:
+        raise ValueError('Required particle initial module')
+    mat=p['materials'][0];tint='_TintColor' if mat['shader']['name']=='Legacy Shaders/Particles/Alpha Blended' else '_Color'
+    if tint not in mat['colors'] or not any(t['property']=='_MainTex' for t in mat['textures']):raise ValueError('Particle material payload')
+    for l in p['limits']:
+        if l['source']!=p['source'] or not l['visible_effect'] or not (p['module_flags'].get(l['module']) or l['module'] in ('material.soft_particles','material.distortion')):
+            raise ValueError('Particle limit')

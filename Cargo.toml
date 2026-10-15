@@ -7,9 +7,6 @@ rust-version = "1.99"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[features]
-save-fixture = []
-
 [dependencies]
 rapier3d = "=0.36.0"
 serde = { version = "=1.0.229", features = ["derive", "rc"] }
