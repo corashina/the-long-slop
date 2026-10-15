@@ -395,7 +395,13 @@ impl PersistentWorld {
                         .items
                         .get(id)
                         .filter(|item| {
-                            matches!(item.location, ItemLocation::World | ItemLocation::Held)
+                            matches!(
+                                item.location,
+                                ItemLocation::World
+                                    | ItemLocation::Held
+                                    | ItemLocation::Stored(_)
+                                    | ItemLocation::Equipped
+                            )
                         })
                         .and_then(|item| item.body),
                 };
@@ -434,7 +440,13 @@ impl PersistentWorld {
                 }) && [0, 2].iter().all(|&axis| {
                     (absolute[axis] - stream.focus[axis]).abs() + extent <= REBASE_LIMIT as f64
                 });
-                let active = if let Some(parent) = parent {
+                let inventory = area.inventory_body(handle);
+                let stored = matches!(inventory, Some(ItemLocation::Stored(_)));
+                let active = if stored
+                    || matches!(inventory, Some(ItemLocation::Equipped | ItemLocation::Held))
+                {
+                    true
+                } else if let Some(parent) = parent {
                     area.bodies
                         .get(&parent)
                         .is_some_and(|h| physics.body_active(*h))
@@ -474,6 +486,9 @@ impl PersistentWorld {
                         {
                             item.inactive_pose = None;
                         }
+                    }
+                    if stored {
+                        physics.rapier_mut().bodies[handle].set_enabled(false);
                     }
                 } else if physics.body_active(handle) {
                     changed = true;

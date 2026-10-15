@@ -14,7 +14,10 @@ impl GarageRuntime {
         saved.validate(reference, expected)?;
         let ids = IdentityMap::new(reference)?;
         let mut candidate = Self::new_candidate(reference, false)?;
-        candidate.area.items.restore_save(&ids, &saved.items)?;
+        candidate
+            .area
+            .items
+            .restore_save(&ids, &saved.items, reference)?;
         candidate.wheels.restore_save(
             &ids,
             &saved.attachments,
@@ -37,7 +40,20 @@ impl GarageRuntime {
             .interaction
             .sync_parts(&mut candidate.area.items, &mut candidate.physics)?;
         // Assembly setup may change local poses. The snapshot owns their saved frames.
-        candidate.area.items.restore_save(&ids, &saved.items)?;
+        candidate
+            .area
+            .items
+            .restore_save(&ids, &saved.items, reference)?;
+        candidate.area.inventory.selected = saved.inventory.selected;
+        for (slot, instance) in candidate
+            .area
+            .inventory
+            .slots
+            .iter_mut()
+            .zip(&saved.inventory.slots)
+        {
+            *slot = instance.as_ref().map(|id| ids.item(id)).transpose()?;
+        }
         candidate.stream.seed = crate::save::identity::unsigned(&saved.world.seed)?;
         candidate.stream.origin.offset = saved.player.pose.position;
         candidate.stream.focus = saved.player.pose.position;
@@ -85,7 +101,10 @@ impl GarageRuntime {
         candidate
             .wheels
             .sync(&mut candidate.area.items, &mut candidate.physics)?;
-        candidate.area.items.restore_save(&ids, &saved.items)?;
+        candidate
+            .area
+            .items
+            .restore_save(&ids, &saved.items, reference)?;
         candidate.area.items.sync_poses(&candidate.physics);
         // Rapier defers collider and additional-mass updates until a step or recomputation.
         // Commit them while paused, before restoring motion and sleep.
@@ -144,6 +163,30 @@ impl GarageRuntime {
                 &mut candidate.physics,
             )?;
         }
+        if let Some(instance) = &saved.inventory.equipped {
+            let id = ids.item(instance)?;
+            candidate.area.interaction.equipment.retrieve(
+                id,
+                &mut candidate.area.items,
+                &mut candidate.physics,
+            );
+        }
+        let starter = reference.survival.starter_food;
+        if candidate.area.items.get(starter).is_some_and(|i| i.removed) {
+            candidate.area.items.get_mut(starter).unwrap().removed = false;
+            candidate.remove_consumable(starter)?;
+        } else {
+            super::survival::sync_consumable_colliders(
+                reference,
+                &candidate.area,
+                &mut candidate.physics,
+                starter,
+            );
+        }
+        candidate
+            .area
+            .sync_equipment(reference, &mut candidate.physics);
+        candidate.area.items.sync_poses(&candidate.physics);
         candidate.vehicle = ids
             .vehicles
             .iter()
@@ -256,6 +299,7 @@ impl GarageRuntime {
         });
         let mut snapshot = SaveSnapshot {
             schema_version: SAVE_SCHEMA_VERSION,
+            inventory: self.area.capture_inventory(&ids)?,
             saved_at: saved_at.into(),
             source: source.clone(),
             world,
@@ -306,7 +350,10 @@ impl GarageRuntime {
                 &self.physics,
                 &self.persistent_world,
             )?,
-            items: self.area.items.capture_save(&ids, origin, &self.physics)?,
+            items: self
+                .area
+                .items
+                .capture_save(&ids, origin, &self.physics, reference)?,
             attachments: AttachmentsSnapshot {
                 parts: self.area.interaction.parts.capture_save(&ids)?,
                 wheels,
@@ -354,6 +401,8 @@ impl StartingArea {
                 item.location,
                 crate::interaction::items::ItemLocation::World
                     | crate::interaction::items::ItemLocation::Held
+                    | crate::interaction::items::ItemLocation::Stored(_)
+                    | crate::interaction::items::ItemLocation::Equipped
             ) {
                 continue;
             }

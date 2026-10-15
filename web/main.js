@@ -43,6 +43,11 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, chunks, colliders, abs
   feedback?.setVisible(started&&!paused&&!dead&&!sleeping&&Boolean(mode)&&menu?.model.state==='playing');
   survival?.setVisible(started&&!paused&&!sleeping&&menu?.model.state==='playing');
 };
+const inventory={selected:0,slots:new Uint32Array(4),progress:0};
+window.gameInventory=(selected,a,b,c,d,progress)=>{
+ inventory.selected=selected;inventory.slots[0]=a;inventory.slots[1]=b;inventory.slots[2]=c;inventory.slots[3]=d;inventory.progress=progress;
+ window.gameState.inventory=inventory;feedback?.inventory(inventory);
+};
 window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,noText,fluidName,condition,held,charge,throwing,rpm,ignition,running,starter,seated,handbrake,gas,oil,alcohol,water,blood,diesel,control,lmbUse)=>{
  record.actions=mask;record.context=context;record.lmbUse=lmbUse;record.name=name;record.notice=notice;record.carrying=carrying;record.amount=amount;record.capacity=capacity;record.hasName=hasName;record.noText=noText;record.fluidName=fluidName;
  record.condition=condition;record.held=held;record.throwCharge=charge;record.throwActive=throwing;
@@ -84,7 +89,7 @@ async function load(){
  menu=createMenu({canvas,ui:manifest.ui,saveSession,audio,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  const switchIconUrl='./assets/'+manifest.lighting.switch_icon.path;
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
- feedback=createFeedback(manifest.ui,switchIconUrl);
+ feedback=createFeedback(manifest.ui,switchIconUrl,manifest);
  status.textContent='Loading game code...';
  const {default:init,run,source_render_failure,source_loading_progress}=await import('./pkg/my_summer_slop.js');
  const wasm=await fetch('./pkg/my_summer_slop_bg.wasm');if(!wasm.ok)throw Error('Cannot load game code (HTTP '+wasm.status+').');

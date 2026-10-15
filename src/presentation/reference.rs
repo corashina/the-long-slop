@@ -25,6 +25,12 @@ pub struct ItemVisual {
 }
 
 #[derive(Component)]
+pub struct InventoryVisibility {
+    item: ItemId,
+    keep: bool,
+    stored: bool,
+}
+#[derive(Component)]
 pub struct ValveVisibility {
     pub(crate) opening: OpeningId,
     pub(crate) open: bool,
@@ -258,6 +264,30 @@ pub fn bind(
                 scale,
             });
     }
+    for item in &reference.items {
+        let Some(rule) = item.pickup.as_ref().filter(|p| p.can_inventory) else {
+            continue;
+        };
+        for (source, keep) in [
+            (rule.disable_when_stored.as_ref(), false),
+            (rule.keep_when_stored.as_ref(), true),
+        ] {
+            if let Some(source) = source {
+                let node = reference
+                    .nodes
+                    .iter()
+                    .find(|n| &n.source == source)
+                    .expect("checked storage node");
+                commands
+                    .entity(visuals.nodes[&node.id])
+                    .insert(InventoryVisibility {
+                        item: item.id,
+                        keep,
+                        stored: false,
+                    });
+            }
+        }
+    }
     for opening in &reference.openings {
         let links = &opening.visuals;
         for &id in &links.open_nodes {
@@ -416,10 +446,13 @@ pub fn sync(
     )>,
 ) {
     for (binding, mut transform, mut visibility, valve) in query {
-        let active = area
-            .bodies
-            .get(&binding.body)
-            .is_some_and(|h| physics.body_active(*h));
+        let active = area.bodies.get(&binding.body).is_some_and(|h| {
+            physics.body_active(*h)
+                || matches!(
+                    area.inventory_body(*h),
+                    Some(crate::interaction::items::ItemLocation::Stored(_))
+                )
+        });
         visibility.set_if_neq(
             if active
                 && valve.is_none_or(|v| (area.interaction.opening_valve(v.opening) > 0.) == v.open)
@@ -442,5 +475,32 @@ pub fn sync(
                     .with_scale(binding.scale),
             );
         }
+    }
+}
+
+pub(crate) fn sync_inventory(
+    drive: Res<crate::app::Drive>,
+    mut query: Query<(&mut InventoryVisibility, &mut Visibility)>,
+) {
+    use crate::interaction::items::ItemLocation;
+    for (mut binding, mut visibility) in &mut query {
+        let stored = drive
+            .runtime
+            .area
+            .items
+            .get(binding.item)
+            .is_some_and(|i| matches!(i.location, ItemLocation::Stored(_)));
+        if stored || binding.stored {
+            visibility.set_if_neq(if stored {
+                if binding.keep {
+                    Visibility::Visible
+                } else {
+                    Visibility::Hidden
+                }
+            } else {
+                Visibility::Inherited
+            });
+        }
+        binding.stored = stored;
     }
 }

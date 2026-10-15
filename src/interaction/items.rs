@@ -15,6 +15,8 @@ pub enum ItemLocation {
     World,
     PartSlot(PartSlotId),
     Held,
+    Stored(u8),
+    Equipped,
     Attached(ItemId),
     WheelSlot(WheelSlotId),
 }
@@ -57,6 +59,7 @@ impl ItemStore {
         &mut self,
         ids: &crate::save::IdentityMap,
         saved: &[crate::save::ItemSnapshot],
+        reference: &ReferenceManifest,
     ) -> Result<(), crate::save::SaveError> {
         use crate::save::ItemLocationSave;
         for record in saved {
@@ -64,6 +67,8 @@ impl ItemStore {
             state.location = match &record.location {
                 ItemLocationSave::World => ItemLocation::World,
                 ItemLocationSave::Held => ItemLocation::Held,
+                ItemLocationSave::Stored { slot } => ItemLocation::Stored(*slot),
+                ItemLocationSave::Equipped => ItemLocation::Equipped,
                 ItemLocationSave::Attached { owner } => ItemLocation::Attached(ids.item(owner)?),
                 ItemLocationSave::PartSlot { slot } => ItemLocation::PartSlot(ids.part_slots[slot]),
                 ItemLocationSave::WheelSlot { slot } => {
@@ -71,6 +76,16 @@ impl ItemStore {
                 }
             };
             state.local_pose = crate::save::local_pose(&record.local_pose);
+            state.food = record.food.as_ref().map(|food| FoodState {
+                prototype_index: reference
+                    .survival
+                    .foods
+                    .iter()
+                    .position(|p| crate::save::SourceKey::from(&p.source) == food.source)
+                    .expect("validated food source"),
+                bite: food.bite,
+            });
+            state.removed = record.removed;
             state.condition = record.condition;
             state.temperature = record.temperature;
             if let (Some(fluid), Some(quantities)) = (&mut state.fluid, record.fluids) {
@@ -220,6 +235,7 @@ impl ItemStore {
         ids: &crate::save::IdentityMap,
         origin: &crate::world::WorldOrigin,
         physics: &PhysicsWorld,
+        reference: &ReferenceManifest,
     ) -> Result<Vec<crate::save::ItemSnapshot>, crate::save::SaveError> {
         use crate::save::{
             AbsolutePose, ItemLocationSave, ItemSnapshot, LocalPose, identity::source_key,
@@ -250,6 +266,8 @@ impl ItemStore {
             let location = match item.location {
                 ItemLocation::World => ItemLocationSave::World,
                 ItemLocation::Held => ItemLocationSave::Held,
+                ItemLocation::Stored(slot) => ItemLocationSave::Stored { slot },
+                ItemLocation::Equipped => ItemLocationSave::Equipped,
                 ItemLocation::PartSlot(slot) => ItemLocationSave::PartSlot {
                     slot: source_key(&ids.part_slots, slot)?,
                 },
@@ -271,6 +289,13 @@ impl ItemStore {
                 condition: item.condition,
                 temperature: item.temperature,
                 fluids: item.fluid.as_ref().map(capture_fluids).transpose()?,
+                food: item.food.map(|food| crate::save::FoodSnapshot {
+                    source: crate::save::SourceKey::from(
+                        &reference.survival.foods[food.prototype_index].source,
+                    ),
+                    bite: food.bite,
+                }),
+                removed: item.removed,
             });
         }
         records.sort_by(|a, b| a.instance.cmp(&b.instance));

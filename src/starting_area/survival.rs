@@ -395,6 +395,7 @@ impl GarageRuntime {
         state.body = None;
         state.location = ItemLocation::World;
         state.removed = true;
+        self.area.inventory.forget(item);
         Ok(())
     }
 }

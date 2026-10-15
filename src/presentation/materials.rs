@@ -288,7 +288,10 @@ impl Plugin for SourceMaterialPlugin {
             Update,
             (
                 material_readiness,
-                bind_authored_materials.after(bind_materials),
+                // Commit material bindings before lighting releases prototype scenes.
+                bind_authored_materials
+                    .after(bind_materials)
+                    .before(super::lighting::lighting_readiness),
             )
                 .chain(),
         );

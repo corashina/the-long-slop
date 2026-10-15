@@ -48,6 +48,10 @@ pub struct StartingArea {
     pub bodies: HashMap<BodyId, RigidBodyHandle>,
     pub items: ItemStore,
     pub interaction: InteractionState,
+    pub inventory: crate::inventory::InventoryState,
+    pub pose: crate::player::pose::PlayerPoseState,
+    inventory_offsets: [Option<(ItemId, VehiclePose)>; 4],
+    pub(crate) inventory_items: std::collections::HashSet<ItemId>,
     pub player: PlayerState,
     pub origin: [f64; 3],
     attachments: Vec<(RigidBodyHandle, RigidBodyHandle, rapier3d::math::Pose)>,
@@ -363,6 +367,15 @@ impl StartingArea {
             })
             .collect();
         Ok(Self {
+            inventory: crate::inventory::InventoryState::new(&reference.inventory),
+            inventory_offsets: [None; 4],
+            pose: crate::player::pose::PlayerPoseState::new(reference)?,
+            inventory_items: reference
+                .items
+                .iter()
+                .filter(|i| i.pickup.as_ref().is_some_and(|p| p.can_inventory))
+                .map(|i| i.id)
+                .collect(),
             bodies,
             items,
             interaction,
@@ -469,8 +482,18 @@ impl StartingArea {
         }
     }
     pub fn commit_poses(&mut self, physics: &PhysicsWorld, teleport: bool) {
+        let stored = self.inventory.slots.map(|id| {
+            id.and_then(|id| self.items.get(id))
+                .filter(|i| {
+                    matches!(
+                        i.location,
+                        crate::interaction::items::ItemLocation::Stored(_)
+                    )
+                })
+                .and_then(|i| i.body)
+        });
         for (id, previous, current) in &mut self.render_poses {
-            if !physics.body_active(self.bodies[id]) {
+            if !physics.body_active(self.bodies[id]) && !stored.contains(&Some(self.bodies[id])) {
                 continue;
             }
             *current =
@@ -614,6 +637,7 @@ impl VehicleRuntime {
     }
 }
 
+mod inventory;
 mod save;
 
 pub struct GarageRuntime {
@@ -837,6 +861,7 @@ impl GarageRuntime {
             );
         }
 
+        self.update_inventory(reference, input);
         self.area.begin_step();
         let aim = if self.sleeping() {
             ResolvedAim::default()
@@ -1181,6 +1206,8 @@ impl GarageRuntime {
                 .sync(&mut self.area.items, &mut self.physics)
                 .expect("validated wheel bindings");
         }
+        self.area.sync_inventory();
+        self.area.sync_equipment(reference, &mut self.physics);
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, false);
         if let Some(audio) = &mut self.audio {
@@ -1537,6 +1564,7 @@ impl GarageRuntime {
             vehicle.engine_output.starter = false;
         }
         self.area.interaction.cancel_input();
+        self.area.inventory.cancel_input();
     }
 
     /// Moves the current vehicle, its cargo, and a walking player back to the road.

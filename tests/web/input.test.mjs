@@ -36,3 +36,9 @@ test('headlights_do_not_overlap_carry_controls',()=>{
 });
 
 test('source_horn_keys_share_a_held_bit',()=>{const i=new InputState();i.code('KeyH',true);assert.equal(i.takeFrame().held,131072);i.code('Numpad8',true);i.code('KeyH',false);assert.equal(i.takeFrame().held,131072);i.code('Numpad8',false);const f=i.takeFrame();assert.equal(f.held,0);assert.equal(f.released,131072);});
+
+test('four_inventory_keys_keep_release_edges_and_cancel_on_clear',()=>{
+ const i=new InputState();
+ for(let n=1;n<=4;n++){i.clear();assert(i.code('Digit'+n,true));assert.equal(i.takeFrame().held,1<<(20+n));i.code('Digit'+n,false);assert.equal(i.takeFrame().released,1<<(20+n));}
+ i.code('Digit2',true);i.clear();i.code('Digit2',false);assert.equal(i.takeFrame().released,0);
+});

@@ -1,7 +1,7 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 1;
+pub const SAVE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -25,6 +25,7 @@ pub struct SaveSnapshot {
     pub source: SourceStamp,
     pub world: WorldSnapshot,
     pub player: PlayerSnapshot,
+    pub inventory: InventorySnapshot,
     pub vehicles: Vec<VehicleSnapshot>,
     pub bodies: Vec<BodySnapshot>,
     pub items: Vec<ItemSnapshot>,
@@ -107,6 +108,19 @@ pub struct CarrySnapshot {
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct InventorySnapshot {
+    pub slots: [Option<InstanceId>; 4],
+    pub selected: u8,
+    pub equipped: Option<InstanceId>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FoodSnapshot {
+    pub source: SourceKey,
+    pub bite: u8,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VehicleSnapshot {
     pub instance: InstanceId,
     pub body: BodySnapshot,
@@ -140,12 +154,16 @@ pub struct ItemSnapshot {
     pub condition: f32,
     pub temperature: Option<f32>,
     pub fluids: Option<[f32; 6]>,
+    pub food: Option<FoodSnapshot>,
+    pub removed: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ItemLocationSave {
     World,
     Held,
+    Stored { slot: u8 },
+    Equipped,
     PartSlot { slot: SourceKey },
     WheelSlot { slot: SourceKey },
     Attached { owner: InstanceId },

@@ -248,7 +248,10 @@ fn item_root(
                 );
             }
             // Source ordinary Pickup keeps its root. Right-hand parenting is outside current controls.
-            ItemLocation::World | ItemLocation::Held => return item.body,
+            ItemLocation::World
+            | ItemLocation::Held
+            | ItemLocation::Stored(_)
+            | ItemLocation::Equipped => return item.body,
         }
     }
     None

@@ -1,6 +1,7 @@
 pub mod attachments;
 pub mod carry;
 pub mod consumption;
+pub mod equipment;
 pub mod feedback;
 pub mod fluid_contact;
 pub mod items;
@@ -177,7 +178,8 @@ pub struct InteractionState {
     mechanism_bodies: HashMap<ItemId, BodyId>,
     openings: Vec<OpeningState>,
     seats: Vec<SeatState>,
-    carry: carry::CarryState,
+    pub(crate) carry: carry::CarryState,
+    pub equipment: equipment::EquipmentState,
     push: push::PushState,
     player_body: Option<RigidBodyHandle>,
     reach: f32,
@@ -508,6 +510,7 @@ impl InteractionState {
             sound_count: 0,
             seats,
             carry: carry::CarryState::new(reference)?,
+            equipment: equipment::EquipmentState::new(reference),
             push: push::PushState::new(reference),
             player_body: None,
             reach: reference.player.aim_reach,
@@ -572,11 +575,16 @@ impl InteractionState {
     pub fn bind_player_body(&mut self, handle: RigidBodyHandle) {
         self.player_body = Some(handle);
     }
+    pub fn pickup_rule(&self, id: ItemId) -> Option<&crate::reference::PickupReference> {
+        self.carry.rule(id)
+    }
     pub fn held(&self) -> Option<ItemId> {
         self.carry.held()
     }
     pub fn held_light_control(&self) -> Option<LightControlId> {
-        self.held()
+        self.equipment
+            .item()
+            .or(self.held())
             .and_then(|item| self.held_controls.get(&item).copied())
     }
     pub fn pickup_stored_item(

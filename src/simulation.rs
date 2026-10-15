@@ -28,6 +28,10 @@ pub mod keys {
     pub const SLEEP: u32 = 1 << 18;
     pub const URINATE: u32 = 1 << 19;
     pub const BURP: u32 = 1 << 20;
+    pub const INVENTORY1: u32 = 1 << 21;
+    pub const INVENTORY2: u32 = 1 << 22;
+    pub const INVENTORY3: u32 = 1 << 23;
+    pub const INVENTORY4: u32 = 1 << 24;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

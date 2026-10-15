@@ -40,6 +40,7 @@ pub(crate) struct Drive {
     skip_elapsed: bool,
     pub(crate) ready: bool,
     last_feedback: Option<FeedbackStamp>,
+    last_inventory: Option<([u32; 4], u8, u32)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -97,6 +98,7 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
             skip_elapsed: false,
             ready: false,
             last_feedback: None,
+            last_inventory: None,
         })
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(presentation::source_io::SourceIoPlugin)
@@ -143,6 +145,7 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
                 presentation::consumables::sync,
                 sync_instruments,
                 presentation::lighting::sync_control_visuals,
+                presentation::reference::sync_inventory,
                 update_camera,
                 presentation::frame_graph::sync_stack_cameras,
                 update_hud,
@@ -605,6 +608,23 @@ fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveC
     }
 }
 fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
+    let state = &drive.runtime.area.inventory;
+    let stamp = (
+        state.slots.map(|id| id.map_or(0, |id| id.0)),
+        state.selected,
+        state.swap_progress.to_bits(),
+    );
+    if drive.last_inventory != Some(stamp) {
+        game_inventory(
+            stamp.1 as u32,
+            stamp.0[0],
+            stamp.0[1],
+            stamp.0[2],
+            stamp.0[3],
+            f32::from_bits(stamp.2),
+        );
+        drive.last_inventory = Some(stamp);
+    }
     let needs = drive.runtime.needs_output();
     game_survival(
         needs.needs.hp,

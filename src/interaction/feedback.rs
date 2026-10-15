@@ -138,6 +138,14 @@ impl InteractionState {
             .or(valid(aim.push_target))
             .or(focus)
             .map(|t| t.item);
+        if self.held().is_none()
+            && let Some(id) = self.equipment.item()
+            && self.held_controls.contains_key(&id)
+        {
+            a.actions.0 |= ActionMask::HELD_SWITCH;
+            a.context = FeedbackContext::LightSwitch;
+            a.item = Some(id);
+        }
         if let Some(held) = self.held() {
             a.actions.0 |= ActionMask::DROP | ActionMask::THROW;
             if items

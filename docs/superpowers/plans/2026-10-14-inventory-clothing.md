@@ -12,7 +12,8 @@ Connect them through `StartingArea` and `GarageRuntime`. Reuse current rendering
 
 **Spec:** [Approved specification](../specs/2026-10-14-inventory-clothing-design.md).
 
-**Status:** The user approved the specification and selected subagent execution on 2026-10-14.
+**Current scope:** Tasks 1 and 2 are complete. Tasks 3�10 are stopped.
+Execute Task 2 directly. Add no fixtures or broad test suites.
 **Branch:** `codex/inventory-clothing`, starting from design commit `a475d86`.
 **Worktree:** `C:/Users/Corashina/.codex/worktrees/inventory-clothing/the-long-drive-wasm`.
 **Recommendation:** Native execution. Most tasks share item, save, input, and renderer ownership.
@@ -65,7 +66,8 @@ Task 1 defines `PrototypeId`, `InventoryReference`, `ClothingReference`, `Acquis
 Extend `PickupReference` with source storage, icon, right-hand, and visibility links. Keep one runtime rule owner.
 Add `ReferenceManifest.inventory`, `.clothing`, and `.acquisition`. Do not accept old exports through serde defaults.
 
-Task 2 defines `InventoryContext` with carried/equipped IDs, carried storage eligibility, player-ancestor carry guard, seated-clutch guard, and loading flag.
+Task 2 defines `InventoryContext` with carried/equipped IDs, player-ancestor carry guard, and seated-clutch guard.
+Transfer validation reads cached pickup rules. Save restoration uses its current candidate reconstruction path.
 Use `Option<ItemId>` for IDs and `bool` for each guard.
 Task 4 defines `LootOutcome` with station ID, source spawner, ordinal, selected source item, absolute pose, variant, and publication state.
 Use `i64`, `SourceId`, `u32`, `Option<u32>`, `AbsolutePose`, `u32`, and `bool`, respectively.
@@ -155,11 +157,11 @@ Modify `web/input.js`, `web/feedback.js`, `src/browser.rs`, and their current in
 - `InventoryCommand::{Select(u8), Swap(u8)}`; state exposes `slots: [Option<ItemId>; 4]` and `selected: u8`.
 - `StartingArea::apply_inventory_command(&mut self, command: InventoryCommand, reference: &ReferenceManifest, physics: &mut PhysicsWorld) -> Result<bool, ReferenceError>`.
 - `EquipmentState` exposes `item(&self) -> Option<ItemId>` and owns minimal source right-hand retrieval.
-- `PlayerPoseState::new(reference: &ClothingReference) -> Result<Self, ReferenceError>`.
+- `PlayerPoseState::new(reference: &ReferenceManifest) -> Result<Self, ReferenceError>`.
 - `PlayerPoseState::update(&mut self, player: &PlayerState, interaction: &InteractionState, items: &ItemStore, reference: &ClothingReference, dt: f32)`.
 - `PlayerPoseState::anchor(&self, node: NodeId) -> Option<VehiclePose>` supplies retained hand and wearable frames.
 
-- [ ] Write `release_selects_hold_swaps_once`, `rejected_transfer_preserves_bodies`, and `two_hands_roundtrip_without_duplicates`.
+- [x] Add one input-order unit check and one real-export ownership/save check. Add no asset fixtures.
   Assert four slots, source key priority, no selection after a completed swap, and no action after input cancellation.
   Assert rejected transfers keep item location, joint, velocity, and membership unchanged.
   Assert distinct carried and equipped items survive capture/load without sharing an identity.
@@ -170,22 +172,24 @@ Modify `web/input.js`, `web/feedback.js`, `src/browser.rs`, and their current in
   assert_eq!(physical_state_after_rejection, physical_state_before);
   assert_eq!(loaded_item_ids, saved_item_ids);
   ```
-- [ ] Run `./scripts/check.ps1 -Test inventory` and `node --test tests/web/input.test.mjs`. Observe failure.
-- [ ] Add number-key bits 21–24 to the shared u32 input contract. Reuse current Tab and contextual X dispatch.
+- [x] Observe inventory and browser input failures before implementation. Run the critical checks after implementation.
+- [x] Add number-key bits 21–24 to the shared u32 input contract. Reuse current Tab and contextual X dispatch.
   Add source slot guards, atomic transfer validation, storage subtree rules, and existing source pickup restrictions.
   Prepare permanent pose anchors and minimal equipment retrieval before any slot can retrieve a hand-eligible item.
-  Extend locations with `Stored(u8)`, `Equipped`, and source worn location support when Task 7 needs it.
+  Extend locations with `Stored(u8)` and `Equipped`. Keep worn support stopped with Task 7.
   Keep active slot membership distinct from physical location. Remove every link on drop, throw, or deletion.
   Use schema 2 for inventory and equipment snapshots. Reject schema 1 and invalid ownership graphs.
   Capture stored food progress and removed state through item snapshots where the changed ownership path needs them.
   Reuse existing `FoodState` source identity and bite values; leave unrelated needs/sleep/weather save gaps outside this task.
   Cancel transient holds through current pause, blur, menu, and `clear_input` paths.
-- [ ] Run the critical tests and `./scripts/check.ps1 -Test save_roundtrip`.
+- [x] Run `cargo test --locked --lib inventory::tests` and `cargo test --locked --test inventory -- --ignored`.
+  Run the existing browser input, feedback, and save bridge checks.
+- [x] Complete release and browser checks.
   Build and check four slots with actual eligible existing items, ordinary carry, storage, retrieval, drop, and save/load.
   Expected: a playable inventory layer and unchanged stored fluids, condition, food state, and attachments.
-- [ ] Commit: `feat: add source inventory ownership and saved transfers`.
+- [x] Commit: `feat: add source inventory ownership and saved transfers`.
 
-### Task 3: Explicit equipment and existing item use
+### Task 3 (STOPPED): Explicit equipment and existing item use
 
 **Files:** Modify `src/interaction/equipment.rs`, `carry.rs`, `consumption.rs`, `storage.rs`, `interaction.rs`, and `starting_area.rs`.
 Modify `src/presentation/reference.rs`, current item transforms, and interaction feedback.
@@ -217,7 +221,7 @@ Create `tests/equipment.rs`; extend existing consumption and input checks where 
   Expected: source equipment actions with existing carry and storage behavior intact.
 - [ ] Commit: `feat: complete source equipment actions`.
 
-### Task 4: Native station selection, prototype items, and persistence
+### Task 4 (STOPPED): Native station selection, prototype items, and persistence
 
 **Files:** Create `src/acquisition.rs`, `src/starting_area/acquisition.rs`, `src/presentation/items.rs`, and `tests/acquisition.rs`.
 Modify `src/world.rs`, `world/stations.rs`, `starting_area.rs`, `interaction/items.rs`, and current registration paths.
@@ -264,7 +268,7 @@ Reuse `src/presentation/world/prototype.rs` for static item nodes and current co
   Expected: native apparel selection on current station placement, stable identities, and recorded broader population gaps.
 - [ ] Commit: `feat: add source station apparel acquisition`.
 
-### Task 5: Source boxes and one-time content release
+### Task 5 (STOPPED): Source boxes and one-time content release
 
 **Files:** Create `src/acquisition/boxes.rs`.
 Modify acquisition integration, collision/contact handling, attachments, dynamic visuals, audio registration, and save records.
@@ -295,7 +299,7 @@ Extend `tests/acquisition.rs` and `tests/save_roundtrip.rs`.
   Expected: one source release, valid pickup of released content, and preserved state after save/load.
 - [ ] Commit: `feat: add source box acquisition and release`.
 
-### Task 6: Source shovel recovery
+### Task 6 (STOPPED): Source shovel recovery
 
 **Files:** Create `src/acquisition/digging.rs`.
 Modify equipment motion, acquisition integration, source pose sampling, aim restrictions, physics queries, and acquisition audio/particles.
@@ -327,7 +331,7 @@ Extend `tests/acquisition.rs` and `tests/equipment.rs`.
   Expected: source burial restrictions, usable recovery, unchanged general damage behavior, and working save/load.
 - [ ] Commit: `feat: add source buried wearable recovery`.
 
-### Task 7: Wearables, cigarettes, glasses, and holiday startup
+### Task 7 (STOPPED): Wearables, cigarettes, glasses, and holiday startup
 
 **Files:** Create `src/clothing.rs` and `tests/clothing.rs`.
 Modify interaction dispatch, consumption, acquisition integration, startup preparation, item visibility, audio, and current camera effects owners.
@@ -368,7 +372,7 @@ Modify save contracts and `web/input.js`; update current input and source-refere
   Expected: no input duplication, valid two-hand states, and cleared main-view effects after glasses removal.
 - [ ] Commit: `feat: add source wearable actions and effects`.
 
-### Task 8: Intact player skins, source pose, and camera visibility
+### Task 8 (STOPPED): Intact player skins, source pose, and camera visibility
 
 **Files:** Create `src/presentation/player.rs` and `tests/player_pose.rs`.
 Extend `src/player/pose.rs`, `src/presentation/items.rs`, source materials, caster/motion paths, cameras, and save preparation.
@@ -405,7 +409,7 @@ Use existing source shader and render graph owners. Add no second renderer.
   Expected: correct joints, checked shader variants, no main/mirror visibility leak, and intact active scene after preparation failure.
 - [ ] Commit: `feat: render source player models and poses`.
 
-### Task 9: Appearance controls, inventory HUD, and atomic profiles
+### Task 9 (STOPPED): Appearance controls, inventory HUD, and atomic profiles
 
 **Files:** Create `web/player.js` and `tests/web/player.test.mjs`.
 Modify current menu, input, feedback, layout, storage, save-session, HTML, and CSS owners.
@@ -443,7 +447,7 @@ Extend `tests/clothing.rs`, `tests/save_roundtrip.rs`, and `tests/web/save-stora
   Expected: native appearance values, usable current menu flow, persistent profiles, and unchanged committed state on failure.
 - [ ] Commit: `feat: add player appearance controls and saved profiles`.
 
-### Task 10: Whole-feature verification and completion evidence
+### Task 10 (STOPPED): Whole-feature verification and completion evidence
 
 **Files:** Update `docs/roadmap.md`, `docs/verification.md`, this plan, and the source audit records.
 Keep browser captures, draw traces, GPU receipts, and memory measurements under ignored `.cache/inventory-clothing/`.

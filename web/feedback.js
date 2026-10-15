@@ -47,7 +47,7 @@ export class FeedbackState {
   return changed||radioChanged||actionsChanged||detailChanged;
  }
 }
-export function createFeedback(ui,switchIconUrl) {
+export function createFeedback(ui,switchIconUrl,manifest) {
  const state=new FeedbackState(),root=document.querySelector('#hud'),icon=document.querySelector('#crosshair'),fluid=document.querySelector('#fluid-text'),carry=document.querySelector('#carry-help'),notice=document.querySelector('#action-notice'),target=document.querySelector('#target-name'),condition=document.querySelector('#target-condition'),charge=document.querySelector('#throw-charge'),level=document.querySelector('#throw-level');
  const rows=[
   [ACTION.USE,'use','[E]: Open/Close'],
@@ -123,7 +123,15 @@ export function createFeedback(ui,switchIconUrl) {
   const message=state.context===6?'Unlimited Gas':state.notice;
   if(message!==lastNotice){notice.textContent=message;lastNotice=message;}notice.hidden=!message;
  }
+ const inventory=document.createElement('div');inventory.id='inventory';inventory.setAttribute('aria-label','Inventory');root.append(inventory);
+ const slotNodes=Array.from({length:4},(_,i)=>{const tile=document.createElement('div'),number=document.createElement('span'),icon=document.createElement('img');number.textContent=String(i+1);icon.hidden=true;tile.append(number,icon);inventory.append(tile);return {tile,icon,id:0};});
+ const itemIcons=new Map(manifest.items.filter(i=>i.pickup?.can_inventory).map(i=>[i.id,{name:i.name,url:ui.urls[ui.sprites.findIndex(s=>s.source.file===i.pickup.inventory_icon?.file&&s.source.path_id===i.pickup.inventory_icon?.path_id)]}]));
+ const swap=document.createElement('progress');swap.max=1;swap.setAttribute('aria-label','Swap progress');inventory.append(swap);
+ function updateInventory(r){
+  for(let i=0;i<4;i++){const n=slotNodes[i],id=r.slots[i];n.tile.classList.toggle('selected',r.selected===i);if(n.id!==id){n.id=id;const item=itemIcons.get(id);n.icon.hidden=!item;if(item){n.icon.src=item.url;n.icon.alt=item.name;}}}
+  swap.hidden=!(r.progress>0);swap.value=Math.min(1,r.progress);
+ }
  const key=event=>{if(event.code==='Backspace'&&!event.repeat&&state.active){event.preventDefault();state.toggle();paint();}};
  window.addEventListener('keydown',key);window.addEventListener('resize',resize);resize();paint();
- return {state,update(record){if(state.update(record))paint();},setVisible(value){const before=state.visible;state.setVisible(value);if(before!==state.visible)paint();},dispose(){window.removeEventListener('keydown',key);window.removeEventListener('resize',resize);}};
+ return {state,inventory:updateInventory,update(record){if(state.update(record))paint();},setVisible(value){const before=state.visible;state.setVisible(value);if(before!==state.visible)paint();},dispose(){window.removeEventListener('keydown',key);window.removeEventListener('resize',resize);}};
 }
