@@ -105,7 +105,7 @@ async function load(){
  const probe=document.createElement('canvas'),graphics=probe.getContext('webgl2');
  if(!graphics)throw Error('This browser cannot use WebGL2.');
  graphics.getExtension('WEBGL_lose_context')?.loseContext();
- // Download and compile the game code while the asset checks run.
+ // Download and compile the game code while the manifest downloads.
  const code=Promise.all([import('./pkg/my_summer_slop.js'),fetch('./pkg/my_summer_slop_bg.wasm').then(response=>{
   if(!response.ok)throw Error('Cannot load game code (HTTP '+response.status+').');
   return WebAssembly.compileStreaming(response);
@@ -113,7 +113,13 @@ async function load(){
  code.catch(()=>{});
  const response=await fetch('./assets/reference/manifest.json');
  if(!response.ok)throw Error('Cannot load reference manifest (HTTP '+response.status+').');
- const bytes=await response.arrayBuffer(),text=new TextDecoder().decode(bytes),manifest=JSON.parse(text);
+ const bytes=new Uint8Array(await response.arrayBuffer());
+ status.textContent='Loading game code...';
+ loading.stage(status.textContent);
+ const [{default:init,run,manifest_shell,source_render_failure},module]=await code;
+ const exports=await init({module_or_path:module});wasmMemory=exports.memory;renderFailure=source_render_failure;
+ // Rust copies only the shell fields, so JS does not parse the world records.
+ const text=manifest_shell(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
  input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas,manifest.driving.bindings);
  bootstrap.manifestUtf16PayloadBytes=text.length*2;
@@ -127,13 +133,8 @@ async function load(){
  const switchIconUrl='./assets/'+manifest.lighting.switch_icon.path;
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
  feedback=createFeedback(manifest.ui,switchIconUrl,manifest);
- status.textContent='Checking world assets...';
- loading.stage(status.textContent);
- await admitWorldAssets(manifest,(done,total)=>loading.stage('Checking world assets...',done,total));worldAdmitted=true;
- status.textContent='Loading game code...';
- loading.stage(status.textContent);
- const [{default:init,run,source_render_failure},module]=await code;
- const exports=await init({module_or_path:module});wasmMemory=exports.memory;if(failed)return;renderFailure=source_render_failure;status.textContent='Loading the garage...';loading.stage(status.textContent);
- run(text,manifestHash);
+ admitWorldAssets(manifest);worldAdmitted=true;
+ if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
+ run(bytes,manifestHash);
 }
 load().catch(error=>fail(error?.message??String(error)));

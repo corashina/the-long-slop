@@ -10,7 +10,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 rapier3d = "=0.36.0"
 serde = { version = "=1.0.229", features = ["derive", "rc"] }
-serde_json = { version = "=1.0.151", features = ["float_roundtrip"] }
+serde_json = { version = "=1.0.151", features = ["float_roundtrip", "raw_value"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 async-lock = "=3.4.2"
@@ -32,6 +32,7 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 panic = "abort"
+strip = true
 
 [patch.crates-io]
 bevy_render = { path = "vendor/bevy_render" }

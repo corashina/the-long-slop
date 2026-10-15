@@ -21,18 +21,11 @@ pub struct SourceGltf {
 /// Typed loads select this loader. Leave glTF labels to Bevy's loader.
 #[derive(Default, TypePath)]
 pub struct SourceGltfLoader;
-#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 pub struct SourceGltfSettings {
     pub json_bytes: usize,
     pub buffer_bytes: usize,
     pub mesh_bytes: usize,
-    pub sha256: String,
-    pub dependencies: Vec<crate::reference::SourceHash>,
-}
-#[wasm_bindgen::prelude::wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen::prelude::wasm_bindgen(catch,js_namespace=window,js_name=sourceVerifyBytes)]
-    async fn verify_bytes(bytes: &[u8], hash: &str) -> Result<(), wasm_bindgen::JsValue>;
 }
 impl AssetLoader for SourceGltfLoader {
     type Asset = SourceGltf;
@@ -57,9 +50,6 @@ impl AssetLoader for SourceGltfLoader {
         if bytes.len() != settings.json_bytes {
             return Err(invalid("Prototype changed after receipt preflight".into()));
         }
-        verify_bytes(&bytes, &settings.sha256)
-            .await
-            .map_err(|e| invalid(format!("Prototype receipt: {e:?}")))?;
         let document = gltf::Gltf::from_slice(&bytes).map_err(|e| invalid(e.to_string()))?;
         let directory = context
             .path()
@@ -91,15 +81,6 @@ impl AssetLoader for SourceGltfLoader {
                     "Prototype buffer length differs from receipt preflight".into(),
                 ));
             }
-            let path = directory.join(uri).to_string_lossy().replace('\\', "/");
-            let receipt = settings
-                .dependencies
-                .iter()
-                .find(|entry| entry.file == path)
-                .ok_or_else(|| invalid(format!("Missing buffer receipt {path}")))?;
-            verify_bytes(&data, &receipt.sha256)
-                .await
-                .map_err(|e| invalid(format!("Buffer receipt: {e:?}")))?;
             buffers.push(data);
         }
         let mut result = SourceGltf {

@@ -858,6 +858,8 @@ pub struct ReferenceManifest {
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
     pub assets: Vec<AssetRecord>,
+    /// Byte size of each exported runtime file, keyed by its `reference/` path.
+    pub file_bytes: std::collections::BTreeMap<String, u64>,
     pub rendering: RenderingRecord,
     pub nodes: Vec<NodeRecord>,
     pub bodies: Vec<BodyRecord>,
