@@ -194,6 +194,10 @@ impl SourcePrototypes {
         if self.entries.len() >= 8192 {
             return Err(ReferenceError("Source prototype owner limit".into()));
         }
+        // Callers poll `loaded`, so a full queue retries on a later frame.
+        if !stream.pending_room() {
+            return Ok(());
+        }
         let mut allocation = stream.presentation_allocation();
         allocation.pending += 1;
         stream.set_presentation_allocation(allocation)?;

@@ -36,6 +36,7 @@ pub struct GrassWriters {
     pub frame: Option<GrassFrameUniform>,
     pub writers: Vec<GrassWriterInput>,
     pending: Vec<WriterPreparation>,
+    deferred: bool,
     allocations: Vec<(Entity, usize, usize)>,
 }
 struct WriterPreparation {
@@ -518,12 +519,13 @@ impl GrassWriters {
         Ok(())
     }
     pub fn update_frame(&mut self, source_camera: Vec3, origin: Vec3, time: f32) {
+        self.deferred = false;
         if let Some(camera) = self.camera {
             self.frame = Some(camera.frame(source_camera, origin, time));
         }
     }
     pub fn ready(&self) -> Result<bool, crate::reference::ReferenceError> {
-        if !self.pending.is_empty() {
+        if self.deferred || !self.pending.is_empty() {
             return Ok(false);
         }
         match &*self.status.lock().unwrap() {
@@ -553,6 +555,11 @@ impl GrassWriters {
         }
         if let Some(writer) = self.pending.iter_mut().find(|w| w.entity == entity) {
             writer.pose = pose;
+            return Ok(());
+        }
+        // Callers request every frame. `ready` stays false until this writer is admitted.
+        if !stream.pending_room() {
+            self.deferred = true;
             return Ok(());
         }
         let mesh_data = meshes

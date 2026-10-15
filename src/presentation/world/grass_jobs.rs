@@ -158,7 +158,10 @@ impl GrassJobs {
     ) -> Result<(), ReferenceError> {
         if let Some(instance) = self.instances.iter_mut().find(|i| i.entity == entity) {
             instance.latest = view;
-            if instance.pending.is_none() && instance.accepted_view != Some(view) {
+            if instance.pending.is_none()
+                && instance.accepted_view != Some(view)
+                && stream.pending_room()
+            {
                 allocation(stream, 0, 0, 0, 1)?;
                 instance.pending = Some(Pending::Queued);
             }
@@ -201,7 +204,10 @@ impl GrassJobs {
     ) -> Result<(), ReferenceError> {
         if let Some(instance) = self.instances.iter_mut().find(|i| i.entity == entity) {
             instance.latest = view;
-            if instance.pending.is_none() && instance.accepted_view != Some(view) {
+            if instance.pending.is_none()
+                && instance.accepted_view != Some(view)
+                && stream.pending_room()
+            {
                 allocation(stream, 0, 0, 0, 1)?;
                 instance.pending = Some(Pending::Queued);
             }
@@ -224,7 +230,9 @@ impl GrassJobs {
             ]));
         }
         let metadata = std::mem::size_of::<Instance>();
-        allocation(stream, metadata, 0, 0, 1)?;
+        // A full queue leaves the instance idle. `request_view` queues it on a later frame.
+        let queued = stream.pending_room();
+        allocation(stream, metadata, 0, 0, i32::from(queued))?;
         self.instances.push(Instance {
             entity,
             session: stream.frame().request.session,
@@ -238,7 +246,7 @@ impl GrassJobs {
             latest: view,
             accepted_view: None,
             accepted: None,
-            pending: Some(Pending::Queued),
+            pending: queued.then_some(Pending::Queued),
             pending_cpu: 0,
             pending_gpu: 0,
             metadata,
