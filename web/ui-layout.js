@@ -20,15 +20,15 @@ export function applyLayout(element,layout,urls){
 }
 export function rgba(c){return 'rgba('+Math.round(c[0]*255)+','+Math.round(c[1]*255)+','+Math.round(c[2]*255)+','+c[3]+')';}
 export async function loadUiAssets(ui) {
- const urls=[];
- for(const sprite of ui.sprites){
+ const urls=await Promise.all(ui.sprites.map(async sprite=>{
   const response=await fetch('./assets/'+sprite.path);if(!response.ok)throw Error('Missing UI sprite '+sprite.role+' ('+sprite.path+')');
   const bytes=await response.arrayBuffer();const digest=await crypto.subtle.digest('SHA-256',bytes);
   const hash=Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('');
   if(hash!==sprite.sha256)throw Error('Invalid UI sprite hash: '+sprite.role);
-  const url=URL.createObjectURL(new Blob([bytes],{type:'image/png'}));urls.push(url);
+  const url=URL.createObjectURL(new Blob([bytes],{type:'image/png'}));
   const image=new Image();image.src=url;await image.decode();
- }
+  return url;
+ }));
  await document.fonts.load('16px "Liberation Sans"');
  const tinted=new Map();
  async function tint(index,color){
