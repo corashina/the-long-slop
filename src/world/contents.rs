@@ -13,6 +13,7 @@ struct DeferredBatch {
 }
 struct Cursor {
     replay_only: bool,
+    deferred_batches: usize,
     parent: Placement,
     building: Option<SourceId>,
     initial_eligible: Option<bool>,
@@ -215,6 +216,25 @@ impl SourceContents {
             next: 0,
         }
     }
+    pub fn eligibility_changed(
+        &self,
+        reference: &WorldReference,
+        before: [[f64; 3]; 2],
+        after: [[f64; 3]; 2],
+    ) -> bool {
+        let spawn = reference.distances["ItemSpawnDist"].powi(2);
+        self.cursors.iter().any(|c| {
+            !c.replay_only
+                && c.building.is_some()
+                && c.initial_eligible == Some(false)
+                && before
+                    .into_iter()
+                    .all(|p| distance(p, c.parent.pose.position) >= spawn)
+                && after
+                    .into_iter()
+                    .any(|p| distance(p, c.parent.pose.position) < spawn)
+        })
+    }
     pub fn input_revision(&self) -> u64 {
         self.input_revision
     }
@@ -282,7 +302,7 @@ impl SourceContents {
         pending: usize,
         staging: usize,
     ) -> Result<(), ReferenceError> {
-        let initial_pending = self.deferred.len();
+        let initial_pending = self.pending_requests();
         self.update = self.update.wrapping_add(1);
         let eligible = self
             .deferred
@@ -299,16 +319,7 @@ impl SourceContents {
             if remaining == 0 || available == 0 {
                 return Ok(());
             }
-            let pending = pending
-                .saturating_add(initial_pending)
-                .saturating_sub(self.deferred.len());
-            if !self.advance_deferred(
-                reference,
-                available_index_bytes,
-                remaining,
-                pending,
-                available,
-            )? {
+            if !self.advance_deferred(reference, available_index_bytes, remaining, available)? {
                 return Ok(());
             }
         }
@@ -378,6 +389,7 @@ impl SourceContents {
             }
             self.cursors.push(Cursor {
                 replay_only,
+                deferred_batches: 0,
                 parent: p.clone(),
                 building: building.map(|b| b.source.clone()),
                 initial_eligible: None,
@@ -392,7 +404,7 @@ impl SourceContents {
         }
         let staging = staging.saturating_sub(self.retained_bytes().saturating_sub(cursor_before));
         if let Some(index) = self.cursors.iter().position(|c| c.root.is_none()) {
-            if pending.saturating_add(initial_pending) <= self.deferred.len() {
+            if pending.saturating_add(initial_pending) <= self.pending_requests() {
                 return Ok(());
             }
             let staging = self.admit_queues(limit, 1, staging)?;
@@ -451,6 +463,7 @@ impl SourceContents {
             );
             self.cursors[index].inputs = inputs.for_parent(&self.cursors[index].parent.id);
             if !deferred.is_empty() {
+                self.cursors[index].deferred_batches += 1;
                 self.deferred.push(DeferredBatch {
                     replay_only: self.cursors[index].replay_only,
                     owner: self.cursors[index].parent.id.clone(),
@@ -524,7 +537,7 @@ impl SourceContents {
                 continue;
             }
             // This synchronous phase can create one new deferred owner.
-            if pending.saturating_add(initial_pending) <= self.deferred.len() {
+            if pending.saturating_add(initial_pending) <= self.pending_requests() {
                 self.next = index;
                 break;
             }
@@ -606,6 +619,7 @@ impl SourceContents {
             let replay_only = cursor.replay_only;
             self.cursors[index].inputs = initialization.for_parent(&self.cursors[index].parent.id);
             if !deferred.is_empty() {
+                self.cursors[index].deferred_batches += 1;
                 self.deferred.push(DeferredBatch {
                     replay_only,
                     owner,
@@ -656,18 +670,22 @@ impl SourceContents {
         reference: &WorldReference,
         available_index_bytes: usize,
         limit: usize,
-        pending: usize,
         staging: usize,
     ) -> Result<bool, ReferenceError> {
         let Some(index) = self.deferred.iter().position(|b| b.eligible <= self.update) else {
             return Ok(false);
         };
         let final_task = self.deferred[index].next + 1 == self.deferred[index].tasks.len();
-        let delta = usize::from(!final_task);
-        if pending < delta {
-            return Ok(false);
+        if !self.cursors.iter().any(|c| {
+            c.parent.id == self.deferred[index].owner
+                && c.replay_only == self.deferred[index].replay_only
+                && c.deferred_batches > 0
+        }) {
+            return Err(ReferenceError("Missing source deferred family".into()));
         }
-        let staging = self.admit_queues(limit, delta, staging)?;
+        // A child appends before the old record retires, including its final task.
+        // The existing family claim covers it; its record and CPU storage need admission.
+        let staging = self.admit_queues(limit, 1, staging)?;
         let batch = &self.deferred[index];
         let (parent, source) = &batch.tasks[batch.next];
         let replay_only = batch.replay_only;
@@ -731,7 +749,7 @@ impl SourceContents {
         {
             cursor.inputs = initialization.for_parent(&cursor.parent.id);
         }
-        self.complete_deferred(index, deferred, initialization, final_task);
+        self.complete_deferred(index, deferred, initialization, final_task)?;
         for content in output {
             if let Some(cursor) = self
                 .cursors
@@ -777,21 +795,22 @@ impl SourceContents {
         deferred: Vec<(Placement, SourceId)>,
         initialization: super::spawn_state::SpawnInitialization,
         final_task: bool,
-    ) {
+    ) -> Result<(), ReferenceError> {
+        let owner = &self.deferred[index];
+        let cursor = self
+            .cursors
+            .iter()
+            .position(|c| c.parent.id == owner.owner && c.replay_only == owner.replay_only)
+            .ok_or_else(|| ReferenceError("Missing source deferred family".into()))?;
+        let next = self.cursors[cursor]
+            .deferred_batches
+            .checked_add(usize::from(!deferred.is_empty()))
+            .and_then(|n| n.checked_sub(usize::from(final_task)))
+            .ok_or_else(|| ReferenceError("Invalid source deferred family count".into()))?;
         let batch = &mut self.deferred[index];
         batch.next += 1;
         batch.inputs = initialization;
-        if final_task {
-            if deferred.is_empty() {
-                self.deferred.remove(index);
-            } else {
-                // Transfer the same counted claim. No transient owner 33 exists.
-                let batch = &mut self.deferred[index];
-                batch.tasks = deferred;
-                batch.next = 0;
-                batch.eligible = self.update.wrapping_add(1);
-            }
-        } else if !deferred.is_empty() {
+        if !deferred.is_empty() {
             let batch = &self.deferred[index];
             self.deferred.push(DeferredBatch {
                 replay_only: batch.replay_only,
@@ -802,6 +821,11 @@ impl SourceContents {
                 eligible: self.update.wrapping_add(1),
             });
         }
+        if final_task {
+            self.deferred.remove(index);
+        }
+        self.cursors[cursor].deferred_batches = next;
+        Ok(())
     }
     pub fn lamp_states(&self) -> impl Iterator<Item = &(GeneratedId, SourceId, bool)> {
         self.instances().flat_map(|c| &c.inputs.lamps)
@@ -917,7 +941,10 @@ impl SourceContents {
             + self.deferred_bytes()
     }
     pub fn pending_requests(&self) -> usize {
-        self.deferred.len()
+        self.cursors
+            .iter()
+            .filter(|c| c.deferred_batches > 0)
+            .count()
     }
     pub fn discovery_ready(
         &self,
@@ -1232,39 +1259,41 @@ mod discovery_checks {
     fn full_pending_contents_continuation_progresses() {
         let manifest = installed();
         let reference = &manifest.world;
-        let mut contents = SourceContents::new(reference);
-        let source = reference
-            .initialization
-            .components
+        let mut contents = family_fixture(reference);
+        for batch in &mut contents.deferred {
+            batch.eligible = 100;
+        }
+        let p = parent(contents.cursors[0].parent.prototype.clone(), 99);
+        let history = contents.state.capture_history();
+        contents
+            .advance(
+                reference,
+                &[p.clone()],
+                &[],
+                [[0.; 3]; 2],
+                16 * 1024 * 1024,
+                32,
+                0,
+                8 * 1024 * 1024,
+            )
+            .unwrap();
+        assert_eq!(contents.pending_requests(), 32);
+        let cursor = contents
+            .cursors
             .iter()
-            .find(|c| {
-                c.class_name == "partslotscript"
-                    && !flag(
-                        contents.rules.get(reference, &c.source).unwrap().fields,
-                        "enableSpawn",
-                    )
-                    .unwrap()
-            })
-            .unwrap()
-            .source
-            .clone();
-        let root = contents.rules.root(reference, &source).unwrap().clone();
-        for i in 0..32 {
-            let p = parent(root.clone(), i);
-            contents.deferred.push(DeferredBatch {
-                replay_only: false,
-                owner: p.id.clone(),
-                tasks: vec![(p, source.clone())],
-                inputs: Default::default(),
-                next: 0,
-                eligible: 1,
-            });
-        }
-        // A nonfinal task needs one possible child owner. It cannot draw at full ownership.
-        let extra = contents.deferred[0].tasks[0].clone();
-        contents.deferred[0].tasks.push(extra);
-        let random = contents.state.live_state();
-        contents
+            .find(|c| c.parent.id == p.id)
+            .unwrap();
+        assert!(cursor.root.is_none());
+        assert_eq!(cursor.next, 0);
+        assert_eq!(cursor.deferred_batches, 0);
+        assert_eq!(contents.state.capture_history(), history);
+        let mut bounded = family_fixture(reference);
+        bounded.active.try_reserve_exact(32).unwrap();
+        let bound = (bounded.deferred.len() + 1 + bounded.deferred.capacity())
+            * std::mem::size_of::<DeferredBatch>();
+        let history = bounded.state.capture_history();
+        let capacity = bounded.deferred.capacity();
+        let error = bounded
             .advance(
                 reference,
                 &[],
@@ -1273,62 +1302,14 @@ mod discovery_checks {
                 16 * 1024 * 1024,
                 32,
                 0,
-                8 * 1024 * 1024,
+                bound - 1,
             )
-            .unwrap();
-        assert_eq!(contents.pending_requests(), 32);
-        assert_eq!(contents.deferred[0].next, 0);
-        assert_eq!(contents.state.live_state(), random);
-        assert!(contents.state.boundaries().is_empty());
-        contents.deferred[0].tasks.pop();
-        // Use actual source Start output to check the same-owner child transfer at 32.
-        let p = contents.deferred[0].tasks[0].0.clone();
-        let mut rng = super::super::UnityRandom::restore(random);
-        let mut pools = Vec::new();
-        let mut evaluation = SpawnEvaluation::new(
-            reference,
-            &contents.rules,
-            &mut rng,
-            contents.state.context,
-            &mut pools,
-            32,
-        );
-        evaluation.staging = 8 * 1024 * 1024;
-        evaluation.admit_initialization(&p).unwrap();
-        evaluation.queue_start(p.clone(), None);
-        evaluation.finish_starts().unwrap();
-        assert!(!evaluation.deferred.is_empty());
-        let deferred = evaluation.deferred;
-        let inputs = evaluation.initialization;
-        let retained = inputs.clone();
-        let owner = contents.deferred[0].owner.clone();
-        contents.complete_deferred(0, deferred, inputs, true);
-        assert_eq!(contents.pending_requests(), 32);
-        assert_eq!(contents.deferred[0].owner, owner);
-        assert_eq!(contents.deferred[0].inputs, retained);
-        assert_eq!(contents.deferred[0].eligible, contents.update + 1);
-        // Polling closure cannot cross the source frame barrier.
-        let update = contents.update;
-        for _ in 0..20 {
-            assert!(!contents.discovery_ready(reference, &[], &[]).unwrap());
-        }
-        assert_eq!(contents.update, update);
-        assert_eq!(contents.state.live_state(), random);
-        // Each existing final task can finish with zero new pending allowance.
-        contents
-            .advance(
-                reference,
-                &[],
-                &[],
-                [[0.; 3]; 2],
-                16 * 1024 * 1024,
-                32,
-                0,
-                8 * 1024 * 1024,
-            )
-            .unwrap();
-        assert_eq!(contents.pending_requests(), 0);
-        assert_eq!(contents.state.boundary_count(), 32);
+            .unwrap_err();
+        assert!(error.0.contains("queues exceed staging"));
+        assert_eq!(bounded.state.capture_history(), history);
+        assert_eq!(bounded.deferred.capacity(), capacity);
+        assert_eq!(bounded.pending_requests(), 32);
+        assert_eq!(bounded.deferred[0].next, 0);
     }
     #[test]
     #[ignore = "requires the installed checked source export"]
@@ -1545,8 +1526,8 @@ mod discovery_checks {
                 [[0.; 3]; 2],
                 16 * 1024 * 1024,
                 32,
+                32,
                 0,
-                8 * 1024 * 1024,
             )
             .unwrap();
         assert_eq!(bounded.next, phase);
@@ -1603,5 +1584,364 @@ mod discovery_checks {
             .unwrap();
         assert_eq!(refused.state.live_state(), initial);
         assert!(refused.state.boundaries().is_empty());
+    }
+    fn family_fixture(reference: &WorldReference) -> SourceContents {
+        let mut contents = SourceContents::new(reference);
+        let source = reference
+            .initialization
+            .components
+            .iter()
+            .find(|c| {
+                c.class_name == "partslotscript"
+                    && !flag(
+                        contents.rules.get(reference, &c.source).unwrap().fields,
+                        "enableSpawn",
+                    )
+                    .unwrap()
+            })
+            .unwrap()
+            .source
+            .clone();
+        let root = contents.rules.root(reference, &source).unwrap().clone();
+        for ordinal in 0..32 {
+            let p = parent(root.clone(), ordinal);
+            let mut random = super::super::UnityRandom::restore(contents.state.live_state());
+            let mut pools = Vec::new();
+            let mut evaluation = SpawnEvaluation::new(
+                reference,
+                &contents.rules,
+                &mut random,
+                contents.state.context,
+                &mut pools,
+                32,
+            );
+            evaluation.staging = 8 * 1024 * 1024;
+            evaluation.admit_initialization(&p).unwrap();
+            evaluation
+                .output
+                .push(ContentInstance::for_structure(p.clone()).content);
+            evaluation.queue_start(p.clone(), None);
+            if ordinal == 0 {
+                let mut child = p.clone();
+                child.id.children.push((source.clone(), 0));
+                evaluation.queue_start(child, None);
+            }
+            evaluation.finish_starts().unwrap();
+            assert!(!evaluation.deferred.is_empty());
+            let inputs = evaluation.initialization;
+            let tasks = evaluation.deferred;
+            let root = evaluation.output.remove(0);
+            contents.cursors.push(Cursor {
+                replay_only: false,
+                deferred_batches: 1,
+                parent: p.clone(),
+                building: None,
+                initial_eligible: Some(false),
+                callers: Vec::new(),
+                next: 0,
+                chance: None,
+                root: Some(root),
+                inputs: inputs.for_parent(&p.id),
+            });
+            contents.deferred.push(DeferredBatch {
+                replay_only: false,
+                owner: p.id,
+                tasks,
+                inputs,
+                next: 0,
+                eligible: 1,
+            });
+        }
+        contents
+    }
+    #[test]
+    #[ignore = "requires the installed checked source export"]
+    fn fix1_full_families_preserve_source_order() {
+        let manifest = installed();
+        let reference = &manifest.world;
+        let mut saturated = family_fixture(reference);
+        let mut free = family_fixture(reference);
+        assert!(saturated.deferred[0].tasks.len() > 1);
+        assert_eq!(saturated.pending_requests(), 32);
+        for _ in 0..16 {
+            saturated
+                .advance(
+                    reference,
+                    &[],
+                    &[],
+                    [[0.; 3]; 2],
+                    16 * 1024 * 1024,
+                    32,
+                    0,
+                    8 * 1024 * 1024,
+                )
+                .unwrap();
+            free.advance(
+                reference,
+                &[],
+                &[],
+                [[0.; 3]; 2],
+                16 * 1024 * 1024,
+                32,
+                32,
+                8 * 1024 * 1024,
+            )
+            .unwrap();
+            assert!(saturated.pending_requests() <= 32);
+            if saturated.pending_requests() == 0 && free.pending_requests() == 0 {
+                break;
+            }
+        }
+        assert_eq!(
+            saturated.pending_requests(),
+            0,
+            "nonfinal head prevented family progress"
+        );
+        assert_eq!(
+            saturated.state.capture_history(),
+            free.state.capture_history()
+        );
+        assert_eq!(
+            saturated
+                .active
+                .iter()
+                .map(|c| (&c.content.placement, &c.content.inputs))
+                .collect::<Vec<_>>(),
+            free.active
+                .iter()
+                .map(|c| (&c.content.placement, &c.content.inputs))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    fn set_component_field(
+        reference: &mut WorldReference,
+        source: &SourceId,
+        name: &str,
+        value: crate::reference::WorldValue,
+    ) {
+        let record = reference
+            .initialization
+            .components
+            .iter_mut()
+            .find(|c| c.source == *source)
+            .expect("checked compact component");
+        record
+            .fields
+            .iter_mut()
+            .find(|f| f.name == name)
+            .unwrap()
+            .value = value;
+    }
+    #[test]
+    #[ignore = "requires the installed checked source export"]
+    fn fix1_final_children_keep_append_and_update_order() {
+        let manifest = installed();
+        let mut reference = (*manifest.world).clone();
+        let mut saturated = family_fixture(&reference);
+        let mut free = family_fixture(&reference);
+        let source = saturated.deferred[0].tasks[0].1.clone();
+        let mut selected = None;
+        for (index, item) in reference.catalog.items.iter().enumerate() {
+            // The catalog also lists objects without checked source rules.
+            let Ok(root) = saturated.rules.root(&reference, &item.source) else {
+                continue;
+            };
+            if saturated
+                .rules
+                .component(&reference, root, "partscript")
+                .unwrap()
+                .is_none()
+            {
+                continue;
+            }
+            let mut components = Vec::new();
+            saturated
+                .rules
+                .start_components(&reference, root, &mut components)
+                .unwrap();
+            let slots = components
+                .iter()
+                .filter(|s| {
+                    saturated.rules.get(&reference, s).unwrap().class_name == "partslotscript"
+                })
+                .count();
+            if slots > 0
+                && !components.contains(&&source)
+                && selected.is_none_or(|(_, n)| slots < n)
+            {
+                selected = Some((index, slots));
+            }
+        }
+        let (item, _) = selected.expect("checked part with deferred child slots");
+        use crate::reference::WorldValue;
+        set_component_field(
+            &mut reference,
+            &source,
+            "enableSpawn",
+            WorldValue::Integer(1),
+        );
+        set_component_field(
+            &mut reference,
+            &source,
+            "spawnChance",
+            WorldValue::Number(1.),
+        );
+        set_component_field(
+            &mut reference,
+            &source,
+            "randomChance",
+            WorldValue::Number(0.),
+        );
+        set_component_field(
+            &mut reference,
+            &source,
+            "spawn_def",
+            WorldValue::Integer(item as i64),
+        );
+        let mount = saturated.cursors[0].parent.prototype.clone();
+        set_component_field(&mut reference, &source, "T", WorldValue::Link(mount));
+        // All setup precedes the first ordinary advance. No blocked queue gets edited.
+        for contents in [&mut saturated, &mut free] {
+            contents.deferred[0].tasks.truncate(1);
+            for (i, batch) in contents.deferred.iter_mut().enumerate() {
+                batch.eligible = if i == 0 {
+                    1
+                } else if i == 1 {
+                    2
+                } else {
+                    100
+                };
+            }
+        }
+        let first = saturated.deferred[0].owner.clone();
+        let second = saturated.deferred[1].owner.clone();
+        saturated
+            .advance(
+                &reference,
+                &[],
+                &[],
+                [[0.; 3]; 2],
+                16 * 1024 * 1024,
+                32,
+                0,
+                8 * 1024 * 1024,
+            )
+            .unwrap();
+        assert_eq!(saturated.pending_requests(), 32);
+        assert_eq!(
+            saturated.deferred.last().unwrap().owner,
+            first,
+            "children must append behind queued N+1 work"
+        );
+        assert_eq!(saturated.deferred.last().unwrap().eligible, 2);
+        let boundary = saturated.state.boundary_count();
+        assert_eq!(boundary, 1);
+        let random = saturated.state.live_state();
+        for _ in 0..10 {
+            assert!(!saturated.discovery_ready(&reference, &[], &[]).unwrap());
+        }
+        assert_eq!(saturated.update, 1);
+        assert_eq!(saturated.state.live_state(), random);
+        saturated
+            .advance(
+                &reference,
+                &[],
+                &[],
+                [[0.; 3]; 2],
+                16 * 1024 * 1024,
+                32,
+                0,
+                8 * 1024 * 1024,
+            )
+            .unwrap();
+        assert_eq!(saturated.state.boundaries()[boundary].parent, second);
+        assert!(
+            saturated.state.boundaries()[boundary + 1]
+                .parent
+                .children
+                .len()
+                > 0
+        );
+        assert!(saturated.pending_requests() <= 32);
+        for _ in 0..2 {
+            free.advance(
+                &reference,
+                &[],
+                &[],
+                [[0.; 3]; 2],
+                16 * 1024 * 1024,
+                32,
+                32,
+                8 * 1024 * 1024,
+            )
+            .unwrap();
+        }
+        for _ in 0..102 {
+            if saturated.pending_requests() == 0 && free.pending_requests() == 0 {
+                break;
+            }
+            saturated
+                .advance(
+                    &reference,
+                    &[],
+                    &[],
+                    [[0.; 3]; 2],
+                    16 * 1024 * 1024,
+                    32,
+                    0,
+                    8 * 1024 * 1024,
+                )
+                .unwrap();
+            free.advance(
+                &reference,
+                &[],
+                &[],
+                [[0.; 3]; 2],
+                16 * 1024 * 1024,
+                32,
+                32,
+                8 * 1024 * 1024,
+            )
+            .unwrap();
+            assert!(saturated.pending_requests() <= 32);
+        }
+        assert_eq!(saturated.pending_requests(), 0);
+        assert_eq!(
+            saturated.state.capture_history(),
+            free.state.capture_history()
+        );
+        assert_eq!(
+            saturated
+                .active
+                .iter()
+                .map(|c| (&c.content.placement, &c.content.inputs))
+                .collect::<Vec<_>>(),
+            free.active
+                .iter()
+                .map(|c| (&c.content.placement, &c.content.inputs))
+                .collect::<Vec<_>>()
+        );
+        let mut refused = family_fixture(&reference);
+        refused.active.try_reserve_exact(32).unwrap();
+        let bytes = (refused.deferred.len() + 1 + refused.deferred.capacity())
+            * std::mem::size_of::<DeferredBatch>();
+        let history = refused.state.capture_history();
+        assert!(
+            refused
+                .advance(
+                    &reference,
+                    &[],
+                    &[],
+                    [[0.; 3]; 2],
+                    16 * 1024 * 1024,
+                    32,
+                    0,
+                    bytes - 1
+                )
+                .is_err()
+        );
+        assert_eq!(refused.state.capture_history(), history);
+        assert_eq!(refused.pending_requests(), 32);
     }
 }

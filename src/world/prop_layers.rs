@@ -116,6 +116,17 @@ impl PropLayers {
             .filter(|c| !c.candidates.is_empty())
             .count()
     }
+    pub fn focus_changed(&self, before: [[f64; 3]; 2], after: [[f64; 3]; 2]) -> bool {
+        self.layers.iter().any(|layer| {
+            before.into_iter().zip(after).any(|(a, b)| {
+                let size = layer.generator.reference.chunk_dist;
+                let center = |p: [f64; 3]| {
+                    [p[0] as f32, -p[2] as f32].map(|v| (v / size).round_ties_even() * size)
+                };
+                center(a) != center(b)
+            })
+        })
+    }
     pub fn discovery_ready(&self, focus: [[f64; 3]; 2]) -> bool {
         self.layers.iter().all(|layer| {
             let size = layer.generator.reference.chunk_dist;
