@@ -44,7 +44,7 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'Invalid selected runtime dependency'):validate_runtime_paths(manifest)
 
     def test_archived_lighting_ranges_reject_changes_and_out_of_bounds_reads(self):
-        import hashlib
+        import hashlib,os
         from types import SimpleNamespace as NS
         from tools.reference.library.reader import LibraryReader
         with tempfile.TemporaryDirectory() as tmp:
@@ -55,7 +55,11 @@ class RuntimeTests(unittest.TestCase):
             reader.verified_source_files={}
             self.assertEqual(reader.source_range('source.bin',9,6),b'source')
             with self.assertRaisesRegex(ValueError,'exceeds file'):reader.source_range('source.bin',10,6)
+            before=path.stat()
             path.write_bytes(b'changed source!')
+            # Make this same-size change visible to the reader's metadata cache.
+            os.utime(path,ns=(before.st_atime_ns,before.st_mtime_ns+1_000_000_000))
+            self.assertGreater(path.stat().st_mtime_ns,before.st_mtime_ns)
             with self.assertRaisesRegex(ValueError,'hash mismatch'):reader.source_range('source.bin',0,1)
 
     def test_failed_runtime_promotion_restores_previous_directory(self):

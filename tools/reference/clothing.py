@@ -267,12 +267,64 @@ def recover_characters(source,manifest,output):
     return characters,od['selectedCharacter']
 
 
+def validate_character_renderer(renderer):
+    """Check the inactive character renderer schema and source-specific state."""
+    fields={'source','node','mesh','gltf_mesh','materials','state','enabled','skin',
+        'update_when_offscreen','skinned_motion_vectors','quality'}
+    state_fields={'source','bounds_center','bounds_extents','cast_shadows','receive_shadows',
+        'reflection_probe_usage','motion_vectors','sorting_layer','sorting_order'}
+    if type(renderer) is not dict or set(renderer)!=fields:
+        raise ValueError('Character renderer fields')
+    state=renderer['state']
+    if type(state) is not dict or set(state)!=state_fields:
+        raise ValueError('Character renderer state fields')
+    if type(renderer['materials']) is not list or not renderer['materials']:
+        raise ValueError('Character renderer material array')
+    for identity in [renderer['source'],renderer['mesh'],state['source'],*renderer['materials']]:
+        if (type(identity) is not dict or set(identity)!={'file','path_id'}
+                or type(identity['file']) is not str or not identity['file']
+                or type(identity['path_id']) is not int or not 0<identity['path_id']<2**63):
+            raise ValueError('Character renderer source identity')
+    finite_record(renderer)
+    for field in ('bounds_center','bounds_extents'):
+        value=state[field]
+        if (type(value) is not list or len(value)!=3
+                or any(type(v) not in (int,float) or abs(v)>3.4028234663852886e38 for v in value)):
+            raise ValueError('Character renderer bounds vector')
+    if any(v<0 for v in state['bounds_extents']):
+        raise ValueError('Character renderer bounds extents')
+    for field in ('node','gltf_mesh'):
+        if type(renderer[field]) is not int or not 0<=renderer[field]<2**32:
+            raise ValueError('Character renderer node or mesh index')
+    pid=renderer['source']['path_id']
+    shadow=pid in (58502,58511,58500,58523,58489,58535)
+    skinned=pid not in (43612,44815,42694,41622)
+    expected={'cast_shadows':3 if shadow else 0 if skinned else 1,
+        'reflection_probe_usage':0 if skinned else 1,'motion_vectors':1,
+        'sorting_layer':0,'sorting_order':0}
+    if (state['source']!=renderer['source'] or renderer['enabled'] is not True
+            or state['receive_shadows'] is not (not shadow)
+            or any(type(state[f]) is not int or state[f]!=v for f,v in expected.items())):
+        raise ValueError('Character renderer state')
+    if skinned:
+        if (type(renderer['skin']) is not int or not 0<=renderer['skin']<2**32
+                or type(renderer['quality']) is not int or renderer['quality']!=0):
+            raise ValueError('Character skinned renderer links')
+    elif renderer['skin'] is not None or renderer['quality'] is not None:
+        raise ValueError('Character eye renderer skin fields')
+    if any(renderer[f] is not (True if skinned else None)
+            for f in ('update_when_offscreen','skinned_motion_vectors')):
+        raise ValueError('Character skinned renderer flags')
+
+
 def validate_characters(clothing,manifest):
     import colorsys
     nodes={n['id']:n for n in manifest['nodes']}
     characters=clothing['characters']
     if clothing['selected_character']!=0 or len(characters)!=2:raise ValueError('Character selection')
     for index,c in enumerate(characters):
+        if type(c['renderers']) is not list:raise ValueError('Character renderer array')
+        for renderer in c['renderers']:validate_character_renderer(renderer)
         asset=next((a for a in manifest['assets'] if a['id']==c['asset']),None)
         if asset is None or asset['usage']!='player_prototype' or c['source']!={'file':'level1','path_id':(71215,67763)[index]}:raise ValueError('Character identity')
         def local(n):return n in nodes and nodes[n]['asset']==c['asset'] and descendant(nodes,n,c['root'])
@@ -285,7 +337,6 @@ def validate_characters(clothing,manifest):
             if nodes.get(r['node'],{}).get('source')!={'file':'level1','path_id':transform_id} or r['mesh']!={'file':'sharedassets0.assets','path_id':mesh_id} or r['materials']!=[{'file':'sharedassets0.assets','path_id':p} for p in materials]:raise ValueError('Exact character renderer bindings')
         if len(renderers)!=len(c['renderers']) or any(not local(r['node']) or not r['materials'] for r in c['renderers']):raise ValueError('Character renderer nodes')
         for r in c['renderers']:
-            if r['state']['source']!=r['source'] or not r['enabled']:raise ValueError('Character renderer state')
             for material in r['materials']:
                 if not any(m['asset']==c['asset'] and m['source']==material for m in manifest['rendering']['materials']):raise ValueError('Character material dependency')
         if len(c['skins'])!=(2,16)[index] or len({s['index'] for s in c['skins']})!=len(c['skins']):raise ValueError('Complete character skins')
@@ -328,6 +379,7 @@ def skin_accessor(document,index):
 
 def validate_player_export(clothing,manifest,output):
     """Bind typed skin records to actual glTF nodes, accessors, and binary validation."""
+    validate_characters(clothing,manifest)
     from pathlib import Path
     from .gltf import validate_gltf
     asset=next(a for a in manifest['assets'] if a['usage']=='player_prototype')

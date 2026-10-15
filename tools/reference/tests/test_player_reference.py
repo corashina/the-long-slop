@@ -100,3 +100,52 @@ class PlayerReferenceTests(unittest.TestCase):
                 changed=bytearray(binary);struct.pack_into('<'+('H' if field=='JOINTS_0' else 'f'),changed,offset,value)
                 (directory/'player.bin').write_bytes(changed)
                 with self.assertRaises(ValueError):validate_gltf(path)
+
+    def test_renderer_contract_rejects_invalid_state_and_shape_in_both_paths(self):
+        import copy
+        from tools.reference.clothing import validate_player_export
+        original=self.manifest['clothing']
+        validators=[('clothing',lambda c:validate_clothing(c,self.manifest)),
+            ('export',lambda c:validate_player_export(c,self.manifest,self.output))]
+        for _,validate in validators:validate(original)
+        # The first five cases reproduce review I1. Others cover the remaining predicates and types.
+        cases=[(0,'state','cast_shadows',99),(0,'state','bounds_extents',[-1,0,0]),
+            (0,None,'update_when_offscreen',False),(0,None,'skinned_motion_vectors',False),
+            (2,None,'quality',2),
+            (1,'state','cast_shadows',0),(1,'state','receive_shadows',True),
+            (0,'state','cast_shadows',1),(0,'state','receive_shadows',False),
+            (2,'state','cast_shadows',0),(2,'state','receive_shadows',False),
+            (0,'state','reflection_probe_usage',1),(2,'state','reflection_probe_usage',0),
+            (0,'state','motion_vectors',0),(0,'state','sorting_layer',1),(0,'state','sorting_order',1),
+            (0,None,'skin',None),(2,None,'skin',0),(0,None,'quality',1),
+            (2,None,'update_when_offscreen',False),(2,None,'skinned_motion_vectors',False),
+            (0,'state','bounds_center',[0,0]),(0,'state','bounds_extents',[0,0,0,0]),
+            (0,'state','bounds_center',[0,'0',0]),(0,'state','bounds_extents',[0,False,0]),
+            (0,'state','bounds_center',[0,float('inf'),0]),(0,'state','bounds_extents',None),
+            (0,'state','bounds_center',{'x':0,'y':0,'z':0}),
+            (0,'state','cast_shadows',False),(0,'state','receive_shadows',1),
+            (0,'state','reflection_probe_usage',False),(0,'state','motion_vectors',1.0),
+            (0,'state','sorting_layer',0.0),(0,'state','sorting_order',False),
+            (0,None,'enabled',1),(0,None,'update_when_offscreen',1),
+            (0,None,'skinned_motion_vectors',1),(0,None,'quality',False),
+            (0,None,'skin',False),(0,None,'node',True),(0,None,'gltf_mesh',0.0),
+            (0,None,'materials',{}),(0,None,'state',None),
+            (0,None,'source',{'file':'level1','path_id':58557,'extra':0}),
+            (0,'state','source',{'file':'level1','path_id':58557.0})]
+        for index,section,field,value in cases:
+            changed=copy.deepcopy(original);r=changed['characters'][0]['renderers'][index]
+            (r if section is None else r[section])[field]=value
+            for name,validate in validators:
+                with self.subTest(path=name,index=index,section=section,field=field,value=value):
+                    with self.assertRaises(ValueError):validate(changed)
+        renderer=original['characters'][0]['renderers'][0]
+        for section in (None,'state'):
+            fields=renderer if section is None else renderer[section]
+            for field in [*fields,'unknown']:
+                changed=copy.deepcopy(original);r=changed['characters'][0]['renderers'][0]
+                record=r if section is None else r[section]
+                if field=='unknown':record[field]=0
+                else:del record[field]
+                for name,validate in validators:
+                    with self.subTest(path=name,section=section,field=field):
+                        with self.assertRaises(ValueError):validate(changed)
