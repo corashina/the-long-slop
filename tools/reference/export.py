@@ -382,7 +382,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     bind_survival(source,manifest)
     bind_weather(source,manifest)
     resources={entry['file'] for entry in manifest['assets'][0]['dependencies']}
-    manifest['assets'][0]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in lighting_resources(manifest) if r['path'] not in resources)
+    manifest['assets'][0]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in runtime_resources(manifest) if r['path'] not in resources)
     manifest['ui']=export_ui(source,output,library)
     for index,name in enumerate(CARS):
         manifest['vehicles'][index]['instruments']=recover_instruments(source,manifest,report,name,roots[name][0])

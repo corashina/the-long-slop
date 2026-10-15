@@ -303,7 +303,7 @@ class RuntimeContractTests(unittest.TestCase):
             content=b'fixture sprite bytes'
             (root/Path(sprite['path']).name).write_bytes(content)
             sprite['sha256']=hashlib.sha256(content).hexdigest()
-        from tools.reference.export import lighting_resources
+        from tools.reference.export import runtime_resources
         def update_resource_hashes(value):
             if isinstance(value,dict):
                 if ('path' in value or 'file' in value) and 'sha256' in value:
@@ -313,9 +313,10 @@ class RuntimeContractTests(unittest.TestCase):
                 for child in value:update_resource_hashes(child)
         update_resource_hashes(manifest['lighting'])
         update_resource_hashes(manifest['render_lighting'])
+        update_resource_hashes(manifest['weather'])
         update_resource_hashes(manifest['plates'])
         from tools.reference.plates import plate_resources
-        for resource in [*lighting_resources(manifest),*plate_resources(manifest['plates'])]:
+        for resource in [*runtime_resources(manifest),*plate_resources(manifest['plates'])]:
             content=b'fixture lighting bytes'
             (root/Path(resource['path']).name).write_bytes(content)
             resource['sha256']=hashlib.sha256(content).hexdigest()
