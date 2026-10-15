@@ -75,6 +75,7 @@ impl WorldPresentation<'_, '_> {
         lod_view: super::lod::LodView,
         receivers: &[WorldBounds],
         enabled: bool,
+        budget_ms: f64,
     ) -> Result<(), ReferenceError> {
         super::preflight::configure_staging(stream)?;
         if self.allocation.session != stream.frame().request.session {
@@ -139,7 +140,7 @@ impl WorldPresentation<'_, '_> {
         ) {
             failure.get_or_insert(error);
         }
-        stream.prepare();
+        stream.prepare(budget_ms);
         while let Some(source) = self.prototypes.take_retired() {
             self.allocation.retired_materials.push(source);
         }

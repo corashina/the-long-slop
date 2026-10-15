@@ -296,6 +296,7 @@ impl PreparedPresentation {
                 lod,
                 &receivers,
                 false,
+                0.,
             ),
             Err(e) => Err(crate::reference::ReferenceError(e.to_string())),
         };

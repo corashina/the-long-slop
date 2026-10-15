@@ -136,7 +136,7 @@ fn installed_manifest_checks_lod_bounds_and_initializes_runtime() {
             allocation.active_cpu
         );
     }
-    runtime.stream.prepare();
+    runtime.stream.prepare(0.);
     assert_eq!(runtime.stream.metrics().prepared_roads, 256);
     use my_summer_slop::world::{ROAD_SEGMENTS, RoadIndex, RoadSequence};
     let seed = reference.world.terrain.seed;

@@ -953,44 +953,63 @@ impl WorldStream {
             self.failure = None;
         }
     }
-    pub fn prepare(&mut self) {
+    /// Advances generation for up to `budget_ms`. A zero budget runs one step.
+    /// Props and contents run once per call. Other stages repeat while they progress.
+    pub fn prepare(&mut self, budget_ms: f64) {
         self.publication_available = true;
         self.last_road_work = 0;
         self.last_terrain_work = 0;
+        #[cfg(target_arch = "wasm32")]
+        let started = crate::browser::game_now();
+        #[cfg(not(target_arch = "wasm32"))]
+        let started = std::time::Instant::now();
+        let mut first = true;
+        while self.prepare_step(first) {
+            first = false;
+            #[cfg(target_arch = "wasm32")]
+            let elapsed = crate::browser::game_now() - started;
+            #[cfg(not(target_arch = "wasm32"))]
+            let elapsed = started.elapsed().as_secs_f64() * 1000.;
+            if elapsed >= budget_ms {
+                break;
+            }
+        }
+    }
+    /// Returns true when the step progressed and another step can run in this frame.
+    fn prepare_step(&mut self, first: bool) -> bool {
         if self.failure.is_some() || self.ready.is_some() || self.presentation.jobs >= 2 {
-            return;
+            return false;
         }
         if !self.indices_ready {
             let slots = 2usize.saturating_sub(self.presentation.jobs);
             let before = self.roads.prepared_segments();
             let road_work = usize::from(before < super::ROAD_SEGMENTS);
             let road_ready = self.roads.prepare(if slots > 0 { 256 } else { 0 });
-            self.last_road_work = (self.roads.prepared_segments() - before) as usize;
+            self.last_road_work += (self.roads.prepared_segments() - before) as usize;
             let placement_ready = self
                 .placements
                 .prepare(if slots > road_work { 256 } else { 0 });
             self.indices_ready = road_ready && placement_ready;
-            return;
+            return slots > 0;
         }
         if self.startup.is_none() {
             self.prepare_startup();
-            return;
+            return true;
         }
         if self.plan_revision != self.request.revision {
             if let Err(error) = self.plan() {
                 self.failure = Some(error.0);
             }
-            return;
+            return true;
         }
         if self.next_road < self.road_candidates.len() {
-            self.prepare_road();
-            return;
+            return self.prepare_road();
         }
-        self.prepare_props();
-        self.prepare_contents();
-        if self.failure.is_none() {
-            self.prepare_terrain();
+        if first {
+            self.prepare_props();
+            self.prepare_contents();
         }
+        self.failure.is_none() && self.prepare_terrain()
     }
     fn prepare_startup(&mut self) {
         if self.startup_candidates.is_empty() && self.startup_next == 0 {
@@ -1531,22 +1550,23 @@ impl WorldStream {
         self.plan_revision = self.request.revision;
         Ok(())
     }
-    fn prepare_road(&mut self) {
+    /// Returns false when admission or capacity blocks the next road.
+    fn prepare_road(&mut self) -> bool {
         if self.available_external_jobs() == 0 {
-            return;
+            return false;
         }
         let index = self.road_candidates[self.next_road];
         let segment = self.roads.prepare_segment(index, 8);
         self.last_road_work = self.roads.replay_work();
         let Some(segment) = segment else {
-            return;
+            return true;
         };
         if !self
             .admissions
             .get(&self.reference.road.prototypes[segment.biome as usize])
             .is_some_and(|a| a.ready)
         {
-            return;
+            return false;
         }
         let radius = self.reference.distances["RoadGenDist"];
         let needs_output = self
@@ -1559,7 +1579,7 @@ impl WorldStream {
                 .any(|s| s.key.layer == WorldLayer::Road && s.key.unit[0] == index as i64);
         let pending_bytes = super::road::road_surface_bound(&self.reference, segment.biome);
         if needs_output && !self.admit_generation(pending_bytes) {
-            return;
+            return false;
         }
         self.next_road += 1;
         let radius = self.reference.distances["RoadGenDist"] as f64;
@@ -1592,16 +1612,16 @@ impl WorldStream {
         }
         if self.metrics().generated_objects > MAX_OBJECTS {
             self.failure = Some("Source object count exceeds 8192".into());
-            return;
+            return true;
         }
         if !self.road_focus.into_iter().any(|p| {
             source_distance_squared(p, segment.position()) <= (radius as f32) * (radius as f32)
         }) {
-            return;
+            return true;
         }
         if self.wanted_roads.len() == MAX_ROADS {
             self.failure = Some("Source road count exceeds512".into());
-            return;
+            return true;
         }
         self.wanted_roads.push(index);
         append_road_points(
@@ -1614,7 +1634,7 @@ impl WorldStream {
             unit: [index as i64, 0],
         };
         if self.surfaces.iter().any(|s| s.key == key) {
-            return;
+            return true;
         }
         let mut surface = WorldSurface::default();
         deform_road(&self.reference, &segment, &mut surface);
@@ -1633,10 +1653,12 @@ impl WorldStream {
                 road: Some(segment),
             },
         });
+        true
     }
-    fn prepare_terrain(&mut self) {
+    /// Returns true when the terrain job advanced.
+    fn prepare_terrain(&mut self) -> bool {
         if self.terrain_work.is_none() && self.available_external_jobs() == 0 {
-            return;
+            return false;
         }
         if self.terrain_work.is_none() {
             let Some(key) = self
@@ -1645,12 +1667,12 @@ impl WorldStream {
                 .find(|key| !self.surfaces.iter().any(|s| s.key == **key))
                 .copied()
             else {
-                return;
+                return false;
             };
             let tier = layer_tier(key.layer);
             let tile = self.tiles[tier];
             if !self.terrain_ready[tier] {
-                return;
+                return false;
             }
             // Reserve all output, border and context storage before constructing the job.
             let startup = self.startup.as_ref().map_or(0, |s| {
@@ -1667,7 +1689,7 @@ impl WorldStream {
                 + self.road_points.len() * std::mem::size_of::<TerrainRoadPoint>() * 2
                 + 512;
             if !self.admit_generation(pending_bytes) {
-                return;
+                return false;
             }
             let mut foundations = Vec::new();
             let mut holes = Vec::new();
@@ -1747,7 +1769,7 @@ impl WorldStream {
         let work = self.terrain_work.as_mut().unwrap();
         if !same_request(work.request, self.request) {
             self.terrain_work = None;
-            return;
+            return false;
         }
         let tier = layer_tier(work.key.layer);
         let before = work.job.prepared_vertices();
@@ -1763,7 +1785,8 @@ impl WorldStream {
             },
             &mut work.surface,
         );
-        self.last_terrain_work = work.job.prepared_vertices() - before;
+        let advanced = work.job.prepared_vertices() - before;
+        self.last_terrain_work += advanced;
         if done {
             let work = self.terrain_work.take().unwrap();
             self.ready = Some(PreparedSurface {
@@ -1782,6 +1805,7 @@ impl WorldStream {
                 },
             });
         }
+        advanced > 0
     }
     pub fn prepared_surface(&self) -> Option<(WorldRequest, &PublishedSurface)> {
         self.ready
