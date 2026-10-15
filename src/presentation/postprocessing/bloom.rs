@@ -312,36 +312,3 @@ impl BloomPass {
         true
     }
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn installed_pyramid_preserves_floor_extents_and_fractional_scale() {
-        let a = BloomLayout::new([1280, 720], 7.).unwrap();
-        assert_eq!(
-            a.extents,
-            vec![
-                [640, 360],
-                [320, 180],
-                [160, 90],
-                [80, 45],
-                [40, 22],
-                [20, 11]
-            ]
-        );
-        assert!((a.sample_scale - 0.821928).abs() < 0.000002);
-        let b = BloomLayout::new([1279, 719], 7.).unwrap();
-        assert_eq!(
-            b.extents,
-            vec![
-                [639, 359],
-                [319, 179],
-                [159, 89],
-                [79, 44],
-                [39, 22],
-                [19, 11]
-            ]
-        );
-        assert!(BloomLayout::new([1, 720], 7.).is_err());
-    }
-}

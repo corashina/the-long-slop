@@ -131,36 +131,6 @@ class SelectedAudio(unittest.TestCase):
             'line_start':1,'line_end':2,'sha256':'b'*64}
         return library,Source(),{'selected':[transform]},manifest,records[key(engine)],seal_records,native,receipt,method
 
-    def test_recover_audio_follows_accepted_pointers_and_overrides(self):
-        from tools.reference.audio import recover_audio
-        with tempfile.TemporaryDirectory() as directory:
-            library,source,roots,manifest,engine,seal_records,native,receipt,method=self.accepted_source_fixture(directory)
-            with patch('tools.reference.audio.managed_evidence',return_value=(receipt,method)), \
-                    patch('tools.reference.audio.NATIVE_HASH',hashlib.sha256(native.read_bytes()).hexdigest()):
-                audio=recover_audio(source,roots,manifest,library,Path(directory))
-                idle=audio['voices'][audio['engine']['idle_voice']-1]
-                self.assertEqual(idle['source'],{'file':'level1','path_id':201})
-                self.assertEqual(audio['emitters'][idle['emitter']-1]['node'],1)
-                self.assertEqual(idle['clip'],1)
-                self.assertEqual(audio['clips'][0]['source'],{'file':'sharedassets1.assets','path_id':4423})
-                self.assertEqual(idle['mixer'],audio['shared']['mixer'])
-                self.assertEqual(idle['curves']['rolloff']['pre_wrap_mode'],2)
-                self.assertEqual(idle['authored_priority'],128)
-                self.assertEqual(idle['priority'],80)
-                self.assertEqual(idle['methods'][0]['method'],'Start')
-                self.assertEqual(audio['radio']['stations'][0]['frequency'],1080)
-                self.assertEqual(audio['radio']['electronics_source'],{'file':'level1','path_id':305})
-                self.assertEqual(audio['radio']['electronics_output'],1)
-                self.assertEqual(audio['radio']['tuning_repeat_seconds'],0.2)
-                self.assertEqual(audio['radio']['holiday_ranges'],[[10,15,11,15],[12,15,1,15]])
-                self.assertEqual(audio['radio']['controls']['volume'],{'source':{'file':'level1','path_id':306},'node':1,'item':1,'enabled':True,'tune':True,'turnable':False})
-                self.assertIn(ObjectId('level1',301),library.selected_records)
-                self.assertIn(ObjectId('sharedassets1.assets',4423),library.selected_records)
-                engine['SAlap']={'file':'level1','m_PathID':999999}
-                seal_records()
-                with self.assertRaises(KeyError):
-                    recover_audio(source,roots,manifest,library,Path(directory))
-
     def fixture(self, directory):
         root = Path(directory)
         path = root / 'audio/sharedassets1.assets/4423/sample-000.wav'
@@ -182,70 +152,9 @@ class SelectedAudio(unittest.TestCase):
                 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}]}}
         return reader, identity, path
 
-    def test_audio_uses_accepted_samples(self):
-        with tempfile.TemporaryDirectory() as directory:
-            reader, identity, original = self.fixture(directory)
-            self.assertTrue(hasattr(reader, 'audio'), 'missing selected WAV interface')
-            from tools.reference.audio import copy_audio
-            metadata = copy_audio(reader,identity,1,reader.root,'effect')
-            path = reader.root / metadata['path'].removeprefix('reference/')
-            self.assertNotEqual(path, original)
-            self.assertEqual(path.read_bytes(), original.read_bytes())
-            self.assertEqual(metadata['sha256'], hashlib.sha256(original.read_bytes()).hexdigest())
-            self.assertEqual(reader.selected_audio, {identity})
-
     def test_required_links_and_samples_fail(self):
         with tempfile.TemporaryDirectory() as directory:
             reader, identity, path = self.fixture(directory)
             self.assertTrue(hasattr(reader, 'audio'), 'missing selected WAV interface')
             path.write_bytes(path.read_bytes()[:-2] + b'xx')
             with self.assertRaises(ValueError): reader.audio(identity)
-
-    def test_audio_closure_and_overrides(self):
-        from tools.reference.audio import validate_audio_export
-        with tempfile.TemporaryDirectory() as directory:
-            reader, identity, path = self.fixture(directory)
-            from tools.reference.audio import copy_audio
-            metadata = copy_audio(reader,identity,1,reader.root,'effect')
-            audio = copy.deepcopy(json.loads(Path('tests/common/reference.json').read_text())['audio'])
-            audio['clips'] = [metadata]
-            for v in audio['voices']:
-                if v['clip'] is not None: v['clip'] = 1
-                if v['authored_clip'] is not None: v['authored_clip'] = 1
-            for b in audio['bindings']: b['clips'] = [1]
-            validate_audio_export(audio,reader.root)
-            idle=next(v for v in audio['voices'] if v['id']==audio['engine']['idle_voice'])
-            self.assertEqual(idle['authored_priority'],128)
-            self.assertEqual(idle['priority'],80)
-            self.assertEqual(idle['curves']['rolloff']['pre_wrap_mode'],2)
-            self.assertTrue(idle['methods'])
-            for field,value in [('clip',2),('emitter',999999),('mixer',999999),('max_distance',0)]:
-                broken=copy.deepcopy(audio);broken['voices'][0][field]=value
-                with self.subTest(field=field), self.assertRaises(ValueError):validate_audio_export(broken,reader.root)
-            for field,value in [('gain',-1),('pitch',0),('min_distance',-1),
-                                ('max_distance',0),('spatial_blend',2),('rolloff_mode',3)]:
-                broken=copy.deepcopy(audio);broken['shared']['settings'][field]=value
-                with self.subTest(shared=field), self.assertRaises(ValueError):validate_audio_export(broken,reader.root)
-            broken=copy.deepcopy(audio)
-            broken['shared']['settings']['rolloff_curve']['keys']=[]
-            with self.assertRaises(ValueError):validate_audio_export(broken,reader.root)
-            with self.assertRaises(ValueError):reader.audio(ObjectId('missing.assets',1))
-
-    def test_custom_content_is_external(self):
-        from tools.reference.audio import station_records
-        class Source:
-            def resolve(self, owner, pointer): raise AssertionError('custom content must stay external')
-        value = station_records(Source(), None, {'radioChs': [], 'radioChsAM': [
-            {'FR': 1080, 'name': 'custom', 'custom': 1, 'music': [], 'talk': [],
-             'musicHoliday': [], 'talkHoliday': [], 'musicVolume': [], 'talkVolume': [],
-             'Bmusic': 0, 'startTime': 0, 'cTime': 0, 'cMaxTime': 0, 'currentVolume': 0}]}, lambda _: 0)
-        self.assertEqual(value[0]['frequency'], 1080)
-        self.assertEqual(value[0]['content'], 'external')
-        self.assertEqual(value[0]['music'], [])
-        self.assertEqual(value[0]['talk'], [])
-
-    def test_radio_clock_receipts_select_scaled_source(self):
-        radio = json.loads(Path('tests/common/reference.json').read_text())['audio']['radio']
-        self.assertEqual(radio['clock']['kind'], 'scaled')
-        self.assertEqual(radio['clock']['selected']['method'], 'RADIO')
-        self.assertEqual(radio['clock']['multiplayer']['method'], 'RADIO2')

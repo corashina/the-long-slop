@@ -215,6 +215,19 @@ impl RendererRecord {
             &format!("renderer {}:{}", self.source.file, self.source.path_id),
         )
     }
+    pub fn validate_template(&self) -> Result<(), ReferenceError> {
+        self.validate()?;
+        let shadow_only = self.source.file == "sharedassets1.assets"
+            && [98477, 98194, 93128, 91870, 98218].contains(&self.source.path_id);
+        require(
+            if shadow_only {
+                self.cast_shadows == 3
+            } else {
+                self.cast_shadows <= 1
+            },
+            "template shadow source mode",
+        )
+    }
     /// Two constant vertex attributes. Flags are small integers, exactly represented by f32.
     pub fn attributes(&self) -> [[f32; 4]; 2] {
         [

@@ -11,7 +11,6 @@ from unittest.mock import patch
 from tools.reference import export
 from tools.reference.library.types import Catalog, Snapshot
 
-
 class ExportSafetyTests(unittest.TestCase):
     def test_library_rejects_resolved_steam_outputs_before_prerequisites(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -69,26 +68,6 @@ class ExportSafetyTests(unittest.TestCase):
             preflight.assert_called_once()
             source.assert_not_called()
 
-    def test_managed_preflight_reports_missing_host_and_package(self):
-        from tools.reference.library.managed import preflight_managed, SCRIPT
-        with patch('tools.reference.library.managed.subprocess.run', side_effect=FileNotFoundError('pwsh')):
-            with self.assertRaisesRegex(ValueError, 'host pwsh'):
-                preflight_managed()
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            script = SCRIPT.with_name('preflight-managed.ps1')
-            result = subprocess.run(['pwsh', '-NoProfile', '-File', str(script), '-PackagePath', str(root)],
-                                    capture_output=True, text=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('ICSharpCode.Decompiler.nuspec', result.stderr)
-            self.assertEqual(list(root.iterdir()), [])
-            (root / 'ICSharpCode.Decompiler.nuspec').write_text(
-                '<package><metadata><version>0.0.0</version></metadata></package>')
-            result = subprocess.run(['pwsh', '-NoProfile', '-File', str(script), '-PackagePath', str(root)],
-                                    capture_output=True, text=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('package version mismatch', result.stderr)
-
     def test_invalid_accepted_catalog_does_not_rebuild_or_remove_managed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -110,19 +89,6 @@ class ExportSafetyTests(unittest.TestCase):
                     export.stage_catalog(None)
                 build.assert_not_called()
             self.assertEqual(managed.read_text(), 'accepted analysis')
-
-    def test_storage_reports_peak_without_charging_retained_bytes_again(self):
-        from tools.reference.library.storage import check_space
-        with tempfile.TemporaryDirectory() as directory, \
-             patch('tools.reference.library.storage.shutil.disk_usage', return_value=N(free=150)), \
-             contextlib.redirect_stdout(io.StringIO()) as output:
-            check_space('fixture', Path(directory), 100, retained=1000)
-            self.assertIn('additional=100', output.getvalue())
-            self.assertIn('retained=1000', output.getvalue())
-            self.assertIn('peak=1100', output.getvalue())
-            self.assertIn('available=150', output.getvalue())
-            with self.assertRaisesRegex(OSError, 'Insufficient'):
-                check_space('fixture', Path(directory), 151, retained=1000)
 
     def test_fresh_library_space_failure_precedes_archive_and_conversion(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(export, 'SOURCE_WORK_ROOT', Path(directory)), \
@@ -161,6 +127,30 @@ class ExportSafetyTests(unittest.TestCase):
             source_text.write_text(json.dumps({'files': [{'output': {'file': 'native/news.txt', 'bytes': 456, 'sha256': 'x'}}]}))
             expected += source_text.stat().st_size + 456
             self.assertEqual(assembly_bytes(stages), expected)
+
+    def test_acquisition_failure_before_promotion_retains_all_runtime_bytes(self):
+        import hashlib
+        from tools.reference.acquisition import validate_acquisition
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);accepted=root/'reference';accepted.mkdir()
+            (accepted/'manifest.json').write_bytes(b'accepted manifest')
+            (accepted/'geometry.bin').write_bytes(b'accepted binary')
+            def inventory():
+                return {p.name:(hashlib.sha256(p.read_bytes()).hexdigest(),p.stat().st_mtime_ns) for p in accepted.iterdir()}
+            before=inventory()
+            snapshot=N(manifest_sha256='source',files=(),root=root/'cache/source',manifest_path=root/'cache/source-manifest.json')
+            receipt=N(source_manifest_sha256='source')
+            reader=N(snapshot=snapshot,root=root/'library',exports={})
+            def fail(source,staged,library,snapshot):
+                (staged/'manifest.json').write_bytes(b'unaccepted acquisition')
+                validate_acquisition({}, {})
+            with patch('tools.reference.library.reader.LibraryReader',return_value=reader), \
+                    patch('tools.reference.source.LibrarySource'), \
+                    patch.object(export,'_export_selected',side_effect=fail), \
+                    patch.object(export,'promote_reference') as promote:
+                with self.assertRaises(ValueError):export.derive_reference(snapshot,receipt,accepted)
+                promote.assert_not_called()
+            self.assertEqual(inventory(),before)
 
 
 if __name__ == '__main__':

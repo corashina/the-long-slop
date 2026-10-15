@@ -1004,7 +1004,11 @@ impl WorldStream {
         }
     }
     /// Advance source discovery once per ordinary application Update.
-    pub fn prepare_descriptors(&mut self) {
+    fn prepare_descriptors(&mut self, budget_ms: f64) {
+        #[cfg(target_arch = "wasm32")]
+        let started = crate::browser::game_now();
+        #[cfg(not(target_arch = "wasm32"))]
+        let started = std::time::Instant::now();
         self.publication_available = true;
         self.last_road_work = 0;
         self.last_terrain_work = 0;
@@ -1016,18 +1020,34 @@ impl WorldStream {
         if self.failure.is_some() {
             return;
         }
-        if !self.indices_ready {
+        while !self.indices_ready {
             let slots =
                 2usize.saturating_sub(self.presentation.jobs + self.overlap.generation_jobs);
-            let before = self.roads.prepared_segments();
-            let road_work = usize::from(before < super::ROAD_SEGMENTS);
+            let before = (
+                self.roads.prepared_segments(),
+                self.placements.prepared_buildings(),
+            );
+            let road_work = usize::from(before.0 < super::ROAD_SEGMENTS);
             let road_ready = self.roads.prepare(if slots > 0 { 256 } else { 0 });
-            self.last_road_work = (self.roads.prepared_segments() - before) as usize;
+            self.last_road_work += (self.roads.prepared_segments() - before.0) as usize;
             let placement_ready = self
                 .placements
                 .prepare(if slots > road_work { 256 } else { 0 });
             self.indices_ready = road_ready && placement_ready;
-            return;
+            #[cfg(target_arch = "wasm32")]
+            let elapsed = crate::browser::game_now() - started;
+            #[cfg(not(target_arch = "wasm32"))]
+            let elapsed = started.elapsed().as_secs_f64() * 1000.;
+            if !self.indices_ready
+                && (elapsed >= budget_ms
+                    || before
+                        == (
+                            self.roads.prepared_segments(),
+                            self.placements.prepared_buildings(),
+                        ))
+            {
+                return;
+            }
         }
         if self.startup.is_none() {
             if self.available_external_jobs() > 0 {
@@ -1069,41 +1089,9 @@ impl WorldStream {
             self.prepare_terrain();
         }
     }
-    pub fn prepare(&mut self) {
-        self.prepare_descriptors();
+    pub fn prepare(&mut self, budget_ms: f64) {
+        self.prepare_descriptors(budget_ms);
         self.prepare_geometry();
-    }
-    pub fn descriptor_window_ready(&self) -> bool {
-        self.failure.is_none()
-            && self.indices_ready
-            && self.startup.is_some()
-            && self.selection_inputs == self.contents.input_revision()
-            && self.plan_revision == self.request.revision
-            && self.next_road == self.road_candidates.len()
-            && self
-                .props
-                .discovery_ready([self.request.player, self.request.vehicle])
-            && self.change_revision == self.changes.revision()
-            && self.change_bounds.is_some()
-            && self
-                .contents
-                .discovery_ready(&self.reference, &self.wanted_structures, &self.replay_roots)
-                .unwrap_or(false)
-            && self.replay_keys.iter().all(|key| {
-                self.changes.get(key).is_none_or(|change| {
-                    change.snapshot.is_none()
-                        || change.replay.as_ref().is_none_or(|root| {
-                            self.contents.replay_finished(&root.id)
-                                || change.instance.as_ref().is_some_and(|id| {
-                                    self.contents
-                                        .active
-                                        .iter()
-                                        .chain(&self.static_controls)
-                                        .any(|c| &c.content.placement.id == id)
-                                })
-                        })
-                })
-            })
     }
     fn prepare_startup(&mut self) {
         if self.startup_candidates.is_empty() && self.startup_next == 0 {

@@ -1,16 +1,43 @@
 //! Admitted source texture arrays. Each layer retains all authored mip levels.
+use crate::presentation::source_images::wrap;
 use crate::reference::{LightingTextureRecord, ReferenceError, SourceId, WorldSourceMaterial};
 use bevy::asset::AssetId;
 use bevy::{
     asset::{LoadState, RenderAssetUsages},
     image::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
     prelude::*,
-    render::render_resource::*,
+    render::{render_asset::RenderAssets, render_resource::*, texture::GpuImage},
 };
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
+
+pub(super) fn bind_arrays(
+    result: &mut UnpreparedBindGroup,
+    arrays: &[Handle<Image>],
+    images: &RenderAssets<GpuImage>,
+) -> Result<(), AsBindGroupError> {
+    for (index, handle) in arrays.iter().enumerate() {
+        let image = images
+            .get(handle.id())
+            .ok_or(AsBindGroupError::RetryNextUpdate)?;
+        result.bindings.0.extend([
+            (
+                1 + index as u32 * 2,
+                OwnedBindingResource::TextureView(
+                    TextureViewDimension::D2Array,
+                    image.texture_view.clone(),
+                ),
+            ),
+            (
+                2 + index as u32 * 2,
+                OwnedBindingResource::Sampler(SamplerBindingType::Filtering, image.sampler.clone()),
+            ),
+        ]);
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ArrayKey {
@@ -873,8 +900,8 @@ fn array_image(key: ArrayKey, layers: usize) -> Result<Image, ReferenceError> {
         ImageFilterMode::Linear
     };
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: super::wrap(key.wrap_u),
-        address_mode_v: super::wrap(key.wrap_v),
+        address_mode_u: wrap(key.wrap_u),
+        address_mode_v: wrap(key.wrap_v),
         mag_filter: filter,
         min_filter: filter,
         mipmap_filter: if key.filter == 2 || key.aniso > 1 {

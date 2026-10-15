@@ -53,6 +53,110 @@ pub struct ParticleReference {
     pub materials: Vec<SkyMaterialReference>,
     pub limits: Vec<ParticleLimit>,
 }
+impl ParticleReference {
+    pub(crate) fn validate_motion(&self) -> Result<(), ReferenceError> {
+        let invalid = |field: &str| {
+            ReferenceError(format!(
+                "Invalid particle {}:{} field {field}",
+                self.source.file, self.source.path_id
+            ))
+        };
+        let scalar = |field: &str| {
+            self.scalars
+                .get(field)
+                .copied()
+                .filter(|v| v.is_finite())
+                .ok_or_else(|| invalid(field))
+        };
+        let flag = |field: &str| self.flags.get(field).copied().ok_or_else(|| invalid(field));
+        let curve = |field: &str| {
+            let c = self.curves.get(field).ok_or_else(|| invalid(field))?;
+            if c.mode > 3
+                || !finite(&[c.scalar, c.min_scalar])
+                || !curve_valid(&c.min_curve)
+                || !curve_valid(&c.max_curve)
+                || ((c.mode == 1 || c.mode == 2) && c.max_curve.keys.is_empty())
+                || (c.mode == 2 && c.min_curve.keys.is_empty())
+            {
+                return Err(invalid(field));
+            }
+            Ok(c)
+        };
+        if self.module_flags.get("VelocityModule") == Some(&true) {
+            flag("VelocityModule.inWorldSpace")?;
+            for field in [
+                "VelocityModule.x",
+                "VelocityModule.y",
+                "VelocityModule.z",
+                "VelocityModule.speedModifier",
+            ] {
+                curve(field)?;
+            }
+            // Checked selected systems have no orbital or radial motion.
+            for field in [
+                "VelocityModule.orbitalX",
+                "VelocityModule.orbitalY",
+                "VelocityModule.orbitalZ",
+                "VelocityModule.orbitalOffsetX",
+                "VelocityModule.orbitalOffsetY",
+                "VelocityModule.orbitalOffsetZ",
+                "VelocityModule.radial",
+            ] {
+                let c = curve(field)?;
+                if c.mode != 0 || c.scalar != 0. {
+                    return Err(invalid(field));
+                }
+            }
+        }
+        if self.module_flags.get("InheritVelocityModule") == Some(&true) {
+            let mode = scalar("InheritVelocityModule.m_Mode")?;
+            if mode != 0. && mode != 1. {
+                return Err(invalid("InheritVelocityModule.m_Mode"));
+            }
+            curve("InheritVelocityModule.m_Curve")?;
+            if scalar("emitterVelocityMode")? != 1. {
+                return Err(invalid("emitterVelocityMode"));
+            }
+        }
+        if self.module_flags.get("CollisionModule") == Some(&true) {
+            for field in [
+                "CollisionModule.m_Bounce",
+                "CollisionModule.m_Dampen",
+                "CollisionModule.m_EnergyLossOnCollision",
+            ] {
+                let c = curve(field)?;
+                if !(0. ..=1.).contains(&c.scalar) || !(0. ..=1.).contains(&c.min_scalar) {
+                    return Err(invalid(field));
+                }
+            }
+            for (field, value) in [
+                ("CollisionModule.type", 1.),
+                ("CollisionModule.collisionMode", 0.),
+                ("CollisionModule.colliderForce", 0.),
+            ] {
+                if scalar(field)? != value {
+                    return Err(invalid(field));
+                }
+            }
+            flag("CollisionModule.collidesWithDynamic")?;
+            if flag("CollisionModule.interiorCollisions")? {
+                return Err(invalid("CollisionModule.interiorCollisions"));
+            }
+            if scalar("CollisionModule.radiusScale")? <= 0. {
+                return Err(invalid("CollisionModule.radiusScale"));
+            }
+            let mask = scalar("CollisionModule.collidesWith.m_Bits")?;
+            if mask < 0. || mask > u32::MAX as f32 || mask.fract() != 0. {
+                return Err(invalid("CollisionModule.collidesWith.m_Bits"));
+            }
+            let min = scalar("CollisionModule.minKillSpeed")?;
+            if min < 0. || scalar("CollisionModule.maxKillSpeed")? < min {
+                return Err(invalid("CollisionModule.maxKillSpeed"));
+            }
+        }
+        Ok(())
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StormReference {
@@ -147,7 +251,7 @@ pub(super) fn valid_geometry(g: &ColliderGeometry) -> bool {
         }
     }
 }
-fn gradient_valid(g: &GradientReference) -> bool {
+pub(super) fn gradient_valid(g: &GradientReference) -> bool {
     g.mode <= 1
         && !g.colors.is_empty()
         && !g.alphas.is_empty()
@@ -160,7 +264,7 @@ fn gradient_valid(g: &GradientReference) -> bool {
         && g.colors.windows(2).all(|w| w[0].time <= w[1].time)
         && g.alphas.windows(2).all(|w| w[0].time <= w[1].time)
 }
-fn curve_valid(c: &TorqueCurve) -> bool {
+pub(super) fn curve_valid(c: &TorqueCurve) -> bool {
     c.keys.iter().all(|k| {
         finite(&[
             k.time,
@@ -306,6 +410,7 @@ impl WeatherReference {
             }
         }
         for p in &self.particles {
+            p.validate_motion()?;
             let check = |valid: bool, field: &str| {
                 if valid {
                     Ok(())
@@ -486,85 +591,95 @@ impl WeatherReference {
                     )?;
                 }
             }
-            check(p.materials.len() == 1, "materials")?;
-            let material = &p.materials[0];
-            check(
-                material.textures.iter().any(|t| t.property == "_MainTex"),
-                "materials.textures._MainTex",
-            )?;
-            let tint = if material.shader.name == "Legacy Shaders/Particles/Alpha Blended" {
-                "_TintColor"
-            } else {
-                "_Color"
-            };
-            check(
-                material.colors.get(tint).is_some_and(|v| finite(v)),
-                &format!("materials.colors.{tint}"),
-            )?;
-            for (name, c) in &p.curves {
-                check(
-                    (c.mode != 1 && c.mode != 2 || !c.max_curve.keys.is_empty())
-                        && (c.mode != 2 || !c.min_curve.keys.is_empty()),
-                    name,
-                )?;
-            }
+            p.validate_data(2)?;
+        }
+        Ok(())
+    }
+}
 
-            require(
-                p.capacity > 0
-                    && p.capacity <= 1_000_000
-                    && p.scalars.get("InitialModule.maxNumParticles") == Some(&(p.capacity as f32)),
-                "particle capacity",
+impl ParticleReference {
+    pub fn validate_data(&self, simulation_space: u8) -> Result<(), ReferenceError> {
+        let p = self;
+        let check =
+            |valid: bool, field: &str| require(valid, &format!("particle {} {field}", p.role));
+        require(
+            p.capacity > 0
+                && p.capacity <= 1_000_000
+                && p.scalars.get("InitialModule.maxNumParticles") == Some(&(p.capacity as f32)),
+            "particle capacity",
+        )?;
+        require(
+            finite(&[p.rate_over_time, p.rate_over_distance, p.duration])
+                && p.rate_over_time >= 0.
+                && p.rate_over_distance >= 0.
+                && p.duration > 0.
+                && p.simulation_space == simulation_space
+                && transform(&p.local_pose),
+            "particle rates",
+        )?;
+        require(
+            p.module_flags.get("InitialModule") == Some(&true)
+                && p.curves.contains_key("InitialModule.startLifetime")
+                && !p.materials.is_empty(),
+            "particle modules",
+        )?;
+        for (name, value) in &p.scalars {
+            check(value.is_finite(), name)?;
+        }
+        for (name, value) in &p.vectors {
+            check(finite(value), name)?;
+        }
+        for (name, c) in &p.curves {
+            check(
+                c.mode <= 3
+                    && finite(&[c.scalar, c.min_scalar])
+                    && curve_valid(&c.min_curve)
+                    && curve_valid(&c.max_curve),
+                name,
             )?;
-            require(
-                finite(&[p.rate_over_time, p.rate_over_distance, p.duration])
-                    && p.rate_over_time >= 0.
-                    && p.rate_over_distance >= 0.
-                    && p.duration > 0.
-                    && p.simulation_space == 2
-                    && transform(&p.local_pose),
-                "particle rates",
+        }
+        for (name, c) in &p.colors {
+            check(
+                c.mode <= 4
+                    && finite(&c.min_color)
+                    && finite(&c.max_color)
+                    && gradient_valid(&c.min_gradient)
+                    && gradient_valid(&c.max_gradient),
+                name,
             )?;
-            require(
-                p.module_flags.get("InitialModule") == Some(&true)
-                    && p.curves.contains_key("InitialModule.startLifetime")
-                    && !p.materials.is_empty(),
-                "particle modules",
+        }
+        check(p.materials.len() == 1, "materials")?;
+        let material = &p.materials[0];
+        check(
+            material.textures.iter().any(|t| t.property == "_MainTex"),
+            "materials.textures._MainTex",
+        )?;
+        let tint = if material.shader.name == "Legacy Shaders/Particles/Alpha Blended" {
+            "_TintColor"
+        } else {
+            "_Color"
+        };
+        check(
+            material.colors.get(tint).is_some_and(|v| finite(v)),
+            &format!("materials.colors.{tint}"),
+        )?;
+        for (name, c) in &p.curves {
+            check(
+                (c.mode != 1 && c.mode != 2 || !c.max_curve.keys.is_empty())
+                    && (c.mode != 2 || !c.min_curve.keys.is_empty()),
+                name,
             )?;
-            for (name, value) in &p.scalars {
-                check(value.is_finite(), name)?;
-            }
-            for (name, value) in &p.vectors {
-                check(finite(value), name)?;
-            }
-            for (name, c) in &p.curves {
-                check(
-                    c.mode <= 3
-                        && finite(&[c.scalar, c.min_scalar])
-                        && curve_valid(&c.min_curve)
-                        && curve_valid(&c.max_curve),
-                    name,
-                )?;
-            }
-            for (name, c) in &p.colors {
-                check(
-                    c.mode <= 4
-                        && finite(&c.min_color)
-                        && finite(&c.max_color)
-                        && gradient_valid(&c.min_gradient)
-                        && gradient_valid(&c.max_gradient),
-                    name,
-                )?;
-            }
-            for l in &p.limits {
-                require(
-                    l.source == p.source
-                        && (p.module_flags.get(&l.module) == Some(&true)
-                            || l.module == "material.soft_particles"
-                            || l.module == "material.distortion")
-                        && !l.visible_effect.is_empty(),
-                    "particle limit",
-                )?;
-            }
+        }
+
+        for l in &p.limits {
+            require(
+                l.source == p.source
+                    && (p.module_flags.get(&l.module) == Some(&true)
+                        || l.module == "material.soft_particles"
+                        || l.module == "material.distortion")
+                    && !l.visible_effect.is_empty(),
+                "particle limit",
+            )?;
         }
         Ok(())
     }

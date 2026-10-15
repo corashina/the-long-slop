@@ -17,6 +17,8 @@ pub enum ItemLocation {
     World,
     PartSlot(PartSlotId),
     Held,
+    Stored(u8),
+    Equipped,
     Attached(ItemId),
     WheelSlot(WheelSlotId),
 }
@@ -35,8 +37,7 @@ pub struct ItemState {
     pub location: ItemLocation,
     pub pose: VehiclePose,
     pub local_pose: VehiclePose,
-    /// One is new; zero is the most worn source state.
-    pub condition: f32,
+    pub generated_condition: Option<f32>,
     pub temperature: Option<f32>,
     pub fluid: Option<FluidContainer>,
     pub food: Option<FoodState>,
@@ -65,6 +66,7 @@ impl ItemStore {
         &mut self,
         ids: &crate::save::IdentityMap,
         saved: &[crate::save::ItemSnapshot],
+        reference: &ReferenceManifest,
     ) -> Result<(), crate::save::SaveError> {
         use crate::save::ItemLocationSave;
         for record in saved {
@@ -74,6 +76,8 @@ impl ItemStore {
                     ItemLocation::World
                 }
                 ItemLocationSave::Held => ItemLocation::Held,
+                ItemLocationSave::Stored { slot } => ItemLocation::Stored(*slot),
+                ItemLocationSave::Equipped => ItemLocation::Equipped,
                 ItemLocationSave::Attached { owner } => ItemLocation::Attached(ids.item(owner)?),
                 ItemLocationSave::PartSlot { slot } => ItemLocation::PartSlot(ids.part_slots[slot]),
                 ItemLocationSave::WheelSlot { slot } => {
@@ -85,7 +89,16 @@ impl ItemStore {
                 ItemLocationSave::GeneratedAttachment { .. }
             );
             state.local_pose = crate::save::local_pose(&record.local_pose);
-            state.condition = record.condition;
+            state.food = record.food.as_ref().map(|food| FoodState {
+                prototype_index: reference
+                    .survival
+                    .foods
+                    .iter()
+                    .position(|p| crate::save::SourceKey::from(&p.source) == food.source)
+                    .expect("validated food source"),
+                bite: food.bite,
+            });
+            state.removed = record.removed;
             state.temperature = record.temperature;
             if let (Some(fluid), Some(quantities)) = (&mut state.fluid, record.fluids) {
                 fluid.mixture.quantities_liters = quantities;
@@ -188,7 +201,7 @@ impl ItemStore {
                     .map_or(ItemLocation::World, ItemLocation::Attached),
                 pose,
                 local_pose,
-                condition: item.condition,
+                generated_condition: None,
                 temperature: reference
                     .vehicles
                     .iter()
@@ -351,6 +364,8 @@ impl ItemStore {
                         })?,
                     }
                 }
+                ItemLocation::Stored(slot) => ItemLocationSave::Stored { slot },
+                ItemLocation::Equipped => ItemLocationSave::Equipped,
                 ItemLocation::PartSlot(slot) => ItemLocationSave::PartSlot {
                     slot: source_key(&ids.part_slots, slot)?,
                 },
@@ -391,9 +406,15 @@ impl ItemStore {
                     rotation: item.local_pose.rotation,
                 },
                 location,
-                condition: item.condition,
                 temperature: item.temperature,
                 fluids: item.fluid.as_ref().map(capture_fluids).transpose()?,
+                food: item.food.map(|food| crate::save::FoodSnapshot {
+                    source: crate::save::SourceKey::from(
+                        &reference.survival.foods[food.prototype_index].source,
+                    ),
+                    bite: food.bite,
+                }),
+                removed: item.removed,
             });
         }
         records.sort_by(|a, b| a.instance.cmp(&b.instance));
@@ -521,7 +542,7 @@ impl ItemStore {
                 position: [0.0; 3],
                 rotation: [0.0, 0.0, 0.0, 1.0],
             },
-            condition: 1.0,
+            generated_condition: Some(1.),
             temperature: None,
             fluid: None,
             food: None,
@@ -559,7 +580,7 @@ impl ItemStore {
                 position: [0.; 3],
                 rotation: [0., 0., 0., 1.],
             },
-            condition: 1.,
+            generated_condition: None,
             temperature: None,
             fluid: None,
             inactive_pose: None,
@@ -624,7 +645,7 @@ impl ItemStore {
                 position: self.origin.absolute(state.pose.position),
                 rotation: state.pose.rotation,
             },
-            condition: state.condition,
+            condition: state.generated_condition.unwrap_or(1.),
             food: None,
             temperature: state.temperature,
             fluid_quantities: state
@@ -666,7 +687,9 @@ impl ItemStore {
             .get_mut(id)
             .ok_or_else(|| ReferenceError("Missing generated snapshot target".into()))?;
         item.pose = pose;
-        item.condition = snapshot.condition;
+        if let Some(condition) = &mut item.generated_condition {
+            *condition = snapshot.condition;
+        }
         item.temperature = snapshot.temperature;
         if let Some(quantities) = snapshot.fluid_quantities {
             let fluid = item

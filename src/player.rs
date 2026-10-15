@@ -1,3 +1,5 @@
+pub mod pose;
+
 use rapier3d::control::{CharacterCollision, KinematicCharacterController};
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{

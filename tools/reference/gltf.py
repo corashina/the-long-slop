@@ -259,6 +259,12 @@ class GltfExporter(GltfBuilder):
 
     def export(self, roots):
         gl = self.gl
+        player_asset = len(roots)==1 and key(roots[0])==('level1',39843)
+        if player_asset:
+            from .clothing import player_renderers
+            selected_player_renderers={key(r) for r in player_renderers(self.source)}
+            outfit=self.source.get('level1',70544)
+            self.material(self.source.resolve(outfit,self.source.read(outfit)['defInvisible']))
         self.output.parent.mkdir(parents=True, exist_ok=True)
         records = []
         mapping = {}
@@ -304,7 +310,10 @@ class GltfExporter(GltfBuilder):
             if record['parent'] is None:
                 from .collision import world_pose
                 from .lighting import IDENTITY
-                if key(reader)==getattr(self.source,'lighting_pole_root',None) or key(reader) in getattr(self.source,'world_prototype_roots',set()):
+                if identity in getattr(self.source, 'item_geometry_nodes', set()):
+                    transform['translation'] = [0., 0., 0.]
+                    transform['rotation'] = [0., 0., 0., 1.]
+                elif key(reader)==getattr(self.source,'lighting_pole_root',None) or key(reader) in getattr(self.source,'world_prototype_roots',set()):
                     transform=IDENTITY.copy()
                 elif key(reader) not in getattr(self.source,'lighting_prototype_roots',set()):
                     transform=world_pose(self.source,reader)
@@ -312,9 +321,15 @@ class GltfExporter(GltfBuilder):
                 extras={'reference_id': source_id(reader), 'active':record['active'], 'hierarchy_path':record['path'],
                     'layer':self.source.read(record['game_object'])['m_Layer']}, **transform)
             if world_prototype:node.extras['source_active']=bool(self.source.read(record['game_object'])['m_IsActive'])
+            if player_asset:
+                for r in record['components']:
+                    if r.type.name.endswith('Renderer') and key(r) not in selected_player_renderers:
+                        self.material_report.append({'source':source_id(r),'reason':'Auxiliary player renderer outside characterscript membership; authored transform retained.'})
             components = {r.type.name:r for r in record['components']}
             renderer = components.get('MeshRenderer') or components.get('SkinnedMeshRenderer')
             mesh_filter = components.get('MeshFilter')
+            if player_asset and renderer and key(renderer) not in selected_player_renderers:
+                renderer=None
             if renderer:
                 renderer_data = self.source.read(renderer)
                 if world_prototype:node.extras['source_renderer_enabled']=bool(renderer_data['m_Enabled'])
@@ -342,11 +357,11 @@ class GltfExporter(GltfBuilder):
                         raise ValueError(f'{source_id(mesh_reader)} empty mesh has indices')
                     node.extras['source_empty_mesh']=source_id(mesh_reader)
                     mesh_reader=None
-                if mesh_reader and (((record['active'] or identity in getattr(self.source,'food_geometry_nodes',set()) or identity in getattr(self.source,'flashlight_inactive_nodes',set())) and render_enabled) or retain_world_geometry):
+                if mesh_reader and (((record['active'] or identity in getattr(self.source,'food_geometry_nodes',set()) or identity in getattr(self.source,'flashlight_inactive_nodes',set()) or identity in getattr(self.source,'condition_geometry_nodes',set())) and render_enabled) or retain_world_geometry or player_asset or identity in getattr(self.source,'item_geometry_nodes',set())):
                     materials=[self.source.resolve(renderer,p) for p in renderer_data['m_Materials']]
                     selected=getattr(self.source,'lighting_startup_materials',{}).get(key(renderer)) or getattr(self.source,'condition_materials',{}).get(key(renderer))
                     if selected:materials=[selected for _ in materials]
-                    color=getattr(self.source,'condition_colors',{}).get(key(renderer))
+                    color=getattr(self.source,'condition_colors',{}).get(key(renderer)) or getattr(self.source,'cleaning_colors',{}).get(key(renderer))
                     condition=getattr(self.source,'condition_renderers',{}).get(key(renderer))
                     if condition:node.extras['condition']=condition
                     mirror = getattr(self.source, 'mirror_renderers', {}).get(key(renderer))
@@ -358,9 +373,9 @@ class GltfExporter(GltfBuilder):
                         # Unity reuses the last renderer material for remaining submeshes.
                         materials += [materials[-1]] * (len(self.geometry(mesh_reader)[2]) - len(materials))
                     node.mesh = self.mesh(mesh_reader,materials,color,condition)
-                    if self.with_materials or world_prototype:
+                    if (self.with_materials or world_prototype) and not player_asset:
                         from .render_lighting import recover_renderer
-                        node.extras["source_renderer"] = recover_renderer(self.source,renderer,mesh_reader)
+                        node.extras["source_renderer"] = recover_renderer(self.source,renderer,mesh_reader,"item_prototype" if identity in getattr(self.source,"item_geometry_nodes",set()) else "scene")
                     if renderer.type.name == 'SkinnedMeshRenderer':
                         bones = [self.source.resolve(renderer, pointer) for pointer in renderer_data['m_Bones']]
                         if bones:
@@ -383,6 +398,12 @@ class GltfExporter(GltfBuilder):
                 root_nodes.append(index)
             else:
                 self.document.nodes[mapping[key(record['parent'])]].children.append(index)
+        for record in records:
+            if key(record['reader']) not in getattr(self.source,'item_geometry_nodes',set()):continue
+            for component in record['components']:
+                if component.type.name=='MonoBehaviour' and self.source.class_name(component)=='partconditionscript':
+                    for pointer in self.source.read(component)['MatList']:
+                        self.material(self.source.resolve(component,pointer))
         # Cache all instrument material variants in the same imported glTF.
         for record in records:
             for component in record['components']:
@@ -399,6 +420,8 @@ class GltfExporter(GltfBuilder):
         if self.asset_id == 2:
             for reader in (self.source.mirror_live_material, self.source.mirror_disabled_material):
                 self.material(reader)
+        from .conditions import export_condition_variants
+        export_condition_variants(self, records, mapping)
         if world_prototype:
             self.world_variants(records)
         self.document.scenes.append(gl.Scene(nodes=root_nodes))
@@ -556,6 +579,7 @@ def validate_gltf(path):
                 weights_attribute = primitive.attributes.WEIGHTS_0
                 if joints is None or weights_attribute is None: raise ValueError('Skinned primitive lacks joints or weights')
                 if any(j >= len(skin.joints) for row in rows(joints) for j in row): raise ValueError('Skin joint attribute exceeds joint count')
+                if any(any(w<0 or w>1 for w in row) or abs(sum(row)-1)>.002 for row in rows(weights_attribute)):raise ValueError('Invalid skin weights')
     for i in range(len(document.nodes)):
         seen = set()
         parent = i
@@ -564,7 +588,7 @@ def validate_gltf(path):
             seen.add(parent)
             parent = parents[parent]
     for skin in document.skins:
-        if not skin.joints: raise ValueError('Skin has no authored joints')
+        if not skin.joints or len(set(skin.joints))!=len(skin.joints): raise ValueError('Skin has no unique authored joints')
         for joint in skin.joints: index(joint,document.nodes,'skin joint')
         if skin.skeleton is not None: index(skin.skeleton,document.nodes,'skin skeleton')
         if skin.inverseBindMatrices is not None:

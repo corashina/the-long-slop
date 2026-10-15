@@ -85,6 +85,7 @@ impl WorldPresentation<'_, '_> {
         receivers: &[WorldBounds],
         enabled: bool,
         light_outputs: &[crate::lighting::LightOutput],
+        budget_ms: f64,
     ) -> Result<(), ReferenceError> {
         super::preflight::configure_staging(stream, &reference.file_catalog)?;
         let mut failure = self
@@ -207,7 +208,7 @@ impl WorldPresentation<'_, '_> {
         ) {
             failure.get_or_insert(error);
         }
-        stream.prepare();
+        stream.prepare(budget_ms);
         while let Some(source) = self.prototypes.take_retired() {
             self.allocation.retired_materials.push(source);
         }

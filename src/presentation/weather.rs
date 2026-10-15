@@ -151,6 +151,9 @@ impl AsBindGroup for ParticleMaterial {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Owner {
     Urine,
+    Brush(usize),
+    Spray(usize),
+    Wash(usize),
     Outlet(u32),
     Storm(crate::weather::StormId),
 }
@@ -164,10 +167,15 @@ struct Group {
     active: bool,
 }
 #[derive(Resource, Default)]
-struct WeatherRender {
+pub(crate) struct WeatherRender {
     mesh: Option<Handle<Mesh>>,
     groups: Vec<Group>,
     uniforms: Vec<ParticleUniform>,
+}
+impl WeatherRender {
+    pub(crate) fn prepared(&self) -> bool {
+        self.mesh.is_some()
+    }
 }
 #[derive(Resource, Default)]
 pub(crate) struct ExtractedParticles {
@@ -252,7 +260,7 @@ fn add_group(
     if let Some(g) = state
         .groups
         .iter_mut()
-        .find(|g| !g.active && g.source == index)
+        .find(|g| matches!(g.owner, Owner::Storm(_)) && !g.active && g.source == index)
     {
         g.owner = owner;
         g.active = true;
@@ -370,6 +378,45 @@ fn sync_weather(
                 &mut materials,
             );
         }
+        for (wash, w) in reference.0.conditions.washes.iter().enumerate() {
+            for (particle, p) in w.particles.iter().enumerate() {
+                add_group(
+                    &mut state,
+                    Owner::Wash(wash),
+                    particle,
+                    p,
+                    &lighting,
+                    &mut commands,
+                    &mut materials,
+                );
+            }
+        }
+        for (tool, b) in reference.0.conditions.brushes.iter().enumerate() {
+            for (particle, p) in b.particles.iter().enumerate() {
+                add_group(
+                    &mut state,
+                    Owner::Brush(tool),
+                    particle,
+                    p,
+                    &lighting,
+                    &mut commands,
+                    &mut materials,
+                );
+            }
+        }
+        for (tool, b) in reference.0.conditions.sprays.iter().enumerate() {
+            for (particle, p) in b.particles.iter().enumerate() {
+                add_group(
+                    &mut state,
+                    Owner::Spray(tool),
+                    particle,
+                    p,
+                    &lighting,
+                    &mut commands,
+                    &mut materials,
+                );
+            }
+        }
     }
     for g in &mut state.groups {
         if let Owner::Storm(id) = g.owner {
@@ -404,7 +451,12 @@ fn sync_weather(
     let fog = linear(cycle.fog_color);
     let state = &mut *state;
     for g in &mut state.groups {
-        let p = &r.particles[g.source];
+        let p = match g.owner {
+            Owner::Spray(tool) => &reference.0.conditions.sprays[tool].particles[g.source],
+            Owner::Brush(tool) => &reference.0.conditions.brushes[tool].particles[g.source],
+            Owner::Wash(wash) => &reference.0.conditions.washes[wash].particles[g.source],
+            _ => &r.particles[g.source],
+        };
         let fluid = match g.owner {
             Owner::Urine => Some(&drive.runtime.urine),
             Owner::Outlet(id) => drive
@@ -414,10 +466,37 @@ fn sync_weather(
                 .fluid_particles()
                 .find(|(key, _)| key.0 == id)
                 .map(|(_, p)| p),
-            Owner::Storm(_) => None,
+            Owner::Storm(_) | Owner::Brush(_) | Owner::Spray(_) | Owner::Wash(_) => None,
         };
         let splash = p.role.starts_with("splash") || p.role == "urine_splash";
-        let particles = if let Owner::Storm(id) = g.owner {
+        let particles = if let Owner::Wash(wash) = g.owner {
+            Some(
+                drive
+                    .runtime
+                    .area
+                    .interaction
+                    .cleaning
+                    .wash_particles(wash, g.source),
+            )
+        } else if let Owner::Spray(tool) = g.owner {
+            Some(
+                drive
+                    .runtime
+                    .area
+                    .interaction
+                    .cleaning
+                    .spray_particles(tool, g.source),
+            )
+        } else if let Owner::Brush(tool) = g.owner {
+            Some(
+                drive
+                    .runtime
+                    .area
+                    .interaction
+                    .cleaning
+                    .particles(tool, g.source),
+            )
+        } else if let Owner::Storm(id) = g.owner {
             drive
                 .runtime
                 .weather

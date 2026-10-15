@@ -1,6 +1,8 @@
 pub mod attachments;
 pub mod carry;
+pub mod cleaning;
 pub mod consumption;
+pub mod equipment;
 pub mod feedback;
 pub mod fluid_contact;
 pub mod items;
@@ -150,6 +152,7 @@ struct SeatState {
 }
 
 pub struct InteractionState {
+    pub cleaning: cleaning::CleaningTools,
     sounds: [Option<InteractionSound>; 64],
     sound_count: usize,
     next_generated_collider: u32,
@@ -180,7 +183,8 @@ pub struct InteractionState {
     mechanism_bodies: HashMap<ItemId, BodyId>,
     openings: Vec<OpeningState>,
     seats: Vec<SeatState>,
-    carry: carry::CarryState,
+    pub(crate) carry: carry::CarryState,
+    pub equipment: equipment::EquipmentState,
     push: push::PushState,
     player_body: Option<RigidBodyHandle>,
     reach: f32,
@@ -483,6 +487,7 @@ impl InteractionState {
             })
             .collect();
         Ok(Self {
+            cleaning: cleaning::CleaningTools::new(reference)?,
             source_supply_emission: HashMap::new(),
             light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
             light_controls,
@@ -552,6 +557,7 @@ impl InteractionState {
             sound_count: 0,
             seats,
             carry: carry::CarryState::new(reference)?,
+            equipment: equipment::EquipmentState::new(reference),
             push: push::PushState::new(reference),
             player_body: None,
             reach: reference.player.aim_reach,
@@ -616,11 +622,16 @@ impl InteractionState {
     pub fn bind_player_body(&mut self, handle: RigidBodyHandle) {
         self.player_body = Some(handle);
     }
+    pub fn pickup_rule(&self, id: ItemId) -> Option<&crate::reference::PickupReference> {
+        self.carry.rule(id)
+    }
     pub fn held(&self) -> Option<ItemId> {
         self.carry.held()
     }
     pub fn held_light_control(&self) -> Option<LightControlId> {
-        self.held()
+        self.equipment
+            .item()
+            .or(self.held())
             .and_then(|item| self.held_controls.get(&item).copied())
     }
     pub fn pickup_stored_item(
@@ -1109,6 +1120,7 @@ impl InteractionState {
         })
     }
     pub fn cancel_input(&mut self) {
+        self.cleaning.reset_contact();
         self.seat_action_latched = false;
         self.fill_opening = None;
         self.f_gesture_consumed = false;
@@ -1128,6 +1140,7 @@ impl InteractionState {
         physics: &mut PhysicsWorld,
     ) -> Option<ItemId> {
         let item = self.carry.drop(items, physics)?;
+        self.cleaning.reset_contact();
         self.storage.mark_dropped(item);
         Some(item)
     }
@@ -1150,6 +1163,7 @@ impl InteractionState {
             .filter_map(|o| o.contact.as_ref().map(|c| (o.reference.id, c)))
     }
     pub fn rebase(&mut self, shift: [f32; 3]) {
+        self.cleaning.reset_contact();
         self.mechanisms.rebase(shift);
         self.parts.rebase(shift);
         self.attachments.rebase(shift);
@@ -1167,7 +1181,7 @@ impl InteractionState {
 
     pub fn step(
         &mut self,
-        input: FrameInput,
+        mut input: FrameInput,
         aim: ResolvedAim,
         player: &mut PlayerState,
         items: &mut ItemStore,
@@ -1177,6 +1191,11 @@ impl InteractionState {
         fluid_scale: f32,
     ) -> Option<InteractionAction> {
         self.finish_cancelled_input(player, physics);
+        if self.cleaning.reserves_lmb(self.held()) {
+            input.held &= !keys::PRIMARY;
+            input.pressed &= !keys::PRIMARY;
+            input.released &= !keys::PRIMARY;
+        }
         if !dt.is_finite() || dt <= 0.0 {
             return None;
         }

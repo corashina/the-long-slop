@@ -536,7 +536,12 @@ pub(crate) fn source_lamp_admission(
     let Some(_recipe) = &source.road_lamps.recipe else {
         return Ok((0, 0, 0));
     };
-    crate::world::required_world_lights(frame, receivers, &mut source.road_lamps.required);
+    crate::world::required_world_lights(
+        frame,
+        receivers,
+        biome_enabled,
+        &mut source.road_lamps.required,
+    );
     let required = source.road_lamps.required.len();
     let light_capacity = crate::presentation::lighting::MAX_LIGHTS - source.road_lamps.fixed_lights;
     let shadow_capacity =

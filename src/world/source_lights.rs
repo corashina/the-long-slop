@@ -285,10 +285,18 @@ impl SourceRoadLight {
 pub fn required_world_lights(
     frame: &WorldFrame<'_>,
     receiver_bounds: &[WorldBounds],
+    road_enabled: bool,
     output: &mut Vec<GeneratedId>,
 ) {
     let mut count = 0;
     for light in frame.lights {
+        if !light.enabled
+            || light.intensity <= 0.
+            || (light.biome.is_some() && !road_enabled)
+            || light.record.culling_mask == 0
+        {
+            continue;
+        }
         if receiver_bounds
             .iter()
             .any(|bounds| light.influences(*bounds))

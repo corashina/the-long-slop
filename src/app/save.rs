@@ -7,10 +7,6 @@ use serde::Deserialize;
 pub struct SaveRequests {
     source: SourceStamp,
     candidate: Option<Candidate>,
-    #[cfg(feature = "save-fixture")]
-    removed_asset: Option<(bevy::asset::AssetId<bevy::gltf::Gltf>, bevy::gltf::Gltf)>,
-    #[cfg(feature = "save-fixture")]
-    fixture_material: Option<bevy::asset::AssetId<presentation::materials::SourceMaterial>>,
 }
 pub(crate) struct Candidate {
     id: u32,
@@ -56,10 +52,6 @@ impl SaveRequests {
                     .collect(),
             },
             candidate: None,
-            #[cfg(feature = "save-fixture")]
-            removed_asset: None,
-            #[cfg(feature = "save-fixture")]
-            fixture_material: None,
         }
     }
 }
@@ -79,7 +71,7 @@ pub fn dispatch(world: &mut World) {
         }
     };
     world.resource_scope(|world, mut requests: Mut<SaveRequests>| {
-        let result = process(world, &mut requests, &request);
+        let result = process_request(world, &mut requests, &request);
         match result {
             Ok(payload) => {
                 if request.kind != "Prepare" && request.kind != "PrepareNewGame" {
@@ -90,32 +82,6 @@ pub fn dispatch(world: &mut World) {
         }
     });
 }
-fn process(
-    world: &mut World,
-    requests: &mut SaveRequests,
-    request: &Request,
-) -> Result<String, SaveError> {
-    #[cfg(feature = "save-fixture")]
-    let removed = if request.kind == "Prepare" {
-        requests.fixture_material.and_then(|id| {
-            world
-                .resource_mut::<Assets<presentation::materials::SourceMaterial>>()
-                .remove(id)
-                .map(|material| (id, material))
-        })
-    } else {
-        None
-    };
-    let result = process_request(world, requests, request);
-    #[cfg(feature = "save-fixture")]
-    if let Some((id, material)) = removed {
-        world
-            .resource_mut::<Assets<presentation::materials::SourceMaterial>>()
-            .insert(id, material)
-            .map_err(|error| SaveError::ReconstructionFailure(error.to_string()))?;
-    }
-    result
-}
 fn process_request(
     world: &mut World,
     requests: &mut SaveRequests,
@@ -124,51 +90,6 @@ fn process_request(
     let reference = world.resource::<RuntimeReference>().0.clone();
     let invalid = |message: &str| SaveError::ReconstructionFailure(message.into());
     match request.kind.as_str() {
-        #[cfg(feature = "save-fixture")]
-        "FixtureRemoveAsset" => {
-            if requests.removed_asset.is_some() {
-                return Err(invalid("A fixture asset is already removed"));
-            }
-            let visuals = world.resource::<ReferenceVisuals>();
-            let (path, handle) = visuals
-                .handles
-                .first()
-                .ok_or_else(|| invalid("No fixture asset"))?;
-            let (path, id) = (path.clone(), handle.id());
-            let asset = world
-                .resource_mut::<Assets<bevy::gltf::Gltf>>()
-                .remove(id)
-                .ok_or_else(|| invalid("Fixture asset is missing"))?;
-            requests.removed_asset = Some((id, asset));
-            Ok(serde_json::to_string(&path).unwrap())
-        }
-        #[cfg(feature = "save-fixture")]
-        "FixtureFailMaterialPreparation" => {
-            if requests.fixture_material.is_some() {
-                return Err(invalid("A fixture material fault is already set"));
-            }
-            requests.fixture_material = Some(world.resource::<WorldVisuals>().fixture_material());
-            Ok(serde_json::to_string("generated chunk terrain material").unwrap())
-        }
-        #[cfg(feature = "save-fixture")]
-        "FixtureRestoreAsset" => {
-            requests.fixture_material = None;
-            if let Some((id, asset)) = requests.removed_asset.take() {
-                world
-                    .resource_mut::<Assets<bevy::gltf::Gltf>>()
-                    .insert(id, asset)
-                    .map_err(|error| invalid(&error.to_string()))?;
-            }
-            Ok(String::new())
-        }
-
-        #[cfg(feature = "save-fixture")]
-        "FixtureSetupFleet"
-        | "FixtureSetupDriving"
-        | "FixtureDetachAndCarry"
-        | "FixtureTransferFluid"
-        | "FixtureSetupCycle"
-        | "FixtureInspect" => super::save_fixture::process(world, &request.kind),
         "Discard" => {
             if requests
                 .candidate

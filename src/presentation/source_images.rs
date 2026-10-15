@@ -72,7 +72,7 @@ pub fn assemble_mips(
     });
     Ok((image, byte_count))
 }
-fn wrap(value: u8) -> ImageAddressMode {
+pub(crate) fn wrap(value: u8) -> ImageAddressMode {
     match value {
         0 => ImageAddressMode::Repeat,
         2 => ImageAddressMode::MirrorRepeat,

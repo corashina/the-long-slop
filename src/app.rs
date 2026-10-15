@@ -1,6 +1,4 @@
 pub(crate) mod save;
-#[cfg(feature = "save-fixture")]
-mod save_fixture;
 use crate::browser::*;
 use crate::interaction::labels::display_name;
 use crate::presentation::instruments::InstrumentVisuals;
@@ -21,6 +19,9 @@ use bevy::prelude::*;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
+/// World generation time per frame while the loading panel shows.
+const LOADING_BUDGET_MS: f64 = 12.;
+
 #[derive(Resource)]
 pub(crate) struct RuntimeReference(pub Arc<ReferenceManifest>);
 #[derive(Resource)]
@@ -29,6 +30,8 @@ pub(crate) struct Drive {
     /// Gauge state per vehicle.
     instruments: Vec<InstrumentState>,
     input: FrameInput,
+    tool_lmb: bool,
+    tool_delta_seconds: f32,
     pub(crate) clock: StepClock,
     previous: VehiclePose,
     current: VehiclePose,
@@ -39,6 +42,7 @@ pub(crate) struct Drive {
     skip_elapsed: bool,
     pub(crate) ready: bool,
     last_feedback: Option<FeedbackStamp>,
+    last_inventory: Option<([u32; 4], u8, u32)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -63,11 +67,45 @@ struct FeedbackStamp {
     engine_flags: [bool; 5],
 }
 
+/// Manifest fields the browser shell reads. Copies them without parsing the world records.
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ManifestShell<'a> {
+    #[serde(borrow)]
+    app_id: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    build_id: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    source_hashes: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    driving: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    ui: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    sleep: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    audio: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    lighting: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    content_base: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    file_catalog: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    items: &'a serde_json::value::RawValue,
+}
+
 #[wasm_bindgen]
-pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue> {
+pub fn manifest_shell(reference_json: &[u8]) -> Result<String, JsValue> {
+    let shell: ManifestShell =
+        serde_json::from_slice(reference_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    serde_json::to_string(&shell).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
     let reference = Arc::new(
-        ReferenceManifest::from_runtime_json(reference_json.as_bytes())
+        ReferenceManifest::from_runtime_json(reference_json)
             .map_err(|e| JsValue::from_str(&e.to_string()))?,
     );
     if let Err(error) = crate::reference::AudioReference::from_value(&reference.audio, &reference) {
@@ -86,6 +124,8 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
                 .collect(),
             runtime,
             input: FrameInput::default(),
+            tool_lmb: false,
+            tool_delta_seconds: 0.,
             clock: StepClock::default(),
             previous: current,
             current,
@@ -96,6 +136,7 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
             skip_elapsed: false,
             ready: false,
             last_feedback: None,
+            last_inventory: None,
         })
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(presentation::source_io::SourceIoPlugin::new(
@@ -124,6 +165,7 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
             presentation::lighting::SourceLightingPlugin,
             presentation::materials::SourceMaterialPlugin,
             presentation::plates::PlateTextPlugin,
+            presentation::conditions::ConditionPlugin,
             presentation::mirrors::SourceMirrorPlugin,
             presentation::source_lighting::SourceLightingPlugin,
             presentation::frame_graph::SourceFramePlugin,
@@ -159,9 +201,11 @@ pub fn run(reference_json: &str, manifest_sha256: String) -> Result<(), JsValue>
                 advance_physics,
                 sync_world,
                 sync_imported,
+                advance_tools,
                 presentation::consumables::sync,
                 sync_instruments,
                 presentation::lighting::sync_control_visuals,
+                presentation::reference::sync_inventory,
                 update_camera,
                 presentation::frame_graph::sync_stack_cameras,
                 publish_loading,
@@ -257,9 +301,13 @@ fn check_ready(
     ),
     mut materials: ResMut<presentation::materials::SourceMaterials>,
     mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
-    plates: Res<presentation::plates::PlateTextStatus>,
+    plates: (
+        Res<presentation::plates::PlateTextStatus>,
+        Res<presentation::weather::WeatherRender>,
+    ),
 ) {
     let (lighting, source_lighting, fixed) = lighting;
+    let (plates, particles) = plates;
     if let Some(error) = mirrors.failure() {
         game_failure(&error);
         visuals.failed = true;
@@ -380,6 +428,9 @@ fn check_ready(
             if source_lighting.state != presentation::materials::RenderingState::Ready {
                 return;
             }
+            if !particles.prepared() {
+                return;
+            }
             *readiness += 1;
             if *readiness >= 2 {
                 drive.ready = true;
@@ -429,6 +480,8 @@ fn trace_presented_frames(
 
 fn clear_input(drive: &mut Drive) {
     drive.input.clear();
+    drive.tool_lmb = false;
+    drive.tool_delta_seconds = 0.;
     drive.runtime.clear_input();
     drive.clock.reset();
     drive.previous = drive.current;
@@ -453,12 +506,15 @@ fn read_input(
         held: game_keys(),
         pressed: game_pressed(),
         released: game_released(),
+        inventory_held: game_inventory_keys() as u8 & 15,
+        inventory_released: (game_inventory_keys() >> 4) as u8 & 15,
         mouse: [
             game_mouse_x() * reference.0.player.look_sensitivity[0],
             game_mouse_y() * reference.0.player.look_sensitivity[1],
         ],
         wheel: game_wheel(),
     };
+    drive.tool_lmb = frame.held & keys::PRIMARY != 0;
     if requests.pending() {
         return;
     }
@@ -514,6 +570,7 @@ fn advance_physics(
 ) {
     drive.frame_steps = 0;
     drive.render_delta_seconds = 0.;
+    drive.tool_delta_seconds = 0.;
     if !drive.ready || !drive.runtime.started || drive.runtime.paused {
         return;
     }
@@ -527,6 +584,9 @@ fn advance_physics(
             .radio
             .calendar((calendar / 100) as u8, (calendar % 100) as u8);
     }
+    let delta = time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale;
+    drive.tool_delta_seconds = delta;
+    drive.runtime.area.conditions.update(delta, true);
     drive.clock.accept_frame(time.delta_secs_f64());
     loop {
         let scale = drive.runtime.clock_factors(&reference.0).time_scale;
@@ -620,6 +680,8 @@ fn sync_world(
     } else {
         1
     };
+    // The loading panel covers the screen, so generation can use most of each frame.
+    let budget_ms = if drive.ready { 0. } else { LOADING_BUDGET_MS };
     let runtime = &mut drive.runtime;
     let enabled = runtime
         .lighting
@@ -638,6 +700,7 @@ fn sync_world(
             &receivers[..receiver_count],
             enabled,
             runtime.lighting.light_outputs(),
+            budget_ms,
         )
         .and_then(|_| runtime.align_startup(&reference.0).map(|_| ()))
         .and_then(|_| {
@@ -717,6 +780,20 @@ fn sync_imported(
         &mut items,
     );
     presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
+}
+pub(crate) fn advance_tools(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
+    let frame = crate::interaction::cleaning::ToolFrame {
+        held: drive.runtime.area.interaction.held(),
+        lmb: drive.tool_lmb,
+        active: drive.ready
+            && !drive.runtime.recovering
+            && drive.runtime.world_supported()
+            && drive.tool_delta_seconds > 0.,
+        dt: drive.tool_delta_seconds,
+        view: drive.rendered,
+        origin: drive.runtime.stream.origin.offset,
+    };
+    drive.runtime.advance_tools(&reference.0, frame);
 }
 fn instrument_sample(
     reference: &ReferenceManifest,
@@ -840,6 +917,23 @@ fn publish_loading(
 }
 
 fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
+    let state = &drive.runtime.area.inventory;
+    let stamp = (
+        state.slots.map(|id| id.map_or(0, |id| id.0)),
+        state.selected,
+        state.swap_progress.to_bits(),
+    );
+    if drive.last_inventory != Some(stamp) {
+        game_inventory(
+            stamp.1 as u32,
+            stamp.0[0],
+            stamp.0[1],
+            stamp.0[2],
+            stamp.0[3],
+            f32::from_bits(stamp.2),
+        );
+        drive.last_inventory = Some(stamp);
+    }
     let needs = drive.runtime.needs_output();
     game_survival(
         needs.needs.hp,
@@ -911,23 +1005,40 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         .area
         .interaction
         .feedback(&available, &runtime.area.items, &reference.0);
-    let (amount, capacity, quantities, fluid_name, has_name, no_text) =
-        info.fluid
-            .as_ref()
-            .map_or((0., 0., [0.; 6], info.name, false, true), |f| {
-                (
-                    f.amount,
-                    f.capacity,
-                    f.quantities,
-                    f.presentation.name.as_str(),
-                    f.presentation.has_name,
-                    f.presentation.no_text,
-                )
-            });
+    let (mut amount, mut capacity, quantities, fluid_name, has_name, mut no_text) = info
+        .fluid
+        .as_ref()
+        .map_or((0., 0., [0.; 6], info.name, false, true), |f| {
+            (
+                f.amount,
+                f.capacity,
+                f.quantities,
+                f.presentation.name.as_str(),
+                f.presentation.has_name,
+                f.presentation.no_text,
+            )
+        });
+    let paint = runtime
+        .area
+        .interaction
+        .paint_feedback(&runtime.aim, &reference.0);
+    if let Some((quantity, maximum)) = paint {
+        amount = quantity;
+        capacity = maximum;
+        no_text = false;
+    }
     let condition = available
         .item
-        .and_then(|id| runtime.area.items.get(id))
-        .map_or(-1.0, |item| item.condition);
+        .and_then(|id| {
+            runtime.area.conditions.item_quality(id).or_else(|| {
+                runtime
+                    .area
+                    .items
+                    .get(id)
+                    .and_then(|i| i.generated_condition)
+            })
+        })
+        .unwrap_or(-1.0);
     let held = runtime.area.interaction.held();
     let notice = if !runtime.notice.is_empty() {
         runtime.notice
@@ -950,14 +1061,22 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             current.handbrake,
         ],
         actions: info.actions.0,
-        context: info.context as u32,
+        context: if paint.is_some() {
+            crate::interaction::feedback::FeedbackContext::Paint as u32
+        } else {
+            info.context as u32
+        },
         light_control: available.light_control.map_or(0, |id| id.0),
         lmb_use: available.lmb_use,
         item: available.item,
         opening: available.opening,
         carrying: info.carrying,
         notice,
-        amount: (amount * 10.).round() as u32,
+        amount: if paint.is_some() {
+            amount.round() as u32
+        } else {
+            (amount * 10.).round() as u32
+        },
         empty: amount <= 0.05,
         capacity,
         percents: std::array::from_fn(|i| {

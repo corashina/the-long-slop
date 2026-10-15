@@ -127,17 +127,6 @@ impl PropLayers {
             })
         })
     }
-    pub fn discovery_ready(&self, focus: [[f64; 3]; 2]) -> bool {
-        self.layers.iter().all(|layer| {
-            let size = layer.generator.reference.chunk_dist;
-            focus.into_iter().enumerate().all(|(j, point)| {
-                let center = [point[0] as f32, -point[2] as f32]
-                    .map(|v| (v / size).round_ties_even() * size);
-                layer.centers[j] == center && layer.next[j] == layer.offsets.len()
-            })
-        }) && self.chunks.iter().all(|c| c.candidates.is_empty())
-            && self.retiring.is_empty()
-    }
     pub fn placements(&self) -> &[Placement] {
         &self.placements
     }

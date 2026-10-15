@@ -26,6 +26,6 @@ def export_paintings(source, reader, selected, world, output, first_asset):
             exporter.material(material,texture_overrides={'_MainTex':texture})
             exporter.document.save_json(str(output/name))
             result.append(dict(material=source_id(material),texture=source_id(texture),asset=asset,
-                asset_record=dict(id=asset,usage='world_material',path='reference/'+name,sha256=hashlib.sha256((output/name).read_bytes()).hexdigest(),root=source_id(material),material_count=1,dependencies=list(exporter.material_dependencies.values())),
+                asset_record=dict(id=asset,usage='world_material',path='reference/'+name,sha256=hashlib.sha256((output/name).read_bytes()).hexdigest(),root=source_id(material),mesh_count=0,material_count=1,dependencies=list(exporter.material_dependencies.values())),
                 materials=[dict(r,asset=asset) for r in exporter.material_records]))
     return result

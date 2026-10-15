@@ -18,13 +18,14 @@ def decoded_mips(obj):
             data=texture2ddecoder.unpack_unity_crunch(raw,level)
             format_id=10 if kind==28 else 12
             expected=max(1,(w+3)//4)*max(1,(h+3)//4)*(8 if kind==28 else 16)
-        elif kind in (1,4):
-            expected=w*h*(1 if kind==1 else 4)
+        elif kind in (1,3,4):
+            expected=w*h*{1:1,3:3,4:4}[kind]
             data=raw[offset:offset+expected];offset+=expected;format_id=kind
         else:raise ValueError(f'Unsupported required source mip format {kind}')
         if len(data)!=expected:raise ValueError(f'Source mip {level} byte count')
         image=parse_image_data(data,w,h,format_id,(2021,3,18,1),0,flip=False).convert('RGBA')
         payload.extend(image.tobytes())
+    if kind in (1,3,4) and offset!=len(raw):raise ValueError("Source mip stream byte count")
     return bytes(payload)
 
 

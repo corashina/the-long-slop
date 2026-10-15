@@ -47,16 +47,6 @@ pub const CUBE_BASES: [[[f32; 3]; 3]; 6] = [
     [[1., 0., 0.], [0., -1., 0.], [0., 0., -1.]],
     [[-1., 0., 0.], [0., -1., 0.], [0., 0., 1.]],
 ];
-/// Target world direction. Cubemap storage retains native face indices.
-pub fn face_direction(face: usize, uv: [f32; 2]) -> [f32; 3] {
-    let [right, up, back] = CUBE_BASES[face];
-    let mut ray = std::array::from_fn(|i| {
-        (right[i] * (2. * uv[0] - 1.) + up[i] * (2. * uv[1] - 1.)) - back[i]
-    });
-    ray[2] = -ray[2];
-    ray
-}
-
 /// Native remap increments its roughness fraction in f32. It does not divide each index.
 pub fn source_filter_levels() -> [f32; 6] {
     let step = 0.1666666716337204_f32;

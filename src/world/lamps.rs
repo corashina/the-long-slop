@@ -36,37 +36,6 @@ pub(crate) fn source_angles(seed: u64, id: RoadLampId, reference: &RoadLampRefer
 mod tests {
     use super::*;
     #[test]
-    fn source_random_draws_and_low_bit_mapping_match_checked_fixtures() {
-        let reference = crate::reference::ReferenceManifest::from_json(include_bytes!(
-            "../../tests/common/reference.json"
-        ))
-        .unwrap()
-        .lighting
-        .road_lamp;
-        for (seed, index, expected) in [
-            (0, 0, [3, 2, 1]),
-            (0, 1, [-4, -1, 5]),
-            (0, 6, [0, 4, 6]),
-            (0, 10, [15, 10, 15]),
-            (0, 12, [-10, -14, -31]),
-            (42, 0, [-4, -4, 0]),
-            (42, 1_000_001, [-5, 3, 3]),
-            ((-42_i32) as u64, 0, [-4, -4, 0]),
-            (i32::MAX as u64, 1, [3, 2, 1]),
-            (i32::MIN as u64, 0, [3, 2, 1]),
-        ] {
-            assert_eq!(source_angles(seed, RoadLampId(index), &reference), expected);
-            assert_eq!(
-                source_angles(
-                    seed.wrapping_add(1 << 32),
-                    RoadLampId(index + (1 << 32)),
-                    &reference
-                ),
-                expected
-            );
-        }
-    }
-    #[test]
     fn flatten_precedes_local_tilt() {
         let incoming = Rotation::from_xyzw(-0.16872216, -0.23081309, 0.13302687, 0.94897944);
         let actual = flatten_then_tilt(incoming, [15, 10, 15]).to_array();

@@ -21,13 +21,13 @@ export function applyLayout(element,layout,urls){
 }
 export function rgba(c){return 'rgba('+Math.round(c[0]*255)+','+Math.round(c[1]*255)+','+Math.round(c[2]*255)+','+c[3]+')';}
 export async function loadUiAssets(ui) {
- const urls=[];
- for(const sprite of ui.sprites){
+ const urls=await Promise.all(ui.sprites.map(async sprite=>{
   const bytes=await readPackageAsset(sprite.path);
-  const url=URL.createObjectURL(new Blob([bytes],{type:'image/png'}));urls.push(url);
+  const url=URL.createObjectURL(new Blob([bytes],{type:'image/png'}));
   const image=new Image();image.src=url;await image.decode();
   checkImageSize(assetReceipt(sprite.path),image.naturalWidth,image.naturalHeight);
- }
+  return url;
+ }));
  await document.fonts.load('16px "Liberation Sans"');
  const tinted=new Map();
  async function tint(index,color){

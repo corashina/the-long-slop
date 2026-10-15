@@ -15,7 +15,7 @@ export function createLoading(){
  function paint(){
   heading.textContent=phase;
   if(total>0&&(!runtime||done<total||(rendering&&world))){bar.max=total;bar.value=done;}else bar.removeAttribute('value');
-  count.textContent=total>0?(runtime?'Road index: ':'Files checked: ')+done.toLocaleString('en-US')+' / '+total.toLocaleString('en-US'):'';
+  count.textContent=total>0?'Road index: '+done.toLocaleString('en-US')+' / '+total.toLocaleString('en-US'):'';
   if(runtime)count.textContent+='\nGarage rendering: '+(rendering?'ready':'preparing')+'\nWorld area: '+(world?'ready':'preparing');
   clock();lastPaint=performance.now();
  }

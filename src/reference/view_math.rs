@@ -21,23 +21,6 @@ pub fn requires_implicit_projection(
     }
     false
 }
-/// Coordinate transport only. It does not reset motion or image history.
-pub fn rebase_model(mut model: Matrix, delta: [f32; 3]) -> Matrix {
-    for column in &mut model {
-        for axis in 0..3 {
-            column[axis] -= delta[axis] * column[3];
-        }
-    }
-    model
-}
-pub fn rebase_view_projection(mut vp: Matrix, delta: [f32; 3]) -> Matrix {
-    for row in 0..4 {
-        vp[3][row] =
-            ((vp[0][row] * delta[0] + vp[1][row] * delta[1]) + vp[2][row] * delta[2]) + vp[3][row];
-    }
-    vp
-}
-
 /// Culling inputs use source-world coordinates. Target world equals S * source world.
 /// Right multiplication by S negates column2; camera/view space remains unchanged.
 pub fn source_culling_view(mut target_view: Matrix) -> Matrix {

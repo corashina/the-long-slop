@@ -15,7 +15,7 @@ use crate::reference::{
 };
 use bevy::asset::{AssetId, LoadState, RenderAssetUsages, UntypedAssetId};
 use bevy::gltf::{GltfExtras, GltfMaterialExtras};
-use bevy::image::{ImageAddressMode, ImageLoaderSettings};
+use bevy::image::ImageLoaderSettings;
 use bevy::material::key::{ErasedMaterialPipelineKey, ErasedMeshPipelineKey};
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{
@@ -31,7 +31,7 @@ use bevy::render::{
     mesh::RenderMesh,
     render_asset::RenderAssets,
     render_resource::*,
-    renderer::RenderDevice,
+    renderer::{RenderDevice, RenderQueue},
 };
 use bevy::shader::{ShaderCacheError, ShaderDefVal, ShaderRef};
 use bevy::{
@@ -305,6 +305,7 @@ impl Plugin for SourceMaterialPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             ExtractResourcePlugin::<MaterialLoading>::default(),
+            ExtractResourcePlugin::<RetainedColors>::default(),
             bevy::render::extract_component::ExtractComponentPlugin::<
                 super::transparent::SourceSortData,
             >::default(),
@@ -327,6 +328,7 @@ impl Plugin for SourceMaterialPlugin {
             transparent_pass_capacity: 0,
             terminal_prewarm_audit: None,
         }))))
+        .init_resource::<RetainedColors>()
         .init_resource::<super::renderers::RendererMeshes>()
         .add_systems(
             Update,
@@ -347,6 +349,13 @@ impl Plugin for SourceMaterialPlugin {
                 .chain(),
         );
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
+            render.add_systems(
+                Render,
+                (prepare_retained_casters, upload_retained_colors)
+                    .chain()
+                    .after(RenderSystems::PrepareBindGroups)
+                    .before(prewarm_materials),
+            );
             render
                 .init_resource::<super::renderers::ShadowsOnly>()
                 .add_systems(
@@ -574,25 +583,17 @@ fn assemble_textures(
             &texture.record.sampler,
             images,
         )
-        .map_err(source::ReferenceError)?;
+        .map_err(|error| source::ReferenceError(format!("{}: {error}", texture.label)))?;
         texture.image = Some(images.add(image));
         texture.levels.clear();
         return Ok(byte_count);
     }
     Ok(0)
 }
-fn wrap(value: u8) -> ImageAddressMode {
-    match value {
-        0 => ImageAddressMode::Repeat,
-        2 => ImageAddressMode::MirrorRepeat,
-        _ => ImageAddressMode::ClampToEdge,
-    }
-}
-
 #[derive(serde::Deserialize)]
-struct MaterialIdentity {
-    asset: source::AssetId,
-    gltf_material: u32,
+pub(crate) struct MaterialIdentity {
+    pub asset: source::AssetId,
+    pub gltf_material: u32,
 }
 pub(crate) fn bind_authored_materials(
     mut commands: Commands,
@@ -822,6 +823,7 @@ fn make_material(
                 ShaderFamily::UnlitColor => 1,
                 ShaderFamily::StainedGlass => 2,
                 ShaderFamily::AmplifyRope => unreachable!("rope uses its master surface"),
+                ShaderFamily::PlayerModel => unreachable!("inactive player material"),
             },
             factor("_UVSec", 0.) as u32,
         ),
@@ -879,6 +881,9 @@ fn make_material(
             }
         }
     }
+    record
+        .validate_active_use()
+        .expect("validated active material usage");
     let alpha_mode = match record.state.alpha_mode {
         source::AlphaMode::Opaque => AlphaMode::Opaque,
         source::AlphaMode::Mask => AlphaMode::Mask(data.factors.w),
@@ -891,6 +896,7 @@ fn make_material(
         .iter()
         .find(|texture| texture.slot == "_MainTex");
     SourceMaterial {
+        retained_color: None,
         preparation: default(),
         mirror: None,
         base: StandardMaterial {
@@ -1162,6 +1168,7 @@ use bevy::ecs::system::SystemParamItem;
 /// Forward source surfaces need the six base maps, not Bevy transmission maps.
 #[derive(Asset, TypePath, Clone, Debug, Default)]
 pub struct SourceMaterial {
+    pub(crate) retained_color: Option<RetainedColor>,
     pub preparation: super::gpu_prepare::GpuPreparation,
     pub(crate) mirror: Option<(u64, usize, bool)>,
     pub base: StandardMaterial,
@@ -1169,7 +1176,11 @@ pub struct SourceMaterial {
 }
 impl SourceMaterial {
     pub(crate) fn caster_data(&self) -> SourceUniform {
-        self.extension.surface.data
+        let mut data = self.extension.surface.data;
+        if let Some(color) = &self.retained_color {
+            data.color = color.0.lock().unwrap().linear;
+        }
+        data
     }
 }
 impl AsBindGroup for SourceMaterial {
@@ -1225,6 +1236,28 @@ impl AsBindGroup for SourceMaterial {
             self.extension
                 .unprepared_bind_group(layout, device, &mut params.1, true)?;
         prepared.bindings.0.extend(extension.bindings.0);
+        if let Some(color) = &self.retained_color {
+            let mut retained = color.0.lock().unwrap();
+            let buffer = retained
+                .buffer
+                .get_or_insert_with(|| {
+                    let mut bytes = encase::UniformBuffer::new(Vec::new());
+                    bytes.write(&self.extension.surface.data).unwrap();
+                    device.create_buffer_with_data(&BufferInitDescriptor {
+                        label: Some("retained condition receiver"),
+                        contents: bytes.as_ref(),
+                        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                    })
+                })
+                .clone();
+            *prepared
+                .bindings
+                .0
+                .iter_mut()
+                .find(|(binding, _)| *binding == 120)
+                .expect("source color binding") = (120, OwnedBindingResource::Buffer(buffer));
+            retained.dirty = true;
+        }
         if let Some((instance, owner, live)) = self.mirror {
             params.2.record(instance, owner, live, &prepared.bindings);
         }
@@ -1809,6 +1842,7 @@ pub fn bind_materials(
 #[derive(Clone)]
 pub struct LampReceiverChoice {
     entity: Entity,
+    sort: Option<super::transparent::SourceSortData>,
     material: Handle<SourceMaterial>,
     casters: Vec<(Entity, Handle<StandardMaterial>)>,
 }
@@ -1861,6 +1895,7 @@ pub(crate) fn prepare_lamp_materials(
             Option<&SourceShadowMode>,
             Option<&Children>,
             &super::renderers::SourceRenderer,
+            &GltfExtras,
         ),
         Without<SourceCaster>,
     >,
@@ -1933,7 +1968,7 @@ pub(crate) fn prepare_lamp_materials(
                 receivers: Vec::with_capacity(target.receivers.len()),
             };
             for &entity in &target.receivers {
-                let (mesh, receiver, global, shadow_mode, children, renderer) =
+                let (mesh, receiver, global, shadow_mode, children, renderer, primitive) =
                     receivers.get(entity).unwrap();
                 let mask = materials.get(&receiver.0).unwrap().extension.receiver_mask;
                 let inverted = global.affine().matrix3.determinant() < 0.;
@@ -1973,21 +2008,37 @@ pub(crate) fn prepare_lamp_materials(
                         materials.add(authored_material(key, inverted, mask, &authored_materials))
                     })
                     .clone();
-                let warm = commands
-                    .spawn((
-                        mesh.clone(),
-                        MeshMaterial3d(material.clone()),
-                        SourceMaterialWarmup,
-                        renderer.clone(),
-                        far,
-                        Visibility::Visible,
-                        bevy::light::NotShadowCaster,
-                        bevy::camera::visibility::NoFrustumCulling,
-                    ))
-                    .id();
-                source.warmups.push((warm, false));
+                let sort = match authored_materials.sort_data(
+                    key,
+                    &renderer.0,
+                    serde_json::from_str::<serde_json::Value>(&primitive.value)
+                        .expect("validated primitive")["submesh"]
+                        .as_u64()
+                        .expect("validated submesh") as u32,
+                ) {
+                    Ok(sort) => sort,
+                    Err(error) => {
+                        source.state = super::lighting::RenderingState::Failed(error.0);
+                        return;
+                    }
+                };
+                let mut warm = commands.spawn((
+                    mesh.clone(),
+                    MeshMaterial3d(material.clone()),
+                    SourceMaterialWarmup,
+                    renderer.clone(),
+                    far,
+                    Visibility::Visible,
+                    bevy::light::NotShadowCaster,
+                    bevy::camera::visibility::NoFrustumCulling,
+                ));
+                if let Some(sort) = sort {
+                    warm.insert((sort, bevy::render::batching::NoAutomaticBatching));
+                }
+                source.warmups.push((warm.id(), false));
                 let mut binding = LampReceiverChoice {
                     entity,
+                    sort,
                     material,
                     casters: Vec::new(),
                 };
@@ -2034,6 +2085,8 @@ pub(crate) fn sync_lamp_materials(
     mut commands: Commands,
     drive: Res<crate::app::Drive>,
     mut source: ResMut<super::lighting::SourceLighting>,
+    receivers: Query<&MeshMaterial3d<SourceMaterial>>,
+    casters: Query<&MeshMaterial3d<StandardMaterial>>,
 ) {
     if !source.materials_prepared {
         return;
@@ -2041,18 +2094,34 @@ pub(crate) fn sync_lamp_materials(
     for target in &mut source.lamp_materials {
         let output = &drive.runtime.lighting.material_outputs()[target.output_index];
         let key = (output.asset, output.material_index);
-        if target.current == Some(key) {
-            continue;
-        }
         let choice = target
             .choices
             .iter()
             .find(|choice| choice.key == key)
             .expect("prepared source material choice");
+        if target.current == Some(key)
+            && choice.receivers.iter().all(|r| {
+                receivers.get(r.entity).is_ok_and(|m| m.0 == r.material)
+                    && r.casters
+                        .iter()
+                        .all(|(entity, handle)| casters.get(*entity).is_ok_and(|m| &m.0 == handle))
+            })
+        {
+            continue;
+        }
         for receiver in &choice.receivers {
             commands
                 .entity(receiver.entity)
                 .insert(MeshMaterial3d(receiver.material.clone()));
+            if let Some(sort) = receiver.sort {
+                commands
+                    .entity(receiver.entity)
+                    .insert((sort, bevy::render::batching::NoAutomaticBatching));
+            } else {
+                commands
+                    .entity(receiver.entity)
+                    .remove::<super::transparent::SourceSortData>();
+            }
             for (entity, material) in &receiver.casters {
                 commands
                     .entity(*entity)
@@ -2170,7 +2239,12 @@ impl SourceMaterials {
             .and_then(|i| self.textures[*i].image.clone())
     }
 }
-pub(crate) fn warm_plate_material(world: &World, mesh: AssetId<Mesh>, material: UntypedAssetId) {
+pub(crate) fn warm_retained_material(
+    world: &World,
+    mesh: AssetId<Mesh>,
+    material: UntypedAssetId,
+    label: String,
+) {
     world
         .resource::<MaterialLoading>()
         .0
@@ -2180,13 +2254,231 @@ pub(crate) fn warm_plate_material(world: &World, mesh: AssetId<Mesh>, material: 
         .push(PipelineRequest {
             mesh,
             material,
-            label: "source plate text".into(),
+            label,
         });
 }
 
 pub(crate) fn seal_plate_materials(world: &World) {
-    if world.resource::<SourceMaterials>().bound {
-        world.resource::<MaterialLoading>().0.lock().unwrap().sealed = true;
+    if world.resource::<SourceMaterials>().bound
+        && world
+            .resource::<super::conditions::ConditionVisuals>()
+            .prepared
+    {
+        let warmup = world
+            .iter_entities()
+            .filter(|e| e.contains::<MeshMaterial3d<SourceMaterial>>())
+            .count();
+        let casters = world
+            .iter_entities()
+            .filter(|e| e.contains::<SourceCaster>())
+            .count();
+        let weight = world.resource::<SourceMaterials>().maximum_pass_weight();
+        let mut pending = world.resource::<MaterialLoading>().0.lock().unwrap();
+        pending.transparent_pass_capacity =
+            pending.transparent_pass_capacity.max(warmup * weight + 2);
+        pending.shadow_capacity = pending.shadow_capacity.max(casters);
+        pending.sealed = true;
+    }
+}
+
+pub(crate) fn set_source_color(material: &mut SourceMaterial, color: [f32; 4]) {
+    let value = Color::srgba(color[0], color[1], color[2], color[3]);
+    material.base.base_color = value;
+    material.extension.surface.data.color = Vec4::from_array(value.to_linear().to_f32_array());
+}
+impl SourceMaterials {
+    fn maximum_pass_weight(&self) -> usize {
+        self.records
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.state.alpha_mode,
+                    source::AlphaMode::Blend
+                        | source::AlphaMode::Premultiply
+                        | source::AlphaMode::Refract
+                )
+            })
+            .map(|r| {
+                1 + usize::from(matches!(
+                    r.shader_family,
+                    ShaderFamily::Standard | ShaderFamily::StainedGlass
+                ))
+            })
+            .max()
+            .unwrap_or(1)
+    }
+}
+
+// The source shader reads color first in binding 120. Keep the original buffer and bind group.
+#[derive(Clone, Debug)]
+pub(crate) struct RetainedColor(Arc<Mutex<RetainedColorData>>);
+#[derive(Debug)]
+struct RetainedColorData {
+    linear: Vec4,
+    revision: u64,
+    dirty: bool,
+    buffer: Option<Buffer>,
+    caster: Option<(AssetId<StandardMaterial>, StandardMaterial)>,
+    caster_buffer: Option<Buffer>,
+}
+#[derive(Resource, Clone, Default, ExtractResource)]
+struct RetainedColors(Arc<Mutex<Vec<RetainedColor>>>);
+impl RetainedColor {
+    pub(crate) fn revision_color(&self) -> (u64, Vec4) {
+        let value = self.0.lock().unwrap();
+        (value.revision, value.linear)
+    }
+}
+impl SourceUniform {
+    pub(crate) fn with_color(mut self, color: Vec4) -> Self {
+        self.color = color;
+        self
+    }
+}
+pub(crate) fn retain_color(material: &mut SourceMaterial, world: &World) {
+    let color = RetainedColor(Arc::new(Mutex::new(RetainedColorData {
+        linear: material.extension.surface.data.color,
+        revision: 0,
+        dirty: true,
+        buffer: None,
+        caster: None,
+        caster_buffer: None,
+    })));
+    world
+        .resource::<RetainedColors>()
+        .0
+        .lock()
+        .unwrap()
+        .push(color.clone());
+    material.retained_color = Some(color);
+}
+pub(crate) fn update_retained_color(material: &SourceMaterial, color: [f32; 4]) {
+    let linear = Vec4::from_array(
+        Color::srgba(color[0], color[1], color[2], color[3])
+            .to_linear()
+            .to_f32_array(),
+    );
+    let mut retained = material
+        .retained_color
+        .as_ref()
+        .expect("retained source color")
+        .0
+        .lock()
+        .unwrap();
+    if retained.linear != linear {
+        retained.linear = linear;
+        retained.revision += 1;
+        retained.dirty = true;
+    }
+}
+pub(crate) fn link_retained_color(
+    material: &Handle<SourceMaterial>,
+    caster: &Handle<StandardMaterial>,
+    world: &World,
+) {
+    let source = world
+        .resource::<Assets<SourceMaterial>>()
+        .get(material)
+        .unwrap();
+    let mut retained = source.retained_color.as_ref().unwrap().0.lock().unwrap();
+    retained.caster = Some((
+        caster.id(),
+        world
+            .resource::<Assets<StandardMaterial>>()
+            .get(caster)
+            .unwrap()
+            .clone(),
+    ));
+}
+fn prepare_retained_casters(
+    colors: Res<RetainedColors>,
+    device: Res<RenderDevice>,
+    cache: Res<PipelineCache>,
+    mut params: bevy::ecs::system::StaticSystemParam<<StandardMaterial as AsBindGroup>::Param>,
+    mut prepared: ResMut<ErasedRenderAssets<PreparedMaterial>>,
+    mut allocators: ResMut<bevy::pbr::MaterialBindGroupAllocators>,
+) {
+    for color in colors.0.lock().unwrap().iter() {
+        let mut color = color.0.lock().unwrap();
+        if color.caster_buffer.is_some() {
+            continue;
+        }
+        let Some((id, source)) = &color.caster else {
+            continue;
+        };
+        let Some(material) = prepared.get_mut(*id) else {
+            continue;
+        };
+        assert!(
+            !StandardMaterial::bindless_supported(&device),
+            "retained source casters require the checked WebGL2 layout"
+        );
+        let descriptor = material
+            .properties
+            .material_layout
+            .as_ref()
+            .expect("standard material layout");
+        let layout = cache.get_bind_group_layout(descriptor);
+        let Ok(mut group) = source.unprepared_bind_group(&layout, &device, &mut params, true)
+        else {
+            continue;
+        };
+        let binding = group
+            .bindings
+            .0
+            .iter_mut()
+            .find(|(binding, _)| *binding == 0)
+            .expect("standard uniform binding");
+        let OwnedBindingResource::Data(data) = &binding.1 else {
+            panic!("checked StandardMaterial binding 0 Data");
+        };
+        let buffer = device.create_buffer_with_data(&BufferInitDescriptor {
+            label: Some("retained condition caster"),
+            contents: &data.0,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
+        binding.1 = OwnedBindingResource::Buffer(buffer.clone());
+        let entries: Vec<_> = group
+            .bindings
+            .0
+            .iter()
+            .map(|(binding, resource)| BindGroupEntry {
+                binding: *binding,
+                resource: resource.get_binding(),
+            })
+            .collect();
+        let bind_group = device.create_bind_group("retained condition caster", &layout, &entries);
+        let allocator = allocators
+            .get_mut(&std::any::TypeId::of::<StandardMaterial>())
+            .expect("standard allocator");
+        let old = material.binding;
+        material.binding = allocator.allocate_prepared(PreparedBindGroup {
+            bindings: group.bindings,
+            bind_group,
+        });
+        allocator.free(old);
+        color.caster_buffer = Some(buffer);
+        color.dirty = true;
+    }
+}
+fn upload_retained_colors(colors: Res<RetainedColors>, queue: Res<RenderQueue>) {
+    for color in colors.0.lock().unwrap().iter() {
+        let mut color = color.0.lock().unwrap();
+        if !color.dirty {
+            continue;
+        }
+        let Some(buffer) = &color.buffer else {
+            continue;
+        };
+        let mut bytes = [0u8; 16];
+        for (slot, value) in bytes.chunks_exact_mut(4).zip(color.linear.to_array()) {
+            slot.copy_from_slice(&value.to_le_bytes());
+        }
+        queue.write_buffer(buffer, 0, &bytes);
+        if let Some(buffer) = &color.caster_buffer {
+            queue.write_buffer(buffer, 0, &bytes);
+        }
+        color.dirty = false;
     }
 }
 

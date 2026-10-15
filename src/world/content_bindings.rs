@@ -414,7 +414,7 @@ impl WorldStream {
                 let state = items.get_mut(id).unwrap();
                 state.body = Some(body);
                 state.fluid = content.content.fluid.clone();
-                state.condition = content.content.condition;
+                state.generated_condition = Some(content.content.condition);
                 state.local_pose = from_rapier(
                     &(physics.rapier().bodies[body].position().inverse() * to_rapier(state.pose)),
                 );
@@ -993,6 +993,20 @@ pub(crate) fn pickup_rule(pickup: SourceRecord<'_>) -> Result<PickupReference, R
         use_recenter_rotation: flag(f, "useRecenterRot")?,
         recenter_rotation: crate::world::spawn_building::source_euler(vector(f, "recenterRot")?),
         recenter_distance: number(f, "recenterDist")?,
+        can_inventory: flag(f, "canInventory")?,
+        can_hold_right_hand: flag(f, "canHoldRightHand")?,
+        disable_rh_fix: flag(f, "disableRHFix")?,
+        right_hand_position: {
+            let mut p = vector(f, "RHP")?;
+            p[2] = -p[2];
+            p
+        },
+        right_hand_rotation: crate::world::spawn_building::source_euler(vector(f, "RHR")?),
+        right_hand_grip: optional(f, "RightHandPos")?.cloned(),
+        left_hand_grip: optional(f, "LeftHandPos")?.cloned(),
+        disable_when_stored: optional(f, "disableThisWhenStored")?.cloned(),
+        keep_when_stored: optional(f, "dontDisableWhenStored")?.cloned(),
+        inventory_icon: optional(f, "invImg")?.cloned(),
     })
 }
 

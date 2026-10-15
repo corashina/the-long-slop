@@ -41,6 +41,25 @@ One manual browser save slot stores both cars, items, mechanisms, pumps, and lam
 Driving includes source manual gears, clutch, Automatic clutch, and Automatic gears.
 The save stores selected gears and both assist choices. Automatic gears requires Automatic clutch.
 
+The cleaning branch adds two brushes, two sponges, and two spray cans from the authored startup scene.
+Use carried tools with LMB. Rub an eligible surface with a brush or sponge; hold LMB to spray paint.
+Brushes and sponges wear during work. Spray cans use their exported color and lose paint during firing.
+The save contract stores surface state, color, progress, tool wear, paint quantity, and wash state.
+Load preserves these values. Recovery preserves preparation; New Game restores exported startup values.
+Looked-at paint quantity uses a bare rounded count. Carried cans hide that count and the native Paint prompt.
+Brush, Sponge, and Paint are port item labels. Wash and Scrub use checked native prompts.
+
+The final particle fix uses frozen code commit `1b51c388`.
+Its release build and export verification passed.
+The controller checked final-package garage readiness, New Game, and fresh-export Save/Load.
+Continue failed pointer capture and left the menu paused.
+See [verification](docs/verification.md) for final package hashes and check limits.
+Active tool use, both-car driving, retained effect counts, and matched source views remain unverified.
+Spray particles apply source local velocity, inherited emitter motion, and masked surface collision through the shared particle pool.
+Spray scene-color refraction and brush soft-particle depth fading remain bounded shared-renderer deferrals.
+These known visual differences keep background refraction absent and brush intersections hard.
+The roadmap keeps Cleaning and painting Partial until the required checks and shared-renderer work pass.
+
 Survival includes health, food, water, bladder, bowel, sausage, toilet actions, healing, starvation, and death.
 Sleep follows source eligibility, hold progress, wake, and clock rules.
 Source sandstorms add movement, fog, light, wind, and particles.

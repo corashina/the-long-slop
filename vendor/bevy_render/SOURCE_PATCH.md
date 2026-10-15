@@ -8,7 +8,7 @@ Upstream crate SHA256: fc86a32b2eef9859e1e7d323c6d1a9150fe77aa17c30fd05abebc12f6
 Upstream Git commit: b56fc29d3016e641754765244b5ba3f9cc504671.
 Upstream path: crates/bevy_render.
 
-The only changed upstream file is `src/render_resource/pipeline_cache.rs`.
+The only changed upstream Rust file is `src/render_resource/pipeline_cache.rs`.
 It adds held render IDs, per-ID synchronous preparation, safe retirement, and release.
 Held IDs cannot enter automatic processing, including shader reload retries.
 An owned queue guard admits descriptor storage before material specialization.
@@ -20,4 +20,5 @@ The patch does not change the mesh allocator, shader language, renderer backend,
 
 When upgrading Bevy, review this file against the new PipelineCache API and preserve these ownership rules.
 
+The local copy omits unused package metadata and the manifest's reference to the original manifest.
 The local .gitattributes disables line-ending conversion within this crate to preserve upstream bytes.

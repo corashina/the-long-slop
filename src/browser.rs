@@ -135,6 +135,8 @@ extern "C" {
     pub fn game_pressed() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameReleased)]
     pub fn game_released() -> u32;
+    #[wasm_bindgen(js_namespace = window, js_name = gameInventoryKeys)]
+    pub fn game_inventory_keys() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameMouseX)]
     pub fn game_mouse_x() -> f32;
     #[wasm_bindgen(js_namespace = window, js_name = gameMouseY)]
@@ -171,6 +173,8 @@ extern "C" {
         paused: bool,
         started: bool,
     );
+    #[wasm_bindgen(js_namespace=window,js_name=gameInventory)]
+    pub fn game_inventory(selected: u32, a: u32, b: u32, c: u32, d: u32, progress: f32);
     #[wasm_bindgen(js_namespace = window, js_name = gameFeedback)]
     pub fn game_feedback(
         actions: u32,

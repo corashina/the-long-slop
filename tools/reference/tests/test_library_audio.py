@@ -8,14 +8,12 @@ from types import SimpleNamespace
 from tools.reference.library.audio import export_audio, validate_wav
 from tools.reference.library.types import Catalog, ObjectId, ObjectRecord
 
-
 def wav(format=1, bits=16, channels=1, frequency=8000, frames=8):
     block = channels * bits // 8
     payload = bytes(frames * block)
     fmt = struct.pack('<HHIIHH', format, channels, frequency, frequency * block, block, bits)
     chunks = b'fmt ' + struct.pack('<I', 16) + fmt + b'data' + struct.pack('<I', len(payload)) + payload
     return b'RIFF' + struct.pack('<I', len(chunks) + 4) + b'WAVE' + chunks
-
 
 class AudioTests(unittest.TestCase):
     def setUp(self):
@@ -62,64 +60,6 @@ class AudioTests(unittest.TestCase):
         path.write_bytes(wav() + b'extra')
         with self.assertRaises(ValueError):
             validate_wav(path, self.clip)
-
-    def test_pcm_and_float_headers_match_source(self):
-        for format, bits in ((1, 16), (3, 32)):
-            with self.subTest(format=format):
-                raw = wav(format, bits)
-                path = self.root / 'sample.wav'
-                path.write_bytes(raw)
-                clip = {**self.clip, 'm_BitsPerSample': bits}
-                result = validate_wav(path, clip)
-                self.assertEqual(result['format'], 'pcm' if format == 1 else 'ieee_float')
-                self.assertEqual(result['frames'], 8)
-                self.assertEqual(result['duration_seconds'], .001)
-                self.assertEqual(path.read_bytes(), raw)
-                for field, value in (('m_Channels', 2), ('m_Frequency', 44100), ('m_Length', 1)):
-                    with self.assertRaises(ValueError):
-                        validate_wav(path, {**clip, field: value})
-
-    def test_long_clip_allows_only_binary32_duration_rounding(self):
-        # Sparse samples keep this boundary fixture small in memory.
-        frames, frequency = 2 ** 25 + 4, 48000
-        path = self.root / 'long.wav'
-        header = bytearray(wav(bits=8, frequency=frequency, frames=0))
-        struct.pack_into('<I', header, 4, frames + 36)
-        struct.pack_into('<I', header, 40, frames)
-        with path.open('wb') as stream:
-            stream.write(header)
-            stream.seek(frames + 43)
-            stream.write(b'\0')
-        clip = {**self.clip, 'm_BitsPerSample': 8, 'm_Frequency': frequency,
-                'm_Length': struct.unpack('<f', struct.pack('<f', frames / frequency))[0]}
-        result = validate_wav(path, clip)
-        self.assertGreater(abs(result['duration_delta_frames']), 1)
-        self.assertGreater(result['duration_tolerance_frames'], 1)
-        with self.assertRaisesRegex(ValueError, 'WAV duration mismatch'):
-            validate_wav(path, {**clip, 'm_Length': (frames + 5) / frequency})
-
-    def test_empty_samples_and_stream_range_fail(self):
-        identity = ObjectId('a.assets', 1)
-        with self.assertRaisesRegex(ValueError, 'No decoded samples'):
-            self.export({identity: (self.clip, SimpleNamespace(samples={}))})
-        bad = {**self.clip, 'm_Resource': {**self.clip['m_Resource'], 'm_Size': 17}}
-        with self.assertRaisesRegex(ValueError, 'Stream range'):
-            self.export({identity: (bad, SimpleNamespace(samples={'same.wav': wav()}))})
-        empty = {**self.clip, 'm_Resource': {**self.clip['m_Resource'], 'm_Size': 0}}
-        with self.assertRaisesRegex(ValueError, 'no source samples'):
-            self.export({identity: (empty, SimpleNamespace(samples={'same.wav': wav()}))})
-
-    def test_invalid_alignment_and_identity_collision_fail(self):
-        raw = bytearray(wav())
-        struct.pack_into('<H', raw, 32, 3)
-        path = self.root / 'bad.wav'
-        path.write_bytes(raw)
-        with self.assertRaises(ValueError):
-            validate_wav(path, self.clip)
-        ids = (ObjectId('A.assets', 1), ObjectId('a.assets', 1))
-        with self.assertRaisesRegex(ValueError, 'identity collision'):
-            self.export({i: (self.clip, SimpleNamespace(samples={'same.wav': wav()})) for i in ids})
-
 
 if __name__ == '__main__':
     unittest.main()

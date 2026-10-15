@@ -1,225 +1,73 @@
 # Project roadmap
 
-Updated: 2026-10-14.
+Updated: 2026-10-15. Source authority: Steam build `11140890` and its decompiled control flow.
 
-## Current status
+## Current state
 
-Master contains the source-world integration and retained Bevy ownership patch after merge `79765e3`.
-The deferred worktree retains implementation reports and recovery files.
-We completed nine source-world implementation layers and three integration merges.
-The final scoped review passed with no findings. Checked runtime inputs and the WASM package are installed in master.
-We reconciled master `6423b062` with source-world startup, collision, save identities, and renderer paths.
-We fixed hidden grass preparation and generated attachment readiness in `8d4341f`.
-We fixed the final review's texture receipt cleanup finding in `103bee7`.
-The full integration review and scoped re-review have no open Critical or Important findings.
-We preserved local transparent sorting and warmup filtering through the replacement renderer.
-We added no features or dependencies during the final source-world merge.
+Master contains the source world, two cars, driving controls, rendering, audio, survival, weather, cleaning, painting, and inventory.
+Save schema 5 holds world, driving, condition, and inventory state. Older schemas are rejected without migration.
+Builds and static review pass. Runtime acceptance of the merged package is open.
+Checked world inputs are restored in `.cache/world-source` (receipt: `recovery-receipt.json`).
+Historical verification records are in Git: `git show 6272b02:docs/verification.md`.
 
-### Changes in master
+## Work order
 
-| Area | Implemented changes |
+Keep each layer working before you add the next.
+
+1. **Recover checked world probes and provenance.** Complete.
+2. **Export and build one matching package.** Generate records, assets, and WASM from merged code. Verify hashes and record the package identity.
+3. **Verify active gameplay.** Get mouse capture. Check walking, both cars, cleaning, painting, Save/Load, restart, seams, long drives, rebasing, revisits, memory, and audio.
+4. **Measure source driving.** Collect original-game measurements before you change tire, rim, hub, suspension, or brake response. Then verify 30/60/120 FPS driving.
+5. **Complete save coverage.** Save needs, food progress, sleep, storms, toilet state, and radio state. Then add save slots and autosave.
+6. **Expand gameplay in layers.** Add cargo, items, fleet, damage, weapons, and enemies when authorized. Include save support and source comparison with each feature.
+7. **Add multiplayer last.**
+
+## Inventory and clothing tasks
+
+Tasks 1 and 2 are done: four slots, storage, hand retrieval, source icons, and saved ownership.
+Tasks 3-10 are stopped at the user's request. Do not resume them until the user says so.
+
+| Task | Remaining scope |
 | --- | --- |
-| Vehicles and interaction | Two imported cars, vehicle selection, carry, parts, mechanisms, and source recovery |
-| Driving controls and transmission | Source pedal ramps, manual gears, clutch, two saved assists, control help, and gear feedback |
-| Rendering | Shared lighting, shadows, probes, camera effects, transparent glass, live mirrors, and source plates |
-| Audio | Source vehicle, interaction, weather, and Lada radio audio |
-| Survival and weather | Existing consumables, survival state, sleep, weather, storm lighting, and particles |
-| Portable flashlight | Source bindings, carried controls, storage restrictions, and shared light rendering |
-| Save/load | Browser storage, fleet state, fluids, item state, and scene replacement |
-| Performance | Reduced camera light clustering and depth/shadow material bindings |
-| Roadside stations | Checked source placement, selected prototypes, static collision, and terrain alignment |
+| 3 | Equip/release transitions, direct Tab behavior, source item-action priority. |
+| 4 | Station loot selection, source RNG order, item creation, stable identities, persistence. |
+| 5 | Source box contents and one-time release, saved. |
+| 6 | Shovel digging and buried-item recovery, saved. |
+| 7 | Wearables, cigarettes, holiday startup. Keep disabled starter apparel disabled. |
+| 8 | Both player skins, pose and IK, wearable anchors, camera visibility. |
+| 9 | Appearance controls and remaining HUD behavior. |
+| 10 | Compare with the running source game. |
 
-We added left-button door dragging and suppress view movement during a drag.
-The integration replaces the obsolete station generator with checked source-world placement and selected prototypes.
+## Feature gaps
 
-### Source-world changes
-
-| Layer | Implemented changes |
-| --- | --- |
-| Source inputs | Checked build `11140890` records, generation rules, assets, and source receipts |
-| Roads | Sequential random state, checkpoints, source positions, slopes, curves, and segment joins |
-| Geometry | Road meshes, collision geometry, imported garage, and continuous garage exit |
-| Terrain | Source height layers, road/building alignment, biomes, and distant terrain |
-| Placement | Separate structures, stations, props, and lamp layers with source selection rules |
-| Rendering | Source materials, terrain, grass, impostors, lamps, shadows, and selected prototype ownership |
-| Streaming | Bounded jobs, requests, geometry, collision windows, and floating origin |
-| Revisits | Stable identities, absolute poses, compact change records, attachment state, and source replay |
-| Final corrections | Loader headroom, double-precision local transforms, and lazy painting assets |
-
-We retain each changed object as a compact record. Active geometry has separate limits.
-Changed-object records have no fixed count limit. Source checkpoints and first-call history share a 16 MiB limit.
-Active CPU/GPU limits remain 128 MiB each. Prototype limits remain 256 MiB CPU and 512 MiB GPU.
-Generation and presentation share 32 MiB of pending storage.
-
-Master contains the source-world design, implementation plan, source research, and checked input provenance.
-The retained worktree also contains exported runtime files and implementation reports.
-
-### Integration changes
-
-We replaced station save identities with canonical generated identities, change records, and source spawn history.
-Source-world introduced save schema 2. The driving integration now uses schema 3. Browser database version remains separate.
-We preserve source integer identities as decimal strings at the browser save boundary.
-We apply the saved seed before generation and restore supported object state before physics participation.
-We preserve imported fleet state, dormant absolute poses, recovery, and cross-owner attachments.
-Vehicle selection updates future source spawn context. Stored first-call boundaries retain their original context.
-We connect existing sausage and turd item definitions to generated state and source-owned geometry.
-
-We completed hidden renderer preparation before scene replacement.
-We preserve active scene owners until candidate uploads, pipelines, collision, and restored bindings are ready.
-We added scoped GPU errors, completion receipts, separate mesh buffers, and combined memory charges.
-We patched the existing Bevy 0.19.1 pipeline cache to own candidate preparation, cancellation, and retries.
-We retain the original crate licenses and source provenance. The patch changes one upstream file.
-Generated meshes require checked renderer bounds and flags. Selected ShadowsOnly meshes skip visible and motion passes.
-We published 365 asset entries and recorded hashes for 7,890 runtime files, including the WASM package.
-We retained master's latest depth/shadow bindings and connected candidate caster ownership.
-The final native/WASM builds, packaging, 22 shader variants, JavaScript syntax, and scoped whitespace checks passed.
-We preserved existing WASM warnings and unchanged upstream whitespace.
-
-The final merged native and release WASM builds, packaging, JavaScript syntax, and scoped whitespace checks passed.
-Master's source matches the reviewed build. All 7,890 installed runtime file hashes match their receipts.
-Runtime acceptance remains open. Tests and runtime checks remain skipped.
-
-### Verification limits
-
-The merged source-world implementation passed native and release WASM builds, packaging, and static review.
-These results establish compilation and reviewed structure. They do not establish source runtime parity.
-The user skipped tests and further runtime checks. Earlier rendering checks below describe earlier revisions.
-Fixed source samples, collision seams, long drives, rebasing, revisits, and memory plateau remain unverified.
-We have not measured retained objects or runtime memory for the merged world.
-We removed obsolete generator paths from the integration. Acceptance of the replacement remains open.
-We added no new storage engine, save migration, multiplayer, or deployment work.
-
-## Driving integration: partial acceptance
-
-We merged the driving work into local master with the source-world implementation.
-The integration includes source pedal ramps, manual gears, clutch, and two saved driving assists.
-Controls show the source keyboard bindings. Feedback shows the selected gear.
-Seat changes clear transient driving input. Automatic rules require a mounted engine.
-Suspension validation accepts source endpoints and rejects invalid values.
-We retain both cars, source-world placement, generated identities, and renderer ownership.
-Save schema 3 combines world records with selected gears and driving assists.
-We reject schema 1 and both earlier schema 2 contracts before reading their vehicle fields.
-
-Tasks 1-3 passed the earlier code review. Normal driving acceptance remains open.
-The merge check report records current compiler failures, test results, and package identities.
-Earlier counts, including 108 native failures, describe older commits.
-
-The controller previously verified assist choices, dependency, paused save, reload, restore, and New game defaults.
-IAB refused pointer capture. Normal launch, both-car driving, and 30/60/120 FPS routes remain unverified.
-At zero wheel RPM, the port can retain neutral. Source curve extrapolation remains unverified.
-
-Task 4 cannot pass. The repository audit found no qualifying source measurements. The user confirmed none are available.
-Task 5 remains unscheduled. Tire/rim grip, empty hubs, suspension, wheel spin, and combined-brake response remain incomplete.
-The adapter supplies summed brake inputs. The stock solver excludes simultaneous motor force and brake impulse per wheel.
-
-Read the [driving verification](verification.md#driving-branch-verification-2026-10-14) and
-[merge check report](../.superpowers/sdd/2026-10-14-correct-driving-physics/task-7-report.md).
-No push was requested.
-
-## Full-game feature gaps
-
-Reference: installed Steam build `11140890`. This backlog records gaps beyond the implemented layers above.
-The source-world integration is in master. Its runtime acceptance remains open.
-Missing means no gameplay implementation. Partial means the current implementation covers selected behavior or content.
-The backlog does not expand approved implementation scope. Each new feature needs a source-based specification.
+Missing means no implementation. Partial means selected behavior only. Each new feature needs a source-based specification.
 
 | Feature | Status | Remaining work |
 | --- | --- | --- |
-| Source world generation | Implemented; runtime unverified | Verify source samples and runtime behavior when authorized. |
-| Buildings and exploration | Implemented; runtime unverified | Check source buildings, interiors, landmarks, placement, content coverage, and collision when authorized. |
-| World population | Partial | Integrate source loot placement; add excluded abandoned vehicles, items, and encounters. |
-| Full vehicle range | Partial | Add vehicles beyond the Lada and Skoda, including diesel, two-stroke, automatic, bus, and bike mechanics. |
-| Driving physics | Partial | Verify launch and both-car driving; collect native source measurements before wheel, rim, hub, suspension, and combined-brake work. |
-| Inventory and clothing | Missing | Add inventory slots, equipped items, wearables, and player customization. |
-| Cleaning and painting | Missing | Add brushes, sponges, spray paint, and source condition changes. |
-| Cargo and towing | Partial | Add general cargo locking, attachment objects, towing hooks, and trailers. Current storage locking covers flashlights. |
-| Full item range | Partial | Add remaining source food, tools, containers, and their actions. |
-| Animals and enemies | Missing | Add rabbits, human enemies, movement, attacks, and spawn rules. |
-| Weapons | Missing | Add firearms, ammunition, reload actions, melee weapons, and projectiles. |
-| Damage and destruction | Partial | Add wounds, blood loss, combat damage, breakable objects, and death ragdolls. |
-| Complete save state | Partial | Preserve needs, food progress, sleep, storms, toilet state, and radio state; add save slots and autosave. |
-| Settings and game setup | Partial | Add seed entry, source game options, editable controls, graphics, audio, and player settings. |
-| Custom radio music | Missing | Add user music playback through the existing audio owner. Source radio playback already exists. |
-| Multiplayer | Missing | Add the reference build's multiplayer behavior and shared state. |
-| Remaining visual effects | Partial | Add soft storm particles, fluid refraction, and source death effects. |
+| World generation | Done; runtime unverified | Verify streaming, revisits, and memory in the matching package. |
+| Buildings and exploration | Done; runtime unverified | Check buildings, interiors, landmarks, and collision. |
+| World population | Partial | Source loot placement, abandoned vehicles, items, encounters. |
+| Vehicle range | Partial | Vehicles beyond the Lada and Skoda. See [vehicles](vehicles.md). |
+| Driving physics | Partial | Source measurements first, then wheel, rim, hub, suspension, and combined brakes. |
+| Inventory and clothing | Partial | Tasks 3-10 above. |
+| Cleaning and painting | Partial | Verify tools in the package. Add spray refraction and brush depth fading. |
+| Cargo and towing | Partial | Cargo locking, attachments, towing hooks, trailers. |
+| Item range | Partial | Remaining food, tools, containers, and actions. |
+| Animals and enemies | Missing | Rabbits, human enemies, movement, attacks, spawn rules. |
+| Weapons | Missing | Firearms, ammunition, reload, melee, projectiles. |
+| Damage and destruction | Partial | Wounds, blood loss, combat damage, breakable objects, death ragdolls. |
+| Save state | Partial | Work order step 5. |
+| Settings and game setup | Partial | Seed entry, game options, controls, graphics, audio, player settings. |
+| Custom radio music | Missing | User music through the existing audio owner. |
+| Multiplayer | Missing | Shared state. Last in the work order. |
+| Visual effects | Partial | Soft storm particles, brush depth fading, fluid refraction, death effects. |
 
-Generated identities and change records belong to the current merge. Complete save state requires the remaining gameplay owners too.
-Source placement and imported geometry do not provide excluded item actions, vehicle mechanics, or enemy behavior.
+The source has no supported rain or snow scheduler. Do not add either without source evidence.
 
-Suggested order: finish world integration, complete saves, correct driving, extend items and cargo, expand the fleet, then add combat.
-Add inventory with item use. Add damage with combat. Connect settings, custom music, and effects to their existing owners.
-Keep each layer working before adding the next. Plan multiplayer after the local gameplay and save state are stable.
+## Known limits
 
-Evidence: [vehicle coverage](vehicles.md), [driving differences](research/2026-10-11-rea-driving-audit.md),
-[save and survival limits](research/2026-10-12-survival-sleep-weather-completion.md), and
-[flashlight storage scope](superpowers/specs/2026-10-13-portable-flashlights-design.md).
-The selected source has no supported rain scheduler or active snow scheduler. Add neither without source evidence.
-
-## Remaining game comparison
-
-Implemented features still need comparison with matched running source views and inputs.
-Check continuous walking, preparation, seat entry, sustained driving, ordinary aiming, and lifecycle behavior after the merge.
-Check assembled audio on a listening device. Compare rendered frames, particles, and physics under matched source conditions.
-Retain the world sample, seam, rebase, revisit, object-count, and memory checks listed above.
-Existing build, review, and historical test results do not establish full-game parity.
-
-## Earlier rendering completion
-
-The user approved source rendering completion in an isolated worktree based on `dccd516`.
-On 2026-10-12, the user authorized merging rendering commit `67798ec` into local master `a5b9778`.
-Keep the accepted gameplay, road, library, menus, instruments, and day cycle.
-The merged package passed verification on 2026-10-13. Retain the rendering worktree and its local evidence.
-Do not push without a separate request.
-
-## Accepted layers
-
-| Layer | Evidence | Checkpoint |
-| --- | --- | --- |
-| Texture storage | Source storage audit, corrected exports, startup and pause checks | Included in shadow checkpoint |
-| Shadows and sky | Three camera views, four main cascades, issued draws, GPU validation, upright image | `8182153` |
-| Reflection probe | Six 64x64 faces, two mip jobs, validated publication, resize | `1b77a1a` |
-| Motion producer | Camera and rigid motion fixture, matching submission tokens, resize | `538810e` |
-| Camera effects | AO, TAA, blur, exposure, bloom, grading, dither, callbacks, resize and steady storage | `6148e66` |
-| Stained glass | Both real door materials, two ordered overlap captures, probe views, resize and steady storage | `6f84766` |
-| Lifecycle and streaming | Cold restart, readiness, terminal faults, probe distance, two actual rebases, fixed motion slots | Final branch commit |
-
-The implementation uses exact 8-sample HDR rendering on the accepted hardware.
-The WebGL backend uses attachment-only multisample renderbuffers and explicit resolves.
-Shader consumers read the original D24 depth storage through a supported unfiltered float view.
-
-## Final acceptance
-
-Task 7 connects scene restart, view suspension, current-scene readiness, probe distance activation, and failure handling.
-Healthy startup, pause, resize, restart, missing assets, invalid pipelines, and context loss passed native checks.
-Restart resets scene histories and retains compatible storage. Terminal failure stops extraction, rendering, and history updates.
-Whole-branch review found one motion streaming fault. The fixed-slot correction passed three critical tests.
-Its scoped review and all five real-body native stages passed. Motion retained 780 GPU slots through streaming and both rebases.
-The rendering branch passed 240 native tests before this merge.
-The merged checks passed 318 native tests, 58 installed-source tests, 87 web tests, and 182 exporter tests.
-Seven final export checks passed. The final default release package built and passed browser startup and Load.
-Controlled lifecycle checks passed six stages. Both vehicle records survived a manual save and full page reload.
-Both probes published. Three main views completed, and three mirror submissions passed GPU validation.
-The merged motion pool retained 953 slots through the checked scene replacements.
-See the [implementation plan](superpowers/plans/2026-10-11-rendering-completion.md) and [verification record](verification.md).
-
-Local evidence remains in the rendering worktree under `.superpowers/sdd/2026-10-11-rendering-completion/` and `.cache/layer*-browser/`.
-Installed source reports remain under `.superpowers/evidence/material-parity/reports/`.
-The old `codex/material-parity` branch is not required for this implementation.
-
-## Limits
-
-- No matched native frame establishes identical pixels.
-- Exact native blend rounding remains unverified.
-- Equal-distance transparent ties use target identities. Native runtime identities remain unknown.
-- Nine exported primitives lack authored tangents.
-- Logical GPU byte counts exclude driver memory and overhead.
-- Native operating-system minimize cannot be automated with the available browser tools.
-- The in-app browser refused pointer capture. Continuous mouse control remains unverified for the final package.
-
-The installed restart caller reloads the active scene with `LoadSceneMode.Single`.
-That source proof resolves the former reload-versus-reset uncertainty.
-
-Source vehicle, interaction, and Lada radio audio are implemented. Assembled audible acceptance remains incomplete.
-The user stopped further checks. See the [audio verification report](research/2026-10-12-audio-verification.md).
-Master now includes save/load, the source fleet, and live mirrors.
-Survival, sleep, and weather are now implemented in master. Multiplayer and deployment remain outside scope.
+- A loose flashlight fell below the floor during a long browser run. Cause unknown.
+- The in-app browser refuses pointer capture, so mouse control and driving are unverified.
+- At zero wheel RPM the port can keep neutral. Source curve extrapolation is unverified.
+- The stock solver does not apply motor force and brake impulse to one wheel at the same time.
+- No matched native frame proves identical pixels. Nine exported primitives lack tangents.

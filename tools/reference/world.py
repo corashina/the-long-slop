@@ -564,7 +564,7 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
         exporter=GltfExporter(source,output/f'{name}.gltf',reader,index)
         report=exporter.export([root])
         for material in report['materials']:
-            selected.receipt(source.get(material['source']['file'],material['source']['path_id']))
+            selected.record(source.get(material['source']['file'],material['source']['path_id']))
             for texture in material['properties']['textures']:
                 selected.receipt(source.get(texture['source']['file'],texture['source']['path_id']))
         for material in report['deferred_materials']:
@@ -630,7 +630,7 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
             for component in node['components']:selected.component_record(component)
         prototypes.append({'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,
             'deferred_materials':report['deferred_materials'],'excluded_actions':scope_cache.get(identity,('',[]))[1],'skins':skins,'bodies':bodies,'colliders':colliders,'prefab_pose':converted_transform(source.read(root)),
-            'asset_record':{'id':index,'material_count':report['material_count'],'usage':'world_prototype','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(root),'dependencies':report['dependencies']},
+            'asset_record':{'id':index,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'world_prototype','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(root),'dependencies':report['dependencies']},
             'materials':[dict(material,asset=index) for material in report['materials']]})
         print(f'Exported {name}: {len(nodes)} nodes, {len(colliders)} colliders',flush=True)
     return prototypes

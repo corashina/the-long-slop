@@ -238,7 +238,7 @@ def recover_lights_and_probes(source, roots):
     return lights,probes
 
 
-def recover_renderer(source, reader, mesh):
+def recover_renderer(source, reader, mesh, usage="scene"):
     """Keep source renderer state separate from shared mesh geometry."""
     from .source import source_id, vector
     data = source.read(reader)

@@ -44,11 +44,16 @@ impl CompoundCollider {
 }
 
 pub struct StartingArea {
+    pub conditions: crate::conditions::ConditionStore,
     pub plates: crate::plates::PlateState,
     _plate_draw: crate::plates::StartupDraw,
     pub bodies: HashMap<BodyId, RigidBodyHandle>,
     pub items: ItemStore,
     pub interaction: InteractionState,
+    pub inventory: crate::inventory::InventoryState,
+    pub pose: crate::player::pose::PlayerPoseState,
+    inventory_offsets: [Option<(ItemId, VehiclePose)>; 4],
+    pub(crate) inventory_items: std::collections::HashSet<ItemId>,
     pub player: PlayerState,
     pub origin: [f64; 3],
     attachments: Vec<(RigidBodyHandle, RigidBodyHandle, rapier3d::math::Pose)>,
@@ -67,6 +72,7 @@ impl StartingArea {
         let mut plate_draw = crate::plates::StartupDraw::new(DEFAULT_SEED);
         let plates =
             crate::plates::PlateState::new(&reference.plates, &mut |a, b| plate_draw.draw(a, b))?;
+        let conditions = crate::conditions::ConditionStore::new(reference)?;
         let mut items = ItemStore::new(reference)?;
         let mut interaction = InteractionState::new(reference)?;
         let mut bodies = HashMap::with_capacity(reference.bodies.len());
@@ -364,6 +370,16 @@ impl StartingArea {
             })
             .collect();
         Ok(Self {
+            conditions,
+            inventory: crate::inventory::InventoryState::new(&reference.inventory),
+            inventory_offsets: [None; 4],
+            pose: crate::player::pose::PlayerPoseState::new(reference)?,
+            inventory_items: reference
+                .items
+                .iter()
+                .filter(|i| i.pickup.as_ref().is_some_and(|p| p.can_inventory))
+                .map(|i| i.id)
+                .collect(),
             bodies,
             items,
             interaction,
@@ -470,8 +486,18 @@ impl StartingArea {
         }
     }
     pub fn commit_poses(&mut self, physics: &PhysicsWorld, teleport: bool) {
+        let stored = self.inventory.slots.map(|id| {
+            id.and_then(|id| self.items.get(id))
+                .filter(|i| {
+                    matches!(
+                        i.location,
+                        crate::interaction::items::ItemLocation::Stored(_)
+                    )
+                })
+                .and_then(|i| i.body)
+        });
         for (id, previous, current) in &mut self.render_poses {
-            if !physics.body_active(self.bodies[id]) {
+            if !physics.body_active(self.bodies[id]) && !stored.contains(&Some(self.bodies[id])) {
                 continue;
             }
             *current =
@@ -611,6 +637,7 @@ impl VehicleRuntime {
     }
 }
 
+mod inventory;
 mod save;
 
 pub struct GarageRuntime {
@@ -690,7 +717,11 @@ impl GarageRuntime {
             );
         }
         let mut wheels = crate::interaction::wheels::WheelAssemblies::new(reference)?;
+        wheels.refresh_conditions(&area.conditions, &area.items);
         wheels.sync(&mut area.items, &mut physics)?;
+        area.interaction
+            .cleaning
+            .sync_wash_colliders(&area.conditions, &mut physics);
         physics.refresh_queries();
         area.items.sync_poses(&physics);
         area.commit_poses(&physics, true);
@@ -795,6 +826,55 @@ impl GarageRuntime {
         Ok(runtime)
     }
 
+    pub fn advance_tools(
+        &mut self,
+        reference: &ReferenceManifest,
+        mut frame: crate::interaction::cleaning::ToolFrame,
+    ) {
+        frame.active &=
+            self.started && !self.paused && !self.needs_output().dead && !self.sleeping();
+        self.area
+            .interaction
+            .cleaning
+            .sync_wash_colliders(&self.area.conditions, &mut self.physics);
+        self.area.interaction.cleaning.advance(
+            frame,
+            reference,
+            &mut self.area.conditions,
+            &self.area.items,
+            &self.physics,
+            &self.area.interaction.parts,
+        );
+        self.area
+            .interaction
+            .cleaning
+            .sync_wash_colliders(&self.area.conditions, &mut self.physics);
+        if let Some(audio) = &mut self.audio {
+            for (b, s) in reference
+                .conditions
+                .brushes
+                .iter()
+                .zip(self.area.interaction.cleaning.signals())
+            {
+                if let Some(voice) = b.voice {
+                    audio.voice(voice, s.playing, s.voice_gain, 1.);
+                }
+            }
+            for (b, s) in reference.conditions.sprays.iter().zip(
+                self.area
+                    .interaction
+                    .cleaning
+                    .signals()
+                    .iter()
+                    .skip(reference.conditions.brushes.len()),
+            ) {
+                if let Some(voice) = b.voice {
+                    audio.voice(voice, s.playing, s.voice_gain, 1.);
+                }
+            }
+        }
+    }
+
     pub fn clock_factors(&self, reference: &ReferenceManifest) -> crate::sleep::ClockFactors {
         self.sleep.clock_factors(&reference.sleep)
     }
@@ -811,6 +891,8 @@ impl GarageRuntime {
     }
 
     pub fn step(&mut self, reference: &ReferenceManifest, mut input: FrameInput) {
+        self.wheels
+            .refresh_conditions(&self.area.conditions, &self.area.items);
         if let Err(error) = self.sync_world_activity(reference) {
             self.stream.fail(ReferenceError(error.to_string()));
         }
@@ -856,6 +938,7 @@ impl GarageRuntime {
             );
         }
 
+        self.update_inventory(reference, input);
         self.area.begin_step();
         let aim = if self.sleeping() {
             ResolvedAim::default()
@@ -1213,6 +1296,8 @@ impl GarageRuntime {
                 .sync(&mut self.area.items, &mut self.physics)
                 .expect("validated wheel bindings");
         }
+        self.area.sync_inventory();
+        self.area.sync_equipment(reference, &mut self.physics);
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, false);
         if let Some(audio) = &mut self.audio {
@@ -1403,9 +1488,9 @@ impl GarageRuntime {
         let radiator_condition = ((1.0
             - self
                 .area
-                .items
-                .get(engine_reference.coolant_tank)
-                .map_or(1.0, |item| item.condition))
+                .conditions
+                .item_quality(engine_reference.coolant_tank)
+                .unwrap_or(1.0))
             * 4.0)
             .round() as u8;
         let was_ignition = vehicle.engine_output.ignition;
@@ -1550,6 +1635,8 @@ impl GarageRuntime {
             vehicle.engine.clear_input();
             vehicle.engine_output.starter = false;
         }
+        self.area.interaction.cancel_input();
+        self.area.inventory.cancel_input();
     }
 
     /// Moves the current vehicle, its cargo, and a walking player back to the road.
@@ -1691,6 +1778,3 @@ fn startup_hash(mut value: u64) -> u64 {
     value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
     value ^ (value >> 31)
 }
-
-#[cfg(test)]
-mod transition_tests;

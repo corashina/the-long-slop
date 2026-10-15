@@ -1,11 +1,12 @@
 import {applyLayout} from './ui-layout.js';
 export function formatGear(gear){return gear<0?'R':gear===0?'N':String(gear);}
-export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,SPLIT:16384,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144,CONSUME:524288,DRINK:1048576,HELD_SWITCH:2097152};
+export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,SPLIT:16384,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144,CONSUME:524288,DRINK:1048576,HELD_SWITCH:2097152,WASH:4194304,SCRUB:8388608};
 const FLUIDS=['Gas','Oil','Alcohol','Water','Blood','Diesel'];
 export function formatRadio(r){if(r.context===11&&Number.isFinite(r.radioVolume))return 'Volume: '+Math.round(r.radioVolume*10).toString().padStart(2,'0');if(r.context===12&&Number.isFinite(r.radioFrequency))return (r.radioAm?'AM '+r.radioFrequency.toFixed(0).padStart(3,'0'):'FM '+r.radioFrequency.toFixed(1).padStart(4,'0'));return '';}
 function volume(value){return (Math.round(value*10)/10).toFixed(1).replace(/\.0$/,'');}
 export function formatTank(r) {
  if(r.noText)return '';
+ if(r.context===14)return Math.round(r.amount).toString();
  const prefix=r.hasName?r.fluidName+':\n':'';
  if(r.amount<=Math.fround(.05))return prefix+'empty';
  const amount=volume(r.amount),capacity=volume(r.capacity);
@@ -34,7 +35,7 @@ export class FeedbackState {
  setVisible(active){this.active=active;this.visible=active&&this.enabled;}
  toggle(){this.enabled=!this.enabled;this.visible=this.active&&this.enabled;}
  update(r){
-  const amountKey=Math.round(r.amount*10),empty=r.amount<=Math.fround(.05);
+  const amountKey=Math.round(r.amount*(r.context===14?1:10)),empty=r.amount<=Math.fround(.05);
   let changed=r.context!==this.context||amountKey!==this.amountKey||r.capacity!==this.capacity||r.fluidName!==this.fluidName||r.hasName!==this.hasName||r.noText!==this.noText||empty!==this.empty;
   for(let i=0;i<6;i++){const percent=r.amount>0?Math.fround(Math.fround(r.quantities[i]/r.amount)*100):0;const key=percent>=1?Math.round(percent):-1;if(this.percentKeys[i]!==key){changed=true;this.percentKeys[i]=key;}}
   const radioChanged=r.radioAm!==this.radioAm||r.radioFrequency!==this.radioFrequency||r.radioVolume!==this.radioVolume;
@@ -48,7 +49,7 @@ export class FeedbackState {
   return changed||radioChanged||actionsChanged||detailChanged;
  }
 }
-export function createFeedback(ui,switchIconUrl) {
+export function createFeedback(ui,switchIconUrl,manifest) {
  const state=new FeedbackState(),root=document.querySelector('#hud'),icon=document.querySelector('#crosshair'),fluid=document.querySelector('#fluid-text'),carry=document.querySelector('#carry-help'),notice=document.querySelector('#action-notice'),target=document.querySelector('#target-name'),condition=document.querySelector('#target-condition'),charge=document.querySelector('#throw-charge'),level=document.querySelector('#throw-level');
  const gear=document.querySelector('#driving-gear');let lastGear,wasSeated;
  const rows=[
@@ -72,13 +73,15 @@ export function createFeedback(ui,switchIconUrl) {
   [ACTION.THROW,'throw','[F]: Drop / hold to throw'],
   [ACTION.SPLIT,'split','[X]: Split / assemble'],
   [ACTION.SCROLL,'scroll','[Scroll]: Open/Close'],
-  [ACTION.HELD_SWITCH,'heldSwitch','[LMB]: Switch flashlight']
+  [ACTION.HELD_SWITCH,'heldSwitch','[LMB]: Switch flashlight'],
+  [ACTION.WASH,'wash','[LMB]: Wash'],
+  [ACTION.SCRUB,'scrub','[LMB]: Scrub']
  ].map(([bit,role,text])=>{const n=document.createElement('p');n.textContent=text;n.className='action-row';n.hidden=true;root.append(n);return {bit,role,n,family:0,top:0,line:0,offset:-1};});
  let lastIcon='',lastFluid='',lastNotice='',lastName='',lastCondition='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='';
  const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance / [Tab]: Center';
  const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance / [Tab]: Center';
  const counts=new Uint8Array(4);
- const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',split:'mount',scroll:'use',heldSwitch:'use'};
+ const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',split:'mount',scroll:'use',heldSwitch:'use',wash:'use',scrub:'use'};
  const families={use:0,pickup:1,mount:2,fill:3};
  function placeRows(){
   counts.fill(0);
@@ -125,7 +128,15 @@ export function createFeedback(ui,switchIconUrl) {
   const message=state.context===6?'Unlimited Gas':state.notice;
   if(message!==lastNotice){notice.textContent=message;lastNotice=message;}notice.hidden=!message;
  }
+ const inventory=document.createElement('div');inventory.id='inventory';inventory.setAttribute('aria-label','Inventory');root.append(inventory);
+ const slotNodes=Array.from({length:4},(_,i)=>{const tile=document.createElement('div'),number=document.createElement('span'),icon=document.createElement('img');number.textContent=String(i+1);icon.hidden=true;tile.append(number,icon);inventory.append(tile);return {tile,icon,id:0};});
+ const itemIcons=new Map(manifest.items.filter(i=>i.pickup?.can_inventory).map(i=>[i.id,{name:i.name,url:ui.urls[ui.sprites.findIndex(s=>s.source.file===i.pickup.inventory_icon?.file&&s.source.path_id===i.pickup.inventory_icon?.path_id)]}]));
+ const swap=document.createElement('progress');swap.max=1;swap.setAttribute('aria-label','Swap progress');inventory.append(swap);
+ function updateInventory(r){
+  for(let i=0;i<4;i++){const n=slotNodes[i],id=r.slots[i];n.tile.classList.toggle('selected',r.selected===i);if(n.id!==id){n.id=id;const item=itemIcons.get(id);n.icon.hidden=!item;if(item){n.icon.src=item.url;n.icon.alt=item.name;}}}
+  swap.hidden=!(r.progress>0);swap.value=Math.min(1,r.progress);
+ }
  const key=event=>{if(event.code==='Backspace'&&!event.repeat&&state.active){event.preventDefault();state.toggle();paint();}};
  window.addEventListener('keydown',key);window.addEventListener('resize',resize);resize();paint();
- return {state,drivingState(value,seated){if(value!==lastGear){gear.textContent='Gear: '+formatGear(value);lastGear=value;}if(seated!==wasSeated){gear.hidden=!seated;wasSeated=seated;}},update(record){if(state.update(record))paint();},setVisible(value){const before=state.visible;state.setVisible(value);if(before!==state.visible)paint();},dispose(){window.removeEventListener('keydown',key);window.removeEventListener('resize',resize);}};
+ return {state,inventory:updateInventory,drivingState(value,seated){if(value!==lastGear){gear.textContent='Gear: '+formatGear(value);lastGear=value;}if(seated!==wasSeated){gear.hidden=!seated;wasSeated=seated;}},update(record){if(state.update(record))paint();},setVisible(value){const before=state.visible;state.setVisible(value);if(before!==state.visible)paint();},dispose(){window.removeEventListener('keydown',key);window.removeEventListener('resize',resize);}};
 }

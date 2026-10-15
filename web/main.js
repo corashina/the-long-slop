@@ -44,12 +44,18 @@ window.gameMeasurements=json=>{
  for(const resolve of measurementWaiters.splice(0))resolve(snapshot);
 };
 let input,survival,dead=false,sleeping=false,audio,menu,feedback,failed=false,worldAdmitted=false,actions=0,frame,renderFailure;
+const inventory={selected:0,slots:[0,0,0,0],progress:0};
+window.gameInventory=(selected,a,b,c,d,progress)=>{
+ inventory.selected=selected;inventory.slots[0]=a;inventory.slots[1]=b;inventory.slots[2]=c;inventory.slots[3]=d;inventory.progress=progress;
+ window.gameState.inventory=inventory;feedback?.inventory(inventory);
+};
 const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',condition:-1,held:'',throwCharge:0,throwActive:false,radioVolume:undefined,radioFrequency:undefined,radioAm:false,quantities:[0,0,0,0,0,0]};
 const settleSave=window.gameSaveResult;
 window.gameSaveResult=(id,kind,payload,error)=>{
  if(kind==='Commit'&&!error){input.clear();actions=0;}
  settleSave(id,kind,payload,error);
 };
+window.gameInventoryKeys=()=>frame.inventoryHeld|(frame.inventoryReleased<<4);
 window.gameKeys=()=>{frame=input.takeFrame();return frame.held;};
 window.gamePressed=()=>frame.pressed;window.gameReleased=()=>frame.released;
 window.gameMouseX=()=>frame.mouseX;window.gameMouseY=()=>frame.mouseY;window.gameWheel=()=>frame.wheel;
@@ -111,9 +117,21 @@ async function load(){
  if(!graphics)throw Error('This browser cannot use WebGL2.');
  graphics.getExtension('WEBGL_lose_context')?.loseContext();
  startup.end('webgl');startup.begin('manifest');
+ // Download and compile the game code while the manifest downloads.
+ const code=Promise.all([import('./pkg/my_summer_slop.js'),fetch('./pkg/my_summer_slop_bg.wasm').then(response=>{
+  if(!response.ok)throw Error('Cannot load game code (HTTP '+response.status+').');
+  return WebAssembly.compileStreaming(response);
+ })]);
+ code.catch(()=>{});
  const response=await fetch('./assets/reference/manifest.json');
  if(!response.ok)throw Error('Cannot load reference manifest (HTTP '+response.status+').');
- const bytes=await response.arrayBuffer(),text=new TextDecoder().decode(bytes),manifest=JSON.parse(text);
+ const bytes=new Uint8Array(await response.arrayBuffer());
+ status.textContent='Loading game code...';
+ loading.stage(status.textContent);
+ const [{default:init,run,manifest_shell,source_render_failure},module]=await code;
+ const exports=await init({module_or_path:module});wasmMemory=exports.memory;renderFailure=source_render_failure;
+ // Rust copies only the shell fields, so JS does not parse the world records.
+ const text=manifest_shell(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
  fetched({path:'assets/reference/manifest.json',requiredBytes:bytes.byteLength,receivedBytes:bytes.byteLength});
  startup.build({sourceBuildId:manifest.build_id,manifestSha256:manifestHash,wasm:'release'});
@@ -132,18 +150,10 @@ async function load(){
  const switchIconUrl=URL.createObjectURL(new Blob([switchIconBytes],{type:'image/png'}));
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
  checkImageSize(assetReceipt(manifest.lighting.switch_icon.path),switchIcon.naturalWidth,switchIcon.naturalHeight);
- feedback=createFeedback(manifest.ui,switchIconUrl);
- startup.end('interface');startup.begin('wasm');
- status.textContent='Loading game code...';
- loading.stage(status.textContent);
- const {default:init,run,source_render_failure}=await import('./pkg/my_summer_slop.js');
- const wasm=await fetch('./pkg/my_summer_slop_bg.wasm');if(!wasm.ok)throw Error('Cannot load game code (HTTP '+wasm.status+').');
- const wasmBytes=Number(wasm.headers.get('content-length'))||0;
- startup.build({wasmBytes,wasmLastModified:wasm.headers.get('last-modified')});
- const consumedWasm=await wasm.arrayBuffer();
- fetched({path:'pkg/my_summer_slop_bg.wasm',requiredBytes:wasmBytes||consumedWasm.byteLength,receivedBytes:consumedWasm.byteLength});
- const exports=await init({module_or_path:consumedWasm});wasmMemory=exports.memory;if(failed)return;renderFailure=source_render_failure;startup.end('wasm');status.textContent='Loading the garage...';loading.stage(status.textContent);
+ feedback=createFeedback(manifest.ui,switchIconUrl,manifest);
+ startup.end('interface');
+ if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
  startup.begin('generation');startup.begin('decodeUpload');startup.begin('pipeline');
- run(text,manifestHash);
+ run(bytes,manifestHash);
 }
 load().catch(error=>fail(error?.message??String(error)));

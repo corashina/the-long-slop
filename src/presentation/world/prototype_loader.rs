@@ -21,7 +21,7 @@ pub struct SourceGltf {
 /// Typed loads select this loader. Leave glTF labels to Bevy's loader.
 #[derive(Default, TypePath)]
 pub struct SourceGltfLoader;
-#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 pub struct SourceGltfSettings {
     pub json_bytes: usize,
     pub buffer_bytes: usize,

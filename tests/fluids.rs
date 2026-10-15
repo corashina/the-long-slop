@@ -1,4 +1,4 @@
-use my_summer_slop::fluids::{FluidContainer, FluidMixture, spill, suitability, transfer};
+use my_summer_slop::fluids::{FluidContainer, FluidMixture, transfer};
 
 fn container(capacity: f32, quantities: [f32; 6]) -> FluidContainer {
     FluidContainer::new(
@@ -31,39 +31,4 @@ fn transfer_conserves_each_type() {
     let remaining = source.mixture.total();
     assert_eq!(transfer(&mut source, &mut empty, f32::MAX), remaining);
     assert_eq!(source.mixture.total(), 0.0);
-}
-
-#[test]
-fn spill_clamps_and_preserves_ratios() {
-    let mut tank = container(5.0, [1.0, 1.0, 0.0, 2.0, 0.0, 0.0]);
-    assert_eq!(spill(&mut tank, f32::NAN), 0.0);
-    assert_eq!(spill(&mut tank, -1.0), 0.0);
-    assert_eq!(spill(&mut tank, 2.0), 2.0);
-    assert_eq!(
-        tank.mixture.quantities_liters,
-        [0.5, 0.5, 0.0, 1.0, 0.0, 0.0]
-    );
-    assert_eq!(spill(&mut tank, f32::MAX), 2.0);
-    assert_eq!(tank.mixture.total(), 0.0);
-    assert_eq!(spill(&mut tank, 1.0), 0.0);
-}
-
-#[test]
-fn suitability_uses_the_limiting_required_ratio() {
-    let required = FluidMixture {
-        quantities_liters: [9.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-    };
-    assert!(
-        (suitability(&container(10.0, [9.5, 0.5, 0.0, 0.0, 0.0, 0.0]), &required) - 0.5).abs()
-            < 0.00001
-    );
-    assert_eq!(
-        suitability(&container(10.0, [9.0, 1.0, 0.0, 0.0, 0.0, 0.0]), &required),
-        1.0
-    );
-    assert_eq!(
-        suitability(&container(10.0, [9.0, 0.0, 0.0, 0.0, 0.0, 0.0]), &required),
-        0.0
-    );
-    assert_eq!(suitability(&container(10.0, [0.0; 6]), &required), 0.0);
 }

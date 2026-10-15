@@ -34,6 +34,7 @@ pub struct PreparedPresentation {
     allocation: SourcePresentationAllocation,
     system: SystemState<WorldPresentation<'static, 'static>>,
     updates: Vec<(Entity, Transform, Visibility)>,
+    conditions: Option<super::conditions::PreparedConditions>,
     roots: Vec<Entity>,
     poses: CandidateImportedPoses,
     screen_height: f32,
@@ -102,7 +103,10 @@ impl PreparedPresentation {
             .account(&mut candidate.stream, &mut fixed_snapshot)?;
         let mesh_count = world.query::<&Mesh3d>().iter(world).count();
         let mut admitted = candidate.stream.presentation_allocation();
-        admitted.active_cpu += super::candidate_upload::UPLOAD_CONTROL_BYTES
+        admitted.active_cpu += world
+            .resource::<super::conditions::ConditionVisuals>()
+            .candidate_bytes()
+            + super::candidate_upload::UPLOAD_CONTROL_BYTES
             + std::mem::size_of::<Self>()
             + reference.nodes.len() * std::mem::size_of::<(Entity, Transform, Visibility)>()
             + 8192 * std::mem::size_of::<Entity>()
@@ -148,6 +152,7 @@ impl PreparedPresentation {
                 allocation
             },
             system: SystemState::new(world),
+            conditions: None,
             updates: Vec::with_capacity(reference.nodes.len()),
             roots: Vec::with_capacity(8192),
         })
@@ -312,6 +317,7 @@ impl PreparedPresentation {
                 &receivers,
                 false,
                 candidate.lighting.light_outputs(),
+                0.,
             ),
             Err(e) => Err(crate::reference::ReferenceError(e.to_string())),
         };
@@ -366,6 +372,17 @@ impl PreparedPresentation {
             && self.writers.ready()?
             && self.pipelines.settled()?
             && self.lighting.road_lamps.ready();
+        if ready && self.conditions.is_none() {
+            self.conditions = Some(world.resource_scope(
+                |world, visuals: Mut<super::conditions::ConditionVisuals>| {
+                    visuals.prepare_candidate(
+                        &candidate.area.conditions,
+                        &candidate.area.interaction.cleaning,
+                        world,
+                    )
+                },
+            )?);
+        }
         if ready {
             imported_updates(candidate, world, &mut self.updates)?;
             validate_assets(reference, world)?;
@@ -389,7 +406,8 @@ impl PreparedPresentation {
         {
             return Err(SaveError::MissingAssets("Prepared viewport changed".into()));
         }
-        if !self.materials.preparation.ready()?
+        if self.conditions.is_none()
+            || !self.materials.preparation.ready()?
             || candidate.restore_pending()
             || !candidate.world_supported()
             || !candidate.stream.window_ready()
@@ -474,6 +492,10 @@ impl PreparedPresentation {
         for (entity, pose, visibility) in self.updates.drain(..) {
             world.entity_mut(entity).insert((pose, visibility));
         }
+        self.conditions
+            .take()
+            .expect("prepared conditions")
+            .commit(world);
         self.exchange(world);
         self.release(old, world);
     }
@@ -565,6 +587,9 @@ fn imported_updates(
     Ok(())
 }
 fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), SaveError> {
+    world
+        .resource::<super::conditions::ConditionVisuals>()
+        .validate_assets(world)?;
     let fail = |path: String| SaveError::MissingAssets(path);
     let server = world.resource::<AssetServer>();
     let gltfs = world.resource::<Assets<bevy::gltf::Gltf>>();

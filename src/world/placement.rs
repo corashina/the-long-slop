@@ -81,11 +81,9 @@ pub struct FoundationPoint {
     pub position: [f64; 3],
     /// Source squared inner and outer radii.
     pub range_squared: [f32; 2],
-    prototype_index: usize,
 }
 
 struct Helper {
-    source: SourceId,
     position: [f32; 3],
     range_squared: [f32; 2],
 }
@@ -377,7 +375,6 @@ impl PlacementIndex {
                     helper_index,
                     position,
                     range_squared: helper.range_squared,
-                    prototype_index: building.prototype_index,
                 });
             }
             for (supply_index, supply) in p.supplies.iter().enumerate() {
@@ -394,26 +391,6 @@ impl PlacementIndex {
             block.supplies.end = self.supplies.len();
         }
         self.sequence.state.next_distance >= SOURCE_END
-    }
-
-    pub fn buildings_in(&mut self, bounds: WorldBounds, output: &mut Vec<Placement>) {
-        output.clear();
-        for block in &self.blocks {
-            if !intersects(block.bounds, bounds, false) {
-                continue;
-            }
-            self.replay.restore(&block.checkpoint);
-            for _ in block.checkpoint.next_building..block.end {
-                let building = self.replay.advance().unwrap();
-                if intersects(
-                    building.bounds(self.replay.inputs.prototypes[building.prototype_index].radius),
-                    bounds,
-                    false,
-                ) {
-                    output.push(self.replay.placement(building));
-                }
-            }
-        }
     }
 
     /// Refresh source membership without cloning unchanged placement identities.
@@ -463,10 +440,6 @@ impl PlacementIndex {
         }
     }
 
-    pub fn foundation_source(&self, point: &FoundationPoint) -> &SourceId {
-        &self.sequence.inputs.prototypes[point.prototype_index].helpers[point.helper_index].source
-    }
-
     pub fn supplies_for_building(&self, index: u32, output: &mut Vec<SupplyPoint>) {
         output.clear();
         output.extend(
@@ -489,18 +462,6 @@ impl PlacementIndex {
 
     pub fn supply_definition(&self, point: &SupplyPoint) -> &SupplyDefinition {
         &self.sequence.inputs.prototypes[point.prototype_index].supplies[point.supply_index]
-    }
-
-    /// Rank the actual cap points and return the owning structure, without adding stock.
-    pub fn nearest_supply(&mut self, point: [f64; 3]) -> Option<Placement> {
-        let supply = self.nearest_supply_point(point)?;
-        let block = &self.blocks[(supply.building_index / BUILDING_CHECKPOINT_INTERVAL) as usize];
-        self.replay.restore(&block.checkpoint);
-        for _ in block.checkpoint.next_building..supply.building_index {
-            self.replay.advance();
-        }
-        let building = self.replay.advance().unwrap();
-        Some(self.replay.placement(building))
     }
 
     pub fn prepared_buildings(&self) -> u32 {
@@ -848,7 +809,6 @@ fn copy_prototype(
                 let inner = (scale as f64 * 0.5) as f32;
                 let outer = (scale as f64 * factor as f64 * 0.5) as f32;
                 helpers.push(Helper {
-                    source: source.clone(),
                     position: node_point(prototype, index, [0.0; 3]),
                     range_squared: [(inner as f64).powi(2) as f32, (outer as f64).powi(2) as f32],
                 });
