@@ -89,3 +89,62 @@ fn rejects_changed_startup_anchor_controls_and_missing_contract() {
     old.as_object_mut().unwrap().remove("inventory");
     assert!(ReferenceManifest::from_runtime_json(&serde_json::to_vec(&old).unwrap()).is_err());
 }
+
+#[test]
+fn original_parent_inventory_clothing_contract() {
+    let r = common::reference();
+    assert_eq!(r.clothing.wearable_type_count, 5);
+    assert_eq!(
+        r.clothing
+            .characters
+            .iter()
+            .map(|c| c.source.path_id)
+            .collect::<Vec<_>>(),
+        [71215, 67763]
+    );
+    assert_eq!(
+        r.acquisition
+            .stations
+            .iter()
+            .map(|s| s.misc4.len())
+            .collect::<Vec<_>>(),
+        [18, 6, 38]
+    );
+    assert_eq!(r.acquisition.pack_item_id, 74);
+    assert_eq!(r.acquisition.cigarette_item_id, 230);
+    assert_eq!(r.acquisition.holiday_pumpkin.file, "level1");
+    assert_eq!(r.acquisition.holiday_pumpkin.path_id, 82);
+}
+#[test]
+fn original_parent_rejects_broken_skin_or_wearable_anchor_and_missing_owners() {
+    let fixture: Value = serde_json::from_slice(include_bytes!("common/reference.json")).unwrap();
+    for path in [
+        "/clothing/characters/0/skins/0/joints/0",
+        "/clothing/characters/0/skins/0/node",
+        "/clothing/anchors/0/path_id",
+        "/clothing/wearables/0/selectors/0/variants/0/nodes/0",
+        "/clothing/wearables/0/selectors/0/variants/2/profile",
+    ] {
+        let mut broken = fixture.clone();
+        *broken.pointer_mut(path).unwrap() = json!(u32::MAX);
+        let bytes = serde_json::to_vec(&broken).unwrap();
+        assert!(ReferenceManifest::from_json(&bytes).is_err(), "{path}");
+        assert!(
+            ReferenceManifest::from_runtime_json(&bytes).is_err(),
+            "{path}"
+        );
+    }
+    for owner in ["inventory", "clothing", "acquisition"] {
+        let mut broken = fixture.clone();
+        broken.as_object_mut().unwrap().remove(owner);
+        let bytes = serde_json::to_vec(&broken).unwrap();
+        assert!(
+            ReferenceManifest::from_json(&bytes).is_err(),
+            "missing {owner}"
+        );
+        assert!(
+            ReferenceManifest::from_runtime_json(&bytes).is_err(),
+            "missing {owner}"
+        );
+    }
+}

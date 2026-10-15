@@ -55,11 +55,13 @@ Representative checked records:
 | `sharedassets1.assets:137208` | `LegjobbBenzinkut/Spawn/MiscSpawn1` | `0.6499999761581421` |
 | `sharedassets1.assets:130805` | `NagyBenzinkut/Spawn/MiscSpawn (9)` | `0.4000000059604645` |
 
-Category `misc4`, ID 32, contains item IDs `74, 172, 217, 218, 220, 245, 305, 306`.
+Category `misc4`, ID 35, selects categories `32, 33, 34, 49, 50, 51, 58, 68, 70, 78, 89`.
+Their ordered weights are `20, 20, 20, 5, 35, 25, 30, 15, 50, 20, 3`.
+Child category 32 contains item IDs `74, 172, 217, 218, 220, 245, 305, 306`.
 This includes a cigarette pack, sunglasses, a hat, and a cone.
 Item ID 230 is the individual cigarette. Item ID 74 is the pack.
 
-The category constructor stores its supplied weights in `categorychances`, while its leaf `itemchances` remain null.
+For category 32, the constructor stores its supplied weights in `categorychances`, while its leaf `itemchances` remain null.
 `selectId` assigns unit weights to leaf items when `itemchances` are null.
 Thus this leaf selection uses eight equal entries, despite the supplied weight array.
 Preserve the executable constructor and selector behavior. Do not use the apparent array as corrected leaf weights.

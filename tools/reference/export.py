@@ -343,6 +343,9 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     for index,name in enumerate(CARS):
         manifest['vehicles'][index]['instruments']=recover_instruments(source,manifest,report,name,roots[name][0])
     manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if (name not in CARS or name == 'lada') and name not in STATIONS and not name.startswith('item_') and name!='player'},manifest,library,output)
+    from .acquisition import recover_acquisition, validate_acquisition
+    manifest['acquisition'] = recover_acquisition(source, manifest)
+    validate_acquisition(manifest['acquisition'], manifest)
     validate_item_prototypes(manifest['item_prototypes'], manifest)
     validate_clothing(manifest['clothing'],manifest)
     validate_lighting_export(manifest,output)

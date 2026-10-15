@@ -303,7 +303,7 @@ class RuntimeContractTests(unittest.TestCase):
     def test_runtime_contract_rejects_missing_records(self):
         with tempfile.TemporaryDirectory() as tmp, patch('tools.reference.lighting.validate_lighting_export'):
             root=Path(tmp);manifest,receipt=self.runtime(root)
-            for field in ('app_id','build_id','nodes','player','vehicles','colliders','item_prototypes'):
+            for field in ('app_id','build_id','nodes','player','vehicles','colliders','item_prototypes','inventory','clothing','acquisition'):
                 incomplete=dict(manifest);del incomplete[field];self.save(root,incomplete)
                 with self.subTest(field=field),self.assertRaisesRegex(ValueError,'Runtime manifest contract'):
                     verify_reference(root,receipt)
@@ -365,3 +365,25 @@ class RuntimeContractTests(unittest.TestCase):
             main(['--stage','library','--verify'])
             library.assert_called_once()
             run.assert_not_called()
+
+class InventoryClothingPublicationTests(unittest.TestCase):
+    def test_complete_selected_resources_and_inactive_templates(self):
+        from tools.reference.export import validate_runtime_paths
+        m=json.loads(Path('tests/common/reference.json').read_text())
+        validate_runtime_paths(m)
+        self.assertEqual(len(m['assets']),22)
+        self.assertEqual([p['item_id'] for p in m['item_prototypes']],[74,62,216,None,None,217,218,221,245,92,230])
+        self.assertEqual([w['type_index'] for w in m['clothing']['wearables']],[0,1,2,1,3,4])
+        self.assertEqual([len(c['skins']) for c in m['clothing']['characters']],[2,16])
+        templates={a['id'] for a in m['assets'] if a['usage'] in ('item_prototype','player_prototype')}
+        node_assets={n['id']:n['asset'] for n in m['nodes']}
+        for field in ('items','colliders','seats','vehicles'):
+            for row in m[field]:
+                node=row.get('node',row.get('root'))
+                if node is not None:self.assertNotIn(node_assets[node],templates)
+        for asset in m['assets']:
+            for resource in [asset,*asset['dependencies']]:self.assertRegex(resource['sha256'],r'^[0-9a-f]{64}$')
+        clips={(c['source']['file'],c['source']['path_id']) for c in m['audio']['clips']}
+        a=m['acquisition']
+        for c in [*a['box']['clips'],*a['shovel']['attack_clips'],*(c for group in a['shovel']['contact_clips'] for c in group)]:
+            self.assertIn((c['file'],c['path_id']),clips)

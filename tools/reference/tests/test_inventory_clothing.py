@@ -78,3 +78,28 @@ class InventoryClothingTests(unittest.TestCase):
             with self.subTest(evidence=field), self.assertRaises(ValueError):
                 validate_inventory(r, self.manifest)
         with self.assertRaises(ValueError): validate_inventory(None, self.manifest)
+
+    def test_original_parent_inventory_clothing_contract(self):
+        from tools.reference.clothing import validate_clothing
+        from tools.reference.acquisition import validate_acquisition
+        m=self.manifest
+        self.assertEqual(m['clothing']['wearable_type_count'],5)
+        self.assertEqual([c['source']['path_id'] for c in m['clothing']['characters']],[71215,67763])
+        self.assertEqual([len(s['misc4']) for s in m['acquisition']['stations']],[18,6,38])
+        self.assertEqual(m['acquisition']['pack_item_id'],74)
+        self.assertEqual(m['acquisition']['cigarette_item_id'],230)
+        self.assertEqual(m['acquisition']['holiday_pumpkin'],{'file':'level1','path_id':82})
+        validate_inventory(m['inventory'],m)
+        validate_clothing(m['clothing'],m)
+        validate_acquisition(m['acquisition'],m)
+
+    def test_original_parent_rejects_broken_skin_or_wearable_anchor(self):
+        from tools.reference.clothing import validate_clothing
+        for field in ('joint','renderer','variant','profile','anchor'):
+            changed=copy.deepcopy(self.manifest);c=changed['clothing']
+            if field=='joint':c['characters'][0]['skins'][0]['joints'][0]=4294967295
+            elif field=='renderer':c['characters'][0]['skins'][0]['node']=4294967295
+            elif field=='anchor':c['anchors'][0]['path_id']=4294967295
+            elif field=='variant':c['wearables'][0]['selectors'][0]['variants'][0]['nodes'][0]=4294967295
+            else:c['wearables'][0]['selectors'][0]['variants'][2]['profile']=4294967295
+            with self.subTest(field=field),self.assertRaises(ValueError):validate_clothing(c,changed)

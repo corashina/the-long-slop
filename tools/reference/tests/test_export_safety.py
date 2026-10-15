@@ -162,6 +162,30 @@ class ExportSafetyTests(unittest.TestCase):
             expected += source_text.stat().st_size + 456
             self.assertEqual(assembly_bytes(stages), expected)
 
+    def test_acquisition_failure_before_promotion_retains_all_runtime_bytes(self):
+        import hashlib
+        from tools.reference.acquisition import validate_acquisition
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);accepted=root/'reference';accepted.mkdir()
+            (accepted/'manifest.json').write_bytes(b'accepted manifest')
+            (accepted/'geometry.bin').write_bytes(b'accepted binary')
+            def inventory():
+                return {p.name:(hashlib.sha256(p.read_bytes()).hexdigest(),p.stat().st_mtime_ns) for p in accepted.iterdir()}
+            before=inventory()
+            snapshot=N(manifest_sha256='source',files=(),root=root/'cache/source',manifest_path=root/'cache/source-manifest.json')
+            receipt=N(source_manifest_sha256='source')
+            reader=N(snapshot=snapshot,root=root/'library',exports={})
+            def fail(source,staged,library,snapshot):
+                (staged/'manifest.json').write_bytes(b'unaccepted acquisition')
+                validate_acquisition({}, {})
+            with patch('tools.reference.library.reader.LibraryReader',return_value=reader), \
+                    patch('tools.reference.source.LibrarySource'), \
+                    patch.object(export,'_export_selected',side_effect=fail), \
+                    patch.object(export,'promote_reference') as promote:
+                with self.assertRaises(ValueError):export.derive_reference(snapshot,receipt,accepted)
+                promote.assert_not_called()
+            self.assertEqual(inventory(),before)
+
 
 if __name__ == '__main__':
     unittest.main()

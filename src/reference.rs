@@ -35,6 +35,8 @@ pub mod clothing;
 pub use clothing::*;
 pub mod item_prototypes;
 pub use item_prototypes::*;
+pub mod acquisition;
+pub use acquisition::*;
 pub mod inventory;
 pub mod stations;
 pub mod survival;
@@ -818,6 +820,7 @@ pub struct ReferenceManifest {
     pub clothing: ClothingReference,
     pub item_prototypes: Vec<ItemPrototype>,
     pub inventory: InventoryReference,
+    pub acquisition: AcquisitionReference,
     pub audio: serde_json::Value,
     pub survival: SurvivalReference,
     pub sleep: SleepReference,
@@ -954,6 +957,7 @@ impl ReferenceManifest {
         }
         self.clothing.validate(self)?;
         self.inventory.validate(self)?;
+        self.acquisition.validate(self)?;
         item_prototypes::validate_prototypes(self)?;
         AudioGameplayReference::from_value(&self.audio)?;
         self.sleep.validate(self)?;
