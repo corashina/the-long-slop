@@ -2,7 +2,7 @@
 
 Date: 2026-10-14, Europe/Warsaw.
 Base: master `ee9d545847f15ffa95017d55fa4f42a0489e89bb`.
-Status: The user approved the design direction. This written specification awaits review.
+Status: The user approved this written specification in chat on 2026-10-14.
 
 ## Goal
 
@@ -28,6 +28,7 @@ They identify work and allocation errors. They do not assign measured shares of 
 | --- | --- |
 | Startup fetches and checks 7,184 world dependency files in sequence | `web/world-assets.js::admitWorldAssets` |
 | Startup reads a 136,571,197-byte manifest before starting WASM | `web/main.js::load`; installed export |
+| The local server disables HTTP caching, including WASM | `scripts/serve.mjs`, header `Cache-Control: no-store` |
 | World source records occupy about 61 MiB of that JSON | Installed export, compact JSON measurement |
 | Startup waits for 50,000 prepared road sections | `src/world/stream.rs::prepare`, `available_external_jobs`, and `window_ready` |
 | The source prepares 100 sections at new-game startup | `level1:64771`, field `genAtStart`; `roadGenScript.FStart` |
@@ -262,4 +263,4 @@ Keep a custom archive format, new rendering backend, quality reduction, and unre
 
 The approved direction covers the complete startup path and the reported light allocation failure.
 The written specification adds package ownership, saved checkpoint rules, and measurable delivery gates.
-The next step is user review of this file, followed by an implementation plan.
+The user approved this written specification. The next step is review of the implementation plan and execution-method selection.
