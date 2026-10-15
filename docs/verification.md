@@ -1,8 +1,9 @@
 # Verification record
 
-## Cleaning and painting: 2026-10-14
+## Cleaning and painting: 2026-10-15
 
-Branch: `codex/cleaning-painting`. Reviewed code head: `6ba18866f20e00126feafcf4aa1863b3b50bde8c`.
+Branch: `codex/cleaning-painting`. Frozen code head: `1b51c38834aa88b907d53a684ba317211395e194`.
+Frozen tree: `464373cf565e3e7c4bd235f638af6ce51554a01f`. Scoped re-review remains open.
 The [approved specification](superpowers/specs/2026-10-14-cleaning-painting-design.md) governs this feature.
 Read the [source record](research/2026-10-14-cleaning-painting-reference.md) for identities, values, and source rules.
 We keep Cleaning and painting Partial. Implementation and menu readiness do not complete gameplay acceptance.
@@ -13,7 +14,29 @@ The loader rejects old schemas and invalid candidates. It preserves live binding
 New Game restores exported startup values. Recovery preserves preparation; Load clears transient contact and valve output.
 We removed duplicate scalar ownership and temporary cleaning diagnostic routes. The checked startup initializer remains necessary.
 
-### Fresh integrated checks
+### Final particle fix checks
+
+We verified the recorded logs and package hashes on 2026-10-15. We did not repeat completed builds or suites.
+
+| Target | Result | Evidence log |
+| --- | --- | --- |
+| particles / cleaning / conditions_reference | 7 / 26 / 9 passed | `final-fix-green-wasm.log` |
+| Sensor amendment: particles / affected formatting / WASM library | 7 passed / passed / passed | `final-fix-sensor-wasm.log` |
+| Source conditions / weather | 3 passed / 2 passed, 1 baseline failure | `final-fix-source-tests.log` |
+| Native survival_reference | 1 passed, 2 baseline failures | `final-fix-focused.log`, `final-fix-baseline-weather.log` |
+| Final source export and verification | Passed; 663 colliders, 232 items | `final-fix-export-final.log` |
+| Release and browser package | Exit 0; release compile 4m29 | `final-fix-build.log` |
+
+The native base and current fix fail the same assertions in `tests/survival_reference.rs`.
+At line 75, the shelter count is 4 rather than 3.
+At line 131, validation accepts a duplicate shelter root.
+Python base and current fix fail `test_rejects_rebound_shelter_links` at line 27: no ValueError.
+The Python baseline log is `final-fix-baseline-source-weather.log`.
+We checked exact reviewed base `6d9179a3d64fc4819273df6b28bc0249233654f6` with unchanged assertions.
+Base and live reference fixtures share SHA-256 `afab4f80586b1f2cb5c6b51a1b1ef5c6eff65dad85f825feeba10b2f26a8b12b`.
+The controller accepted these baseline limits. Full survival and Python weather acceptance remain open.
+
+### Historical Task 5 integrated checks
 
 We ran the source condition suite once with the primary reference Python executable and `PYTHONPATH=.`.
 Command: `python.exe -m unittest tools.reference.tests.test_conditions`. Result: exit 0; three tests, OK.
@@ -32,7 +55,7 @@ Actual control bits: 1573376. Expected control bits: 786944.
 This failure matches the recorded baseline input limit. We kept its assertion and production controls unchanged.
 The script stopped before formatting, native tests, and release WASM compilation.
 
-We retain the named Task 4 evidence for unchanged native code:
+We retain the named Task 4 evidence for earlier checks. Final particle fix results above supersede affected targets:
 
 | Target | Result | Evidence log |
 | --- | --- | --- |
@@ -52,27 +75,35 @@ Local logs remain in `.superpowers/sdd/2026-10-14-cleaning-painting/` outside Gi
 
 ### Final package identity
 
-The final Task 4 fix1 release build passed: exit 0; release compile 4m47; wasm-bindgen completed.
-Log: `task4-fix1-build.log`. The approved ruling permits reuse for docs-only Task 5.
-We checked the following SHA256 hashes before and after source verification. They match the frozen fix1 package.
+The final particle fix supersedes the Task 4 fix1 package and its Task 5 source export.
+The prior WASM hash was `d5a554a973f94be9e98fe226f0eefd318c8d25aa8d1a096e45f2f1dc1b258425`.
+The prior manifest hash was `46db456b73b7d78d4ba532750ce4b39fd6fcc12a89b4cd80a2f03731926d72ac`.
+We checked frozen code head `1b51c388` and confirmed no later production edits.
+The final export receipt and current source hashes match.
+The release log records exit 0 and 4m29 compilation. Package files have timestamp 2026-10-14T20:08:32Z.
 
-| File | SHA256 |
-| --- | --- |
-| `web/pkg/my_summer_slop_bg.wasm` | `d5a554a973f94be9e98fe226f0eefd318c8d25aa8d1a096e45f2f1dc1b258425` |
-| `web/pkg/my_summer_slop.js` | `f9052bc0688392d973daeabbc9ef549684c60e5e6397106f0f245089603a8ec8` |
-| `web/feedback.js` | `5d464dd6adbf5fce3cdedf47c986cfc1625018fbed3d5ec908bafb92b1014328` |
-| `web/assets/reference/manifest.json` | `46db456b73b7d78d4ba532750ce4b39fd6fcc12a89b4cd80a2f03731926d72ac` |
-| `web/assets/reference/conditions-evidence.json` | `f5eb8096ec605346535e7c992a6f5234f490dc4a7f4ec71fd7e574d68f48e03c` |
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `web/pkg/my_summer_slop_bg.wasm` | 60757157 | `cf80cd66d0cf6526594c045cd26545d9e862116741e7e6c971c9d33741c24a6f` |
+| `web/pkg/my_summer_slop.js` | 108929 | `dff466b79a8ef77b0c0c0c8811406ebc03b3e6697216c955b39a37695e5febd1` |
+| `web/feedback.js` | 11512 | `5d464dd6adbf5fce3cdedf47c986cfc1625018fbed3d5ec908bafb92b1014328` |
+| `web/assets/reference/manifest.json` | 25307587 | `9fed7506b9f84511c0918e23917d7bb3e606b8c96f678a8e7a29698b6e1ec517` |
+| `web/assets/reference/conditions-evidence.json` | 2678512 | `99a18f97e7dc4cd1c23bca18b105d552c537e467806ae973b31be4609b4b1b68` |
+| `web/assets/reference/library-selection.json` | 1239655 | `821a747ac8b02c4dcc385b32be6081f642bfc9c2247db53fe0217b4d02093a4b` |
 
-The final `library-selection.json` hash is `f65428109d326b96f456976de5213868790706141ddd9663d06d9cdf1291a75f`.
-The accepted receipt hash is `a87176a07c287a9c8ccf7ae977c12c46dd1dc811017d965d8b5b44e599d30b41`.
+The accepted receipt hash remains `a87176a07c287a9c8ccf7ae977c12c46dd1dc811017d965d8b5b44e599d30b41`.
 Generated assets and source receipts remain outside Git.
+The source identity changed. The controller used a fresh same-export save for final Load acceptance.
+The controller owns the scoped re-review.
 
 ### Browser evidence and open gates
 
-The controller checked the final package at `http://127.0.0.1:4178/` in IAB tab 2.
-Fresh navigation reached garage readiness. New Game and same-export Load reached enabled pause controls.
-Continue after Load showed `Mouse capture failed` and retained pause. The controller performed no active movement or tool action.
+The controller checked the final particle fix package on 2026-10-15 at `http://127.0.0.1:4178/` in IAB tab 2.
+Receipt: `final-fix-browser.md` in the local feature evidence directory.
+Fresh navigation reached garage readiness. New Game, a fresh same-export Save, and Load reached enabled pause controls.
+Continue showed `Mouse capture failed`: the root document was not valid for pointer lock.
+The menu stayed paused. The controller performed no active movement, tool action, or driving.
+The screenshot confirmed the paused garage and capture message. The tool supplied no saved local image path.
 Fresh browser inventory still omitted Chrome despite the user's connection reports.
 The current error-level query returned no entries. Startup event capture remains incomplete.
 Bevy can publish warnings at log level. The error query does not establish warning-free operation.
@@ -100,6 +131,7 @@ Complete the following route before marking the feature complete:
 The fixed build hash color policy does not reproduce Unity's random sequence.
 The particle sweep retains the shared FluidContact non-sensor filter as an explicit adaptation.
 Native particle trigger membership needs matched source proof; ray queriesHitTriggers does not establish it.
+Native cache/shape ordering, collision messages, and world tank-fill callbacks remain outside the shared particle route.
 The controller owns independent whole-branch review and branch integration.
 
 ## Rendering merge: 2026-10-12

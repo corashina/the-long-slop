@@ -1,14 +1,16 @@
 # Project roadmap
 
-Updated: 2026-10-14.
+Updated: 2026-10-15.
 
 ## Current status
 
-Cleaning and painting remains on `codex/cleaning-painting`, based on the reviewed code head `6ba1886`.
+Cleaning and painting remains on `codex/cleaning-painting`, with final particle fixes frozen at `1b51c388`.
+The release build, fresh export verification, garage readiness, New Game, and fresh-export Save/Load passed.
+Scoped re-review remains open.
 We implemented authored tools, live condition state, cleaning, spray paint, and strict save schema 2.
 The shared particle owner applies selected spray velocity, inherited motion, and masked collision.
 Spray refraction and brush soft-particle depth fading remain bounded shared-renderer deferrals and known visual differences.
-The final package reached garage readiness, New Game, and Load with enabled controls.
+The final package reached these browser gates with enabled pause controls.
 IAB showed `Mouse capture failed` after Continue. Active preparation and driving remain unverified.
 See [cleaning evidence](research/2026-10-14-cleaning-painting-reference.md) and [verification](verification.md).
 

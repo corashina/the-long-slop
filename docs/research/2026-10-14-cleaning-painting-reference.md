@@ -3,7 +3,8 @@
 Date: 2026-10-14. Steam app 1017180, build 11140890, Unity 2021.3.18f1.
 
 We implemented startup records, live condition state, cleaning, and spray painting on `codex/cleaning-painting`.
-Reviewed code head: `6ba18866f20e00126feafcf4aa1863b3b50bde8c`.
+Final particle fix code head: `1b51c38834aa88b907d53a684ba317211395e194`.
+Frozen tree: `464373cf565e3e7c4bd235f638af6ce51554a01f`. Scoped re-review remains open.
 We retain Partial status until active gameplay and matched source checks pass.
 Build checks do not prove source parity.
 
@@ -186,13 +187,21 @@ The shared rendering work owns these changes. We keep the roadmap Partial and ma
 
 ## Final acceptance package and limits
 
-The final Task 4 fix package uses code head `6ba1886`.
-We reuse its successful release build for documentation changes under the approved build reuse ruling.
-Task 5 checks package hashes before and after source verification.
-See [verification](../verification.md) for final hashes, commands, counts, and baseline failures.
+The final particle fix supersedes the Task 4 package at code head `6ba1886`.
+The release build passed at frozen code head `1b51c388`: exit 0; release compile 4m29; browser package generated.
+The final export passed source verification with 663 colliders and 232 items.
+We checked the current export hashes against the recorded final export receipt.
+WASM SHA-256: `cf80cd66d0cf6526594c045cd26545d9e862116741e7e6c971c9d33741c24a6f`.
+Manifest SHA-256: `9fed7506b9f84511c0918e23917d7bb3e606b8c96f678a8e7a29698b6e1ec517`.
+Particle 7, cleaning 26, and condition-reference 9 tests passed. The WASM library check passed.
+Source condition tests passed: 3. Python weather retained 2 passes and one proved baseline failure.
+Native survival_reference retained one pass and two proved baseline failures at exact base `6d9179a`.
+See [verification](../verification.md) for package identities, logs, baseline attribution, and open gates.
 
-The controller reached garage readiness, New Game, and current-export Load with enabled controls.
-The controller's fresh Continue attempt showed `Mouse capture failed` and retained pause.
+The controller checked the final package on 2026-10-15 in IAB tab 2 at `http://127.0.0.1:4178/`.
+Fresh navigation reached garage readiness. New Game, a fresh same-export Save, and Load reached enabled pause controls.
+The named receipt is `final-fix-browser.md` in the local feature evidence directory.
+Continue showed `Mouse capture failed`: the root document was not valid for pointer lock. The menu stayed paused.
 Chrome remains absent from tool inventory; IAB cannot capture the pointer.
 The current error-level log query returned no entries. Startup event capture remains incomplete.
 Bevy can publish warnings at log level; this query does not prove warning-free operation.

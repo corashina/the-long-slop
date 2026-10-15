@@ -41,7 +41,11 @@ Load preserves these values. Recovery preserves preparation; New Game restores e
 Looked-at paint quantity uses a bare rounded count. Carried cans hide that count and the native Paint prompt.
 Brush, Sponge, and Paint are port item labels. Wash and Scrub use checked native prompts.
 
-The isolated cleaning branch passed menu readiness checks on its final package.
+The final particle fix uses frozen code commit `1b51c388`.
+Its release build and export verification passed.
+The controller checked final-package garage readiness, New Game, and fresh-export Save/Load.
+Continue failed pointer capture and left the menu paused.
+See [verification](docs/verification.md) for final package hashes and check limits.
 Active tool use, both-car driving, retained effect counts, and matched source views remain unverified.
 Spray particles apply source local velocity, inherited emitter motion, and masked surface collision through the shared particle pool.
 Spray scene-color refraction and brush soft-particle depth fading remain bounded shared-renderer deferrals.
