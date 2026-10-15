@@ -19,7 +19,7 @@ fn rejects_missing_world_broken_weights_and_wrong_source_hashes() {
 
 #[test]
 fn rejects_missing_prototype_dependencies_and_corrupt_local_bindings() {
-    use my_summer_slop::reference::{WorldSourceLink, WorldValue};
+    use my_summer_slop::reference::WorldValue;
     let original = ReferenceManifest::from_json(include_bytes!("common/reference.json")).unwrap();
     assert_eq!(original.expected_instances(), 2);
     let mut m = original.clone();
@@ -42,15 +42,17 @@ fn rejects_missing_prototype_dependencies_and_corrupt_local_bindings() {
     let mut m = original.clone();
     let mut stale = m.world.records[0].source.clone();
     stale.path_id = -999;
-    std::sync::Arc::make_mut(&mut m.world).records[0]
-        .fields
-        .insert("broken".into(), WorldValue::Link(stale.clone()));
-    std::sync::Arc::make_mut(&mut m.world).records[0]
-        .links
-        .push(WorldSourceLink {
-            field: "broken".into(),
-            target: stale,
-        });
+    let mut fields = serde_json::to_value(&m.world.records[0].fields).unwrap();
+    fields.as_array_mut().unwrap().push(serde_json::json!({
+        "name": "broken",
+        "value": serde_json::to_value(WorldValue::Link(stale)).unwrap(),
+    }));
+    fields
+        .as_array_mut()
+        .unwrap()
+        .sort_by(|a, b| a["name"].as_str().unwrap().cmp(b["name"].as_str().unwrap()));
+    std::sync::Arc::make_mut(&mut m.world).records[0].fields =
+        serde_json::from_value(fields).unwrap();
     assert!(m.validate().is_err());
     let mut m = original.clone();
     let source = m.world.records[0].source.clone();
@@ -73,32 +75,4 @@ fn rejects_missing_prototype_dependencies_and_corrupt_local_bindings() {
         .distances
         .remove("RoadGenDist");
     assert!(m.validate().is_err());
-}
-
-#[test]
-fn stable_keys_and_absolute_poses_roundtrip() {
-    use my_summer_slop::{reference::SourceId, world::*};
-    let key = ObjectKey::Generated(GeneratedId {
-        layer: WorldLayer::Nested,
-        generator: SourceId {
-            file: "synthetic".into(),
-            path_id: 1,
-        },
-        unit: [-2, 50000],
-        ordinal: 8,
-        children: vec![(
-            SourceId {
-                file: "synthetic".into(),
-                path_id: 2,
-            },
-            9,
-        )],
-    });
-    let pose = AbsolutePose {
-        position: [20000001.125, -1., -5000000.5],
-        rotation: [0., 0., 0., 1.],
-    };
-    let text = serde_json::to_vec(&(key.clone(), pose)).unwrap();
-    let restored: (ObjectKey, AbsolutePose) = serde_json::from_slice(&text).unwrap();
-    assert_eq!(restored, (key, pose));
 }

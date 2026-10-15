@@ -22,24 +22,6 @@ test('record_checksum_rejects_corruption_and_preserves_property_order',async()=>
  await assert.rejects(verifyRecord({...b.tx.record,payload:JSON.stringify(payload)},crypto),/record/i);
  await assert.rejects(verifyRecord({...b.tx.record,version:2},crypto),/record/i);
 });
-test('write_freezes_object_before_delayed_hash_and_verify_freezes_before_hash',async()=>{
- const b=boundary();let finish;
- const delayedCrypto={subtle:{digest:(...args)=>new Promise(resolve=>{finish=()=>crypto.subtle.digest(...args).then(resolve);})}};
- const storage=createSaveStorage({indexedDB:b.indexedDB,crypto:delayedCrypto});
- const original=structuredClone(payload),mutable=structuredClone(payload),write=storage.write(mutable);
- mutable.world.seed='changed';await finish();await connect(b);b.tx.oncomplete();await write;
- assert.equal(JSON.stringify(b.tx.record.payload),JSON.stringify(original));
- const verification=verifyRecord(b.tx.record,delayedCrypto);b.tx.record.payload.world.seed='changed again';await finish();
- assert.deepEqual(await verification,original);
-});
-test('manifest_stamp_hashes_original_bytes_and_copies_reference_fields',async()=>{
- const bytes=new TextEncoder().encode('{ "build_id":11140890 }');
- const reference={app_id:1017180,build_id:11140890,source_hashes:[{file:'source',sha256:'a'.repeat(64)}]};
- const stamp=await manifestStamp(bytes,reference,crypto);
- assert.deepEqual(Object.keys(stamp),['app_id','build_id','manifest_sha256','source_hashes']);
- assert.equal(stamp.manifest_sha256.length,64);assert.deepEqual(stamp.source_hashes,reference.source_hashes);
- reference.source_hashes[0].file='changed';assert.equal(stamp.source_hashes[0].file,'source');
-});
 test('write_and_read_wait_for_transaction_completion',async()=>{
  const b=boundary();let done=false;const write=b.storage.write(payload).then(()=>{done=true;});await connect(b);
  b.request.onsuccess?.();await tick();assert.equal(done,false);
@@ -51,24 +33,11 @@ test('unavailable_storage_and_quota_errors_reject',async()=>{
  await assert.rejects(createSaveStorage({indexedDB:undefined,crypto}).read(),/unavailable/i);
  const b=boundary();const write=b.storage.write(payload);await connect(b);b.tx.error=new DOMException('Full','QuotaExceededError');b.tx.onabort();await assert.rejects(write,{name:'QuotaExceededError'});
 });
-test('blocked_open_rejects_and_closes_late_connection',async()=>{
- const b=boundary();const read=b.storage.read();await tick();b.open.onblocked();await assert.rejects(read,/blocked/i);b.open.result=b.db;b.open.onsuccess();assert.equal(b.db.closed,1);
-});
 test('incompatible_upgrade_aborts_without_creating_a_store',async()=>{
  const b=boundary();let aborted=false;let created=false;b.open.transaction={abort(){aborted=true;}};b.db.createObjectStore=()=>{created=true;};
  const read=b.storage.read();await tick();b.open.result=b.db;b.open.onupgradeneeded({oldVersion:2});await assert.rejects(read,/version/i);assert.equal(aborted,true);assert.equal(created,false);
 });
-test('version_change_closes_connection_and_cancel_aborts_write',async()=>{
- const b=boundary();const controller=new AbortController();const write=b.storage.write(payload,{signal:controller.signal});await connect(b);controller.abort();await assert.rejects(write,{name:'AbortError'});
- b.db.onversionchange();assert.equal(b.db.closed,1);
-});
 test('cancel_during_delayed_hash_never_opens_a_transaction',async()=>{
  let finish;const delayedCrypto={subtle:{digest:()=>new Promise(resolve=>{finish=resolve;})}};
  const b=boundary();const storage=createSaveStorage({indexedDB:b.indexedDB,crypto:delayedCrypto});const controller=new AbortController();const write=storage.write(payload,{signal:controller.signal});controller.abort();finish(new ArrayBuffer(32));await assert.rejects(write,{name:'AbortError'});assert.equal(b.indexedDB.args,undefined);
-});
-test('close_rejects_pending_open_and_closes_late_connection',async()=>{
- const b=boundary();const read=b.storage.read();await tick();b.storage.close();await assert.rejects(read,/closed/i);b.open.result=b.db;b.open.onsuccess();assert.equal(b.db.closed,1);await assert.rejects(b.storage.read(),/closed/i);
-});
-test('cancel_during_open_does_not_start_a_transaction',async()=>{
- const b=boundary();const controller=new AbortController();const write=b.storage.write(payload,{signal:controller.signal});while(!b.open.onsuccess)await tick();controller.abort();b.open.result=b.db;b.open.onsuccess();await assert.rejects(write,{name:'AbortError'});assert.equal(b.db.args,undefined);
 });

@@ -1,46 +1,8 @@
 """Source postprocessing recovery and exact histogram transport."""
-import math
-
 from .render_lighting import f32
 
-HISTOGRAM_BINS = 128
-SCATTER_SAMPLES = 32
 LUT_SIZE = 33
 
-
-def histogram_weight(u, v):
-    """Installed KEyeHistogram DXBC: vignette weighting, then float-to-uint."""
-    x, y = f32(u - .5), f32(v - .5)
-    distance = f32(f32(x * x) + f32(y * y))
-    factor = max(0., f32(1. - distance))
-    return int(f32(f32(factor * factor) * 64.))
-
-
-def histogram_bin(luminance):
-    if not math.isfinite(luminance) or luminance < 0:
-        raise ValueError('Invalid histogram luminance')
-    value = 0. if luminance == 0 else min(1., max(0., f32(f32(math.log2(luminance)) * f32(1./18.) + .5)))
-    return int(f32(value * 127.))
-
-
-def histogram_transport_bounds(width, height):
-    if not isinstance(width, int) or not isinstance(height, int) or min(width, height) <= 0:
-        raise ValueError('Invalid histogram dimensions')
-    columns, rows = (width + 1) // 2, (height + 1) // 2
-    # At least ceil(width/8) sampled columns have u<.25. Their weight is <=56.
-    # All other weights are <=64. This also bounds any single source bin.
-    total = (64 * columns - 8 * ((width + 7) // 8)) * rows
-    if total > 0xffffffff:
-        raise ValueError('Histogram count can exceed uint32')
-    return {'tile_maximum': SCATTER_SAMPLES * 64, 'total_maximum': total,
-            'sample_count': columns * rows, 'tiles': (columns * rows + SCATTER_SAMPLES - 1) // SCATTER_SAMPLES,
-            'texels_per_tile': HISTOGRAM_BINS // 4}
-
-
-def histogram_channel(bin_index):
-    if not 0 <= bin_index < HISTOGRAM_BINS:
-        raise ValueError('Invalid histogram bin')
-    return bin_index // 4, bin_index % 4
 
 # These are constructor values from the installed package, not serialized overrides.
 GRADING_DEFAULTS = {

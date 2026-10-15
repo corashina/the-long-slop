@@ -1,5 +1,31 @@
 # Verification record
 
+## Test suite reduction: 2026-10-15
+
+The user requested removal of the least useful 80 percent of tests.
+Baseline: `fa2265c`, with 809 declared cases. We retained 162 and removed 647, or 79.98 percent.
+
+| Suite | Before | Retained |
+| --- | --- | --- |
+| Rust, including tests inside source files | 494 | 100 |
+| Python exporter tools | 212 | 40 |
+| JavaScript browser interface | 103 | 22 |
+
+We retained save transactions, cancellation, validation, ownership, fluid conservation, input boundaries, physics, and exporter publication safeguards.
+We removed repeated formula, layout, metadata, and fixture checks, plus tests for obsolete station APIs.
+We removed unused test helpers and imports. The check script now names only retained JavaScript suites.
+Retained fixtures use the current sorted world fields and request-based candidate identity.
+
+The JavaScript suite passed 22 tests. Python discovery passed 40 tests.
+The native Rust suite compiled: 13 passed, 71 failed, and 13 remained ignored.
+Three retained rendering tests require the WASM target and did not run in the native suite.
+The shared fixture already lacked the required `world` field before this cleanup.
+Most native failures stop at that boundary. The earlier integration report below records the same baseline defect.
+Retained installed-source tests also require a matching current export. These results do not establish gameplay acceptance.
+
+This reduction removes coverage for individual shader boundaries, UI labels, media variants, and source scalar combinations.
+The retained suite provides narrower coverage. Failed fixture checks remain visible.
+
 ## Cleaning and current master integration: 2026-10-15
 
 We merged source-world, source driving, startup, and cleaning owners under strict save schema 4.

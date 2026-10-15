@@ -248,36 +248,6 @@ mod tests {
         [0., 0., -1., 1.],
     ];
     #[test]
-    fn offscreen_casters_survive_hull_but_do_not_expand_valid_preferred_union() {
-        let hull = DirectionalHull::new(BOX, [0., 0., 1.]).unwrap();
-        let receiver = Bounds {
-            center: [0.; 3],
-            extents: [0.5; 3],
-        };
-        let offscreen = Bounds {
-            center: [0., 0., -100.],
-            extents: [0.5; 3],
-        };
-        assert!(hull.intersects(offscreen));
-        assert!(!hull.intersects(Bounds {
-            center: [0., 0., 2.],
-            extents: [0.5; 3]
-        }));
-        assert!(hull.intersects(Bounds {
-            center: [1.5, 0., -100.],
-            extents: [0.5; 3]
-        }));
-        assert!(!hull.intersects(Bounds {
-            center: [1.5001, 0., -100.],
-            extents: [0.5; 3]
-        }));
-        let mut union = ProjectionUnion::default();
-        union.include(offscreen, &BOX);
-        assert_eq!(union.bounds(), Some(MinMax::from_bounds(offscreen)));
-        union.include(receiver, &BOX);
-        assert_eq!(union.bounds(), Some(MinMax::from_bounds(receiver)));
-    }
-    #[test]
     fn source_membership_filters_are_separate_from_material_and_projection_membership() {
         let hull = DirectionalHull::new(BOX, [0., 0., 1.]).unwrap();
         let bounds = Bounds {

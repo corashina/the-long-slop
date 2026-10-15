@@ -15,9 +15,7 @@ use crate::reference::{
 };
 use bevy::asset::{AssetId, LoadState, RenderAssetUsages, UntypedAssetId};
 use bevy::gltf::{GltfExtras, GltfMaterialExtras};
-use bevy::image::{
-    ImageAddressMode, ImageFilterMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor,
-};
+use bevy::image::ImageLoaderSettings;
 use bevy::material::key::{ErasedMaterialPipelineKey, ErasedMeshPipelineKey};
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{
@@ -590,74 +588,19 @@ fn assemble_textures(
         {
             continue;
         }
-        let byte_count = texture
-            .record
-            .mips
-            .iter()
-            .map(|mip| mip.width as usize * mip.height as usize * 4)
-            .sum();
-        // Validate every mip before removing any admitted source image.
-        for (handle, mip) in texture.levels.iter().zip(&texture.record.mips) {
-            let image = images.get(handle.id()).unwrap();
-            let expected = mip.width as usize * mip.height as usize * 4;
-            if image.width() != mip.width
-                || image.height() != mip.height
-                || image.data.as_ref().map(Vec::len) != Some(expected)
-            {
-                return Err(source::ReferenceError(format!(
-                    "{}: invalid decoded mip {}",
-                    texture.label, mip.file
-                )));
-            }
-        }
-        let mut bytes = Vec::with_capacity(byte_count);
-        let mut assembled = None;
-        for handle in &texture.levels {
-            let mut image = images.remove(handle.id()).unwrap();
-            bytes.append(image.data.as_mut().unwrap());
-            if assembled.is_none() {
-                assembled = Some(image);
-            }
-        }
-        let mut image =
-            assembled.ok_or_else(|| source::ReferenceError("Missing authored mip chain".into()))?;
-        image.data = Some(bytes);
-        image.texture_descriptor.mip_level_count = texture.record.sampler.mip_count;
-        image.asset_usage = RenderAssetUsages::RENDER_WORLD;
-        let settings = &texture.record.sampler;
-        let filter = if settings.filter == 0 {
-            ImageFilterMode::Nearest
-        } else {
-            ImageFilterMode::Linear
-        };
-        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-            address_mode_u: wrap(settings.wrap_u),
-            address_mode_v: wrap(settings.wrap_v),
-            mag_filter: filter,
-            min_filter: filter,
-            mipmap_filter: if settings.filter == 2 || settings.aniso > 1 {
-                ImageFilterMode::Linear
-            } else {
-                ImageFilterMode::Nearest
-            },
-            anisotropy_clamp: u16::from(settings.aniso.max(1)),
-            lod_max_clamp: (settings.mip_count - 1) as f32,
-            ..default()
-        });
+        let (image, byte_count) = super::source_images::assemble_mips(
+            &texture.levels,
+            &texture.record.mips,
+            &texture.record.sampler,
+            images,
+        )
+        .map_err(|error| source::ReferenceError(format!("{}: {error}", texture.label)))?;
         texture.image = Some(images.add(image));
         texture.levels.clear();
         return Ok(byte_count);
     }
     Ok(0)
 }
-fn wrap(value: u8) -> ImageAddressMode {
-    match value {
-        0 => ImageAddressMode::Repeat,
-        2 => ImageAddressMode::MirrorRepeat,
-        _ => ImageAddressMode::ClampToEdge,
-    }
-}
-
 #[derive(serde::Deserialize)]
 pub(crate) struct MaterialIdentity {
     pub asset: source::AssetId,

@@ -19,11 +19,9 @@ pub fn assemble_mips(
         .iter()
         .map(|mip| mip.width as usize * mip.height as usize * 4)
         .sum();
-    let mut bytes = Vec::with_capacity(byte_count);
-    let mut assembled = None;
     for (handle, mip) in levels.iter().zip(mips) {
-        let mut image = images
-            .remove(handle.id())
+        let image = images
+            .get(handle.id())
             .ok_or_else(|| format!("Missing decoded mip {}", mip.file))?;
         let expected = mip.width as usize * mip.height as usize * 4;
         if image.width() != mip.width
@@ -32,6 +30,13 @@ pub fn assemble_mips(
         {
             return Err(format!("Invalid decoded mip {}", mip.file));
         }
+    }
+    let mut bytes = Vec::with_capacity(byte_count);
+    let mut assembled = None;
+    for (handle, mip) in levels.iter().zip(mips) {
+        let mut image = images
+            .remove(handle.id())
+            .ok_or_else(|| format!("Missing decoded mip {}", mip.file))?;
         bytes.append(image.data.as_mut().expect("checked pixels"));
         if assembled.is_none() {
             assembled = Some(image);
@@ -62,7 +67,7 @@ pub fn assemble_mips(
     });
     Ok((image, byte_count))
 }
-fn wrap(value: u8) -> ImageAddressMode {
+pub(crate) fn wrap(value: u8) -> ImageAddressMode {
     match value {
         0 => ImageAddressMode::Repeat,
         2 => ImageAddressMode::MirrorRepeat,

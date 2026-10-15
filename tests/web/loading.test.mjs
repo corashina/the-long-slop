@@ -34,14 +34,3 @@ test('loading keeps counts and budgets on failure, then resets for the next load
  assert.equal(nodes.get('#loading-budgets').hidden,true);
  assert.equal(formatBudget(3,2,'jobs'),'3 / 2');
 });
-
-test('asset progress counts verified files',async t=>{
- const bytes=new TextEncoder().encode('{"buffers":[]}');
- const hash=Buffer.from(await crypto.subtle.digest('SHA-256',bytes)).toString('hex');
- t.mock.method(globalThis,'fetch',async()=>new Response(bytes));
- const samples=[];
- await admitWorldAssets({world:{prototypes:[{}]},rendering:{materials:[]},assets:[{
-  id:1,path:'reference/progress.gltf',sha256:hash,usage:'world_prototype',dependencies:[],
- }]},(done,total)=>samples.push([done,total]));
- assert.deepEqual(samples,[[0,1],[1,1]]);
-});

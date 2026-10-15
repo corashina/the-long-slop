@@ -355,16 +355,6 @@ fn identity_preserves_large_signed_values() {
 }
 
 #[test]
-#[ignore = "requires installed source export"]
-fn installed_source_identity_and_schema() {
-    let reference =
-        ReferenceManifest::from_json(&std::fs::read("web/assets/reference/manifest.json").unwrap())
-            .unwrap();
-    let (reference, source, snapshot) = snapshot_for(reference);
-    snapshot.validate(&reference, &source).unwrap();
-}
-
-#[test]
 fn fixed_source_child_cannot_become_an_independent_item() {
     let (mut reference, _, _) = fixture();
     let owner = reference
@@ -388,45 +378,4 @@ fn fixed_source_child_cannot_become_an_independent_item() {
             "Fixed source attachment changed".into()
         ))
     );
-}
-
-#[test]
-fn authored_startup_rotation_can_precede_drag_limits() {
-    let (mut reference, _, _) = fixture();
-    let node = reference.items[0].node;
-    reference.mechanisms.push(serde_json::from_value(json!({
-        "id": reference.mechanisms.iter().map(|m|m.id.0).max().unwrap()+1, "source": {"file":"fixture", "path_id":90003}, "item": reference.items[0].id,
-        "parent_item":null,"driven_nodes":[node],"enabled":true,"child":null,"invert_child":false,"invert_value":false,
-        "disable_on_craft":false,"disable_on_uncraft":false,
-        "drag":{"mode":"direct","node":node,"node2":node,"axis":[0.,0.,0.],"axes2":[[0.,0.,0.],[0.,0.,0.]]},
-        "rotation":{"targets":[{"node":node,"mapping":[[false,false,false],[true,false,false]]}],"sum_axes":true,
-        "limits_degrees":[[0.,0.],[-90.,0.]],"initial_degrees":[0.,90.],"inverted":[false,false],"sensitivity":1.},
-        "slide":null,"turn":null
-    })).unwrap());
-    let mechanism = reference.mechanisms.last_mut().unwrap();
-    let identity = SourceKey::from(&mechanism.source);
-    let rotation = mechanism.rotation.as_mut().unwrap();
-    rotation.initial_degrees[1] = 90.;
-    rotation.limits_degrees[1] = [-90., 0.];
-    let (reference, source, mut snapshot) = snapshot_for(reference);
-    snapshot.validate(&reference, &source).unwrap();
-    let record = snapshot
-        .mechanisms
-        .controls
-        .iter_mut()
-        .find(|m| m.source == identity)
-        .unwrap();
-    record.degrees[1] = 89.;
-    assert!(snapshot.validate(&reference, &source).is_err());
-}
-
-#[test]
-fn obsolete_save_schema_is_rejected_before_reading_vehicle_fields() {
-    for version in [1, 2, 3] {
-        let obsolete = format!(r#"{{"schema_version":{version},"vehicles":[{{"auto_gear":1}}]}}"#);
-        assert!(matches!(
-            SaveSnapshot::from_json(obsolete.as_bytes()),
-            Err(SaveError::IncompatibleSources(_))
-        ));
-    }
 }

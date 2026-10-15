@@ -66,19 +66,4 @@ mod tests {
             );
         }
     }
-    #[test]
-    fn flatten_precedes_local_tilt() {
-        let incoming = Rotation::from_xyzw(-0.16872216, -0.23081309, 0.13302687, 0.94897944);
-        let actual = flatten_then_tilt(incoming, [15, 10, 15]).to_array();
-        let expected = [-0.16586584, -0.3201835, 0.07734451, 0.92951006];
-        for (a, b) in actual.into_iter().zip(expected) {
-            assert!((a - b).abs() < 1e-6);
-        }
-        assert!(
-            (flatten_then_tilt(incoming, [15, 10, 15]) * Vector::NEG_Z)
-                .y
-                .abs()
-                > 0.25
-        );
-    }
 }

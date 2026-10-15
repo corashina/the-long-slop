@@ -175,39 +175,6 @@ fn installed_manifest_checks_lod_bounds_and_initializes_runtime() {
 }
 
 #[test]
-fn two_sided_source_shadows_pass_renderer_validation() {
-    let mut record = my_summer_slop::reference::render_lighting::RendererRecord {
-        source: my_summer_slop::reference::SourceId {
-            file: "source".into(),
-            path_id: 1,
-        },
-        bounds_center: [0.; 3],
-        bounds_extents: [0.; 3],
-        cast_shadows: 2,
-        receive_shadows: true,
-        reflection_probe_usage: 0,
-        motion_vectors: 1,
-        sorting_layer: 0,
-        sorting_order: 0,
-    };
-    record.validate().unwrap();
-    record.cast_shadows = 4;
-    assert!(record.validate().is_err());
-}
-
-#[test]
-fn source_world_sized_documents_reach_contract_validation() {
-    let mut bytes = b"{}".to_vec();
-    bytes.resize(130 * 1024 * 1024, b' ');
-    for result in [
-        ReferenceManifest::from_runtime_json(&bytes),
-        ReferenceManifest::from_json(&bytes),
-    ] {
-        assert!(result.unwrap_err().to_string().contains("missing field"));
-    }
-}
-
-#[test]
 fn oversized_documents_stop_before_parsing() {
     let bytes = vec![b' '; MAX_MANIFEST_BYTES + 1];
     for result in [

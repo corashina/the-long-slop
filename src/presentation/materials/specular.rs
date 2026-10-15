@@ -284,23 +284,7 @@ impl AsBindGroup for SpecularMaterial {
                 usage: BufferUsages::UNIFORM,
             })),
         ));
-        for (index, handle) in self.arrays.iter().enumerate() {
-            let image = params
-                .1
-                .get(handle.id())
-                .ok_or(AsBindGroupError::RetryNextUpdate)?;
-            result.bindings.0.push((
-                1 + index as u32 * 2,
-                OwnedBindingResource::TextureView(
-                    TextureViewDimension::D2Array,
-                    image.texture_view.clone(),
-                ),
-            ));
-            result.bindings.0.push((
-                2 + index as u32 * 2,
-                OwnedBindingResource::Sampler(SamplerBindingType::Filtering, image.sampler.clone()),
-            ));
-        }
+        super::world_textures::bind_arrays(&mut result, &self.arrays, &params.1)?;
         self.uploaded.lock().unwrap().extend(
             self.arrays[..self.array_count as usize]
                 .iter()

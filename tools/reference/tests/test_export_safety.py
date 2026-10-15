@@ -11,7 +11,6 @@ from unittest.mock import patch
 from tools.reference import export
 from tools.reference.library.types import Catalog, Snapshot
 
-
 class ExportSafetyTests(unittest.TestCase):
     def test_library_rejects_resolved_steam_outputs_before_prerequisites(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -69,26 +68,6 @@ class ExportSafetyTests(unittest.TestCase):
             preflight.assert_called_once()
             source.assert_not_called()
 
-    def test_managed_preflight_reports_missing_host_and_package(self):
-        from tools.reference.library.managed import preflight_managed, SCRIPT
-        with patch('tools.reference.library.managed.subprocess.run', side_effect=FileNotFoundError('pwsh')):
-            with self.assertRaisesRegex(ValueError, 'host pwsh'):
-                preflight_managed()
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            script = SCRIPT.with_name('preflight-managed.ps1')
-            result = subprocess.run(['pwsh', '-NoProfile', '-File', str(script), '-PackagePath', str(root)],
-                                    capture_output=True, text=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('ICSharpCode.Decompiler.nuspec', result.stderr)
-            self.assertEqual(list(root.iterdir()), [])
-            (root / 'ICSharpCode.Decompiler.nuspec').write_text(
-                '<package><metadata><version>0.0.0</version></metadata></package>')
-            result = subprocess.run(['pwsh', '-NoProfile', '-File', str(script), '-PackagePath', str(root)],
-                                    capture_output=True, text=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('package version mismatch', result.stderr)
-
     def test_invalid_accepted_catalog_does_not_rebuild_or_remove_managed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -111,19 +90,6 @@ class ExportSafetyTests(unittest.TestCase):
                 build.assert_not_called()
             self.assertEqual(managed.read_text(), 'accepted analysis')
 
-    def test_storage_reports_peak_without_charging_retained_bytes_again(self):
-        from tools.reference.library.storage import check_space
-        with tempfile.TemporaryDirectory() as directory, \
-             patch('tools.reference.library.storage.shutil.disk_usage', return_value=N(free=150)), \
-             contextlib.redirect_stdout(io.StringIO()) as output:
-            check_space('fixture', Path(directory), 100, retained=1000)
-            self.assertIn('additional=100', output.getvalue())
-            self.assertIn('retained=1000', output.getvalue())
-            self.assertIn('peak=1100', output.getvalue())
-            self.assertIn('available=150', output.getvalue())
-            with self.assertRaisesRegex(OSError, 'Insufficient'):
-                check_space('fixture', Path(directory), 151, retained=1000)
-
     def test_fresh_library_space_failure_precedes_archive_and_conversion(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(export, 'SOURCE_WORK_ROOT', Path(directory)), \
              patch('tools.reference.library.managed.preflight_managed'), \
@@ -137,31 +103,6 @@ class ExportSafetyTests(unittest.TestCase):
             source.assert_not_called()
             categories.assert_not_called()
             self.assertEqual(list(Path(directory).iterdir()), [])
-
-    def test_receipted_assembly_estimate_includes_standalone_and_shared_files_once(self):
-        from tools.reference.library.storage import assembly_bytes
-        from tools.reference.library.types import FileRecord
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / 'ui').mkdir()
-            (root / 'ui/index.json').write_text('{}')
-            languages = [{'file': 'ui/English.txt', 'bytes': 300, 'sha256': 'x'}]
-            (root / 'ui/languages.json').write_text(json.dumps(languages))
-            shared = FileRecord('ui/shared.png', 900, 'x')
-            items = (N(files=(shared,)), N(files=(shared,)))
-            expected = 1200 + (root / 'ui/index.json').stat().st_size + (root / 'ui/languages.json').stat().st_size
-            stages = [('ui', root, items)]
-            for category, key in (('native', 'managed_links'), ('animations', 'ownership')):
-                (root / category).mkdir()
-                index = root / category / 'index.json'
-                index.write_text(json.dumps({key: {'file': f'{category}/sidecar.json', 'bytes': 123, 'sha256': 'x'}}))
-                expected += index.stat().st_size + 123
-                stages.append((category, root, ()))
-            source_text = root / 'native/source-text.json'
-            source_text.write_text(json.dumps({'files': [{'output': {'file': 'native/news.txt', 'bytes': 456, 'sha256': 'x'}}]}))
-            expected += source_text.stat().st_size + 456
-            self.assertEqual(assembly_bytes(stages), expected)
-
 
 if __name__ == '__main__':
     unittest.main()

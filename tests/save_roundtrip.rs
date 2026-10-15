@@ -72,81 +72,6 @@ fn assert_logical_equal(a: &SaveSnapshot, b: &SaveSnapshot) {
     );
 }
 #[test]
-fn pause_save_continue_clears_short_ignition_hold() {
-    starter_boundary(1, false);
-}
-#[test]
-fn pause_save_continue_clears_engaged_starter() {
-    starter_boundary(120, true);
-}
-fn starter_boundary(steps: usize, engaged: bool) {
-    use my_summer_slop::simulation::keys;
-    let r = fixture();
-    let mut original = GarageRuntime::new(&r).unwrap();
-    original.started = true;
-    let seat = r.seats.iter().find(|s| s.driver).unwrap();
-    assert!(original.area.player.enter(
-        seat.id,
-        my_summer_slop::vehicle::VehiclePose {
-            position: [0., 1., 0.],
-            rotation: [0., 0., 0., 1.]
-        },
-        &mut original.physics
-    ));
-    for step in 0..steps {
-        original.step(
-            &r,
-            FrameInput {
-                held: keys::IGNITION,
-                pressed: if step == 0 { keys::IGNITION } else { 0 },
-                ..Default::default()
-            },
-        );
-    }
-    assert_eq!(original.vehicles[0].engine_output.starter, engaged);
-    original.paused = true;
-    let before = capture(&original, &r);
-    original.clear_input();
-    let saved = capture(&original, &r);
-    assert_eq!(saved.vehicles[0].engine, before.vehicles[0].engine);
-    assert_eq!(saved.progress, before.progress);
-    assert_eq!(saved.player.recoil_velocity, before.player.recoil_velocity);
-    assert_eq!(saved.items, before.items);
-    assert!(
-        !original.vehicles[0].engine_output.starter,
-        "cached starter remains engaged"
-    );
-    let mut loaded = GarageRuntime::from_save(&r, &stamp(&r), &saved).unwrap();
-    assert_eq!(
-        original.vehicles[0].engine.capture_save(),
-        loaded.vehicles[0].engine.capture_save()
-    );
-    original.clear_input();
-    loaded.clear_input();
-    original.paused = false;
-    loaded.paused = false;
-    original.step(&r, FrameInput::default());
-    loaded.step(&r, FrameInput::default());
-    assert_eq!(
-        original.vehicles[0].engine.ignition,
-        saved
-            .vehicles
-            .iter()
-            .find(|v| v.instance == InstanceId::initial(&r.vehicles[0].source))
-            .unwrap()
-            .engine
-            .ignition,
-        "neutral input released a canceled short hold"
-    );
-    assert_eq!(
-        original.vehicles[0].engine.ignition,
-        loaded.vehicles[0].engine.ignition
-    );
-    assert!(!original.vehicles[0].engine_output.starter);
-    assert!(!loaded.vehicles[0].engine_output.starter);
-    assert_eq!(original.attempts, loaded.attempts);
-}
-#[test]
 fn driven_rebased_roundtrip_preserves_logic_and_resumes() {
     let mut r = fixture();
     r.vehicles[0].engine.start_chance = 1.;
@@ -654,32 +579,6 @@ fn installed_source_roundtrip() {
     loaded.step(&r, FrameInput::default());
 }
 #[test]
-fn instruments_initialize_without_time_step() {
-    use my_summer_slop::simulation::instruments::*;
-    let r = common::reference();
-    let mut state = InstrumentState::new(&r.vehicles[0].instruments);
-    let sample = InstrumentSample {
-        speed_kmh: 80.,
-        fuel_liters: 39.,
-        temperature: 130.,
-        oil_liters: 5.,
-        rpm: 1000.,
-        local_ignition: true,
-        headlights: 2,
-        distance_m: 12345.,
-    };
-    state.initialize_from_sample(&r.vehicles[0].instruments, sample);
-    assert!((state.needle_angles[0]).abs() < 1e-5);
-    assert_eq!(state.needle_angles[1], 30.);
-    assert_eq!(state.needle_angles[2], 26.);
-    let angles = state.needle_angles;
-    let digits = state.digit_angles;
-    state.update(&r.vehicles[0].instruments, sample, 0.02);
-    assert_eq!(angles, state.needle_angles);
-    assert_eq!(digits, state.digit_angles);
-    assert!(state.digits_lit);
-}
-#[test]
 fn distant_world_and_dormant_car_roundtrip() {
     let r = fixture();
     let mut g = GarageRuntime::new(&r).unwrap();
@@ -697,81 +596,6 @@ fn distant_world_and_dormant_car_roundtrip() {
     let loaded = GarageRuntime::from_save(&r, &stamp(&r), &saved).unwrap();
     assert!(!loaded.physics.body_active(loaded.physics.chassis_handle(0)));
     assert_logical_equal(&saved, &capture(&loaded, &r));
-}
-#[test]
-fn seated_relation_survives_large_absolute_coordinates() {
-    let r = common::reference();
-    let mut g = GarageRuntime::new(&r).unwrap();
-    let seat = r.seats.iter().find(|s| s.driver).unwrap();
-    let entry = my_summer_slop::vehicle::VehiclePose {
-        position: [0.03, 1.17, -0.123],
-        rotation: rapier3d::math::Rotation::from_rotation_y(0.2).to_array(),
-    };
-    assert!(g.area.player.enter(seat.id, entry, &mut g.physics));
-    let expected = g.area.player.body_pose(&g.physics);
-    let mut saved = capture(&g, &r);
-    let mut encoded = serde_json::to_value(&saved).unwrap();
-    encoded["player"]["seat"]
-        .as_object_mut()
-        .unwrap()
-        .remove("local_pose");
-    assert!(SaveSnapshot::from_json(&serde_json::to_vec(&encoded).unwrap()).is_err());
-    let mut invalid = saved.clone();
-    invalid.player.seat.as_mut().unwrap().local_pose.position[0] = f32::MAX;
-    assert!(invalid.validate(&r, &stamp(&r)).is_err());
-    let offset = my_summer_slop::world::MAX_ABSOLUTE_COORDINATE - 100.;
-    let vehicle = saved
-        .vehicles
-        .iter_mut()
-        .find(|v| v.instance == saved.player.seat.as_ref().unwrap().vehicle)
-        .unwrap();
-    vehicle.body.pose.position[0] += offset;
-    vehicle.body.pose.position[2] -= offset;
-    saved.player.pose.position[0] += offset;
-    saved.player.pose.position[2] -= offset;
-    let mut loaded = GarageRuntime::from_save(&r, &stamp(&r), &saved).unwrap();
-    loaded.physics.reset(0, g.physics.snapshot(0).pose);
-    let actual = loaded.area.player.body_pose(&loaded.physics);
-    for (a, b) in actual.position.iter().zip(expected.position) {
-        assert!(
-            (*a - b).abs() < 1e-5,
-            "seat relation {actual:?} != {expected:?}"
-        );
-    }
-    for (a, b) in actual.rotation.iter().zip(expected.rotation) {
-        assert!((*a - b).abs() < 1e-5);
-    }
-}
-#[test]
-fn crouched_player_rebuilds_shape_and_support() {
-    let mut r = common::reference();
-    r.area.player_spawn.translation = [5., 2., 5.];
-    let mut g = GarageRuntime::new(&r).unwrap();
-    g.started = true;
-    for _ in 0..120 {
-        g.step(
-            &r,
-            FrameInput {
-                held: my_summer_slop::simulation::keys::CROUCH,
-                ..Default::default()
-            },
-        );
-    }
-    assert!(g.area.player.crouched() && g.area.player.grounded());
-    let saved = capture(&g, &r);
-    let loaded = GarageRuntime::from_save(&r, &stamp(&r), &saved).unwrap();
-    assert_logical_equal(&saved, &capture(&loaded, &r));
-    assert!(loaded.area.player.grounded());
-    let height = |game: &GarageRuntime| {
-        let h = game.area.player.body_handle();
-        let collider = game.physics.rapier().bodies[h].colliders()[0];
-        game.physics.rapier().colliders[collider]
-            .shape()
-            .compute_local_aabb()
-            .extents()
-            .y
-    };
-    assert!((height(&g) - height(&loaded)).abs() < 1e-5);
 }
 
 #[test]
@@ -881,52 +705,6 @@ fn installed_fleet_roundtrip_preserves_owners_and_selection() {
     wrong_seat.player.seat.as_mut().unwrap().vehicle = InstanceId::initial(&r.vehicles[0].source);
     wrong_seat.progress.selected_vehicle = InstanceId::initial(&r.vehicles[0].source);
     assert!(wrong_seat.validate(&r, &stamp(&r)).is_err());
-}
-
-#[test]
-#[ignore = "requires installed source export"]
-fn installed_fleet_dormancy_and_recovery_preserve_other_vehicle() {
-    let r =
-        ReferenceManifest::from_json(&std::fs::read("web/assets/reference/manifest.json").unwrap())
-            .unwrap();
-    assert_eq!(r.vehicles.len(), 2);
-    let mut game = GarageRuntime::new(&r).unwrap();
-    game.vehicle = 1;
-    game.vehicles[0].trip_m = 300.;
-    game.vehicles[1].trip_m = 700.;
-    let mut saved = capture(&game, &r);
-    saved.player.pose.position = [10000000000., 1., -10000000000.];
-    let mut loaded = GarageRuntime::from_save(&r, &stamp(&r), &saved).unwrap();
-    for index in 0..2 {
-        assert!(
-            !loaded
-                .physics
-                .body_active(loaded.physics.chassis_handle(index))
-        );
-    }
-    assert_logical_equal(&saved, &capture(&loaded, &r));
-    let first = saved
-        .vehicles
-        .iter()
-        .find(|v| v.instance == my_summer_slop::save::InstanceId::initial(&r.vehicles[0].source))
-        .unwrap()
-        .clone();
-    loaded.recover(&r);
-    assert_eq!(loaded.vehicle, 1);
-    assert!(loaded.physics.body_active(loaded.physics.chassis_handle(1)));
-    assert!(!loaded.physics.body_active(loaded.physics.chassis_handle(0)));
-    let recovered = capture(&loaded, &r);
-    assert_eq!(
-        &first,
-        recovered
-            .vehicles
-            .iter()
-            .find(|v| v.instance == first.instance)
-            .unwrap()
-    );
-    let again = GarageRuntime::from_save(&r, &stamp(&r), &recovered).unwrap();
-    assert_eq!(again.vehicle, 1);
-    assert_logical_equal(&recovered, &capture(&again, &r));
 }
 
 #[test]
@@ -1070,29 +848,6 @@ fn source_conditions_round_trip_and_reject_invalid_candidates() {
         c.washes.pop();
     });
     assert_eq!(capture(&g, &r).conditions.surfaces[0].color, [1.; 4]);
-}
-
-#[test]
-fn active_wash_without_on_stays_visible_through_save() {
-    let mut r = fixture();
-    r.conditions.washes[0].active = true;
-    r.conditions.washes[0].on = false;
-    let id = r.conditions.washes[0].id;
-    let game = GarageRuntime::new(&r).unwrap();
-    let wash = game.area.conditions.wash(id);
-    assert!(wash.visible());
-    assert!(!wash.on);
-    assert!(!wash.destroyed);
-    let saved = capture(&game, &r);
-    let loaded = GarageRuntime::from_save(&r, &stamp(&r), &saved).unwrap();
-    let restored = loaded.area.conditions.wash(id);
-    assert!(restored.visible());
-    assert!(!restored.on);
-    assert!(!restored.destroyed);
-    assert_eq!(
-        capture(&loaded, &r).conditions.washes,
-        saved.conditions.washes
-    );
 }
 
 #[test]
