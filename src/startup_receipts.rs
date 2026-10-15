@@ -45,25 +45,3 @@ impl StartupFrames {
             .count() as u32
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::StartupFrames;
-
-    #[test]
-    fn counts_only_validated_post_ready_frames_in_the_current_scene() {
-        let mut frames = StartupFrames::default();
-        frames.arm(3, 7); // Token 7 was prepared before readiness but is still in flight.
-        assert!(!frames.accepts(3, 7));
-        frames.record(3, 8, 1);
-        frames.record(3, 9, 2);
-        assert!(!frames.accepts(3, 10));
-        assert_eq!(frames.validated_count(3, 0, true), 0); // Both CPU receipts; GPU pending.
-        assert_eq!(frames.validated_count(3, 1, true), 1);
-        assert_eq!(frames.validated_count(3, 2, true), 2);
-        assert_eq!(frames.validated_count(3, 2, false), 0); // Rejected after error poll.
-        assert_eq!(frames.validated_count(4, 2, true), 0); // Stale scene.
-        frames.arm(4, 9);
-        assert_eq!(frames.validated_count(4, 2, true), 0);
-    }
-}

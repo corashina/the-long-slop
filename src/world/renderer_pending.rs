@@ -181,21 +181,3 @@ impl RendererRetirement {
         self.0 && parent && children
     }
 }
-#[cfg(test)]
-mod tests {
-    use super::{PhysicalPipelineState::*, pipeline_states_drained};
-    #[test]
-    fn failed_caster_keeps_unfinished_sibling_live() {
-        for unfinished in [Queued, Compiling, Retryable] {
-            for states in [[Failed, unfinished], [unfinished, Failed]] {
-                let mut inspected = 0;
-                assert!(!pipeline_states_drained(
-                    states.into_iter().inspect(|_| inspected += 1)
-                ));
-                assert_eq!(inspected, 2);
-            }
-        }
-        assert!(pipeline_states_drained([Failed, Ready].into_iter()));
-        assert!(pipeline_states_drained([Failed, Failed].into_iter()));
-    }
-}

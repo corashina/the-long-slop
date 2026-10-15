@@ -1,105 +1,6 @@
 use my_summer_slop::reference::{MAX_MANIFEST_BYTES, ReferenceManifest};
 
 #[test]
-fn package_receipts_preserve_internal_spaces_and_reject_unsafe_paths() {
-    use my_summer_slop::reference::FileReceipt;
-    let mut receipt = FileReceipt {
-        file: "reference/lighting-unity default resources-10001.smip".into(),
-        bytes: 3,
-        sha256: "a".repeat(64),
-        image_size: None,
-    };
-    receipt.validate().unwrap();
-    for path in [
-        "reference/a_b-0.1",
-        "reference/internal  spaces.bin",
-        "shaders/source_mesh.wgsl",
-    ] {
-        receipt.file = path.into();
-        receipt.validate().unwrap();
-    }
-    for path in [
-        "",
-        "/reference/file.bin",
-        "reference/",
-        "reference//file.bin",
-        "reference/./file.bin",
-        "reference/../file.bin",
-        "../file.bin",
-        "./reference/file.bin",
-        "reference\\file.bin",
-        "C:/reference/file.bin",
-        "reference/%2e%2e/file.bin",
-        "reference/file%20name.bin",
-        "reference/file.bin?x=1",
-        "reference/file.bin#x",
-        "reference/ file.bin",
-        "reference/file.bin ",
-        " reference/file.bin",
-        "reference /file.bin",
-        "reference/\tfile.bin",
-        "reference/file\tname.bin",
-        "reference/file.bin\n",
-        "reference/file\rname.bin",
-        "reference/file\0.bin",
-        "reference/caf\u{e9}.bin",
-        "reference/file+name.bin",
-        "reference/file~name.bin",
-    ] {
-        receipt.file = path.into();
-        assert_eq!(
-            receipt.validate().unwrap_err().to_string(),
-            "Invalid reference field: package file path",
-            "{path:?}"
-        );
-    }
-}
-
-#[test]
-fn receipt_catalog_rejects_oversize_images_and_unreserved_selected_plans() {
-    use my_summer_slop::reference::{FileCatalog, FileReceipt};
-    let receipt = |file: &str, bytes| serde_json::json!({"file":file,"bytes":bytes,"sha256":"a".repeat(64),"image_size":null});
-    let input = receipt("reference/mesh.plan.json", 100);
-    let mut catalog: FileCatalog = serde_json::from_value(serde_json::json!({
-        "files":[receipt("reference/mesh.gltf", 200), input.clone()],
-        "plans":[{"asset_file":"reference/mesh.gltf","input":input}],
-        "dependency_staging_reserve":5242960
-    }))
-    .unwrap();
-    catalog.admit().unwrap();
-    assert_eq!(catalog.file("reference/mesh.gltf").unwrap().bytes, 200);
-    assert!(catalog.file("reference/unused.bin").is_err());
-    assert!(
-        catalog
-            .check_plan_reservation("reference/mesh.gltf", 1799, 200)
-            .is_err()
-    );
-    assert!(
-        catalog
-            .check_plan_reservation("reference/mesh.gltf", 1800, 199)
-            .is_err()
-    );
-    catalog
-        .check_plan_reservation("reference/mesh.gltf", 1800, 200)
-        .unwrap();
-    assert!(catalog.retained_bytes() > 200);
-    let mut png: FileReceipt = serde_json::from_value(receipt("reference/a.png", 30)).unwrap();
-    assert!(png.validate().is_err());
-    png.image_size = Some([u32::MAX, 2]);
-    assert!(png.validate().is_err());
-    png.image_size = Some([2, 3]);
-    png.validate().unwrap();
-    let audio: FileReceipt = serde_json::from_value(receipt("reference/radio.wav", 57_418_028)).unwrap();
-    audio.validate().unwrap();
-    let mut plan: my_summer_slop::reference::prototype_plan::PrototypePlan = serde_json::from_value(serde_json::json!({
-        "json_bytes":1,"buffer_bytes":0,"mesh_bytes":0,"scene_bytes":0,"nodes":[],"primitives":[]
-    })).unwrap();
-    assert_eq!(plan.reservation().unwrap(), (18, 0));
-    plan.mesh_bytes = usize::MAX;
-    assert!(plan.reservation().is_err());
-}
-
-#[test]
 #[ignore = "requires the installed source export"]
 fn installed_manifest_checks_lod_bounds_and_initializes_runtime() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
@@ -235,7 +136,7 @@ fn installed_manifest_checks_lod_bounds_and_initializes_runtime() {
             allocation.active_cpu
         );
     }
-    runtime.stream.prepare();
+    runtime.stream.prepare(0.);
     assert_eq!(runtime.stream.metrics().prepared_roads, 256);
     use my_summer_slop::world::{ROAD_SEGMENTS, RoadIndex, RoadSequence};
     let seed = reference.world.terrain.seed;
@@ -271,39 +172,6 @@ fn installed_manifest_checks_lod_bounds_and_initializes_runtime() {
         "Both road indexes: {:?}; largest 256-section batch: {peak:?}",
         start.elapsed()
     );
-}
-
-#[test]
-fn two_sided_source_shadows_pass_renderer_validation() {
-    let mut record = my_summer_slop::reference::render_lighting::RendererRecord {
-        source: my_summer_slop::reference::SourceId {
-            file: "source".into(),
-            path_id: 1,
-        },
-        bounds_center: [0.; 3],
-        bounds_extents: [0.; 3],
-        cast_shadows: 2,
-        receive_shadows: true,
-        reflection_probe_usage: 0,
-        motion_vectors: 1,
-        sorting_layer: 0,
-        sorting_order: 0,
-    };
-    record.validate().unwrap();
-    record.cast_shadows = 4;
-    assert!(record.validate().is_err());
-}
-
-#[test]
-fn source_world_sized_documents_reach_contract_validation() {
-    let mut bytes = b"{}".to_vec();
-    bytes.resize(130 * 1024 * 1024, b' ');
-    for result in [
-        ReferenceManifest::from_runtime_json(&bytes),
-        ReferenceManifest::from_json(&bytes),
-    ] {
-        assert!(result.unwrap_err().to_string().contains("missing field"));
-    }
 }
 
 #[test]

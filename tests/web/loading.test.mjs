@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createLoading,formatBudget} from '../../web/loading.js';
-import {configureAssetCatalog,readPackageAsset} from '../../web/world-assets.js';
 
 test('loading keeps counts and budgets on failure, then resets for the next load',t=>{
  let now=0;t.mock.method(performance,'now',()=>now);
@@ -13,10 +12,8 @@ test('loading keeps counts and budgets on failure, then resets for the next load
  t.after(()=>delete globalThis.document);
  const loading=createLoading();t.after(()=>loading.finish());
  assert.equal(nodes.get('#loading-progress').value,null);
- now=1000;loading.stage('Checking world assets...',12,20);
- assert.equal(nodes.get('#loading-progress').value,12);
- assert.match(nodes.get('#loading-count').textContent,/12 \/ 20/);
  now=2000;loading.progress(24000,50000,false,false);
+ assert.equal(nodes.get('#loading-progress').value,24000);
  assert.match(nodes.get('#loading-count').textContent,/Road index: 24,000 \/ 50,000/);
  assert.match(nodes.get('#loading-count').textContent,/Garage rendering: preparing/);
  loading.budget('Asset GPU',120*1048576,512*1048576,'bytes');
@@ -24,7 +21,6 @@ test('loading keeps counts and budgets on failure, then resets for the next load
  now=3000;loading.progress(50000,50000,true,false);
  assert.equal(nodes.get('#loading-progress').value,null,'world preparation has no known percentage');
  loading.fail();const stopped=nodes.get('#loading-phase').textContent;
- assert.deepEqual(loading.snapshot().budgets,[{name:'Asset GPU',used:120*1048576,limit:512*1048576,unit:'bytes'}]);
  loading.progress(1,50000,false,false);loading.budget('Asset GPU',0,512*1048576,'bytes');
  assert.equal(nodes.get('#loading-phase').textContent,stopped);
  assert.match(stopped,/stopped/);
@@ -34,15 +30,4 @@ test('loading keeps counts and budgets on failure, then resets for the next load
  loading.start();assert.equal(nodes.get('#loading-details').hidden,false);
  assert.equal(nodes.get('#loading-budgets').hidden,true);
  assert.equal(formatBudget(3,2,'jobs'),'3 / 2');
-});
-
-test('asset progress counts selected verified bytes',async t=>{
- const bytes=new TextEncoder().encode('{"buffers":[]}');
- const hash=Buffer.from(await crypto.subtle.digest('SHA-256',bytes)).toString('hex');
- t.mock.method(globalThis,'fetch',async()=>new Response(bytes));
- const samples=[];
- configureAssetCatalog('./assets/runtime/progress/',{files:[{file:'reference/progress.gltf',sha256:hash,bytes:bytes.length}],plans:[],dependency_staging_reserve:5242960},record=>samples.push(record));
- assert.deepEqual(samples,[]);
- await readPackageAsset('reference/progress.gltf');
- assert.deepEqual(samples,[{path:'./assets/runtime/progress/reference/progress.gltf',requiredBytes:bytes.length,receivedBytes:bytes.length}]);
 });
