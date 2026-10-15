@@ -429,20 +429,10 @@ impl SourcePrototypes {
                         json_bytes: plan.json_bytes,
                         buffer_bytes: plan.buffer_bytes,
                         mesh_bytes: plan.mesh_bytes,
-                        sha256: record.sha256.clone(),
-                        dependencies: record.dependencies.clone(),
                     };
                     let asset = server
                         .load_builder()
-                        .with_settings(move |target: &mut SourceGltfSettings| {
-                            *target = SourceGltfSettings {
-                                json_bytes: settings.json_bytes,
-                                buffer_bytes: settings.buffer_bytes,
-                                mesh_bytes: settings.mesh_bytes,
-                                sha256: settings.sha256.clone(),
-                                dependencies: settings.dependencies.clone(),
-                            }
-                        })
+                        .with_settings(move |target: &mut SourceGltfSettings| *target = settings)
                         .load::<SourceGltf>(record.path.clone());
                     entry.state = State::Loading { plan, asset };
                     entry.retired = false;

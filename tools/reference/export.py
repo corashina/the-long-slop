@@ -367,6 +367,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     }
     parameters['player_markers']=[{'source':{'file':'level1','path_id':pid},'fields':source.read(source.get('level1',pid))} for pid in (39823,23339)]
     (output/'parameter-evidence.json').write_text(json.dumps(parameters,indent=2,allow_nan=False),encoding='utf-8')
+    # The browser reads world input sizes here instead of requesting every file at startup.
+    manifest['file_bytes']={'reference/'+p.name:p.stat().st_size for p in sorted(output.iterdir()) if p.is_file() and p.suffix!='.json'}
     (output/'manifest.json').write_text(json.dumps(manifest,separators=(',',':'),allow_nan=False),encoding='utf-8')
     from dataclasses import asdict
     selection = {name:[asdict(v) for v in sorted(values)] for name,values in (

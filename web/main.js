@@ -127,9 +127,7 @@ async function load(){
  const switchIconUrl='./assets/'+manifest.lighting.switch_icon.path;
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
  feedback=createFeedback(manifest.ui,switchIconUrl);
- status.textContent='Checking world assets...';
- loading.stage(status.textContent);
- await admitWorldAssets(manifest,(done,total)=>loading.stage('Checking world assets...',done,total));worldAdmitted=true;
+ admitWorldAssets(manifest);worldAdmitted=true;
  if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
  run(bytes,manifestHash);
 }

@@ -5,8 +5,7 @@ export function worldInputBytes(path){const bytes=inputSizes.get(path);if(!bytes
 export function worldPrototypeStaging(path){const bytes=prototypeStaging.get(path);if(!bytes)throw Error("Missing checked prototype size: "+path);return bytes;}
 export function worldDependencyReserve(){if(!dependencyReserve)throw Error("Missing world dependency reservation.");return dependencyReserve;}
 export function worldInputMetadataBytes(){return inputMetadataBytes;}
-const WORKERS=6;
-export const worldBootstrapMeasurements={dependencyWorkers:WORKERS,maxDependencyBytes:0,dependencyPayloadCopyBytes:0};
+export const worldBootstrapMeasurements={};
 
 async function checkedBytes(response,maxBytes=MAX_FILE_BYTES){
  const reader=response.body.getReader(),chunks=[];
@@ -25,76 +24,25 @@ async function checkedBytes(response,maxBytes=MAX_FILE_BYTES){
  return bytes;
 }
 
-// Check catalog bytes without decoding meshes or textures into resident assets.
-// The glTF loader hashes prototype glTF and buffer bytes, so this pass reads only their sizes.
-export async function admitWorldAssets(manifest,onProgress){
+// Read world input sizes from the manifest. The asset reader checks each file hash when it loads.
+export function admitWorldAssets(manifest){
  if(!manifest.world||!manifest.world.prototypes?.length)throw Error('Missing required world contract.');
- const files=new Map(),pngMips=new Map(),prototypeInputs=new Map();
- const prototypePaths=new Set(manifest.assets.filter(a=>a.usage==='world_prototype').map(a=>a.path));
+ const sizes=manifest.file_bytes,prototypeInputs=new Map();
+ const size=file=>{const bytes=sizes[file];if(!Number.isSafeInteger(bytes)||bytes<=0)throw Error('Missing world file size: '+file);if(bytes>MAX_FILE_BYTES)throw Error('World file exceeds 32 MiB: '+file);return bytes;};
  const dynamic=new Set(manifest.assets.filter(a=>a.usage==='world_prototype'||a.usage==='world_material').map(a=>a.id));
- for(const material of manifest.rendering.materials.filter(m=>dynamic.has(m.asset)))for(const texture of material.properties.textures)for(const mip of texture.mips)pngMips.set(mip.file,mip);
- for(const asset of manifest.assets.filter(asset=>asset.usage==='world_prototype'||asset.usage==='world_material')){
-  for(const entry of [{file:asset.path,sha256:asset.sha256},...asset.dependencies]){
-   if(!/^reference\/[a-zA-Z0-9_.-]+$/.test(entry.file)||!/^[a-f0-9]{64}$/.test(entry.sha256))throw Error('Invalid world dependency receipt.');
-   const previous=files.get(entry.file);
-   if(previous&&previous.sha256!==entry.sha256)throw Error('Conflicting world dependency receipts.');
-   files.set(entry.file,{...entry,owner:previous?.owner??asset.path});
+ for(const asset of manifest.assets.filter(asset=>dynamic.has(asset.id))){
+  for(const entry of [{file:asset.path},...asset.dependencies]){
+   if(!/^reference\/[a-zA-Z0-9_.-]+$/.test(entry.file))throw Error('Invalid world dependency receipt.');
+   inputSizes.set(entry.file,size(entry.file));
   }
+  if(asset.usage==='world_prototype')prototypeInputs.set(asset.path,asset.dependencies.filter(d=>d.file.endsWith('.bin')).map(d=>d.file));
  }
- if(!files.size)throw Error('Missing required world prototype assets.');
- let completed=0;onProgress(completed,files.size);
- const controller=new AbortController(),buffers=new Set();
- async function check(entry){
-  try{
-   if(buffers.has(entry.file)){
-    // A HEAD request reads the size without the body.
-    const response=await fetch('./assets/'+entry.file,{method:'HEAD',signal:controller.signal});
-    if(!response.ok)throw Error('HTTP '+response.status);
-    const length=Number(response.headers.get('Content-Length'));
-    if(!Number.isSafeInteger(length)||length<=0)throw Error('Missing size');
-    if(length>MAX_FILE_BYTES)throw Error('World dependency exceeds 32 MiB.');
-    inputSizes.set(entry.file,length);
-   }else{
-    const response=await fetch('./assets/'+entry.file,{signal:controller.signal});
-    if(!response.ok)throw Error('HTTP '+response.status);
-    const bytes=await checkedBytes(response);
-    worldBootstrapMeasurements.maxDependencyBytes=Math.max(worldBootstrapMeasurements.maxDependencyBytes,bytes.byteLength);
-    worldBootstrapMeasurements.dependencyPayloadCopyBytes=2*worldBootstrapMeasurements.maxDependencyBytes;
-    if(prototypePaths.has(entry.file)){
-     const gltf=JSON.parse(new TextDecoder().decode(bytes));
-     prototypeInputs.set(entry.file,(gltf.buffers??[]).map(buffer=>{
-      if(!/^[a-zA-Z0-9_.-]+$/.test(buffer.uri)||!Number.isSafeInteger(buffer.byteLength)||buffer.byteLength<0)throw Error('Invalid checked prototype buffer.');
-      return {file:'reference/'+buffer.uri,bytes:buffer.byteLength};
-     }));
-    }else{
-     await verifyWorldBytes(bytes,entry.sha256);
-     const mip=pngMips.get(entry.file);
-     if(mip)checkPngInput(bytes,mip);
-    }
-    inputSizes.set(entry.file,bytes.byteLength);
-   }
-   onProgress(++completed,files.size);
-  }catch(error){throw Error('Cannot load dependencies for '+entry.owner+': '+entry.file+' ('+error.message+').');}
- }
- async function run(entries){
-  const pending=entries.values();
-  async function worker(){for(let next=pending.next();!next.done;next=pending.next())await check(next.value);}
-  await Promise.all(Array.from({length:WORKERS},worker));
- }
- try{
-  const all=[...files.values()];
-  await run(all.filter(entry=>prototypePaths.has(entry.file)));
-  for(const inputs of prototypeInputs.values())for(const input of inputs)if(!pngMips.has(input.file)&&!prototypePaths.has(input.file))buffers.add(input.file);
-  await run(all.filter(entry=>!prototypePaths.has(entry.file)));
- }finally{controller.abort();}
+ if(!inputSizes.size)throw Error('Missing required world prototype assets.');
  // One dependency can always advance while generation retains its own bounded share.
  dependencyReserve=5*(1024*1024+16);
  for(const [path,buffers] of prototypeInputs){
   let bytes=worldInputBytes(path);
-  for(const buffer of buffers){
-   if(worldInputBytes(buffer.file)!==buffer.bytes)throw Error('Checked prototype buffer size differs: '+buffer.file);
-   bytes+=buffer.bytes;
-  }
+  for(const buffer of buffers)bytes+=worldInputBytes(buffer);
   prototypeStaging.set(path,2*bytes);
   dependencyReserve=Math.max(dependencyReserve,2*bytes);
  }
@@ -163,16 +111,4 @@ export async function preflightWorldPrototype(path,sha256,budget,key){
  const sceneBytes=nodes.length*2048+primitives.length*2048+skinBytes;
  return JSON.stringify({json_bytes:bytes.byteLength,buffer_bytes:bufferBytes,mesh_bytes:meshBytes,scene_bytes:sceneBytes,nodes,primitives});
  }finally{prototypeRequests.delete(key);}
-}
-
-// The checked export uses RGB/RGBA8, bounded IDAT chunks, and no auxiliary PNG payloads.
-function checkPngInput(bytes,mip){
- const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
- if(bytes.length<45||view.getUint32(0)!==0x89504e47||view.getUint32(4)!==0x0d0a1a0a||view.getUint32(8)!==13||view.getUint32(12)!==0x49484452||view.getUint32(16)!==mip.width||view.getUint32(20)!==mip.height||bytes[24]!==8||![2,6].includes(bytes[25])||bytes[26]||bytes[27]||bytes[28])throw Error('Unsupported checked PNG layout.');
- for(let offset=8;offset<bytes.length;){
-  if(offset+12>bytes.length)throw Error('Truncated checked PNG chunk.');
-  const size=view.getUint32(offset),type=view.getUint32(offset+4);
-  if(![0x49484452,0x49444154,0x49454e44].includes(type)||size>65536||offset+12+size>bytes.length)throw Error('Unsupported checked PNG chunk.');
-  offset+=12+size;
- }
 }

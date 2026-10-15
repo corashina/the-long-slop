@@ -90,6 +90,8 @@ struct ManifestShell<'a> {
     #[serde(borrow)]
     assets: &'a serde_json::value::RawValue,
     #[serde(borrow)]
+    file_bytes: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
     rendering: RenderingShell<'a>,
     #[serde(borrow)]
     world: WorldShell<'a>,
@@ -149,7 +151,7 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
             last_feedback: None,
         })
         .insert_resource(ClearColor(Color::BLACK))
-        .add_plugins(presentation::source_io::SourceIoPlugin)
+        .add_plugins(presentation::source_io::SourceIoPlugin::new(&reference))
         .add_plugins(
             DefaultPlugins
                 .set(AssetPlugin {

@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createLoading,formatBudget} from '../../web/loading.js';
-import {admitWorldAssets} from '../../web/world-assets.js';
 
 test('loading keeps counts and budgets on failure, then resets for the next load',t=>{
  let now=0;t.mock.method(performance,'now',()=>now);
@@ -13,10 +12,8 @@ test('loading keeps counts and budgets on failure, then resets for the next load
  t.after(()=>delete globalThis.document);
  const loading=createLoading();t.after(()=>loading.finish());
  assert.equal(nodes.get('#loading-progress').value,null);
- now=1000;loading.stage('Checking world assets...',12,20);
- assert.equal(nodes.get('#loading-progress').value,12);
- assert.match(nodes.get('#loading-count').textContent,/12 \/ 20/);
  now=2000;loading.progress(24000,50000,false,false);
+ assert.equal(nodes.get('#loading-progress').value,24000);
  assert.match(nodes.get('#loading-count').textContent,/Road index: 24,000 \/ 50,000/);
  assert.match(nodes.get('#loading-count').textContent,/Garage rendering: preparing/);
  loading.budget('Asset GPU',120*1048576,512*1048576,'bytes');
