@@ -64,7 +64,7 @@ KEYWORDS = {'_NORMALMAP', '_DETAIL_MULX2', '_METALLICGLOSSMAP', '_EMISSION',
     '_GLOSSYREFLECTIONS_OFF', '_ALPHATEST_ON', '_ALPHABLEND_ON', '_ALPHAPREMULTIPLY_ON'}
 
 
-PLAYER_FLOATS = {'_BumpStrength', '_Glossiness', '_Metallic', '_Dist', '_Cutoff'}
+PLAYER_FLOATS = {'_BumpStrength': 5., '_Glossiness': 1., '_Metallic': 1., '_Dist': 10., '_Cutoff': 1.}
 PLAYER_PROPERTIES = {'_Color': 0, '_MainTex': 4, '_BumpMap': 4,
     **{name: 3 for name in PLAYER_FLOATS}}
 
@@ -79,14 +79,22 @@ def validate_player_source(reader, shader_reader, data, shader):
     if {p['m_Name']: p['m_Type'] for p in properties} != PLAYER_PROPERTIES or len(properties) != 8:
         raise ValueError(f'{identity}: unsupported player shader properties')
     saved = data['m_SavedProperties']
-    expected = set(STANDARD_FLOATS) | PLAYER_FLOATS | ({'_Red'} if identity['path_id'] == 61 else set())
-    if set(dict(saved['m_Floats'])) - expected:
+    floats = dict(saved['m_Floats'])
+    expected = set(STANDARD_FLOATS) | set(PLAYER_FLOATS) | ({'_Red'} if identity['path_id'] == 61 else set())
+    if set(floats) - expected:
         raise ValueError(f'{identity}: unsupported player properties')
     for field in expected:
-        if field not in dict(saved['m_Floats']):
+        if field not in floats:
             raise ValueError(f'{identity}: missing {field}')
-    if '_Color' not in dict(saved['m_Colors']):
-        raise ValueError(f'{identity}: missing _Color')
+    for field, maximum in PLAYER_FLOATS.items():
+        if not 0 <= floats[field] <= maximum:
+            raise ValueError(f'{identity}: {field} outside player range')
+    colors = dict(saved['m_Colors'])
+    for field in ('_Color', '_EmissionColor'):
+        if field not in colors:
+            raise ValueError(f'{identity}: missing {field}')
+    if set(colors) != {'_Color', '_EmissionColor'}:
+        raise ValueError(f'{identity}: unsupported player colors')
     if data['m_EnableInstancingVariants'] or data['m_CustomRenderQueue'] != -1:
         raise ValueError(f'{identity}: unsupported player state')
     if data['m_ValidKeywords'] or data['disabledShaderPasses']:
@@ -191,6 +199,14 @@ def recover_material(source, reader, color_override=None, condition=None):
         suffix = f'-normal-{encoding}' if encoding else ''
         name = f'texture-{texture_reader.assets_file.name}-{texture_reader.path_id}-{color_space}{suffix}.png'
         width, height = texture['m_Width'], texture['m_Height']
+        if family == 'player_model':
+            main, bump = {57: (346, 168), 59: (284, 168), 61: (219, 168), 75: (212, 225)}[reader.path_id]
+            expected = {'file': 'sharedassets0.assets', 'path_id': bump if slot == '_BumpMap' else main}
+            if source_id(texture_reader) != expected or color_space != ('linear' if encoding else 'srgb'):
+                raise ValueError(f'{source_id(reader)} {slot}: player texture source or color space')
+            if (not 0 <= settings['m_Aniso'] <= 16 or not math.isfinite(settings['m_MipBias'])
+                    or min(width, height) <= 0 or not 0 < texture['m_MipCount'] <= max(width, height).bit_length()):
+                raise ValueError(f'{source_id(reader)} {slot}: player texture sampler or mips')
         mips = [{'file': f'reference/{name}' if level == 0 else f'reference/{name[:-4]}-mip-{level}.png',
                  'width': max(1, width >> level), 'height': max(1, height >> level)}
                 for level in range(texture['m_MipCount'])]
@@ -214,10 +230,14 @@ def recover_material(source, reader, color_override=None, condition=None):
         render_pass = next(p for p in parsed['m_SubShaders'][0]['m_Passes'] if p['m_Type'] == 0)
         def value(field): return floats.get(field['name'], field['val'])
         pass_state = render_pass['m_State']
-        state.update(cull=int(value(pass_state['culling'])), z_write=bool(value(pass_state['zWrite'])),
-                     z_test=int(value(pass_state['zTest'])),
-                     src_blend=int(value(pass_state['rtBlend0']['srcBlend'])),
-                     dst_blend=int(value(pass_state['rtBlend0']['destBlend'])))
+        pass_values = dict(cull=value(pass_state['culling']), z_write=value(pass_state['zWrite']),
+            z_test=value(pass_state['zTest']), src_blend=value(pass_state['rtBlend0']['srcBlend']),
+            dst_blend=value(pass_state['rtBlend0']['destBlend']))
+        if family == 'player_model' and pass_values != dict(cull=2, z_write=1, z_test=4, src_blend=1, dst_blend=0):
+            raise ValueError(f'{source_id(reader)}: unsupported player pass state')
+        state.update({key: bool(value) if key == 'z_write' else int(value) for key, value in pass_values.items()})
+    if family == 'player_model' and condition is not None:
+        raise ValueError(f'{source_id(reader)}: unsupported player condition')
     return {'source': source_id(reader), 'shader_family': family, 'color': color,
         'enable_instancing': bool(data['m_EnableInstancingVariants']),
         'condition': condition, 'keywords': keywords, 'state': state,
@@ -341,7 +361,7 @@ def material_source_evidence(source, reader, record):
             '3a6dc70fae785e22a66269ba660c7960e87975db890f97b08e2bfaedd6108768',
             'a873c329305fc3f24007c8c1708b58a26652825b2e8c5a10b68113510b6d2432',
             'fbc1da7ea386966e3bff8eb51930af5135fe88313aebb3f729b7262a8b9df30e']))
-        evidence['unused_saved_properties'] = sorted(set(record['properties']['floats']) - PLAYER_FLOATS)
+        evidence['unused_saved_properties'] = sorted(set(record['properties']['floats']) - set(PLAYER_FLOATS))
         evidence['transport_limits'] = ['Inactive source contract. Active player material preparation is rejected.',
             'Camera distance clipping, custom normal blending, and matched game views are not implemented or measured.']
 
