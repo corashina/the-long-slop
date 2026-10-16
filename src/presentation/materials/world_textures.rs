@@ -437,10 +437,8 @@ impl WorldTextures {
                 > cpu_available
         }) || gpu.is_none_or(|v| v > gpu_available)
         {
-            return Err(ReferenceError(format!(
-                "Source texture budget {}:{}",
-                material.source.file, material.source.path_id
-            )));
+            // The material stays unadmitted. Callers wait until retirement frees budget.
+            return Ok(());
         }
         self.cpu_reserved = cpu.unwrap();
         self.gpu_reserved = gpu.unwrap();
@@ -582,19 +580,34 @@ impl WorldTextures {
                 }
             }
         }
-        let active = self
-            .arrays
-            .iter()
-            .position(|a| a.as_ref().is_some_and(|a| a.cpu_live));
-        let index = active.or_else(|| {
-            self.arrays.iter().position(|a| {
-                a.as_ref()
-                    .is_some_and(|a| !a.failed && a.next_layer < a.layers.len())
-            })
-        });
-        let Some(index) = index else {
-            return Ok(());
-        };
+        // Several arrays fetch and decode chunks at once. The upload slot stays serial.
+        let (mut jobs, mut staging) = (new_jobs, staging_available);
+        for index in 0..self.arrays.len() {
+            let Some(array) = self.arrays[index].as_ref() else {
+                continue;
+            };
+            if array.failed || array.next_layer == array.layers.len() {
+                continue;
+            }
+            let loading = array.cpu_live;
+            self.step(index, server, images, jobs, staging, cpu_available)?;
+            let array = self.arrays[index].as_ref().unwrap();
+            if !loading && array.cpu_live {
+                jobs -= 1;
+                staging -= array.cpu_bytes;
+            }
+        }
+        Ok(())
+    }
+    fn step(
+        &mut self,
+        index: usize,
+        server: &AssetServer,
+        images: &mut Assets<Image>,
+        new_jobs: usize,
+        staging_available: usize,
+        cpu_available: usize,
+    ) -> Result<(), ReferenceError> {
         let array = self.arrays[index].as_mut().unwrap();
         if array.pending_upload {
             return Ok(());
@@ -634,10 +647,9 @@ impl WorldTextures {
                 return Err(ReferenceError("Invalid source array layer".into()));
             }
             let mut queue = self.uploads.lock().unwrap();
+            // Another array owns the serial upload slot.
             if queue.job.is_some() || queue.completed.is_some() {
-                return Err(ReferenceError(
-                    "Source array upload ownership overlap".into(),
-                ));
+                return Ok(());
             }
             if array.image.is_none() {
                 array.image = Some(images.add(array_image(key, array.layers.len())?));

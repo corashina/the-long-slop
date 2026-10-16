@@ -417,7 +417,7 @@ fn check_ready(
             if materials.state != presentation::materials::RenderingState::Ready {
                 return;
             }
-            if !drive.runtime.world_supported() || !drive.runtime.stream.window_ready() {
+            if !drive.runtime.world_supported() || !drive.runtime.stream.start_ready() {
                 return;
             }
             if !mirrors.ready() || !plates.ready() {
@@ -860,7 +860,7 @@ fn publish_loading(
         stream.metrics().prepared_roads,
         crate::world::ROAD_SEGMENTS,
         rendering,
-        drive.runtime.world_supported() && stream.window_ready(),
+        drive.runtime.world_supported() && stream.start_ready(),
     );
     for budget in stream.presentation_budgets(stream.presentation_allocation()) {
         game_loading_budget(

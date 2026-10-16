@@ -136,12 +136,25 @@ impl SourceInstances {
             self.pending = None;
         }
         if self.pending.is_none() {
+            // Nearest structures prepare first. Until play can start, start area
+            // structures go before all others, because the loaders are serial.
+            let starting = !stream.start_ready();
+            let rank = |p: &Placement| {
+                (
+                    !(starting && stream.in_start_area(p)),
+                    stream.focus_distance_squared(p.pose.position),
+                )
+            };
             self.pending = stream
                 .pending_structures()
                 .iter()
-                .find(|p| {
+                .filter(|p| {
                     stream.contents_initialized(&p.id)
                         && !self.instances.iter().any(|i| i.placement.id == p.id)
+                })
+                .min_by(|a, b| {
+                    let (a, b) = (rank(a), rank(b));
+                    a.0.cmp(&b.0).then(a.1.total_cmp(&b.1))
                 })
                 .cloned();
         }

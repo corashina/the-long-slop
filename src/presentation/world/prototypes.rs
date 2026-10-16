@@ -417,6 +417,10 @@ impl SourcePrototypes {
                         .find(|a| a.id == prototype.asset)
                         .ok_or_else(|| ReferenceError("Missing prototype asset".into()))?;
                     let (cpu, gpu) = plan.reservation()?;
+                    // A full budget retires this queued entry. The structure requests it again later.
+                    if !stream.prototype_fits(&entry.source, cpu, gpu) {
+                        continue;
+                    }
                     stream.resize_prototype(&entry.source, cpu, gpu)?;
                     entry.cpu = cpu;
                     entry.gpu = gpu;
@@ -488,6 +492,11 @@ impl SourcePrototypes {
                         + plan.scene_bytes
                         + loaded.meshes.len() * 4096;
                     let gpu = loaded.mesh_bytes + loaded.skin_bytes + loaded.meshes.len() * 8;
+                    // A full budget keeps the loaded asset waiting until retirement frees space.
+                    if !stream.prototype_fits(&entry.source, cpu, gpu) {
+                        entry.retired = false;
+                        continue;
+                    }
                     stream.resize_prototype(&entry.source, cpu, gpu)?;
                     entry.cpu = cpu;
                     entry.gpu = gpu;
@@ -566,10 +575,9 @@ impl SourcePrototypes {
                 return Ok(());
             }
             let budget = 18 * json_bytes;
+            // A full prototype budget waits until retirement frees space.
             if budget > stream.prototype_headroom(&entry.source) {
-                return Err(ReferenceError(
-                    "No source prototype metadata admission capacity".into(),
-                ));
+                return Ok(());
             }
             stream.reserve_prototype(entry.source.clone(), budget, 0)?;
             entry.cpu = budget;

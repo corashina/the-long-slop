@@ -20,6 +20,8 @@ const MAX_NEAR: usize = 512;
 const MAX_DISTANT: usize = 256;
 const MAX_OBJECTS: usize = 8192;
 const MAX_PENDING: usize = 32;
+/// Ground around a placed player or vehicle that must exist before play continues.
+const SUPPORT_RADIUS: f64 = 24.0;
 const ACTIVE_CPU: usize = 128 * MIB;
 const ACTIVE_GPU: usize = 128 * MIB;
 const PROTOTYPE_CPU: usize = 256 * MIB;
@@ -837,6 +839,29 @@ impl WorldStream {
             },
         );
         Ok(())
+    }
+    /// True when `resize_prototype` would stay inside the prototype budget.
+    pub fn prototype_fits(&self, source: &SourceId, cpu: usize, gpu: usize) -> bool {
+        let old = self
+            .admissions
+            .get(source)
+            .copied()
+            .unwrap_or(PrototypeAllocation {
+                cpu: 0,
+                gpu: 0,
+                ready: false,
+            });
+        let current = self.metrics();
+        current
+            .prototype_cpu_bytes
+            .saturating_sub(old.cpu)
+            .saturating_add(cpu)
+            <= PROTOTYPE_CPU
+            && current
+                .prototype_gpu_bytes
+                .saturating_sub(old.gpu)
+                .saturating_add(gpu)
+                <= PROTOTYPE_GPU
     }
     /// Replace a loader reservation with its retained allocation before binding.
     pub fn resize_prototype(
@@ -2151,9 +2176,17 @@ impl WorldStream {
                 .iter()
                 .all(|p| self.structures.iter().any(|s| s.placement.id == p.id))
     }
+    /// Play can start when the ground under the player and vehicle is ready.
+    /// The rest of the window streams while playing.
+    pub fn start_ready(&self) -> bool {
+        self.failure.is_none()
+            && self.plan_revision == self.request.revision
+            && self.supports(window(self.request.player, SUPPORT_RADIUS))
+            && self.supports(window(self.request.vehicle, SUPPORT_RADIUS))
+    }
     pub fn recovery_window(&self) -> Option<WorldBounds> {
         self.recovery
-            .map(|pending| window(pending.target.position, 24.0))
+            .map(|pending| window(pending.target.position, SUPPORT_RADIUS))
     }
     pub fn recovery_target(
         &mut self,
@@ -2314,7 +2347,14 @@ impl WorldStream {
                     self.publication_light(light, required_lights) && light.owned_by(&placement.id)
                 })
             })
-            .or_else(|| self.wanted_structures.iter().find(ready))
+            .or_else(|| {
+                // Nearest structures publish first, so the start area is ready early.
+                let request = self.request;
+                self.wanted_structures.iter().filter(ready).min_by(|a, b| {
+                    focus_distance_squared(request, a.pose.position)
+                        .total_cmp(&focus_distance_squared(request, b.pose.position))
+                })
+            })
         else {
             return Ok(());
         };
@@ -2709,7 +2749,7 @@ impl WorldStream {
             && self.failure.is_none()
             && self.next_road == self.road_candidates.len()
             && self.plan_revision == self.request.revision
-            && self.supports(window(pose.position, 24.0))
+            && self.supports(window(pose.position, SUPPORT_RADIUS))
             && (!require_supply
                 || recovery.supply.as_ref().is_some_and(|owner| {
                     self.supplies.iter().any(|supply| {
@@ -2850,6 +2890,22 @@ impl WorldStream {
         self.failure = Some(error.0);
     }
 
+    /// True when the placement overlaps the ground that `start_ready` waits for.
+    pub fn in_start_area(&self, placement: &Placement) -> bool {
+        [self.request.player, self.request.vehicle]
+            .into_iter()
+            .any(|point| {
+                let area = window(point, SUPPORT_RADIUS);
+                [0, 2].into_iter().all(|axis| {
+                    placement.bounds.min[axis] <= area.max[axis]
+                        && placement.bounds.max[axis] >= area.min[axis]
+                })
+            })
+    }
+    /// Squared source distance from the nearer of the player and vehicle.
+    pub fn focus_distance_squared(&self, position: [f64; 3]) -> f32 {
+        focus_distance_squared(self.request, position)
+    }
     pub fn pending_structures(&self) -> &[Placement] {
         &self.wanted_structures
     }
@@ -3193,6 +3249,10 @@ fn append_road_points(output: &mut Vec<TerrainRoadPoint>, segment: RoadSegment, 
     }
 }
 
+fn focus_distance_squared(request: WorldRequest, position: [f64; 3]) -> f32 {
+    source_distance_squared(request.player, position)
+        .min(source_distance_squared(request.vehicle, position))
+}
 // Frozen source coordinates, with source float vector boundaries.
 fn source_distance_squared(a: [f64; 3], b: [f64; 3]) -> f32 {
     let x = a[0] as f32 - b[0] as f32;

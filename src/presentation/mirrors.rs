@@ -822,18 +822,19 @@ fn prepare_capture_pipelines(
                 continue;
             };
             for (entity, original) in pipelines.iter_mut() {
-                let source_id = if surfaces
+                let is_owner = surfaces
                     .entries
                     .get(owner)
-                    .is_some_and(|entry| MainEntity::from(entry.0) == *entity)
-                {
-                    cache.owner_sources.get(&(owner, *original)).copied()
-                } else {
-                    Some(*original)
-                };
+                    .is_some_and(|entry| MainEntity::from(entry.0) == *entity);
+                // World meshes stream in while playing. They keep their own pipeline,
+                // which compiles like any other. Only the owner surface needs a mapping.
+                if !is_owner {
+                    continue;
+                }
+                let source_id = cache.owner_sources.get(&(owner, *original)).copied();
                 if let Some(id) = source_id.filter(|id| cache.sources.contains(id)) {
                     *original = id;
-                } else if cache.sealed && source_id.is_none_or(|id| !cache.sources.contains(&id)) {
+                } else if cache.sealed {
                     let mut status = world.resource::<MirrorGpuStatus>().0.lock().unwrap();
                     if status.failure.is_none() {
                         status.failure = Some(format!(

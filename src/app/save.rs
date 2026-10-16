@@ -7,6 +7,8 @@ use serde::Deserialize;
 pub struct SaveRequests {
     source: SourceStamp,
     candidate: Option<Candidate>,
+    /// A new game that keeps the loaded world, which nobody has started yet.
+    fresh: Option<u32>,
 }
 pub(crate) struct Candidate {
     id: u32,
@@ -34,7 +36,7 @@ impl SaveRequests {
         self.hidden().is_some()
     }
     pub fn pending(&self) -> bool {
-        self.candidate.is_some()
+        self.candidate.is_some() || self.fresh.is_some()
     }
     pub fn new(reference: &ReferenceManifest, hash: String) -> Self {
         Self {
@@ -52,6 +54,7 @@ impl SaveRequests {
                     .collect(),
             },
             candidate: None,
+            fresh: None,
         }
     }
 }
@@ -92,6 +95,14 @@ fn process_request(
     match request.kind.as_str() {
         "Discard" => {
             if requests
+                .fresh
+                .is_some_and(|id| Some(u64::from(id)) == request.payload.as_u64())
+            {
+                requests.fresh = None;
+                world.resource_mut::<Drive>().runtime.started = false;
+                return Ok(String::new());
+            }
+            if requests
                 .candidate
                 .as_ref()
                 .is_some_and(|candidate| Some(candidate.id as u64) == request.payload.as_u64())
@@ -105,6 +116,13 @@ fn process_request(
             Ok(String::new())
         }
         "Commit" => {
+            if requests
+                .fresh
+                .is_some_and(|id| Some(u64::from(id)) == request.payload.as_u64())
+            {
+                requests.fresh = None;
+                return Ok(String::new());
+            }
             if !requests
                 .candidate
                 .as_ref()
@@ -205,8 +223,17 @@ fn process_request(
                 return serde_json::to_string(&snapshot)
                     .map_err(|error| SaveError::CorruptData(error.to_string()));
             }
-            if requests.candidate.is_some() {
+            if requests.candidate.is_some() || requests.fresh.is_some() {
                 return Err(invalid("A prepared session is pending"));
+            }
+            // The loaded world is already a new game until the player starts it.
+            if request.kind == "PrepareNewGame" && !world.resource::<Drive>().runtime.started {
+                let mut drive = world.resource_mut::<Drive>();
+                drive.runtime.started = true;
+                drive.runtime.paused = true;
+                requests.fresh = Some(request.id);
+                game_save_result(request.id, &request.kind, &request.id.to_string(), "");
+                return Ok(String::new());
             }
             let (mut runtime, camera) = if request.kind == "Prepare" {
                 let saved: SaveSnapshot = serde_json::from_value(request.payload.clone())
