@@ -22,6 +22,8 @@ const MAX_OBJECTS: usize = 8192;
 const MAX_PENDING: usize = 32;
 /// Ground around a placed player or vehicle that must exist before play continues.
 const SUPPORT_RADIUS: f64 = 24.0;
+/// Focus movement in metres before the structure window refreshes.
+const STRUCTURE_REFRESH_DISTANCE: f32 = 1.0;
 const ACTIVE_CPU: usize = 128 * MIB;
 const ACTIVE_GPU: usize = 128 * MIB;
 const PROTOTYPE_CPU: usize = 256 * MIB;
@@ -159,6 +161,8 @@ pub struct WorldStream {
     indices_ready: bool,
     plan_revision: u64,
     road_focus: [[f64; 3]; 2],
+    /// Player and vehicle positions at the last structure refresh.
+    structure_focus: [[f64; 3]; 2],
     road_candidates: Vec<u32>,
     next_road: usize,
     wanted_roads: Vec<u32>,
@@ -529,6 +533,7 @@ impl WorldStream {
             indices_ready: false,
             plan_revision: 0,
             road_focus: [[f64::INFINITY; 3]; 2],
+            structure_focus: [[f64::INFINITY; 3]; 2],
             road_candidates: Vec::new(),
             next_road: 0,
             wanted_roads: Vec::with_capacity(MAX_ROADS),
@@ -965,10 +970,16 @@ impl WorldStream {
                 cell(player, tile.size) != cell(self.request.player, tile.size)
                     || cell(vehicle, tile.size) != cell(self.request.vehicle, tile.size)
             });
-        let moved = player != self.request.player || vehicle != self.request.vehicle;
+        // Physics moves the focus a little every step. A full refresh after each
+        // metre keeps spawn edges current without rebuilding the window every step.
+        let moved = [player, vehicle]
+            .into_iter()
+            .zip(self.structure_focus)
+            .any(|(a, b)| source_distance_squared(a, b) >= STRUCTURE_REFRESH_DISTANCE.powi(2));
         self.request.player = player;
         self.request.vehicle = vehicle;
         if moved && self.indices_ready {
+            self.structure_focus = [player, vehicle];
             self.refresh_structures();
         }
         if changed {

@@ -1,7 +1,8 @@
 //! Source coordinate-seeded building children. These do not use Unity random state.
 use super::spawn_rules::*;
 use super::{AbsolutePose, Placement, SourceRandom, WorldBounds};
-use crate::reference::{ReferenceError, WorldReference};
+use crate::reference::{ReferenceError, SourceId, WorldReference};
+use std::collections::{HashMap, HashSet};
 
 pub(crate) fn append_ramps(
     reference: &WorldReference,
@@ -10,24 +11,40 @@ pub(crate) fn append_ramps(
     placements: &mut Vec<Placement>,
     maximum: usize,
 ) -> Result<(), ReferenceError> {
+    // One pass finds existing ramps. Buildings share a few prototypes, so their
+    // components resolve once per call.
+    let mut ramps: HashSet<_> = placements
+        .iter()
+        .filter_map(|p| {
+            let (source, ordinal) = p.id.children.last()?;
+            (*ordinal == u32::MAX).then(|| (p.id.layer, p.id.unit, p.id.ordinal, source.clone()))
+        })
+        .collect();
+    let mut buildings: HashMap<SourceId, Option<SourceRecord>> = HashMap::new();
     let parents = placements.len();
     for index in 0..parents {
         let parent = &placements[index];
         if !parent.id.children.is_empty() {
             continue;
         }
-        let Some(building) = rules.component(reference, &parent.prototype, "buildingscript")?
-        else {
+        let building = match buildings.get(&parent.prototype) {
+            Some(building) => *building,
+            None => {
+                let building = rules.component(reference, &parent.prototype, "buildingscript")?;
+                buildings.insert(parent.prototype.clone(), building);
+                building
+            }
+        };
+        let Some(building) = building else {
             continue;
         };
-        if placements.iter().any(|p| {
-            p.id.layer == parent.id.layer
-                && p.id.unit == parent.id.unit
-                && p.id.ordinal == parent.id.ordinal
-                && p.id.children.last().is_some_and(|(source, ordinal)| {
-                    source == building.source && *ordinal == u32::MAX
-                })
-        }) {
+        let key = (
+            parent.id.layer,
+            parent.id.unit,
+            parent.id.ordinal,
+            building.source.clone(),
+        );
+        if ramps.contains(&key) {
             continue;
         }
         let f = building.fields;
@@ -79,9 +96,6 @@ pub(crate) fn append_ramps(
         ];
         let mut id = parent.id.clone();
         id.children.push((building.source.clone(), u32::MAX));
-        if placements.iter().any(|p| p.id == id) {
-            continue;
-        }
         if placements.len() == maximum {
             return Err(ReferenceError(
                 "Source ramp object admission exceeds capacity".into(),
@@ -104,6 +118,7 @@ pub(crate) fn append_ramps(
             },
             object_seed: local_seed,
         });
+        ramps.insert(key);
     }
     Ok(())
 }
