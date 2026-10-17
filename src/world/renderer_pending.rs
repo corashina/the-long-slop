@@ -47,15 +47,32 @@ impl PipelineContinuation {
         self.held = false;
         Ok(())
     }
+    pub(crate) fn validate(&self, stream: &WorldStream) -> Result<(), ReferenceError> {
+        if !self.held
+            || self.request().session != stream.frame().request.session
+            || self.flight.as_ref().is_some_and(UploadReceipt::stopped)
+        {
+            return Err(ReferenceError("Stale renderer continuation proof".into()));
+        }
+        Ok(())
+    }
+    pub(crate) fn stop_flight(&self) {
+        if let Some(flight) = &self.flight {
+            flight.stop();
+        }
+    }
+    pub(crate) fn shares(&self, receipt: &UploadReceipt) -> bool {
+        self.flight
+            .as_ref()
+            .is_some_and(|flight| flight.same(receipt))
+    }
     pub(crate) fn start(
         &mut self,
         stream: &mut WorldStream,
         cpu: usize,
         staging: usize,
     ) -> Result<Option<PipelineOperation>, ReferenceError> {
-        if !self.held || self.request().session != stream.frame().request.session {
-            return Err(ReferenceError("Stale renderer continuation proof".into()));
-        }
+        self.validate(stream)?;
         if self.flight.as_ref().is_some_and(|f| !f.completed()) {
             return Ok(None);
         }
@@ -73,6 +90,18 @@ pub(crate) struct PipelineOperation {
     pub(crate) physical: UploadReceipt,
 }
 impl PipelineOperation {
+    pub(crate) fn reserve_pair(
+        &self,
+        stream: &mut WorldStream,
+        cpu: usize,
+    ) -> Result<(), ReferenceError> {
+        if self.physical.completed() || self.physical.stopped() {
+            return Err(ReferenceError("Stale source pipeline batch".into()));
+        }
+        let mut allocation = stream.presentation_allocation();
+        allocation.prototype_cpu += cpu;
+        stream.set_presentation_allocation(allocation)
+    }
     pub(crate) fn independent(
         stream: &mut WorldStream,
         cpu: usize,
@@ -103,17 +132,175 @@ impl PipelineOperation {
         }))
     }
 }
+pub(crate) struct PipelineBufferGrowth {
+    pub(crate) capacity: usize,
+    pub(crate) admitted: usize,
+    pub(crate) released: usize,
+}
+impl PipelineBufferGrowth {
+    pub(crate) fn new(capacity: usize, needed: usize, item: usize) -> Self {
+        if needed <= capacity {
+            Self {
+                capacity,
+                admitted: 0,
+                released: 0,
+            }
+        } else {
+            let next = capacity.saturating_mul(2).max(needed).max(4);
+            Self {
+                capacity: next,
+                admitted: next * item,
+                released: capacity * item,
+            }
+        }
+    }
+}
+pub(crate) fn pipeline_pair_ready(receipt: &UploadReceipt, spill: bool) -> bool {
+    !spill && !receipt.stopped() && receipt.completed()
+}
+/// Base requests include cache hits. Companions retain their existing constructors.
+pub(crate) const PIPELINE_BATCH_KEYS: usize = 32;
+#[derive(Default)]
+pub(crate) struct PipelineBatchWork {
+    pub(crate) pairs: usize,
+    pub(crate) base_keys: usize,
+}
+impl PipelineBatchWork {
+    pub(crate) fn accept(&mut self, keys: usize) -> Result<bool, ReferenceError> {
+        if keys == 0 || keys > PIPELINE_BATCH_KEYS {
+            return Err(ReferenceError(
+                "Source material pipeline reservation exceeded".into(),
+            ));
+        }
+        if self.base_keys + keys > PIPELINE_BATCH_KEYS {
+            return Ok(false);
+        }
+        self.base_keys += keys;
+        self.pairs += 1;
+        Ok(true)
+    }
+}
+/// Fixed render-stack keys preserve first occurrence and shadow/view order.
+pub(crate) struct PipelineKeys<K> {
+    values: [Option<K>; PIPELINE_BATCH_KEYS],
+    pub(crate) len: usize,
+}
+impl<K: Copy + PartialEq> PipelineKeys<K> {
+    pub(crate) fn new() -> Self {
+        Self {
+            values: [None; PIPELINE_BATCH_KEYS],
+            len: 0,
+        }
+    }
+    pub(crate) fn push(&mut self, key: K) -> Result<(), ReferenceError> {
+        if self.values[..self.len].contains(&Some(key)) {
+            return Ok(());
+        }
+        if self.len == PIPELINE_BATCH_KEYS {
+            return Err(ReferenceError(
+                "Source material pipeline reservation exceeded".into(),
+            ));
+        }
+        self.values[self.len] = Some(key);
+        self.len += 1;
+        Ok(())
+    }
+    pub(crate) fn iter(&self) -> impl Iterator<Item = K> + '_ {
+        self.values[..self.len].iter().map(|v| v.unwrap())
+    }
+}
+pub(crate) struct PipelineBatch<P> {
+    pub(crate) operation: PipelineOperation,
+    pub(crate) pairs: [std::sync::Weak<P>; PIPELINE_BATCH_KEYS],
+    pub(crate) len: usize,
+    pub(crate) next: usize,
+    pub(crate) open: bool,
+    pub(crate) stopped: bool,
+    pub(crate) work: PipelineBatchWork,
+    pub(crate) dispatched_keys: usize,
+}
+impl<P> PipelineBatch<P> {
+    pub(crate) fn new(operation: PipelineOperation) -> Self {
+        Self {
+            operation,
+            pairs: std::array::from_fn(|_| std::sync::Weak::new()),
+            len: 0,
+            next: 0,
+            open: true,
+            stopped: false,
+            work: PipelineBatchWork::default(),
+            dispatched_keys: 0,
+        }
+    }
+    pub(crate) fn push(&mut self, pair: &std::sync::Arc<P>) {
+        assert!(self.open && self.len < PIPELINE_BATCH_KEYS);
+        self.pairs[self.len] = std::sync::Arc::downgrade(pair);
+        self.len += 1;
+    }
+    pub(crate) fn select(&mut self, keys: Option<usize>) -> Result<bool, ReferenceError> {
+        let Some(keys) = keys else {
+            self.stopped |= self.next != 0;
+            return Ok(false);
+        };
+        match self.work.accept(keys) {
+            Ok(true) => {
+                self.next += 1;
+                Ok(true)
+            }
+            Ok(false) => {
+                self.stopped = true;
+                Ok(false)
+            }
+            Err(error) => {
+                self.stopped = true;
+                Err(error)
+            }
+        }
+    }
+    pub(crate) fn register(&self, settled: impl Iterator<Item = bool>) -> bool {
+        let drained = settled.fold(true, |all, pair| pair & all);
+        (self.stopped || self.next == self.len) && drained && self.operation.physical.register()
+    }
+    pub(crate) fn retire_pairs(&mut self) {
+        if self.operation.physical.completed() {
+            for pair in &mut self.pairs[..self.len] {
+                if pair.strong_count() <= 1 {
+                    *pair = std::sync::Weak::new();
+                }
+            }
+        }
+    }
+    pub(crate) fn retain(&self) -> bool {
+        if !self.operation.physical.completed() {
+            return true;
+        }
+        let mut receipt_owners = 1;
+        for pair in &self.pairs[..self.len] {
+            let owners = pair.strong_count();
+            if owners > 1 {
+                return true;
+            }
+            receipt_owners += usize::from(owners != 0);
+        }
+        // The parent can still retain the completed flight. Charge its control until release.
+        self.operation.physical.owners() > receipt_owners
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 pub(crate) struct PipelineAccounting {
     pub(crate) jobs: usize,
     pub(crate) pending: usize,
-    pub(crate) tickets: usize,
+    pub(crate) cpu: usize,
 }
 impl PipelineAccounting {
     pub(crate) fn admitted(&mut self, operation: &PipelineOperation) {
         self.jobs += 1;
         self.pending += usize::from(operation.owns_pending);
-        self.tickets += 1;
+        self.cpu += UploadReceipt::allocation_bytes();
+    }
+    pub(crate) fn pair_admitted(&mut self, cpu: usize) {
+        self.cpu += cpu;
     }
     pub(crate) fn reconcile(
         &mut self,
@@ -122,9 +309,11 @@ impl PipelineAccounting {
         cpu: usize,
         staging: usize,
     ) -> Result<(), ReferenceError> {
-        let mut next = Self::default();
+        let mut next = Self {
+            cpu,
+            ..Self::default()
+        };
         for operation in operations {
-            next.tickets += 1;
             if !operation.physical.completed() {
                 next.jobs += 1;
                 next.pending += usize::from(operation.owns_pending);
@@ -138,11 +327,8 @@ impl PipelineAccounting {
             .checked_sub(self.jobs * staging)
             .unwrap()
             + next.jobs * staging;
-        allocation.prototype_cpu = allocation
-            .prototype_cpu
-            .checked_sub(self.tickets * cpu)
-            .unwrap()
-            + next.tickets * cpu;
+        allocation.prototype_cpu =
+            allocation.prototype_cpu.checked_sub(self.cpu).unwrap() + next.cpu;
         stream.set_presentation_allocation(allocation)?;
         *self = next;
         Ok(())
@@ -179,5 +365,390 @@ impl RendererRetirement {
     }
     pub(crate) fn drained(&self, parent: bool, children: bool) -> bool {
         self.0 && parent && children
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    #[test]
+    fn whole_pair_prefix_spills_without_consuming_the_next_pair() {
+        let mut work = PipelineBatchWork::default();
+        assert!(work.accept(7).unwrap());
+        assert!(work.accept(9).unwrap());
+        assert!(!work.accept(17).unwrap());
+        assert_eq!((work.pairs, work.base_keys), (2, 16));
+        let mut next = PipelineBatchWork::default();
+        assert!(next.accept(17).unwrap());
+        assert!(!next.accept(32).unwrap());
+        let mut full = PipelineBatchWork::default();
+        assert!(full.accept(32).unwrap());
+        assert_eq!(full.base_keys, 32);
+        assert!(PipelineBatchWork::default().accept(33).is_err());
+        assert!(PipelineBatchWork::default().accept(0).is_err());
+    }
+    #[test]
+    fn frozen_keys_preserve_order_and_variants_against_the_previous_vec_path() {
+        for material_bits in [0, 4, 8] {
+            for shadows in [false, true] {
+                for discard in [false, true] {
+                    let mut old = Vec::new();
+                    let mut keys = PipelineKeys::new();
+                    for view in [1u64, 2, 1, 16] {
+                        let key = (view | material_bits | 32, false);
+                        if !old.contains(&key) {
+                            old.push(key);
+                        }
+                        keys.push(key).unwrap();
+                    }
+                    if shadows {
+                        for light in [64, 128] {
+                            let key = (light | 32 | if discard { 256 } else { 0 }, true);
+                            if !old.contains(&key) {
+                                old.push(key);
+                            }
+                            keys.push(key).unwrap();
+                        }
+                    }
+                    assert_eq!(keys.iter().collect::<Vec<_>>(), old);
+                }
+            }
+        }
+        let mut full = PipelineKeys::new();
+        for key in 0..32 {
+            full.push((key, false)).unwrap();
+        }
+        full.push((31, false)).unwrap();
+        assert_eq!(full.len, 32);
+        assert!(full.push((32, false)).is_err());
+    }
+    #[test]
+    fn missing_inputs_seal_only_a_nonempty_prefix_and_spills_retry_with_a_full_budget() {
+        use std::sync::Arc;
+        let operation = || PipelineOperation {
+            owns_pending: false,
+            physical: UploadReceipt::default(),
+        };
+        let mut batch = PipelineBatch::new(operation());
+        let pair = Arc::new(());
+        batch.push(&pair);
+        batch.push(&pair);
+        batch.push(&pair);
+        batch.open = false;
+        assert!(!batch.select(None).unwrap());
+        assert!(!batch.stopped);
+        assert!(!batch.register(std::iter::empty()));
+        assert!(batch.select(Some(8)).unwrap());
+        assert!(batch.select(Some(16)).unwrap());
+        assert!(!batch.select(Some(16)).unwrap());
+        assert!(batch.stopped);
+        assert_eq!((batch.next, batch.work.base_keys), (2, 24));
+        assert!(!batch.register([true, false].into_iter()));
+        assert!(batch.register([true, true].into_iter()));
+        assert!(!pipeline_pair_ready(&batch.operation.physical, true));
+        batch.operation.physical.complete();
+        let mut retry = PipelineBatch::new(operation());
+        retry.push(&pair);
+        retry.open = false;
+        assert!(retry.select(Some(16)).unwrap());
+        assert_eq!(retry.next, retry.len);
+        let mut waiting = PipelineBatch::new(operation());
+        waiting.push(&pair);
+        waiting.push(&pair);
+        waiting.open = false;
+        assert!(waiting.select(Some(4)).unwrap());
+        assert!(!waiting.select(None).unwrap());
+        assert!(waiting.stopped);
+        assert_eq!(waiting.work.base_keys, 4);
+    }
+    #[test]
+    fn shared_receipt_withholds_errors_and_dropped_pair_proof_until_all_siblings_drain() {
+        use crate::mirrors::capture::{GeneratedProof, SourceProof};
+        use std::sync::Arc;
+        let operation = PipelineOperation {
+            owns_pending: false,
+            physical: UploadReceipt::default(),
+        };
+        let mut batch = PipelineBatch::new(operation);
+        let first = Arc::new(batch.operation.physical.clone());
+        let first_user = first.clone();
+        let second = Arc::new(batch.operation.physical.clone());
+        let second_user = second.clone();
+        batch.push(&first);
+        batch.push(&second);
+        assert!(batch.work.accept(3).unwrap());
+        assert!(batch.work.accept(4).unwrap());
+        batch.next = 2;
+        batch.open = false;
+        let first_error = |errors: [Option<&'static str>; 2]| {
+            [(&first, errors[0]), (&second, errors[1])]
+                .into_iter()
+                .find_map(|(receipt, error)| {
+                    if pipeline_pair_ready(receipt, false) {
+                        error
+                    } else {
+                        None
+                    }
+                })
+        };
+        assert_eq!(first_error([None, Some("later failure")]), None);
+        // Later failure cannot expose an error while an earlier shader or companion waits.
+        assert!(!batch.register([false, true].into_iter()));
+        assert!(!pipeline_pair_ready(&first, false));
+        assert!(!pipeline_pair_ready(&second, false));
+        assert!(batch.retain());
+        assert!(batch.register([true, true].into_iter()));
+        assert!(!batch.register([true, true].into_iter()));
+        assert!(!pipeline_pair_ready(&first, false));
+        // This is the native receipt adapter. Render uses only the queue callback here.
+        batch.operation.physical.complete();
+        assert!(pipeline_pair_ready(&first, false));
+        assert_eq!(
+            first_error([Some("earlier failure"), Some("later failure")]),
+            Some("earlier failure")
+        );
+        assert!(!pipeline_pair_ready(&first, true));
+        drop(first_user);
+        let mut proof = GeneratedProof {
+            ids: Vec::with_capacity(64),
+        };
+        for (pair, id) in [(&first, 263), (&second, 264)] {
+            proof.include_ticket(
+                7,
+                7,
+                true,
+                pipeline_pair_ready(pair, false),
+                Arc::strong_count(pair) > 1,
+                [SourceProof {
+                    id,
+                    isolated: false,
+                    cancelled: false,
+                }]
+                .into_iter(),
+            );
+        }
+        proof.finish();
+        assert!(
+            !proof.contains(263),
+            "a live sibling must not authorize the dropped pair"
+        );
+        assert!(proof.contains(264));
+        assert!(batch.retain());
+        batch.retire_pairs();
+        assert_eq!(Arc::weak_count(&first), 0);
+        assert_eq!(Arc::weak_count(&second), 1);
+        drop(first);
+        drop(second_user);
+        assert!(
+            !batch.retain(),
+            "Weak controls drop before bank pair charges release"
+        );
+    }
+    #[test]
+    fn stopped_flights_still_require_one_real_completion_and_keep_upload_ownership() {
+        for stop_at in 0..3 {
+            let receipt = UploadReceipt::default();
+            if stop_at == 0 {
+                receipt.stop();
+                receipt.stop();
+            }
+            assert!(receipt.register());
+            assert!(!receipt.register());
+            if stop_at == 1 {
+                receipt.stop();
+            }
+            assert!(!receipt.completed());
+            assert_eq!(receipt.cpu_bytes(123, true), 123);
+            receipt.complete();
+            if stop_at == 2 {
+                receipt.stop();
+            }
+            assert!(receipt.completed());
+            assert!(receipt.stopped());
+            assert!(!receipt.register());
+            assert_eq!(receipt.cpu_bytes(123, true), 0);
+            assert!(!pipeline_pair_ready(&receipt, false));
+        }
+        let request = WorldRequest {
+            session: 7,
+            revision: 1,
+            player: [0.; 3],
+            vehicle: [0.; 3],
+        };
+        let mut parent = PipelineContinuation::counted(RendererOwner::Grass(request, 9));
+        let upload = UploadReceipt::default();
+        parent.watch_upload(upload.clone());
+        let flight = UploadReceipt::default();
+        parent.flight = Some(flight.clone());
+        parent.stop_flight();
+        assert!(flight.stopped());
+        assert!(!upload.stopped());
+        assert!(!parent.drained());
+        flight.complete();
+        assert!(!parent.drained());
+        upload.complete();
+        assert!(parent.drained());
+    }
+    #[test]
+    fn growth_admits_the_full_new_buffer_before_old_storage_is_released() {
+        let growth = PipelineBufferGrowth::new(8, 9, 24);
+        assert_eq!(
+            (growth.capacity, growth.admitted, growth.released),
+            (16, 384, 192)
+        );
+        let same = PipelineBufferGrowth::new(16, 9, 24);
+        assert_eq!((same.capacity, same.admitted, same.released), (16, 0, 0));
+    }
+    #[test]
+    #[ignore = "requires the installed source export"]
+    fn batch_admission_and_reconciliation_keep_global_limits_and_parent_claims() {
+        let reference = crate::reference::ReferenceManifest::from_runtime_json(
+            &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+        )
+        .unwrap();
+        let mut stream = WorldStream::new(&reference, 42).unwrap();
+        for _ in 0..2000 {
+            if stream.available_external_jobs() > 0 {
+                break;
+            }
+            stream.prepare(100.);
+        }
+        assert!(
+            stream.available_external_jobs() > 0,
+            "source frontiers precede external work"
+        );
+        let base = stream.presentation_allocation();
+        let mut one_busy = base;
+        one_busy.jobs += stream.available_external_jobs().saturating_sub(1);
+        stream.set_presentation_allocation(one_busy).unwrap();
+        let staging = 64 * 1024;
+        let receipt_bytes = UploadReceipt::allocation_bytes();
+        let pair_cpu = 1024;
+        let mut parent = stream.reserve_grass_renderer(9, 0).unwrap();
+        let operation = parent
+            .start(&mut stream, receipt_bytes + pair_cpu, staging)
+            .unwrap()
+            .unwrap();
+        let mut accounting = PipelineAccounting::default();
+        accounting.admitted(&operation);
+        accounting.pair_admitted(pair_cpu);
+        operation.reserve_pair(&mut stream, pair_cpu).unwrap();
+        accounting.pair_admitted(pair_cpu);
+        assert_eq!(stream.available_external_jobs(), 0);
+        assert_eq!(stream.presentation_allocation().pending, base.pending + 1);
+        assert!(parent.shares(&operation.physical));
+        assert!(parent.start(&mut stream, 0, staging).unwrap().is_none());
+        assert!(
+            PipelineOperation::independent(&mut stream, 0, staging)
+                .unwrap()
+                .is_none()
+        );
+        accounting
+            .reconcile(
+                &mut stream,
+                std::iter::once(operation.clone()),
+                receipt_bytes + 2 * pair_cpu,
+                staging,
+            )
+            .unwrap();
+        assert_eq!(stream.presentation_allocation().jobs, 2);
+        assert_eq!(
+            stream.presentation_allocation().staging_bytes,
+            base.staging_bytes + staging
+        );
+        assert!(parent.release().is_err());
+        operation.physical.complete();
+        accounting
+            .reconcile(
+                &mut stream,
+                std::iter::once(operation.clone()),
+                receipt_bytes + 2 * pair_cpu,
+                staging,
+            )
+            .unwrap();
+        assert_eq!(stream.available_external_jobs(), 1);
+        assert_eq!(
+            stream.presentation_allocation().staging_bytes,
+            base.staging_bytes
+        );
+        assert_eq!(
+            stream.presentation_allocation().prototype_cpu,
+            base.prototype_cpu + receipt_bytes + 2 * pair_cpu
+        );
+        stream.release_grass_renderer(9, &mut parent).unwrap();
+        assert!(parent.validate(&stream).is_err());
+        drop(parent);
+        drop(operation);
+        accounting
+            .reconcile(&mut stream, std::iter::empty(), 0, staging)
+            .unwrap();
+        assert_eq!(
+            stream.presentation_allocation().prototype_cpu,
+            base.prototype_cpu
+        );
+        stream.set_presentation_allocation(base).unwrap();
+        let mut full = base;
+        full.pending = 32;
+        stream.set_presentation_allocation(full).unwrap();
+        assert!(
+            PipelineOperation::independent(&mut stream, 0, staging)
+                .unwrap()
+                .is_none()
+        );
+        let mut counted =
+            PipelineContinuation::counted(RendererOwner::Grass(stream.frame().request, 10));
+        let counted_op = counted.start(&mut stream, 0, staging).unwrap().unwrap();
+        assert_eq!(stream.presentation_allocation().pending, 32);
+        counted_op.physical.complete();
+        stream.set_presentation_allocation(base).unwrap();
+        let mut stale_request = stream.frame().request;
+        stale_request.session += 1;
+        let stale = PipelineContinuation::counted(RendererOwner::Grass(stale_request, 11));
+        assert!(stale.validate(&stream).is_err());
+        let before = stream.presentation_allocation();
+        assert!(PipelineOperation::independent(&mut stream, usize::MAX / 2, staging).is_err());
+        assert_eq!(
+            stream.presentation_allocation().prototype_cpu,
+            before.prototype_cpu
+        );
+        assert_eq!(stream.presentation_allocation().jobs, before.jobs);
+        assert!(PipelineOperation::independent(&mut stream, 0, 32 * 1024 * 1024 + 1).is_err());
+        assert_eq!(
+            stream.presentation_allocation().staging_bytes,
+            before.staging_bytes
+        );
+        let growth = PipelineBufferGrowth::new(8, 9, 24);
+        let budget = stream
+            .presentation_budgets(before)
+            .into_iter()
+            .find(|b| b.name == "Asset CPU")
+            .unwrap();
+        let mut tight = before;
+        tight.prototype_cpu += budget.limit - budget.used - growth.admitted + 1;
+        stream.set_presentation_allocation(tight).unwrap();
+        assert!(PipelineOperation::independent(&mut stream, growth.admitted, staging).is_err());
+        assert_eq!(
+            stream.presentation_allocation().prototype_cpu,
+            tight.prototype_cpu
+        );
+        // The net size would fit. The full new buffer must fail while the old buffer exists.
+        let mut net = tight;
+        net.prototype_cpu += growth.admitted - growth.released;
+        stream.set_presentation_allocation(net).unwrap();
+        stream.set_presentation_allocation(before).unwrap();
+        // A candidate cannot subtract active charges when it checks overlap.
+        let mut active = before;
+        let staging_budget = stream
+            .presentation_budgets(before)
+            .into_iter()
+            .find(|b| b.name == "Staging")
+            .unwrap();
+        active.staging_bytes += staging_budget.limit - staging_budget.used - staging + 1;
+        stream.set_presentation_allocation(active).unwrap();
+        assert!(PipelineOperation::independent(&mut stream, 0, staging).is_err());
+        assert_eq!(
+            stream.presentation_allocation().staging_bytes,
+            active.staging_bytes
+        );
     }
 }

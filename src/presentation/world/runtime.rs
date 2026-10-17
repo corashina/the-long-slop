@@ -362,7 +362,7 @@ impl WorldPresentation<'_, '_> {
             .request_descriptors(stream, reference, &mut self.prototypes)?;
         // MaterialProperties resolves ShaderRef::Path during preparation.
         // Descriptor discovery stays available while fixed shader inputs wait.
-        if !self.fixed.shaders_ready() {
+        if !self.fixed.pipeline_inputs_ready() {
             return Ok(());
         }
         self.surfaces.prepare_bindings(

@@ -96,6 +96,9 @@ impl SourceWorldVisuals {
     }
 
     pub fn retire_session(&mut self, commands: &mut Commands, meshes: &mut Assets<Mesh>) {
+        if let Some(pending) = &self.pending {
+            pending.continuation.stop_flight();
+        }
         for visual in self.surfaces.drain(..) {
             commands.entity(visual.root).despawn();
             for mesh in visual.meshes {
@@ -189,6 +192,7 @@ impl SourceWorldVisuals {
                 || pending.request.revision != stream.frame().request.revision
                 || pending.request.session != stream.frame().request.session
         }) {
+            self.pending.as_ref().unwrap().continuation.stop_flight();
             if !self.pending.as_ref().unwrap().continuation.drained() {
                 return Ok(());
             }
@@ -259,6 +263,7 @@ impl SourceWorldVisuals {
         let pending = self.pending.as_mut().unwrap();
         for index in 0..pending.meshes.len() {
             let source = stream.prepared_surface().unwrap().1.prototype.as_ref();
+            PipelineTicket::retry(&mut pending.tickets[index * 2]);
             if pending.tickets[index * 2].is_none() {
                 let ticket = if let Some(source) = source {
                     pipelines.request_continuation(
@@ -286,6 +291,7 @@ impl SourceWorldVisuals {
                 self.terrain_casters[tier(key.layer)?].as_ref()
             };
             if let Some(caster) = caster {
+                PipelineTicket::retry(&mut pending.tickets[index * 2 + 1]);
                 if pending.tickets[index * 2 + 1].is_none() {
                     pending.tickets[index * 2 + 1] = pipelines.request_continuation(
                         stream,

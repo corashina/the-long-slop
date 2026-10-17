@@ -831,6 +831,7 @@ impl SourceInstances {
                     complete &= grass.ready(renderer.entity);
                     continue;
                 }
+                PipelineTicket::retry(&mut renderer.tickets[0]);
                 if renderer.tickets[0].is_none() {
                     renderer.tickets[0] = renderer.binding.visible.warm(
                         stream,
@@ -842,6 +843,7 @@ impl SourceInstances {
                 }
                 complete &= ready(&renderer.tickets[0])?;
                 for variant in &mut renderer.variants {
+                    PipelineTicket::retry(&mut variant.tickets[0]);
                     if variant.tickets[0].is_none() {
                         variant.tickets[0] = variant.binding.visible.warm(
                             stream,
@@ -853,6 +855,7 @@ impl SourceInstances {
                     }
                     complete &= ready(&variant.tickets[0])?;
                     if let Some(caster) = &variant.binding.caster {
+                        PipelineTicket::retry(&mut variant.tickets[1]);
                         if variant.tickets[1].is_none() {
                             variant.tickets[1] = pipelines.request_continuation(
                                 stream,
@@ -866,6 +869,7 @@ impl SourceInstances {
                     }
                 }
                 if let Some(caster) = &renderer.binding.caster {
+                    PipelineTicket::retry(&mut renderer.tickets[1]);
                     if renderer.tickets[1].is_none() {
                         renderer.tickets[1] = pipelines.request_continuation(
                             stream,
@@ -1285,6 +1289,9 @@ impl SourceInstances {
             if self.instances[index].retirement.keep(wanted) {
                 index += 1;
                 continue;
+            }
+            if let Some(parent) = &self.instances[index].continuation {
+                parent.stop_flight();
             }
             let mut grass_drained = true;
             for renderer in &self.instances[index].renderers {

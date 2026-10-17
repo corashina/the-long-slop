@@ -3,13 +3,31 @@ use std::sync::{
     atomic::{AtomicU8, Ordering},
 };
 
+// Low bits preserve the original queued, registered, and complete receipt states.
+const RECEIPT_STATE: u8 = 3;
+const STOPPED: u8 = 4;
 /// Shared by material forks, CPU accounting, and the render queue callback.
 #[derive(Clone, Default)]
 pub(crate) struct UploadReceipt(Arc<AtomicU8>);
 
 impl UploadReceipt {
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+    pub(crate) fn owners(&self) -> usize {
+        Arc::strong_count(&self.0)
+    }
+    pub(crate) fn allocation_bytes() -> usize {
+        std::alloc::Layout::new::<[usize; 2]>()
+            .extend(std::alloc::Layout::new::<AtomicU8>())
+            .unwrap()
+            .0
+            .pad_to_align()
+            .size()
+    }
+
     pub fn cpu_bytes(&self, reservation: usize, started: bool) -> usize {
-        if started && self.0.load(Ordering::Acquire) != 2 {
+        if started && self.0.load(Ordering::Acquire) & RECEIPT_STATE != 2 {
             reservation
         } else {
             0
@@ -17,16 +35,28 @@ impl UploadReceipt {
     }
 
     pub fn completed(&self) -> bool {
-        self.0.load(Ordering::Acquire) == 2
+        self.0.load(Ordering::Acquire) & RECEIPT_STATE == 2
     }
 
+    pub(crate) fn stop(&self) {
+        self.0.fetch_or(STOPPED, Ordering::AcqRel);
+    }
+    pub(crate) fn stopped(&self) -> bool {
+        self.0.load(Ordering::Acquire) & STOPPED != 0
+    }
     pub fn register(&self) -> bool {
         self.0
-            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+                (state & RECEIPT_STATE == 0).then_some(state | 1)
+            })
             .is_ok()
     }
 
     pub fn complete(&self) {
-        self.0.store(2, Ordering::Release);
+        self.0
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+                Some((state & !RECEIPT_STATE) | 2)
+            })
+            .unwrap();
     }
 }

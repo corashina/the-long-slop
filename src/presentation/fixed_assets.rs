@@ -261,8 +261,8 @@ impl SourceFixedAssets {
             .find(|r| r.asset == asset)
             .and_then(|r| r.state.plan())
     }
-    pub(crate) fn shaders_ready(&self) -> bool {
-        self.shaders_bound
+    pub(crate) fn pipeline_inputs_ready(&self) -> bool {
+        self.shaders_bound && self.cookie_receipt.completed()
     }
     pub(crate) fn startup_audit(&self) -> serde_json::Value {
         serde_json::json!({

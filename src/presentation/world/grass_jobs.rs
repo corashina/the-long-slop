@@ -399,6 +399,7 @@ impl GrassJobs {
                 ..
             }) = &mut instance.pending
             {
+                PipelineTicket::retry(ticket);
                 if ticket.is_none() {
                     *ticket = pipelines.request_continuation(
                         stream,
@@ -490,6 +491,9 @@ impl GrassJobs {
             return Ok(true);
         };
         self.instances[index].retirement.keep(false);
+        if let Some(parent) = &self.instances[index].continuation {
+            parent.stop_flight();
+        }
         let physical = self.instances[index]
             .continuation
             .as_ref()
