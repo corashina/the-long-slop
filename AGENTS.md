@@ -1,3 +1,6 @@
+- Use GPT-6.1 Sol with high reasoning for all work, including subagents.
+- Use GPT-6 Luna for merges and simple tasks, including subagents.
+- Never use GPT-6 Astra.
 - Be Brief. Use ASD-STE100 Simplified Technical English. Use one word for one idea. Do not use two words for the same thing. Write short sentences. Use 20 words or less for instructions.
 - Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
 - Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
