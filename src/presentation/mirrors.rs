@@ -6,7 +6,10 @@ use super::{
 };
 use crate::{
     app::{Drive, RuntimeReference},
-    mirrors::{MirrorFrame, MirrorInput, MirrorState},
+    mirrors::{
+        MirrorFrame, MirrorInput, MirrorState,
+        capture::{self, GeneratedProof},
+    },
 };
 use bevy::asset::{AssetId, RenderAssetUsages, UntypedAssetId};
 use bevy::camera::{CameraProjection, RenderTarget, visibility::RenderLayers};
@@ -671,6 +674,8 @@ use bevy::render::{
     view::{ExtractedView, RenderVisibleEntities},
 };
 
+use super::world::pipelines::{CandidatePipelines, PipelineIsolation, WorldPipelines};
+
 #[derive(Resource, Default)]
 struct CapturePipelines {
     instance: u64,
@@ -679,6 +684,37 @@ struct CapturePipelines {
     owner_sources: HashMap<(usize, CachedRenderPipelineId), CachedRenderPipelineId>,
 }
 
+impl CapturePipelines {
+    fn authorize(
+        &self,
+        owner: usize,
+        entity: MainEntity,
+        original: CachedRenderPipelineId,
+        surfaces: &MirrorSurfaces,
+        proof: Option<&GeneratedProof>,
+        isolation: &PipelineIsolation,
+    ) -> Option<CachedRenderPipelineId> {
+        let owner_screen = surfaces
+            .entries
+            .get(owner)
+            .is_some_and(|entry| MainEntity::from(entry.0) == entity);
+        capture::authorize(
+            original,
+            owner_screen,
+            self.owner_sources.get(&(owner, original)).copied(),
+            |id| {
+                let generated = proof.is_some_and(|p| p.contains(id.id()));
+                // Candidate markers retire later in PrepareBindGroups. A generated proof
+                // already excludes unpromoted/cancelled owners and can outlive that marker.
+                capture::admitted(
+                    self.sources.contains(&id),
+                    generated,
+                    isolation.0.contains(&id),
+                )
+            },
+        )
+    }
+}
 fn warm_capture_pipelines(
     world: &mut World,
     cache: &mut CapturePipelines,
@@ -807,6 +843,11 @@ fn prepare_capture_pipelines(
         cache.sources.clear();
     }
     warm_capture_pipelines(world, &mut cache, &surfaces);
+    let bank = world.resource::<WorldPipelines>().clone();
+    // Retirement/publication and extraction precede this snapshot. The active bank
+    // supplies the world session; the mirror instance is a separate lifecycle.
+    bank.refresh_capture_proof(world.resource::<super::pipeline_ownership::PipelineOwners>());
+    let proof = bank.capture_proof();
     let mut capture_views = [None; 3];
     for (view, role, stamp) in views.iter(world) {
         if stamp.0 != surfaces.instance {
@@ -822,23 +863,34 @@ fn prepare_capture_pipelines(
                 continue;
             };
             for (entity, original) in pipelines.iter_mut() {
-                let source_id = if surfaces
-                    .entries
-                    .get(owner)
-                    .is_some_and(|entry| MainEntity::from(entry.0) == *entity)
-                {
-                    cache.owner_sources.get(&(owner, *original)).copied()
-                } else {
-                    Some(*original)
-                };
-                if let Some(id) = source_id.filter(|id| cache.sources.contains(id)) {
+                let id = cache.authorize(
+                    owner,
+                    *entity,
+                    *original,
+                    &surfaces,
+                    proof.as_deref(),
+                    world.resource::<PipelineIsolation>(),
+                );
+                if let Some(id) = id {
                     *original = id;
-                } else if cache.sealed && source_id.is_none_or(|id| !cache.sources.contains(&id)) {
+                } else if cache.sealed {
                     let mut status = world.resource::<MirrorGpuStatus>().0.lock().unwrap();
                     if status.failure.is_none() {
                         status.failure = Some(format!(
                             "Mirror pipeline outside loading contract: {original:?}"
                         ));
+                        status.failure_context = Some(capture_failure_context(
+                            world,
+                            &cache,
+                            &surfaces,
+                            owner,
+                            *entity,
+                            *original,
+                            capture_views[owner],
+                            &bank,
+                            proof.as_deref(),
+                        ));
+                        error!("{}", status.failure_context.as_deref().unwrap());
                         status.ready = false;
                     }
                 }
@@ -846,6 +898,105 @@ fn prepare_capture_pipelines(
         }
     });
     world.insert_resource(cache);
+}
+
+// The first terminal failure retains at most 4096 UTF-8 bytes.
+struct FailureContext(String);
+impl std::fmt::Write for FailureContext {
+    fn write_str(&mut self, value: &str) -> std::fmt::Result {
+        let mut length = value.len().min(4096 - self.0.len());
+        while !value.is_char_boundary(length) {
+            length -= 1;
+        }
+        self.0.push_str(&value[..length]);
+        Ok(())
+    }
+}
+fn capture_failure_context(
+    world: &World,
+    cache: &CapturePipelines,
+    surfaces: &MirrorSurfaces,
+    owner: usize,
+    entity: MainEntity,
+    original: CachedRenderPipelineId,
+    view: Option<bevy::render::view::RetainedViewEntity>,
+    bank: &WorldPipelines,
+    proof: Option<&GeneratedProof>,
+) -> String {
+    use std::fmt::Write;
+    let mut context = FailureContext(String::with_capacity(4096));
+    let mapped = cache.owner_sources.get(&(owner, original)).copied();
+    let owner_screen = surfaces
+        .entries
+        .get(owner)
+        .is_some_and(|entry| MainEntity::from(entry.0) == entity);
+    let material = world
+        .resource::<RenderMaterialInstances>()
+        .instances
+        .get(&entity)
+        .map(|m| m.asset_id);
+    let mesh = world
+        .resource::<RenderMeshInstances>()
+        .render_mesh_queue_data(entity)
+        .map(|m| m.mesh_asset_id());
+    let candidate = world.resource::<CandidatePipelines>().0.as_ref();
+    let key = view.and_then(|v| world.resource::<ViewKeyCache>().get(&v));
+    let _ = write!(
+        context,
+        "Mirror contract instance={} session={} owner={} entity={:?} mesh={:?} material={:?} original={:?} mapped={:?} owner_screen={} static={} generated={} isolated={} view_key={:?} warmup_pairs={} static_sources={} ",
+        surfaces.instance,
+        bank.session(),
+        owner,
+        entity,
+        mesh,
+        material,
+        original,
+        mapped,
+        owner_screen,
+        cache.sources.contains(&original),
+        proof.is_some_and(|p| p.contains(original.id())),
+        world.resource::<PipelineIsolation>().0.contains(&original),
+        key,
+        world.resource::<MirrorWarmup>().pairs.len(),
+        cache.sources.len()
+    );
+    let _ = write!(context, "active=[");
+    bank.write_capture_context(original, &mut context);
+    let _ = write!(context, "] candidate=[");
+    if let Some(candidate) = candidate {
+        candidate.write_capture_context(original, &mut context);
+    } else {
+        let _ = write!(context, "absent");
+    }
+    let owner_state = world
+        .resource::<super::pipeline_ownership::PipelineOwners>()
+        .owner(original);
+    let _ = write!(
+        context,
+        "] gpu_owner={:?} ",
+        owner_state.as_ref().map(|o| (o.isolated(), o.cancelled()))
+    );
+    if let Some(published) = world
+        .resource::<PipelineCache>()
+        .pipelines()
+        .nth(original.id())
+    {
+        if let bevy::material::descriptor::PipelineDescriptor::RenderPipelineDescriptor(
+            descriptor,
+        ) = &published.descriptor
+        {
+            let _ = write!(
+                context,
+                "label={:?} vertex_defs={:?} fragment_defs={:?}",
+                descriptor.label,
+                descriptor.vertex.shader_defs,
+                descriptor.fragment.as_ref().map(|f| &f.shader_defs)
+            );
+        }
+    } else {
+        let _ = write!(context, "descriptor=unpublished");
+    }
+    context.0
 }
 
 pub(crate) struct SetMirrorMaterial<const I: usize>;
@@ -924,10 +1075,12 @@ fn queue_capture_meshes(
         &MirrorInstance,
     )>,
     specialized_material_pipeline_cache: ResMut<SpecializedMaterialPipelineCache>,
-    (surfaces, sky, captures): (
+    (surfaces, sky, captures, bank, isolation): (
         Res<MirrorSurfaces>,
         Res<super::sky::SkyVariants>,
         Res<CapturePipelines>,
+        Res<WorldPipelines>,
+        Res<PipelineIsolation>,
     ),
     (draw_opaque, draw_mask, draw_transparent, draw_transmissive): (
         Res<DrawFunctions<Opaque3d>>,
@@ -936,11 +1089,12 @@ fn queue_capture_meshes(
         Res<DrawFunctions<Transmissive3d>>,
     ),
 ) {
+    let proof = bank.capture_proof();
     for (view, visible_entities, role, stamp) in &views {
         if stamp.0 != surfaces.instance {
             continue;
         }
-        let MirrorViewRole::Capture(_) = role else {
+        let MirrorViewRole::Capture(owner) = role else {
             continue;
         };
         let (
@@ -990,9 +1144,16 @@ fn queue_capture_meshes(
                 continue;
             };
 
-            if !captures.sources.contains(&pipeline_id) {
+            let Some(pipeline_id) = captures.authorize(
+                *owner,
+                *visible_entity,
+                pipeline_id,
+                &surfaces,
+                proof.as_deref(),
+                &isolation,
+            ) else {
                 continue;
-            }
+            };
             // Check for material instance, mesh, and material. If any of these
             // fail, it's probably because the relevant asset hasn't loaded yet.
             // Retry from the retained visible set on the next frame.
@@ -1183,6 +1344,7 @@ struct MirrorGpuData {
     validation: [u32; 3],
     ready: bool,
     failure: Option<String>,
+    failure_context: Option<String>,
     warmup_stage: u8,
     capture_pipelines: u32,
     pipelines_pending: u32,
@@ -1191,6 +1353,7 @@ struct MirrorGpuData {
 #[derive(serde::Serialize)]
 pub(crate) struct MirrorAudit {
     instance: u64,
+    failure_context: Option<String>,
     ready: bool,
     banks_mask: u8,
     warmup_stage: u8,
@@ -1215,6 +1378,7 @@ impl MirrorGpuStatus {
         }
         MirrorAudit {
             instance: status.instance,
+            failure_context: status.failure_context.clone(),
             ready: status.ready,
             banks_mask,
             warmup_stage: status.warmup_stage,

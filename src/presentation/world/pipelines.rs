@@ -1,4 +1,5 @@
 //! Compile admitted material variants before collision and visual publication.
+use crate::mirrors::capture::{GeneratedProof, SourceProof, TICKET_PIPELINES, proof_capacity};
 use crate::world::renderer_pending::{PipelineAccounting, PipelineContinuation, PipelineOperation};
 use crate::{
     presentation::materials::RenderingState, reference::ReferenceError, world::WorldStream,
@@ -23,7 +24,9 @@ use bevy::{
     },
     shader::ShaderCacheError,
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
+// Arc counters, Mutex, Vec header and payload are admitted before construction.
+const PROOF_CONTROL_BYTES: usize = size_of::<Mutex<GeneratedProof>>() + 2 * size_of::<usize>();
 struct PipelineJob {
     operation: PipelineOperation,
     session: u64,
@@ -56,6 +59,8 @@ pub struct WorldPipelines {
     jobs: Arc<Mutex<Vec<PipelineTicket>>>,
     accounting: PipelineAccounting,
     cache_reserved: bool,
+    session: u64,
+    capture_proof: Option<Arc<Mutex<GeneratedProof>>>,
 }
 #[derive(Resource, Clone, ExtractResource, Default)]
 pub struct CandidatePipelines(
@@ -125,6 +130,68 @@ impl WorldPipelines {
         Ok(())
     }
 
+    pub(crate) fn session(&self) -> u64 {
+        self.session
+    }
+    pub(crate) fn capture_proof(&self) -> Option<MutexGuard<'_, GeneratedProof>> {
+        self.capture_proof
+            .as_ref()
+            .map(|proof| proof.lock().unwrap())
+    }
+    pub(crate) fn refresh_capture_proof(
+        &self,
+        owners: &super::super::pipeline_ownership::PipelineOwners,
+    ) {
+        let Some(mut proof) = self.capture_proof() else {
+            return;
+        };
+        proof.ids.clear();
+        for ticket in self.jobs.lock().unwrap().iter() {
+            let job = ticket.0.lock().unwrap();
+            proof.include_ticket(
+                self.session,
+                job.session,
+                job.state == RenderingState::Ready,
+                job.operation.physical.completed(),
+                Arc::strong_count(&ticket.0) > 1,
+                job.ids.iter().map(|id| {
+                    let owner = owners.owner(*id);
+                    SourceProof {
+                        id: id.id(),
+                        isolated: owner.as_ref().is_some_and(|o| o.isolated()),
+                        cancelled: owner.as_ref().is_some_and(|o| o.cancelled()),
+                    }
+                }),
+            );
+        }
+        proof.finish();
+    }
+    // Only the first terminal mirror failure requests this diagnostic.
+    pub(crate) fn write_capture_context(
+        &self,
+        id: CachedRenderPipelineId,
+        out: &mut impl std::fmt::Write,
+    ) {
+        for ticket in self.jobs.lock().unwrap().iter() {
+            let job = ticket.0.lock().unwrap();
+            if !job.ids.contains(&id) {
+                continue;
+            }
+            let _ = write!(
+                out,
+                "session={} state={:?} receipt={} live={} material={} mesh={:?} material_id={:?}",
+                job.session,
+                job.state,
+                job.operation.physical.completed(),
+                Arc::strong_count(&ticket.0) > 1,
+                job.material_type,
+                job.mesh,
+                job.material
+            );
+            return;
+        }
+        let _ = out.write_str("absent");
+    }
     pub fn owns(&self, id: CachedRenderPipelineId) -> bool {
         self.jobs
             .lock()
@@ -170,7 +237,21 @@ impl WorldPipelines {
         material: &Handle<M>,
         shadows: bool,
     ) -> Result<Option<PipelineTicket>, ReferenceError> {
+        let old_capacity = self.capture_proof().map_or(0, |proof| proof.ids.capacity());
+        let capacity = proof_capacity(old_capacity, self.jobs.lock().unwrap().len() + 1);
+        let proof_growth = if capacity > old_capacity {
+            capacity * size_of::<usize>()
+        } else {
+            0
+        };
+        let proof_control = if self.capture_proof.is_none() {
+            PROOF_CONTROL_BYTES
+        } else {
+            0
+        };
         let cpu = ticket_bytes()
+            + proof_growth
+            + proof_control
             + if self.cache_reserved {
                 0
             } else {
@@ -184,6 +265,20 @@ impl WorldPipelines {
         let Some(operation) = operation else {
             return Ok(None);
         };
+        // Admission retains the old buffer while reserving the complete new buffer.
+        if proof_growth != 0 {
+            let ids = Vec::with_capacity(capacity);
+            assert_eq!(ids.capacity(), capacity);
+            if let Some(proof) = &self.capture_proof {
+                proof.lock().unwrap().ids = ids;
+            } else {
+                self.capture_proof = Some(Arc::new(Mutex::new(GeneratedProof { ids })));
+            }
+            let mut allocation = stream.presentation_allocation();
+            allocation.prototype_cpu -= old_capacity * size_of::<usize>();
+            stream.set_presentation_allocation(allocation)?;
+        }
+        self.session = stream.frame().request.session;
         self.cache_reserved = true;
         self.accounting.admitted(&operation);
         let ticket = PipelineTicket(Arc::new(Mutex::new(PipelineJob {
@@ -196,7 +291,7 @@ impl WorldPipelines {
             shadows,
             state: RenderingState::Loading,
             waiting: "queued",
-            ids: Vec::with_capacity(32),
+            ids: Vec::with_capacity(TICKET_PIPELINES),
         })));
         self.jobs.lock().unwrap().push(ticket.clone());
         Ok(Some(ticket))
@@ -209,6 +304,7 @@ impl WorldPipelines {
             .all(|t| t.0.lock().unwrap().operation.physical.completed())
     }
     pub fn prepare(&mut self, stream: &mut WorldStream) -> Result<(), ReferenceError> {
+        self.session = stream.frame().request.session;
         let mut jobs = self.jobs.lock().unwrap();
         jobs.retain(|ticket| {
             let mut job = ticket.0.lock().unwrap();
@@ -228,7 +324,9 @@ impl WorldPipelines {
 }
 fn ticket_bytes() -> usize {
     // Include the ticket Arc/Mutex and the shared physical receipt control blocks.
-    std::mem::size_of::<PipelineJob>() + 64 + 32 * std::mem::size_of::<CachedRenderPipelineId>()
+    std::mem::size_of::<PipelineJob>()
+        + 64
+        + TICKET_PIPELINES * std::mem::size_of::<CachedRenderPipelineId>()
 }
 fn compile(world: &mut World) {
     let Some(input) = world.get_resource::<WorldPipelines>().cloned() else {
@@ -343,7 +441,7 @@ fn compile(world: &mut World) {
                         }
                     }
                 }
-                if keys.len() > 32 {
+                if keys.len() > TICKET_PIPELINES {
                     job.state = RenderingState::Failed(
                         "Source material pipeline reservation exceeded".into(),
                     );

@@ -1,3 +1,6 @@
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) mod capture;
+
 use rapier3d::math::{Rotation, Vector};
 
 use crate::reference::{MirrorRecord, MirrorRulesReference};
