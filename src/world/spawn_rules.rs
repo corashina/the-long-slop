@@ -32,10 +32,43 @@ impl<'a> FieldAccess<'a> for &'a WorldFields {
 }
 #[derive(Clone, Copy)]
 pub(crate) struct SourceRecord<'a> {
+    pub location: RecordLocation,
     pub source: &'a SourceId,
     pub class_name: &'a str,
     pub fields: Fields<'a>,
     pub execution_order: i32,
+}
+/// A location in the immutable checked graph owned by one stream.
+#[derive(Clone, Copy)]
+pub(crate) enum RecordLocation {
+    Compact(usize),
+    Full(usize, i32),
+}
+impl RecordLocation {
+    pub fn record(self, reference: &WorldReference) -> SourceRecord<'_> {
+        match self {
+            Self::Compact(index) => {
+                let r = &reference.initialization.components[index];
+                SourceRecord {
+                    location: self,
+                    source: &r.source,
+                    class_name: &r.class_name,
+                    fields: Fields::Compact(&r.fields),
+                    execution_order: r.execution_order,
+                }
+            }
+            Self::Full(index, execution_order) => {
+                let r = &reference.records[index];
+                SourceRecord {
+                    location: self,
+                    source: &r.source,
+                    class_name: &r.class_name,
+                    fields: Fields::Record(&r.fields),
+                    execution_order,
+                }
+            }
+        }
+    }
 }
 pub(crate) struct SourceNode<'a> {
     pub owner: &'a SourceId,
@@ -203,13 +236,7 @@ impl SourceRules {
             ))
         })?;
         if compact {
-            let r = &reference.initialization.components[i];
-            return Ok(SourceRecord {
-                source: &r.source,
-                class_name: &r.class_name,
-                fields: Fields::Compact(&r.fields),
-                execution_order: r.execution_order,
-            });
+            return Ok(RecordLocation::Compact(i).record(reference));
         }
         let r = &reference.records[i];
         let order = if let Some(WorldValue::Link(script)) = r.fields.get("m_Script") {
@@ -227,12 +254,7 @@ impl SourceRules {
         } else {
             0
         };
-        Ok(SourceRecord {
-            source: &r.source,
-            class_name: &r.class_name,
-            fields: Fields::Record(&r.fields),
-            execution_order: order,
-        })
+        Ok(RecordLocation::Full(i, order).record(reference))
     }
     pub fn node<'a>(
         &self,

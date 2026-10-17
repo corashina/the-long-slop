@@ -136,6 +136,7 @@ pub struct WorldStream {
     package_id: String,
     generation_revision: u64,
     structure_helpers: super::structure_helpers::StructureHelpers,
+    building_components: super::building_extras::BuildingComponents,
     reference: Arc<WorldReference>,
     presentation: PresentationAllocation,
     overlap: WorldMetrics,
@@ -536,6 +537,7 @@ impl WorldStream {
             lamp_bindings: Vec::new(),
             seed,
             structure_helpers,
+            building_components: Default::default(),
             presentation: PresentationAllocation::default(),
             overlap: WorldMetrics::default(),
             dependency_staging_reserve: 0,
@@ -1311,19 +1313,32 @@ impl WorldStream {
                 self.wanted_structures.push(placement.clone());
             }
         }
+        self.append_ramps();
+        self.refresh_poles();
+        self.ready_structures
+            .retain(|id| self.wanted_structures.iter().any(|p| &p.id == id));
+        removed || count != self.wanted_structures.iter().filter(|p| numeric(p)).count()
+    }
+    fn append_ramps(&mut self) {
+        let room = if self
+            .building_components
+            .needs_lookup(&self.wanted_structures)
+        {
+            PROTOTYPE_CPU.saturating_sub(self.metrics().prototype_cpu_bytes)
+        } else {
+            0
+        };
         if let Err(error) = super::building_extras::append_ramps(
             &self.reference,
             &self.contents.rules,
+            &mut self.building_components,
+            room,
             self.seed,
             &mut self.wanted_structures,
             MAX_OBJECTS,
         ) {
             self.failure = Some(error.0);
         }
-        self.refresh_poles();
-        self.ready_structures
-            .retain(|id| self.wanted_structures.iter().any(|p| &p.id == id));
-        removed || count != self.wanted_structures.iter().filter(|p| numeric(p)).count()
     }
     fn refresh_poles(&mut self) {
         self.wanted_structures
@@ -1415,15 +1430,7 @@ impl WorldStream {
                 self.wanted_structures.push(p.clone());
             }
         }
-        if let Err(error) = super::building_extras::append_ramps(
-            &self.reference,
-            &self.contents.rules,
-            self.seed,
-            &mut self.wanted_structures,
-            MAX_OBJECTS,
-        ) {
-            self.failure = Some(error.0);
-        }
+        self.append_ramps();
         self.ready_structures
             .retain(|id| self.wanted_structures.iter().any(|p| &p.id == id));
     }
@@ -3719,6 +3726,7 @@ impl WorldStream {
                     .sum::<usize>()
                 + self.road_light.retained_bytes()
                 + self.contents.rules.retained_bytes()
+                + self.building_components.retained_bytes()
                 + self.structure_helpers.retained_bytes()
                 + self.shared_cpu_bytes.unwrap_or(0)
                 + self.presentation.prototype_cpu

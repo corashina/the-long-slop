@@ -86,8 +86,22 @@ impl Plugin for WorldPipelinePlugin {
 impl WorldPipelines {
     pub(crate) fn startup_audit(&self) -> serde_json::Value {
         let jobs = self.jobs.lock().unwrap();
+        let mut requests = std::collections::HashSet::new();
+        let mut compiled = std::collections::HashSet::new();
+        let mut ready = 0;
+        for ticket in jobs.iter() {
+            let job = ticket.0.lock().unwrap();
+            requests.insert((job.mesh, job.material, job.shadows));
+            compiled.extend(job.ids.iter().copied());
+            ready += usize::from(
+                job.state == RenderingState::Ready && job.operation.physical.completed(),
+            );
+        }
         serde_json::json!({
             "retained": jobs.len(),
+            "unique_requests": requests.len(),
+            "unique_compiled_pipelines": compiled.len(),
+            "ready": ready,
             "pending": jobs.iter().filter_map(|ticket| {
                 let job = ticket.0.lock().unwrap();
                 (job.state != RenderingState::Ready).then(|| serde_json::json!({
