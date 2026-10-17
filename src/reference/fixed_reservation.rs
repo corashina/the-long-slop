@@ -314,6 +314,100 @@ pub fn png_chain_staging(
     }
     Ok(staging)
 }
+/// Original single-layer BC blocks, in ascending authored mip order.
+pub fn bc_payload(
+    format: super::NativeBcFormat,
+    width: u32,
+    height: u32,
+    count: u32,
+) -> Result<usize, ReferenceError> {
+    require(
+        width > 0 && height > 0 && count > 0 && count <= 32 - width.max(height).leading_zeros(),
+        "BC extent or mip count",
+    )?;
+    (0..count).try_fold(0usize, |sum, level| {
+        let w = (width >> level).max(1) as usize;
+        let h = (height >> level).max(1) as usize;
+        w.div_ceil(4)
+            .checked_mul(h.div_ceil(4))
+            .and_then(|n| n.checked_mul(format.block_bytes()))
+            .and_then(|n| n.checked_add(sum))
+            .ok_or_else(overflow)
+    })
+}
+pub fn validate_native_bc(texture: &super::TextureRecord) -> Result<usize, ReferenceError> {
+    use super::{NativeBcFormat, TextureEncoding, TextureStorage};
+    let TextureStorage::NativeBc {
+        format,
+        source_format,
+        width,
+        height,
+        mip_count,
+        image_count,
+        dimension,
+        mips_stripped,
+        input,
+    } = &texture.storage
+    else {
+        return Err(ReferenceError("Expected native BC storage".into()));
+    };
+    require(
+        texture.encoding == TextureEncoding::Rgba
+            && texture.source_encoding == TextureEncoding::Rgba
+            && matches!(
+                (format, source_format),
+                (NativeBcFormat::Bc1, 10 | 28) | (NativeBcFormat::Bc3, 12 | 29)
+            )
+            && *image_count == 1
+            && *dimension == 2
+            && *mips_stripped == 0
+            && *mip_count == texture.sampler.mip_count
+            && *mip_count == 32 - width.max(height).leading_zeros()
+            && !texture.source.file.is_empty()
+            && texture.source.path_id != 0,
+        "Native BC source gate",
+    )?;
+    let space = if texture.color_space == super::TextureColorSpace::Srgb {
+        "srgb"
+    } else {
+        "linear"
+    };
+    require(
+        input.file
+            == format!(
+                "reference/texture-{}-{}-{space}.bc",
+                texture.source.file, texture.source.path_id
+            ),
+        "Native BC source identity",
+    )?;
+    input.validate()?;
+    let bytes = bc_payload(*format, *width, *height, *mip_count)?;
+    require(
+        input.image_size.is_none() && input.bytes as usize == bytes,
+        "Native BC receipt bytes",
+    )?;
+    Ok(bytes)
+}
+/// Validate metadata and receipts before scheduling any checked input.
+pub fn primary_staging(
+    texture: &super::TextureRecord,
+    catalog: &FileCatalog,
+) -> Result<usize, ReferenceError> {
+    match &texture.storage {
+        super::TextureStorage::PngChain { mips } => {
+            png_chain_staging(mips, texture.sampler.mip_count, catalog)
+        }
+        super::TextureStorage::NativeBc { width, input, .. } => {
+            let bytes = validate_native_bc(texture)?;
+            require(
+                catalog.file(&input.file)? == input,
+                "Native BC catalog receipt",
+            )?;
+            png_staging(bytes, *width)
+        }
+    }
+}
+
 pub fn png_cpu(pixels: usize, max_staging: usize) -> Result<usize, ReferenceError> {
     pixels
         .checked_mul(2)

@@ -45,15 +45,10 @@ fn installed_png_chains_fit_unchanged_single_job_caps() {
         .flat_map(|m| &m.properties.textures)
         .chain(&reference.plates.material.textures)
     {
-        let staging = png_chain_staging(
-            &texture.mips,
-            texture.sampler.mip_count,
-            &reference.file_catalog,
-        )
-        .unwrap();
-        let cpu = png_cpu(png_pixels(&texture.mips).unwrap(), staging).unwrap();
-        assert!(staging <= 32 * 1024 * 1024, "{}: {staging}", texture.file);
-        assert!(cpu <= 256 * 1024 * 1024, "{}: {cpu}", texture.file);
+        let staging = primary_staging(texture, &reference.file_catalog).unwrap();
+        let cpu = png_cpu(texture.payload_bytes().unwrap(), staging).unwrap();
+        assert!(staging <= 32 * 1024 * 1024, "{}: {staging}", texture.file());
+        assert!(cpu <= 256 * 1024 * 1024, "{}: {cpu}", texture.file());
         count += 1;
     }
     for texture in &reference.render_lighting.textures {

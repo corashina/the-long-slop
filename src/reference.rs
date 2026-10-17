@@ -1045,6 +1045,15 @@ impl ReferenceManifest {
         )?;
         self.rendering
             .validate(&self.assets, self.lighting.cycle.sky_geometry.asset)?;
+        for texture in self
+            .rendering
+            .materials
+            .iter()
+            .flat_map(|m| &m.properties.textures)
+            .chain(&self.plates.material.textures)
+        {
+            fixed_reservation::primary_staging(texture, &self.file_catalog)?;
+        }
         let asset_ids = ids(self.assets.iter().map(|r| r.id), "duplicate asset ID")?;
         let node_ids = ids(self.nodes.iter().map(|r| r.id), "duplicate node ID")?;
         self.ui.validate()?;

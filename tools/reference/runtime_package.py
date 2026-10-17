@@ -116,6 +116,13 @@ def build_file_catalog(manifest: dict, output: Path) -> dict:
         if receipt['image_size']:
             reserve = max(reserve, checked(3 * receipt['bytes'] + 2 * 1024 * 1024
                                           + 128 * receipt['image_size'][0]))
+    from .native_bc import validate_storage
+    for material in manifest.get('rendering', {}).get('materials', []):
+        for texture in material['properties']['textures']:
+            validate_storage(texture, files)
+            storage = texture['storage']
+            if storage['kind'] == 'native_bc':
+                reserve = max(reserve, checked(3 * storage['input']['bytes'] + 2 * 1024 * 1024 + 128 * storage['width']))
     if reserve >= MAX_STAGING:
         raise ValueError('World input overlap leaves no generation capacity')
     for asset in manifest['assets']:
@@ -136,7 +143,7 @@ def prepare_package(manifest, output):
     export_manifest_texture_batches(manifest, output)
     manifest['file_catalog'] = build_file_catalog(manifest, output)
     shaders = Path(__file__).resolve().parents[2] / 'web/assets/shaders'
-    shutil.copytree(shaders, output / 'shaders')
+    shutil.copytree(shaders, output / 'shaders', dirs_exist_ok=True)
     manifest['file_catalog']['files'].extend(file_receipt(path, f'shaders/{path.relative_to(shaders).as_posix()}')
         for path in sorted(shaders.rglob('*')) if path.is_file())
     manifest['content_base'] = f"assets/runtime/{package_id(manifest)}/"

@@ -57,7 +57,7 @@ pub struct WorldPresentation<'w, 's> {
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub skins: ResMut<'w, Assets<SkinnedMeshInverseBindposes>>,
     pub batches: ResMut<'w, Assets<crate::presentation::texture_batches::SourceTextureBatch>>,
-    pub chains: ResMut<'w, Assets<crate::presentation::png_mip_chain::SourcePngMipChain>>,
+    pub chains: ResMut<'w, Assets<crate::presentation::primary_image::SourcePrimaryImage>>,
     pub images: ResMut<'w, Assets<Image>>,
     pub server: Res<'w, AssetServer>,
     pub lights: ResMut<'w, SourceLighting>,

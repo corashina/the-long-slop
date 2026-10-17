@@ -172,7 +172,7 @@ pub enum TextureEncoding {
 pub struct TextureRecord {
     pub slot: String,
     pub source: SourceId,
-    pub file: String,
+    pub storage: TextureStorage,
     pub color_space: TextureColorSpace,
     pub encoding: TextureEncoding,
     pub source_encoding: TextureEncoding,
@@ -180,7 +180,73 @@ pub struct TextureRecord {
     pub scale: [f32; 2],
     pub offset: [f32; 2],
     pub sampler: SamplerRecord,
-    pub mips: Vec<TextureMip>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TextureStorage {
+    PngChain {
+        mips: Vec<TextureMip>,
+    },
+    NativeBc {
+        format: NativeBcFormat,
+        source_format: u32,
+        width: u32,
+        height: u32,
+        mip_count: u32,
+        image_count: u32,
+        dimension: u32,
+        mips_stripped: u32,
+        input: super::FileReceipt,
+    },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeBcFormat {
+    Bc1,
+    Bc3,
+}
+impl NativeBcFormat {
+    pub fn block_bytes(self) -> usize {
+        match self {
+            Self::Bc1 => 8,
+            Self::Bc3 => 16,
+        }
+    }
+}
+impl TextureRecord {
+    pub fn file(&self) -> &str {
+        match &self.storage {
+            TextureStorage::PngChain { mips } => mips.first().map_or("", |m| m.file.as_str()),
+            TextureStorage::NativeBc { input, .. } => &input.file,
+        }
+    }
+    pub fn payload_bytes(&self) -> Result<usize, ReferenceError> {
+        match &self.storage {
+            TextureStorage::PngChain { mips } => super::fixed_reservation::png_pixels(mips),
+            TextureStorage::NativeBc {
+                format,
+                width,
+                height,
+                mip_count,
+                ..
+            } => super::fixed_reservation::bc_payload(*format, *width, *height, *mip_count),
+        }
+    }
+    pub fn retained_cpu_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.slot.capacity()
+            + self.source.file.capacity()
+            + match &self.storage {
+                TextureStorage::PngChain { mips } => {
+                    mips.capacity() * std::mem::size_of::<TextureMip>()
+                        + mips.iter().map(|m| m.file.capacity()).sum::<usize>()
+                }
+                TextureStorage::NativeBc { input, .. } => {
+                    input.file.capacity() + input.sha256.capacity()
+                }
+            }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -193,7 +259,7 @@ pub struct SamplerRecord {
     pub mip_bias: f32,
     pub mip_count: u32,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TextureMip {
     pub file: String,
@@ -578,7 +644,7 @@ impl RenderingRecord {
                     (texture.source_encoding != TextureEncoding::Rag
                         || material.shader_family == ShaderFamily::PlayerModel)
                         && source(&texture.source)
-                        && safe_path(&texture.file)
+                        && safe_path(texture.file())
                         && texture.uv_channel <= 1
                         && finite(&texture.scale)
                         && finite(&texture.offset),
@@ -602,40 +668,48 @@ impl RenderingRecord {
                         && sampler.wrap_v <= 3
                         && sampler.aniso <= 16
                         && sampler.mip_bias.is_finite()
-                        && sampler.mip_count > 0
-                        && sampler.mip_count as usize == texture.mips.len(),
+                        && sampler.mip_count > 0,
                     &field,
                 )?;
-                require(
-                    texture
-                        .mips
-                        .first()
-                        .is_some_and(|mip| mip.file == texture.file),
-                    &field,
-                )?;
-                let mut dimensions: Option<(u32, u32)> = None;
-                let mut paths = HashSet::new();
-                for mip in &texture.mips {
-                    require(
-                        safe_path(&mip.file)
-                            && paths.insert(&mip.file)
-                            && mip.width > 0
-                            && mip.height > 0
-                            && asset.dependencies.iter().any(|dependency| {
-                                dependency.file == mip.file
-                                    && dependency.image_size == Some([mip.width, mip.height])
-                            }),
-                        &field,
-                    )?;
-                    if let Some((width, height)) = dimensions {
+                match &texture.storage {
+                    TextureStorage::PngChain { mips } => {
+                        require(mips.len() == sampler.mip_count as usize, &field)?;
+                        let mut dimensions: Option<(u32, u32)> = None;
+                        let mut paths = HashSet::new();
+                        for mip in mips {
+                            require(
+                                safe_path(&mip.file)
+                                    && paths.insert(&mip.file)
+                                    && mip.width > 0
+                                    && mip.height > 0
+                                    && asset.dependencies.iter().any(|dependency| {
+                                        dependency.file == mip.file
+                                            && dependency.image_size
+                                                == Some([mip.width, mip.height])
+                                    }),
+                                &field,
+                            )?;
+                            if let Some((width, height)) = dimensions {
+                                require(
+                                    (width > 1 || height > 1)
+                                        && mip.width == (width / 2).max(1)
+                                        && mip.height == (height / 2).max(1),
+                                    &field,
+                                )?;
+                            }
+                            dimensions = Some((mip.width, mip.height));
+                        }
+                    }
+                    TextureStorage::NativeBc { input, .. } => {
+                        super::fixed_reservation::validate_native_bc(texture)?;
                         require(
-                            (width > 1 || height > 1)
-                                && mip.width == (width / 2).max(1)
-                                && mip.height == (height / 2).max(1),
+                            asset
+                                .dependencies
+                                .iter()
+                                .any(|dependency| dependency == input),
                             &field,
                         )?;
                     }
-                    dimensions = Some((mip.width, mip.height));
                 }
             }
             for (slot, default) in &material.properties.defaults {

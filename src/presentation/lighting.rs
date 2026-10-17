@@ -281,8 +281,8 @@ impl ExtractedLighting {
 pub struct SourceLightingPlugin;
 impl Plugin for SourceLightingPlugin {
     fn build(&self, app: &mut App) {
-        app.init_asset::<super::png_mip_chain::SourcePngMipChain>()
-            .init_asset_loader::<super::png_mip_chain::SourcePngMipChainLoader>()
+        app.init_asset::<super::primary_image::SourcePrimaryImage>()
+            .init_asset_loader::<super::primary_image::SourcePrimaryImageLoader>()
             .init_asset::<super::texture_batches::SourceTextureBatch>()
             .init_asset_loader::<super::texture_batches::SourceTextureBatchLoader>()
             .init_asset_loader::<super::textures::SourceImageLoader>()

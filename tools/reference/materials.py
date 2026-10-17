@@ -267,6 +267,11 @@ def recover_material(source, reader, color_override=None, condition=None, textur
         state.update({key: bool(value) if key == 'z_write' else int(value) for key, value in pass_values.items()})
     if family == 'player_model' and condition is not None:
         raise ValueError(f'{source_id(reader)}: unsupported player condition')
+    from .native_bc import storage
+    for entry in textures:
+        tr = source.get(entry['source']['file'], entry['source']['path_id'])
+        entry['storage'] = storage(source, tr, entry)
+        entry.pop('file'); entry.pop('mips')
     return {'source': source_id(reader), 'shader_family': family, 'color': color,
         'enable_instancing': bool(data['m_EnableInstancingVariants']),
         'condition': condition, 'keywords': keywords, 'state': state,
@@ -305,19 +310,24 @@ def export_material_textures(source, owner, record, output):
     if cache is None: source.material_texture_cache = cache = set()
     for entry in record['properties']['textures']:
         reader = source.get(entry['source']['file'], entry['source']['path_id'])
-        destination = output / entry['file'].removeprefix('reference/')
-        identity = str(destination.resolve())
+        from .native_bc import source_blocks, texture_inputs
+        paths = texture_inputs(entry)
+        identity = str((output / paths[0].removeprefix('reference/')).resolve())
         if identity not in cache:
             texture = source.texture_object(reader)
-            for mip, image in zip(entry['mips'], source_mip_images(texture), strict=True):
-                pixels = decode_normal_image(image, entry['source_encoding']) if entry['slot'] in NORMAL_SLOTS else image.convert('RGBA')
-                pixels.transpose(Image.Transpose.FLIP_TOP_BOTTOM).save(output / mip['file'].removeprefix('reference/'))
+            if entry['storage']['kind'] == 'native_bc':
+                (output / paths[0].removeprefix('reference/')).write_bytes(b''.join(source_blocks(texture)))
+            else:
+                for mip, image in zip(entry['storage']['mips'], source_mip_images(texture), strict=True):
+                    pixels = decode_normal_image(image, entry['source_encoding']) if entry['slot'] in NORMAL_SLOTS else image.convert('RGBA')
+                    pixels.transpose(Image.Transpose.FLIP_TOP_BOTTOM).save(output / mip['file'].removeprefix('reference/'))
             cache.add(identity)
-        for mip in entry['mips']:
-            path = output / mip['file'].removeprefix('reference/')
-            if not path.is_file(): raise ValueError(f'{record["source"]} {entry["slot"]}: missing {mip["file"]}')
-            from .runtime_package import file_receipt
-            dependencies[mip['file']] = file_receipt(path, mip['file'])
+        from .runtime_package import file_receipt
+        from .native_bc import validate_storage
+        for name in paths:
+            path = output / name.removeprefix('reference/')
+            dependencies[name] = file_receipt(path, name)
+        validate_storage(entry, dependencies)
     return list(dependencies.values())
 
 

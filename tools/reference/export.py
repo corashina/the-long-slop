@@ -155,7 +155,7 @@ def validate_runtime_paths(manifest):
                 if item['sha256'] != resources[name]:
                     raise ValueError('Runtime dependency hash differs from typed resource')
                 continue
-            if not name.startswith('reference/') or len(Path(name).parts) != 2 or Path(name).suffix not in ('.gltf','.bin','.png'):
+            if not name.startswith('reference/') or len(Path(name).parts) != 2 or Path(name).suffix not in ('.gltf','.bin','.png','.bc'):
                 raise ValueError('Invalid selected runtime dependency')
     for item in runtime_resources(manifest):
         name = item['path']
@@ -230,8 +230,11 @@ def verify_reference(output: Path, library) -> None:
         resources = {item['path'].removeprefix('reference/') for item in
                      [*runtime_resources(manifest), *plate_resources(manifest['plates'])]}
         declared = {entry['file'].removeprefix('reference/') for entry in asset['dependencies']}
-        material_mips = {Path(mip['file']).name for material in manifest['rendering']['materials']
-            if material['asset'] == asset['id'] for texture in material['properties']['textures'] for mip in texture['mips']}
+        from .native_bc import texture_inputs, validate_storage
+        files = {r['file']: r for r in manifest['file_catalog']['files']}
+        selected = [t for m in manifest['rendering']['materials'] if m['asset'] == asset['id'] for t in m['properties']['textures']]
+        for texture in selected: validate_storage(texture, files)
+        material_mips = {Path(name).name for texture in selected for name in texture_inputs(texture)}
         required = uris | material_mips
         if not required <= declared or declared - required - resources:
             raise ValueError('Runtime scene dependencies differ from selected receipts')

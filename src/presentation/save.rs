@@ -456,7 +456,7 @@ impl PreparedPresentation {
                 |world, mut batches: Mut<Assets<super::texture_batches::SourceTextureBatch>>| {
                     self.materials.drain_ready(
                         world.resource::<AssetServer>(),
-                        world.resource::<Assets<super::png_mip_chain::SourcePngMipChain>>(),
+                        world.resource::<Assets<super::primary_image::SourcePrimaryImage>>(),
                         &mut batches,
                     )
                 },
@@ -481,7 +481,7 @@ impl PreparedPresentation {
         world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
             world.resource_scope(
                 |world, mut materials: Mut<Assets<materials::SourceMaterial>>| {
-                    world.resource_scope(|world, mut chains: Mut<Assets<super::png_mip_chain::SourcePngMipChain>>| self.materials
+                    world.resource_scope(|world, mut chains: Mut<Assets<super::primary_image::SourcePrimaryImage>>| self.materials
                         .release_all(world.resource::<AssetServer>(), &mut images, &mut chains, &mut materials)
                         .expect("drained source material ownership"));
                 },

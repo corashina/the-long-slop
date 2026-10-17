@@ -238,7 +238,7 @@ fn bind(world: &mut World) -> Result<(), String> {
                 .textures
                 .iter()
                 .find(|t| t.slot == slot)
-                .and_then(|t| source.texture(&t.file))
+                .and_then(|t| source.texture(t.file()))
         };
         let (Some(atlas), Some(face), Some(bump)) = (
             texture("_MainTex"),

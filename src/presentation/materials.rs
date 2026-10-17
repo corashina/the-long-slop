@@ -9,7 +9,7 @@ pub mod terrain;
 use crate::world::upload_receipt;
 mod world_texture_upload;
 pub mod world_textures;
-use super::png_mip_chain::{SourcePngMipChain, SourcePngMipChainSettings};
+use super::primary_image::{SourcePrimaryImage, SourcePrimaryImageSettings};
 use crate::reference::{
     self as source, AssetUsage, MaterialRecord, ReferenceManifest, ShaderFamily, TextureRecord,
 };
@@ -125,9 +125,9 @@ struct SourceTexture {
     persistent: bool,
     users: usize,
     record: Arc<TextureRecord>,
-    chain: Option<Handle<SourcePngMipChain>>,
+    chain: Option<Handle<SourcePrimaryImage>>,
     input_staging: usize,
-    pixel_bytes: usize,
+    payload_bytes: usize,
     cpu_reservation: usize,
     image: Option<Handle<Image>>,
     label: String,
@@ -446,17 +446,13 @@ pub fn load_materials(
     let mut texture_indices = HashMap::new();
     for record in &records {
         for texture in &record.properties.textures {
-            if texture_indices.contains_key(&texture.file) {
+            if texture_indices.contains_key(texture.file()) {
                 continue;
             }
-            let input_staging = primary::png_chain_staging(
-                &texture.mips,
-                texture.sampler.mip_count,
-                &reference.file_catalog,
-            )?;
-            let pixel_bytes = source::fixed_reservation::png_pixels(&texture.mips)?;
-            let cpu_reservation = source::fixed_reservation::png_cpu(pixel_bytes, input_staging)?;
-            texture_indices.insert(texture.file.clone(), textures.len());
+            let input_staging = primary::primary_staging(texture, &reference.file_catalog)?;
+            let payload_bytes = texture.payload_bytes()?;
+            let cpu_reservation = source::fixed_reservation::png_cpu(payload_bytes, input_staging)?;
+            texture_indices.insert(texture.file().to_owned(), textures.len());
             textures.push(SourceTexture {
                 owner: Arc::new(()),
                 upload: default(),
@@ -466,7 +462,7 @@ pub fn load_materials(
                 record: Arc::new(texture.clone()),
                 chain: None,
                 input_staging,
-                pixel_bytes,
+                payload_bytes,
                 cpu_reservation,
                 image: None,
                 label: format!(
@@ -477,18 +473,14 @@ pub fn load_materials(
         }
     }
     for texture in &reference.plates.material.textures {
-        if texture_indices.contains_key(&texture.file) {
+        if texture_indices.contains_key(texture.file()) {
             continue;
         }
-        let input_staging = primary::png_chain_staging(
-            &texture.mips,
-            texture.sampler.mip_count,
-            &reference.file_catalog,
-        )?;
-        let pixel_bytes = source::fixed_reservation::png_pixels(&texture.mips)?;
-        let cpu_reservation = source::fixed_reservation::png_cpu(pixel_bytes, input_staging)?;
+        let input_staging = primary::primary_staging(texture, &reference.file_catalog)?;
+        let payload_bytes = texture.payload_bytes()?;
+        let cpu_reservation = source::fixed_reservation::png_cpu(payload_bytes, input_staging)?;
 
-        texture_indices.insert(texture.file.clone(), textures.len());
+        texture_indices.insert(texture.file().to_owned(), textures.len());
         textures.push(SourceTexture {
             owner: Arc::new(()),
             upload: default(),
@@ -498,10 +490,10 @@ pub fn load_materials(
             record: Arc::new(texture.clone()),
             chain: None,
             input_staging,
-            pixel_bytes,
+            payload_bytes,
             cpu_reservation,
             image: None,
-            label: format!("source texture {}", texture.file),
+            label: format!("source texture {}", texture.file()),
         });
     }
     let mut source = SourceMaterials {
@@ -546,7 +538,7 @@ pub fn material_readiness(
 }
 fn assemble_textures(
     textures: &mut [SourceTexture],
-    chains: &mut Assets<SourcePngMipChain>,
+    chains: &mut Assets<SourcePrimaryImage>,
     images: &mut Assets<Image>,
 ) -> usize {
     let mut bytes = 0;
@@ -557,12 +549,12 @@ fn assemble_textures(
         let Some(handle) = &texture.chain else {
             continue;
         };
-        let Some(SourcePngMipChain(image)) = chains.remove(handle.id()) else {
+        let Some(SourcePrimaryImage(image)) = chains.remove(handle.id()) else {
             continue;
         };
         texture.image = Some(images.add(image));
         texture.chain = None;
-        bytes += texture.pixel_bytes;
+        bytes += texture.payload_bytes;
     }
     bytes
 }
@@ -829,7 +821,7 @@ fn make_material(
         {
             let bank = usize::from(mapping[index].expect("mapped source texture"));
             data.banks[index / 4][index % 4] = bank as u32;
-            textures[bank] = source.textures[source.texture_indices[&texture.file]]
+            textures[bank] = source.textures[source.texture_indices[texture.file()]]
                 .image
                 .clone();
             data.flags.y |= 1 << index;
@@ -2507,7 +2499,7 @@ impl SourceMaterials {
     pub fn drain_ready(
         &mut self,
         server: &AssetServer,
-        chains: &Assets<SourcePngMipChain>,
+        chains: &Assets<SourcePrimaryImage>,
         batches: &mut Assets<crate::presentation::texture_batches::SourceTextureBatch>,
     ) -> bool {
         self.world_textures.drain_ready(server, batches)
@@ -2524,7 +2516,7 @@ impl SourceMaterials {
         &mut self,
         server: &AssetServer,
         images: &mut Assets<Image>,
-        chains: &mut Assets<SourcePngMipChain>,
+        chains: &mut Assets<SourcePrimaryImage>,
         materials: &mut Assets<SourceMaterial>,
     ) -> Result<(), source::ReferenceError> {
         let assets: Vec<_> = self.world_primary.asset_ids().collect();
@@ -2551,7 +2543,7 @@ impl SourceMaterials {
             .textures
             .iter()
             .filter(|t| !shared || Arc::strong_count(&t.owner) > 1)
-            .map(|t| t.pixel_bytes)
+            .map(|t| t.payload_bytes)
             .sum();
         let record_bytes: usize = self
             .records

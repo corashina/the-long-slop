@@ -73,4 +73,4 @@ pub mod weather;
 
 mod pipeline_ownership;
 
-pub mod png_mip_chain;
+pub mod primary_image;

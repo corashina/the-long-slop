@@ -1,6 +1,6 @@
 //! Dynamic primary materials share the accepted source material cache.
 use super::*;
-pub(super) use crate::reference::fixed_reservation::png_chain_staging;
+pub(super) use crate::reference::fixed_reservation::{png_chain_staging, primary_staging};
 use crate::{
     reference::{AssetId as SourceAssetId, ReferenceError},
     world::WorldStream,
@@ -17,8 +17,8 @@ pub struct PrimaryOwnership {
     pending: usize,
     staging: usize,
 }
-fn pixels(texture: &TextureRecord) -> Result<usize, ReferenceError> {
-    crate::reference::fixed_reservation::png_pixels(&texture.mips)
+fn payload(texture: &TextureRecord) -> Result<usize, ReferenceError> {
+    texture.payload_bytes()
 }
 fn texture_cpu_reservation(texture: &SourceTexture) -> usize {
     texture.cpu_reservation
@@ -30,18 +30,9 @@ pub(super) fn pending_texture_cpu(texture: &SourceTexture) -> usize {
     )
 }
 pub(super) fn texture_metadata(texture: &TextureRecord) -> usize {
-    use std::mem::size_of;
-    4096 + size_of::<TextureRecord>()
-        + texture.slot.capacity()
-        + texture.source.file.capacity()
-        + texture.file.capacity()
-        + texture.mips.capacity() * size_of::<source::TextureMip>()
-        + texture
-            .mips
-            .iter()
-            .map(|m| m.file.capacity())
-            .sum::<usize>()
+    4096 + texture.retained_cpu_bytes()
 }
+
 pub(super) fn record_bytes(record: &MaterialRecord) -> usize {
     record.retained_cpu_bytes()
 }
@@ -127,7 +118,7 @@ impl SourceMaterials {
             .textures
             .iter()
             .filter(|t| !t.failed || t.image.is_some())
-            .map(|t| t.pixel_bytes)
+            .map(|t| t.payload_bytes)
             .sum();
         (cpu + self.container_bytes(), gpu)
     }
@@ -198,11 +189,11 @@ impl SourceMaterials {
         for record in &records {
             added_cpu += record_bytes(record);
             for texture in &record.properties.textures {
-                if paths.contains(&texture.file) {
+                if paths.iter().any(|p| p == texture.file()) {
                     continue;
                 }
-                paths.push(texture.file.clone());
-                if let Some(&index) = self.texture_indices.get(&texture.file) {
+                paths.push(texture.file().to_owned());
+                if let Some(&index) = self.texture_indices.get(texture.file()) {
                     let retained = &self.textures[index].record;
                     let a = &retained.sampler;
                     let b = &texture.sampler;
@@ -215,27 +206,20 @@ impl SourceMaterials {
                         || a.aniso != b.aniso
                         || a.mip_bias.to_bits() != b.mip_bias.to_bits()
                         || a.mip_count != b.mip_count
-                        || retained.mips.len() != texture.mips.len()
-                        || !retained.mips.iter().zip(&texture.mips).all(|(a, b)| {
-                            a.file == b.file && a.width == b.width && a.height == b.height
-                        })
+                        || retained.source_encoding != texture.source_encoding
+                        || retained.storage != texture.storage
                     {
                         return Err(ReferenceError(
                             "Conflicting source texture identity or sampler".into(),
                         ));
                     }
                 }
-                if !self.texture_indices.contains_key(&texture.file) {
-                    let bytes = pixels(texture)?;
+                if !self.texture_indices.contains_key(texture.file()) {
+                    let bytes = payload(texture)?;
                     added_gpu += bytes;
                     added_cpu += 4096
                         + std::mem::size_of::<SourceTexture>()
-                        + texture.file.len() * 2
-                        + texture.source.file.len()
-                        + texture.mips.len()
-                            * (std::mem::size_of::<source::TextureMip>()
-                                + std::mem::size_of::<usize>())
-                        + texture.mips.iter().map(|m| m.file.len()).sum::<usize>()
+                        + texture.retained_cpu_bytes()
                         + 128;
                 }
             }
@@ -250,17 +234,13 @@ impl SourceMaterials {
         )?;
         for record in records {
             for texture in &record.properties.textures {
-                if !self.texture_indices.contains_key(&texture.file) {
-                    let input_staging = png_chain_staging(
-                        &texture.mips,
-                        texture.sampler.mip_count,
-                        &reference.file_catalog,
-                    )?;
-                    let pixel_bytes = pixels(texture)?;
+                if !self.texture_indices.contains_key(texture.file()) {
+                    let input_staging = primary_staging(texture, &reference.file_catalog)?;
+                    let payload_bytes = payload(texture)?;
                     let cpu_reservation =
-                        crate::reference::fixed_reservation::png_cpu(pixel_bytes, input_staging)?;
+                        crate::reference::fixed_reservation::png_cpu(payload_bytes, input_staging)?;
                     self.texture_indices
-                        .insert(texture.file.clone(), self.textures.len());
+                        .insert(texture.file().to_owned(), self.textures.len());
                     self.textures.push(SourceTexture {
                         owner: Arc::new(()),
                         upload: default(),
@@ -270,7 +250,7 @@ impl SourceMaterials {
                         record: Arc::new(texture.clone()),
                         chain: None,
                         input_staging,
-                        pixel_bytes,
+                        payload_bytes,
                         cpu_reservation,
                         image: None,
                         label: format!(
@@ -309,7 +289,7 @@ impl SourceMaterials {
                 .find(|record| (record.asset, record.gltf_material) == identity)
                 .is_some_and(|record| {
                     record.properties.textures.iter().all(|record| {
-                        let texture = &self.textures[self.texture_indices[&record.file]];
+                        let texture = &self.textures[self.texture_indices[record.file()]];
                         texture.image.is_some() && pending_texture_cpu(texture) == 0
                     })
                 })
@@ -319,7 +299,7 @@ impl SourceMaterials {
         stream: &mut WorldStream,
         server: &AssetServer,
         images: &mut Assets<Image>,
-        chains: &mut Assets<SourcePngMipChain>,
+        chains: &mut Assets<SourcePrimaryImage>,
         materials: &mut Assets<SourceMaterial>,
     ) -> Result<(), ReferenceError> {
         let mut failure = None;
@@ -380,7 +360,7 @@ impl SourceMaterials {
                 let staging = texture.input_staging;
                 if staging > 32 * 1024 * 1024 {
                     return Err(ReferenceError(
-                        "PNG input overlap exceeds staging cap".into(),
+                        "Primary input overlap exceeds staging cap".into(),
                     ));
                 }
                 if staging > stream.available_dependency_staging_bytes() {
@@ -404,19 +384,23 @@ impl SourceMaterials {
                 )?;
                 let texture = &mut self.textures[index];
                 let record = Arc::clone(&texture.record);
-                let encoded_bytes = record
-                    .mips
-                    .iter()
-                    .map(|m| crate::presentation::world::preflight::checked_input_bytes(&m.file))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let encoded_bytes = match &record.storage {
+                    source::TextureStorage::PngChain { mips } => mips
+                        .iter()
+                        .map(|m| {
+                            crate::presentation::world::preflight::checked_input_bytes(&m.file)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    source::TextureStorage::NativeBc { input, .. } => vec![input.bytes as usize],
+                };
                 texture.chain = Some(
                     server
                         .load_builder()
-                        .with_settings(move |settings: &mut SourcePngMipChainSettings| {
+                        .with_settings(move |settings: &mut SourcePrimaryImageSettings| {
                             settings.record = Some(Arc::clone(&record));
                             settings.encoded_bytes = encoded_bytes.clone();
                         })
-                        .load(texture.record.mips[0].file.clone()),
+                        .load(texture.record.file().to_owned()),
                 );
             }
         }
@@ -433,7 +417,7 @@ impl SourceMaterials {
     }
     fn primary_loading(
         &self,
-        chains: &Assets<SourcePngMipChain>,
+        chains: &Assets<SourcePrimaryImage>,
         server: &AssetServer,
     ) -> (usize, usize) {
         self.textures
@@ -451,7 +435,7 @@ impl SourceMaterials {
     pub fn world_asset_retirable(
         &self,
         asset: SourceAssetId,
-        chains: &Assets<SourcePngMipChain>,
+        chains: &Assets<SourcePrimaryImage>,
         server: &AssetServer,
     ) -> bool {
         self.world_primary.assets.get(&asset).is_none_or(|paths| {
@@ -472,7 +456,7 @@ impl SourceMaterials {
         &mut self,
         asset: SourceAssetId,
         images: &mut Assets<Image>,
-        chains: &mut Assets<SourcePngMipChain>,
+        chains: &mut Assets<SourcePrimaryImage>,
         materials: &mut Assets<SourceMaterial>,
         server: &AssetServer,
     ) -> Result<(), ReferenceError> {
@@ -529,7 +513,7 @@ impl SourceMaterials {
         self.texture_indices.clear();
         for (index, texture) in self.textures.iter().enumerate() {
             self.texture_indices
-                .insert(texture.record.file.clone(), index);
+                .insert(texture.record.file().to_owned(), index);
         }
         Ok(())
     }
@@ -704,10 +688,7 @@ impl SourceMaterials {
                     || old.sampler.aniso != t.sampler.aniso
                     || old.sampler.mip_bias.to_bits() != t.sampler.mip_bias.to_bits()
                     || old.sampler.mip_count != t.sampler.mip_count
-                    || old.mips.len() != t.mips.len()
-                    || !old.mips.iter().zip(&t.mips).all(|(a, b)| {
-                        a.file == b.file && a.width == b.width && a.height == b.height
-                    })
+                    || !matches!(&old.storage, source::TextureStorage::PngChain { mips } if *mips == t.mips)
                 {
                     return Err(ReferenceError(
                         "Conflicting persistent lighting sampler".into(),
@@ -719,7 +700,9 @@ impl SourceMaterials {
             let record = TextureRecord {
                 slot: String::new(),
                 source: t.source.clone(),
-                file: file.clone(),
+                storage: source::TextureStorage::PngChain {
+                    mips: t.mips.clone(),
+                },
                 color_space: t.color_space,
                 encoding: source::TextureEncoding::Rgba,
                 source_encoding: source::TextureEncoding::Rgba,
@@ -727,13 +710,12 @@ impl SourceMaterials {
                 scale: [1., 1.],
                 offset: [0., 0.],
                 sampler: t.sampler.clone(),
-                mips: t.mips.clone(),
             };
             let input_staging =
                 png_chain_staging(&t.mips, t.sampler.mip_count, &reference.file_catalog)?;
-            let pixel_bytes = pixels(&record)?;
+            let payload_bytes = payload(&record)?;
             let cpu_reservation =
-                crate::reference::fixed_reservation::png_cpu(pixel_bytes, input_staging)?;
+                crate::reference::fixed_reservation::png_cpu(payload_bytes, input_staging)?;
             self.texture_indices
                 .insert(file.clone(), self.textures.len());
             self.textures.push(SourceTexture {
@@ -745,7 +727,7 @@ impl SourceMaterials {
                 record: Arc::new(record),
                 chain: None,
                 input_staging,
-                pixel_bytes,
+                payload_bytes,
                 cpu_reservation,
                 image: None,
                 label: file.clone(),
@@ -789,7 +771,7 @@ impl SourceMaterials {
             "accounted_deferred_gpu_bytes": self.world_deferred.gpu,
             "selected_materials": self.world_primary.materials.iter().collect::<Vec<_>>(),
             "textures": self.textures.iter().map(|t| serde_json::json!({
-                "source": t.record.source, "path": t.record.file, "pixel_bytes": t.pixel_bytes,
+                "source": t.record.source, "path": t.record.file(), "payload_bytes": t.payload_bytes, "storage": match &t.record.storage { source::TextureStorage::PngChain { .. } => "png_chain", source::TextureStorage::NativeBc { format: source::NativeBcFormat::Bc1, .. } => "bc1", source::TextureStorage::NativeBc { .. } => "bc3" },
                 "persistent": t.persistent, "users": t.users, "owners": Arc::strong_count(&t.owner),
                 "failed": t.failed, "upload_complete": t.upload.completed(),
                 "cpu_reservation": pending_texture_cpu(t), "input_staging": t.input_staging,

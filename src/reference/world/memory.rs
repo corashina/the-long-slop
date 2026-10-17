@@ -153,7 +153,15 @@ fields!(super::super::AssetRecord:path,sha256,root,dependencies);
 fields!(super::super::rendering::MaterialRecord:source,condition,keywords,properties);
 fields!(super::super::rendering::MaterialCondition:source);
 fields!(super::super::rendering::ShaderProperties:floats,colors,textures,defaults,exclusions);
-fields!(super::super::rendering::TextureRecord:slot,source,file,mips);
+fields!(super::super::rendering::TextureRecord:slot,source,storage);
+impl ImmutableInputBytes for super::super::rendering::TextureStorage {
+    fn heap_bytes(&self) -> usize {
+        match self {
+            Self::PngChain { mips } => mips.heap_bytes(),
+            Self::NativeBc { input, .. } => input.heap_bytes(),
+        }
+    }
+}
 fields!(super::super::rendering::TextureMip:file);
 fields!(super::super::rendering::TextureExclusion:slot,source);
 inline!(super::super::rendering::TextureDefault);

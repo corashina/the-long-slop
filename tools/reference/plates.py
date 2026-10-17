@@ -57,12 +57,12 @@ def _material(source, reader, output):
         name=f'plate-{tr.assets_file.name}-{tr.path_id}.png'
         mips=[{'file':f'reference/{name}' if level==0 else f'reference/{name[:-4]}-mip-{level}.png',
             'width':max(1,td['m_Width']>>level),'height':max(1,td['m_Height']>>level)} for level in range(td['m_MipCount'])]
-        textures.append({'slot':slot,'source':source_id(tr),'file':mips[0]['file'],
+        textures.append({'slot':slot,'source':source_id(tr),
             'color_space':'linear' if slot in ('_MainTex','_BumpMap') else 'srgb','encoding':'rgb' if slot=='_BumpMap' else 'rgba',
             'source_encoding':'ag' if slot=='_BumpMap' else 'rgba','uv_channel':0,
             'scale':[env['m_Scale'][k] for k in ('x','y')],'offset':[env['m_Offset'][k] for k in ('x','y')],
             'sampler':{'filter':settings['m_FilterMode'],'wrap_u':settings['m_WrapU'],'wrap_v':settings['m_WrapV'],
-                'aniso':settings['m_Aniso'],'mip_bias':settings['m_MipBias'],'mip_count':td['m_MipCount']},'mips':mips})
+                'aniso':settings['m_Aniso'],'mip_bias':settings['m_MipBias'],'mip_count':td['m_MipCount']},'storage':{'kind':'png_chain','mips':mips}})
     passes=sd['m_ParsedForm']['m_SubShaders'][0]['m_Passes'];state=passes[0]['m_State']
     def value(field):return floats.get(field['name'],field['val'])
     material_state={'alpha_mode':'blend','cull':int(value(state['culling'])),'z_write':bool(value(state['zWrite'])),
@@ -73,7 +73,7 @@ def _material(source, reader, output):
     suffix,payload=source.shader_resource(shader)
     shader_data=_resource(shader,output,suffix,payload);compiled=_resource(shader,output,'shader.bin',source.raw_data(shader))
     receipts=[{'source':t['source'],'path':m['file'],'sha256':next(d['sha256'] for d in dependencies if d['file']==m['file'])}
-        for t in textures for m in t['mips']]
+        for t in textures for m in t['storage']['mips']]
     unique={r['path']:r for r in receipts}
     return {'source':source_id(reader),'shader':shader_data,'compiled_shader':compiled,'shader_name':shader_name,
         'keywords':data['m_ValidKeywords'],'disabled_passes':data['disabledShaderPasses'],'state':material_state,

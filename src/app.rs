@@ -145,6 +145,16 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
         ))
         .add_plugins(
             DefaultPlugins
+                .set(bevy::render::RenderPlugin {
+                    render_creation: {
+                        let settings = bevy::render::settings::WgpuSettings::default();
+                        bevy::render::settings::WgpuSettings {
+                            features: settings.features | bevy::render::render_resource::WgpuFeatures::TEXTURE_COMPRESSION_BC,
+                            ..settings
+                        }.into()
+                    },
+                    ..default()
+                })
                 .set(AssetPlugin {
                     file_path: reference.content_base.clone(),
                     meta_check: AssetMetaCheck::Never,

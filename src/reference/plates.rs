@@ -332,18 +332,21 @@ impl PlateRecord {
             "plate named textures",
         )?;
         for t in &m.textures {
+            let super::TextureStorage::PngChain { mips } = &t.storage else {
+                return Err(ReferenceError("Plate requires PNG storage".into()));
+            };
             require(
                 valid_source(&t.source)
-                    && !t.mips.is_empty()
-                    && t.mips[0].file == t.file
+                    && !mips.is_empty()
+                    && mips[0].file == t.file()
                     && finite(&t.scale)
                     && finite(&t.offset)
                     && t.sampler.filter <= 2
                     && t.sampler.wrap_u <= 3
                     && t.sampler.wrap_v <= 3
                     && t.sampler.mip_bias.is_finite()
-                    && t.sampler.mip_count as usize == t.mips.len()
-                    && t.mips.iter().all(|mip| {
+                    && t.sampler.mip_count as usize == mips.len()
+                    && mips.iter().all(|mip| {
                         mip.width > 0
                             && mip.height > 0
                             && m.resources
@@ -355,7 +358,7 @@ impl PlateRecord {
         }
         require(
             m.textures.iter().any(|t| {
-                t.slot == "_MainTex" && t.source == f.atlas.source && t.file == f.atlas.path
+                t.slot == "_MainTex" && t.source == f.atlas.source && t.file() == f.atlas.path
             }),
             "plate material atlas binding",
         )?;
