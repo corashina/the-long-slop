@@ -18,7 +18,6 @@ pub mod render_lighting;
 pub mod world;
 pub use world::*;
 pub mod rendering;
-pub mod texture_batch;
 pub mod shadow_candidates;
 pub mod shadow_frame;
 pub mod shadow_planes;
@@ -27,6 +26,7 @@ pub mod shadows;
 pub mod sky;
 pub mod sorting;
 pub mod temporal;
+pub mod texture_batch;
 pub mod view_math;
 pub use rendering::*;
 

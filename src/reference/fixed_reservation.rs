@@ -275,6 +275,24 @@ pub fn png_staging(encoded: usize, width: u32) -> Result<usize, ReferenceError> 
         .and_then(|n| n.checked_add((width as usize).checked_mul(128)?))
         .ok_or_else(overflow)
 }
+/// Sequential chain overlap includes the retained base reader during each later read.
+pub fn png_chain_staging(
+    mips: &[super::TextureMip],
+    mut encoded: impl FnMut(&str) -> Result<usize, ReferenceError>,
+) -> Result<usize, ReferenceError> {
+    let first = mips
+        .first()
+        .ok_or_else(|| ReferenceError("Empty PNG chain".into()))?;
+    let base = encoded(&first.file)?;
+    let mut staging = png_staging(base, first.width)?;
+    for mip in &mips[1..] {
+        staging = staging.max(
+            base.checked_add(png_staging(encoded(&mip.file)?, mip.width)?)
+                .ok_or_else(overflow)?,
+        );
+    }
+    Ok(staging)
+}
 pub fn png_cpu(pixels: usize, max_staging: usize) -> Result<usize, ReferenceError> {
     pixels
         .checked_mul(2)

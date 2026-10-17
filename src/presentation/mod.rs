@@ -33,8 +33,8 @@ pub fn interpolate(a: VehiclePose, b: VehiclePose, alpha: f32) -> VehiclePose {
             .to_array(),
     }
 }
-pub mod textures;
 pub mod texture_batches;
+pub mod textures;
 
 pub mod sky;
 
@@ -72,3 +72,5 @@ pub mod view_frame;
 pub mod weather;
 
 mod pipeline_ownership;
+
+pub mod png_mip_chain;

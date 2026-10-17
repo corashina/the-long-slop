@@ -57,6 +57,7 @@ pub struct WorldPresentation<'w, 's> {
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub skins: ResMut<'w, Assets<SkinnedMeshInverseBindposes>>,
     pub batches: ResMut<'w, Assets<crate::presentation::texture_batches::SourceTextureBatch>>,
+    pub chains: ResMut<'w, Assets<crate::presentation::png_mip_chain::SourcePngMipChain>>,
     pub images: ResMut<'w, Assets<Image>>,
     pub server: Res<'w, AssetServer>,
     pub lights: ResMut<'w, SourceLighting>,
@@ -228,15 +229,17 @@ impl WorldPresentation<'_, '_> {
             stream,
             &self.server,
             &mut self.images,
+            &mut self.chains,
             &mut self.materials.primary,
         ) {
             failure.get_or_insert(error);
         }
-        if let Err(error) =
-            self.materials
-                .cache
-                .prepare_world_deferred(stream, &self.server, &mut self.images, &mut self.batches)
-        {
+        if let Err(error) = self.materials.cache.prepare_world_deferred(
+            stream,
+            &self.server,
+            &mut self.images,
+            &mut self.batches,
+        ) {
             failure.get_or_insert(error);
         }
         if let Err(error) = self.prototypes.prepare(
@@ -270,7 +273,7 @@ impl WorldPresentation<'_, '_> {
                 .expect("retired prototype");
             if !self.materials.cache.world_asset_retirable(
                 prototype.asset,
-                &self.images,
+                &self.chains,
                 &self.server,
             ) || prototype.deferred_materials.iter().any(|m| {
                 !self.materials.cache.world_textures.retirable(
@@ -286,7 +289,7 @@ impl WorldPresentation<'_, '_> {
                     !self.prototypes.references_asset(reference, asset)
                         && !self.materials.cache.world_asset_retirable(
                             asset,
-                            &self.images,
+                            &self.chains,
                             &self.server,
                         )
                 })
@@ -297,6 +300,7 @@ impl WorldPresentation<'_, '_> {
             self.materials.cache.release_world_asset(
                 prototype.asset,
                 &mut self.images,
+                &mut self.chains,
                 &mut self.materials.primary,
                 &self.server,
             )?;
@@ -309,6 +313,7 @@ impl WorldPresentation<'_, '_> {
                     self.materials.cache.release_world_asset(
                         asset,
                         &mut self.images,
+                        &mut self.chains,
                         &mut self.materials.primary,
                         &self.server,
                     )?;
@@ -332,13 +337,14 @@ impl WorldPresentation<'_, '_> {
             if !stream.uses_painting_asset(binding.asset)
                 && self.materials.cache.world_asset_retirable(
                     binding.asset,
-                    &self.images,
+                    &self.chains,
                     &self.server,
                 )
             {
                 self.materials.cache.release_world_asset(
                     binding.asset,
                     &mut self.images,
+                    &mut self.chains,
                     &mut self.materials.primary,
                     &self.server,
                 )?;

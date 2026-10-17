@@ -452,9 +452,15 @@ impl PreparedPresentation {
                 world.resource::<Assets<super::world::prototype_loader::SourceGltf>>(),
                 world.resource::<Assets<super::world::preflight::SourcePlan>>(),
             )
-            && world.resource_scope(|world, mut batches: Mut<Assets<super::texture_batches::SourceTextureBatch>>| self.materials.drain_ready(
-                world.resource::<AssetServer>(), world.resource::<Assets<Image>>(), &mut batches,
-            ))
+            && world.resource_scope(
+                |world, mut batches: Mut<Assets<super::texture_batches::SourceTextureBatch>>| {
+                    self.materials.drain_ready(
+                        world.resource::<AssetServer>(),
+                        world.resource::<Assets<super::png_mip_chain::SourcePngMipChain>>(),
+                        &mut batches,
+                    )
+                },
+            )
     }
     pub fn release(mut self, _candidate: &mut GarageRuntime, world: &mut World) {
         *world.resource_mut::<super::world::pipelines::CandidatePipelines>() = default();
@@ -475,9 +481,9 @@ impl PreparedPresentation {
         world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
             world.resource_scope(
                 |world, mut materials: Mut<Assets<materials::SourceMaterial>>| {
-                    self.materials
-                        .release_all(world.resource::<AssetServer>(), &mut images, &mut materials)
-                        .expect("drained source material ownership");
+                    world.resource_scope(|world, mut chains: Mut<Assets<super::png_mip_chain::SourcePngMipChain>>| self.materials
+                        .release_all(world.resource::<AssetServer>(), &mut images, &mut chains, &mut materials)
+                        .expect("drained source material ownership"));
                 },
             )
         });

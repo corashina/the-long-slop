@@ -9,13 +9,12 @@ pub mod terrain;
 use crate::world::upload_receipt;
 mod world_texture_upload;
 pub mod world_textures;
+use super::png_mip_chain::{SourcePngMipChain, SourcePngMipChainSettings};
 use crate::reference::{
-    self as source, AssetUsage, MaterialRecord, ReferenceManifest, ShaderFamily, TextureColorSpace,
-    TextureRecord,
+    self as source, AssetUsage, MaterialRecord, ReferenceManifest, ShaderFamily, TextureRecord,
 };
-use bevy::asset::{AssetId, LoadState, RenderAssetUsages, UntypedAssetId};
+use bevy::asset::{AssetId, LoadState, UntypedAssetId};
 use bevy::gltf::{GltfExtras, GltfMaterialExtras};
-use bevy::image::ImageLoaderSettings;
 use bevy::material::key::{ErasedMaterialPipelineKey, ErasedMeshPipelineKey};
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{
@@ -126,8 +125,8 @@ struct SourceTexture {
     persistent: bool,
     users: usize,
     record: Arc<TextureRecord>,
-    levels: Vec<Handle<Image>>,
-    input_staging: Vec<usize>,
+    chain: Option<Handle<SourcePngMipChain>>,
+    input_staging: usize,
     pixel_bytes: usize,
     cpu_reservation: usize,
     image: Option<Handle<Image>>,
@@ -450,17 +449,9 @@ pub fn load_materials(
             if texture_indices.contains_key(&texture.file) {
                 continue;
             }
-            let levels = Vec::with_capacity(texture.mips.len());
-            let input_staging = texture
-                .mips
-                .iter()
-                .map(primary::png_staging)
-                .collect::<Result<Vec<_>, _>>()?;
+            let input_staging = primary::png_chain_staging(&texture.mips)?;
             let pixel_bytes = source::fixed_reservation::png_pixels(&texture.mips)?;
-            let cpu_reservation = source::fixed_reservation::png_cpu(
-                pixel_bytes,
-                input_staging.iter().copied().max().unwrap_or(0),
-            )?;
+            let cpu_reservation = source::fixed_reservation::png_cpu(pixel_bytes, input_staging)?;
             texture_indices.insert(texture.file.clone(), textures.len());
             textures.push(SourceTexture {
                 owner: Arc::new(()),
@@ -469,7 +460,7 @@ pub fn load_materials(
                 persistent: true,
                 users: 0,
                 record: Arc::new(texture.clone()),
-                levels,
+                chain: None,
                 input_staging,
                 pixel_bytes,
                 cpu_reservation,
@@ -485,17 +476,9 @@ pub fn load_materials(
         if texture_indices.contains_key(&texture.file) {
             continue;
         }
-        let levels = Vec::with_capacity(texture.mips.len());
-        let input_staging = texture
-            .mips
-            .iter()
-            .map(primary::png_staging)
-            .collect::<Result<Vec<_>, _>>()?;
+        let input_staging = primary::png_chain_staging(&texture.mips)?;
         let pixel_bytes = source::fixed_reservation::png_pixels(&texture.mips)?;
-        let cpu_reservation = source::fixed_reservation::png_cpu(
-            pixel_bytes,
-            input_staging.iter().copied().max().unwrap_or(0),
-        )?;
+        let cpu_reservation = source::fixed_reservation::png_cpu(pixel_bytes, input_staging)?;
 
         texture_indices.insert(texture.file.clone(), textures.len());
         textures.push(SourceTexture {
@@ -505,7 +488,7 @@ pub fn load_materials(
             persistent: true,
             users: 0,
             record: Arc::new(texture.clone()),
-            levels,
+            chain: None,
             input_staging,
             pixel_bytes,
             cpu_reservation,
@@ -555,40 +538,25 @@ pub fn material_readiness(
 }
 fn assemble_textures(
     textures: &mut [SourceTexture],
-    server: &AssetServer,
+    chains: &mut Assets<SourcePngMipChain>,
     images: &mut Assets<Image>,
-) -> Result<usize, source::ReferenceError> {
+) -> usize {
+    let mut bytes = 0;
     for texture in textures
         .iter_mut()
-        .filter(|texture| texture.image.is_none() && !texture.failed)
+        .filter(|t| t.image.is_none() && !t.failed)
     {
-        if texture
-            .levels
-            .iter()
-            .any(|h| matches!(server.load_state(h.id()), LoadState::Failed(_)))
-        {
+        let Some(handle) = &texture.chain else {
             continue;
-        }
-        if texture.levels.len() != texture.record.mips.len()
-            || !texture
-                .levels
-                .iter()
-                .all(|handle| images.contains(handle.id()))
-        {
+        };
+        let Some(SourcePngMipChain(image)) = chains.remove(handle.id()) else {
             continue;
-        }
-        let (image, byte_count) = super::source_images::assemble_mips(
-            &texture.levels,
-            &texture.record.mips,
-            &texture.record.sampler,
-            images,
-        )
-        .map_err(|error| source::ReferenceError(format!("{}: {error}", texture.label)))?;
+        };
         texture.image = Some(images.add(image));
-        texture.levels.clear();
-        return Ok(byte_count);
+        texture.chain = None;
+        bytes += texture.pixel_bytes;
     }
-    Ok(0)
+    bytes
 }
 #[derive(serde::Deserialize)]
 pub(crate) struct MaterialIdentity {
@@ -2518,7 +2486,7 @@ impl SourceMaterials {
     pub(crate) fn measurement_images(&self) -> impl Iterator<Item = (AssetId<Image>, bool)> + '_ {
         self.textures
             .iter()
-            .flat_map(|t| t.image.iter().chain(&t.levels).map(move |h| (h.id(), true)))
+            .flat_map(|t| t.image.iter().map(move |h| (h.id(), true)))
             .chain(
                 self.world_textures
                     .measurement_images()
@@ -2528,13 +2496,18 @@ impl SourceMaterials {
 }
 
 impl SourceMaterials {
-    pub fn drain_ready(&mut self, server: &AssetServer, images: &Assets<Image>, batches: &mut Assets<crate::presentation::texture_batches::SourceTextureBatch>) -> bool {
+    pub fn drain_ready(
+        &mut self,
+        server: &AssetServer,
+        chains: &Assets<SourcePngMipChain>,
+        batches: &mut Assets<crate::presentation::texture_batches::SourceTextureBatch>,
+    ) -> bool {
         self.world_textures.drain_ready(server, batches)
             && self.textures.iter().all(|t| {
                 (t.image.is_some() && primary::pending_texture_cpu(t) == 0)
                     || (t.image.is_none()
-                        && t.levels.iter().all(|h| {
-                            images.contains(h.id())
+                        && t.chain.iter().all(|h| {
+                            chains.contains(h.id())
                                 || matches!(server.load_state(h.id()), LoadState::Failed(_))
                         }))
             })
@@ -2543,11 +2516,12 @@ impl SourceMaterials {
         &mut self,
         server: &AssetServer,
         images: &mut Assets<Image>,
+        chains: &mut Assets<SourcePngMipChain>,
         materials: &mut Assets<SourceMaterial>,
     ) -> Result<(), source::ReferenceError> {
         let assets: Vec<_> = self.world_primary.asset_ids().collect();
         for asset in assets {
-            self.release_world_asset(asset, images, materials, server)?;
+            self.release_world_asset(asset, images, chains, materials, server)?;
         }
         self.world_textures.release_all(images);
         Ok(())

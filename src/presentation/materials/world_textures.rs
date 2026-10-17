@@ -112,7 +112,9 @@ impl WorldTextures {
             "session": self.session,
             "arrays": self.arrays.iter().flatten().map(|a| serde_json::json!({
                 "layers": a.layers.len(), "next_layer": a.next_layer, "next_batch": a.next_batch, "failed": a.failed,
-                "gpu_bytes": a.bytes,
+                "gpu_bytes": a.bytes, "users": a.users, "owners": Arc::strong_count(&a.owner),
+                "image": a.image.as_ref().map(|h| format!("{:?}", h.id())),
+                "hashes": a.layers.iter().map(|l| &l.hash).collect::<Vec<_>>(),
                 "sources": a.layers.iter().map(|l| &l.source).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
             "slots": queue.ownership.slots.iter().flatten().map(|o| serde_json::json!({

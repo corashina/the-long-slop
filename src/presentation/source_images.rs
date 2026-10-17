@@ -51,6 +51,18 @@ pub fn assemble_mips(
     image.data = Some(bytes);
     image.texture_descriptor.mip_level_count = settings.mip_count;
     image.asset_usage = RenderAssetUsages::RENDER_WORLD;
+    apply_sampler(&mut image, settings);
+    Ok((image, byte_count))
+}
+pub(crate) fn wrap(value: u8) -> ImageAddressMode {
+    match value {
+        0 => ImageAddressMode::Repeat,
+        2 => ImageAddressMode::MirrorRepeat,
+        _ => ImageAddressMode::ClampToEdge,
+    }
+}
+
+pub(super) fn apply_sampler(image: &mut Image, settings: &SamplerRecord) {
     let filter = if settings.filter == 0 {
         ImageFilterMode::Nearest
     } else {
@@ -70,12 +82,4 @@ pub fn assemble_mips(
         lod_max_clamp: (settings.mip_count - 1) as f32,
         ..default()
     });
-    Ok((image, byte_count))
-}
-pub(crate) fn wrap(value: u8) -> ImageAddressMode {
-    match value {
-        0 => ImageAddressMode::Repeat,
-        2 => ImageAddressMode::MirrorRepeat,
-        _ => ImageAddressMode::ClampToEdge,
-    }
 }
