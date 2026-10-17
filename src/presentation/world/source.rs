@@ -69,6 +69,10 @@ impl SourceWorldVisuals {
     pub fn ready(&self, stream: &WorldStream) -> bool {
         self.pending.is_none() && self.surfaces.len() == stream.frame().surfaces.len()
     }
+    /// Play can start when every published surface draws with near terrain material.
+    pub fn start_ready(&self, stream: &WorldStream) -> bool {
+        self.ready(stream) && self.terrain[0].is_some()
+    }
     pub fn roots(&self) -> impl Iterator<Item = Entity> + '_ {
         self.surfaces.iter().map(|s| s.root)
     }

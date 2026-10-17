@@ -376,6 +376,10 @@ impl PlayerState {
         physics.rapier_mut().bodies[self.body].set_next_kinematic_position(self.pose);
     }
 
+    /// Take the body pose after an external placement, such as startup terrain alignment.
+    pub fn sync_pose(&mut self, physics: &PhysicsWorld) {
+        self.pose = *physics.rapier().bodies[self.body].position();
+    }
     fn update_crouch(&mut self, want_crouch: bool, physics: &mut PhysicsWorld) {
         if want_crouch == self.crouched {
             return;

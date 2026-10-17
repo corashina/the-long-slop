@@ -15,8 +15,10 @@ use crate::vehicle::{
     PhysicsWorld, VEHICLE_COLLIDER_FLAG, VehiclePose, collider_builder, to_rapier,
 };
 use crate::world::{DEFAULT_SEED, WorldStream};
+use rapier3d::math::Vector;
 use rapier3d::prelude::{
-    Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder, RigidBodyHandle,
+    Group, InteractionGroups, InteractionTestMode, QueryFilter, Ray, RigidBodyBuilder,
+    RigidBodyHandle,
 };
 use std::collections::HashMap;
 
@@ -900,6 +902,9 @@ impl GarageRuntime {
             self.clear_input();
             return;
         }
+        // Colliders published or moved while paused are absent from queries until a refresh.
+        // Player and wheel casts run before the physics step, so refresh first.
+        self.physics.refresh_queries();
         let factors = self.clock_factors(reference);
         let sleep = self.sleep.output();
         self.lighting.cycle.advance(
@@ -1676,6 +1681,25 @@ impl GarageRuntime {
             Err(error) => self.stream.fail(error),
         }
     }
+    /// Play can start only when physics has ground under the player and every vehicle.
+    /// Stream readiness alone does not prove that published colliders are in place.
+    pub fn start_ground_ready(&mut self) -> bool {
+        self.physics.refresh_queries();
+        let player = self.area.player.body_handle();
+        (0..self.physics.vehicle_count())
+            .map(|index| self.physics.chassis_handle(index))
+            .chain([player])
+            .all(|body| {
+                let origin = self.physics.rapier().bodies[body].position().translation;
+                let filter = QueryFilter::default()
+                    .exclude_sensors()
+                    .exclude_rigid_body(body);
+                self.physics
+                    .queries(filter)
+                    .cast_ray(&Ray::new(origin, -Vector::Y), 20.0, true)
+                    .is_some()
+            })
+    }
     pub fn world_supported(&self) -> bool {
         if self.restore_pending() || !self.startup_aligned || !self.stream.metrics().indices_ready {
             return false;
@@ -1724,18 +1748,22 @@ impl GarageRuntime {
         };
         for body in &reference.bodies {
             let mut node = reference.nodes.iter().find(|n| n.id == body.node);
-            let mut offset = 0.0;
+            let mut offset = None::<f32>;
             while let Some(record) = node {
-                offset += startup
+                for (_, value) in startup
                     .root_offsets
                     .iter()
                     .filter(|(id, _)| *id == record.source)
-                    .map(|(_, value)| *value)
-                    .sum::<f32>();
+                {
+                    *offset.get_or_insert(0.0) += value;
+                }
                 node = record
                     .parent
                     .and_then(|id| reference.nodes.iter().find(|n| n.id == id));
             }
+            // Loose start objects are authored on the start area floor.
+            // Without a startup root, they move with the shared start offset, like the player.
+            let offset = offset.unwrap_or(startup.player_offset);
             let handle = self.area.bodies[&body.id];
             let body = &mut self.physics.rapier_mut().bodies[handle];
             let mut pose = *body.position();
@@ -1747,6 +1775,7 @@ impl GarageRuntime {
         let mut pose = *body.position();
         pose.translation.y += startup.player_offset;
         body.set_position(pose, true);
+        self.area.player.sync_pose(&self.physics);
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, true);

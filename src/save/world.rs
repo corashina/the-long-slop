@@ -430,11 +430,19 @@ impl PersistentWorld {
                             .player
                             .seat_vehicle()
                             .is_some_and(|vehicle| handle == physics.chassis_handle(vehicle))
-                        || (bounded
-                            && stream.supports(crate::world::WorldBounds {
+                        || (bounded && {
+                            let bounds = crate::world::WorldBounds {
                                 min: absolute.map(|v| v - extent - 2.),
                                 max: absolute.map(|v| v + extent + 2.),
-                            }))
+                            };
+                            // Activation needs complete support. An active body stays active
+                            // while its ground exists, so nearby streaming cannot drop it.
+                            if physics.body_active(handle) {
+                                stream.ground_supports(bounds)
+                            } else {
+                                stream.supports(bounds)
+                            }
+                        })
                 };
                 if active {
                     if let Some(state) = self.records[index].state.take() {

@@ -579,8 +579,11 @@ impl WorldStream {
         &mut self,
         next: PresentationAllocation,
     ) -> Result<(), ReferenceError> {
-        for budget in self.presentation_budgets(next) {
-            if budget.used > budget.limit {
+        // Stream work can fill a shared budget between presentation updates.
+        // A change fails only when it raises a budget above its limit.
+        let current = self.presentation_budgets(self.presentation);
+        for (budget, current) in self.presentation_budgets(next).into_iter().zip(current) {
+            if budget.used > budget.limit && budget.used > current.used {
                 return Err(ReferenceError(format!(
                     "{} budget exceeded: requested {} {}, limit {} {}.",
                     budget.name, budget.used, budget.unit, budget.limit, budget.unit,
@@ -2097,6 +2100,17 @@ impl WorldStream {
                     .iter()
                     .any(|s| light.owned_by(&s.placement.id))
         }) {
+            return false;
+        }
+        self.ground_supports(swept)
+    }
+    /// Near terrain colliders cover the bounds. Structures and lights may still be pending.
+    pub fn ground_supports(&self, swept: WorldBounds) -> bool {
+        if !self.indices_ready
+            || ![swept.min[0], swept.min[2], swept.max[0], swept.max[2]]
+                .into_iter()
+                .all(f64::is_finite)
+        {
             return false;
         }
         let size = self.tiles[0].size as f64;

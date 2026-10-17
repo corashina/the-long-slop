@@ -305,10 +305,11 @@ fn check_ready(
     plates: (
         Res<presentation::plates::PlateTextStatus>,
         Res<presentation::weather::WeatherRender>,
+        Res<presentation::world::SourceWorldVisuals>,
     ),
 ) {
     let (lighting, source_lighting) = lighting;
-    let (plates, particles) = plates;
+    let (plates, particles, world_visuals) = plates;
     if let Some(error) = mirrors.failure() {
         game_failure(&error);
         visuals.failed = true;
@@ -417,7 +418,11 @@ fn check_ready(
             if materials.state != presentation::materials::RenderingState::Ready {
                 return;
             }
-            if !drive.runtime.world_supported() || !drive.runtime.stream.start_ready() {
+            if !drive.runtime.world_supported()
+                || !drive.runtime.stream.start_ready()
+                || !drive.runtime.start_ground_ready()
+                || !world_visuals.start_ready(&drive.runtime.stream)
+            {
                 return;
             }
             if !mirrors.ready() || !plates.ready() {
