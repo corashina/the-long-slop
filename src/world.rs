@@ -114,3 +114,4 @@ pub(crate) fn hash(mut value: u64) -> u64 {
     value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
     value ^ (value >> 31)
 }
+pub mod texture_batch_ownership;

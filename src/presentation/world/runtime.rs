@@ -56,6 +56,7 @@ pub struct WorldPresentation<'w, 's> {
     pub plans: ResMut<'w, Assets<super::preflight::SourcePlan>>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub skins: ResMut<'w, Assets<SkinnedMeshInverseBindposes>>,
+    pub batches: ResMut<'w, Assets<crate::presentation::texture_batches::SourceTextureBatch>>,
     pub images: ResMut<'w, Assets<Image>>,
     pub server: Res<'w, AssetServer>,
     pub lights: ResMut<'w, SourceLighting>,
@@ -234,7 +235,7 @@ impl WorldPresentation<'_, '_> {
         if let Err(error) =
             self.materials
                 .cache
-                .prepare_world_deferred(stream, &self.server, &mut self.images)
+                .prepare_world_deferred(stream, &self.server, &mut self.images, &mut self.batches)
         {
             failure.get_or_insert(error);
         }

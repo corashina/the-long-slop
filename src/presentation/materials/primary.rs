@@ -543,6 +543,7 @@ impl SourceMaterials {
 
 #[derive(Default, Clone)]
 pub struct DeferredAllocation {
+    pending: usize,
     staging: usize,
     cpu: usize,
     gpu: usize,
@@ -566,6 +567,11 @@ impl SourceMaterials {
             .saturating_sub(self.world_deferred.gpu)
             + gpu;
         allocation.jobs = allocation.jobs.saturating_sub(self.world_deferred.jobs) + jobs;
+        let pending = self.world_textures.pending();
+        allocation.pending = allocation
+            .pending
+            .saturating_sub(self.world_deferred.pending)
+            + pending;
         allocation.staging_bytes = allocation
             .staging_bytes
             .saturating_sub(self.world_deferred.staging)
@@ -576,6 +582,7 @@ impl SourceMaterials {
             + staging;
         stream.set_presentation_allocation(allocation)?;
         self.world_deferred = DeferredAllocation {
+            pending,
             cpu,
             gpu,
             jobs,
@@ -620,26 +627,51 @@ impl SourceMaterials {
         stream: &mut WorldStream,
         server: &AssetServer,
         images: &mut Assets<Image>,
+        batches: &mut Assets<crate::presentation::texture_batches::SourceTextureBatch>,
     ) -> Result<(), ReferenceError> {
-        let jobs = self.world_textures.jobs(images);
-        self.account_deferred(stream, jobs, self.world_textures.staging_bytes(images))?;
+        if self.preparation.cancelled() || stream.frame().failure.is_some() {
+            self.world_textures.cancel();
+        }
+        self.account_deferred(
+            stream,
+            self.world_textures.jobs(),
+            self.world_textures.staging_bytes(),
+        )?;
         let free = stream.available_external_jobs();
-        // Reserve shared work slots before scheduling source image loaders.
-        let mut allocation = stream.presentation_allocation();
-        allocation.jobs += free;
+        let pending = 32usize.saturating_sub(stream.metrics().pending_work);
         let staging_available = stream.available_dependency_staging_bytes();
-        allocation.staging_bytes += staging_available;
-        allocation.dependency_staging_bytes += staging_available;
-        stream.set_presentation_allocation(allocation)?;
-        self.world_deferred.jobs += free;
-        self.world_deferred.staging += staging_available;
         let available_cpu = stream.available_prototype_cpu_bytes() + self.world_textures.bytes().0;
-        let result =
-            self.world_textures
-                .prepare(server, images, free, staging_available, available_cpu);
-        let jobs = self.world_textures.jobs(images);
-        self.account_deferred(stream, jobs, self.world_textures.staging_bytes(images))?;
-        result
+        let releasable = stream.metrics().generation_jobs > 0
+            || stream.presentation_allocation().staging_bytes > 0;
+        let result = self.world_textures.prepare(
+            server,
+            images,
+            batches,
+            &self.preparation,
+            pending,
+            staging_available,
+            available_cpu,
+            releasable,
+        );
+        self.account_deferred(
+            stream,
+            self.world_textures.jobs(),
+            self.world_textures.staging_bytes(),
+        )?;
+        result?;
+        // CPU and pair staging are committed before either AssetServer request.
+        let launch = free.min(self.world_textures.queued_jobs());
+        self.account_deferred(
+            stream,
+            self.world_textures.jobs() + launch,
+            self.world_textures.staging_bytes(),
+        )?;
+        self.world_textures.start_jobs(server, launch);
+        self.account_deferred(
+            stream,
+            self.world_textures.jobs(),
+            self.world_textures.staging_bytes(),
+        )
     }
 }
 

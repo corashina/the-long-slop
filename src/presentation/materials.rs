@@ -2528,8 +2528,8 @@ impl SourceMaterials {
 }
 
 impl SourceMaterials {
-    pub fn drain_ready(&self, server: &AssetServer, images: &Assets<Image>) -> bool {
-        self.world_textures.drain_ready(server, images)
+    pub fn drain_ready(&mut self, server: &AssetServer, images: &Assets<Image>, batches: &mut Assets<crate::presentation::texture_batches::SourceTextureBatch>) -> bool {
+        self.world_textures.drain_ready(server, batches)
             && self.textures.iter().all(|t| {
                 (t.image.is_some() && primary::pending_texture_cpu(t) == 0)
                     || (t.image.is_none()
@@ -2604,10 +2604,11 @@ impl SourceMaterials {
         &self,
         stream: &mut crate::world::WorldStream,
     ) -> Result<Self, source::ReferenceError> {
+        let world_textures = self.world_textures.fork()?;
         self.reserve_fork(stream)?;
         let mut copy = self.clone();
         copy.preparation = super::gpu_prepare::GpuPreparation::candidate();
-        copy.world_textures = self.world_textures.fork();
+        copy.world_textures = world_textures;
         copy.begin_world_session();
         copy.account_fork(stream)?;
         Ok(copy)

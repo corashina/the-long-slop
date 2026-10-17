@@ -1,6 +1,13 @@
-//! Bounded source-array uploads use Bevy's prepared GPU image and wgpu queue.
+//! Ordered CPU batch owners and GPU acknowledgement.
+use crate::{
+    presentation::{
+        gpu_prepare::GpuPreparation,
+        texture_batches::{SourceTextureBatch, SourceTextureBatchSettings},
+    },
+    reference::texture_batch::TextureBatchReference,
+    world::texture_batch_ownership::{BatchIdentity, BatchQueue, BatchState},
+};
 use bevy::{
-    asset::AssetId,
     ecs as bevy_ecs,
     prelude::*,
     render::{
@@ -11,37 +18,99 @@ use bevy::{
         texture::GpuImage,
     },
 };
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
-};
-pub(super) const UPLOAD_BYTES: usize = 1024 * 1024;
+use std::sync::{Arc, Mutex};
 pub(super) struct Upload {
+    pub identity: BatchIdentity,
     pub image: Handle<Image>,
-    pub layer: u32,
-    pub width: u32,
-    pub height: u32,
-    pub chunk: u32,
-    pub data: Vec<u8>,
-    pub mip: u32,
-    pub row: u32,
-    pub finished: bool,
-    pub submitted: bool,
+    pub array: usize,
+    pub layer: usize,
+    pub batch: usize,
+    pub reference: TextureBatchReference,
+    pub handle: Option<Handle<SourceTextureBatch>>,
+    pub payload: Option<SourceTextureBatch>,
+    pub error: Option<String>,
+    pub preparation: GpuPreparation,
     pub callback_registered: bool,
-    pub completion: Arc<AtomicBool>,
+    pub completion: Arc<Mutex<Option<BatchIdentity>>>,
 }
 #[derive(Default)]
 pub(super) struct UploadQueue {
-    pub job: Option<Upload>,
-    pub completed: Option<(AssetId<Image>, u32, u32)>,
+    pub ownership: BatchQueue,
+    pub jobs: [Option<Upload>; 2],
+    pub next_request: u64,
+}
+impl UploadQueue {
+    pub fn poll(&mut self, server: &AssetServer, batches: &Assets<SourceTextureBatch>) {
+        for job in self.jobs.iter_mut().flatten() {
+            let Some(owner) = self.ownership.owner(job.identity).copied() else {
+                continue;
+            };
+            if owner.state == BatchState::Loading {
+                let handle = job.handle.as_ref().unwrap();
+                if let bevy::asset::LoadState::Failed(error) = server.load_state(handle.id()) {
+                    self.ownership.fail(job.identity);
+                    job.error = Some(format!(
+                        "{}: texture batch load: {error}",
+                        job.reference.descriptor.file
+                    ));
+                } else if let Some(batch) = batches.get(handle) {
+                    job.payload = Some(batch.clone()); // Arc clones only. The decoded Vec has one allocation.
+                    self.ownership.ready(job.identity);
+                }
+            }
+            if let Some(receipt) = job.completion.lock().unwrap().take() {
+                self.ownership.acknowledge(receipt);
+            }
+        }
+    }
+    pub fn start(&mut self, server: &AssetServer, free: usize) {
+        for identity in self.ownership.start(free) {
+            let job = self
+                .jobs
+                .iter_mut()
+                .flatten()
+                .find(|j| j.identity == identity)
+                .unwrap();
+            let descriptor_bytes = job.reference.descriptor.bytes as usize;
+            let decoded_bytes = job.reference.decoded_bytes;
+            job.handle = Some(
+                server
+                    .load_builder()
+                    .with_settings(move |s: &mut SourceTextureBatchSettings| {
+                        s.descriptor_bytes = descriptor_bytes;
+                        s.decoded_bytes = decoded_bytes;
+                    })
+                    .load(job.reference.descriptor.file.clone()),
+            );
+        }
+    }
+    pub fn remove(
+        &mut self,
+        identity: BatchIdentity,
+        batches: &mut Assets<SourceTextureBatch>,
+    ) -> Option<Upload> {
+        self.ownership.release(identity)?;
+        let index = self
+            .jobs
+            .iter()
+            .position(|j| j.as_ref().is_some_and(|j| j.identity == identity))
+            .unwrap();
+        let job = self.jobs[index].take().unwrap();
+        if let Some(handle) = &job.handle {
+            if !self
+                .jobs
+                .iter()
+                .flatten()
+                .any(|j| j.handle.as_ref().is_some_and(|h| h.id() == handle.id()))
+            {
+                batches.remove(handle.id());
+            }
+        }
+        Some(job)
+    }
 }
 #[derive(Resource, Default)]
-struct RenderUploads(
-    [Option<(
-        Arc<Mutex<UploadQueue>>,
-        crate::presentation::gpu_prepare::GpuPreparation,
-    )>; 2],
-);
+struct RenderUploads(Option<Arc<Mutex<UploadQueue>>>);
 pub(super) struct WorldTextureUploadPlugin;
 impl Plugin for WorldTextureUploadPlugin {
     fn build(&self, app: &mut App) {
@@ -83,94 +152,90 @@ fn extract(
             }
         }
     }
-    uploads.0[0] = source.as_ref().map(|s| {
-        (
-            Arc::clone(s.world_textures.upload_queue()),
-            s.preparation.clone(),
-        )
-    });
-    uploads.0[1] = requests.hidden().map(|p| {
-        (
-            Arc::clone(p.materials.world_textures.upload_queue()),
-            p.materials.preparation.clone(),
-        )
-    });
+    uploads.0 = source
+        .as_ref()
+        .map(|s| Arc::clone(s.world_textures.upload_queue()))
+        .or_else(|| {
+            requests
+                .hidden()
+                .map(|p| Arc::clone(p.materials.world_textures.upload_queue()))
+        });
 }
-
 fn upload(
     uploads: Res<RenderUploads>,
     images: Res<RenderAssets<GpuImage>>,
     queue: Res<RenderQueue>,
     device: Res<RenderDevice>,
 ) {
-    for (shared, owner) in uploads.0.iter().flatten() {
-        let mut shared = shared.lock().unwrap();
-        let Some(job) = shared.job.as_mut() else {
-            continue;
-        };
-        if job.submitted {
-            if !job.completion.load(Ordering::Acquire) {
-                continue;
-            }
-            job.submitted = false;
-        }
-        if job.finished {
-            continue;
-        }
-        let Some(image) = images.get(job.image.id()) else {
-            continue;
-        };
-        let _scope = owner.scope(&device);
+    let Some(shared) = &uploads.0 else { return };
+    let mut shared = shared.lock().unwrap();
+    let Some(owner) = shared.ownership.slots[0] else {
+        return;
+    };
+    if owner.state != BatchState::Ready || owner.cancelled {
+        return;
+    }
+    let job = shared
+        .jobs
+        .iter()
+        .flatten()
+        .find(|j| j.identity == owner.identity)
+        .unwrap();
+    let Some(image) = images.get(job.image.id()) else {
+        return;
+    };
+    let batch = job.payload.as_ref().unwrap();
+    let _scope = job.preparation.scope(&device);
+    for region in batch.regions.iter() {
         queue.write_texture(
             TexelCopyTextureInfo {
                 texture: &image.texture,
-                mip_level: job.mip,
+                mip_level: region.mip,
                 origin: Origin3d {
                     x: 0,
-                    y: job.row,
-                    z: job.layer,
+                    y: region.row,
+                    z: job.layer as u32,
                 },
                 aspect: TextureAspect::All,
             },
-            &job.data,
+            &batch.payload[region.decoded_offset..region.decoded_offset + region.decoded_bytes],
             TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(job.width * 4),
-                rows_per_image: Some(job.height),
+                bytes_per_row: Some(region.width * 4),
+                rows_per_image: Some(region.rows),
             },
             Extent3d {
-                width: job.width,
-                height: job.height,
+                width: region.width,
+                height: region.rows,
                 depth_or_array_layers: 1,
             },
         );
-        if owner.isolated() {
-            queue.submit([]);
-            owner.submitted(&queue);
-        }
-        job.finished = true;
-        job.submitted = true;
-        job.callback_registered = false;
-        job.completion.store(false, Ordering::Release);
     }
+    if job.preparation.isolated() {
+        queue.submit([]);
+        job.preparation.submitted(&queue);
+    }
+    shared.ownership.submit(owner.identity);
 }
 fn complete(uploads: Res<RenderUploads>, queue: Res<RenderQueue>) {
-    for (shared, _) in uploads.0.iter().flatten() {
-        let mut shared = shared.lock().unwrap();
-        if let Some(job) = shared.job.as_mut() {
-            if job.submitted && !job.callback_registered {
-                job.callback_registered = true;
-                let completion = Arc::clone(&job.completion);
-                queue.on_submitted_work_done(move || completion.store(true, Ordering::Release));
-            }
-        }
-        if shared
-            .job
-            .as_ref()
-            .is_some_and(|job| job.finished && job.completion.load(Ordering::Acquire))
-        {
-            let job = shared.job.take().unwrap();
-            shared.completed = Some((job.image.id(), job.layer, job.chunk));
-        }
+    let Some(shared) = &uploads.0 else { return };
+    let mut shared = shared.lock().unwrap();
+    let Some(owner) = shared.ownership.slots[0] else {
+        return;
+    };
+    if owner.state != BatchState::Submitted {
+        return;
+    }
+    let job = shared
+        .jobs
+        .iter_mut()
+        .flatten()
+        .find(|j| j.identity == owner.identity)
+        .unwrap();
+    if !job.callback_registered {
+        job.callback_registered = true;
+        let completion = Arc::clone(&job.completion);
+        let identity = job.identity;
+        queue.on_submitted_work_done(move || *completion.lock().unwrap() = Some(identity));
     }
 }

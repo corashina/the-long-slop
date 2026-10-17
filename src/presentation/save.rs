@@ -437,9 +437,10 @@ impl PreparedPresentation {
     }
     pub fn cancel(&mut self) {
         self.materials.preparation.cancel();
+        self.materials.world_textures.cancel();
         self.prototypes.cancel();
     }
-    pub fn drained(&mut self, world: &World) -> bool {
+    pub fn drained(&mut self, world: &mut World) -> bool {
         self.materials.preparation.drained()
             && self.pipelines.drained()
             && self.surfaces.drained()
@@ -451,10 +452,9 @@ impl PreparedPresentation {
                 world.resource::<Assets<super::world::prototype_loader::SourceGltf>>(),
                 world.resource::<Assets<super::world::preflight::SourcePlan>>(),
             )
-            && self.materials.drain_ready(
-                world.resource::<AssetServer>(),
-                world.resource::<Assets<Image>>(),
-            )
+            && world.resource_scope(|world, mut batches: Mut<Assets<super::texture_batches::SourceTextureBatch>>| self.materials.drain_ready(
+                world.resource::<AssetServer>(), world.resource::<Assets<Image>>(), &mut batches,
+            ))
     }
     pub fn release(mut self, _candidate: &mut GarageRuntime, world: &mut World) {
         *world.resource_mut::<super::world::pipelines::CandidatePipelines>() = default();

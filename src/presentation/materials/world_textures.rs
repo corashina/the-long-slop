@@ -1,9 +1,13 @@
 //! Admitted source texture arrays. Each layer retains all authored mip levels.
 use crate::presentation::source_images::wrap;
+use crate::presentation::texture_batches::SourceTextureBatch;
+use crate::reference::texture_batch::TextureBatchReference;
 use crate::reference::{LightingTextureRecord, ReferenceError, SourceId, WorldSourceMaterial};
+use crate::world::texture_batch_ownership::{Admission, BatchIdentity, BatchState, reservation};
 use bevy::asset::AssetId;
+static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 use bevy::{
-    asset::{LoadState, RenderAssetUsages},
+    asset::RenderAssetUsages,
     image::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
     prelude::*,
     render::{render_asset::RenderAssets, render_resource::*, texture::GpuImage},
@@ -90,8 +94,7 @@ struct Layer {
     source: SourceId,
     path: String,
     hash: String,
-    chunks: Arc<[crate::reference::LightingTextureChunk]>,
-    load: Option<Handle<Image>>,
+    batches: Arc<[TextureBatchReference]>,
 }
 #[derive(Clone)]
 struct TextureArray {
@@ -102,11 +105,8 @@ struct TextureArray {
     image: Option<Handle<Image>>,
     users: usize,
     bytes: usize,
-    cpu_bytes: usize,
-    cpu_live: bool,
     next_layer: usize,
-    next_chunk: usize,
-    pending_upload: bool,
+    next_batch: usize,
 }
 #[derive(Clone, Copy, Debug)]
 pub struct TextureBinding {
@@ -120,42 +120,47 @@ struct MaterialTextures {
     arrays: Vec<usize>,
     slots: HashMap<String, TextureBinding>,
 }
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct WorldTextures {
     uploaded: Arc<Mutex<HashSet<AssetId<Image>>>>,
     uploads: Arc<Mutex<super::world_texture_upload::UploadQueue>>,
     arrays: Vec<Option<TextureArray>>,
     materials: HashMap<SourceId, MaterialTextures>,
     /// Live source layer and bounded queue upload overlap.
-    cpu_reserved: usize,
+    session: u64,
+    cancelled: bool,
     gpu_reserved: usize,
+}
+impl Default for WorldTextures {
+    fn default() -> Self {
+        Self {
+            uploaded: Arc::default(),
+            uploads: Arc::default(),
+            arrays: Vec::new(),
+            materials: HashMap::new(),
+            session: NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            cancelled: false,
+            gpu_reserved: 0,
+        }
+    }
 }
 impl WorldTextures {
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn startup_audit(
         &self,
-        images: &Assets<Image>,
-        server: &AssetServer,
+        _images: &Assets<Image>,
+        _server: &AssetServer,
     ) -> serde_json::Value {
         let queue = self.uploads.lock().unwrap();
         serde_json::json!({
-            "arrays": self.arrays.iter().flatten().map(|a| {
-                let layer = a.layers.get(a.next_layer);
-                serde_json::json!({
-                    "layers": a.layers.len(), "next_layer": a.next_layer,
-                    "next_chunk": a.next_chunk, "cpu_live": a.cpu_live,
-                    "pending_upload": a.pending_upload, "failed": a.failed,
-                    "path": layer.and_then(|l| l.chunks.get(a.next_chunk)).map(|c| &c.data.path),
-                    "loaded": layer.and_then(|l| l.load.as_ref()).map(|h| images.contains(h.id())),
-                    "load_state": layer.and_then(|l| l.load.as_ref()).map(|h| format!("{:?}", server.load_state(h.id()))),
-                })
-            }).collect::<Vec<_>>(),
-            "completed": queue.completed.is_some(),
-            "job": queue.job.as_ref().map(|j| serde_json::json!({
-                "finished": j.finished, "submitted": j.submitted,
-                "callback_registered": j.callback_registered,
-                "completion": j.completion.load(std::sync::atomic::Ordering::Acquire),
-            })),
+            "session": self.session,
+            "arrays": self.arrays.iter().flatten().map(|a| serde_json::json!({
+                "layers": a.layers.len(), "next_layer": a.next_layer, "next_batch": a.next_batch, "failed": a.failed,
+            })).collect::<Vec<_>>(),
+            "slots": queue.ownership.slots.iter().flatten().map(|o| serde_json::json!({
+                "session": o.identity.session, "request": o.identity.request, "state": format!("{:?}", o.state),
+                "bytes": o.bytes, "cancelled": o.cancelled,
+            })).collect::<Vec<_>>(),
         })
     }
 
@@ -165,16 +170,24 @@ impl WorldTextures {
         })
     }
 
-    pub fn drain_ready(&self, server: &AssetServer, images: &Assets<Image>) -> bool {
-        self.uploads.lock().unwrap().job.is_none()
-            && self.arrays.iter().flatten().all(|a| {
-                a.layers.iter().all(|l| {
-                    l.load.as_ref().is_none_or(|h| {
-                        images.contains(h.id())
-                            || matches!(server.load_state(h.id()), LoadState::Failed(_))
-                    })
-                })
-            })
+    pub fn cancel(&mut self) {
+        self.cancelled = true;
+        self.uploads.lock().unwrap().ownership.cancel(self.session);
+    }
+    pub fn drain_ready(
+        &mut self,
+        server: &AssetServer,
+        batches: &mut Assets<SourceTextureBatch>,
+    ) -> bool {
+        let _ = self.reap(server, batches);
+        !self
+            .uploads
+            .lock()
+            .unwrap()
+            .jobs
+            .iter()
+            .flatten()
+            .any(|j| j.identity.session == self.session)
     }
     pub fn release_all(&mut self, images: &mut Assets<Image>) {
         for a in self.arrays.drain(..).flatten() {
@@ -186,19 +199,33 @@ impl WorldTextures {
             }
         }
         self.materials.clear();
-        self.cpu_reserved = 0;
         self.gpu_reserved = 0;
     }
 
     pub fn settled(&self) -> bool {
-        self.arrays.iter().flatten().all(|a| {
-            !a.failed && a.image.is_some() && !a.pending_upload && a.next_layer == a.layers.len()
-        }) && self.uploads.lock().unwrap().job.is_none()
+        self.arrays
+            .iter()
+            .flatten()
+            .all(|a| !a.failed && a.image.is_some() && a.next_layer == a.layers.len())
+            && !self
+                .uploads
+                .lock()
+                .unwrap()
+                .jobs
+                .iter()
+                .flatten()
+                .any(|j| j.identity.session == self.session)
     }
-    pub fn fork(&self) -> Self {
+    pub fn fork(&self) -> Result<Self, ReferenceError> {
+        if !self.settled() {
+            return Err(ReferenceError(
+                "Texture fork requires settled owners".into(),
+            ));
+        }
         let mut copy = self.clone();
-        copy.uploads = Arc::default();
-        copy
+        copy.session = NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        copy.cancelled = false;
+        Ok(copy)
     }
     pub fn shared_bytes(&self) -> (usize, usize) {
         self.shared_bytes_if(true)
@@ -207,42 +234,47 @@ impl WorldTextures {
         self.shared_bytes_if(false)
     }
     fn shared_bytes_if(&self, shared: bool) -> (usize, usize) {
-        self.arrays
+        let arrays = self
+            .arrays
             .iter()
             .flatten()
             .filter(|a| !shared || Arc::strong_count(&a.owner) > 1)
             .fold((0, 0), |n, a| {
                 (
-                    n.0 + (if a.cpu_live { a.cpu_bytes } else { 0 })
-                        + a.layers
-                            .iter()
-                            .filter(|l| !shared || Arc::strong_count(&l.chunks) > 1)
-                            .map(|l| {
-                                l.chunks.len()
-                                    * std::mem::size_of::<crate::reference::LightingTextureChunk>()
-                                    + l.chunks
-                                        .iter()
-                                        .map(|c| {
-                                            c.data.path.capacity()
-                                                + c.data.sha256.capacity()
-                                                + c.data.source.file.capacity()
-                                        })
-                                        .sum::<usize>()
-                            })
-                            .sum::<usize>(),
+                    n.0 + a
+                        .layers
+                        .iter()
+                        .filter(|l| !shared || Arc::strong_count(&l.batches) > 1)
+                        .map(|l| {
+                            l.batches.len() * std::mem::size_of::<TextureBatchReference>()
+                                + l.batches
+                                    .iter()
+                                    .map(|c| {
+                                        c.descriptor.file.capacity()
+                                            + c.descriptor.sha256.capacity()
+                                    })
+                                    .sum::<usize>()
+                        })
+                        .sum::<usize>(),
                     n.1 + a.bytes,
                 )
-            })
+            });
+        (
+            arrays.0
+                + if !shared || Arc::strong_count(&self.uploads) > 1 {
+                    queue_bytes()
+                } else {
+                    0
+                },
+            arrays.1,
+        )
     }
 
     pub(crate) fn measurement_images(&self) -> impl Iterator<Item = AssetId<Image>> + '_ {
-        self.arrays.iter().flatten().flat_map(|a| {
-            a.image.iter().map(Handle::id).chain(
-                a.layers
-                    .iter()
-                    .filter_map(|l| l.load.as_ref().map(Handle::id)),
-            )
-        })
+        self.arrays
+            .iter()
+            .flatten()
+            .filter_map(|a| a.image.as_ref().map(Handle::id))
     }
 
     pub(super) fn upload_queue(&self) -> &Arc<Mutex<super::world_texture_upload::UploadQueue>> {
@@ -253,7 +285,10 @@ impl WorldTextures {
         Arc::clone(&self.uploaded)
     }
     pub fn bytes(&self) -> (usize, usize) {
-        (self.cpu_reserved + self.metadata_bytes(), self.gpu_reserved)
+        (
+            self.staging_bytes() + self.metadata_bytes(),
+            self.gpu_reserved,
+        )
     }
 
     fn metadata_bytes(&self) -> usize {
@@ -272,15 +307,13 @@ impl WorldTextures {
                                 layer.source.file.capacity()
                                     + layer.path.capacity()
                                     + layer.hash.capacity()
-                                    + layer.chunks.len()
-                                        * size_of::<crate::reference::LightingTextureChunk>()
+                                    + layer.batches.len() * size_of::<TextureBatchReference>()
                                     + layer
-                                        .chunks
+                                        .batches
                                         .iter()
                                         .map(|c| {
-                                            c.data.path.capacity()
-                                                + c.data.sha256.capacity()
-                                                + c.data.source.file.capacity()
+                                            c.descriptor.file.capacity()
+                                                + c.descriptor.sha256.capacity()
                                         })
                                         .sum::<usize>()
                             })
@@ -303,9 +336,7 @@ impl WorldTextures {
                     + material.slots.keys().map(String::capacity).sum::<usize>()
             })
             .sum::<usize>();
-        size_of::<super::world_texture_upload::UploadQueue>()
-            + 4 * size_of::<usize>()
-            + size_of::<Mutex<super::world_texture_upload::UploadQueue>>()
+        queue_bytes()
             + arrays
             + materials
             + map_bytes(
@@ -399,16 +430,11 @@ impl WorldTextures {
                                 + layer.source.file.len()
                                 + layer.mip_data.path.len()
                                 + layer.mip_data.sha256.len()
-                                + layer.chunks.len()
-                                    * std::mem::size_of::<crate::reference::LightingTextureChunk>()
+                                + layer.batches.len() * std::mem::size_of::<TextureBatchReference>()
                                 + layer
-                                    .chunks
+                                    .batches
                                     .iter()
-                                    .map(|c| {
-                                        c.data.path.len()
-                                            + c.data.sha256.len()
-                                            + c.data.source.file.len()
-                                    })
+                                    .map(|c| c.descriptor.file.len() + c.descriptor.sha256.len())
                                     .sum::<usize>()
                         })
                         .sum::<usize>()
@@ -429,7 +455,7 @@ impl WorldTextures {
                 .sum::<usize>()
             + material.source.file.len()
             + groups.len() * std::mem::size_of::<usize>();
-        let cpu = Some(self.cpu_reserved);
+        let cpu = Some(self.staging_bytes());
         let gpu = added.checked_add(self.gpu_reserved);
         if cpu.is_none_or(|v| {
             v.saturating_add(self.metadata_bytes())
@@ -441,7 +467,7 @@ impl WorldTextures {
                 "Source texture budget {}:{}: CPU {} / {}, GPU {} / {} bytes",
                 material.source.file,
                 material.source.path_id,
-                self.cpu_reserved
+                self.staging_bytes()
                     .saturating_add(self.metadata_bytes())
                     .saturating_add(metadata),
                 cpu_available,
@@ -449,7 +475,6 @@ impl WorldTextures {
                 gpu_available
             )));
         }
-        self.cpu_reserved = cpu.unwrap();
         self.gpu_reserved = gpu.unwrap();
         let mut indices = Vec::with_capacity(groups.len());
         for ((key, records), existing) in groups.into_iter().zip(existing) {
@@ -458,16 +483,13 @@ impl WorldTextures {
                 index
             } else {
                 let bytes = key.layer_bytes()? * records.len();
-                // Fetch buffer, reader, shared asset, upload payload, and GPU upload copy.
-                let cpu_bytes = 5 * (super::world_texture_upload::UPLOAD_BYTES + 16);
                 let layers = records
                     .into_iter()
                     .map(|record| Layer {
                         source: record.source.clone(),
                         path: record.mip_data.path.clone(),
                         hash: record.mip_data.sha256.clone(),
-                        chunks: record.chunks.clone().into(),
-                        load: None,
+                        batches: record.batches.clone().into(),
                     })
                     .collect();
                 let array = Some(TextureArray {
@@ -478,11 +500,8 @@ impl WorldTextures {
                     image: None,
                     users: 1,
                     bytes,
-                    cpu_bytes,
-                    cpu_live: false,
                     next_layer: 0,
-                    next_chunk: 0,
-                    pending_upload: false,
+                    next_batch: 0,
                 });
                 if let Some(index) = self.arrays.iter().position(Option::is_none) {
                     self.arrays[index] = array;
@@ -528,206 +547,226 @@ impl WorldTextures {
         );
         Ok(())
     }
-    /// Admit one source layer, then upload at most four MiB per render update.
+    fn reap(
+        &mut self,
+        server: &AssetServer,
+        batches: &mut Assets<SourceTextureBatch>,
+    ) -> Result<(), ReferenceError> {
+        let mut queue = self.uploads.lock().unwrap();
+        queue.poll(server, batches);
+        let mut failure = None;
+        // Current first. The second owner cannot advance array progress before it.
+        let identities = queue.ownership.slots.map(|o| o.map(|o| o.identity));
+        for identity in identities
+            .into_iter()
+            .flatten()
+            .filter(|id| id.session == self.session)
+        {
+            let owner = *queue.ownership.owner(identity).unwrap();
+            if let Some(job) = queue.remove(identity, batches) {
+                let array = self.arrays[job.array].as_mut().unwrap();
+                if owner.state == BatchState::Failed {
+                    array.failed = true;
+                    failure = job.error.map(ReferenceError);
+                } else if !owner.cancelled {
+                    if array.next_layer != job.layer || array.next_batch != job.batch {
+                        return Err(ReferenceError("Texture batch completion order".into()));
+                    }
+                    array.next_batch += 1;
+                    if array.next_batch == array.layers[array.next_layer].batches.len() {
+                        array.next_layer += 1;
+                        array.next_batch = 0;
+                    }
+                }
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    }
     pub fn prepare(
         &mut self,
         server: &AssetServer,
         images: &mut Assets<Image>,
-        new_jobs: usize,
+        batches: &mut Assets<SourceTextureBatch>,
+        preparation: &crate::presentation::gpu_prepare::GpuPreparation,
+        pending_available: usize,
         staging_available: usize,
         cpu_available: usize,
+        releasable: bool,
     ) -> Result<(), ReferenceError> {
-        let result = self.prepare_inner(server, images, new_jobs, staging_available, cpu_available);
-        loop {
-            let failed = self
-                .materials
-                .iter()
-                .find(|(id, material)| {
-                    material
-                        .arrays
-                        .iter()
-                        .any(|&i| self.arrays[i].as_ref().is_some_and(|a| a.failed))
-                        && self.retirable(id, images, server)
-                })
-                .map(|(id, _)| id.clone());
-            let Some(id) = failed else {
-                break;
-            };
-            self.release(&id, images, server)?;
+        self.reap(server, batches)?;
+        if self.cancelled {
+            return Ok(());
         }
-        result
-    }
-    fn prepare_inner(
-        &mut self,
-        server: &AssetServer,
-        images: &mut Assets<Image>,
-        new_jobs: usize,
-        staging_available: usize,
-        cpu_available: usize,
-    ) -> Result<(), ReferenceError> {
-        if let Some((image, layer, chunk)) = self.uploads.lock().unwrap().completed.take() {
-            if let Some(array) = self
+        let metadata = self.metadata_bytes();
+        let mut queue = self.uploads.lock().unwrap();
+        if queue.jobs.iter().all(Option::is_none) {
+            let mut selected = Vec::new();
+            'arrays: for (index, array) in self
                 .arrays
-                .iter_mut()
-                .flatten()
-                .find(|a| a.image.as_ref().is_some_and(|h| h.id() == image))
+                .iter()
+                .enumerate()
+                .filter_map(|(i, a)| a.as_ref().map(|a| (i, a)))
             {
-                if array.pending_upload
-                    && array.next_layer == layer as usize
-                    && array.next_chunk == chunk as usize
-                {
-                    array.pending_upload = false;
-                    // Drop only this consumer. AssetServer owns shared chunk retirement.
-                    array.layers[array.next_layer].load = None;
-                    array.next_chunk += 1;
-                    if array.next_chunk == array.layers[array.next_layer].chunks.len() {
-                        array.next_layer += 1;
-                        array.next_chunk = 0;
+                if array.failed {
+                    continue;
+                }
+                for layer in array.next_layer..array.layers.len() {
+                    let first = if layer == array.next_layer {
+                        array.next_batch
+                    } else {
+                        0
+                    };
+                    for batch in first..array.layers[layer].batches.len() {
+                        let reference = &array.layers[layer].batches[batch];
+                        let bytes = reservation(reference).ok_or_else(|| {
+                            ReferenceError(format!(
+                                "{}: batch reservation overflow",
+                                reference.descriptor.file
+                            ))
+                        })?;
+                        queue.next_request += 1;
+                        selected.push((
+                            index,
+                            layer,
+                            batch,
+                            BatchIdentity {
+                                session: self.session,
+                                request: queue.next_request,
+                            },
+                            bytes,
+                        ));
+                        if selected.len() == 2 {
+                            break 'arrays;
+                        }
                     }
-                    self.cpu_reserved -= array.cpu_bytes;
-                    array.cpu_live = false;
                 }
             }
-        }
-        let active = self
-            .arrays
-            .iter()
-            .position(|a| a.as_ref().is_some_and(|a| a.cpu_live));
-        let index = active.or_else(|| {
-            self.arrays.iter().position(|a| {
-                a.as_ref()
-                    .is_some_and(|a| !a.failed && a.next_layer < a.layers.len())
-            })
-        });
-        let Some(index) = index else {
-            return Ok(());
-        };
-        let array = self.arrays[index].as_mut().unwrap();
-        if array.pending_upload {
-            return Ok(());
-        }
-        if array.failed {
-            return Ok(());
-        }
-        let key = array.key;
-        let layer = &mut array.layers[array.next_layer];
-        let chunk = &layer.chunks[array.next_chunk];
-        let (width, rows, mip, row) = (chunk.width, chunk.rows, chunk.mip, chunk.row);
-        if let Some(handle) = &layer.load {
-            if let LoadState::Failed(error) = server.load_state(handle.id()) {
-                array.failed = true;
-                layer.load = None;
-                self.cpu_reserved -= array.cpu_bytes;
-                array.cpu_live = false;
-                return Err(ReferenceError(format!(
-                    "Source texture {}:{}: {error}",
-                    layer.source.file, layer.source.path_id
-                )));
-            }
-            let Some(image) = images.get(handle) else {
+            if selected.is_empty() {
                 return Ok(());
+            }
+            if selected.len() > pending_available {
+                return Ok(());
+            }
+            let shared = if selected.len() == 2 {
+                let (a, l, b, _, bytes) = selected[0];
+                let (c, m, d, _, _) = selected[1];
+                (self.arrays[a].as_ref().unwrap().layers[l].batches[b]
+                    .descriptor
+                    .file
+                    == self.arrays[c].as_ref().unwrap().layers[m].batches[d]
+                        .descriptor
+                        .file)
+                    .then_some(bytes - 4096)
+            } else {
+                None
             };
-            if image.width() != width
-                || image.height() != rows
-                || image.texture_descriptor.mip_level_count != 1
-                || image.data.as_ref().map(Vec::len) != Some(width as usize * rows as usize * 4)
-                || !matches!(
-                    image.texture_descriptor.format,
-                    TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb
-                )
+            if shared.is_some() {
+                selected[1].4 = 4096;
+            }
+            let available = staging_available.min(cpu_available.saturating_sub(metadata));
+            match queue
+                .ownership
+                .admit(selected.iter().map(|s| (s.3, s.4)), available, releasable)
             {
-                array.failed = true;
-                layer.load = None;
-                return Err(ReferenceError("Invalid source array layer".into()));
+                Ok(()) => (),
+                Err(Admission::Wait) => return Ok(()),
+                Err(Admission::Permanent) => {
+                    let (i, l, b, _, _) = selected[0];
+                    let source = &self.arrays[i].as_ref().unwrap().layers[l];
+                    return Err(ReferenceError(format!(
+                        "{}:{} {}: batch pair admission requested {} bytes, available {} bytes",
+                        source.source.file,
+                        source.source.path_id,
+                        source.batches[b].descriptor.file,
+                        selected.iter().map(|s| s.4).sum::<usize>(),
+                        available
+                    )));
+                }
             }
-            let mut queue = self.uploads.lock().unwrap();
-            if queue.job.is_some() || queue.completed.is_some() {
-                return Err(ReferenceError(
-                    "Source array upload ownership overlap".into(),
-                ));
+            if let Some(bytes) = shared {
+                queue.ownership.share(selected[0].3, selected[1].3, bytes);
             }
-            if array.image.is_none() {
-                array.image = Some(images.add(array_image(key, array.layers.len())?));
+            for (slot, (index, layer, batch, identity, _)) in selected.into_iter().enumerate() {
+                let array = self.arrays[index].as_mut().unwrap();
+                if array.image.is_none() {
+                    array.image = Some(images.add(array_image(array.key, array.layers.len())?));
+                }
+                queue.jobs[slot] = Some(super::world_texture_upload::Upload {
+                    identity,
+                    image: array.image.as_ref().unwrap().clone(),
+                    array: index,
+                    layer,
+                    batch,
+                    reference: array.layers[layer].batches[batch].clone(),
+                    handle: None,
+                    payload: None,
+                    error: None,
+                    preparation: preparation.clone(),
+                    callback_registered: false,
+                    completion: Arc::default(),
+                });
             }
-            // A chunk path may serve several arrays or an overlapping Restart.
-            // Retain its strong handle through completion; never remove its shared asset.
-            let data = images
-                .get(array.layers[array.next_layer].load.as_ref().unwrap())
-                .ok_or_else(|| ReferenceError("Source layer ownership disappeared".into()))?
-                .data
-                .as_ref()
-                .unwrap()
-                .clone();
-            queue.job = Some(super::world_texture_upload::Upload {
-                image: array.image.as_ref().unwrap().clone(),
-                layer: array.next_layer as u32,
-                width,
-                height: rows,
-                chunk: array.next_chunk as u32,
-                data,
-                mip,
-                row,
-                finished: false,
-                submitted: false,
-                callback_registered: false,
-                completion: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            });
-            array.pending_upload = true;
-            return Ok(());
         }
-        if new_jobs == 0 {
-            return Ok(());
-        }
-        if array.cpu_bytes > 32 * 1024 * 1024 {
-            return Err(ReferenceError(
-                "Source layer and upload overlap exceed shared staging cap".into(),
-            ));
-        }
-        if array.cpu_bytes > staging_available
-            || self
-                .cpu_reserved
-                .saturating_add(array.cpu_bytes)
-                .saturating_add(self.metadata_bytes())
-                > cpu_available
-        {
-            return Ok(());
-        }
-        let array = self.arrays[index].as_mut().unwrap();
-        self.cpu_reserved += array.cpu_bytes;
-        array.cpu_live = true;
-        array.layers[array.next_layer].load = Some(
-            server
-                .load_builder()
-                .with_settings(
-                    move |settings: &mut crate::presentation::textures::SourceImageSettings| {
-                        settings.srgb = key.srgb;
-                        settings.filter = key.filter;
-                        settings.wrap_u = key.wrap_u;
-                        settings.wrap_v = key.wrap_v;
-                        settings.main_world_only = true;
-                        settings.decoded_bytes = width as usize * rows as usize * 4;
-                    },
-                )
-                .load(
-                    array.layers[array.next_layer].chunks[array.next_chunk]
-                        .data
-                        .path
-                        .clone(),
-                ),
-        );
         Ok(())
     }
-    pub fn jobs(&self, images: &Assets<Image>) -> usize {
-        self.arrays
+    pub fn queued_jobs(&self) -> usize {
+        self.uploads
+            .lock()
+            .unwrap()
+            .ownership
+            .slots
             .iter()
             .flatten()
-            .flat_map(|a| &a.layers)
-            .filter_map(|l| l.load.as_ref())
-            .filter(|h| !images.contains(h.id()))
+            .filter(|o| {
+                o.identity.session == self.session && o.state == BatchState::Queued && !o.cancelled
+            })
             .count()
     }
-    pub fn staging_bytes(&self, _images: &Assets<Image>) -> usize {
-        self.cpu_reserved
+    pub fn start_jobs(&mut self, server: &AssetServer, free: usize) {
+        let mut queue = self.uploads.lock().unwrap();
+        if queue
+            .ownership
+            .slots
+            .iter()
+            .flatten()
+            .any(|o| o.identity.session == self.session && !o.cancelled)
+        {
+            queue.start(server, free);
+        }
+    }
+    pub fn jobs(&self) -> usize {
+        self.uploads
+            .lock()
+            .unwrap()
+            .ownership
+            .slots
+            .iter()
+            .flatten()
+            .filter(|o| o.identity.session == self.session && o.state == BatchState::Loading)
+            .count()
+    }
+    pub fn pending(&self) -> usize {
+        self.uploads
+            .lock()
+            .unwrap()
+            .ownership
+            .slots
+            .iter()
+            .flatten()
+            .filter(|o| o.identity.session == self.session)
+            .count()
+    }
+    pub fn staging_bytes(&self) -> usize {
+        self.uploads
+            .lock()
+            .unwrap()
+            .ownership
+            .slots
+            .iter()
+            .flatten()
+            .filter(|o| o.identity.session == self.session)
+            .map(|o| o.bytes)
+            .sum()
     }
     pub fn admitted(&self, material: &SourceId) -> bool {
         self.materials.contains_key(material)
@@ -761,38 +800,22 @@ impl WorldTextures {
             })
         })
     }
-    fn upload_in_flight(&self, array: &TextureArray) -> bool {
-        self.uploads
-            .lock()
-            .unwrap()
-            .job
-            .as_ref()
-            .is_some_and(|job| {
-                array
-                    .image
-                    .as_ref()
-                    .is_some_and(|image| image.id() == job.image.id())
-                    && job.submitted
-                    && !job.completion.load(std::sync::atomic::Ordering::Acquire)
-            })
-    }
     pub fn retirable(
         &self,
         material: &SourceId,
-        images: &Assets<Image>,
-        server: &AssetServer,
+        _images: &Assets<Image>,
+        _server: &AssetServer,
     ) -> bool {
+        let queue = self.uploads.lock().unwrap();
         self.materials.get(material).is_none_or(|m| {
             m.arrays.iter().all(|&i| {
                 self.arrays[i].as_ref().is_none_or(|a| {
                     a.users > 1
-                        || (!self.upload_in_flight(a)
-                            && a.layers.iter().all(|l| {
-                                l.load.as_ref().is_none_or(|h| {
-                                    images.contains(h.id())
-                                        || matches!(server.load_state(h.id()), LoadState::Failed(_))
-                                })
-                            }))
+                        || !queue
+                            .jobs
+                            .iter()
+                            .flatten()
+                            .any(|j| j.identity.session == self.session && j.array == i)
                 })
             })
         })
@@ -808,26 +831,6 @@ impl WorldTextures {
                 "Source texture retirement still has pending work".into(),
             ));
         }
-        if self.materials.get(material).is_some_and(|binding| {
-            binding.arrays.iter().any(|&index| {
-                self.arrays[index].as_ref().is_some_and(|array| {
-                    array.users == 1
-                        && array.layers.iter().any(|layer| {
-                            layer.load.as_ref().is_some_and(|handle| {
-                                !images.contains(handle.id())
-                                    && !matches!(
-                                        server.load_state(handle.id()),
-                                        LoadState::Failed(_)
-                                    )
-                            })
-                        })
-                })
-            })
-        }) {
-            return Err(ReferenceError(
-                "Source texture retirement still has a loader job".into(),
-            ));
-        }
         let Some(material) = self.materials.remove(material) else {
             return Ok(());
         };
@@ -839,26 +842,8 @@ impl WorldTextures {
             }
             let array = self.arrays[index].take().unwrap();
             if let Some(image) = array.image.filter(|_| Arc::strong_count(&array.owner) == 1) {
-                let mut queue = self.uploads.lock().unwrap();
-                if queue
-                    .job
-                    .as_ref()
-                    .is_some_and(|job| job.image.id() == image.id())
-                {
-                    queue.job = None;
-                }
-                if queue
-                    .completed
-                    .as_ref()
-                    .is_some_and(|(id, _, _)| *id == image.id())
-                {
-                    queue.completed = None;
-                }
                 self.uploaded.lock().unwrap().remove(&image.id());
                 images.remove(image.id());
-            }
-            if array.cpu_live {
-                self.cpu_reserved -= array.cpu_bytes;
             }
             // Dropping layer handles releases this owner without invalidating other users.
             drop(array.layers);
@@ -866,6 +851,11 @@ impl WorldTextures {
         }
         Ok(())
     }
+}
+
+fn queue_bytes() -> usize {
+    std::mem::size_of::<Mutex<super::world_texture_upload::UploadQueue>>()
+        + 2 * std::mem::size_of::<usize>()
 }
 
 // Hash-table allocation upper bound from capacity, including control bytes.
