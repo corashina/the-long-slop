@@ -1,0 +1,452 @@
+//! Native adapter for the same renderer receipts and publication boundary used by WASM.
+use super::*;
+use crate::starting_area::GarageRuntime;
+
+fn reference() -> ReferenceManifest {
+    ReferenceManifest::from_runtime_json(
+        &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+    )
+    .unwrap()
+}
+fn views() -> [super::super::RequiredView; 1] {
+    let planes = [
+        [1., 0., 0., 150.],
+        [-1., 0., 0., 150.],
+        [0., 1., 0., 150.],
+        [0., -1., 0., 150.],
+        [0., 0., 1., 150.],
+        [0., 0., -1., 150.],
+    ];
+    [super::super::RequiredView {
+        camera: planes,
+        shadow: crate::reference::shadow_candidates::DirectionalHull::new(planes, [1., 0., 0.])
+            .unwrap(),
+        mask: u32::MAX,
+        light_mask: u32::MAX,
+        origin: [0.; 3],
+    }]
+}
+fn prepare_step(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    surface_claim: &mut Option<PipelineContinuation>,
+) {
+    let stream = &mut run.stream;
+    stream.prepare(100.);
+    if stream
+        .ready
+        .as_ref()
+        .is_some_and(|w| !same_request(w.request, stream.request))
+    {
+        if let Some(mut claim) = surface_claim.take() {
+            stream.discard_surface_renderer(&mut claim).unwrap();
+        }
+    }
+    stream.select_required(&views());
+    let sources: Vec<_> = reference
+        .world
+        .terrain
+        .materials
+        .iter()
+        .map(|m| m.source.clone())
+        .chain(reference.world.road.prototypes.iter().cloned())
+        .collect();
+    for source in sources {
+        stream.reserve_prototype(source.clone(), 0, 0).unwrap();
+        stream.bind_prototype(&source).unwrap();
+    }
+    let placement = stream
+        .wanted_structures
+        .iter()
+        .find(|p| {
+            (stream.structure_required(&p.id)
+                || stream.lights.iter().any(|light| {
+                    stream.publication_light(light, &stream.required.lights)
+                        && light.owned_by(&p.id)
+                }))
+                && stream.contents_initialized(&p.id)
+                && !stream.structures.iter().any(|s| s.placement.id == p.id)
+                && !stream.ready_structures.contains(&p.id)
+        })
+        .cloned();
+    if let Some(p) = placement {
+        stream.reserve_prototype(p.prototype.clone(), 0, 0).unwrap();
+        stream.bind_prototype(&p.prototype).unwrap();
+        stream.bind_structure_recipe(&p.prototype).unwrap();
+        let mut claim = stream
+            .reserve_instance_renderer(stream.request, &p.id, 0, 0, 0)
+            .unwrap();
+        stream
+            .accept_structure_renderer(stream.request, &p.id, &mut claim)
+            .unwrap();
+    }
+    if let Some((request, surface)) = stream.prepared_surface() {
+        let key = surface.key;
+        if !stream.ready.as_ref().unwrap().renderer_reserved {
+            let claim = stream.reserve_surface_renderer(request, key).unwrap();
+            stream
+                .accept_surface_renderer(request, key, &claim)
+                .unwrap();
+            *surface_claim = Some(claim);
+        }
+    }
+    let lights = stream.required.lights.clone();
+    stream.publish(&mut run.physics, &lights).unwrap();
+    if stream.ready.is_none() {
+        *surface_claim = None;
+    }
+    stream
+        .sync_supplies(
+            reference,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.physics,
+            &mut run.wheels,
+        )
+        .unwrap();
+    assert!(stream.failure.is_none(), "{:?}", stream.failure);
+    run.align_startup(reference).unwrap();
+}
+
+fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
+    let mut surface_claim = None;
+    for step in 0..2000 {
+        prepare_step(run, reference, &mut surface_claim);
+        if run.stream.required_ready() {
+            if let Some(mut claim) = surface_claim.take() {
+                let key = run.stream.ready.as_ref().unwrap().published.key;
+                assert!(!run.stream.required.terrain.contains(&key));
+                assert!(
+                    key.layer != WorldLayer::Road
+                        || !run.stream.required.roads.contains(&(key.unit[0] as u32))
+                );
+                run.stream.discard_surface_renderer(&mut claim).unwrap();
+            }
+            return;
+        }
+        if step == 1999 {
+            println!("stalled: {}", run.stream.startup_job_audit());
+        }
+    }
+    panic!("required publication did not reach readiness");
+}
+fn withdraw_terrain(run: &mut GarageRuntime, key: SurfaceKey) {
+    let index = run
+        .stream
+        .surfaces
+        .iter()
+        .position(|s| s.key == key)
+        .unwrap();
+    let mut surface = run.stream.surfaces.remove(index);
+    run.physics
+        .remove_collider(surface.collider.take().unwrap());
+    surface.collision_bytes = 0;
+    assert!(run.stream.ready.is_none());
+    run.stream.ready = Some(PreparedSurface {
+        pending_bytes: 0,
+        renderer_ready: false,
+        renderer_reserved: false,
+        request: run.stream.request,
+        published: surface,
+    });
+}
+fn publish_with_receipts(run: &mut GarageRuntime) {
+    let stream = &mut run.stream;
+    let (request, surface) = stream.prepared_surface().unwrap();
+    let key = surface.key;
+    let mut claim = stream.reserve_surface_renderer(request, key).unwrap();
+    for stage in ["geometry", "caster", "effect"] {
+        let receipt = super::super::upload_receipt::UploadReceipt::default();
+        receipt.register();
+        claim.watch_upload(receipt.clone());
+        assert!(
+            stream
+                .accept_surface_renderer(request, key, &claim)
+                .is_err(),
+            "{stage} must finish before renderer publication"
+        );
+        let lights = stream.required.lights.clone();
+        stream.publication_available = true;
+        stream.publish(&mut run.physics, &lights).unwrap();
+        assert!(!stream.required_ready(), "{stage} must block readiness");
+        receipt.complete();
+    }
+    stream
+        .accept_surface_renderer(request, key, &claim)
+        .unwrap();
+    let lights = stream.required.lights.clone();
+    stream.publication_available = true;
+    stream.publish(&mut run.physics, &lights).unwrap();
+}
+#[test]
+#[ignore = "requires the installed source export"]
+fn required_publication_reaches_ready_and_withholds_dependencies() {
+    let reference = reference();
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    prepare_ready(&mut run, &reference);
+    assert!(run.stream.required_ready());
+    assert!(run.world_supported());
+    println!(
+        "ready: roads={} tiles={} structures={} lights={}; active bindings={} static={}",
+        run.stream.required.roads.len(),
+        run.stream.required.terrain.len(),
+        run.stream.required.structures.len(),
+        run.stream.required.lights.len(),
+        run.stream.contents.active.len(),
+        run.stream.static_controls.len()
+    );
+    let key = *run
+        .stream
+        .required
+        .terrain
+        .iter()
+        .find(|k| k.layer == WorldLayer::Terrain)
+        .unwrap();
+    withdraw_terrain(&mut run, key);
+    assert!(
+        !run.stream.required_ready(),
+        "unpublished geometry/collision must block readiness"
+    );
+    publish_with_receipts(&mut run);
+    assert!(run.stream.required_ready());
+    let light = run
+        .stream
+        .lights
+        .iter()
+        .find(|l| run.stream.required.lights.contains(&l.id))
+        .unwrap();
+    let index = run
+        .stream
+        .structures
+        .iter()
+        .position(|s| light.owned_by(&s.placement.id))
+        .unwrap();
+    let owner = run.stream.structures.remove(index);
+    assert!(
+        !run.stream.required_ready(),
+        "required light owner must publish"
+    );
+    run.stream.structures.insert(index, owner);
+    assert!(run.stream.required_ready());
+    mechanism_binding_gate(&mut run, &reference);
+    swept_boundaries(&mut run, &reference);
+}
+
+fn move_player(run: &mut GarageRuntime, position: [f32; 3]) {
+    let old = run.area.player.body_pose(&run.physics).position;
+    run.area
+        .player
+        .rebase(std::array::from_fn(|i| old[i] - position[i]));
+    let pose = run.area.player.body_pose(&run.physics);
+    let body = run.area.player.body_handle();
+    run.physics.rapier_mut().bodies[body].set_position(crate::vehicle::to_rapier(pose), true);
+    run.physics.refresh_queries();
+}
+fn swept_boundaries(run: &mut GarageRuntime, reference: &ReferenceManifest) {
+    use crate::simulation::{FrameInput, keys};
+    use rapier3d::math::Vector;
+    let original_player = run.area.player.body_pose(&run.physics).position;
+    let original_car = run.physics.snapshot(run.vehicle).pose;
+    let size = run.stream.tiles[0].size as f32;
+    let boundary = size * 0.5;
+    let key = SurfaceKey {
+        layer: WorldLayer::Terrain,
+        unit: [1, 0],
+    };
+    move_player(run, [boundary - 7.5, original_player[1] + 10., 0.]);
+    run.started = true;
+    assert!(run.world_supported());
+    withdraw_terrain(run, key);
+    let before = run.area.player.body_pose(&run.physics);
+    assert!(
+        run.stream
+            .supports(window(run.stream.origin.absolute(before.position), 1.)),
+        "player's current tile stays published"
+    );
+    assert!(
+        !run.world_supported(),
+        "player movement envelope reaches the unpublished neighbor"
+    );
+    for _ in 0..4 {
+        run.step(
+            reference,
+            FrameInput {
+                held: keys::RIGHT,
+                ..Default::default()
+            },
+        );
+    }
+    assert_eq!(
+        run.area.player.body_pose(&run.physics),
+        before,
+        "player must stop before unresolved collision"
+    );
+    publish_with_receipts(run);
+    assert!(run.world_supported());
+    run.step(
+        reference,
+        FrameInput {
+            held: keys::RIGHT,
+            ..Default::default()
+        },
+    );
+    let after = run.area.player.body_pose(&run.physics);
+    assert!(
+        (after.position[0] - before.position[0]).abs()
+            + (after.position[2] - before.position[2]).abs()
+            > 1e-5,
+        "player advances after collision publication"
+    );
+
+    let player = run.stream.origin.local([
+        f64::from(boundary - 18.),
+        f64::from(original_player[1] + 10.),
+        0.,
+    ]);
+    move_player(run, player);
+    let mut pose = original_car;
+    pose.position = run.stream.origin.local([
+        f64::from(boundary - 9.),
+        f64::from(original_car.position[1] + 10.),
+        0.,
+    ]);
+    run.physics.reset_preserving_wheels(run.vehicle, pose);
+    run.stream.request_at(
+        run.stream
+            .origin
+            .absolute(run.area.player.focus_position(&run.physics)),
+        run.stream
+            .origin
+            .absolute(run.physics.snapshot(run.vehicle).pose.position),
+    );
+    prepare_ready(run, reference);
+    run.sync_world_activity(reference).unwrap();
+    run.physics.reset_preserving_wheels(run.vehicle, pose);
+    assert_eq!(run.physics.snapshot(run.vehicle).pose, pose);
+    let chassis = run.physics.chassis_handle(run.vehicle);
+    assert!(
+        run.physics.body_active(chassis),
+        "vehicle must be active for the swept guard"
+    );
+    run.physics.rapier_mut().bodies[chassis].set_linvel(Vector::ZERO, true);
+    withdraw_terrain(run, key);
+    assert!(
+        run.world_supported(),
+        "stationary car remains in the prepared region"
+    );
+    run.physics.rapier_mut().bodies[chassis].set_linvel(Vector::new(120., 0., 0.), true);
+    assert!(
+        !run.world_supported(),
+        "vehicle swept support includes its next step: pose={:?} velocity={:?} origin={:?} boundary={}",
+        run.physics.snapshot(run.vehicle).pose.position,
+        run.physics.rapier().bodies[chassis].linvel(),
+        run.stream.origin.offset,
+        boundary
+    );
+    let before = run.physics.snapshot(run.vehicle).pose;
+    for _ in 0..4 {
+        run.step(reference, FrameInput::default());
+    }
+    assert_eq!(
+        run.physics.snapshot(run.vehicle).pose,
+        before,
+        "vehicle must stop before unresolved collision"
+    );
+    publish_with_receipts(run);
+    assert!(run.world_supported());
+    run.step(reference, FrameInput::default());
+    assert!(
+        run.physics.snapshot(run.vehicle).pose.position[0] > before.position[0] + 0.01,
+        "vehicle advances after collision publication"
+    );
+}
+
+fn mechanism_binding_gate(run: &mut GarageRuntime, reference: &ReferenceManifest) {
+    let prototype = reference
+        .world
+        .prototypes
+        .iter()
+        .find(|p| {
+            reference
+                .world
+                .mechanisms
+                .iter()
+                .any(|m| m.prototype == p.source)
+                && run
+                    .stream
+                    .contents
+                    .rules
+                    .component(&reference.world, &p.source, "buildingscript")
+                    .unwrap()
+                    .is_none()
+        })
+        .unwrap();
+    let mut placement = run.stream.wanted_structures[0].clone();
+    placement.prototype = prototype.source.clone();
+    placement.id.layer = WorldLayer::Nested;
+    placement.id.children.push((prototype.source.clone(), 999));
+    placement.pose.position = run.stream.request.player;
+    placement.bounds = window(placement.pose.position, 2.);
+    placement.scale = prototype.prefab_pose.scale;
+    let id = placement.id.clone();
+    run.stream.wanted_structures.push(placement);
+    run.stream.select_required(&views());
+    assert!(run.stream.structure_required(&id));
+    assert!(!run.stream.required_ready());
+    run.stream
+        .reserve_prototype(prototype.source.clone(), 0, 0)
+        .unwrap();
+    run.stream.bind_prototype(&prototype.source).unwrap();
+    run.stream.bind_structure_recipe(&prototype.source).unwrap();
+    let request = run.stream.request;
+    let mut claim = run
+        .stream
+        .reserve_instance_renderer(request, &id, 0, 0, 0)
+        .unwrap();
+    run.stream
+        .accept_structure_renderer(request, &id, &mut claim)
+        .unwrap();
+    run.stream.publication_available = true;
+    let lights = run.stream.required.lights.clone();
+    run.stream
+        .publish_structure(&mut run.physics, &lights)
+        .unwrap();
+    run.stream
+        .sync_static_controls(
+            reference,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.physics,
+            &mut run.wheels,
+        )
+        .unwrap();
+    let content = run
+        .stream
+        .static_controls
+        .iter()
+        .find(|c| c.content.placement.id == id)
+        .unwrap();
+    assert!(content.item.is_some());
+    assert!(
+        !content.bindings.is_empty(),
+        "real mechanism must bind a control"
+    );
+    assert!(
+        !run.stream.required_ready(),
+        "unfinished control/interaction restoration blocks readiness"
+    );
+    run.stream
+        .sync_supplies(
+            reference,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.physics,
+            &mut run.wheels,
+        )
+        .unwrap();
+    assert!(run.stream.bindings_ready(&id));
+    assert!(
+        run.stream.required_ready(),
+        "control publication reaches terminal readiness"
+    );
+}

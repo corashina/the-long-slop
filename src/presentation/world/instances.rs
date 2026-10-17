@@ -150,9 +150,10 @@ impl SourceInstances {
         prototypes: &mut SourcePrototypes,
     ) -> Result<(), ReferenceError> {
         // Discover selected descriptors before material or payload readiness.
+        let required_ready = stream.required_ready();
         for index in 0..stream.pending_structures().len() {
             let placement = &stream.pending_structures()[index];
-            if !stream.structure_required(&placement.id) && !stream.required_ready() {
+            if !stream.structure_required(&placement.id) && !required_ready {
                 continue;
             }
             let source = &placement.prototype;
@@ -194,12 +195,13 @@ impl SourceInstances {
             self.pending = None;
         }
         if self.pending.is_none() {
+            let required_ready = stream.required_ready();
             self.pending = stream
                 .pending_structures()
                 .iter()
                 .find(|p| {
                     stream.contents_initialized(&p.id)
-                        && (stream.structure_required(&p.id) || stream.required_ready())
+                        && (stream.structure_required(&p.id) || required_ready)
                         && !self.instances.iter().any(|i| i.placement.id == p.id)
                 })
                 .cloned();

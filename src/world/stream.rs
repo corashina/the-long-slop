@@ -2066,8 +2066,9 @@ impl WorldStream {
         if self.available_external_jobs() == 0 {
             return;
         }
+        let required_ready = self.required_ready();
         let Some(index) = self.wanted_roads.iter().copied().find(|id| {
-            (self.required.roads.contains(id) || self.required_ready())
+            (self.required.roads.contains(id) || required_ready)
                 && !self
                     .surfaces
                     .iter()
@@ -2132,8 +2133,9 @@ impl WorldStream {
             .any(|p| (p[0] - x).abs() <= size * 0.5 + 8. && (p[2] - z).abs() <= size * 0.5 + 8.)
     }
     pub fn road_prototype_required(&self, source: &SourceId) -> bool {
+        let required_ready = self.required_ready();
         self.selected_roads.iter().any(|r| {
-            (self.required.roads.contains(&r.segment.index) || self.required_ready())
+            (self.required.roads.contains(&r.segment.index) || required_ready)
                 && self.reference.road.prototypes[r.segment.biome as usize] == *source
         })
     }
@@ -2142,13 +2144,14 @@ impl WorldStream {
             return;
         }
         if self.terrain_work.is_none() {
+            let required_ready = self.required_ready();
             let Some(key) = self
                 .wanted_tiles
                 .iter()
                 .find(|key| self.local_collision_pending(**key))
                 .or_else(|| {
                     self.wanted_tiles.iter().find(|key| {
-                        (self.required.terrain.contains(key) || self.required_ready())
+                        (self.required.terrain.contains(key) || required_ready)
                             && !self.surfaces.iter().any(|s| s.key == **key)
                     })
                 })
@@ -2695,11 +2698,6 @@ impl WorldStream {
             && self.failure.is_none()
             && self.plan_revision == self.request.revision
             && self.next_road == self.road_candidates.len()
-            && self.props.selection_complete()
-            && self
-                .contents
-                .discovery_ready(&self.reference, &self.wanted_structures, &self.replay_roots)
-                .is_ok_and(|ready| ready)
             && self.required.roads.iter().all(|id| {
                 self.surfaces
                     .iter()
@@ -2718,6 +2716,11 @@ impl WorldStream {
                 .collision_ranges
                 .into_iter()
                 .all(|bounds| self.supports(bounds))
+            && self.props.selection_complete()
+            && self
+                .contents
+                .discovery_ready(&self.reference, &self.wanted_structures, &self.replay_roots)
+                .is_ok_and(|ready| ready)
     }
     pub fn structure_required(&self, id: &super::GeneratedId) -> bool {
         self.required.structures.contains(id)
@@ -4040,3 +4043,7 @@ pub(crate) mod content_bindings;
 
 #[path = "content_lamps.rs"]
 mod content_lamps;
+
+#[cfg(test)]
+#[path = "stream_tests.rs"]
+mod tests;
