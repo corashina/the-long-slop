@@ -37,3 +37,4 @@ strip = true
 
 [patch.crates-io]
 bevy_render = { path = "vendor/bevy_render" }
+wgpu-hal = { path = "vendor/wgpu-hal" }
