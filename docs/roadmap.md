@@ -1,8 +1,31 @@
 # Project roadmap
 
-Updated: 2026-10-15.
+Updated: 2026-10-17.
 
 ## Current status
+
+### Startup and early play
+
+Commit `10e58b9` added early play. New game unlocks when the start area is ready. The world loads during play.
+Before the merge with master `3dcb7ad`, New game took 43 s from cache and 79 s on a new browser profile.
+The player stood on the garage floor. The Lada stood on four wheels. Play ran at about 38 FPS.
+
+Fixed in `10e58b9`: lamp warmup stall, motion-pass crash, budget failures during loading, play below 1 FPS,
+the car flip at start, and the fall through the garage floor.
+
+Problems to fix, in this order:
+
+1. **New game stalls on the current export.** Master `10e58b9` with an export from its own exporter stops at
+   "Preparing the garage and world". Pending work stays at 32 of 32, staging at 0, and garage rendering stays in preparation.
+   Build `3dcb7ad` with the same export first. If it also stalls, the cause is in master. If not, check the budget waits
+   in `src/presentation/world/prototypes.rs` and `world_textures.rs`. They can keep entries pending.
+2. **Play is not verified.** Nobody has walked out of the garage or driven out of the yard. Check that the ground outside the garage is visible.
+3. **Four web audio checks fail.** `tests/web/audio.test.mjs` fails on `3dcb7ad` and `10e58b9`.
+4. **Shader compilation is slow on a new profile.** It takes about 40 s before the garage is ready.
+5. **Far content can wait.** Before the merge, the 5 km window needed more prototype GPU memory than the 512 MiB budget.
+   Far content loaded only after near content retired. Master now has a 1024 MiB budget. Measure again.
+
+Automated browsers cannot capture the mouse. A test hook in `web/main.js` can enter play. Never commit that hook.
 
 ### Inventory and clothing
 
