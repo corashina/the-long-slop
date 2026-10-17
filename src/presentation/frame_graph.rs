@@ -1256,6 +1256,7 @@ struct GpuBoundary {
     shadow_phases: u32,
     shadow_scene_frame: u32,
     shadow_queue_frame: u32,
+    shadow_specializations: usize,
     shadow_ready_mask: u16,
     snapshot_frame: u32,
     snapshot_views: u16,
@@ -1446,6 +1447,7 @@ fn gpu_boundaries(
         .map_or(0, |s| s.frame);
     if let Some(queues) = world.get_resource::<super::shadow_queue::ShadowQueues>() {
         boundary.shadow_queue_frame = queues.frame;
+        boundary.shadow_specializations = queues.cached_pipelines();
         for (index, ready) in queues.ready.iter().enumerate() {
             if *ready {
                 boundary.shadow_ready_mask |= 1 << index;

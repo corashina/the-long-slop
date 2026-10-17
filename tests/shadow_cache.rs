@@ -26,22 +26,21 @@ fn inactive_shadow_caches_remove_changed_materials_without_losing_storage() {
 #[test]
 fn specialization_keys_match_linear_lookup_without_cloning_owners() {
     use shadow_cache::SpecializationKey;
-    use std::{collections::HashMap, sync::Arc};
-    // Distinct allocations can have equal contents. They must remain distinct keys.
+    use std::sync::Arc;
     let layouts: Vec<_> = (0..5).map(|_| Arc::new(0_u32)).collect();
     let materials: Vec<_> = (0..7).map(|_| Arc::new(0_u32)).collect();
     let mut linear = Vec::new();
-    let mut keyed = HashMap::new();
+    let mut keyed = Vec::new();
     for bits in [0, 1, u64::MAX] {
         for layout in &layouts {
             for properties in &materials {
                 let id = linear.len();
                 linear.push((bits, layout.clone(), properties.clone(), id));
-                assert!(
-                    keyed
-                        .insert(SpecializationKey::new(bits, layout, properties), id)
-                        .is_none()
-                );
+                let key = SpecializationKey::new(bits, layout, properties);
+                let index = keyed
+                    .binary_search_by_key(&key, |entry: &(SpecializationKey, usize)| entry.0)
+                    .unwrap_err();
+                keyed.insert(index, (key, id));
             }
         }
     }
@@ -58,7 +57,11 @@ fn specialization_keys_match_linear_lookup_without_cloning_owners() {
                         e.0 == bits && Arc::ptr_eq(&e.1, layout) && Arc::ptr_eq(&e.2, properties)
                     })
                     .map(|e| &e.3);
-                assert_eq!(keyed.get(&key), expected);
+                let actual = keyed
+                    .binary_search_by_key(&key, |entry| entry.0)
+                    .ok()
+                    .map(|index| &keyed[index].1);
+                assert_eq!(actual, expected);
                 assert_eq!(
                     counts,
                     (Arc::strong_count(layout), Arc::strong_count(properties))

@@ -8,10 +8,8 @@ createServer(async(req,res)=>{try{
  const pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname);
  if(req.method==='POST'&&/^\/__benchmark-result\/[a-z0-9-]+$/.test(pathname)){const chunks=[];for await(const chunk of req)chunks.push(chunk);const dir=resolve(root,'.cache/benchmark/results');await mkdir(dir,{recursive:true});const label=pathname.split('/').at(-1);const body=Buffer.concat(chunks);JSON.parse(body.toString());await writeFile(resolve(dir,label+'.json'),body);res.writeHead(200).end('saved');return;}
  let path=resolve(web,'.'+(pathname==='/'?'/index.html':pathname));
- if(pathname==='/__scene.mjs')path=resolve(root,'scripts/prepare-benchmark-scene.mjs');
- else if(pathname==='/__scenes.json')path=resolve(root,'.cache/benchmark/scenes.json');
- else if(pathname==='/__measure.mjs')path=resolve(root,'scripts/measure-shadow-cache.mjs');
- else if(baseline&&pathname.startsWith('/pkg/'))path=resolve(root,'.cache/benchmark/baseline-source/web'+pathname);
+ if(pathname==='/__measure.mjs')path=resolve(root,'scripts/measure-shadow-cache.mjs');
+ else if(baseline&&pathname.startsWith('/pkg/'))path=resolve(root,'.cache/benchmark/playable-baseline'+pathname);
  else if(!path.startsWith(web+sep))throw Error('Invalid path');
  const file=await stat(path);if(!file.isFile())throw Error('Not a file');
  res.writeHead(200,{'Content-Type':types[extname(path)]??'application/octet-stream','Content-Length':file.size,'Cache-Control':pathname.startsWith('/assets/runtime/')?'public,max-age=31536000,immutable':'no-cache'});

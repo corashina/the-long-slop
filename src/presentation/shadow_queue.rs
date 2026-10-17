@@ -31,8 +31,9 @@ use bevy::render::{
     view::{ExtractedView, RetainedViewEntity},
 };
 use bevy::{ecs as bevy_ecs, prelude::*};
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 struct CachedSpecialization {
+    key: SpecializationKey,
     // Retain both allocations for as long as their pointer identities remain keys.
     _layout: MeshVertexBufferLayoutRef,
     _properties: Arc<MaterialProperties>,
@@ -41,7 +42,7 @@ struct CachedSpecialization {
 #[derive(Resource)]
 pub struct ShadowQueues {
     query: QueryState<(Entity, &'static SourceSurfaceView, &'static ExtractedView)>,
-    specializations: HashMap<SpecializationKey, CachedSpecialization>,
+    specializations: Vec<CachedSpecialization>,
     pub ready: [bool; VIEW_COUNT],
     pub frame: u32,
 }
@@ -49,7 +50,7 @@ impl FromWorld for ShadowQueues {
     fn from_world(world: &mut World) -> Self {
         Self {
             query: world.query(),
-            specializations: HashMap::new(),
+            specializations: Vec::new(),
             ready: [false; VIEW_COUNT],
             frame: 0,
         }
@@ -102,9 +103,13 @@ fn base_pipeline(
             &Msaa::from_samples(view_key.msaa_samples()),
         );
     let cache_key = SpecializationKey::new(key.bits(), &mesh.layout.0, &material.properties);
-    if let Some(entry) = state.specializations.get(&cache_key) {
-        return Ok(Some((entry.base, indexed)));
-    }
+    let index = match state
+        .specializations
+        .binary_search_by_key(&cache_key, |entry| entry.key)
+    {
+        Ok(index) => return Ok(Some((state.specializations[index].base, indexed))),
+        Err(index) => index,
+    };
     if state.specializations.len() == state.specializations.capacity() {
         return Err("Source shadow specialization capacity was exceeded".into());
     }
@@ -119,8 +124,9 @@ fn base_pipeline(
     let base = base_specialize(world, full, &layout, &properties)
         .map_err(|e| format!("Source shadow specialization: {e}"))?;
     state.specializations.insert(
-        cache_key,
+        index,
         CachedSpecialization {
+            key: cache_key,
             _layout: layout,
             _properties: properties,
             base,
@@ -143,7 +149,9 @@ pub fn queue(world: &mut World) {
                 return;
             }
             if state.specializations.capacity() < scene.capacity() * VIEW_COUNT {
-                state.specializations.reserve(scene.capacity() * VIEW_COUNT);
+                state
+                    .specializations
+                    .reserve_exact(scene.capacity() * VIEW_COUNT);
             }
             let mut views: [Option<(Entity, RetainedViewEntity, MeshPipelineKey)>; VIEW_COUNT] =
                 [None; VIEW_COUNT];
