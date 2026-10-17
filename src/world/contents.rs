@@ -508,10 +508,17 @@ impl SourceContents {
         }
         let before_count = self.active.len();
         let before_bytes = self.retained_bytes();
+        let mut current_bytes = before_bytes;
+        let mut dirty = false;
         for _ in 0..self.cursors.len() {
             let limit = limit.saturating_sub(self.active.len().saturating_sub(before_count));
-            let staging =
-                staging.saturating_sub(self.retained_bytes().saturating_sub(before_bytes));
+            if dirty {
+                current_bytes = self.retained_bytes();
+                dirty = false;
+            }
+            #[cfg(test)]
+            tests::check_guard(self, current_bytes);
+            let staging = staging.saturating_sub(current_bytes.saturating_sub(before_bytes));
             if limit == 0 || staging == 0 {
                 break;
             }
@@ -541,6 +548,7 @@ impl SourceContents {
                 self.next = index;
                 break;
             }
+            dirty = true;
             let staging = self.admit_queues(limit, 1, staging)?;
             let cursor = &self.cursors[index];
             let first = cursor.next == 0;
@@ -1060,6 +1068,10 @@ impl SourceContents {
         self.active.iter().any(|c| c.content.placement.id == *id)
     }
     pub fn retained_bytes(&self) -> usize {
+        #[cfg(test)]
+        if tests::OBSERVING.get() {
+            tests::RETAINED_SCANS.set(tests::RETAINED_SCANS.get() + 1);
+        }
         self.deferred_bytes()
             + self.cursors.capacity() * std::mem::size_of::<Cursor>()
             + self.cursors.iter().map(cursor_heap).sum::<usize>()
@@ -1176,4 +1188,263 @@ fn cursor_heap(cursor: &Cursor) -> usize {
             .iter()
             .map(|s| s.file.capacity())
             .sum::<usize>()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::{Cell, RefCell};
+
+    thread_local! {
+        pub(super) static OBSERVING: Cell<bool> = const { Cell::new(false) };
+        pub(super) static RETAINED_SCANS: Cell<usize> = const { Cell::new(0) };
+        static GUARDS: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub(super) fn check_guard(contents: &SourceContents, current_bytes: usize) {
+        if !OBSERVING.get() {
+            return;
+        }
+        assert_eq!(
+            current_bytes,
+            contents.retained_bytes(),
+            "stale final cursor guard"
+        );
+        GUARDS.with_borrow_mut(|guards| {
+            guards.push(RETAINED_SCANS.get() - guards.len() - 1);
+        });
+    }
+
+    struct ScanCheck;
+    impl ScanCheck {
+        fn new() -> Self {
+            RETAINED_SCANS.set(0);
+            GUARDS.with_borrow_mut(Vec::clear);
+            OBSERVING.set(true);
+            Self
+        }
+        fn production_scans(&self) -> Vec<usize> {
+            GUARDS.with_borrow(Clone::clone)
+        }
+    }
+    impl Drop for ScanCheck {
+        fn drop(&mut self) {
+            OBSERVING.set(false);
+            RETAINED_SCANS.set(0);
+            GUARDS.with_borrow_mut(Vec::clear);
+        }
+    }
+
+    fn reference() -> &'static WorldReference {
+        static REFERENCE: std::sync::OnceLock<crate::reference::ReferenceManifest> =
+            std::sync::OnceLock::new();
+        &REFERENCE
+            .get_or_init(|| {
+                crate::reference::ReferenceManifest::from_runtime_json(
+                    &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+                )
+                .unwrap()
+            })
+            .world
+    }
+
+    fn cursors(reference: &WorldReference) -> SourceContents {
+        let mut contents = SourceContents::new(reference);
+        let prototype = reference.buildings.types[0].prototype.clone();
+        let building = contents
+            .rules
+            .component(reference, &prototype, "buildingscript")
+            .unwrap()
+            .unwrap()
+            .source
+            .clone();
+        for ordinal in 0..4 {
+            let parent = Placement {
+                id: GeneratedId {
+                    layer: super::super::WorldLayer::Building,
+                    generator: reference.buildings.source.clone(),
+                    unit: [0; 2],
+                    ordinal,
+                    children: Vec::new(),
+                },
+                prototype: prototype.clone(),
+                pose: super::super::AbsolutePose {
+                    position: [0.; 3],
+                    rotation: [0., 0., 0., 1.],
+                },
+                scale: [1.; 3],
+                bounds: super::super::WorldBounds {
+                    min: [0.; 3],
+                    max: [0.; 3],
+                },
+                object_seed: 42,
+            };
+            contents.cursors.push(Cursor {
+                root: Some(ContentInstance::for_structure(parent.clone()).content),
+                parent,
+                building: Some(building.clone()),
+                replay_only: false,
+                deferred_batches: 0,
+                initial_eligible: None,
+                callers: Vec::new(),
+                next: 0,
+                chance: None,
+                inputs: Default::default(),
+            });
+        }
+        contents
+    }
+
+    #[test]
+    #[ignore = "requires the installed source export"]
+    fn final_cursor_scan_skips_reuse_exact_total() {
+        let reference = reference();
+        let mut contents = cursors(reference);
+        for (index, cursor) in contents.cursors.iter_mut().enumerate() {
+            if index == 0 {
+                cursor.building = None;
+            } else if index == 1 {
+                cursor.initial_eligible = Some(false);
+            } else {
+                cursor.next = 1;
+            }
+        }
+        let history = contents.state.capture_history();
+        let scans = ScanCheck::new();
+        contents
+            .advance(reference, &[], &[], [[0.; 3]; 2], usize::MAX, 1, 1, 1)
+            .unwrap();
+        assert_eq!(scans.production_scans(), [5, 5, 5, 5]);
+        assert_eq!(contents.next, 0);
+        assert!(contents.active.is_empty());
+        assert!(contents.deferred.is_empty());
+        assert_eq!(
+            contents.cursors.iter().map(|c| c.next).collect::<Vec<_>>(),
+            [0, 0, 1, 1]
+        );
+        assert_eq!(contents.state.capture_history(), history);
+    }
+
+    #[test]
+    #[ignore = "requires the installed source export"]
+    fn final_cursor_scan_refreshes_after_work() {
+        let reference = reference();
+        let mut contents = cursors(reference);
+        for cursor in contents.cursors.iter_mut().skip(1) {
+            cursor.building = None;
+        }
+        let before = contents.retained_bytes();
+        let live = contents.state.live_state();
+        let scans = ScanCheck::new();
+        contents
+            .advance(
+                reference,
+                &[],
+                &[],
+                [[0.; 3]; 2],
+                16 * 1024 * 1024,
+                128,
+                128,
+                32 * 1024 * 1024,
+            )
+            .unwrap();
+        assert_eq!(scans.production_scans(), [5, 6, 6, 6]);
+        assert!(contents.retained_bytes() > before);
+        assert_eq!(contents.next, 0);
+        assert_eq!(
+            contents.cursors.iter().map(|c| c.next).collect::<Vec<_>>(),
+            [1, 0, 0, 0]
+        );
+        assert_eq!(contents.state.boundary_count(), 1);
+        let boundary = &contents.state.boundaries()[0];
+        assert_eq!(boundary.parent, contents.cursors[0].parent.id);
+        assert_eq!(
+            boundary.caller,
+            *contents.cursors[0].building.as_ref().unwrap()
+        );
+        assert_eq!(boundary.phase, SpawnPhase::SynchronousAndStarts);
+        assert_eq!(boundary.ordinal, 0);
+        assert_eq!(boundary.random, live);
+        assert_eq!(boundary.initialization, Default::default());
+        assert_eq!(
+            contents.state.live_state().words,
+            [4005824999, 1007970560, 4283702805, 3403211127]
+        );
+        let mut expected = contents.cursors[0].parent.id.clone();
+        expected.children.push((
+            SourceId {
+                file: "sharedassets1.assets".into(),
+                path_id: 154992,
+            },
+            0,
+        ));
+        assert_eq!(
+            contents
+                .active
+                .iter()
+                .map(|c| &c.content.placement.id)
+                .collect::<Vec<_>>(),
+            [&expected]
+        );
+        assert!(contents.deferred.is_empty());
+        assert_eq!(contents.cursors[0].chance, None);
+    }
+
+    #[test]
+    #[ignore = "requires the installed source export"]
+    fn final_cursor_scan_refreshes_after_missing_replay_boundary() {
+        let reference = reference();
+        let mut contents = cursors(reference);
+        contents.cursors[0].replay_only = true;
+        let history = contents.state.capture_history();
+        let before = contents.retained_bytes();
+        let staging = std::mem::size_of::<ContentInstance>() + std::mem::size_of::<DeferredBatch>();
+        let mut rejected = cursors(reference);
+        rejected.cursors[0].replay_only = true;
+        let error = rejected
+            .advance(
+                reference,
+                &[],
+                &[],
+                [[0.; 3]; 2],
+                16 * 1024 * 1024,
+                1,
+                1,
+                staging - 1,
+            )
+            .unwrap_err();
+        assert_eq!(error.0, "Source continuation queues exceed staging");
+        assert_eq!(rejected.active.capacity(), 0);
+        assert_eq!(rejected.deferred.capacity(), 0);
+        assert_eq!(rejected.next, 1);
+        assert_eq!(rejected.cursors[0].next, 0);
+        assert_eq!(rejected.state.capture_history(), history);
+        let scans = ScanCheck::new();
+        contents
+            .advance(
+                reference,
+                &[],
+                &[],
+                [[0.; 3]; 2],
+                16 * 1024 * 1024,
+                1,
+                1,
+                staging,
+            )
+            .unwrap();
+        assert_eq!(scans.production_scans(), [5, 6]);
+        assert_eq!(contents.retained_bytes() - before, staging);
+        assert_eq!(contents.active.capacity(), 1);
+        assert_eq!(contents.deferred.capacity(), 1);
+        assert_eq!(contents.next, 1);
+        assert_eq!(
+            contents.cursors.iter().map(|c| c.next).collect::<Vec<_>>(),
+            [1, 0, 0, 0]
+        );
+        assert_eq!(contents.cursors[0].initial_eligible, Some(true));
+        assert_eq!(contents.cursors[1].initial_eligible, None);
+        assert!(contents.active.is_empty());
+        assert!(contents.deferred.is_empty());
+        assert_eq!(contents.state.capture_history(), history);
+    }
 }
