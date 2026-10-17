@@ -8,6 +8,19 @@ pub(crate) struct ResourceBudget {
     pub unit: &'static str,
 }
 
+/// Live counts and renderer reservations. Excludes retained simulation and source data.
+#[cfg(target_arch = "wasm32")]
+#[derive(Default)]
+pub(crate) struct WorldPerformance {
+    pub roads: usize,
+    pub terrain: usize,
+    pub objects: usize,
+    pub jobs: usize,
+    pub pending: usize,
+    pub render_cpu_bytes: usize,
+    pub render_gpu_bytes: usize,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize)]
 pub struct WorldMetrics {
     pub shared_input_cpu_bytes: usize,

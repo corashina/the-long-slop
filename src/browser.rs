@@ -118,6 +118,22 @@ extern "C" {
     );
     #[wasm_bindgen(js_namespace = window, js_name = gameNow)]
     pub fn game_now() -> f64;
+    #[wasm_bindgen(js_namespace = window, js_name = gamePerformanceFrame)]
+    pub fn game_performance_frame(physics_ms: f64, world_ms: f64) -> bool;
+    #[wasm_bindgen(js_namespace = window, js_name = gamePerformanceCounters)]
+    pub fn game_performance_counters(
+        steps: u32,
+        wheel_contacts: u32,
+        bodies: u32,
+        colliders: u32,
+        roads: u32,
+        terrain: u32,
+        objects: u32,
+        jobs: u32,
+        pending: u32,
+        cpu_bytes: f64,
+        gpu_bytes: f64,
+    );
     #[wasm_bindgen(js_namespace = window, js_name = gameMeasureRequested)]
     pub fn game_measure_requested() -> bool;
     #[wasm_bindgen(js_namespace = window, js_name = gameMeasurements)]

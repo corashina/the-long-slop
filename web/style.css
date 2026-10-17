@@ -19,6 +19,9 @@ button:active:enabled {filter:brightness(.85);}
 button:disabled {opacity:.45;cursor:default;}
 button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #game:focus-visible {outline:2px solid #fff;outline-offset:-2px;}
+#performance {position:absolute;z-index:5;right:12px;top:12px;width:280px;max-width:calc(100% - 48px);max-height:calc(100% - 48px);overflow:hidden;padding:10px 12px;background:#000d;color:#fff;pointer-events:none;font:12px/1.45 monospace;font-variant-numeric:tabular-nums;}
+#performance-values {margin:0;font:inherit;white-space:pre-wrap;}
+#performance p {margin:8px 0 0;color:#bbb;font:11px/1.4 Arial,sans-serif;}
 .menu-actions {position:absolute;inset:0;}
 #session-distance {position:absolute;right:24px;bottom:16px;margin:0;font-size:clamp(16px,1.5vw,24px);text-shadow:2px 2px 2px #000;}
 #controls-screen {position:absolute;inset:0;}
@@ -41,6 +44,7 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #loading-budgets dd {text-align:right;}
 #loading-budget-note {font-size:14px;color:#d2d2d2;}
 @media(min-width:800px) {
+ main:has(#performance:not([hidden])) #loading-details {right:332px;}
  #menu:has(#capture-error:not([hidden])) #capture-error,#runtime-error {right:520px;max-height:calc(100dvh - 190px);overflow:auto;}
 }
 #hud {position:absolute;inset:0;pointer-events:none;font-family:Arial,sans-serif;text-shadow:2px 2px 2px #000;}
