@@ -70,6 +70,8 @@ impl ExtractComponent for SourceSkyExtra {
 struct SkyExtras(bevy::ecs::entity::EntityHashMap<(Entity, u32)>);
 #[derive(Default, serde::Serialize)]
 struct FrameProgress {
+    #[serde(skip)]
+    loading: crate::reference::loading_dispatch::LoadingDispatch<PROBE_COUNT>,
     scene: u32,
     extent: [u32; 2],
     first_token: u32,
@@ -91,6 +93,15 @@ struct FrameProgress {
 }
 #[derive(Resource, Clone, Default)]
 pub struct SourceGraphProgress(Arc<Mutex<FrameProgress>>);
+pub(crate) fn control_bytes() -> usize {
+    std::alloc::Layout::new::<[usize; 2]>()
+        .extend(std::alloc::Layout::new::<Mutex<FrameProgress>>())
+        .unwrap()
+        .0
+        .pad_to_align()
+        .size()
+        + 3 * std::mem::size_of::<SourceGraphProgress>()
+}
 impl SourceGraphProgress {
     pub(crate) fn frame_submission(&self) -> (u32, u32, bool) {
         let state = self.0.lock().unwrap();
@@ -241,7 +252,7 @@ impl MotionFrame {
 pub struct SourceFramePlugin;
 impl Plugin for SourceFramePlugin {
     fn build(&self, app: &mut App) {
-        let progress = SourceGraphProgress::default();
+        let progress = app.world().resource::<SourceGraphProgress>().clone();
         let status = app.world().resource::<SourceLightingStatus>().0.clone();
         let gate = app.world().resource::<SourceExecutionGate>().clone();
         let _ = SOURCE_DIAGNOSTICS.set(SourceDiagnostics {

@@ -32,6 +32,16 @@ pub struct SourcePresentationAllocation {
     retired_materials: Vec<crate::reference::SourceId>,
 }
 impl SourcePresentationAllocation {
+    pub fn bootstrap(
+        session: u64,
+        fixed: crate::reference::fixed_reservation::FixedAllocation,
+    ) -> Self {
+        Self {
+            session,
+            fixed,
+            ..default()
+        }
+    }
     pub fn for_session(session: u64) -> Self {
         Self {
             session,

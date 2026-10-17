@@ -172,6 +172,21 @@ impl FixedAllocation {
     }
 }
 
+/// Admit shared control bytes before its allocation closure can run.
+pub fn admit_control<T>(
+    stream: &mut crate::world::WorldStream,
+    bytes: usize,
+    allocate: impl FnOnce() -> T,
+) -> Result<(FixedAllocation, T), ReferenceError> {
+    let fixed = FixedAllocation {
+        cpu: bytes,
+        ..FixedAllocation::default()
+    };
+    let next = fixed.replace(FixedAllocation::default(), stream.presentation_allocation())?;
+    stream.set_presentation_allocation(next)?;
+    Ok((fixed, allocate()))
+}
+
 /// Production lifetime of one fixed assembled image and its bounded row scratch.
 #[derive(Clone, Copy, Debug)]
 pub struct FixedImageOwnership {

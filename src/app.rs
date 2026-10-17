@@ -114,9 +114,22 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
     if let Err(error) = crate::reference::AudioReference::from_value(&reference.audio, &reference) {
         game_audio_error(&error.to_string());
     }
-    let runtime = GarageRuntime::new(&reference).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let mut runtime =
+        GarageRuntime::new(&reference).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let (fixed, graph) = crate::reference::fixed_reservation::admit_control(
+        &mut runtime.stream,
+        presentation::frame_graph::control_bytes(),
+        presentation::frame_graph::SourceGraphProgress::default,
+    )
+    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let allocation = presentation::world::runtime::SourcePresentationAllocation::bootstrap(
+        runtime.stream.frame().request.session,
+        fixed,
+    );
     let current = runtime.area.player.view_pose(&runtime.physics);
     App::new()
+        .insert_resource(graph)
+        .insert_resource(allocation)
         .insert_resource(RuntimeReference(reference.clone()))
         .insert_resource(save::SaveRequests::new(&reference, manifest_sha256))
         .insert_resource(Drive {
@@ -192,7 +205,6 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
         .init_resource::<presentation::world::SourceWorldVisuals>()
         .init_resource::<presentation::world::instances::SourceInstances>()
         .init_resource::<presentation::world::grass_jobs::GrassJobs>()
-        .init_resource::<presentation::world::runtime::SourcePresentationAllocation>()
         .init_resource::<crate::world::metrics::browser::MeshMeasurements>()
         .add_systems(
             Last,
