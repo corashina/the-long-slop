@@ -132,6 +132,60 @@ impl PipelineOperation {
         }))
     }
 }
+/// Each admitted pair reserves this payload, allocated only when a diagnostic exists.
+pub(crate) const PIPELINE_DIAGNOSTIC_BYTES: usize = 4096;
+const DIAGNOSTIC_TRUNCATED: &str = " [truncated]";
+struct PipelineDiagnosticWriter<'a> {
+    text: &'a mut String,
+    truncated: bool,
+}
+impl std::fmt::Write for PipelineDiagnosticWriter<'_> {
+    fn write_str(&mut self, value: &str) -> std::fmt::Result {
+        if self.truncated {
+            return Ok(());
+        }
+        if value.len() <= PIPELINE_DIAGNOSTIC_BYTES - self.text.len() {
+            self.text.push_str(value);
+            return Ok(());
+        }
+        let limit = PIPELINE_DIAGNOSTIC_BYTES - DIAGNOSTIC_TRUNCATED.len();
+        if self.text.len() > limit {
+            let mut end = limit;
+            while !self.text.is_char_boundary(end) {
+                end -= 1;
+            }
+            self.text.truncate(end);
+        }
+        let mut end = (limit - self.text.len()).min(value.len());
+        while !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.text.push_str(&value[..end]);
+        self.text.push_str(DIAGNOSTIC_TRUNCATED);
+        self.truncated = true;
+        Ok(())
+    }
+}
+pub(crate) fn write_pipeline_diagnostic(
+    output: &mut Option<String>,
+    args: std::fmt::Arguments<'_>,
+) {
+    let text = output.get_or_insert_with(|| String::with_capacity(PIPELINE_DIAGNOSTIC_BYTES));
+    assert_eq!(text.capacity(), PIPELINE_DIAGNOSTIC_BYTES);
+    text.clear();
+    let mut writer = PipelineDiagnosticWriter {
+        text,
+        truncated: false,
+    };
+    std::fmt::write(&mut writer, args).expect("pipeline diagnostic formatter failed");
+    assert!(writer.text.len() <= PIPELINE_DIAGNOSTIC_BYTES);
+    assert_eq!(writer.text.capacity(), PIPELINE_DIAGNOSTIC_BYTES);
+}
+pub(crate) fn pipeline_diagnostic(args: std::fmt::Arguments<'_>) -> String {
+    let mut output = None;
+    write_pipeline_diagnostic(&mut output, args);
+    output.unwrap()
+}
 pub(crate) struct PipelineBufferGrowth {
     pub(crate) capacity: usize,
     pub(crate) admitted: usize,
@@ -217,6 +271,7 @@ pub(crate) struct PipelineBatch<P> {
     pub(crate) open: bool,
     pub(crate) stopped: bool,
     pub(crate) work: PipelineBatchWork,
+    #[cfg(target_arch = "wasm32")]
     pub(crate) dispatched_keys: usize,
 }
 impl<P> PipelineBatch<P> {
@@ -229,6 +284,7 @@ impl<P> PipelineBatch<P> {
             open: true,
             stopped: false,
             work: PipelineBatchWork::default(),
+            #[cfg(target_arch = "wasm32")]
             dispatched_keys: 0,
         }
     }
@@ -371,6 +427,132 @@ impl RendererRetirement {
 #[cfg(test)]
 mod batch_tests {
     use super::*;
+    #[test]
+    fn pipeline_diagnostics_preserve_short_text_and_bound_utf8_without_growth() {
+        let short = pipeline_diagnostic(format_args!(
+            "Source material pipeline: {}",
+            "missing shader"
+        ));
+        assert_eq!(short, "Source material pipeline: missing shader");
+        assert_eq!(short.capacity(), PIPELINE_DIAGNOSTIC_BYTES);
+        let exact = "a".repeat(PIPELINE_DIAGNOSTIC_BYTES);
+        assert_eq!(pipeline_diagnostic(format_args!("{exact}")), exact);
+        let unicode = "🦀".repeat(PIPELINE_DIAGNOSTIC_BYTES);
+        let long = pipeline_diagnostic(format_args!("Source material shader: {unicode}"));
+        assert!(long.ends_with(" [truncated]"));
+        assert!(long.len() <= PIPELINE_DIAGNOSTIC_BYTES);
+        assert_eq!(long.capacity(), PIPELINE_DIAGNOSTIC_BYTES);
+        let chunks = pipeline_diagnostic(format_args!("{exact}é{unicode}"));
+        assert!(chunks.ends_with(" [truncated]"));
+        assert_eq!(chunks.len(), PIPELINE_DIAGNOSTIC_BYTES);
+        let misaligned = pipeline_diagnostic(format_args!("x{unicode}"));
+        assert_eq!(
+            misaligned,
+            format!(
+                "x{} [truncated]",
+                "🦀".repeat((PIPELINE_DIAGNOSTIC_BYTES - 13) / 4)
+            )
+        );
+        let previous = "€".repeat((PIPELINE_DIAGNOSTIC_BYTES - 1) / 3);
+        let trimmed = pipeline_diagnostic(format_args!("{previous}é"));
+        assert_eq!(
+            trimmed,
+            format!(
+                "{} [truncated]",
+                "€".repeat((PIPELINE_DIAGNOSTIC_BYTES - 12) / 3)
+            )
+        );
+        assert_eq!(trimmed.capacity(), PIPELINE_DIAGNOSTIC_BYTES);
+        let mut output = Some(long);
+        let storage = output.as_ref().unwrap().as_ptr();
+        write_pipeline_diagnostic(&mut output, format_args!("Source material shader: failure"));
+        assert_eq!(output.as_ref().unwrap(), "Source material shader: failure");
+        assert_eq!(output.as_ref().unwrap().as_ptr(), storage);
+        assert_eq!(
+            output.as_ref().unwrap().capacity(),
+            PIPELINE_DIAGNOSTIC_BYTES
+        );
+    }
+    #[test]
+    fn failed_siblings_keep_admitted_diagnostics_until_shared_drain_and_first_error() {
+        use std::sync::{Arc, Mutex};
+        struct Pair {
+            receipt: UploadReceipt,
+            error: Option<String>,
+        }
+        let operation = PipelineOperation {
+            owns_pending: false,
+            physical: UploadReceipt::default(),
+        };
+        let mut batch = PipelineBatch::new(operation);
+        let pairs: Vec<_> = (0..3)
+            .map(|_| {
+                Arc::new(Mutex::new(Pair {
+                    receipt: batch.operation.physical.clone(),
+                    error: None,
+                }))
+            })
+            .collect();
+        for pair in &pairs {
+            batch.push(pair);
+            assert!(batch.select(Some(1)).unwrap());
+        }
+        batch.open = false;
+        batch.stopped = true;
+        write_pipeline_diagnostic(
+            &mut pairs[2].lock().unwrap().error,
+            format_args!("later failure"),
+        );
+        assert!(
+            !batch.register(
+                pairs
+                    .iter()
+                    .map(|pair| pair.lock().unwrap().error.is_some())
+            )
+        );
+        for index in 0..2 {
+            write_pipeline_diagnostic(
+                &mut pairs[index].lock().unwrap().error,
+                format_args!("failure {index}"),
+            );
+        }
+        let retained: usize = pairs
+            .iter()
+            .map(|pair| pair.lock().unwrap().error.as_ref().unwrap().capacity())
+            .sum();
+        assert_eq!(retained, 3 * PIPELINE_DIAGNOSTIC_BYTES);
+        assert!(
+            !batch.register([true, false, true].into_iter()),
+            "a companion still owns the batch"
+        );
+        assert!(
+            batch.register(
+                pairs
+                    .iter()
+                    .map(|pair| pair.lock().unwrap().error.is_some())
+            )
+        );
+        assert!(
+            pairs
+                .iter()
+                .all(|pair| !pipeline_pair_ready(&pair.lock().unwrap().receipt, false))
+        );
+        batch.operation.physical.complete();
+        let first = pairs.iter().find_map(|pair| {
+            let pair = pair.lock().unwrap();
+            pipeline_pair_ready(&pair.receipt, false)
+                .then(|| pair.error.clone())
+                .flatten()
+        });
+        assert_eq!(first.as_deref(), Some("failure 0"));
+        assert_eq!(
+            pairs
+                .iter()
+                .map(|pair| pair.lock().unwrap().error.as_ref().unwrap().capacity())
+                .sum::<usize>(),
+            retained
+        );
+    }
     #[test]
     fn whole_pair_prefix_spills_without_consuming_the_next_pair() {
         let mut work = PipelineBatchWork::default();
@@ -623,7 +805,7 @@ mod batch_tests {
         stream.set_presentation_allocation(one_busy).unwrap();
         let staging = 64 * 1024;
         let receipt_bytes = UploadReceipt::allocation_bytes();
-        let pair_cpu = 1024;
+        let pair_cpu = 1024 + PIPELINE_DIAGNOSTIC_BYTES;
         let mut parent = stream.reserve_grass_renderer(9, 0).unwrap();
         let operation = parent
             .start(&mut stream, receipt_bytes + pair_cpu, staging)
@@ -717,6 +899,36 @@ mod batch_tests {
             stream.presentation_allocation().staging_bytes,
             before.staging_bytes
         );
+        let diagnostic_budget = stream
+            .presentation_budgets(before)
+            .into_iter()
+            .find(|b| b.name == "Asset CPU")
+            .unwrap();
+        let mut diagnostic_tight = before;
+        diagnostic_tight.prototype_cpu +=
+            diagnostic_budget.limit - diagnostic_budget.used - PIPELINE_DIAGNOSTIC_BYTES + 1;
+        stream
+            .set_presentation_allocation(diagnostic_tight)
+            .unwrap();
+        let mut formatted = false;
+        let rejected = PipelineOperation::independent(
+            &mut stream,
+            PIPELINE_DIAGNOSTIC_BYTES,
+            staging,
+        )
+        .map(|operation| {
+            operation.map(|_| {
+                formatted = true;
+                pipeline_diagnostic(format_args!("must not allocate after rejected admission"))
+            })
+        });
+        assert!(rejected.is_err());
+        assert!(!formatted);
+        assert_eq!(
+            stream.presentation_allocation().prototype_cpu,
+            diagnostic_tight.prototype_cpu
+        );
+        stream.set_presentation_allocation(before).unwrap();
         let growth = PipelineBufferGrowth::new(8, 9, 24);
         let budget = stream
             .presentation_budgets(before)

@@ -1,8 +1,9 @@
 //! Compile admitted material variants before collision and visual publication.
 use crate::mirrors::capture::{GeneratedProof, SourceProof, TICKET_PIPELINES, proof_capacity};
 use crate::world::renderer_pending::{
-    PIPELINE_BATCH_KEYS, PipelineAccounting, PipelineBufferGrowth, PipelineContinuation,
-    PipelineOperation, pipeline_pair_ready,
+    PIPELINE_BATCH_KEYS, PIPELINE_DIAGNOSTIC_BYTES, PipelineAccounting, PipelineBufferGrowth,
+    PipelineContinuation, PipelineOperation, pipeline_diagnostic, pipeline_pair_ready,
+    write_pipeline_diagnostic,
 };
 use crate::world::upload_receipt::UploadReceipt;
 use crate::{
@@ -482,7 +483,9 @@ fn grow<T>(buffer: &mut Vec<T>, capacity: usize) {
     *buffer = next;
 }
 fn ticket_bytes() -> usize {
-    arc_bytes::<Mutex<PipelineJob>>() + TICKET_PIPELINES * size_of::<CachedRenderPipelineId>()
+    arc_bytes::<Mutex<PipelineJob>>()
+        + TICKET_PIPELINES * size_of::<CachedRenderPipelineId>()
+        + PIPELINE_DIAGNOSTIC_BYTES
 }
 
 // The keys live only on the render stack, then freeze into the dispatched IDs.
@@ -625,7 +628,10 @@ fn compile(world: &mut World) {
                             batch.stopped = true;
                         }
                         Err(error) => {
-                            job.state = RenderingState::Failed(error.0);
+                            job.state = RenderingState::Failed(pipeline_diagnostic(format_args!(
+                                "{}",
+                                error.0
+                            )));
                             batch.stopped = true;
                         }
                     },
@@ -636,7 +642,10 @@ fn compile(world: &mut World) {
                         break;
                     }
                     Err(error) => {
-                        job.state = RenderingState::Failed(error.0);
+                        job.state = RenderingState::Failed(pipeline_diagnostic(format_args!(
+                            "{}",
+                            error.0
+                        )));
                         batch.stopped = true;
                     }
                 }
@@ -710,7 +719,8 @@ fn compile_pair(
                 ) {
                     Ok(scope) => Some(scope),
                     Err(error) => {
-                        job.state = RenderingState::Failed(error.into());
+                        job.state =
+                            RenderingState::Failed(pipeline_diagnostic(format_args!("{error}")));
                         break;
                     }
                 }
@@ -724,8 +734,9 @@ fn compile_pair(
             };
             let result = if shadow {
                 let Some(specialize) = properties.prepass_specialize else {
-                    job.state =
-                        RenderingState::Failed("Source shadow material has no shader pass".into());
+                    job.state = RenderingState::Failed(pipeline_diagnostic(format_args!(
+                        "Source shadow material has no shader pass"
+                    )));
                     break;
                 };
                 dispatched += 1;
@@ -786,8 +797,9 @@ fn compile_pair(
                     }
                 }
                 Err(error) => {
-                    job.state =
-                        RenderingState::Failed(format!("Source material pipeline: {error}"));
+                    job.state = RenderingState::Failed(pipeline_diagnostic(format_args!(
+                        "Source material pipeline: {error}"
+                    )));
                     break;
                 }
             }
@@ -811,7 +823,7 @@ fn compile_pair(
     });
     let mut ready = true;
     let mut waiting = "motion pipeline";
-    let mut motion_failure = None;
+    let mut failure = None;
     for id in &job.ids {
         match crate::presentation::motion_draw::prepare_world_motion(
             world,
@@ -821,13 +833,12 @@ fn compile_pair(
         ) {
             Ok(done) => ready &= done,
             Err(error) => {
-                motion_failure = Some(error);
+                write_pipeline_diagnostic(&mut failure, format_args!("{error}"));
                 break;
             }
         }
     }
     let cache = world.resource::<PipelineCache>();
-    let mut failure = motion_failure;
     for id in &job.ids {
         match cache.get_render_pipeline_state(*id) {
             CachedPipelineState::Ok(_) => {}
@@ -836,7 +847,10 @@ fn compile_pair(
                 | ShaderCacheError::ShaderImportNotYetAvailable,
             ) => ready = false,
             CachedPipelineState::Err(error) => {
-                failure = Some(format!("Source material shader: {error}"));
+                write_pipeline_diagnostic(
+                    &mut failure,
+                    format_args!("Source material shader: {error}"),
+                );
                 break;
             }
             _ => {
@@ -858,7 +872,7 @@ fn compile_pair(
                     ready &= value;
                 }
                 Err(error) => {
-                    failure = Some(error);
+                    write_pipeline_diagnostic(&mut failure, format_args!("{error}"));
                     break;
                 }
             }
@@ -875,7 +889,7 @@ fn compile_pair(
                     ready &= value;
                 }
                 Err(error) => {
-                    failure = Some(error);
+                    write_pipeline_diagnostic(&mut failure, format_args!("{error}"));
                     break;
                 }
             }
