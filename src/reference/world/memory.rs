@@ -78,8 +78,9 @@ fields!(SourceHash:file,sha256);
 fields!(LibraryProvenance:manifest_sha256,catalog_sha256,source_manifest_sha256);
 fields!(super::super::rendering::ResourceReference:source,path,sha256);
 fields!(super::super::rendering::ShaderReference:compiled_data,source,path,sha256,name);
-fields!(super::super::rendering::LightingTextureRecord:chunks,mip_data,source_data,source,path,sha256,sample_channel);
+fields!(super::super::rendering::LightingTextureRecord:batches,chunks,mip_data,source_data,source,path,sha256,sample_channel);
 fields!(super::super::rendering::TextureLink:property);
+fields!(super::super::texture_batch::TextureBatchReference:descriptor);
 fields!(super::super::rendering::LightingTextureChunk:data);
 impl ImmutableInputBytes for WorldValue {
     fn heap_bytes(&self) -> usize {

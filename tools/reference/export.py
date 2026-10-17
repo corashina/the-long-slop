@@ -400,6 +400,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     parameters['player_markers']=[{'source':{'file':'level1','path_id':pid},'fields':source.read(source.get('level1',pid))} for pid in (39823,23339)]
     (output/'parameter-evidence.json').write_text(json.dumps(parameters,indent=2,allow_nan=False),encoding='utf-8')
     from .runtime_package import prepare_package
+    # Package preparation also checks and catalogs texture batch descriptors.
     prepare_package(manifest, output)
     (output/'manifest.json').write_text(json.dumps(manifest,separators=(',',':'),allow_nan=False),encoding='utf-8')
     from dataclasses import asdict

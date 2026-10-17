@@ -35,6 +35,103 @@ def texture_chunks(reader, output, payload):
     return chunks
 
 
+BATCH_BYTES = 1024 * 1024
+BATCH_ENTRIES = 32
+BATCH_DESCRIPTOR_BYTES = 64 * 1024
+
+
+def _texture_regions(texture, output):
+    width, height, count = (texture[k] for k in ('width', 'height', 'mip_count'))
+    if min(width, height, count) <= 0 or count > max(width, height).bit_length():
+        raise ValueError('Texture batch dimensions')
+    index = 0
+    texture_offset = 0
+    for mip in range(count):
+        w, h = max(1, width >> mip), max(1, height >> mip)
+        row = 0
+        while row < h:
+            if index >= len(texture['chunks']):
+                raise ValueError('Missing texture batch region')
+            chunk = texture['chunks'][index]
+            rows = chunk['rows']
+            size = w * rows * 4
+            if (chunk['mip'], chunk['row'], chunk['width']) != (mip, row, w) or not 0 < rows <= h-row or size > BATCH_BYTES or chunk['data']['source'] != texture['source']:
+                raise ValueError('Texture batch region coverage')
+            name = chunk['data']['path']
+            if not name.startswith('reference/') or Path(name).name != name.removeprefix('reference/'):
+                raise ValueError('Texture batch input path')
+            path = output / Path(name).name
+            data = path.read_bytes()
+            if len(data) != size + 16 or data[:16] != b'SMIP' + struct.pack('<III', w, rows, 1) or hashlib.sha256(data).hexdigest() != chunk['data']['sha256']:
+                raise ValueError(f'Texture batch input receipt/header: {texture["source"]} {name}')
+            yield dict(input=dict(file=name, bytes=len(data), sha256=chunk['data']['sha256'], image_size=None),
+                       mip=mip, row=row, width=w, rows=rows, texture_offset=texture_offset, decoded_offset=0, decoded_bytes=size)
+            texture_offset += size
+            row += rows
+            index += 1
+    if index != len(texture['chunks']):
+        raise ValueError('Extra texture batch regions')
+
+
+def _batch_descriptors(texture, output):
+    regions = []
+    decoded = 0
+    for region in _texture_regions(texture, output):
+        if regions and (decoded + region['decoded_bytes'] > BATCH_BYTES or len(regions) == BATCH_ENTRIES):
+            yield dict(source=texture['source'], width=texture['width'], height=texture['height'], mip_count=texture['mip_count'], decoded_bytes=decoded, regions=regions)
+            regions = []
+            decoded = 0
+        region['decoded_offset'] = decoded
+        regions.append(region)
+        decoded += region['decoded_bytes']
+    if regions:
+        yield dict(source=texture['source'], width=texture['width'], height=texture['height'], mip_count=texture['mip_count'], decoded_bytes=decoded, regions=regions)
+
+
+def _descriptor_bytes(descriptor):
+    return json.dumps(descriptor, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+
+
+def export_texture_batches(texture, output):
+    from .runtime_package import file_receipt
+    # Validate all chunks before publishing any descriptor.
+    descriptors = list(_batch_descriptors(texture, output))
+    references = []
+    for descriptor in descriptors:
+        data = _descriptor_bytes(descriptor)
+        if len(data) > BATCH_DESCRIPTOR_BYTES:
+            raise ValueError('Texture batch descriptor bound')
+        name = hashlib.sha256(data).hexdigest() + '.stexbatch'
+        (output / name).write_bytes(data)
+        references.append(dict(descriptor=file_receipt(output / name, 'reference/' + name),
+                               decoded_bytes=descriptor['decoded_bytes'],
+                               largest_raw_input_bytes=max(r['input']['bytes'] for r in descriptor['regions']),
+                               region_count=len(descriptor['regions'])))
+    texture['batches'] = references
+
+
+def validate_texture_batches(texture, output):
+    from .runtime_package import file_receipt
+    expected = list(_batch_descriptors(texture, output))
+    if len(expected) != len(texture['batches']):
+        raise ValueError('Texture batch count')
+    for descriptor, reference in zip(expected, texture['batches']):
+        receipt = reference['descriptor']
+        path = output / Path(receipt['file']).name
+        data = _descriptor_bytes(descriptor)
+        if receipt['file'] != 'reference/' + hashlib.sha256(data).hexdigest() + '.stexbatch' or file_receipt(path, receipt['file']) != receipt or path.read_bytes() != data:
+            raise ValueError('Texture batch descriptor receipt/coverage')
+        if reference['decoded_bytes'] != descriptor['decoded_bytes'] or reference['region_count'] != len(descriptor['regions']) or reference['largest_raw_input_bytes'] != max(r['input']['bytes'] for r in descriptor['regions']):
+            raise ValueError('Texture batch totals')
+
+
+def export_manifest_texture_batches(manifest, output):
+    for group in (manifest.get('lighting', {}).get('textures', []), manifest.get('world', {}).get('material_textures', []), manifest.get('world', {}).get('terrain', {}).get('textures', [])):
+        for texture in group:
+            export_texture_batches(texture, output)
+            validate_texture_batches(texture, output)
+
+
 def texture(source, reader, output):
     if reader is None or reader.type.name!='Texture2D':raise ValueError(f'Required lighting Texture2D: {key(reader) if reader else None}')
     identity=key(reader)

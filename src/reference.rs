@@ -18,6 +18,7 @@ pub mod render_lighting;
 pub mod world;
 pub use world::*;
 pub mod rendering;
+pub mod texture_batch;
 pub mod shadow_candidates;
 pub mod shadow_frame;
 pub mod shadow_planes;
@@ -959,6 +960,15 @@ impl ReferenceManifest {
     }
 
     fn validate_gameplay(&self) -> Result<(), ReferenceError> {
+        for texture in self
+            .lighting
+            .textures
+            .iter()
+            .chain(self.world.material_textures.iter())
+            .chain(self.world.terrain.textures.iter())
+        {
+            texture.validate_batch_receipts(&self.file_catalog)?;
+        }
         let package = self
             .content_base
             .strip_prefix("assets/runtime/")

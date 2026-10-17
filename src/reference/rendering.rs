@@ -716,6 +716,7 @@ pub struct LightingTextureChunk {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LightingTextureRecord {
+    pub batches: Vec<super::texture_batch::TextureBatchReference>,
     #[serde(default)]
     pub chunks: Vec<LightingTextureChunk>,
     pub mip_data: ResourceReference,

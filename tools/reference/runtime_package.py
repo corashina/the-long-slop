@@ -132,6 +132,8 @@ def package_id(manifest):
 
 
 def prepare_package(manifest, output):
+    from .lighting import export_manifest_texture_batches
+    export_manifest_texture_batches(manifest, output)
     manifest['file_catalog'] = build_file_catalog(manifest, output)
     shaders = Path(__file__).resolve().parents[2] / 'web/assets/shaders'
     shutil.copytree(shaders, output / 'shaders')
