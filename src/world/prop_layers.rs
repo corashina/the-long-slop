@@ -110,6 +110,15 @@ impl PropLayers {
             .map(|c| c.candidates.capacity() * std::mem::size_of::<PropCandidate>())
             .sum()
     }
+    pub fn selection_complete(&self) -> bool {
+        self.layers.iter().all(|layer| {
+            layer
+                .next
+                .into_iter()
+                .all(|next| next == layer.offsets.len())
+        }) && self.chunks.iter().all(|chunk| chunk.candidates.is_empty())
+            && self.retiring.is_empty()
+    }
     pub fn pending_requests(&self) -> usize {
         self.chunks
             .iter()

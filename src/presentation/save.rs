@@ -39,6 +39,8 @@ pub struct PreparedPresentation {
     poses: CandidateImportedPoses,
     screen_height: f32,
     aspect_ratio: f32,
+    required_views: Vec<crate::world::RequiredView>,
+    mirror_state: crate::mirrors::MirrorState,
 }
 impl PreparedPresentation {
     pub fn can_start(world: &World) -> bool {
@@ -131,6 +133,8 @@ impl PreparedPresentation {
             .next()
             .map_or(1., |w| w.width() / w.height().max(1.));
         Ok(Self {
+            required_views: Vec::with_capacity(18),
+            mirror_state: crate::mirrors::MirrorState::new(&reference.mirrors),
             aspect_ratio,
             screen_height,
             poses: CandidateImportedPoses(std::collections::HashMap::with_capacity(mesh_count)),
@@ -209,6 +213,7 @@ impl PreparedPresentation {
             self.screen_height = window.physical_height() as f32;
             self.aspect_ratio = window.width() / window.height().max(1.);
         }
+        candidate.stream.advance_generation();
         candidate.stream.set_overlap(self.overlap(world))?;
         candidate.initialize_storage_frame(1. / 60.)?;
         let pose = candidate.area.player.view_pose(&candidate.physics);
@@ -252,23 +257,18 @@ impl PreparedPresentation {
             fov_degrees: reference.player.field_of_view_degrees,
             ortho_size: None,
         };
-        let inverse = clip.inverse();
-        let mut min = Vec3::splat(f32::MAX);
-        let mut max = Vec3::splat(f32::MIN);
-        for x in [-1., 1.] {
-            for y in [-1., 1.] {
-                for z in [0.00001, 1.] {
-                    let p = inverse.project_point3(Vec3::new(x, y, z));
-                    min = min.min(p);
-                    max = max.max(p);
-                }
-            }
-        }
-        let receivers = [crate::world::WorldBounds {
-            min: min.to_array().map(|v| v as f64),
-            max: max.to_array().map(|v| v as f64),
-        }];
         imported_updates(candidate, world, &mut self.updates)?;
+        candidate_required_views(
+            reference,
+            candidate,
+            camera.to_matrix(),
+            self.aspect_ratio,
+            self.screen_height,
+            world,
+            &self.updates,
+            &mut self.mirror_state,
+            &mut self.required_views,
+        )?;
         self.poses.0.clear();
         let mut query = world.query::<(Entity, &ChildOf, &Mesh3d)>();
         for (entity, parent, _) in query.iter(world) {
@@ -314,9 +314,9 @@ impl PreparedPresentation {
                 view,
                 candidate.lighting.cycle.output().shader_time_seconds as f32,
                 lod,
-                &receivers,
                 false,
                 candidate.lighting.light_outputs(),
+                &self.required_views,
                 crate::app::LOADING_BUDGET_MS,
             ),
             Err(e) => Err(crate::reference::ReferenceError(e.to_string())),
@@ -364,7 +364,7 @@ impl PreparedPresentation {
         let ready = gpu_ready
             && restored
             && !candidate.restore_pending()
-            && candidate.stream.window_ready()
+            && candidate.stream.required_ready()
             && candidate.world_supported()
             && self.surfaces.ready(&candidate.stream)
             && self.instances.ready()
@@ -385,6 +385,17 @@ impl PreparedPresentation {
         }
         if ready {
             imported_updates(candidate, world, &mut self.updates)?;
+            candidate_required_views(
+                reference,
+                candidate,
+                camera.to_matrix(),
+                self.aspect_ratio,
+                self.screen_height,
+                world,
+                &self.updates,
+                &mut self.mirror_state,
+                &mut self.required_views,
+            )?;
             validate_assets(reference, world)?;
         }
         Ok(ready)
@@ -410,7 +421,7 @@ impl PreparedPresentation {
             || !self.materials.preparation.ready()?
             || candidate.restore_pending()
             || !candidate.world_supported()
-            || !candidate.stream.window_ready()
+            || !candidate.stream.required_ready()
             || !self.pipelines.settled()?
             || !self.writers.ready()?
             || !self.grass.settled()
@@ -716,6 +727,149 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
         .any(|entity| entity.contains::<super::camera::DriveCamera>())
     {
         return Err(fail("Camera binding".into()));
+    }
+    Ok(())
+}
+
+fn candidate_node_pose(
+    node: crate::reference::NodeId,
+    world: &World,
+    updates: &[(Entity, Transform, Visibility)],
+) -> Result<Mat4, SaveError> {
+    let entity = *world
+        .resource::<ReferenceVisuals>()
+        .nodes
+        .get(&node)
+        .ok_or_else(|| SaveError::InvalidLinks("Missing candidate view node".into()))?;
+    let mut current = Some(entity);
+    let mut matrix = Mat4::IDENTITY;
+    let mut depth = 0;
+    while let Some(node) = current {
+        let pose = updates
+            .iter()
+            .find(|(id, _, _)| *id == node)
+            .map(|(_, pose, _)| pose)
+            .or_else(|| world.get::<Transform>(node))
+            .ok_or_else(|| SaveError::InvalidLinks("Missing candidate view transform".into()))?;
+        matrix = pose.to_matrix() * matrix;
+        current = world.get::<ChildOf>(node).map(ChildOf::parent);
+        depth += 1;
+        if depth > world.resource::<ReferenceVisuals>().nodes.len() + 4 {
+            return Err(SaveError::InvalidLinks(
+                "Cyclic candidate view transform".into(),
+            ));
+        }
+    }
+    Ok(matrix)
+}
+fn candidate_required_views(
+    reference: &ReferenceManifest,
+    candidate: &GarageRuntime,
+    camera: Mat4,
+    aspect: f32,
+    height: f32,
+    world: &World,
+    updates: &[(Entity, Transform, Visibility)],
+    mirrors: &mut crate::mirrors::MirrorState,
+    views: &mut Vec<crate::world::RequiredView>,
+) -> Result<(), SaveError> {
+    use super::view_frame::{camera_snapshot, required_view};
+    views.clear();
+    let lighting = &reference.render_lighting;
+    let extent = UVec2::new((height * aspect).max(1.) as u32, height.max(1.) as u32);
+    let [x, y, z] = candidate
+        .lighting
+        .cycle
+        .output()
+        .directional_euler_degrees
+        .map(f32::to_radians);
+    let forward = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::NEG_Z;
+    let forward = [forward.x, forward.y, -forward.z];
+    let mut append = |view: super::view_frame::ViewSnapshot| -> Result<(), SaveError> {
+        views.push(required_view(
+            &view,
+            candidate.stream.origin.offset,
+            forward,
+            lighting.lights[0].mask,
+        )?);
+        Ok(())
+    };
+    // Each candidate owns its view list. No live camera resource changes here.
+    for stage in &lighting.cameras[1..4] {
+        append(camera_snapshot(
+            extent,
+            camera.inverse(),
+            stage.near,
+            stage.far,
+            stage.field_of_view,
+            stage.mask,
+            lighting.shadows.distance,
+            None,
+            None,
+        ))?;
+    }
+    for probe in &lighting.probes {
+        if !probe.enabled {
+            continue;
+        }
+        let position = candidate_node_pose(probe.node, world, updates)?
+            .w_axis
+            .truncate();
+        for face in 0..6 {
+            let view = Mat4::from_cols_array_2d(
+                &crate::reference::reflections::capture_view_from_world(face, position.to_array()),
+            );
+            append(camera_snapshot(
+                UVec2::splat(probe.resolution),
+                view,
+                probe.near,
+                probe.far,
+                90.,
+                probe.mask,
+                probe.shadow_distance,
+                None,
+                None,
+            ))?;
+        }
+    }
+    let mut inputs = [crate::mirrors::MirrorInput::default(); 3];
+    for (input, record) in inputs.iter_mut().zip(&reference.mirrors.mirrors) {
+        let plane = candidate_node_pose(record.plane_node, world, updates)?;
+        let pose = candidate_node_pose(record.camera_node, world, updates)?;
+        let rotation = plane.to_scale_rotation_translation().1;
+        *input = crate::mirrors::MirrorInput {
+            plane_position: plane.w_axis.truncate().to_array(),
+            plane_normal: (rotation * Vec3::Y).to_array(),
+            camera_up: (rotation * Vec3::NEG_Z).to_array(),
+            camera_position: pose.w_axis.truncate().to_array(),
+            normal_view_visible: true,
+        };
+    }
+    mirrors.update(
+        &reference.mirrors.rules,
+        crate::mirrors::MirrorFrame {
+            player_position: candidate.area.player.body_pose(&candidate.physics).position,
+            view_head_position: camera.w_axis.truncate().to_array(),
+            source_enabled: true,
+            pointer_locked: false,
+        },
+        &inputs,
+    );
+    for (output, record) in mirrors.outputs().iter().zip(&reference.mirrors.mirrors) {
+        if !output.pose_valid || !output.has_valid_clip_range() {
+            continue;
+        }
+        append(camera_snapshot(
+            UVec2::from_array(reference.mirrors.target.extent),
+            super::transform(output.pose).to_matrix().inverse(),
+            output.capture_near_plane,
+            output.capture_far_plane,
+            output.fov_degrees,
+            record.culling_mask,
+            lighting.shadows.distance,
+            None,
+            None,
+        ))?;
     }
     Ok(())
 }

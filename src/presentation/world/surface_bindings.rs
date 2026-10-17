@@ -18,6 +18,9 @@ impl SourceWorldVisuals {
     ) -> Result<(), ReferenceError> {
         // Request every selected road descriptor before any material admission.
         for source in &reference.world.road.prototypes {
+            if !stream.road_prototype_required(source) {
+                continue;
+            }
             prototypes.request(stream, source)?;
         }
         Ok(())
@@ -34,6 +37,9 @@ impl SourceWorldVisuals {
         casters: &mut Assets<crate::presentation::materials::lod::SurfaceCasterMaterial>,
     ) -> Result<(), ReferenceError> {
         for source in &reference.world.road.prototypes {
+            if !stream.road_prototype_required(source) {
+                continue;
+            }
             if self.road_materials.contains_key(source) {
                 continue;
             }
@@ -43,23 +49,34 @@ impl SourceWorldVisuals {
             {
                 continue;
             }
-            // Task 2B inserts the combined descriptor check before this call.
-            if !prototypes.admit_payload(stream, reference, server, source)? {
-                continue;
-            }
             let prototype = reference
                 .world
                 .prototypes
                 .iter()
                 .find(|p| p.source == *source)
                 .ok_or_else(|| ReferenceError("Missing road prototype".into()))?;
-            cache.admit_world_asset(prototype.asset, reference, stream)?;
+            let plan = prototypes
+                .plan(stream.frame().request.session, source)
+                .unwrap();
+            let mut ready = true;
+            for skin in &prototype.skins {
+                let node = &plan.nodes[prototype.nodes[skin.node as usize].gltf_node as usize];
+                for primitive in plan.primitives.iter().filter(|p| Some(p.mesh) == node.mesh) {
+                    let material = primitive
+                        .material
+                        .as_ref()
+                        .ok_or_else(|| ReferenceError("Missing road material identity".into()))?;
+                    let identity = (material.asset, material.gltf_material);
+                    cache.admit_world_primary(identity, reference, stream)?;
+                    ready &= cache.world_primary_ready(identity);
+                }
+            }
+            if !ready || !prototypes.admit_payload(stream, reference, server, source)? {
+                continue;
+            }
             let Some(loaded) = prototypes.loaded(stream.frame().request.session, source) else {
                 continue;
             };
-            if !cache.world_asset_ready(prototype.asset) {
-                continue;
-            }
             // Road bindings persist for this bank. Reserve before allocating any binding.
             let count = prototype
                 .skins
@@ -149,9 +166,6 @@ impl SourceWorldVisuals {
             }
             self.bind_road(source.clone(), bindings)?;
             stream.bind_prototype(source)?;
-        }
-        if self.road_materials.len() != reference.world.road.prototypes.len() {
-            return Ok(());
         }
         for (tier, record) in reference.world.terrain.materials.iter().enumerate() {
             if self.terrain[tier].is_some() {

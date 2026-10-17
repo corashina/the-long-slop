@@ -27,3 +27,53 @@ fn source_culling_inverse_and_positions_share_source_world() {
     assert!((motion_world.column(3) - world.column(3)).norm() < 0.0001);
     assert!((motion_world.column(3) - source_camera).norm() > 40.);
 }
+
+#[test]
+fn candidate_mirror_views_use_private_pose_and_origin() {
+    use my_summer_slop::{
+        reference::{shadow_candidates::DirectionalHull, shadow_planes::implicit_cull_planes},
+        world::{RequiredView, WorldBounds},
+    };
+    let view = |world: Matrix4<f32>, origin| {
+        let runtime_view = world.try_inverse().unwrap();
+        let source = source_culling_view(std::array::from_fn(|c| {
+            std::array::from_fn(|r| runtime_view[(r, c)])
+        }));
+        let source = Matrix4::from_column_slice(&source.into_iter().flatten().collect::<Vec<_>>());
+        let projection =
+            rapier3d::na::Perspective3::new(1., 60_f32.to_radians(), 0.1, 100.).to_homogeneous();
+        let clip = projection * source;
+        let inverse = source.try_inverse().unwrap();
+        let planes = implicit_cull_planes(
+            clip.as_slice().try_into().unwrap(),
+            inverse.as_slice().try_into().unwrap(),
+            0.1,
+            100.,
+            30.,
+            0.,
+        );
+        RequiredView {
+            camera: planes.camera,
+            shadow: DirectionalHull::new(planes.shadow, [1., 0., 0.]).unwrap(),
+            mask: 1,
+            light_mask: 0,
+            origin,
+        }
+    };
+    let live_pose = Matrix4::new_translation(&Vector3::new(0., 1., 0.));
+    let candidate_pose = Matrix4::new_translation(&Vector3::new(20., 1., 4.))
+        * UnitQuaternion::from_euler_angles(0., std::f32::consts::FRAC_PI_2, 0.).to_homogeneous();
+    let live = view(live_pose, [0.; 3]);
+    let candidate = view(candidate_pose, [1000., 0., 3000.]);
+    let bounds = |x, z| WorldBounds {
+        min: [x - 0.1, 0.9, z - 0.1],
+        max: [x + 0.1, 1.1, z + 0.1],
+    };
+    let live_id = bounds(0., -10.);
+    let candidate_id = bounds(1010., 3004.);
+    assert!(live.includes(live_id, 1));
+    assert!(candidate.includes(candidate_id, 1));
+    assert!(!live.includes(candidate_id, 1));
+    assert!(!candidate.includes(live_id, 1));
+    assert_eq!(live.camera, view(live_pose, [0.; 3]).camera);
+}

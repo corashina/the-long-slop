@@ -13,6 +13,7 @@ pub(super) fn png_staging(mip: &source::TextureMip) -> Result<usize, ReferenceEr
 pub struct PrimaryOwnership {
     pub(super) assets: HashMap<SourceAssetId, Vec<String>>,
     owners: HashMap<SourceAssetId, Arc<()>>,
+    materials: std::collections::HashSet<(SourceAssetId, u32)>,
     pub(super) borrowed_records: std::collections::HashSet<SourceAssetId>,
     cpu: usize,
     gpu: usize,
@@ -100,6 +101,7 @@ impl SourceMaterials {
                 .sum::<usize>()
             + self.world_primary.owners.capacity() * (size_of::<(SourceAssetId, Arc<()>)>() + 1)
             + self.world_primary.borrowed_records.capacity() * (size_of::<SourceAssetId>() + 1)
+            + self.world_primary.materials.capacity() * (size_of::<(SourceAssetId, u32)>() + 1)
     }
     pub(super) fn reserve_fork(&self, stream: &mut WorldStream) -> Result<(), ReferenceError> {
         let (cpu, gpu) = self.primary_bytes();
@@ -176,22 +178,28 @@ impl SourceMaterials {
         self.world_primary.staging = staging;
         Ok(())
     }
-    pub fn admit_world_asset(
+    pub fn admit_world_primary(
         &mut self,
-        asset: SourceAssetId,
+        identity: (SourceAssetId, u32),
         reference: &ReferenceManifest,
         stream: &mut WorldStream,
     ) -> Result<(), ReferenceError> {
-        if self.world_primary.assets.contains_key(&asset) {
+        let asset = identity.0;
+        if self.world_primary.materials.contains(&identity) {
             return Ok(());
         }
-        let borrowed = self.records.iter().any(|r| r.asset == asset);
+        let borrowed = self.world_primary.borrowed_records.contains(&asset)
+            || (!self.world_primary.assets.contains_key(&asset)
+                && self.records.iter().any(|r| r.asset == asset));
         let records: Vec<_> = reference
             .rendering
             .materials
             .iter()
-            .filter(|r| r.asset == asset)
+            .filter(|r| (r.asset, r.gltf_material) == identity)
             .collect();
+        if records.is_empty() {
+            return Err(ReferenceError("Missing selected primary material".into()));
+        }
         let mut paths = Vec::new();
         let mut added_cpu = 0usize;
         let mut added_gpu = 0usize;
@@ -286,23 +294,35 @@ impl SourceMaterials {
                 self.records.push(Arc::new(record.clone()));
             }
         }
-        for path in &paths {
-            self.textures[self.texture_indices[path]].users += 1;
+        let owned = self.world_primary.assets.entry(asset).or_default();
+        for path in paths {
+            if !owned.contains(&path) {
+                self.textures[self.texture_indices[&path]].users += 1;
+                owned.push(path);
+            }
         }
         if borrowed {
             self.world_primary.borrowed_records.insert(asset);
         }
-        self.world_primary.assets.insert(asset, paths);
-        self.world_primary.owners.insert(asset, Arc::new(()));
+        self.world_primary.materials.insert(identity);
+        self.world_primary
+            .owners
+            .entry(asset)
+            .or_insert_with(|| Arc::new(()));
         Ok(())
     }
-    pub fn world_asset_ready(&self, asset: SourceAssetId) -> bool {
-        self.world_primary.assets.get(&asset).is_some_and(|paths| {
-            paths.iter().all(|path| {
-                let texture = &self.textures[self.texture_indices[path]];
-                texture.image.is_some() && pending_texture_cpu(texture) == 0
-            })
-        })
+    pub fn world_primary_ready(&self, identity: (SourceAssetId, u32)) -> bool {
+        self.world_primary.materials.contains(&identity)
+            && self
+                .records
+                .iter()
+                .find(|record| (record.asset, record.gltf_material) == identity)
+                .is_some_and(|record| {
+                    record.properties.textures.iter().all(|record| {
+                        let texture = &self.textures[self.texture_indices[&record.file]];
+                        texture.image.is_some() && pending_texture_cpu(texture) == 0
+                    })
+                })
     }
     pub fn prepare_world_primary(
         &mut self,
@@ -475,6 +495,9 @@ impl SourceMaterials {
             .owners
             .remove(&asset)
             .is_none_or(|owner| Arc::strong_count(&owner) == 1);
+        self.world_primary
+            .materials
+            .retain(|identity| identity.0 != asset);
         let paths = self.world_primary.assets.remove(&asset).unwrap();
         for path in paths {
             self.textures[self.texture_indices[&path]].users -= 1;

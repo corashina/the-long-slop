@@ -50,6 +50,7 @@ fn intersect(a: Plane, b: Plane, c: Plane) -> [f32; 3] {
     std::array::from_fn(|i| ((b[3] * ac[i] + a[3] * cb[i]) - c[3] * ab[i]) * reciprocal)
 }
 /// Fixed capacity matches CalculateShadowCasterCull2d5300. No heap storage or padding changes the result.
+#[derive(Clone, Copy)]
 pub struct DirectionalHull {
     planes: [Plane; 10],
     len: usize,
@@ -206,7 +207,7 @@ pub fn no_umbra_candidate(
         && hull.intersects(bounds)
 }
 /// IntersectAABBFrustumFull35fe20 uses a different scalar addition boundary from the hull kernel.
-fn intersects_camera(bounds: Bounds, camera_planes: &[Plane; 6]) -> bool {
+pub fn intersects_camera(bounds: Bounds, camera_planes: &[Plane; 6]) -> bool {
     camera_planes.iter().all(|p| {
         let n = normal(*p);
         let center = dot_xyz(n, bounds.center) + p[3];

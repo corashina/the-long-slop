@@ -418,7 +418,10 @@ fn check_ready(
             if materials.state != presentation::materials::RenderingState::Ready {
                 return;
             }
-            if !drive.runtime.world_supported() || !drive.runtime.stream.window_ready() {
+            if !drive.runtime.world_supported()
+                || !drive.runtime.stream.required_ready()
+                || !lighting.road_lamps.ready()
+            {
                 return;
             }
             if !mirrors.ready() || !plates.ready() {
@@ -585,6 +588,8 @@ fn sync_world(
     mut presentation: presentation::world::runtime::WorldPresentation,
     requests: Res<save::SaveRequests>,
     camera: Query<(&Projection, &GlobalTransform), With<DriveCamera>>,
+    views: Res<presentation::view_frame::SourceViewFrame>,
+    mut required_views: Local<Vec<crate::world::RequiredView>>,
     windows: Query<&Window>,
 ) {
     if requests.freezes_world() {
@@ -624,36 +629,38 @@ fn sync_world(
             _ => None,
         },
     };
-    let inverse_clip = (projection.get_clip_from_view() * camera_world.inverse()).inverse();
-    let mut min = Vec3::splat(f32::MAX);
-    let mut max = Vec3::splat(f32::MIN);
-    for x in [-1., 1.] {
-        for y in [-1., 1.] {
-            for z in [0.00001, 1.] {
-                let point = inverse_clip.project_point3(Vec3::new(x, y, z));
-                min = min.min(point);
-                max = max.max(point);
-            }
-        }
-    }
-    let mut receivers = [crate::world::WorldBounds {
-        min: min.to_array().map(|v| v as f64),
-        max: max.to_array().map(|v| v as f64),
-    }; 2];
-    let receiver_count = if let Some(bounds) = drive.runtime.stream.recovery_window() {
-        receivers[1] = bounds;
-        2
-    } else {
-        1
-    };
     // The loading panel covers the screen, so generation can use most of each frame.
     let budget_ms = if drive.ready { 0. } else { LOADING_BUDGET_MS };
     let runtime = &mut drive.runtime;
+    runtime.stream.advance_generation();
     let was_aligned = runtime.startup_aligned;
     let enabled = runtime
         .lighting
         .road_lamp_output(&reference.0.lighting)
         .enabled;
+    required_views.clear();
+    let [x, y, z] = runtime
+        .lighting
+        .cycle
+        .output()
+        .directional_euler_degrees
+        .map(f32::to_radians);
+    let forward = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::NEG_Z;
+    let forward = [forward.x, forward.y, -forward.z];
+    for view in views.views.iter().flatten() {
+        match presentation::view_frame::required_view(
+            view,
+            runtime.stream.origin.offset,
+            forward,
+            reference.0.render_lighting.lights[0].mask,
+        ) {
+            Ok(view) => required_views.push(view),
+            Err(error) => {
+                runtime.stream.fail(error);
+                return;
+            }
+        }
+    }
     let result = presentation
         .prepare(
             &mut runtime.stream,
@@ -664,9 +671,9 @@ fn sync_world(
             view,
             runtime.lighting.cycle.output().shader_time_seconds as f32,
             lod_view,
-            &receivers[..receiver_count],
             enabled,
             runtime.lighting.light_outputs(),
+            &required_views,
             budget_ms,
         )
         .and_then(|_| runtime.align_startup(&reference.0).map(|_| ()))
@@ -832,6 +839,7 @@ fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveC
     }
 }
 fn publish_loading(
+    reference: Res<RuntimeReference>,
     drive: Res<Drive>,
     visuals: Res<ReferenceVisuals>,
     materials: Res<presentation::materials::SourceMaterials>,
@@ -851,7 +859,7 @@ fn publish_loading(
         && source_lighting.state == presentation::materials::RenderingState::Ready
         && mirrors.ready()
         && plates.ready();
-    if stream.metrics().prepared_roads == crate::world::ROAD_SEGMENTS && *traced & 1 == 0 {
+    if stream.initial_generation_ready() && *traced & 1 == 0 {
         game_startup_stage("generation", false);
         *traced |= 1;
     }
@@ -869,9 +877,9 @@ fn publish_loading(
     *last = now;
     game_loading_progress(
         stream.metrics().prepared_roads,
-        crate::world::ROAD_SEGMENTS,
+        reference.0.world.road.gen_at_start,
         rendering,
-        drive.runtime.world_supported() && stream.window_ready(),
+        drive.runtime.world_supported() && stream.required_ready(),
     );
     for budget in stream.presentation_budgets(stream.presentation_allocation()) {
         game_loading_budget(

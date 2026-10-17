@@ -15,7 +15,7 @@ use crate::{
     reference::{ReferenceError, ReferenceManifest},
     starting_area::StartingArea,
     vehicle::PhysicsWorld,
-    world::{WorldBounds, WorldStream},
+    world::WorldStream,
 };
 use bevy::{
     ecs as bevy_ecs, ecs::system::SystemParam, mesh::skinning::SkinnedMeshInverseBindposes,
@@ -82,9 +82,9 @@ impl WorldPresentation<'_, '_> {
         view: GrassView,
         time: f32,
         lod_view: super::lod::LodView,
-        receivers: &[WorldBounds],
         enabled: bool,
         light_outputs: &[crate::lighting::LightOutput],
+        required_views: &[crate::world::RequiredView],
         budget_ms: f64,
     ) -> Result<(), ReferenceError> {
         let started = crate::browser::game_now();
@@ -100,9 +100,9 @@ impl WorldPresentation<'_, '_> {
                 view,
                 time,
                 lod_view,
-                receivers,
                 enabled,
                 light_outputs,
+                required_views,
                 remaining,
             )?;
             if budget_ms <= 0.
@@ -123,9 +123,9 @@ impl WorldPresentation<'_, '_> {
         view: GrassView,
         time: f32,
         lod_view: super::lod::LodView,
-        receivers: &[WorldBounds],
         enabled: bool,
         light_outputs: &[crate::lighting::LightOutput],
+        required_views: &[crate::world::RequiredView],
         budget_ms: f64,
     ) -> Result<(), ReferenceError> {
         super::preflight::configure_staging(stream, &reference.file_catalog)?;
@@ -250,6 +250,7 @@ impl WorldPresentation<'_, '_> {
             failure.get_or_insert(error);
         }
         stream.prepare(budget_ms);
+        stream.select_required(required_views);
         while let Some(source) = self.prototypes.take_retired() {
             self.allocation.retired_materials.push(source);
         }
@@ -396,7 +397,7 @@ impl WorldPresentation<'_, '_> {
         )?;
         let lamps = super::lamps::source_lamp_admission(
             &stream.frame(),
-            receivers,
+            stream.required_content().lights,
             &mut self.lights,
             reference,
             light_outputs,

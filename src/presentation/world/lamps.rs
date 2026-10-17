@@ -522,7 +522,7 @@ pub(crate) fn sync_source_lamps(
 
 pub(crate) fn source_lamp_admission(
     frame: &crate::world::WorldFrame<'_>,
-    receivers: &[crate::world::WorldBounds],
+    selected: &[crate::world::GeneratedId],
     source: &mut SourceLighting,
     reference: &crate::reference::ReferenceManifest,
     light_outputs: &[crate::lighting::LightOutput],
@@ -536,12 +536,22 @@ pub(crate) fn source_lamp_admission(
     let Some(_recipe) = &source.road_lamps.recipe else {
         return Ok((0, 0, 0));
     };
-    crate::world::required_world_lights(
-        frame,
-        receivers,
-        biome_enabled,
-        &mut source.road_lamps.required,
-    );
+    let mut count = 0;
+    for light in frame.lights.iter().filter(|light| {
+        selected.contains(&light.id)
+            && light.enabled
+            && light.intensity > 0.
+            && light.record.culling_mask != 0
+            && (light.biome.is_none() || biome_enabled)
+    }) {
+        if count == source.road_lamps.required.len() {
+            source.road_lamps.required.push(light.id.clone());
+        } else if source.road_lamps.required[count] != light.id {
+            source.road_lamps.required[count] = light.id.clone();
+        }
+        count += 1;
+    }
+    source.road_lamps.required.truncate(count);
     let required = source.road_lamps.required.len();
     let light_capacity = crate::presentation::lighting::MAX_LIGHTS - source.road_lamps.fixed_lights;
     let shadow_capacity =

@@ -36,7 +36,6 @@ pub struct WorldMetrics {
     pub spawn_boundary_bytes: usize,
     pub prepared_roads: u32,
     pub prepared_buildings: u32,
-    pub indices_ready: bool,
     pub last_road_work: usize,
     pub last_terrain_work: usize,
 }
@@ -348,7 +347,7 @@ pub(crate) mod browser {
                     "wheel_contacts": car.wheels_contact,
                 },
                 "supported": runtime.world_supported(),
-                "window_ready": runtime.stream.window_ready(),
+                "required_ready": runtime.stream.required_ready(),
                 "failure": frame.failure,
                 "surfaces": surfaces.startup_audit(),
                 "textures": materials.world_textures.startup_audit(&images, &server),

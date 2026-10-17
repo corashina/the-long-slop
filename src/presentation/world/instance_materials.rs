@@ -41,43 +41,88 @@ impl InstanceMaterials<'_> {
         stream: &mut WorldStream,
         reference: &ReferenceManifest,
         prototype: &WorldPrototypeReference,
-        id: &crate::world::GeneratedId,
+        placement: &crate::world::Placement,
+        plan: &crate::reference::prototype_plan::PrototypePlan,
     ) -> Result<bool, ReferenceError> {
-        self.cache
-            .admit_world_asset(prototype.asset, reference, stream)?;
-        let mut selected = 0;
-        loop {
-            let Some(asset) = stream
-                .appearance(id)
-                .iter()
-                .filter_map(|a| a.primary.map(|p| p.0))
-                .nth(selected)
-            else {
-                break;
-            };
-            self.cache.admit_world_asset(asset, reference, stream)?;
-            if !self.cache.world_asset_ready(asset) {
-                return Ok(false);
+        let mut ready = true;
+        for source_node in &prototype.nodes {
+            if !source_node.renderer_enabled {
+                continue;
             }
-            selected += 1;
-        }
-        for node in &prototype.nodes {
-            if let Some((asset, _)) = super::preflight::initial_material(reference, &node.source) {
-                self.cache.admit_world_asset(asset, reference, stream)?;
-                if !self.cache.world_asset_ready(asset) {
-                    return Ok(false);
+            let node = &plan.nodes[source_node.gltf_node as usize];
+            for primitive in plan.primitives.iter().filter(|p| Some(p.mesh) == node.mesh) {
+                let (initial, selected) =
+                    selected_material(stream, reference, prototype, placement, &source_node.source);
+                let selected = selected.cloned();
+                ready &= self.admit_binding(
+                    stream,
+                    reference,
+                    prototype,
+                    primitive,
+                    initial,
+                    selected.as_ref(),
+                )?;
+                let variants = stream
+                    .lamp_materials(&prototype.source, &source_node.source)?
+                    .len();
+                for index in 0..variants {
+                    let source = stream.lamp_materials(&prototype.source, &source_node.source)?
+                        [index]
+                        .clone();
+                    let primary = reference
+                        .rendering
+                        .materials
+                        .iter()
+                        .find(|m| m.source == source && m.asset == prototype.asset)
+                        .map(|m| (m.asset, m.gltf_material));
+                    ready &= self.admit_binding(
+                        stream,
+                        reference,
+                        prototype,
+                        primitive,
+                        primary,
+                        Some(&source),
+                    )?;
                 }
             }
         }
-        for material in &prototype.deferred_materials {
-            self.cache
-                .admit_world_material(material, reference, stream)?;
-        }
-        Ok(self.cache.world_asset_ready(prototype.asset)
-            && prototype
+        Ok(ready)
+    }
+    fn admit_binding(
+        &mut self,
+        stream: &mut WorldStream,
+        reference: &ReferenceManifest,
+        prototype: &WorldPrototypeReference,
+        primitive: &PlanPrimitive,
+        initial: Option<(crate::reference::AssetId, u32)>,
+        selected: Option<&crate::reference::SourceId>,
+    ) -> Result<bool, ReferenceError> {
+        if initial.is_none() && (selected.is_some() || primitive.has_source_material) {
+            let source = selected
+                .or(primitive.source_material.as_ref())
+                .ok_or_else(|| ReferenceError("Unresolved source null material draw".into()))?;
+            let record = prototype
                 .deferred_materials
                 .iter()
-                .all(|m| self.cache.world_textures.ready(&m.source)))
+                .find(|m| m.source == *source)
+                .ok_or_else(|| ReferenceError("Missing generated material record".into()))?;
+            self.cache.admit_world_material(record, reference, stream)?;
+            Ok(self.cache.world_textures.ready(source))
+        } else {
+            let identity = initial
+                .or_else(|| {
+                    primitive
+                        .material
+                        .as_ref()
+                        .map(|m| (m.asset, m.gltf_material))
+                })
+                .ok_or_else(|| {
+                    ReferenceError("Missing generated primary material identity".into())
+                })?;
+            self.cache
+                .admit_world_primary(identity, reference, stream)?;
+            Ok(self.cache.world_primary_ready(identity))
+        }
     }
     pub fn bind(
         &mut self,
@@ -361,4 +406,62 @@ impl RendererMaterial {
             )>();
         }
     }
+}
+
+pub fn selected_material<'a>(
+    stream: &'a WorldStream,
+    reference: &'a ReferenceManifest,
+    prototype: &WorldPrototypeReference,
+    placement: &crate::world::Placement,
+    node: &crate::reference::SourceId,
+) -> (
+    Option<(crate::reference::AssetId, u32)>,
+    Option<&'a crate::reference::SourceId>,
+) {
+    let appearance = stream.appearance(&placement.id).iter().rev().find(|a| {
+        a.node == *node
+            && (a.primary.is_some()
+                || a.material.is_some()
+                || a.color.is_some()
+                || a.color_material.is_some())
+    });
+    let selected = appearance.and_then(|a| a.material.as_ref()).or_else(|| stream.prop_material(placement).filter(|(renderer,_)| {
+                                        let owner = reference.world.records.iter().find(|r| &r.source == *renderer)
+                                            .and_then(|r| r.fields.get("m_GameObject"));
+                                        let node_owner = reference.world.records.iter().find(|r| r.source == *node)
+                                            .and_then(|r| r.fields.get("m_GameObject"));
+                                        matches!((owner,node_owner), (Some(crate::reference::WorldValue::Link(a)),Some(crate::reference::WorldValue::Link(b))) if a == b)
+                                    }).map(|(_,material)| material));
+    let selected_primary = selected
+        .and_then(|id| {
+            reference
+                .rendering
+                .materials
+                .iter()
+                .find(|m| m.source == *id && m.asset == prototype.asset)
+        })
+        .map(|m| (m.asset, m.gltf_material));
+    let initial = stream
+        .appearance(&placement.id)
+        .iter()
+        .rev()
+        .find(|a| a.node == *node && a.primary.is_some())
+        .and_then(|a| a.primary)
+        .or(selected_primary)
+        .or_else(|| {
+            reference
+                .world
+                .initial_materials
+                .iter()
+                .find(|m| m.node == *node)
+                .and_then(|binding| {
+                    reference
+                        .rendering
+                        .materials
+                        .iter()
+                        .find(|m| m.source == binding.material)
+                })
+                .map(|m| (m.asset, m.gltf_material))
+        });
+    (initial, selected)
 }

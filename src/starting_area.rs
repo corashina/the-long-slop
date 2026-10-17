@@ -1677,7 +1677,10 @@ impl GarageRuntime {
         }
     }
     pub fn world_supported(&self) -> bool {
-        if self.restore_pending() || !self.startup_aligned || !self.stream.metrics().indices_ready {
+        if self.restore_pending()
+            || !self.startup_aligned
+            || !self.stream.initial_generation_ready()
+        {
             return false;
         }
         let supported = |point: [f32; 3], padding: f64| {

@@ -320,6 +320,7 @@ const _: () = assert!(
 
 /// Sparse source states and conservative spatial bounds. Inputs remain private and frozen.
 pub struct RoadIndex {
+    latest: Option<RoadSegment>,
     sequence: RoadSequence,
     replay: RoadSequence,
     terrain: TerrainEvaluator,
@@ -341,6 +342,7 @@ impl RoadIndex {
         let mut checkpoints = Vec::with_capacity(BLOCKS + 1);
         checkpoints.push(sequence.checkpoint());
         Self {
+            latest: None,
             replay: sequence.clone(),
             sequence,
             terrain,
@@ -361,6 +363,7 @@ impl RoadIndex {
             let Some(segment) = self.sequence.advance(&self.terrain) else {
                 break;
             };
+            self.latest = Some(segment);
             if segment.index % ROAD_CHECKPOINT_INTERVAL == 0 {
                 self.blocks.push(RoadBlock {
                     first: segment.index,
@@ -382,6 +385,9 @@ impl RoadIndex {
         self.sequence.state.next_segment == ROAD_SEGMENTS
     }
 
+    pub(crate) fn latest_segment(&self) -> Option<RoadSegment> {
+        self.latest
+    }
     pub fn candidate_count(
         &self,
         bounds: WorldBounds,
@@ -949,6 +955,7 @@ impl RoadIndex {
     pub fn restore_index(&mut self, s: &RoadIndexSnapshot) -> Result<(), ReferenceError> {
         self.validate_index(s)?;
         self.sequence.state = s.state;
+        self.latest = None;
         self.checkpoints.clone_from(&s.checkpoints);
         self.blocks.clone_from(&s.blocks);
         self.buffer.clear();

@@ -1,3 +1,5 @@
+mod required;
+pub use required::{RequiredContent, RequiredView};
 mod generation;
 pub use generation::*;
 pub mod changes;

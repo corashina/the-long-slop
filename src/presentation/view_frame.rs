@@ -325,69 +325,17 @@ pub(crate) fn snapshot(
                 scene.probe_position[clock.probe_index].to_array(),
             ))
         };
-        let implicit = Mat4::perspective_rh_gl(
-            fov.to_radians(),
-            extent.x as f32 / extent.y as f32,
-            near,
-            far,
-        );
-        let current = if index == 1 {
-            // The source helper is row-major; glam stores columns.
-            let rows = jitter_perspective(
-                implicit.transpose().to_cols_array_2d(),
-                near,
-                fov,
-                extent.x as f32 / extent.y as f32,
-                extent.to_array(),
-                clock.jitter.unwrap(),
-            )
-            .expect("validated source view jitter");
-            Mat4::from_cols_array_2d(&rows).transpose()
-        } else {
-            implicit
-        };
-        let source_view = Mat4::from_cols_array_2d(
-            &crate::reference::view_math::source_culling_view(view.to_cols_array_2d()),
-        );
-        let source_world_from_view = source_view.inverse();
-        let world_corners = corners((current * source_view).inverse());
-        let selected = if crate::reference::view_math::requires_implicit_projection(
-            world_corners,
-            source_world_from_view.w_axis.truncate().to_array(),
-            near,
-            far,
-        ) {
-            implicit
-        } else {
-            current
-        };
-        // GetScriptableCullingParameters450659..450663 sets shadowNearOffset=0.
-        // This is separate from the quality projection near_offset.
-        let CullPlanes { camera, shadow } = implicit_cull_planes(
-            (selected * source_view).to_cols_array(),
-            source_world_from_view.to_cols_array(),
-            near,
-            far,
-            distance,
-            0.,
-        );
-        Some(ViewSnapshot {
+        Some(camera_snapshot(
             extent,
-            view_from_world: view,
-            implicit_projection: implicit,
-            nonjittered_projection: mirror.map_or_else(|| gpu_projection(implicit), |p| p.3),
-            raster_projection: mirror.map_or_else(|| gpu_projection(current), |p| p.3),
-            culling_projection: selected,
-            source_world_from_view,
-            source_camera_planes: camera,
-            source_shadow_planes: shadow,
-            frustum_points: corners(implicit.inverse()),
+            view,
             near,
             far,
-            fov_degrees: fov,
+            fov,
             mask,
-            shadow_distance: distance,
-        })
+            distance,
+            (index == 1).then_some(clock.jitter.unwrap()),
+            mirror.map(|p| p.3),
+        ))
     });
     let sky_clips = Some(sky_pose).map(|pose| {
         let sky = &assets.record.cameras[0];
@@ -545,4 +493,100 @@ pub fn apply_sky_snapshot(
             view.invert_culling = true;
         }
     }
+}
+
+/// Shared source projection and culling math for live and private candidate views.
+pub(crate) fn camera_snapshot(
+    extent: UVec2,
+    view: Mat4,
+    near: f32,
+    far: f32,
+    fov: f32,
+    mask: u32,
+    distance: f32,
+    jitter: Option<TaaJitter>,
+    raster_override: Option<Mat4>,
+) -> ViewSnapshot {
+    let implicit = Mat4::perspective_rh_gl(
+        fov.to_radians(),
+        extent.x as f32 / extent.y as f32,
+        near,
+        far,
+    );
+    let current = if let Some(jitter) = jitter {
+        // The source helper is row-major; glam stores columns.
+        let rows = jitter_perspective(
+            implicit.transpose().to_cols_array_2d(),
+            near,
+            fov,
+            extent.x as f32 / extent.y as f32,
+            extent.to_array(),
+            jitter,
+        )
+        .expect("validated source view jitter");
+        Mat4::from_cols_array_2d(&rows).transpose()
+    } else {
+        implicit
+    };
+    let source_view = Mat4::from_cols_array_2d(&crate::reference::view_math::source_culling_view(
+        view.to_cols_array_2d(),
+    ));
+    let source_world_from_view = source_view.inverse();
+    let world_corners = corners((current * source_view).inverse());
+    let selected = if crate::reference::view_math::requires_implicit_projection(
+        world_corners,
+        source_world_from_view.w_axis.truncate().to_array(),
+        near,
+        far,
+    ) {
+        implicit
+    } else {
+        current
+    };
+    // GetScriptableCullingParameters450659..450663 sets shadowNearOffset=0.
+    // This is separate from the quality projection near_offset.
+    let CullPlanes { camera, shadow } = implicit_cull_planes(
+        (selected * source_view).to_cols_array(),
+        source_world_from_view.to_cols_array(),
+        near,
+        far,
+        distance,
+        0.,
+    );
+    ViewSnapshot {
+        extent,
+        view_from_world: view,
+        implicit_projection: implicit,
+        nonjittered_projection: raster_override.unwrap_or_else(|| gpu_projection(implicit)),
+        raster_projection: raster_override.unwrap_or_else(|| gpu_projection(current)),
+        culling_projection: selected,
+        source_world_from_view,
+        source_camera_planes: camera,
+        source_shadow_planes: shadow,
+        frustum_points: corners(implicit.inverse()),
+        near,
+        far,
+        fov_degrees: fov,
+        mask,
+        shadow_distance: distance,
+    }
+}
+
+pub(crate) fn required_view(
+    snapshot: &ViewSnapshot,
+    origin: [f64; 3],
+    light_forward: [f32; 3],
+    light_mask: u32,
+) -> Result<crate::world::RequiredView, crate::reference::ReferenceError> {
+    Ok(crate::world::RequiredView {
+        camera: snapshot.source_camera_planes,
+        shadow: crate::reference::shadow_candidates::DirectionalHull::new(
+            snapshot.source_shadow_planes,
+            light_forward,
+        )
+        .map_err(|e| crate::reference::ReferenceError(e.into()))?,
+        mask: snapshot.mask,
+        light_mask,
+        origin,
+    })
 }

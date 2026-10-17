@@ -151,7 +151,11 @@ impl SourceInstances {
     ) -> Result<(), ReferenceError> {
         // Discover selected descriptors before material or payload readiness.
         for index in 0..stream.pending_structures().len() {
-            let source = &stream.pending_structures()[index].prototype;
+            let placement = &stream.pending_structures()[index];
+            if !stream.structure_required(&placement.id) && !stream.required_ready() {
+                continue;
+            }
+            let source = &placement.prototype;
             if prototypes.requested(source) {
                 continue;
             }
@@ -195,18 +199,10 @@ impl SourceInstances {
                 .iter()
                 .find(|p| {
                     stream.contents_initialized(&p.id)
+                        && (stream.structure_required(&p.id) || stream.required_ready())
                         && !self.instances.iter().any(|i| i.placement.id == p.id)
                 })
                 .cloned();
-        }
-        if let Some(placement) = self.pending.as_ref() {
-            if prototypes
-                .plan(stream.frame().request.session, &placement.prototype)
-                .is_some()
-            {
-                // Task 2B inserts the combined descriptor check before this call.
-                prototypes.admit_payload(stream, reference, server, &placement.prototype)?;
-            }
         }
         // Full pending ownership must drain through publication before another instance starts.
         // Continue polling existing renderer work below, including its readiness transfer.
@@ -232,8 +228,17 @@ impl SourceInstances {
             let admitted = prototypes
                 .plan(stream.frame().request.session, &placement.prototype)
                 .is_some()
-                && materials.admit(stream, reference, prototype, &placement.id)?;
+                && materials.admit(
+                    stream,
+                    reference,
+                    prototype,
+                    placement,
+                    prototypes
+                        .plan(stream.frame().request.session, &placement.prototype)
+                        .unwrap(),
+                )?;
             if admitted {
+                prototypes.admit_payload(stream, reference, server, &placement.prototype)?;
                 if let Some(loaded) =
                     prototypes.loaded(stream.frame().request.session, &placement.prototype)
                 {
@@ -436,44 +441,14 @@ impl SourceInstances {
                                                     || a.color.is_some()
                                                     || a.color_material.is_some())
                                         });
-                                    let selected = appearance.and_then(|a| a.material.as_ref()).or_else(|| stream.prop_material(placement).filter(|(renderer,_)| {
-                                        let owner = reference.world.records.iter().find(|r| &r.source == *renderer)
-                                            .and_then(|r| r.fields.get("m_GameObject"));
-                                        let node_owner = reference.world.records.iter().find(|r| r.source == source_node.source)
-                                            .and_then(|r| r.fields.get("m_GameObject"));
-                                        matches!((owner,node_owner), (Some(crate::reference::WorldValue::Link(a)),Some(crate::reference::WorldValue::Link(b))) if a == b)
-                                    }).map(|(_,material)| material));
-                                    let selected_primary = selected
-                                        .and_then(|id| {
-                                            reference.rendering.materials.iter().find(|m| {
-                                                m.source == *id && m.asset == prototype.asset
-                                            })
-                                        })
-                                        .map(|m| (m.asset, m.gltf_material));
-                                    let initial = stream
-                                        .appearance(&placement.id)
-                                        .iter()
-                                        .rev()
-                                        .find(|a| {
-                                            a.node == source_node.source && a.primary.is_some()
-                                        })
-                                        .and_then(|a| a.primary)
-                                        .or(selected_primary)
-                                        .or_else(|| {
-                                            reference
-                                                .world
-                                                .initial_materials
-                                                .iter()
-                                                .find(|m| m.node == source_node.source)
-                                                .and_then(|binding| {
-                                                    reference
-                                                        .rendering
-                                                        .materials
-                                                        .iter()
-                                                        .find(|m| m.source == binding.material)
-                                                })
-                                                .map(|m| (m.asset, m.gltf_material))
-                                        });
+                                    let (initial, selected) =
+                                        super::instance_materials::selected_material(
+                                            stream,
+                                            reference,
+                                            prototype,
+                                            placement,
+                                            &source_node.source,
+                                        );
                                     let Some(binding) = materials.bind(
                                         stream.frame().request.session,
                                         prototype,
@@ -540,12 +515,9 @@ impl SourceInstances {
                                         .id();
                                     owned_bindings.push((entity, binding.clone()));
                                     let material_source = selected.cloned();
-                                    let mut variant_ids = Vec::new();
-                                    stream.lamp_materials(
-                                        &prototype.source,
-                                        &source_node.source,
-                                        &mut variant_ids,
-                                    )?;
+                                    let mut variant_ids = stream
+                                        .lamp_materials(&prototype.source, &source_node.source)?
+                                        .to_vec();
                                     variant_ids.retain(|id| Some(id) != material_source.as_ref());
                                     let mut variants = Vec::with_capacity(variant_ids.len());
                                     if !variant_ids.is_empty() {

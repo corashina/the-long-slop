@@ -258,3 +258,113 @@ fn checkpoint_order_and_helper_coverage_are_checked() {
             .is_err()
     );
 }
+
+#[test]
+fn required_views_include_casters_and_use_their_own_origin() {
+    use my_summer_slop::reference::shadow_candidates::DirectionalHull;
+    let camera = [
+        [1., 0., 0., 1.],
+        [-1., 0., 0., 1.],
+        [0., 1., 0., 1.],
+        [0., -1., 0., 1.],
+        [0., 0., 1., 1.],
+        [0., 0., -1., 1.],
+    ];
+    let live = RequiredView {
+        camera,
+        shadow: DirectionalHull::new(camera, [1., 0., 0.]).unwrap(),
+        mask: 1,
+        light_mask: 1,
+        origin: [0.; 3],
+    };
+    let candidate = RequiredView {
+        origin: [1000., 0., 0.],
+        ..live
+    };
+    let bounds = |x| WorldBounds {
+        min: [x - 0.1, -0.1, -0.1],
+        max: [x + 0.1, 0.1, 0.1],
+    };
+    assert!(live.includes(bounds(0.), 1));
+    assert!(
+        live.includes(bounds(-5.), 1),
+        "off-camera caster remains required"
+    );
+    assert!(
+        !live.includes(bounds(5.), 1),
+        "distant non-caster leaves startup gate"
+    );
+    assert!(
+        !live.includes(bounds(0.), 2),
+        "source layer mask remains binding"
+    );
+    assert!(candidate.includes(bounds(1000.), 1));
+    assert!(!live.includes(bounds(1000.), 1));
+    assert_eq!(
+        live.origin, [0.; 3],
+        "candidate metadata cannot mutate live views"
+    );
+}
+
+#[test]
+fn required_source_planes_reflect_z_after_nonzero_rebase() {
+    use my_summer_slop::reference::{
+        shadow_candidates::DirectionalHull, shadow_planes::implicit_cull_planes,
+        view_math::source_culling_view,
+    };
+    // Runtime camera at (2,3,4), looking down -Z. This is the live snapshot adapter path.
+    let target_view = [
+        [1., 0., 0., 0.],
+        [0., 1., 0., 0.],
+        [0., 0., 1., 0.],
+        [-2., -3., -4., 1.],
+    ];
+    let source_view = source_culling_view(target_view);
+    let projection = [
+        [1., 0., 0., 0.],
+        [0., 1., 0., 0.],
+        [0., 0., -101. / 99., -1.],
+        [0., 0., -200. / 99., 0.],
+    ];
+    let clip: [[f32; 4]; 4] = std::array::from_fn(|c| {
+        std::array::from_fn(|r| (0..4).map(|k| projection[k][r] * source_view[c][k]).sum())
+    });
+    let inverse = [
+        1., 0., 0., 0., 0., 1., 0., 0., 0., 0., -1., 0., 2., 3., -4., 1.,
+    ];
+    let planes = implicit_cull_planes(
+        clip.into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap(),
+        inverse,
+        1.,
+        100.,
+        30.,
+        0.,
+    );
+    let view = RequiredView {
+        camera: planes.camera,
+        shadow: DirectionalHull::new(planes.shadow, [1., 0., 0.]).unwrap(),
+        mask: 1,
+        light_mask: 0,
+        origin: [1000., 2000., 3000.],
+    };
+    let bounds = |z| WorldBounds {
+        min: [1001.9, 2002.9, z - 0.1],
+        max: [1002.1, 2003.1, z + 0.1],
+    };
+    assert!(
+        view.includes(bounds(2994.), 1),
+        "runtime -Z is source +Z after rebase"
+    );
+    assert!(
+        !view.includes(bounds(3014.), 1),
+        "point behind runtime camera must be excluded"
+    );
+    assert!(
+        !view.includes(bounds(-2994.), 1),
+        "absolute Z must not be reflected before subtracting origin"
+    );
+}
