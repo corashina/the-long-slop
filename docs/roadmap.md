@@ -1,8 +1,34 @@
 # Project roadmap
 
-Updated: 2026-10-15.
+Updated: 2026-10-17.
 
 ## Current status
+
+### Loading and start
+
+New game opens when the start area is ready. The rest of the window streams during play.
+The start area gate checks ground, structures, and lamp owners within 24 m of the player and vehicles.
+It also checks physics ground under the player and vehicles, and drawn surfaces with near terrain material.
+Structures load nearest first. Texture arrays load chunks in parallel.
+Full texture and prototype budgets wait. They do not stop the game.
+New game from the start menu starts the loaded world. It does not build a second world.
+Start objects without a startup root move with the shared start offset. An active body stays active while its ground exists.
+
+The previous export measured New game at 43 s on a cached reload and 79 s on a new profile.
+Play ran at 38 FPS. The player stood in the garage and the car stood on four wheels.
+
+Fix these problems in order:
+
+1. **Loading stalls with the current export.** Master `10e58b9` with the current exporter output stops at "Preparing the garage and world".
+   Pending work stays at 32 of 32. Staging stays at 0. Garage rendering stays in preparation.
+   Build `3dcb7ad` with the same export first. If it stalls, the cause is in that master work.
+   If it does not stall, examine the budget waits in `prototypes.rs` and `world_textures.rs`. They can keep entries pending.
+2. **Verify play by hand.** Walk and drive out of the yard. Confirm that the ground outside the garage is visible.
+   Confirm that streaming during play causes no budget, mirror, or slab allocator errors.
+3. **Fix the audio browser checks.** Four checks in `tests/web/audio.test.mjs` fail on master: decode does not start.
+4. **Reduce new-profile shader time.** Shader and pipeline compilation takes about 40 s before the garage is ready.
+5. **Fit the full window in the budgets.** The 5 km source window needs more than the prototype GPU budget with uncompressed world textures.
+   Far content now waits. Upload compressed textures or retire distant content.
 
 ### Inventory and clothing
 
