@@ -1,7 +1,9 @@
 //! Admitted source texture arrays. Each layer retains all authored mip levels.
 use crate::presentation::source_images::wrap;
 use crate::presentation::texture_batches::SourceTextureBatch;
-use crate::reference::texture_batch::TextureBatchReference;
+use crate::reference::texture_batch::{
+    TextureArrayKey as ArrayKey, TextureBatchReference, texture_bank_groups,
+};
 use crate::reference::{LightingTextureRecord, ReferenceError, SourceId, WorldSourceMaterial};
 use crate::world::texture_batch_ownership::{Admission, BatchIdentity, BatchState, reservation};
 use bevy::asset::AssetId;
@@ -43,52 +45,6 @@ pub(super) fn bind_arrays(
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ArrayKey {
-    width: u32,
-    height: u32,
-    srgb: bool,
-    mips: u32,
-    filter: u8,
-    wrap_u: u8,
-    wrap_v: u8,
-    aniso: u32,
-    bias: u32,
-}
-impl From<&LightingTextureRecord> for ArrayKey {
-    fn from(t: &LightingTextureRecord) -> Self {
-        Self {
-            width: t.width,
-            height: t.height,
-            srgb: t.color_space != 0,
-            mips: t.mip_count,
-            filter: t.filter_mode,
-            wrap_u: t.wrap_u,
-            wrap_v: t.wrap_v,
-            aniso: t.aniso,
-            bias: t.mip_bias.to_bits(),
-        }
-    }
-}
-impl ArrayKey {
-    fn layer_bytes(self) -> Result<usize, ReferenceError> {
-        if self.width == 0
-            || self.height == 0
-            || self.mips == 0
-            || self.mips > 32 - self.width.max(self.height).leading_zeros()
-        {
-            return Err(ReferenceError("Invalid source texture dimensions".into()));
-        }
-        let bytes: u64 = (0..self.mips)
-            .map(|level| {
-                u64::from((self.width >> level).max(1))
-                    * u64::from((self.height >> level).max(1))
-                    * 4
-            })
-            .sum();
-        usize::try_from(bytes).map_err(|_| ReferenceError("Source texture size overflow".into()))
-    }
-}
 #[derive(Clone)]
 struct Layer {
     source: SourceId,
@@ -156,6 +112,8 @@ impl WorldTextures {
             "session": self.session,
             "arrays": self.arrays.iter().flatten().map(|a| serde_json::json!({
                 "layers": a.layers.len(), "next_layer": a.next_layer, "next_batch": a.next_batch, "failed": a.failed,
+                "gpu_bytes": a.bytes,
+                "sources": a.layers.iter().map(|l| &l.source).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
             "slots": queue.ownership.slots.iter().flatten().map(|o| serde_json::json!({
                 "session": o.identity.session, "request": o.identity.request, "state": format!("{:?}", o.state),
@@ -350,43 +308,23 @@ impl WorldTextures {
         &mut self,
         material: &WorldSourceMaterial,
         textures: &[LightingTextureRecord],
+        bank_materials: &[WorldSourceMaterial],
         cpu_available: usize,
         gpu_available: usize,
     ) -> Result<(), ReferenceError> {
         if self.materials.contains_key(&material.source) {
             return Ok(());
         }
-        let mut groups: Vec<(ArrayKey, Vec<&LightingTextureRecord>)> = Vec::new();
-        for link in &material.textures {
-            let record = textures
-                .iter()
-                .find(|t| t.id == link.texture)
-                .ok_or_else(|| {
-                    ReferenceError(format!("Missing source texture {}", link.texture))
-                })?;
-            record.validate_chunks()?;
-            let key = ArrayKey::from(record);
-            let index = groups
-                .iter()
-                .position(|(old, _)| *old == key)
-                .unwrap_or_else(|| {
-                    groups.push((key, Vec::new()));
-                    groups.len() - 1
-                });
-            if !groups[index]
-                .1
-                .iter()
-                .any(|old| old.source == record.source)
-            {
-                groups[index].1.push(record);
-            }
-        }
-        // Source identity, mip hash and exact sampler state define sharing.
-        for (_, layers) in &mut groups {
-            layers.sort_by(|a, b| {
-                (&a.source.file, a.source.path_id).cmp(&(&b.source.file, b.source.path_id))
-            });
-        }
+        let mut groups = texture_bank_groups(bank_materials, textures)?;
+        // Only bind banks used by this material. The bank membership is immutable.
+        groups.retain(|(key, _)| {
+            material.textures.iter().any(|link| {
+                textures
+                    .iter()
+                    .find(|t| t.id == link.texture)
+                    .is_some_and(|t| ArrayKey::from(t) == *key)
+            })
+        });
         let existing: Vec<_> = groups
             .iter()
             .map(|(key, layers)| {
@@ -599,7 +537,21 @@ impl WorldTextures {
         }
         let metadata = self.metadata_bytes();
         let mut queue = self.uploads.lock().unwrap();
-        if queue.jobs.iter().all(Option::is_none) {
+        let current = queue.ownership.slots[0].and_then(|owner| {
+            queue
+                .jobs
+                .iter()
+                .flatten()
+                .find(|j| j.identity == owner.identity)
+                .map(|job| (owner, job.array, job.layer, job.batch))
+        });
+        let empty = current.is_none();
+        let refill = current
+            .as_ref()
+            .is_some_and(|(owner, ..)| owner.identity.session == self.session && !owner.cancelled)
+            && queue.ownership.slots[1].is_none();
+        if empty || refill {
+            let count = if empty { 2 } else { 1 };
             let mut selected = Vec::new();
             'arrays: for (index, array) in self
                 .arrays
@@ -617,6 +569,12 @@ impl WorldTextures {
                         0
                     };
                     for batch in first..array.layers[layer].batches.len() {
+                        if current
+                            .as_ref()
+                            .is_some_and(|(_, a, l, b)| (index, layer, batch) <= (*a, *l, *b))
+                        {
+                            continue;
+                        }
                         let reference = &array.layers[layer].batches[batch];
                         let bytes = reservation(reference).ok_or_else(|| {
                             ReferenceError(format!(
@@ -635,7 +593,7 @@ impl WorldTextures {
                             },
                             bytes,
                         ));
-                        if selected.len() == 2 {
+                        if selected.len() == count {
                             break 'arrays;
                         }
                     }
@@ -647,27 +605,50 @@ impl WorldTextures {
             if selected.len() > pending_available {
                 return Ok(());
             }
-            let shared = if selected.len() == 2 {
-                let (a, l, b, _, bytes) = selected[0];
-                let (c, m, d, _, _) = selected[1];
+            let shared = if let Some((owner, _, _, _)) = &current {
+                let path = &queue
+                    .jobs
+                    .iter()
+                    .flatten()
+                    .find(|j| j.identity == owner.identity)
+                    .unwrap()
+                    .reference
+                    .descriptor
+                    .file;
+                let (a, l, b, identity, _) = selected[0];
+                (self.arrays[a].as_ref().unwrap().layers[l].batches[b]
+                    .descriptor
+                    .file
+                    == *path)
+                    .then_some((owner.identity, identity, owner.bytes - 4096, 0))
+            } else if selected.len() == 2 {
+                let (a, l, b, first, bytes) = selected[0];
+                let (c, m, d, second, _) = selected[1];
                 (self.arrays[a].as_ref().unwrap().layers[l].batches[b]
                     .descriptor
                     .file
                     == self.arrays[c].as_ref().unwrap().layers[m].batches[d]
                         .descriptor
                         .file)
-                    .then_some(bytes - 4096)
+                    .then_some((first, second, bytes - 4096, 1))
             } else {
                 None
             };
-            if shared.is_some() {
-                selected[1].4 = 4096;
+            if let Some((_, _, _, index)) = shared {
+                selected[index].4 = 4096;
             }
-            let available = staging_available.min(cpu_available.saturating_sub(metadata));
-            match queue
-                .ownership
-                .admit(selected.iter().map(|s| (s.3, s.4)), available, releasable)
-            {
+            let available = staging_available
+                .min(cpu_available.saturating_sub(metadata + queue.ownership.bytes()));
+            let admission = if refill {
+                queue
+                    .ownership
+                    .refill(selected[0].3, selected[0].4, available)
+            } else {
+                queue
+                    .ownership
+                    .admit(selected.iter().map(|s| (s.3, s.4)), available, releasable)
+            };
+            match admission {
                 Ok(()) => (),
                 Err(Admission::Wait) => return Ok(()),
                 Err(Admission::Permanent) => {
@@ -683,10 +664,11 @@ impl WorldTextures {
                     )));
                 }
             }
-            if let Some(bytes) = shared {
-                queue.ownership.share(selected[0].3, selected[1].3, bytes);
+            if let Some((first, second, bytes, _)) = shared {
+                queue.ownership.share(first, second, bytes);
             }
-            for (slot, (index, layer, batch, identity, _)) in selected.into_iter().enumerate() {
+            for (index, layer, batch, identity, _) in selected {
+                let slot = queue.jobs.iter().position(Option::is_none).unwrap();
                 let array = self.arrays[index].as_mut().unwrap();
                 if array.image.is_none() {
                     array.image = Some(images.add(array_image(array.key, array.layers.len())?));

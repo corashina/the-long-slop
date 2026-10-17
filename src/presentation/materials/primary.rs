@@ -613,6 +613,17 @@ impl SourceMaterials {
             } else {
                 &reference.world.material_textures
             },
+            if reference
+                .world
+                .terrain
+                .materials
+                .iter()
+                .any(|m| m.source == material.source)
+            {
+                &reference.world.terrain.materials
+            } else {
+                std::slice::from_ref(material)
+            },
             stream.available_prototype_cpu_bytes() + cpu,
             stream.available_prototype_gpu_bytes() + gpu,
         )?;
@@ -637,7 +648,6 @@ impl SourceMaterials {
             self.world_textures.jobs(),
             self.world_textures.staging_bytes(),
         )?;
-        let free = stream.available_external_jobs();
         let pending = 32usize.saturating_sub(stream.metrics().pending_work);
         let staging_available = stream.available_dependency_staging_bytes();
         let available_cpu = stream.available_prototype_cpu_bytes() + self.world_textures.bytes().0;
@@ -660,7 +670,7 @@ impl SourceMaterials {
         )?;
         result?;
         // CPU and pair staging are committed before either AssetServer request.
-        let launch = free.min(self.world_textures.queued_jobs());
+        let launch = stream.available_external_jobs().min(self.world_textures.queued_jobs());
         self.account_deferred(
             stream,
             self.world_textures.jobs() + launch,

@@ -79,6 +79,39 @@ impl BatchQueue {
         self.slots = proposed;
         Ok(())
     }
+    /// Reserve a new prefetch without changing the retained current owner.
+    pub fn refill(
+        &mut self,
+        identity: BatchIdentity,
+        bytes: usize,
+        available: usize,
+    ) -> Result<(), Admission> {
+        let Some(current) = self.slots[0] else {
+            return Err(Admission::Permanent);
+        };
+        if self.slots[1].is_some() {
+            return Err(Admission::Wait);
+        }
+        if current
+            .bytes
+            .checked_add(bytes)
+            .is_none_or(|n| n > STAGING_LIMIT)
+        {
+            return Err(Admission::Permanent);
+        }
+        if bytes > available {
+            return Err(Admission::Wait);
+        }
+        self.slots[1] = Some(BatchOwner {
+            identity,
+            bytes,
+            state: BatchState::Queued,
+            cancelled: false,
+            shared_with: None,
+            shared_bytes: 0,
+        });
+        Ok(())
+    }
     pub fn start(&mut self, available_jobs: usize) -> Vec<BatchIdentity> {
         let mut started = Vec::new();
         let free = available_jobs.min(2usize.saturating_sub(self.jobs()));
@@ -96,10 +129,7 @@ impl BatchQueue {
     }
     /// The second strong handle shares input and payload storage, but owns its control bytes.
     pub fn share(&mut self, first: BatchIdentity, second: BatchIdentity, shared_bytes: usize) {
-        assert!(
-            self.owner(first)
-                .is_some_and(|o| o.state == BatchState::Queued)
-        );
+        assert!(self.owner(first).is_some());
         let other = self
             .slots
             .iter_mut()

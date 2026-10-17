@@ -195,3 +195,98 @@ impl LightingTextureRecord {
         )
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TextureArrayKey {
+    pub width: u32,
+    pub height: u32,
+    pub srgb: bool,
+    pub mips: u32,
+    pub filter: u8,
+    pub wrap_u: u8,
+    pub wrap_v: u8,
+    pub aniso: u32,
+    pub bias: u32,
+}
+impl From<&LightingTextureRecord> for TextureArrayKey {
+    fn from(t: &LightingTextureRecord) -> Self {
+        Self {
+            width: t.width,
+            height: t.height,
+            srgb: t.color_space != 0,
+            mips: t.mip_count,
+            filter: t.filter_mode,
+            wrap_u: t.wrap_u,
+            wrap_v: t.wrap_v,
+            aniso: t.aniso,
+            bias: t.mip_bias.to_bits(),
+        }
+    }
+}
+impl TextureArrayKey {
+    pub fn layer_bytes(self) -> Result<usize, ReferenceError> {
+        if self.width == 0
+            || self.height == 0
+            || self.mips == 0
+            || self.mips > 32 - self.width.max(self.height).leading_zeros()
+        {
+            return Err(ReferenceError("Invalid source texture dimensions".into()));
+        }
+        let bytes: u64 = (0..self.mips)
+            .map(|level| {
+                u64::from((self.width >> level).max(1))
+                    * u64::from((self.height >> level).max(1))
+                    * 4
+            })
+            .sum();
+        usize::try_from(bytes).map_err(|_| ReferenceError("Source texture size overflow".into()))
+    }
+}
+
+/// Plan exact banks before allocation. Every material in this set must already be required.
+pub fn texture_bank_groups<'a>(
+    materials: &[super::WorldSourceMaterial],
+    textures: &'a [LightingTextureRecord],
+) -> Result<Vec<(TextureArrayKey, Vec<&'a LightingTextureRecord>)>, ReferenceError> {
+    let mut groups: Vec<(TextureArrayKey, Vec<&LightingTextureRecord>)> = Vec::new();
+    for material in materials {
+        for link in &material.textures {
+            let record = textures
+                .iter()
+                .find(|t| t.id == link.texture)
+                .ok_or_else(|| {
+                    ReferenceError(format!("Missing source texture {}", link.texture))
+                })?;
+            record.validate_chunks()?;
+            let key = TextureArrayKey::from(record);
+            let index = if let Some(index) = groups.iter().position(|(old, _)| *old == key) {
+                index
+            } else {
+                groups.push((key, Vec::new()));
+                groups.len() - 1
+            };
+            if let Some(old) = groups[index]
+                .1
+                .iter()
+                .find(|old| old.source == record.source)
+            {
+                if old.mip_data.path != record.mip_data.path
+                    || old.mip_data.sha256 != record.mip_data.sha256
+                {
+                    return Err(ReferenceError(format!(
+                        "Conflicting texture bank source {}:{}",
+                        record.source.file, record.source.path_id
+                    )));
+                }
+            } else {
+                groups[index].1.push(record);
+            }
+        }
+    }
+    for (_, records) in &mut groups {
+        records.sort_by(|a, b| {
+            (&a.source.file, a.source.path_id).cmp(&(&b.source.file, b.source.path_id))
+        });
+    }
+    Ok(groups)
+}
