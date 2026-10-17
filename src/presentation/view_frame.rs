@@ -170,6 +170,7 @@ pub struct SourceViewFrame {
     pub motion_revision: u32,
     pub scene: u32,
     pub probe_enabled: [bool; PROBE_COUNT],
+    pub probe_position: [Vec3; PROBE_COUNT],
     pub probe_checks: u32,
     pub probe_distance_squared: [f32; PROBE_COUNT],
     pub probe_index: usize,
@@ -389,6 +390,7 @@ pub(crate) fn snapshot(
         scene: epoch.0,
         motion_revision: drive.runtime.audio_motion_revision,
         probe_enabled: activation.enabled,
+        probe_position: scene.probe_position,
         probe_checks: activation.checks,
         probe_index: clock.probe_index,
         probe_distance_squared: activation.distance_squared,
@@ -625,5 +627,33 @@ pub(crate) fn required_view(
         mask: snapshot.mask,
         light_mask,
         origin,
+    })
+}
+
+/// Live and private candidates use the same complete probe frontier and source camera math.
+pub(crate) fn append_probe_required_views(
+    views: &mut crate::world::RequiredViews,
+    records: &[crate::reference::render_lighting::ProbeRecord],
+    positions: &[Vec3; PROBE_COUNT],
+    enabled: &[bool; PROBE_COUNT],
+    origin: [f64; 3],
+    light_forward: [f32; 3],
+    light_mask: u32,
+) -> Result<(), crate::reference::ReferenceError> {
+    const _: () = assert!(crate::world::REQUIRED_VIEW_CAPACITY == 3 + PROBE_COUNT * 6 + 3);
+    views.append_probe_faces(enabled, |index, face| {
+        let probe = &records[index];
+        let snapshot = camera_snapshot(
+            UVec2::splat(probe.resolution),
+            Mat4::from_cols_array_2d(&capture_view_from_world(face, positions[index].to_array())),
+            probe.near,
+            probe.far,
+            90.,
+            probe.mask,
+            probe.shadow_distance,
+            None,
+            None,
+        );
+        required_view(&snapshot, origin, light_forward, light_mask)
     })
 }

@@ -39,7 +39,7 @@ pub struct PreparedPresentation {
     poses: CandidateImportedPoses,
     screen_height: f32,
     aspect_ratio: f32,
-    required_views: Vec<crate::world::RequiredView>,
+    required_views: Option<Box<crate::world::RequiredViews>>,
     mirror_state: crate::mirrors::MirrorState,
 }
 impl PreparedPresentation {
@@ -110,6 +110,7 @@ impl PreparedPresentation {
             .candidate_bytes()
             + super::candidate_upload::UPLOAD_CONTROL_BYTES
             + std::mem::size_of::<Self>()
+            + std::mem::size_of::<crate::world::RequiredViews>()
             + reference.nodes.len() * std::mem::size_of::<(Entity, Transform, Visibility)>()
             + 8192 * std::mem::size_of::<Entity>()
             + mesh_count.next_power_of_two() * 2 * (std::mem::size_of::<(Entity, Mat4)>() + 1)
@@ -133,7 +134,7 @@ impl PreparedPresentation {
             .next()
             .map_or(1., |w| w.width() / w.height().max(1.));
         Ok(Self {
-            required_views: Vec::with_capacity(18),
+            required_views: None,
             mirror_state: crate::mirrors::MirrorState::new(&reference.mirrors),
             aspect_ratio,
             screen_height,
@@ -316,7 +317,9 @@ impl PreparedPresentation {
                 lod,
                 false,
                 candidate.lighting.light_outputs(),
-                &self.required_views,
+                self.required_views
+                    .as_deref()
+                    .map_or(&[], crate::world::RequiredViews::as_slice),
                 crate::app::LOADING_BUDGET_MS,
             ),
             Err(e) => Err(crate::reference::ReferenceError(e.to_string())),
@@ -777,10 +780,9 @@ fn candidate_required_views(
     world: &World,
     updates: &[(Entity, Transform, Visibility)],
     mirrors: &mut crate::mirrors::MirrorState,
-    views: &mut Vec<crate::world::RequiredView>,
+    views: &mut Option<Box<crate::world::RequiredViews>>,
 ) -> Result<(), SaveError> {
     use super::view_frame::{camera_snapshot, required_view};
-    views.clear();
     let lighting = &reference.render_lighting;
     let extent = UVec2::new((height * aspect).max(1.) as u32, height.max(1.) as u32);
     let [x, y, z] = candidate
@@ -791,53 +793,72 @@ fn candidate_required_views(
         .map(f32::to_radians);
     let forward = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::NEG_Z;
     let forward = [forward.x, forward.y, -forward.z];
-    let mut append = |view: super::view_frame::ViewSnapshot| -> Result<(), SaveError> {
+    let first = &lighting.cameras[1];
+    let first = required_view(
+        &camera_snapshot(
+            extent,
+            camera.inverse(),
+            first.near,
+            first.far,
+            first.field_of_view,
+            first.mask,
+            lighting.shadows.distance,
+            None,
+            None,
+        ),
+        candidate.stream.origin.offset,
+        forward,
+        lighting.lights[0].mask,
+    )?;
+    let views = views.get_or_insert_with(|| Box::new(crate::world::RequiredViews::new(first)));
+    views.reset(first);
+    let append = |views: &mut crate::world::RequiredViews,
+                  view: super::view_frame::ViewSnapshot|
+     -> Result<(), SaveError> {
         views.push(required_view(
             &view,
             candidate.stream.origin.offset,
             forward,
             lighting.lights[0].mask,
-        )?);
+        )?)?;
         Ok(())
     };
     // Each candidate owns its view list. No live camera resource changes here.
-    for stage in &lighting.cameras[1..4] {
-        append(camera_snapshot(
-            extent,
-            camera.inverse(),
-            stage.near,
-            stage.far,
-            stage.field_of_view,
-            stage.mask,
-            lighting.shadows.distance,
-            None,
-            None,
-        ))?;
-    }
-    for probe in &lighting.probes {
-        if !probe.enabled {
-            continue;
-        }
-        let position = candidate_node_pose(probe.node, world, updates)?
-            .w_axis
-            .truncate();
-        for face in 0..6 {
-            let view = Mat4::from_cols_array_2d(
-                &crate::reference::reflections::capture_view_from_world(face, position.to_array()),
-            );
-            append(camera_snapshot(
-                UVec2::splat(probe.resolution),
-                view,
-                probe.near,
-                probe.far,
-                90.,
-                probe.mask,
-                probe.shadow_distance,
+    for stage in &lighting.cameras[2..4] {
+        append(
+            views,
+            camera_snapshot(
+                extent,
+                camera.inverse(),
+                stage.near,
+                stage.far,
+                stage.field_of_view,
+                stage.mask,
+                lighting.shadows.distance,
                 None,
                 None,
-            ))?;
+            ),
+        )?;
+    }
+    let mut positions = [Vec3::ZERO; super::lighting_scene::PROBE_COUNT];
+    let mut enabled = [false; super::lighting_scene::PROBE_COUNT];
+    for (index, probe) in lighting.probes.iter().enumerate() {
+        enabled[index] = probe.enabled;
+        if probe.enabled {
+            positions[index] = candidate_node_pose(probe.node, world, updates)?
+                .w_axis
+                .truncate();
         }
     }
+    super::view_frame::append_probe_required_views(
+        views,
+        &lighting.probes,
+        &positions,
+        &enabled,
+        candidate.stream.origin.offset,
+        forward,
+        lighting.lights[0].mask,
+    )?;
     let mut inputs = [crate::mirrors::MirrorInput::default(); 3];
     for (input, record) in inputs.iter_mut().zip(&reference.mirrors.mirrors) {
         let plane = candidate_node_pose(record.plane_node, world, updates)?;
@@ -865,17 +886,20 @@ fn candidate_required_views(
         if !output.pose_valid || !output.has_valid_clip_range() {
             continue;
         }
-        append(camera_snapshot(
-            UVec2::from_array(reference.mirrors.target.extent),
-            super::transform(output.pose).to_matrix().inverse(),
-            output.capture_near_plane,
-            output.capture_far_plane,
-            output.fov_degrees,
-            record.culling_mask,
-            lighting.shadows.distance,
-            None,
-            None,
-        ))?;
+        append(
+            views,
+            camera_snapshot(
+                UVec2::from_array(reference.mirrors.target.extent),
+                super::transform(output.pose).to_matrix().inverse(),
+                output.capture_near_plane,
+                output.capture_far_plane,
+                output.fov_degrees,
+                record.culling_mask,
+                lighting.shadows.distance,
+                None,
+                None,
+            ),
+        )?;
     }
     Ok(())
 }

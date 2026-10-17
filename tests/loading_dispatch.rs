@@ -19,17 +19,18 @@ fn installed_graph_control_admission_precedes_allocation_and_replaces_bootstrap(
     );
     assert!(!allocated);
     let before = stream.presentation_allocation();
-    let (bootstrap, ()) = admit_control(&mut stream, 4096, || {
+    let shared = 4096 + std::mem::size_of::<Option<my_summer_slop::world::RequiredViews>>();
+    let (bootstrap, ()) = admit_control(&mut stream, shared, || {
         allocated = true;
     })
     .unwrap();
     assert!(allocated);
     assert_eq!(
         stream.presentation_allocation().prototype_cpu,
-        before.prototype_cpu + 4096
+        before.prototype_cpu + shared
     );
     let fixed = FixedAllocation {
-        cpu: 12288,
+        cpu: shared + 8192,
         ..FixedAllocation::default()
     };
     stream
@@ -70,8 +71,26 @@ fn installed_graph_control_admission_precedes_allocation_and_replaces_bootstrap(
         candidate.metrics().prototype_cpu_bytes,
         candidate_cpu + fixed.cpu
     );
+    // Candidate setup bytes survive fixed accounting and overlap reconciliation.
+    let mut setup = candidate.presentation_allocation();
+    setup.active_cpu += std::mem::size_of::<my_summer_slop::world::RequiredViews>();
+    candidate.set_presentation_allocation(setup).unwrap();
+    candidate.set_overlap(overlap).unwrap();
+    let replaced = fixed
+        .replace(fixed, candidate.presentation_allocation())
+        .unwrap();
+    candidate.set_presentation_allocation(replaced).unwrap();
+    assert_eq!(
+        candidate.presentation_allocation().active_cpu,
+        setup.active_cpu
+    );
+    drop(candidate);
+    assert_eq!(
+        stream.presentation_allocation().prototype_cpu,
+        before.prototype_cpu + fixed.cpu
+    );
     let mut runtime = my_summer_slop::starting_area::GarageRuntime::new(&reference).unwrap();
-    admit_control(&mut runtime.stream, 4096, || ()).unwrap();
+    admit_control(&mut runtime.stream, shared, || ()).unwrap();
     let retained = runtime.stream.presentation_allocation();
     let discarded =
         my_summer_slop::save::fresh_permit::FreshSessionPermit::prepare(7, &runtime, 1).unwrap();

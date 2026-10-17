@@ -94,7 +94,7 @@ struct FrameProgress {
 }
 #[derive(Resource, Clone, Default)]
 pub struct SourceGraphProgress(Arc<Mutex<FrameProgress>>);
-// One shared Arc payload, three retained handles, and main/render view snapshots.
+// Shared graph handles, main/render snapshots, and the retained main-world required-view buffer.
 pub(crate) fn control_bytes() -> usize {
     std::alloc::Layout::new::<[usize; 2]>()
         .extend(std::alloc::Layout::new::<Mutex<FrameProgress>>())
@@ -104,6 +104,7 @@ pub(crate) fn control_bytes() -> usize {
         .size()
         + 3 * std::mem::size_of::<SourceGraphProgress>()
         + 2 * std::mem::size_of::<SourceViewFrame>()
+        + std::mem::size_of::<Option<crate::world::RequiredViews>>()
 }
 impl SourceGraphProgress {
     pub(crate) fn content_checked(&self, content: Option<(u64, u64)>) {

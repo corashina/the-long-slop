@@ -719,7 +719,8 @@ fn sync_world(
     requests: Res<save::SaveRequests>,
     camera: Query<(&Projection, &GlobalTransform), With<DriveCamera>>,
     views: Res<presentation::view_frame::SourceViewFrame>,
-    mut required_views: Local<Vec<crate::world::RequiredView>>,
+    mut required_views: Local<Option<crate::world::RequiredViews>>,
+    epoch: Res<presentation::view_frame::SourceSceneEpoch>,
     windows: Query<&Window>,
 ) {
     drive.world_ms = 0.;
@@ -770,7 +771,6 @@ fn sync_world(
         .lighting
         .road_lamp_output(&reference.0.lighting)
         .enabled;
-    required_views.clear();
     let [x, y, z] = runtime
         .lighting
         .cycle
@@ -779,19 +779,52 @@ fn sync_world(
         .map(f32::to_radians);
     let forward = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::NEG_Z;
     let forward = [forward.x, forward.y, -forward.z];
-    for view in views.views.iter().flatten() {
-        match presentation::view_frame::required_view(
-            view,
-            runtime.stream.origin.offset,
-            forward,
-            reference.0.render_lighting.lights[0].mask,
-        ) {
-            Ok(view) => required_views.push(view),
-            Err(error) => {
-                runtime.stream.fail(error);
-                return;
+    let coherent = views.session == runtime.stream.frame().request.session
+        && views.scene == epoch.0
+        && views.views[..3].iter().all(Option::is_some);
+    if coherent {
+        let first = views.views[0]
+            .as_ref()
+            .expect("complete source stack snapshot");
+        let result = (|| -> Result<(), crate::reference::ReferenceError> {
+            let first = presentation::view_frame::required_view(
+                first,
+                runtime.stream.origin.offset,
+                forward,
+                reference.0.render_lighting.lights[0].mask,
+            )?;
+            let required =
+                required_views.get_or_insert_with(|| crate::world::RequiredViews::new(first));
+            required.reset(first);
+            for (index, view) in views.views.iter().enumerate().skip(1) {
+                if (3..presentation::surface_views::MIRROR_START).contains(&index) {
+                    continue;
+                }
+                if let Some(view) = view {
+                    required.push(presentation::view_frame::required_view(
+                        view,
+                        runtime.stream.origin.offset,
+                        forward,
+                        reference.0.render_lighting.lights[0].mask,
+                    )?)?;
+                }
             }
+            presentation::view_frame::append_probe_required_views(
+                required,
+                &reference.0.render_lighting.probes,
+                &views.probe_position,
+                &views.probe_enabled,
+                runtime.stream.origin.offset,
+                forward,
+                reference.0.render_lighting.lights[0].mask,
+            )
+        })();
+        if let Err(error) = result {
+            runtime.stream.fail(error);
+            return;
         }
+    } else {
+        *required_views = None;
     }
     let result = presentation
         .prepare(
@@ -805,7 +838,9 @@ fn sync_world(
             lod_view,
             enabled,
             runtime.lighting.light_outputs(),
-            &required_views,
+            required_views
+                .as_ref()
+                .map_or(&[], crate::world::RequiredViews::as_slice),
             budget_ms,
         )
         .and_then(|_| runtime.align_startup(&reference.0).map(|_| ()))

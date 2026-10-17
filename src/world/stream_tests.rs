@@ -450,3 +450,130 @@ fn mechanism_binding_gate(run: &mut GarageRuntime, reference: &ReferenceManifest
         "control publication reaches terminal readiness"
     );
 }
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn complete_probe_union_preserves_revision_and_fresh_cycles() {
+    use crate::{
+        reference::{
+            loading_dispatch::{LoadingDispatch, LoadingKey},
+            reflections::{ProbeJob, ProbeSchedule},
+        },
+        save::fresh_permit::PresentedFrames,
+        world::{REQUIRED_VIEW_CAPACITY, RequiredView, RequiredViews},
+    };
+    let reference = reference();
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    prepare_ready(&mut run, &reference);
+    let tiny = |center: [f64; 3], mask| {
+        let [x, y, z] = center.map(|v| v as f32);
+        let planes = [
+            [1., 0., 0., 0.25 - x],
+            [-1., 0., 0., 0.25 + x],
+            [0., 1., 0., 0.25 - y],
+            [0., -1., 0., 0.25 + y],
+            [0., 0., 1., 0.25 + z],
+            [0., 0., -1., 0.25 - z],
+        ];
+        RequiredView {
+            camera: planes,
+            shadow: crate::reference::shadow_candidates::DirectionalHull::new(planes, [1., 0., 0.])
+                .unwrap(),
+            mask,
+            light_mask: 0,
+            origin: [0.; 3],
+        }
+    };
+    // Published source structures provide distinct probe-exclusive geometry.
+    let first_structure = run.stream.structures.iter().max_by(|a, b| {
+        let a = a.placement.bounds.min[0].abs() + a.placement.bounds.min[2].abs();
+        let b = b.placement.bounds.min[0].abs() + b.placement.bounds.min[2].abs();
+        a.total_cmp(&b)
+    });
+    let center = first_structure
+        .map(|s| {
+            std::array::from_fn(|i| (s.placement.bounds.min[i] + s.placement.bounds.max[i]) * 0.5)
+        })
+        .expect("published source structures");
+    let first = tiny(center, u32::MAX);
+    let centers: Vec<_> = run
+        .stream
+        .structures
+        .iter()
+        .map(|s| {
+            std::array::from_fn(|i| (s.placement.bounds.min[i] + s.placement.bounds.max[i]) * 0.5)
+        })
+        .collect();
+    run.stream.select_required(&[first]);
+    let first_ids = run.stream.required.structures.clone();
+    let mut pair = None;
+    for center in centers {
+        let second = tiny(center, u32::MAX);
+        run.stream.select_required(&[second]);
+        let second_ids = &run.stream.required.structures;
+        if first_ids.iter().any(|id| !second_ids.contains(id))
+            && second_ids.iter().any(|id| !first_ids.contains(id))
+        {
+            pair = Some((second, second_ids.clone()));
+            break;
+        }
+    }
+    let (second, second_ids) = pair.expect("two probe-exclusive published regions");
+    let seed = tiny([0.; 3], 0);
+    let mut required = RequiredViews::new(seed);
+    let build = |required: &mut RequiredViews, enabled: [bool; 2]| {
+        required.reset(seed);
+        required
+            .append_probe_faces(&enabled, |probe, _| Ok([first, second][probe]))
+            .unwrap();
+    };
+    build(&mut required, [true, true]);
+    let storage = required.as_slice().as_ptr();
+    run.stream.select_required(required.as_slice());
+    let ids = run.stream.required.structures.clone();
+    assert!(first_ids.iter().all(|id| ids.contains(id)));
+    assert!(second_ids.iter().all(|id| ids.contains(id)));
+    assert_eq!(required.as_slice().len(), 13);
+    assert!(run.stream.required_ready());
+    let revision = run.stream.required.revision;
+    let key = LoadingKey {
+        session: run.stream.request.session,
+        scene: 1,
+        extent: [800, 600],
+    };
+    let mut policy = LoadingDispatch::<2>::default();
+    let mut schedule = [ProbeSchedule::default(), ProbeSchedule::default()];
+    let mut probe = 0;
+    for frame in 1..=16 {
+        build(&mut required, [true, true]);
+        run.stream.select_required(required.as_slice());
+        assert_eq!(run.stream.required.structures, ids);
+        assert_eq!(run.stream.required.revision, revision);
+        assert_eq!(required.as_slice().as_ptr(), storage);
+        policy.snapshot(key, frame, false, run.stream.required_ready(), revision, 3);
+        let job = schedule[probe].job();
+        if job == ProbeJob::Face(0) {
+            policy.capture_started(key, frame, probe);
+        }
+        schedule[probe].complete(job).unwrap();
+        if job == ProbeJob::RemainingMipsAndPublish {
+            policy.publication_validated(key, probe);
+            probe = (probe + 1) % 2;
+        }
+        assert_eq!(policy.fresh(key, revision, 3), frame == 16);
+    }
+    let mut presented = PresentedFrames::default();
+    assert!(!presented.observe(key.session, key.scene, 16, 16));
+    assert!(!presented.observe(key.session, key.scene, 17, 17));
+    assert!(presented.observe(key.session, key.scene, 18, 18));
+    build(&mut required, [true, false]);
+    assert_eq!(required.as_slice().len(), 7);
+    run.stream.select_required(required.as_slice());
+    assert_ne!(run.stream.required.revision, revision);
+    policy.snapshot(key, 19, false, true, run.stream.required.revision, 1);
+    assert!(!policy.fresh(key, run.stream.required.revision, 1));
+    while required.as_slice().len() < REQUIRED_VIEW_CAPACITY {
+        required.push(seed).unwrap();
+    }
+    assert!(required.push(seed).is_err());
+}

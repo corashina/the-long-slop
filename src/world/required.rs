@@ -23,6 +23,55 @@ impl RequiredView {
                 || self.light_mask & layers != 0 && self.shadow.intersects(bounds))
     }
 }
+/// Complete source frontier: three stack views, twelve probe faces, three mirrors.
+pub const REQUIRED_VIEW_CAPACITY: usize = 18;
+
+/// Inline storage starts with a real source view, including its valid shadow hull.
+pub struct RequiredViews {
+    views: [RequiredView; REQUIRED_VIEW_CAPACITY],
+    len: usize,
+}
+impl RequiredViews {
+    pub fn new(first: RequiredView) -> Self {
+        Self {
+            views: [first; REQUIRED_VIEW_CAPACITY],
+            len: 1,
+        }
+    }
+    pub fn reset(&mut self, first: RequiredView) {
+        self.views[0] = first;
+        self.len = 1;
+    }
+    pub fn as_slice(&self) -> &[RequiredView] {
+        &self.views[..self.len]
+    }
+    pub fn push(&mut self, view: RequiredView) -> Result<(), crate::reference::ReferenceError> {
+        if self.len == self.views.len() {
+            return Err(crate::reference::ReferenceError(
+                "required source view capacity".into(),
+            ));
+        }
+        self.views[self.len] = view;
+        self.len += 1;
+        Ok(())
+    }
+    pub fn append_probe_faces(
+        &mut self,
+        enabled: &[bool],
+        mut face: impl FnMut(usize, usize) -> Result<RequiredView, crate::reference::ReferenceError>,
+    ) -> Result<(), crate::reference::ReferenceError> {
+        for (index, enabled) in enabled.iter().enumerate() {
+            if !enabled {
+                continue;
+            }
+            for side in 0..6 {
+                self.push(face(index, side)?)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct RequiredSelection {
     pub views_ready: bool,
