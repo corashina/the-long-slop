@@ -1,15 +1,10 @@
 //! Dynamic primary materials share the accepted source material cache.
 use super::*;
+pub(super) use crate::reference::fixed_reservation::png_chain_staging;
 use crate::{
     reference::{AssetId as SourceAssetId, ReferenceError},
     world::WorldStream,
 };
-pub(super) fn png_chain_staging(mips: &[source::TextureMip]) -> Result<usize, ReferenceError> {
-    crate::reference::fixed_reservation::png_chain_staging(
-        mips,
-        crate::presentation::world::preflight::checked_input_bytes,
-    )
-}
 #[derive(Default, Clone)]
 pub struct PrimaryOwnership {
     pub(super) assets: HashMap<SourceAssetId, Vec<String>>,
@@ -256,7 +251,11 @@ impl SourceMaterials {
         for record in records {
             for texture in &record.properties.textures {
                 if !self.texture_indices.contains_key(&texture.file) {
-                    let input_staging = png_chain_staging(&texture.mips)?;
+                    let input_staging = png_chain_staging(
+                        &texture.mips,
+                        texture.sampler.mip_count,
+                        &reference.file_catalog,
+                    )?;
                     let pixel_bytes = pixels(texture)?;
                     let cpu_reservation =
                         crate::reference::fixed_reservation::png_cpu(pixel_bytes, input_staging)?;
@@ -730,7 +729,8 @@ impl SourceMaterials {
                 sampler: t.sampler.clone(),
                 mips: t.mips.clone(),
             };
-            let input_staging = png_chain_staging(&t.mips)?;
+            let input_staging =
+                png_chain_staging(&t.mips, t.sampler.mip_count, &reference.file_catalog)?;
             let pixel_bytes = pixels(&record)?;
             let cpu_reservation =
                 crate::reference::fixed_reservation::png_cpu(pixel_bytes, input_staging)?;

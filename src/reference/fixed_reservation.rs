@@ -278,18 +278,39 @@ pub fn png_staging(encoded: usize, width: u32) -> Result<usize, ReferenceError> 
 /// Sequential chain overlap includes the retained base reader during each later read.
 pub fn png_chain_staging(
     mips: &[super::TextureMip],
-    mut encoded: impl FnMut(&str) -> Result<usize, ReferenceError>,
+    mip_count: u32,
+    catalog: &FileCatalog,
 ) -> Result<usize, ReferenceError> {
-    let first = mips
-        .first()
-        .ok_or_else(|| ReferenceError("Empty PNG chain".into()))?;
-    let base = encoded(&first.file)?;
-    let mut staging = png_staging(base, first.width)?;
-    for mip in &mips[1..] {
-        staging = staging.max(
-            base.checked_add(png_staging(encoded(&mip.file)?, mip.width)?)
-                .ok_or_else(overflow)?,
-        );
+    require(
+        !mips.is_empty() && mips.len() == mip_count as usize,
+        "PNG chain mip count",
+    )?;
+    let mut previous: Option<(u32, u32)> = None;
+    let mut base = 0;
+    let mut staging = 0;
+    for (index, mip) in mips.iter().enumerate() {
+        let receipt = catalog.file(&mip.file)?;
+        require(
+            receipt.image_size == Some([mip.width, mip.height]),
+            "PNG chain receipt dimensions",
+        )?;
+        if let Some((width, height)) = previous {
+            require(
+                (width > 1 || height > 1)
+                    && mip.width == (width / 2).max(1)
+                    && mip.height == (height / 2).max(1),
+                "PNG chain mip progression",
+            )?;
+        }
+        let encoded = receipt.bytes as usize;
+        let input = png_staging(encoded, mip.width)?;
+        if index == 0 {
+            base = encoded;
+            staging = input;
+        } else {
+            staging = staging.max(base.checked_add(input).ok_or_else(overflow)?);
+        }
+        previous = Some((mip.width, mip.height));
     }
     Ok(staging)
 }

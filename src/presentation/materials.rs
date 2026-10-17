@@ -449,7 +449,11 @@ pub fn load_materials(
             if texture_indices.contains_key(&texture.file) {
                 continue;
             }
-            let input_staging = primary::png_chain_staging(&texture.mips)?;
+            let input_staging = primary::png_chain_staging(
+                &texture.mips,
+                texture.sampler.mip_count,
+                &reference.file_catalog,
+            )?;
             let pixel_bytes = source::fixed_reservation::png_pixels(&texture.mips)?;
             let cpu_reservation = source::fixed_reservation::png_cpu(pixel_bytes, input_staging)?;
             texture_indices.insert(texture.file.clone(), textures.len());
@@ -476,7 +480,11 @@ pub fn load_materials(
         if texture_indices.contains_key(&texture.file) {
             continue;
         }
-        let input_staging = primary::png_chain_staging(&texture.mips)?;
+        let input_staging = primary::png_chain_staging(
+            &texture.mips,
+            texture.sampler.mip_count,
+            &reference.file_catalog,
+        )?;
         let pixel_bytes = source::fixed_reservation::png_pixels(&texture.mips)?;
         let cpu_reservation = source::fixed_reservation::png_cpu(pixel_bytes, input_staging)?;
 
