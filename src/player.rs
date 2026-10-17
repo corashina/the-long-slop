@@ -670,6 +670,10 @@ impl PlayerState {
     pub fn focus_position(&self, physics: &PhysicsWorld) -> [f32; 3] {
         self.view_pose(physics).position
     }
+    pub(crate) fn align_startup(&mut self, offset: f32, physics: &mut PhysicsWorld) {
+        self.pose.translation.y += offset;
+        physics.rapier_mut().bodies[self.body].set_position(self.pose, false);
+    }
     pub fn rebase(&mut self, shift: [f32; 3]) {
         self.pose.translation -= Vector::from_array(shift);
     }

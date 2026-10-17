@@ -198,12 +198,12 @@ impl Reservation {
                 .prototype_cpu_bytes
                 .saturating_sub(old_cpu)
                 .checked_add(self.cpu)
-                .is_some_and(|n| n <= 256 * 1024 * 1024)
+                .is_some_and(|n| n <= crate::world::stream::PROTOTYPE_CPU)
             && metrics
                 .prototype_gpu_bytes
                 .saturating_sub(old_gpu)
                 .checked_add(self.gpu)
-                .is_some_and(|n| n <= 512 * 1024 * 1024)
+                .is_some_and(|n| n <= crate::world::stream::PROTOTYPE_GPU)
     }
     pub fn allocation(
         self,
@@ -215,5 +215,24 @@ impl Reservation {
         allocation.staging_bytes += self.staging;
         allocation.dependency_staging_bytes += self.staging;
         allocation
+    }
+}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn queued_input_uses_current_shared_asset_limits() {
+        let request = super::Reservation {
+            cpu: 1024,
+            gpu: 1024,
+            staging: 1024,
+        };
+        let mut metrics = crate::world::WorldMetrics::default();
+        metrics.prototype_cpu_bytes = 300 * 1024 * 1024;
+        metrics.prototype_gpu_bytes = 600 * 1024 * 1024;
+        metrics.pending_work = 32;
+        assert!(request.fits(&metrics, 1, 1024, 0, 0, true));
+        assert!(!request.fits(&metrics, 1, 1024, 0, 0, false));
+        metrics.prototype_gpu_bytes = 1024 * 1024 * 1024;
+        assert!(!request.fits(&metrics, 1, 1024, 0, 0, true));
     }
 }

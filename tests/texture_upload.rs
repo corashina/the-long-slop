@@ -1,4 +1,4 @@
-#[path = "../src/presentation/materials/upload_receipt.rs"]
+#[path = "../src/world/upload_receipt.rs"]
 mod upload_receipt;
 
 #[test]

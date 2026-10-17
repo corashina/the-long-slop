@@ -29,3 +29,7 @@ pub mod world;
 pub mod presentation;
 
 pub mod inventory;
+#[cfg(test)]
+#[path = "presentation/world/preflight/selected.rs"]
+#[allow(dead_code)]
+mod selected_tests;

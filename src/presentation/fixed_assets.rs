@@ -264,6 +264,15 @@ impl SourceFixedAssets {
     pub(crate) fn shaders_ready(&self) -> bool {
         self.shaders_bound
     }
+    pub(crate) fn startup_audit(&self) -> serde_json::Value {
+        serde_json::json!({
+            "descriptors_ready": self.descriptors_ready(),
+            "payloads_ready": self.payloads_ready(),
+            "roots_loading": self.roots.iter().filter(|r| matches!(r.state, RootState::Loading { .. })).count(),
+            "rows_pending": self.rows.iter().filter(|r| !r.receipt.completed()).count(),
+            "shaders_pending": self.shaders.iter().zip(SHADERS).filter_map(|(s, path)| (!s.done).then_some(path)).collect::<Vec<_>>(),
+        })
+    }
     pub fn descriptors_ready(&self) -> bool {
         self.roots.iter().all(|r| r.state.plan().is_some())
     }

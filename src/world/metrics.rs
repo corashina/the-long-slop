@@ -8,7 +8,7 @@ pub(crate) struct ResourceBudget {
     pub unit: &'static str,
 }
 
-#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize)]
 pub struct WorldMetrics {
     pub shared_input_cpu_bytes: usize,
     /// Subset of active CPU: imported item snapshots retained for change capture.
@@ -259,6 +259,7 @@ pub(crate) mod browser {
         materials: Res<SourceMaterials>,
         server: Res<AssetServer>,
         pipelines: Res<crate::presentation::world::pipelines::WorldPipelines>,
+        fixed: Res<crate::presentation::fixed_assets::SourceFixedAssets>,
     ) {
         if !crate::browser::game_measure_requested() {
             return;
@@ -329,11 +330,23 @@ pub(crate) mod browser {
         }
         let runtime = &drive.runtime;
         let frame = runtime.stream.frame();
+        let car = runtime.physics.snapshot(runtime.vehicle);
         let snapshot = Snapshot {
             session: frame.request.session,
             revision: frame.request.revision,
             world: frame.metrics,
             startup: serde_json::json!({
+                "fixed": fixed.startup_audit(),
+                "player": {
+                    "controller": runtime.area.player.body_pose(&runtime.physics).position,
+                    "body": runtime.physics.rapier().bodies[runtime.area.player.body_handle()].translation().to_array(),
+                    "grounded": runtime.area.player.grounded(),
+                },
+                "vehicle": {
+                    "position": car.pose.position, "rotation": car.pose.rotation,
+                    "velocity": car.linear_velocity, "angular_velocity": car.angular_velocity,
+                    "wheel_contacts": car.wheels_contact,
+                },
                 "supported": runtime.world_supported(),
                 "window_ready": runtime.stream.window_ready(),
                 "failure": frame.failure,

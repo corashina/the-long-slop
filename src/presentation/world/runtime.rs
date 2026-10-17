@@ -87,6 +87,47 @@ impl WorldPresentation<'_, '_> {
         light_outputs: &[crate::lighting::LightOutput],
         budget_ms: f64,
     ) -> Result<(), ReferenceError> {
+        let started = crate::browser::game_now();
+        loop {
+            let before = stream.metrics();
+            let remaining = (budget_ms - (crate::browser::game_now() - started)).max(0.);
+            self.prepare_step(
+                stream,
+                reference,
+                physics,
+                area,
+                wheels,
+                view,
+                time,
+                lod_view,
+                receivers,
+                enabled,
+                light_outputs,
+                remaining,
+            )?;
+            if budget_ms <= 0.
+                || crate::browser::game_now() - started >= budget_ms
+                || before == stream.metrics()
+            {
+                return Ok(());
+            }
+        }
+    }
+    fn prepare_step(
+        &mut self,
+        stream: &mut WorldStream,
+        reference: &ReferenceManifest,
+        physics: &mut PhysicsWorld,
+        area: &mut StartingArea,
+        wheels: &mut crate::interaction::wheels::WheelAssemblies,
+        view: GrassView,
+        time: f32,
+        lod_view: super::lod::LodView,
+        receivers: &[WorldBounds],
+        enabled: bool,
+        light_outputs: &[crate::lighting::LightOutput],
+        budget_ms: f64,
+    ) -> Result<(), ReferenceError> {
         super::preflight::configure_staging(stream, &reference.file_catalog)?;
         let mut failure = self
             .fixed

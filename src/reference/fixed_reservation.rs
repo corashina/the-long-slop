@@ -12,58 +12,52 @@ pub struct FixedReservation {
 }
 impl FixedReservation {
     pub fn mesh(plan: &PrototypePlan, retained: usize) -> Result<Self, ReferenceError> {
-        require(
-            plan.primitives
-                .iter()
-                .all(|p| plan.nodes.iter().any(|n| n.mesh == Some(p.mesh))),
-            "fixed unreferenced mesh bound",
-        )?;
-        let mut bytes = 0usize;
-        let mut count = 0usize;
         for node in &plan.nodes {
             require(node.skin.is_none(), "fixed mesh skin bound")?;
-            let Some(mesh) = node.mesh else { continue };
-            let mut found = false;
-            for primitive in plan.primitives.iter().filter(|p| p.mesh == mesh) {
-                found = true;
-                require(
-                    primitive.vertices > 0
-                        && primitive.indices > 0
-                        && primitive.attributes.iter().any(|a| a == "POSITION")
-                        && !primitive
-                            .attributes
-                            .iter()
-                            .any(|a| a.starts_with("JOINTS_") || a.starts_with("WEIGHTS_")),
-                    "fixed mesh vertex contract",
-                )?;
-                let indices = primitive.indices.checked_mul(4).ok_or_else(overflow)?;
-                let authored = primitive.bytes.checked_sub(indices).ok_or_else(overflow)?;
-                require(
-                    authored % primitive.vertices == 0,
-                    "fixed mesh authored stride",
-                )?;
-                let stride = authored / primitive.vertices;
-                require(
-                    stride >= 12 && stride % 4 == 0,
-                    "fixed mesh authored attributes",
-                )?;
-                let expanded = primitive
-                    .vertices
-                    .max(primitive.indices)
-                    .checked_mul(stride.checked_add(32).ok_or_else(overflow)?)
-                    .and_then(|n| n.checked_add(indices))
-                    .ok_or_else(overflow)?;
-                bytes = bytes.checked_add(expanded).ok_or_else(overflow)?;
-                count = count.checked_add(1).ok_or_else(overflow)?;
-            }
-            require(found, "fixed mesh primitive coverage")?;
+            require(
+                node.mesh
+                    .is_none_or(|mesh| plan.primitives.iter().any(|p| p.mesh == mesh)),
+                "fixed mesh primitive coverage",
+            )?;
+        }
+        let mut bytes = 0usize;
+        // Bevy imports each primitive, including meshes not used by a scene node.
+        for primitive in &plan.primitives {
+            require(
+                primitive.vertices > 0
+                    && primitive.indices > 0
+                    && primitive.attributes.iter().any(|a| a == "POSITION")
+                    && !primitive
+                        .attributes
+                        .iter()
+                        .any(|a| a.starts_with("JOINTS_") || a.starts_with("WEIGHTS_")),
+                "fixed mesh vertex contract",
+            )?;
+            let indices = primitive.indices.checked_mul(4).ok_or_else(overflow)?;
+            let authored = primitive.bytes.checked_sub(indices).ok_or_else(overflow)?;
+            require(
+                authored % primitive.vertices == 0,
+                "fixed mesh authored stride",
+            )?;
+            let stride = authored / primitive.vertices;
+            require(
+                stride >= 12 && stride % 4 == 0,
+                "fixed mesh authored attributes",
+            )?;
+            let expanded = primitive
+                .vertices
+                .max(primitive.indices)
+                .checked_mul(stride.checked_add(32).ok_or_else(overflow)?)
+                .and_then(|n| n.checked_add(indices))
+                .ok_or_else(overflow)?;
+            bytes = bytes.checked_add(expanded).ok_or_else(overflow)?;
         }
         Self::checked(
             plan.json_bytes,
             plan.buffer_bytes,
             bytes.max(plan.mesh_bytes),
             plan.scene_bytes,
-            count,
+            plan.primitives.len(),
             retained,
         )
     }
@@ -316,12 +310,12 @@ pub fn fixed_room(
             .metrics()
             .prototype_cpu_bytes
             .checked_add(cpu)
-            .is_some_and(|n| n <= 256 * 1024 * 1024)
+            .is_some_and(|n| n <= crate::world::stream::PROTOTYPE_CPU)
         && stream
             .metrics()
             .prototype_gpu_bytes
             .checked_add(gpu)
-            .is_some_and(|n| n <= 512 * 1024 * 1024))
+            .is_some_and(|n| n <= crate::world::stream::PROTOTYPE_GPU))
 }
 
 pub const FIXED_SHADER_PATHS: [&str; 36] = [

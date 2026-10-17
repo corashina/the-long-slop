@@ -25,8 +25,8 @@ const MAX_OBJECTS: usize = 32768;
 const MAX_PENDING: usize = 32;
 const ACTIVE_CPU: usize = 256 * MIB;
 const ACTIVE_GPU: usize = 128 * MIB;
-const PROTOTYPE_CPU: usize = 512 * MIB;
-const PROTOTYPE_GPU: usize = 1024 * MIB;
+pub(crate) const PROTOTYPE_CPU: usize = 512 * MIB;
+pub(crate) const PROTOTYPE_GPU: usize = 1024 * MIB;
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -317,7 +317,7 @@ impl PreparedPresentation {
                 &receivers,
                 false,
                 candidate.lighting.light_outputs(),
-                0.,
+                crate::app::LOADING_BUDGET_MS,
             ),
             Err(e) => Err(crate::reference::ReferenceError(e.to_string())),
         };

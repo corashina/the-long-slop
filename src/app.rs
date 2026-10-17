@@ -20,7 +20,7 @@ use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
 /// World generation time per frame while the loading panel shows.
-const LOADING_BUDGET_MS: f64 = 12.;
+pub(crate) const LOADING_BUDGET_MS: f64 = 12.;
 
 #[derive(Resource)]
 pub(crate) struct RuntimeReference(pub Arc<ReferenceManifest>);
@@ -649,6 +649,7 @@ fn sync_world(
     // The loading panel covers the screen, so generation can use most of each frame.
     let budget_ms = if drive.ready { 0. } else { LOADING_BUDGET_MS };
     let runtime = &mut drive.runtime;
+    let was_aligned = runtime.startup_aligned;
     let enabled = runtime
         .lighting
         .road_lamp_output(&reference.0.lighting)
@@ -682,7 +683,7 @@ fn sync_world(
         });
     match result {
         Ok(moved) => {
-            if moved {
+            if moved || (!was_aligned && drive.runtime.startup_aligned) {
                 drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
                 clear_input(&mut drive);
             }

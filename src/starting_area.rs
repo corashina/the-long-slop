@@ -1722,19 +1722,42 @@ impl GarageRuntime {
         let Some(startup) = frame.startup else {
             return Ok(false);
         };
+        let nodes: HashMap<_, _> = reference.nodes.iter().map(|node| (node.id, node)).collect();
+        let records: HashMap<_, _> = reference
+            .world
+            .records
+            .iter()
+            .map(|r| (&r.source, r))
+            .collect();
         for body in &reference.bodies {
-            let mut node = reference.nodes.iter().find(|n| n.id == body.node);
+            let mut node = &nodes[&body.node];
             let mut offset = 0.0;
-            while let Some(record) = node {
+            loop {
                 offset += startup
                     .root_offsets
                     .iter()
-                    .filter(|(id, _)| *id == record.source)
+                    .filter(|(id, _)| *id == node.source)
                     .map(|(_, value)| *value)
                     .sum::<f32>();
-                node = record
-                    .parent
-                    .and_then(|id| reference.nodes.iter().find(|n| n.id == id));
+                if let Some(parent) = node.parent {
+                    node = &nodes[&parent];
+                } else {
+                    break;
+                }
+            }
+            // Asset roots can have source parents outside the exported scene.
+            let mut source = &node.source;
+            while let Some(crate::reference::WorldValue::Link(parent)) = records
+                .get(source)
+                .and_then(|record| record.fields.get("m_Father"))
+            {
+                offset += startup
+                    .root_offsets
+                    .iter()
+                    .filter(|(id, _)| id == parent)
+                    .map(|(_, value)| *value)
+                    .sum::<f32>();
+                source = parent;
             }
             let handle = self.area.bodies[&body.id];
             let body = &mut self.physics.rapier_mut().bodies[handle];
@@ -1742,11 +1765,9 @@ impl GarageRuntime {
             pose.translation.y += offset;
             body.set_position(pose, true);
         }
-        let handle = self.area.player.body_handle();
-        let body = &mut self.physics.rapier_mut().bodies[handle];
-        let mut pose = *body.position();
-        pose.translation.y += startup.player_offset;
-        body.set_position(pose, true);
+        self.area
+            .player
+            .align_startup(startup.player_offset, &mut self.physics);
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, true);
