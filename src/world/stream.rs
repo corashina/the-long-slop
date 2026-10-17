@@ -3321,6 +3321,52 @@ impl WorldStream {
             failure: self.failure.as_deref(),
         }
     }
+    /// Bounded live counts. Does not walk spawn history, asset payloads, or change records.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn performance_counters(&self) -> super::metrics::WorldPerformance {
+        let mut counters = super::metrics::WorldPerformance {
+            objects: self
+                .contents
+                .active
+                .iter()
+                .chain(&self.static_controls)
+                .map(|c| c.bindings.len() + usize::from(c.item.is_some()))
+                .sum::<usize>()
+                + self.structures.len()
+                + self.supplies.len() * 2
+                + self.lights.len()
+                + self.presentation.objects,
+            jobs: self.presentation.jobs
+                + usize::from(self.terrain_work.is_some())
+                + usize::from(self.contents.has_replay()),
+            pending: self
+                .replay_roots
+                .len()
+                .max(usize::from(self.contents.has_replay()))
+                + self.contents.pending_requests()
+                + self.props.pending_requests()
+                + self.ready_structures.len()
+                + usize::from(self.ready.is_some())
+                + usize::from(self.terrain_work.is_some())
+                + self.presentation.pending,
+            render_cpu_bytes: self.presentation.active_cpu + self.presentation.prototype_cpu,
+            render_gpu_bytes: self.presentation.active_gpu + self.presentation.prototype_gpu,
+            ..Default::default()
+        };
+        for surface in &self.surfaces {
+            match surface.key.layer {
+                WorldLayer::Road => counters.roads += 1,
+                WorldLayer::Terrain | WorldLayer::DistantTerrain | WorldLayer::DistantTerrain2 => {
+                    counters.terrain += 1;
+                }
+                _ => {}
+            }
+            counters.render_cpu_bytes += surface_render_cpu(&surface.surface);
+            counters.render_gpu_bytes += surface_render_bytes(&surface.surface);
+        }
+        counters
+    }
+
     pub fn metrics(&self) -> WorldMetrics {
         let imported_snapshot_bytes = self.imported_baselines.capacity()
             * std::mem::size_of::<(crate::reference::ItemId, super::ObjectSnapshot)>()

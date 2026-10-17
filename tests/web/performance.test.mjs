@@ -1,0 +1,53 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {FrameTimings,createPerformance} from '../../web/performance.js';
+
+test('frame statistics retain stalls, expire old samples, and reset after a gap',()=>{
+ const timings=new FrameTimings();
+ timings.sample(0,1,2);
+ for(let now=20;now<=2000;now+=20)timings.sample(now,1,2);
+ assert.deepEqual(timings.summary(),{fps:50,average:20,worst:20,physics:1,world:2});
+ timings.sample(2100,3,4);
+ assert.equal(timings.summary().worst,100);
+ for(let now=2120;now<=90000;now+=20)timings.sample(now,1,2);
+ assert.equal(timings.summary().worst,20);
+ timings.reset();
+ timings.sample(60000,1,2);
+ assert.equal(timings.summary(),null);
+ timings.sample(60010,2,3);
+ assert.deepEqual(timings.summary(),{fps:100,average:10,worst:10,physics:2,world:3});
+});
+
+test('the single panel updates at 4 Hz, toggles with F3, and discards hidden-tab time',t=>{
+ const root={hidden:false,textContent:''},listeners=new Map();
+ globalThis.document={hidden:false,querySelector:()=>root,addEventListener:(type,fn)=>listeners.set(type,fn),removeEventListener:()=>{}};
+ globalThis.window={addEventListener:(type,fn)=>listeners.set(type,fn),removeEventListener:()=>{}};
+ t.after(()=>{delete globalThis.document;delete globalThis.window;});
+ const panel=createPerformance(()=>64*1048576);
+ assert.equal(panel.frame(0,1,2),true);
+ panel.counters(1,3,10,20,30,40,50,2,4,8*1048576,16*1048576);
+ assert.match(root.textContent,/WASM: 64\.0 MiB/);
+ assert.match(root.textContent,/JS heap: unavailable/);
+ assert.match(root.textContent,/Wheel contacts: 3/);
+ assert.match(root.textContent,/World render CPU reserve: 8\.0 MiB/);
+ for(let now=20;now<260;now+=20)assert.equal(panel.frame(now,1,2),false);
+ assert.equal(panel.frame(260,1,2),true);
+ panel.counters(1,3,10,20,30,40,50,2,4,8*1048576,16*1048576);
+ assert.match(root.textContent,/FPS: 50/);
+ assert.match(root.textContent,/Frame avg \/ worst: 20\.0 \/ 20\.0 ms/);
+ const f3={code:'F3',repeat:false,preventDefault(){}};
+ listeners.get('keydown')({...f3,repeat:true});assert.equal(root.hidden,false);
+ listeners.get('keydown')(f3);assert.equal(root.hidden,true);
+ assert.equal(panel.frame(1000,1,2),false);
+ listeners.get('keydown')(f3);assert.equal(root.hidden,false);
+ document.hidden=true;listeners.get('visibilitychange')();
+ assert.equal(panel.frame(20000,1,2),false);
+ document.hidden=false;listeners.get('visibilitychange')();
+ assert.equal(panel.frame(30000,1,2),true);
+ panel.counters(0,0,10,20,30,40,50,0,0,0,0);
+ assert.match(root.textContent,/FPS: --/);
+ panel.frame(30020,1,2);panel.frame(30260,1,2);
+ panel.counters(0,0,10,20,30,40,50,0,0,0,0);
+ assert.match(root.textContent,/worst: 130\.0 \/ 240\.0 ms/);
+ panel.stop();assert.match(root.textContent,/stopped/);
+});

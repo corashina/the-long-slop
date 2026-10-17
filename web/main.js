@@ -10,6 +10,7 @@ import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
 import {createLoading} from './loading.js';
 import {createStartupTrace} from './startup-trace.js';
+import {createPerformance} from './performance.js';
 import {loadUiAssets} from './ui-layout.js';
 import {configureAssetCatalog,readAsset,readPackageAsset,assetReceipt,checkImageSize,worldBootstrapMeasurements,worldInputBytes,worldInputMetadataBytes} from './world-assets.js';
 window.sourceReadAsset=(base,receipt)=>readAsset(base,JSON.parse(receipt));
@@ -32,6 +33,9 @@ window.gameLoadingProgress=(roads,total,rendering,world)=>loading.progress(roads
 window.gameLoadingBudget=(name,used,limit,unit)=>loading.budget(name,used,limit,unit);
 const bootStarted=performance.now();
 let wasmMemory,initialReadyMs=null,peakFrameMs=0,lastFrameTime=null,measureRequested=false;
+const performancePanel=createPerformance(()=>wasmMemory?.buffer.byteLength);
+window.gamePerformanceFrame=(physicsMs,worldMs)=>performancePanel.frame(performance.now(),physicsMs,worldMs);
+window.gamePerformanceCounters=performancePanel.counters;
 const measurementWaiters=[];
 const bootstrap={manifestUtf16PayloadBytes:0,dependencyGate:worldBootstrapMeasurements};
 window.gameNow=()=>performance.now();
@@ -102,7 +106,7 @@ const sleep={phase:0,eligible:false,charge:0,cooldownRemaining:0,progress:0,held
 window.gameSleep=(phase,eligible,charge,cooldownRemaining,progress)=>{
  sleep.phase=phase;sleep.eligible=eligible;sleep.charge=charge;sleep.cooldownRemaining=cooldownRemaining;sleep.progress=progress;sleep.held=(input.state.held&262144)!==0;sleep.dead=dead;sleeping=phase===2;survival?.updateSleep(sleep,feedback?.state.enabled);
 };
-function fail(message,notifyRenderer=true){if(failed)return;failed=true;startup.reconcile(performance.getEntriesByType('resource'));startup.fail({...startupFailureDetails,message,loading:loading.snapshot()});startupDone=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
+function fail(message,notifyRenderer=true){if(failed)return;failed=true;performancePanel.stop();startup.reconcile(performance.getEntriesByType('resource'));startup.fail({...startupFailureDetails,message,loading:loading.snapshot()});startupDone=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
 function finishStartup(){if(failed||startupDone||!startupReady||!input||!menu)return;startup.reconcile(performance.getEntriesByType('resource'));startup.finish({inputReady:true});startupDone=true;}
 window.gameFailure=message=>fail(message,false);
 window.gameLoading=()=>{if(failed)return;loading.start();loading.stage('Loading the garage...');menu.loading();};

@@ -8,7 +8,7 @@ try {
     & docker build --tag $image --file "$root/tools/Dockerfile" $root
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     if (-not $Test) {
-        & node --test "$root/tests/web/audio.test.mjs" "$root/tests/web/loading.test.mjs" "$root/tests/web/input.test.mjs" "$root/tests/web/save-storage.test.mjs" "$root/tests/web/save-session.test.mjs" "$root/tests/web/save-bridge.test.mjs"
+        & node --test "$root/tests/web/audio.test.mjs" "$root/tests/web/loading.test.mjs" "$root/tests/web/input.test.mjs" "$root/tests/web/performance.test.mjs" "$root/tests/web/save-storage.test.mjs" "$root/tests/web/save-session.test.mjs" "$root/tests/web/save-bridge.test.mjs"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
     $checks = 'cargo fmt --all -- --check && cargo test --locked && cargo build --locked --release --target wasm32-unknown-unknown --lib'

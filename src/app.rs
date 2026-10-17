@@ -1,3 +1,4 @@
+mod performance;
 pub(crate) mod save;
 use crate::browser::*;
 use crate::interaction::labels::display_name;
@@ -38,6 +39,8 @@ pub(crate) struct Drive {
     rendered: VehiclePose,
     camera: CameraMode,
     frame_steps: u32,
+    physics_ms: f64,
+    world_ms: f64,
     pub render_delta_seconds: f32,
     skip_elapsed: bool,
     pub(crate) ready: bool,
@@ -132,6 +135,8 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
             rendered: current,
             camera: CameraMode::default(),
             frame_steps: 0,
+            physics_ms: 0.,
+            world_ms: 0.,
             render_delta_seconds: 0.,
             skip_elapsed: false,
             ready: false,
@@ -184,6 +189,7 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
             (
                 crate::world::metrics::browser::collect_mesh_bytes,
                 crate::world::metrics::browser::publish,
+                performance::publish,
             )
                 .chain(),
         )
@@ -534,6 +540,7 @@ fn advance_physics(
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
 ) {
+    drive.physics_ms = 0.;
     drive.frame_steps = 0;
     drive.render_delta_seconds = 0.;
     drive.tool_delta_seconds = 0.;
@@ -544,6 +551,7 @@ fn advance_physics(
         drive.skip_elapsed = false;
         return;
     }
+    let started = game_now();
     if let Some(audio) = &mut drive.runtime.audio {
         let calendar = game_audio_calendar();
         audio
@@ -578,6 +586,7 @@ fn advance_physics(
     let scale = drive.runtime.clock_factors(&reference.0).time_scale;
     drive.rendered =
         presentation::interpolate(drive.previous, drive.current, drive.clock.alpha(scale));
+    drive.physics_ms = game_now() - started;
 }
 fn sync_world(
     reference: Res<RuntimeReference>,
@@ -587,12 +596,14 @@ fn sync_world(
     camera: Query<(&Projection, &GlobalTransform), With<DriveCamera>>,
     windows: Query<&Window>,
 ) {
+    drive.world_ms = 0.;
     if requests.freezes_world() {
         return;
     }
     let Ok((projection, camera_transform)) = camera.single() else {
         return;
     };
+    let started = game_now();
     let origin = drive.runtime.stream.origin;
     let position = Vec3::from_array(
         origin
@@ -694,6 +705,7 @@ fn sync_world(
             drive.runtime.clear_input();
         }
     }
+    drive.world_ms = game_now() - started;
 }
 
 fn sync_imported(
