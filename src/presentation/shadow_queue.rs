@@ -1,4 +1,5 @@
 //! Cached source shadow specialization and offscreen mesh queueing.
+use super::shadow_cache::SpecializationKey;
 use super::surface_views::VIEW_COUNT;
 use super::{
     caster::{CasterPasses, CasterUniform, CasterViews},
@@ -30,17 +31,17 @@ use bevy::render::{
     view::{ExtractedView, RetainedViewEntity},
 };
 use bevy::{ecs as bevy_ecs, prelude::*};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 struct CachedSpecialization {
-    mesh_key: MeshPipelineKey,
-    layout: MeshVertexBufferLayoutRef,
-    properties: Arc<MaterialProperties>,
+    // Retain both allocations for as long as their pointer identities remain keys.
+    _layout: MeshVertexBufferLayoutRef,
+    _properties: Arc<MaterialProperties>,
     base: CachedRenderPipelineId,
 }
 #[derive(Resource)]
 pub struct ShadowQueues {
     query: QueryState<(Entity, &'static SourceSurfaceView, &'static ExtractedView)>,
-    specializations: Vec<CachedSpecialization>,
+    specializations: HashMap<SpecializationKey, CachedSpecialization>,
     pub ready: [bool; VIEW_COUNT],
     pub frame: u32,
 }
@@ -48,7 +49,7 @@ impl FromWorld for ShadowQueues {
     fn from_world(world: &mut World) -> Self {
         Self {
             query: world.query(),
-            specializations: Vec::new(),
+            specializations: HashMap::new(),
             ready: [false; VIEW_COUNT],
             frame: 0,
         }
@@ -100,11 +101,8 @@ fn base_pipeline(
             material.properties.alpha_mode,
             &Msaa::from_samples(view_key.msaa_samples()),
         );
-    if let Some(entry) = state.specializations.iter().find(|entry| {
-        entry.mesh_key == key
-            && entry.layout == mesh.layout
-            && Arc::ptr_eq(&entry.properties, &material.properties)
-    }) {
+    let cache_key = SpecializationKey::new(key.bits(), &mesh.layout.0, &material.properties);
+    if let Some(entry) = state.specializations.get(&cache_key) {
         return Ok(Some((entry.base, indexed)));
     }
     if state.specializations.len() == state.specializations.capacity() {
@@ -120,12 +118,14 @@ fn base_pipeline(
     };
     let base = base_specialize(world, full, &layout, &properties)
         .map_err(|e| format!("Source shadow specialization: {e}"))?;
-    state.specializations.push(CachedSpecialization {
-        mesh_key: key,
-        layout,
-        properties,
-        base,
-    });
+    state.specializations.insert(
+        cache_key,
+        CachedSpecialization {
+            _layout: layout,
+            _properties: properties,
+            base,
+        },
+    );
     Ok(Some((base, indexed)))
 }
 pub fn queue(world: &mut World) {
@@ -143,9 +143,7 @@ pub fn queue(world: &mut World) {
                 return;
             }
             if state.specializations.capacity() < scene.capacity() * VIEW_COUNT {
-                state
-                    .specializations
-                    .reserve_exact(scene.capacity() * VIEW_COUNT);
+                state.specializations.reserve(scene.capacity() * VIEW_COUNT);
             }
             let mut views: [Option<(Entity, RetainedViewEntity, MeshPipelineKey)>; VIEW_COUNT] =
                 [None; VIEW_COUNT];
