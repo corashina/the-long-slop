@@ -166,6 +166,7 @@ pub struct ViewSnapshot {
 }
 #[derive(Resource, Clone, Default, ExtractResource)]
 pub struct SourceViewFrame {
+    pub session: u64,
     pub motion_revision: u32,
     pub scene: u32,
     pub probe_enabled: [bool; PROBE_COUNT],
@@ -180,6 +181,21 @@ pub struct SourceViewFrame {
     pub probe_job: Option<ProbeJob>,
     pub jitter: Option<TaaJitter>,
     pub views: [Option<ViewSnapshot>; VIEW_COUNT],
+}
+impl SourceViewFrame {
+    pub(crate) fn loading_key(&self) -> Option<crate::reference::loading_dispatch::LoadingKey> {
+        Some(crate::reference::loading_dispatch::LoadingKey {
+            session: self.session,
+            scene: self.scene,
+            extent: self.views[1]?.extent.to_array(),
+        })
+    }
+    pub(crate) fn probe_mask(&self) -> u32 {
+        self.probe_enabled
+            .iter()
+            .enumerate()
+            .fold(0, |mask, (i, enabled)| mask | (u32::from(*enabled) << i))
+    }
 }
 fn source_transform(m: Mat4, p: Vec4) -> Vec4 {
     // Matrix4x4::PerspectiveMultiplyPoint3 sums Y, X, Z, then W.
@@ -212,6 +228,8 @@ pub fn gpu_projection(source: Mat4) -> Mat4 {
 /// Runs after current physical extents and transforms, before source frustum publication.
 pub(crate) fn snapshot(
     drive: Res<crate::app::Drive>,
+    requests: Res<crate::app::save::SaveRequests>,
+    graph: Res<super::frame_graph::SourceGraphProgress>,
     reference: Res<crate::app::RuntimeReference>,
     assets: Option<Res<LightingAssets>>,
     scene: Res<SourceSceneLighting>,
@@ -224,12 +242,17 @@ pub(crate) fn snapshot(
     views: Query<(&SourceSurfaceView, &Camera, &GlobalTransform, &Projection)>,
     sky_view: Query<(&Camera, &GlobalTransform), With<super::frame_graph::SourceSkyCamera>>,
 ) {
+    frame.session = drive.runtime.stream.frame().request.session;
     frame.scene = epoch.0;
     frame.probe_job = None;
     frame.views = [None; VIEW_COUNT];
     frame.sky_clip_from_world = None;
     frame.skybox_clip_from_world = None;
+    if drive.runtime.stream.frame().failure.is_some() {
+        graph.invalidate_loading();
+    }
     if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+        graph.invalidate_loading();
         return;
     }
     let (Some(assets), Some(scene)) = (assets, scene.0) else {
@@ -243,6 +266,7 @@ pub(crate) fn snapshot(
         if view.index >= VIEW_COUNT || input[view.index].is_some() {
             *status.0.lock().unwrap() =
                 RenderingState::Failed("Source snapshot view identity is invalid".into());
+            graph.invalidate_loading();
             return;
         }
         if !camera.is_active {
@@ -297,6 +321,7 @@ pub(crate) fn snapshot(
         activation.enabled,
     ) {
         *status.0.lock().unwrap() = RenderingState::Failed(error.into());
+        graph.invalidate_loading();
         return;
     }
     let snapshots = std::array::from_fn(|index| {
@@ -360,6 +385,7 @@ pub(crate) fn snapshot(
         (gpu_projection(projection) * view, skybox_projection * view)
     });
     *frame = SourceViewFrame {
+        session: drive.runtime.stream.frame().request.session,
         scene: epoch.0,
         motion_revision: drive.runtime.audio_motion_revision,
         probe_enabled: activation.enabled,
@@ -377,6 +403,11 @@ pub(crate) fn snapshot(
         jitter: clock.jitter,
         views: snapshots,
     };
+    graph.loading_snapshot(
+        &frame,
+        drive.ready || drive.runtime.started || requests.pending(),
+        drive.runtime.stream.required_content().selection_revision,
+    );
 }
 /// Replace Bevy's frusta after its update, before either camera visibility system runs.
 pub fn publish_frusta(

@@ -70,8 +70,9 @@ impl ExtractComponent for SourceSkyExtra {
 struct SkyExtras(bevy::ecs::entity::EntityHashMap<(Entity, u32)>);
 #[derive(Default, serde::Serialize)]
 struct FrameProgress {
-    #[serde(skip)]
     loading: crate::reference::loading_dispatch::LoadingDispatch<PROBE_COUNT>,
+    #[serde(skip)]
+    prepared_content: Option<(u64, u64)>,
     scene: u32,
     extent: [u32; 2],
     first_token: u32,
@@ -93,6 +94,7 @@ struct FrameProgress {
 }
 #[derive(Resource, Clone, Default)]
 pub struct SourceGraphProgress(Arc<Mutex<FrameProgress>>);
+// One shared Arc payload, three retained handles, and main/render view snapshots.
 pub(crate) fn control_bytes() -> usize {
     std::alloc::Layout::new::<[usize; 2]>()
         .extend(std::alloc::Layout::new::<Mutex<FrameProgress>>())
@@ -101,8 +103,46 @@ pub(crate) fn control_bytes() -> usize {
         .pad_to_align()
         .size()
         + 3 * std::mem::size_of::<SourceGraphProgress>()
+        + 2 * std::mem::size_of::<SourceViewFrame>()
 }
 impl SourceGraphProgress {
+    pub(crate) fn content_checked(&self, content: Option<(u64, u64)>) {
+        self.0.lock().unwrap().prepared_content = content;
+    }
+    pub(crate) fn invalidate_loading(&self) {
+        let mut state = self.0.lock().unwrap();
+        state.prepared_content = None;
+        state.loading.invalidate();
+    }
+    pub(crate) fn loading_snapshot(&self, frame: &SourceViewFrame, bypass: bool, revision: u64) {
+        let Some(key) = frame.loading_key() else {
+            return;
+        };
+        let mut state = self.0.lock().unwrap();
+        // Preparation can change the required selection after check_ready.
+        let complete = state.prepared_content == Some((key.session, revision));
+        state.loading.snapshot(
+            key,
+            frame.frame,
+            bypass,
+            complete,
+            revision,
+            frame.probe_mask(),
+        );
+    }
+    pub(crate) fn complete_scene(
+        &self,
+        key: crate::reference::loading_dispatch::LoadingKey,
+        revision: u64,
+        enabled: u32,
+    ) -> bool {
+        let state = self.0.lock().unwrap();
+        state.scene == key.scene
+            && state.extent == key.extent
+            && state.prepared_content == Some((key.session, revision))
+            && state.loading.fresh(key, revision, enabled)
+    }
+
     pub(crate) fn frame_submission(&self) -> (u32, u32, bool) {
         let state = self.0.lock().unwrap();
         (state.frame, state.token, state.presented)
@@ -145,7 +185,8 @@ impl SourceGraphProgress {
             state
                 .probes
                 .iter()
-                .all(|probe| !probe.enabled || probe.published),
+                .all(|probe| !probe.enabled || probe.published)
+                && state.loading.current_fresh(),
         )
     }
     pub fn validated(&self) -> bool {
@@ -690,6 +731,9 @@ pub(crate) fn surface_ready(
     let state = progress.0.lock().unwrap();
     index < VIEW_COUNT
         && frame.views[index].is_some()
+        && frame
+            .loading_key()
+            .is_none_or(|key| state.loading.allows(key, frame.frame))
         && camera.ready()
         && resources.is_some_and(|r| r.display.ready(&cache))
         && effects.is_some_and(|effects| effects.ready(&cache))
@@ -708,8 +752,12 @@ fn begin_frame(frame: Res<SourceViewFrame>, progress: Res<SourceGraphProgress>) 
     if state.scene != frame.scene {
         let cpu = state.cpu_boundary;
         let gpu = state.gpu_boundary;
+        let loading = state.loading;
+        let prepared_content = state.prepared_content;
         *state = FrameProgress {
             scene: frame.scene,
+            loading,
+            prepared_content,
             cpu_boundary: cpu,
             gpu_boundary: gpu,
             ..default()
@@ -977,6 +1025,13 @@ fn finish_surface(
             *status.0.lock().unwrap() = RenderingState::Failed(error.into());
             return;
         }
+        if face == 0 {
+            if let Some(key) = frame.loading_key() {
+                state
+                    .loading
+                    .capture_started(key, frame.frame, frame.probe_index);
+            }
+        }
         probe.encoded_token = Some(frame.probe_token);
         return;
     }
@@ -1044,6 +1099,9 @@ fn submitted(
             if gate.submission_validated(probe.publication_validation) {
                 let token = probe.publication_token;
                 probe.publication.publication_submitted(token)?;
+                if let Some(key) = frame.loading_key() {
+                    state.loading.publication_validated(key, index);
+                }
                 acks.probe_publication_submitted(token);
                 probe.published_token = token;
                 probe.publication_validation = 0;
@@ -1114,6 +1172,10 @@ pub fn source_render_failure(message: &str) {
     if !matches!(*state, RenderingState::Failed(_)) {
         *state = RenderingState::Failed(message.to_owned());
     }
+    drop(state);
+    let mut progress = renderer.progress.lock().unwrap();
+    progress.loading.invalidate();
+    progress.prepared_content = None;
 }
 
 /// Serialize only on explicit diagnostic calls. Render frames copy fixed-size counters.
@@ -1131,6 +1193,7 @@ pub fn source_render_audit() -> String {
     };
     serde_json::to_string(&serde_json::json!({
         "state": state, "graph": &*progress,
+        "graph_control_bytes": control_bytes(),
         "gpu_validated_generation": audit.gate.validated_generation(),
         "mirrors": audit.mirrors.audit(),
     }))

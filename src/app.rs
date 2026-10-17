@@ -325,6 +325,7 @@ fn check_ready(
         Res<presentation::lighting::SourceLighting>,
         Res<presentation::source_lighting::SourceLighting>,
         Res<presentation::fixed_assets::SourceFixedAssets>,
+        Res<presentation::source_lighting::SourceLightingStatus>,
     ),
     mut materials: ResMut<presentation::materials::SourceMaterials>,
     mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
@@ -334,25 +335,44 @@ fn check_ready(
         Res<presentation::view_frame::SourceSubmissionAcks>,
         Res<presentation::view_frame::SourceViewClock>,
         Res<presentation::view_frame::SourceSceneEpoch>,
+        Res<presentation::frame_graph::SourceGraphProgress>,
+        Res<presentation::lighting_scene::ProbeActivation>,
+        Query<(&presentation::surface_views::SourceSurfaceView, &Camera)>,
+        Query<&Window>,
     ),
 ) {
-    let (lighting, source_lighting, fixed) = lighting;
-    let (plates, particles, submissions, view_clock, epoch) = plates;
+    let (lighting, source_lighting, fixed, status) = lighting;
+    let (plates, particles, submissions, view_clock, epoch, graph, activation, cameras, windows) =
+        plates;
+    graph.content_checked(None);
+    let shared_status = status.0.lock().unwrap();
+    if let presentation::materials::RenderingState::Failed(error) = &*shared_status {
+        game_failure(error);
+        drop(shared_status);
+        visuals.failed = true;
+        graph.invalidate_loading();
+        readiness.reset();
+        return;
+    }
+    drop(shared_status);
     if let Some(error) = mirrors.failure() {
         game_failure(&error);
         visuals.failed = true;
+        graph.invalidate_loading();
         readiness.reset();
         return;
     }
     if let presentation::materials::RenderingState::Failed(error) = &source_lighting.state {
         game_failure(error);
         visuals.failed = true;
+        graph.invalidate_loading();
         readiness.reset();
         return;
     }
     if let Some(error) = plates.failure() {
         game_failure(error);
         visuals.failed = true;
+        graph.invalidate_loading();
     }
     if visuals.failed {
         readiness.reset();
@@ -361,12 +381,14 @@ fn check_ready(
     if let presentation::lighting::RenderingState::Failed(error) = &lighting.state {
         game_failure(error);
         visuals.failed = true;
+        graph.invalidate_loading();
         readiness.reset();
         return;
     }
     if let presentation::materials::RenderingState::Failed(error) = &materials.state {
         game_failure(error);
         visuals.failed = true;
+        graph.invalidate_loading();
         readiness.reset();
         return;
     }
@@ -396,12 +418,14 @@ fn check_ready(
         if let LoadState::Failed(error) = load {
             game_failure(&format!("Cannot load {path}: {error}"));
             visuals.failed = true;
+            graph.invalidate_loading();
             readiness.reset();
             return;
         }
         if let RecursiveDependencyLoadState::Failed(error) = recursive {
             game_failure(&format!("Cannot load dependencies for {path}: {error}"));
             visuals.failed = true;
+            graph.invalidate_loading();
             readiness.reset();
             return;
         }
@@ -412,6 +436,7 @@ fn check_ready(
         if gltfs.get(handle).unwrap().scenes.is_empty() {
             game_failure(&format!("Required source scene 0 is missing from {path}"));
             visuals.failed = true;
+            graph.invalidate_loading();
             readiness.reset();
             return;
         }
@@ -451,6 +476,7 @@ fn check_ready(
                 Err(e) => {
                     game_failure(&e.to_string());
                     visuals.failed = true;
+                    graph.invalidate_loading();
                     readiness.reset();
                     return;
                 }
@@ -463,6 +489,7 @@ fn check_ready(
                 presentation::lighting::RenderingState::Failed(error) => {
                     game_failure(error);
                     visuals.failed = true;
+                    graph.invalidate_loading();
                     readiness.reset();
                     return;
                 }
@@ -479,7 +506,14 @@ fn check_ready(
                 readiness.reset();
                 return;
             }
-            if !mirrors.ready() || !plates.ready() {
+            if !plates.ready() || !particles.prepared() {
+                readiness.reset();
+                return;
+            }
+            let session = drive.runtime.stream.frame().request.session;
+            let revision = drive.runtime.stream.required_content().selection_revision;
+            graph.content_checked(Some((session, revision)));
+            if !mirrors.ready() {
                 readiness.reset();
                 return;
             }
@@ -487,7 +521,36 @@ fn check_ready(
                 readiness.reset();
                 return;
             }
-            if !particles.prepared() {
+            let extent =
+                cameras
+                    .iter()
+                    .find(|(view, _)| view.index == 1)
+                    .and_then(|(_, camera)| {
+                        let extent = camera.physical_viewport_size()?;
+                        let target = camera.physical_target_size()?;
+                        (extent == target
+                            && windows.single().is_ok_and(|window| {
+                                window.physical_width() == target.x
+                                    && window.physical_height() == target.y
+                            }))
+                        .then_some(extent.to_array())
+                    });
+            let enabled = activation
+                .enabled
+                .iter()
+                .enumerate()
+                .fold(0, |mask, (i, enabled)| mask | (u32::from(*enabled) << i));
+            if extent.is_none_or(|extent| {
+                !graph.complete_scene(
+                    crate::reference::loading_dispatch::LoadingKey {
+                        session,
+                        scene: epoch.0,
+                        extent,
+                    },
+                    revision,
+                    enabled,
+                )
+            }) {
                 readiness.reset();
                 return;
             }
@@ -505,6 +568,7 @@ fn check_ready(
         Err(error) => {
             game_failure(&error);
             visuals.failed = true;
+            graph.invalidate_loading();
             readiness.reset();
         }
     }
