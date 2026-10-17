@@ -15,18 +15,16 @@ pub fn assemble_mips(
     if levels.len() != mips.len() || mips.is_empty() || mips.len() != settings.mip_count as usize {
         return Err("Invalid authored mip count".into());
     }
-    let byte_count = mips
-        .iter()
-        .map(|mip| mip.width as usize * mip.height as usize * 4)
-        .sum();
+    let byte_count =
+        crate::reference::fixed_reservation::png_pixels(mips).map_err(|e| e.to_string())?;
     for (handle, mip) in levels.iter().zip(mips) {
         let image = images
-            .get(handle.id())
+            .get(handle)
             .ok_or_else(|| format!("Missing decoded mip {}", mip.file))?;
-        let expected = mip.width as usize * mip.height as usize * 4;
         if image.width() != mip.width
             || image.height() != mip.height
-            || image.data.as_ref().map(Vec::len) != Some(expected)
+            || image.data.as_ref().map(Vec::len)
+                != Some(mip.width as usize * mip.height as usize * 4)
         {
             return Err(format!("Invalid decoded mip {}", mip.file));
         }
@@ -37,6 +35,13 @@ pub fn assemble_mips(
         let mut image = images
             .remove(handle.id())
             .ok_or_else(|| format!("Missing decoded mip {}", mip.file))?;
+        let expected = mip.width as usize * mip.height as usize * 4;
+        if image.width() != mip.width
+            || image.height() != mip.height
+            || image.data.as_ref().map(Vec::len) != Some(expected)
+        {
+            return Err(format!("Invalid decoded mip {}", mip.file));
+        }
         bytes.append(image.data.as_mut().expect("checked pixels"));
         if assembled.is_none() {
             assembled = Some(image);

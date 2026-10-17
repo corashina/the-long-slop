@@ -2,7 +2,7 @@
 use super::postprocessing::{CameraStage, PostprocessingRecord};
 use super::render_lighting::{LightKind, LightRecord, ProbeRecord, valid_pose, valid_source};
 use super::rendering::{SamplerRecord, TextureColorSpace, TextureMip, safe_path};
-use super::{NodeRecord, ReferenceError, SourceHash, SourceId, Transform, finite, hash, require};
+use super::{FileReceipt, NodeRecord, ReferenceError, SourceId, Transform, finite, hash, require};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -26,7 +26,7 @@ pub struct LightingRecord {
     pub postprocessing: PostprocessingRecord,
     pub textures: Vec<LightingTexture>,
     pub caster_dither: CasterDither,
-    pub dependencies: Vec<SourceHash>,
+    pub dependencies: Vec<FileReceipt>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

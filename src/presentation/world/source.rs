@@ -3,7 +3,9 @@ use super::super::materials::{
     SourceCaster, SourceMaterial, SourceShadowMode, terrain::TerrainMaterial,
 };
 use super::pipelines::{PipelineTicket, WorldPipelines};
+use crate::presentation::fixed_assets::{MeshUpload, SourceFixedAssets};
 use crate::presentation::materials::RenderingState;
+use crate::world::renderer_pending::PipelineContinuation;
 use crate::world::{WorldRequest, WorldStream};
 use crate::{
     reference::{ReferenceError, SourceId},
@@ -16,7 +18,7 @@ use bevy::{
     mesh::{Indices, PrimitiveTopology},
     prelude::*,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 pub struct SurfaceMaterial {
     pub renderer: crate::reference::render_lighting::RendererRecord,
@@ -28,6 +30,8 @@ pub struct SurfaceMaterial {
 }
 struct SurfacePreparation {
     request: WorldRequest,
+    continuation: PipelineContinuation,
+    _upload: Arc<MeshUpload>,
     key: SurfaceKey,
     meshes: Vec<Handle<Mesh>>,
     tickets: Vec<Option<PipelineTicket>>,
@@ -66,6 +70,11 @@ impl SourceWorldVisuals {
         })
     }
 
+    pub(crate) fn drained(&self) -> bool {
+        self.pending
+            .as_ref()
+            .is_none_or(|p| p.continuation.drained())
+    }
     pub fn ready(&self, stream: &WorldStream) -> bool {
         self.pending.is_none() && self.surfaces.len() == stream.frame().surfaces.len()
     }
@@ -97,7 +106,12 @@ impl SourceWorldVisuals {
                 meshes.remove(mesh.id());
             }
         }
-        if let Some(pending) = self.pending.take() {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.continuation.drained())
+        {
+            let pending = self.pending.take().unwrap();
             for mesh in pending.meshes {
                 meshes.remove(mesh.id());
             }
@@ -155,32 +169,58 @@ impl SourceWorldVisuals {
         self.terrain_casters[tier] = caster;
         self.terrain_shadow_modes[tier] = shadow_mode;
     }
-    pub fn prepare_surface(
+    pub(crate) fn retire_stale(
         &mut self,
         stream: &mut WorldStream,
         meshes: &mut Assets<Mesh>,
-        pipelines: &mut WorldPipelines,
     ) -> Result<(), ReferenceError> {
         let matches = |pending: &SurfacePreparation, request: WorldRequest, key: SurfaceKey| {
             pending.request.session == request.session
                 && pending.request.revision == request.revision
                 && pending.key == key
         };
+        if self.pending.as_ref().is_some_and(|p| {
+            p.request.session == stream.frame().request.session
+                && stream.frame().surfaces.iter().any(|s| s.key == p.key)
+        }) {
+            return Ok(());
+        }
         let current = stream
             .prepared_surface()
             .map(|(request, surface)| (request, surface.key));
         if self.pending.as_ref().is_some_and(|pending| {
             current.is_none_or(|(request, key)| !matches(pending, request, key))
+                || pending.request.revision != stream.frame().request.revision
+                || pending.request.session != stream.frame().request.session
         }) {
+            if !self.pending.as_ref().unwrap().continuation.drained() {
+                return Ok(());
+            }
+            stream.discard_surface_renderer(&mut self.pending.as_mut().unwrap().continuation)?;
             let pending = self.pending.take().unwrap();
             for mesh in pending.meshes {
                 meshes.remove(mesh.id());
             }
         }
+        Ok(())
+    }
+    pub fn prepare_surface(
+        &mut self,
+        stream: &mut WorldStream,
+        meshes: &mut Assets<Mesh>,
+        pipelines: &mut WorldPipelines,
+        fixed: &SourceFixedAssets,
+    ) -> Result<(), ReferenceError> {
+        self.retire_stale(stream, meshes)?;
         let Some((request, surface)) = stream.prepared_surface() else {
             return Ok(());
         };
         let key = surface.key;
+        if request.revision != stream.frame().request.revision
+            || request.session != stream.frame().request.session
+        {
+            return Ok(());
+        }
         if let Some(source) = &surface.prototype {
             if !self.road_materials.contains_key(source) {
                 return Ok(());
@@ -189,7 +229,7 @@ impl SourceWorldVisuals {
             return Ok(());
         }
         if self.pending.is_none() {
-            stream.reserve_surface_renderer(request, key)?;
+            let mut continuation = stream.reserve_surface_renderer(request, key)?;
             let prepared = stream.prepared_surface().unwrap().1;
             let source = prepared.prototype.as_ref();
             let surface = &prepared.surface;
@@ -208,8 +248,12 @@ impl SourceWorldVisuals {
                 records.push(record);
             }
             let tickets = (0..handles.len() * 2).map(|_| None).collect();
+            let upload = fixed.watch_meshes(handles.iter().cloned());
+            continuation.watch_upload(upload.receipt.clone());
             self.pending = Some(SurfacePreparation {
                 request,
+                continuation,
+                _upload: upload,
                 key,
                 meshes: handles,
                 tickets,
@@ -221,15 +265,17 @@ impl SourceWorldVisuals {
             let source = stream.prepared_surface().unwrap().1.prototype.as_ref();
             if pending.tickets[index * 2].is_none() {
                 let ticket = if let Some(source) = source {
-                    pipelines.request(
+                    pipelines.request_continuation(
                         stream,
+                        &mut pending.continuation,
                         &pending.meshes[index],
                         &self.road_materials[source][index].material,
                         false,
                     )?
                 } else {
-                    pipelines.request(
+                    pipelines.request_continuation(
                         stream,
+                        &mut pending.continuation,
                         &pending.meshes[index],
                         self.terrain[tier(key.layer)?].as_ref().unwrap(),
                         false,
@@ -245,8 +291,13 @@ impl SourceWorldVisuals {
             };
             if let Some(caster) = caster {
                 if pending.tickets[index * 2 + 1].is_none() {
-                    pending.tickets[index * 2 + 1] =
-                        pipelines.request(stream, &pending.meshes[index], caster, true)?;
+                    pending.tickets[index * 2 + 1] = pipelines.request_continuation(
+                        stream,
+                        &mut pending.continuation,
+                        &pending.meshes[index],
+                        caster,
+                        true,
+                    )?;
                 }
             }
             if pending.tickets[index * 2].is_none()
@@ -262,7 +313,10 @@ impl SourceWorldVisuals {
                 RenderingState::Ready => {}
             }
         }
-        stream.accept_surface_renderer(request, key)
+        if !pending.continuation.drained() {
+            return Ok(());
+        }
+        stream.accept_surface_renderer(request, key, &pending.continuation)
     }
     pub fn sync(
         &mut self,

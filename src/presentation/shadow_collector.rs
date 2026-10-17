@@ -32,8 +32,6 @@ struct CollectorUniform {
     projection: Vec4,
     atlas: Vec4,
 }
-#[derive(Resource)]
-struct CollectorShader(Handle<Shader>);
 #[derive(Component)]
 pub struct CollectorView {
     targets: Arc<SourceViewTargets>,
@@ -71,7 +69,7 @@ fn prepare(
     frame: Res<SourceViewFrame>,
     live: Res<SourceSceneLighting>,
     assets: Option<Res<LightingRenderAssets>>,
-    shader: Res<CollectorShader>,
+    shaders: Res<super::fixed_assets::AdmittedShaders>,
     mut pipeline: Local<Option<CachedRenderPipelineId>>,
     mut views: Query<(
         Entity,
@@ -84,6 +82,9 @@ fn prepare(
     cache: Res<PipelineCache>,
     status: Res<SourceLightingStatus>,
 ) {
+    let Some(shader) = shaders.get("shaders/source_shadow_collector.wgsl") else {
+        return;
+    };
     if scene.frame == 0
         || scene.frame != frame.frame
         || frame.views[..super::surface_views::MIRROR_START]
@@ -109,12 +110,12 @@ fn prepare(
             label: Some("source_shadow_collector".into()),
             layout: vec![layout()],
             vertex: VertexState {
-                shader: shader.0.clone(),
+                shader: shader.clone(),
                 entry_point: Some("vertex".into()),
                 ..default()
             },
             fragment: Some(FragmentState {
-                shader: shader.0.clone(),
+                shader: shader.clone(),
                 entry_point: Some("collect".into()),
                 targets: vec![Some(ColorTargetState {
                     format: COLLECTOR_FORMAT,
@@ -273,12 +274,7 @@ fn collect(
         .store(frame.frame, Ordering::Release);
 }
 pub fn install(app: &mut App) {
-    let shader = app
-        .world()
-        .resource::<AssetServer>()
-        .load("shaders/source_shadow_collector.wgsl");
     app.sub_app_mut(RenderApp)
-        .insert_resource(CollectorShader(shader))
         .add_systems(Render, prepare.in_set(RenderSystems::PrepareBindGroups))
         .add_systems(SourceSurface, collect.in_set(SourceSurfaceStage::Collector));
 }

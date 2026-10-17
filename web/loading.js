@@ -8,7 +8,7 @@ export function createLoading(){
  const root=document.querySelector('#loading-details'),heading=document.querySelector('#loading-phase');
  const bar=document.querySelector('#loading-progress'),count=document.querySelector('#loading-count');
  const elapsed=document.querySelector('#loading-elapsed'),budgets=document.querySelector('#loading-budgets');
- const note=document.querySelector('#loading-budget-note'),rows=new Map();
+ const note=document.querySelector('#loading-budget-note'),rows=new Map(),budgetValues=new Map();
  let active=false,timer,started,lastChange,lastPaint=0,phase='',done=0,total=0,rendering=false,world=false,runtime=false;
  const seconds=ms=>Math.floor(ms/60000)+'m '+Math.floor(ms/1000)%60+'s';
  function clock(){const now=performance.now();elapsed.textContent='Elapsed: '+seconds(now-started)+'\nLast change: '+seconds(now-lastChange)+' ago';}
@@ -31,6 +31,7 @@ export function createLoading(){
   if(active)return;
   active=true;runtime=false;started=lastChange=performance.now();root.hidden=false;
   budgets.hidden=true;note.hidden=true;
+  budgetValues.clear();
   for(const node of rows.values())node.textContent='';
   phase='';stage('Loading the game...');timer=setInterval(clock,1000);
  }
@@ -48,6 +49,8 @@ export function createLoading(){
    if(!active)return;
    let node=rows.get(name);
    if(!node){const label=document.createElement('dt');label.textContent=name;node=document.createElement('dd');budgets.append(label,node);rows.set(name,node);}
+   const value=budgetValues.get(name);
+   if(value){value.used=used;value.limit=limit;value.unit=unit;}else budgetValues.set(name,{name,used,limit,unit});
    const text=formatBudget(used,limit,unit);
    if(node.textContent!==text){node.textContent=text;lastChange=performance.now();}
    node.title=used.toLocaleString('en-US')+' '+unit+' / '+limit.toLocaleString('en-US')+' '+unit;
@@ -55,5 +58,6 @@ export function createLoading(){
   },
   finish(){active=false;clearInterval(timer);root.hidden=true;},
   fail(){if(!active)return;paint();active=false;clearInterval(timer);heading.textContent=phase+' (stopped)';},
+  snapshot(){return {phase,done,total,rendering,world,budgets:Array.from(budgetValues.values(),value=>({...value}))};},
  };
 }

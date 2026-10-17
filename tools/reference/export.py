@@ -57,6 +57,8 @@ def derive_reference(snapshot: Snapshot, library: LibraryReceipt, output: Path) 
     try:
         _export_selected(LibrarySource(reader), staged, reader, snapshot)
         verify_reference(staged, library)
+        from .runtime_package import publish_package
+        publish_package(staged, output.parent)
     except BaseException:
         import shutil
         shutil.rmtree(staged)
@@ -247,6 +249,14 @@ def verify_reference(output: Path, library) -> None:
     from .lighting import validate_lighting_export
     validate_lighting_export(manifest, output)
     names.update(Path(item['path']).name for item in runtime_resources(manifest))
+    from .runtime_package import file_receipt, package_id
+    if manifest['content_base'] != f'assets/runtime/{package_id(manifest)}/':
+        raise ValueError('Runtime package identity differs')
+    for receipt in manifest['file_catalog']['files']:
+        name = receipt['file'].removeprefix('reference/')
+        if file_receipt(output / name, receipt['file']) != receipt:
+            raise ValueError('Runtime file receipt differs')
+        names.add(name)
     if {p.relative_to(output).as_posix() for p in output.rglob('*') if p.is_file()} != names:
         raise ValueError('Unselected files in runtime')
 
@@ -389,8 +399,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     }
     parameters['player_markers']=[{'source':{'file':'level1','path_id':pid},'fields':source.read(source.get('level1',pid))} for pid in (39823,23339)]
     (output/'parameter-evidence.json').write_text(json.dumps(parameters,indent=2,allow_nan=False),encoding='utf-8')
-    # The browser reads world input sizes here instead of requesting every file at startup.
-    manifest['file_bytes']={'reference/'+p.name:p.stat().st_size for p in sorted(output.iterdir()) if p.is_file() and p.suffix!='.json'}
+    from .runtime_package import prepare_package
+    prepare_package(manifest, output)
     (output/'manifest.json').write_text(json.dumps(manifest,separators=(',',':'),allow_nan=False),encoding='utf-8')
     from dataclasses import asdict
     selection = {name:[asdict(v) for v in sorted(values)] for name,values in (
@@ -632,6 +642,9 @@ def main(argv=None):
             source_work=SOURCE_WORK_ROOT
         if arguments.verify:
             verify_reference(arguments.output, receipt)
+            from .runtime_package import verify_package, package_id
+            manifest = json.loads((arguments.output / 'manifest.json').read_bytes())
+            verify_package(manifest, arguments.output.parent / 'runtime' / package_id(manifest))
         else:
             from .library.archive import load_snapshot
             derive_reference(load_snapshot(source_work), receipt, arguments.output)

@@ -6,7 +6,7 @@ Updated: 2026-10-15.
 
 ### Inventory and clothing
 
-We completed tasks 1 and 2 on `codex/inventory-clothing`. We stopped tasks 3ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“10 at the user's request.
+We completed tasks 1 and 2 on `codex/inventory-clothing`. We stopped tasks 3 to 10 at the user's request.
 Keep these eight tasks stopped until the user resumes them. Do not start another feature during integration.
 Use Steam build `11140890` and its decompiled control flow as the source authority.
 
@@ -16,7 +16,7 @@ The master integration uses save schema 5 for inventory, driving, world changes,
 We reject older schemas without migration. We removed JSON test fixtures and their dependent checks.
 We retain small independent checks and source verification.
 The merged tree passed the release WASM build, 10 native checks, 53 exporter checks, and 21 browser interface checks.
-Two installed-export checks remain ignored until we generate a matching merged package.
+Two installed-export checks remain ignored. Full reference validation passed separately for the matching candidate below.
 The acquisition check confirms unchanged source values and valid links to the current world tables.
 
 | Task | Status | Remaining scope |
@@ -31,7 +31,7 @@ The acquisition check confirms unchanged source values and valid links to the cu
 | 10 | Stopped | Compare the completed feature with the running source game. Record gameplay and visual limits. Use critical checks only. |
 
 The branch passed its Task 2 release build, source checks, and browser inventory checks before integration.
-Those results do not establish acceptance of the merged runtime package. Export and browser checks remain in the work order below.
+The retained diagnostic candidate passed export validation and garage readiness. New game and final release work remain deferred below.
 A loose flashlight fell below the floor during a long browser run. We have not confirmed its cause.
 Native source comparison, trusted desktop input, and full clothing behavior remain unverified.
 
@@ -45,13 +45,68 @@ Those build results predate the later rendering cleanup and test reduction.
 The retained native test targets compiled after we removed obsolete API tests and corrected retained fixture bindings.
 Those native behavior checks failed because the former shared fixture lacked required world data.
 The checked world probes, harness, and provenance are restored in `.cache/world-source`.
-We retained the earlier runtime assets and WASM package. Merged package and active gameplay acceptance remain open.
+We retained the earlier runtime assets and restored the earlier WASM package after candidate preparation failed.
+The source fixes are merged into local master. The diagnostic package is retained separately. New game repair and release installation remain deferred.
 
 The shared particle owner applies selected spray velocity, inherited motion, and masked collision.
 Spray refraction and brush soft-particle depth fading remain deferred shared-renderer work and known visual differences.
 The historical feature package passed release, export, readiness, New Game, and same-export Save/Load checks.
 IAB showed `Mouse capture failed` after Continue. Active tool use and driving remain unverified.
 See the [cleaning implementation](../src/interaction/cleaning.rs), [condition state](../src/conditions.rs), and [verification status](#verification-status).
+
+### Matching package
+
+Current pass closed on 2026-10-15 at the user's request. Remaining work is deferred below.
+The diagnostic candidate uses revision `2f4e8a1` plus the source fixes now merged into local master.
+Source authority remains Steam build `11140890`. Save schema remains 5.
+The export passed full reference validation, including the native manifest contract and selected file hashes.
+Exporter inputs stayed unchanged during the later runtime repairs.
+
+The current WASM uses release dependencies and diagnostic crate flags: `opt-level=1`, `lto=off`, `codegen-units=16`.
+This is a diagnostic package. The final default release build remains deferred.
+WASM compilation and syntax checks for 15 JavaScript files passed for this exact build.
+The critical acquisition check passed. It retains source-value and runtime-binding checks.
+
+Source fixes merged into local master:
+
+- Split lighting buffers with 64 lights and 289 shadow slots. Each binding stays below 16 KiB.
+- Fixed receiver bindings, light warmup, and motion capture during material warmup.
+- Kept the shared queue at 32 items. Generation leaves four slots for downstream presentation work.
+- Fixed repeated displacement invalidation by retaining original node scales and exact physics body roots.
+- Raised bounded capacities to fit checked source data and session overlap.
+  Active CPU/GPU limits are 256/128 MiB. Asset CPU/GPU limits are 512/1,024 MiB. The object cap is 32,768.
+
+The real browser reached "The garage is ready." It prepared 14,622 objects and drained the pending queue.
+Displacement preparation completed with 124 writers and revision 127.
+New game then failed with `Missing source asset: reference/food.gltf`.
+The file exists. Session validation incorrectly expects its lazy prototype in the eager scene cache.
+New game preparation, active input, driving, tools, and Save/Load remain unverified.
+
+The candidate contains 377 asset entries and 8,290 runtime files, totaling 3,527,950,523 bytes.
+Source fingerprint for 451 tracked build inputs: `45e4c720f7012c34687d5319b322a5423962f1f876b4c7e203226d9bb6dedfa9`.
+Package SHA256: `d1f5cfa41603de24f461e5ff1749011455fa6d4c645af727fc6302970567c6a2`.
+Manifest SHA256: `6855be7d05b4e0790fcbf7898afe2b223cb4f7b504011462a28322b897a87819`.
+WASM SHA256: `3aaba6bfd3e03473e51183cf827683c007a939e30e4bf1fa2df4fc14a7f46330`.
+
+The diagnostic candidate is preserved in `.cache/matching-package/retained-candidate`. The source fixes are in local master.
+The [package receipt](../.cache/matching-package/package-receipt.json) identifies the retained candidate and records every runtime file hash.
+The original worktree was removed after merging. The preservation receipt records copied evidence and source hashes.
+It also records build flags, source identity, probe identity, reviews, and the observed browser result.
+The main checkout retains its earlier generated package. The candidate is not installed.
+Provenance archives stay in `.cache/world-source/provenance`, outside served assets.
+Inventory tasks 3 to 10 remain stopped.
+
+#### Deferred package work
+
+Resume these steps in order. Use critical checks only.
+
+1. Fix New game asset validation. Match eager checks to the eager scene owners.
+   Keep strict validation for loaded scenes and each lazy prototype's owner. Check all asset usage categories.
+2. Build the default release from one recorded source snapshot. Repeat garage readiness and New game preparation on that exact WASM.
+   Confirm the real menu reports "New game ready" and the runtime is started and paused.
+3. Record final release hashes and browser evidence. Recheck the main revision and source hashes before installation.
+   The source fixes are already merged. Install matching assets and WASM after acceptance passes.
+   Then resume active gameplay acceptance under work order item 3.
 
 ### Checked world input recovery
 
@@ -70,6 +125,11 @@ This verifies the restored source inputs. Port gameplay acceptance remains open.
 Wheel-response measurements remain a separate work item.
 
 ### Verification status
+
+The current tree declares 54 Python exporter cases. The new critical acquisition binding check passed.
+The inventory merge recorded 53 passing exporter cases. We did not rerun that suite during packaging.
+Full reference validation, native manifest validation, WASM compilation, and syntax checks for 15 JavaScript files passed.
+The retained diagnostic build reached garage readiness. New game failed its lazy asset check. Final release validation remains deferred.
 
 Before inventory integration, the reduced suite contained 162 declared cases. The cleanup removed 647 of the previous 809 cases.
 Inventory integration removes the remaining JSON fixture and dependent checks. The table below records the earlier cleanup run.
@@ -103,7 +163,7 @@ The full integration review and scoped re-review have no open Critical or Import
 We preserved local transparent sorting and warmup filtering through the replacement renderer.
 We added no features or dependencies during the final source-world merge.
 
-The checked source-input gap is resolved. Fresh merged runtime export and package verification remain open.
+The checked source inputs and merged export are complete. The repaired diagnostic candidate reaches garage readiness. Package follow-up remains deferred.
 
 ### Changes in master
 
@@ -116,7 +176,7 @@ The checked source-input gap is resolved. Fresh merged runtime export and packag
 | Survival and weather | Existing consumables, survival state, sleep, weather, storm lighting, and particles |
 | Portable flashlight | Source bindings, carried controls, storage restrictions, and shared light rendering |
 | Cleaning and painting | Authored tools, cleaning, spray paint, wear, live conditions, and retained material updates |
-| Save/load | Browser storage, fleet, fluids, items, conditions, tools, and scene replacement under strict schema 4 |
+| Save/load | Browser storage, fleet, fluids, items, conditions, tools, inventory ownership, and scene replacement under strict schema 5 |
 | Performance | Reduced camera light clustering and depth/shadow material bindings |
 | Roadside stations | Checked source placement, selected prototypes, static collision, and terrain alignment |
 
@@ -139,7 +199,8 @@ The integration replaces the obsolete station generator with checked source-worl
 
 We retain each changed object as a compact record. Active geometry has separate limits.
 Changed-object records have no fixed count limit. Source checkpoints and first-call history share a 16 MiB limit.
-Active CPU/GPU limits remain 128 MiB each. Prototype limits remain 256 MiB CPU and 512 MiB GPU.
+Active CPU/GPU limits are 256/128 MiB. Prototype CPU/GPU limits are 512/1,024 MiB.
+The object cap is 32,768. See [matching package](#matching-package) for the retained build and deferred acceptance.
 Generation and presentation share 32 MiB of pending storage.
 
 The documentation cleanup removed the source-world design, implementation plan, and research from the checkout.
@@ -149,7 +210,7 @@ The [probe tool](../tools/reference/world_probe.py) requires checked inputs and 
 ### Integration changes
 
 We replaced station save identities with canonical generated identities, change records, and source spawn history.
-The merged save schema 4 includes world, driving, and condition state. Browser database version remains separate.
+Save schema 5 includes world, driving, condition state, and inventory ownership. Browser database version remains separate.
 We preserve source integer identities as decimal strings at the browser save boundary.
 We apply the saved seed before generation and restore supported object state before physics participation.
 We preserve imported fleet state, dormant absolute poses, recovery, and cross-owner attachments.
@@ -190,10 +251,10 @@ Seat changes clear transient driving input. Automatic rules require a mounted en
 Suspension validation accepts source endpoints and rejects invalid values.
 We retain both cars, source-world placement, generated identities, and renderer ownership.
 Save schema 5 combines world records, selected gears, driving assists, condition state, and inventory ownership.
-We reject versions 1ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“4 before reading their vehicle fields. No migration or old reader exists.
+We reject versions 1 to 4 before reading their vehicle fields. No migration or old reader exists.
 
 The control and transmission work passed earlier code review. Normal driving acceptance remains open.
-The retained native targets now compile. Current fixture failures and recorded counts appear in [verification status](#verification-status).
+The merged native checks passed. Earlier fixture failures and historical counts appear in [verification status](#verification-status).
 
 The controller previously verified assist choices, dependency, paused save, reload, restore, and New game defaults.
 IAB refused pointer capture. Normal launch, both-car driving, and 30/60/120 FPS routes remain unverified.
@@ -207,12 +268,12 @@ Read [vehicle coverage and controls](vehicles.md), the [drivetrain](../src/simul
 
 ## Work order
 
-Recover source inputs and finish the matching package before expanding gameplay. Keep each layer working before adding the next.
+Source inputs are recovered. Finish package preparation before expanding gameplay. Keep each layer working before adding the next.
 
 1. **Recover checked world probes and provenance: complete.** Restored the unchanged build `11140890` capture and its local replay files.
    The probe tool accepts the recovered inputs. See [checked world input recovery](#checked-world-input-recovery).
-2. **Export and build one matching package.** Generate runtime records, assets, and WASM from the merged code and accepted source inputs.
-   Verify hashes, source identity, and candidate preparation. Record the package identity.
+2. **Export and build one matching package: partial; remaining work deferred.** Export, diagnostic build, hashes, and garage readiness are complete.
+   Resume the New game asset fix, default release validation, and installation in [deferred package work](#deferred-package-work).
 3. **Verify active gameplay.** Obtain mouse capture and check walking, preparation, both cars, cleaning, painting, Save/Load, recovery, and restart.
    Check collision seams, long drives, rebasing, revisits, retained objects, memory, and assembled audio.
 4. **Measure source driving behavior.** Collect matched original-game measurements before changing tire, rim, hub, suspension, or braking response.
@@ -233,12 +294,12 @@ The backlog does not expand approved implementation scope. Each new feature need
 
 | Feature | Status | Remaining work |
 | --- | --- | --- |
-| Source world generation | Implemented; runtime unverified | Checked probes are recovered. Build the merged package, then verify streaming, revisits, and memory. |
+| Source world generation | Implemented; runtime unverified | Checked probes and the diagnostic package are complete. Resume deferred package work before streaming, revisit, and memory acceptance. |
 | Buildings and exploration | Implemented; runtime unverified | Check source buildings, interiors, landmarks, placement, content coverage, and collision in the matching package. |
 | World population | Partial | Integrate source loot placement; add excluded abandoned vehicles, items, and encounters. |
 | Full vehicle range | Partial | Add vehicles beyond the Lada and Skoda, including diesel, two-stroke, automatic, bus, and bike mechanics. |
 | Driving physics | Partial | Verify launch and both-car driving; collect native source measurements before wheel, rim, hub, suspension, and combined-brake work. |
-| Inventory and clothing | Partial; tasks 3ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“10 stopped | Four slots and hand retrieval implemented. See the eight stopped tasks above. |
+| Inventory and clothing | Partial; tasks 3 to 10 stopped | Four slots and hand retrieval implemented. See the eight stopped tasks above. |
 | Cleaning and painting | Partial; merged | Verify active tools and lifecycle behavior in the matching package. Complete refraction and brush depth fading. |
 | Cargo and towing | Partial | Add general cargo locking, attachment objects, towing hooks, and trailers. Current storage locking covers flashlights. |
 | Full item range | Partial | Add remaining source food, tools, containers, and their actions. |

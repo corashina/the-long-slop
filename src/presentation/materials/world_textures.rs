@@ -333,7 +333,7 @@ impl WorldTextures {
                 .ok_or_else(|| {
                     ReferenceError(format!("Missing source texture {}", link.texture))
                 })?;
-            validate_chunks(record)?;
+            record.validate_chunks()?;
             let key = ArrayKey::from(record);
             let index = groups
                 .iter()
@@ -927,38 +927,4 @@ fn array_image(key: ArrayKey, layers: usize) -> Result<Image, ReferenceError> {
         ..default()
     });
     Ok(image)
-}
-
-fn validate_chunks(texture: &LightingTextureRecord) -> Result<(), ReferenceError> {
-    let mut index = 0;
-    for mip in 0..texture.mip_count {
-        let width = (texture.width >> mip).max(1);
-        let height = (texture.height >> mip).max(1);
-        let mut row = 0;
-        while row < height {
-            let chunk = texture
-                .chunks
-                .get(index)
-                .ok_or_else(|| ReferenceError("Missing source texture chunk".into()))?;
-            if chunk.mip != mip
-                || chunk.row != row
-                || chunk.width != width
-                || chunk.rows == 0
-                || chunk.rows > height - row
-                || u64::from(width) * u64::from(chunk.rows) * 4
-                    > super::world_texture_upload::UPLOAD_BYTES as u64
-                || chunk.data.source != texture.source
-            {
-                return Err(ReferenceError(
-                    "Invalid source texture chunk coverage".into(),
-                ));
-            }
-            row += chunk.rows;
-            index += 1;
-        }
-    }
-    if index != texture.chunks.len() {
-        return Err(ReferenceError("Extra source texture chunks".into()));
-    }
-    Ok(())
 }

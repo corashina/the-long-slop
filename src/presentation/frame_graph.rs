@@ -1313,7 +1313,9 @@ fn gpu_boundaries(
     boundary.lighting_render_assets = stamps[2].is_some();
     if let Some(master) = world.get_resource::<super::lighting::LightingGpu>() {
         boundary.master_cookies = master.cookies.is_some();
-        boundary.master_uniform = master.uniform.buffer().is_some();
+        boundary.master_uniform = master.uniform.buffer().is_some()
+            && master.shadow_a.buffer().is_some()
+            && master.shadow_b.buffer().is_some();
         boundary.master_state = match &*master.status.lock().unwrap() {
             super::lighting::RenderingState::Loading => 0,
             super::lighting::RenderingState::Ready => 1,

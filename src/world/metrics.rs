@@ -198,7 +198,7 @@ pub(crate) mod browser {
             Unorm8x4Bgra
         )
     }
-    fn mesh_payload(mesh: &Mesh) -> usize {
+    pub(crate) fn mesh_payload(mesh: &Mesh) -> usize {
         mesh.try_attributes().map_or(0, |attributes| {
             attributes.map(|(_, v)| attribute_bytes(v)).sum::<usize>()
         }) + mesh
@@ -255,6 +255,7 @@ pub(crate) mod browser {
         surfaces: Res<SourceWorldVisuals>,
         instances: Res<SourceInstances>,
         grass: Res<GrassJobs>,
+        writers: Res<crate::presentation::materials::grass::writers::GrassWriters>,
         materials: Res<SourceMaterials>,
         server: Res<AssetServer>,
         pipelines: Res<crate::presentation::world::pipelines::WorldPipelines>,
@@ -339,6 +340,9 @@ pub(crate) mod browser {
                 "surfaces": surfaces.startup_audit(),
                 "textures": materials.world_textures.startup_audit(&images, &server),
                 "jobs": runtime.stream.startup_job_audit(),
+                "instances": instances.startup_audit(&grass),
+                "grass": grass.startup_audit(),
+                "writers": writers.startup_audit(),
                 "pipelines": pipelines.startup_audit(),
             }),
             assets: groups,

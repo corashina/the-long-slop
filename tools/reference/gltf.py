@@ -431,7 +431,8 @@ class GltfExporter(GltfBuilder):
         self.document.save_json(str(self.output))
         validate_gltf(self.output)
         paths={buffer.uri for buffer in self.document.buffers}|{image.uri for image in self.document.images}
-        dependencies=[{'file':f'reference/{path}','sha256':hashlib.sha256((self.output.parent/path).read_bytes()).hexdigest()} for path in sorted(paths)]
+        from .runtime_package import file_receipt
+        dependencies=[file_receipt(self.output.parent/path, f'reference/{path}') for path in sorted(paths)]
         dependencies = list({entry['file']: entry for entry in [*dependencies, *self.material_dependencies.values()]}.values())
         return {'path': self.output.name, 'sha256': hashlib.sha256(self.output.read_bytes()).hexdigest(),
                 'dependencies':dependencies, 'materials': self.material_records, 'deferred_materials':list(self.deferred_materials.values()),

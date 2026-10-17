@@ -524,6 +524,9 @@ pub(crate) fn source_lamp_admission(
     frame: &crate::world::WorldFrame<'_>,
     receivers: &[crate::world::WorldBounds],
     source: &mut SourceLighting,
+    reference: &crate::reference::ReferenceManifest,
+    light_outputs: &[crate::lighting::LightOutput],
+    biome_enabled: bool,
 ) -> Result<(usize, usize, usize), crate::reference::ReferenceError> {
     source.road_lamps.preflight_ready = false;
     source.road_lamps.allocation.fill(None);
@@ -533,7 +536,12 @@ pub(crate) fn source_lamp_admission(
     let Some(_recipe) = &source.road_lamps.recipe else {
         return Ok((0, 0, 0));
     };
-    crate::world::required_world_lights(frame, receivers, &mut source.road_lamps.required);
+    crate::world::required_world_lights(
+        frame,
+        receivers,
+        biome_enabled,
+        &mut source.road_lamps.required,
+    );
     let required = source.road_lamps.required.len();
     let light_capacity = crate::presentation::lighting::MAX_LIGHTS - source.road_lamps.fixed_lights;
     let shadow_capacity =
@@ -552,9 +560,51 @@ pub(crate) fn source_lamp_admission(
             }
         })
         .sum();
-    if required + source.road_lamps.overlap.0 > light_capacity.min(32)
+    if required + source.road_lamps.overlap.0 > light_capacity
         || shadow_count + source.road_lamps.overlap.1 > shadow_capacity
     {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let entries: Vec<_> = source.road_lamps.required.iter().filter_map(|id| {
+                frame.lights.iter().find(|light| &light.id == id).map(|light| {
+                    let faces = if light.record.shadows.kind == 0 { 0 }
+                        else if light.record.kind == crate::reference::LightKind::Point { 6 }
+                        else { 1 };
+                    serde_json::json!({
+                        "id": id,
+                        "sourceId": light.record.source,
+                        "prototypeId": light.prototype,
+                        "shadowFaces": faces,
+                        "controllerOutput": {"enabled": light.enabled && (light.biome.is_none() || biome_enabled), "intensity": light.intensity},
+                    })
+                })
+            }).collect();
+            let fixed_entries: Vec<_> = source.lights.iter().take(source.road_lamps.fixed_lights).map(|bound| {
+                let record = &reference.lighting.lights[bound.source_index];
+                let output = &light_outputs[bound.source_index];
+                serde_json::json!({
+                    "id": bound.id,
+                    "sourceId": record.source,
+                    "shadowFaces": if record.shadows.kind == 0 || record.kind == crate::reference::LightKind::Directional { 0 }
+                        else if record.kind == crate::reference::LightKind::Point { 6 } else { 1 },
+                    "controllerOutput": {"enabled": output.enabled, "intensity": output.intensity},
+                })
+            }).collect();
+            crate::browser::game_startup_failure_details(&serde_json::json!({
+                "kind": "sourceLightAdmission",
+                "requiredLightEntries": required,
+                "requiredShadowFaces": shadow_count,
+                "availableLightEntries": light_capacity,
+                "availableShadowFaces": shadow_capacity,
+                "availableNewLightEntries": light_capacity.saturating_sub(source.road_lamps.overlap.0),
+                "availableNewShadowFaces": shadow_capacity.saturating_sub(source.road_lamps.overlap.1),
+                "fixedLightEntries": source.road_lamps.fixed_lights,
+                "fixedShadowFaces": source.road_lamps.fixed_shadows,
+                "fixedEntries": fixed_entries,
+                "retainedOverlap": {"lightEntries": source.road_lamps.overlap.0, "shadowFaces": source.road_lamps.overlap.1},
+                "entries": entries,
+            }).to_string());
+        }
         return Err(crate::reference::ReferenceError(format!(
             "Required source lights exceed renderer capacity: {required}"
         )));

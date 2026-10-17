@@ -1,97 +1,92 @@
-//! Bound browser asset requests until each response body is complete.
-//! Each file the manifest lists is hashed once, when it first loads.
+//! Receipt checks complete before the existing Bevy decoders receive input.
+use crate::reference::FileCatalog;
 use async_lock::Semaphore;
 use bevy::{
     asset::{
-        AssetApp, AssetPlugin,
+        AssetApp,
         io::{
             AssetReader, AssetReaderError, AssetSourceBuilder, AssetSourceId, PathStream, Reader,
-            VecReader, wasm::HttpWasmAssetReader,
+            VecReader,
         },
     },
     prelude::{App, Plugin},
 };
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{path::Path, sync::Arc};
 use wasm_bindgen::prelude::*;
-
 #[wasm_bindgen]
 extern "C" {
-    #[wasm_bindgen(catch, js_namespace = window, js_name = sourceVerifyBytes)]
-    async fn verify_bytes(bytes: &[u8], hash: &str) -> Result<(), JsValue>;
+    #[wasm_bindgen(catch, js_namespace=window, js_name=sourceReadAsset)]
+    async fn read_asset(base: &str, receipt: &str) -> Result<js_sys::Uint8Array, JsValue>;
 }
-
 pub(crate) struct SourceIoPlugin {
-    hashes: Arc<HashMap<String, String>>,
+    content_base: String,
+    catalog: Arc<FileCatalog>,
 }
-
 impl SourceIoPlugin {
-    pub(crate) fn new(reference: &crate::reference::ReferenceManifest) -> Self {
-        let mut hashes = HashMap::new();
-        for asset in &reference.assets {
-            hashes.insert(asset.path.clone(), asset.sha256.clone());
-            for entry in &asset.dependencies {
-                hashes.insert(entry.file.clone(), entry.sha256.clone());
-            }
-        }
+    pub fn new(content_base: String, catalog: Arc<FileCatalog>) -> Self {
         Self {
-            hashes: Arc::new(hashes),
+            content_base,
+            catalog,
         }
     }
 }
-
 impl Plugin for SourceIoPlugin {
     fn build(&self, app: &mut App) {
-        let hashes = self.hashes.clone();
+        let base = self.content_base.clone();
+        let catalog = Arc::clone(&self.catalog);
         app.register_asset_source(
             AssetSourceId::Default,
             AssetSourceBuilder::new(move || {
                 Box::new(SourceAssetReader {
-                    inner: HttpWasmAssetReader::new(AssetPlugin::default().file_path),
+                    base: base.clone(),
+                    catalog: Arc::clone(&catalog),
                     requests: Semaphore::new(8),
-                    hashes: hashes.clone(),
                 })
             }),
         );
     }
 }
-
 struct SourceAssetReader {
-    inner: HttpWasmAssetReader,
+    base: String,
+    catalog: Arc<FileCatalog>,
     requests: Semaphore,
-    hashes: Arc<HashMap<String, String>>,
 }
-
 impl AssetReader for SourceAssetReader {
     async fn read<'a>(&'a self, path: &'a Path) -> Result<impl Reader + 'a, AssetReaderError> {
-        let _permit = self.requests.acquire().await;
-        // Bevy returns its VecReader after fetch and array_buffer both complete.
-        let mut reader = self.inner.read(path).await?;
-        let mut bytes = Vec::new();
-        Reader::read_to_end(&mut reader, &mut bytes).await?;
-        if let Some(hash) = self.hashes.get(&*path.to_string_lossy()) {
-            verify_bytes(&bytes, hash).await.map_err(|_| {
-                AssetReaderError::Io(Arc::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("{} does not match its manifest SHA-256", path.display()),
-                )))
-            })?;
-        }
+        let invalid = |message: String| {
+            AssetReaderError::Io(
+                std::io::Error::new(std::io::ErrorKind::InvalidData, message).into(),
+            )
+        };
+        let path = path
+            .to_str()
+            .ok_or_else(|| invalid("Invalid source path".into()))?;
+        let receipt = self
+            .catalog
+            .file(path)
+            .map_err(|e| invalid(e.to_string()))?;
+        let json = serde_json::to_string(receipt).map_err(|e| invalid(e.to_string()))?;
+        // The asset owner keeps byte/job reservations through decode and upload.
+        // This permit covers only the physical response, never dependent decoder work.
+        let permit = self.requests.acquire().await;
+        let bytes = read_asset(&self.base, &json)
+            .await
+            .map_err(|e| invalid(format!("Checked source input: {e:?}")))?
+            .to_vec();
+        drop(permit);
         Ok(VecReader::new(bytes))
     }
-
     async fn read_meta<'a>(&'a self, path: &'a Path) -> Result<impl Reader + 'a, AssetReaderError> {
-        let _permit = self.requests.acquire().await;
-        self.inner.read_meta(path).await
+        // The package has no Bevy .meta files; AssetPlugin disables metadata probing.
+        Err::<VecReader, _>(AssetReaderError::NotFound(path.to_path_buf()))
     }
-
     async fn read_directory<'a>(
         &'a self,
-        path: &'a Path,
+        _path: &'a Path,
     ) -> Result<Box<PathStream>, AssetReaderError> {
-        self.inner.read_directory(path).await
+        Ok(Box::new(bevy::tasks::futures_lite::stream::empty()))
     }
-
-    async fn is_directory<'a>(&'a self, path: &'a Path) -> Result<bool, AssetReaderError> {
-        self.inner.is_directory(path).await
+    async fn is_directory<'a>(&'a self, _path: &'a Path) -> Result<bool, AssetReaderError> {
+        Ok(false)
     }
 }

@@ -9,17 +9,25 @@ import {createInput} from './input.js';
 import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
 import {createLoading} from './loading.js';
+import {createStartupTrace} from './startup-trace.js';
 import {loadUiAssets} from './ui-layout.js';
-import {admitWorldAssets,preflightWorldPrototype,verifyWorldBytes,cancelWorldPrototype,worldBootstrapMeasurements,worldInputBytes,worldPrototypeStaging,worldDependencyReserve,worldInputMetadataBytes} from './world-assets.js';
-window.sourcePrototypePlan=preflightWorldPrototype;
+import {configureAssetCatalog,readAsset,readPackageAsset,assetReceipt,checkImageSize,worldBootstrapMeasurements,worldInputBytes,worldInputMetadataBytes} from './world-assets.js';
+window.sourceReadAsset=(base,receipt)=>readAsset(base,JSON.parse(receipt));
 window.sourceInputBytes=worldInputBytes;
-window.sourcePrototypeStaging=worldPrototypeStaging;
-window.sourceDependencyReserve=worldDependencyReserve;
 window.sourceInputMetadataBytes=worldInputMetadataBytes;
-window.sourceVerifyBytes=verifyWorldBytes;
-window.sourcePrototypeCancel=cancelWorldPrototype;
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
 const loading=createLoading();
+performance.setResourceTimingBufferSize?.(16000);
+const startup=createStartupTrace(()=>performance.now());
+let startupFailureDetails=null,startupDone=false,startupReady=false;
+function fetched(record){
+ const entry=performance.getEntriesByName?.(new URL(record.path,location.href).href)?.at(-1);
+ startup.fetched({...record,cache:entry?entry.transferSize===0?'hit':'miss':'unknown',downloadMs:entry?entry.responseEnd-entry.requestStart:null});
+}
+window.gameStartupTrace=()=>startup.snapshot();
+window.gameStartupDone=()=>startupDone;
+window.gameStartupFailureDetails=json=>{startupFailureDetails=JSON.parse(json);};
+window.gameStartupStage=(stage,started)=>{if(started)startup.begin(stage);else startup.end(stage);};
 window.gameLoadingProgress=(roads,total,rendering,world)=>loading.progress(roads,total,rendering,world);
 window.gameLoadingBudget=(name,used,limit,unit)=>loading.budget(name,used,limit,unit);
 const bootStarted=performance.now();
@@ -94,17 +102,20 @@ const sleep={phase:0,eligible:false,charge:0,cooldownRemaining:0,progress:0,held
 window.gameSleep=(phase,eligible,charge,cooldownRemaining,progress)=>{
  sleep.phase=phase;sleep.eligible=eligible;sleep.charge=charge;sleep.cooldownRemaining=cooldownRemaining;sleep.progress=progress;sleep.held=(input.state.held&262144)!==0;sleep.dead=dead;sleeping=phase===2;survival?.updateSleep(sleep,feedback?.state.enabled);
 };
-function fail(message,notifyRenderer=true){if(failed)return;failed=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
+function fail(message,notifyRenderer=true){if(failed)return;failed=true;startup.reconcile(performance.getEntriesByType('resource'));startup.fail({...startupFailureDetails,message,loading:loading.snapshot()});startupDone=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
+function finishStartup(){if(failed||startupDone||!startupReady||!input||!menu)return;startup.reconcile(performance.getEntriesByType('resource'));startup.finish({inputReady:true});startupDone=true;}
 window.gameFailure=message=>fail(message,false);
 window.gameLoading=()=>{if(failed)return;loading.start();loading.stage('Loading the garage...');menu.loading();};
-window.gameReady=()=>{if(failed||!worldAdmitted)return;if(initialReadyMs===null)initialReadyMs=performance.now()-bootStarted;loading.finish();menu.ready();};
+window.gameReady=()=>{if(failed||!worldAdmitted)return;if(initialReadyMs===null)initialReadyMs=performance.now()-bootStarted;loading.finish();menu.ready();startupReady=true;finishStartup();};
 window.addEventListener('error',event=>fail(event.message||'The runtime stopped.'));
 window.addEventListener('unhandledrejection',event=>fail(event.reason?.message||String(event.reason)));
 canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();fail('The graphics context was lost.');});
 async function load(){
+ startup.begin('webgl');
  const probe=document.createElement('canvas'),graphics=probe.getContext('webgl2');
  if(!graphics)throw Error('This browser cannot use WebGL2.');
  graphics.getExtension('WEBGL_lose_context')?.loseContext();
+ startup.end('webgl');startup.begin('manifest');
  // Download and compile the game code while the manifest downloads.
  const code=Promise.all([import('./pkg/my_summer_slop.js'),fetch('./pkg/my_summer_slop_bg.wasm').then(response=>{
   if(!response.ok)throw Error('Cannot load game code (HTTP '+response.status+').');
@@ -121,6 +132,10 @@ async function load(){
  // Rust copies only the shell fields, so JS does not parse the world records.
  const text=manifest_shell(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
+ fetched({path:'assets/reference/manifest.json',requiredBytes:bytes.byteLength,receivedBytes:bytes.byteLength});
+ startup.build({sourceBuildId:manifest.build_id,manifestSha256:manifestHash,wasm:'release'});
+ configureAssetCatalog(manifest.content_base,manifest.file_catalog,fetched);worldAdmitted=true;
+ startup.end('manifest');startup.begin('interface');
  input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas,manifest.driving.bindings);
  bootstrap.manifestUtf16PayloadBytes=text.length*2;
  status.textContent='Loading interface assets...';
@@ -130,11 +145,14 @@ async function load(){
  audio=createAudio(manifest.audio);installAudioBridge(window,audio);
  window.addEventListener('pagehide',()=>audio.dispose());
  menu=createMenu({canvas,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,audio,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
- const switchIconUrl='./assets/'+manifest.lighting.switch_icon.path;
+ const switchIconBytes=await readPackageAsset(manifest.lighting.switch_icon.path);
+ const switchIconUrl=URL.createObjectURL(new Blob([switchIconBytes],{type:'image/png'}));
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
+ checkImageSize(assetReceipt(manifest.lighting.switch_icon.path),switchIcon.naturalWidth,switchIcon.naturalHeight);
  feedback=createFeedback(manifest.ui,switchIconUrl,manifest);
- admitWorldAssets(manifest);worldAdmitted=true;
+ startup.end('interface');
  if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
+ startup.begin('generation');startup.begin('decodeUpload');startup.begin('pipeline');
  run(bytes,manifestHash);
 }
 load().catch(error=>fail(error?.message??String(error)));

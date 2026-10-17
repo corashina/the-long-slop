@@ -87,25 +87,11 @@ struct ManifestShell<'a> {
     #[serde(borrow)]
     lighting: &'a serde_json::value::RawValue,
     #[serde(borrow)]
-    assets: &'a serde_json::value::RawValue,
+    content_base: &'a serde_json::value::RawValue,
     #[serde(borrow)]
-    file_bytes: &'a serde_json::value::RawValue,
+    file_catalog: &'a serde_json::value::RawValue,
     #[serde(borrow)]
     items: &'a serde_json::value::RawValue,
-    #[serde(borrow)]
-    rendering: RenderingShell<'a>,
-    #[serde(borrow)]
-    world: WorldShell<'a>,
-}
-#[derive(serde::Deserialize, serde::Serialize)]
-struct RenderingShell<'a> {
-    #[serde(borrow)]
-    materials: &'a serde_json::value::RawValue,
-}
-#[derive(serde::Deserialize, serde::Serialize)]
-struct WorldShell<'a> {
-    #[serde(borrow)]
-    prototypes: &'a serde_json::value::RawValue,
 }
 
 #[wasm_bindgen]
@@ -153,11 +139,14 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
             last_inventory: None,
         })
         .insert_resource(ClearColor(Color::BLACK))
-        .add_plugins(presentation::source_io::SourceIoPlugin::new(&reference))
+        .add_plugins(presentation::source_io::SourceIoPlugin::new(
+            reference.content_base.clone(),
+            Arc::clone(&reference.file_catalog),
+        ))
         .add_plugins(
             DefaultPlugins
                 .set(AssetPlugin {
-                    file_path: "assets".into(),
+                    file_path: reference.content_base.clone(),
                     meta_check: AssetMetaCheck::Never,
                     ..default()
                 })
@@ -252,15 +241,23 @@ fn setup(
 ) {
     commands.insert_resource(InstrumentVisuals::default());
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
-    presentation::materials::load_materials(&mut commands, &server, &reference.0);
+    if let Err(error) =
+        presentation::materials::load_materials(&mut commands, &server, &reference.0)
+    {
+        game_failure(&error.to_string());
+        return;
+    }
     presentation::lighting::load_lighting(&mut commands, &server, &reference.0.lighting);
-    presentation::lighting_assets::load_lighting(
-        &mut commands,
-        &server,
-        &reference.0.render_lighting,
-    );
+    presentation::lighting_assets::load_lighting(&mut commands, &server, Arc::clone(&reference.0));
     presentation::lighting::load_lamp_materials(&mut commands, &gltf_extensions, &reference.0);
     presentation::reference::load(&mut commands, &server, &reference.0);
+    match presentation::fixed_assets::SourceFixedAssets::new(&reference.0) {
+        Ok(fixed) => commands.insert_resource(fixed),
+        Err(error) => {
+            game_failure(&error.to_string());
+            return;
+        }
+    };
     presentation::frame_graph::spawn_cameras(
         &mut commands,
         &mut images,
@@ -299,6 +296,7 @@ fn check_ready(
     lighting: (
         Res<presentation::lighting::SourceLighting>,
         Res<presentation::source_lighting::SourceLighting>,
+        Res<presentation::fixed_assets::SourceFixedAssets>,
     ),
     mut materials: ResMut<presentation::materials::SourceMaterials>,
     mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
@@ -308,7 +306,7 @@ fn check_ready(
         Res<presentation::world::SourceWorldVisuals>,
     ),
 ) {
-    let (lighting, source_lighting) = lighting;
+    let (lighting, source_lighting, fixed) = lighting;
     let (plates, particles, world_visuals) = plates;
     if let Some(error) = mirrors.failure() {
         game_failure(&error);
@@ -339,6 +337,9 @@ fn check_ready(
     }
     if drive.ready {
         *readiness = 0;
+        return;
+    }
+    if !fixed.payloads_ready() || !materials.fixed_textures_ready() {
         return;
     }
     if !drive
@@ -674,6 +675,7 @@ fn sync_world(
             lod_view,
             &receivers[..receiver_count],
             enabled,
+            runtime.lighting.light_outputs(),
             budget_ms,
         )
         .and_then(|_| runtime.align_startup(&reference.0).map(|_| ()))
@@ -848,12 +850,9 @@ fn publish_loading(
     plates: Res<presentation::plates::PlateTextStatus>,
     time: Res<Time<Real>>,
     mut last: Local<f64>,
+    mut traced: Local<u8>,
 ) {
     let now = time.elapsed_secs_f64();
-    if drive.ready || visuals.failed || now - *last < 0.5 {
-        return;
-    }
-    *last = now;
     let stream = &drive.runtime.stream;
     let rendering = visuals.bound
         && materials.state == presentation::materials::RenderingState::Ready
@@ -861,6 +860,22 @@ fn publish_loading(
         && source_lighting.state == presentation::materials::RenderingState::Ready
         && mirrors.ready()
         && plates.ready();
+    if stream.metrics().prepared_roads == crate::world::ROAD_SEGMENTS && *traced & 1 == 0 {
+        game_startup_stage("generation", false);
+        *traced |= 1;
+    }
+    if visuals.bound && *traced & 2 == 0 {
+        game_startup_stage("decodeUpload", false);
+        *traced |= 2;
+    }
+    if rendering && *traced & 4 == 0 {
+        game_startup_stage("pipeline", false);
+        *traced |= 4;
+    }
+    if drive.ready || visuals.failed || now - *last < 0.5 {
+        return;
+    }
+    *last = now;
     game_loading_progress(
         stream.metrics().prepared_roads,
         crate::world::ROAD_SEGMENTS,

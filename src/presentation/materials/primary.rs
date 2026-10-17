@@ -4,10 +4,10 @@ use crate::{
     reference::{AssetId as SourceAssetId, ReferenceError},
     world::WorldStream,
 };
-fn png_staging(mip: &source::TextureMip) -> Result<usize, ReferenceError> {
+pub(super) fn png_staging(mip: &source::TextureMip) -> Result<usize, ReferenceError> {
     let encoded = crate::presentation::world::preflight::checked_input_bytes(&mip.file)?;
     // Input copies plus decoder buffer growth, chunk input, scanlines, and inflate state.
-    Ok(3 * encoded + 2 * 1024 * 1024 + 128 * mip.width as usize)
+    crate::reference::fixed_reservation::png_staging(encoded, mip.width)
 }
 #[derive(Default, Clone)]
 pub struct PrimaryOwnership {
@@ -17,21 +17,16 @@ pub struct PrimaryOwnership {
     cpu: usize,
     gpu: usize,
     jobs: usize,
+    pending: usize,
     staging: usize,
 }
-fn pixels(texture: &TextureRecord) -> usize {
-    texture
-        .mips
-        .iter()
-        .map(|m| m.width as usize * m.height as usize * 4)
-        .sum()
+fn pixels(texture: &TextureRecord) -> Result<usize, ReferenceError> {
+    crate::reference::fixed_reservation::png_pixels(&texture.mips)
 }
 fn texture_cpu_reservation(texture: &SourceTexture) -> usize {
-    // Reserve assembly overlap and both loader slots before starting the first mip.
-    // Holding this window lets later mips finish even when other assets are admitted.
-    pixels(&texture.record) * 2 + texture.input_staging.iter().copied().max().unwrap_or(0) * 2
+    texture.cpu_reservation
 }
-fn pending_texture_cpu(texture: &SourceTexture) -> usize {
+pub(super) fn pending_texture_cpu(texture: &SourceTexture) -> usize {
     texture.upload.cpu_bytes(
         texture_cpu_reservation(texture),
         !texture.levels.is_empty() || texture.image.is_some(),
@@ -60,6 +55,7 @@ impl SourceMaterials {
         self.world_primary.cpu = 0;
         self.world_primary.gpu = 0;
         self.world_primary.jobs = 0;
+        self.world_primary.pending = 0;
         self.world_primary.staging = 0;
         self.world_deferred = DeferredAllocation::default();
     }
@@ -126,23 +122,18 @@ impl SourceMaterials {
         let cpu = self
             .textures
             .iter()
-            .filter(|t| !t.eager)
             .map(|t| pending_texture_cpu(t) + texture_metadata(&t.record))
             .sum::<usize>()
             + self
                 .records
                 .iter()
-                .filter(|r| {
-                    self.world_primary.assets.contains_key(&r.asset)
-                        && !self.world_primary.borrowed_records.contains(&r.asset)
-                })
                 .map(|record| record_bytes(record))
                 .sum::<usize>();
         let gpu = self
             .textures
             .iter()
-            .filter(|t| !t.eager)
-            .map(|t| pixels(&t.record))
+            .filter(|t| !t.failed || t.image.is_some())
+            .map(|t| t.pixel_bytes)
             .sum();
         (cpu + self.container_bytes(), gpu)
     }
@@ -152,6 +143,7 @@ impl SourceMaterials {
         cpu: usize,
         gpu: usize,
         jobs: usize,
+        pending: usize,
         staging: usize,
     ) -> Result<(), ReferenceError> {
         let mut allocation = stream.presentation_allocation();
@@ -164,6 +156,10 @@ impl SourceMaterials {
             .saturating_sub(self.world_primary.gpu)
             + gpu;
         allocation.jobs = allocation.jobs.saturating_sub(self.world_primary.jobs) + jobs;
+        allocation.pending = allocation
+            .pending
+            .saturating_sub(self.world_primary.pending)
+            + pending;
         allocation.staging_bytes = allocation
             .staging_bytes
             .saturating_sub(self.world_primary.staging)
@@ -176,6 +172,7 @@ impl SourceMaterials {
         self.world_primary.cpu = cpu;
         self.world_primary.gpu = gpu;
         self.world_primary.jobs = jobs;
+        self.world_primary.pending = pending;
         self.world_primary.staging = staging;
         Ok(())
     }
@@ -229,7 +226,7 @@ impl SourceMaterials {
                     }
                 }
                 if !self.texture_indices.contains_key(&texture.file) {
-                    let bytes = pixels(texture);
+                    let bytes = pixels(texture)?;
                     added_gpu += bytes;
                     added_cpu += 4096
                         + std::mem::size_of::<SourceTexture>()
@@ -248,6 +245,7 @@ impl SourceMaterials {
             self.world_primary.cpu + added_cpu,
             self.world_primary.gpu + added_gpu,
             self.world_primary.jobs,
+            self.world_primary.pending,
             self.world_primary.staging,
         )?;
         for record in records {
@@ -258,17 +256,24 @@ impl SourceMaterials {
                         .iter()
                         .map(png_staging)
                         .collect::<Result<Vec<_>, _>>()?;
+                    let pixel_bytes = pixels(texture)?;
+                    let cpu_reservation = crate::reference::fixed_reservation::png_cpu(
+                        pixel_bytes,
+                        input_staging.iter().copied().max().unwrap_or(0),
+                    )?;
                     self.texture_indices
                         .insert(texture.file.clone(), self.textures.len());
                     self.textures.push(SourceTexture {
                         owner: Arc::new(()),
                         upload: default(),
                         failed: false,
-                        eager: false,
+                        persistent: false,
                         users: 0,
                         record: Arc::new(texture.clone()),
                         levels: Vec::with_capacity(texture.mips.len()),
                         input_staging,
+                        pixel_bytes,
+                        cpu_reservation,
                         image: None,
                         label: format!(
                             "source material {}:{} {}",
@@ -295,7 +300,7 @@ impl SourceMaterials {
         self.world_primary.assets.get(&asset).is_some_and(|paths| {
             paths.iter().all(|path| {
                 let texture = &self.textures[self.texture_indices[path]];
-                texture.image.is_some() && (texture.eager || pending_texture_cpu(texture) == 0)
+                texture.image.is_some() && pending_texture_cpu(texture) == 0
             })
         })
     }
@@ -307,11 +312,7 @@ impl SourceMaterials {
         materials: &mut Assets<SourceMaterial>,
     ) -> Result<(), ReferenceError> {
         let mut failure = None;
-        for texture in self
-            .textures
-            .iter_mut()
-            .filter(|t| !t.eager && t.image.is_none())
-        {
+        for texture in self.textures.iter_mut().filter(|t| t.image.is_none()) {
             for handle in &texture.levels {
                 if let LoadState::Failed(error) = server.load_state(handle.id()) {
                     if !texture.failed {
@@ -337,13 +338,11 @@ impl SourceMaterials {
                 self.release_world_asset(asset, images, materials, server)?;
             }
         }
+        // Failed fixed chains retain their MAIN_WORLD mip handles and conservative CPU charge.
+        // Dropping handles alone cannot prove that Bevy has removed their pixel assets.
         let mut jobs = 0;
         let mut staging = 0;
-        for texture in self
-            .textures
-            .iter()
-            .filter(|t| !t.eager && t.image.is_none())
-        {
+        for texture in self.textures.iter().filter(|t| t.image.is_none()) {
             for (handle, bytes) in texture.levels.iter().zip(&texture.input_staging) {
                 if !images.contains(handle.id())
                     && !matches!(server.load_state(handle.id()), LoadState::Failed(_))
@@ -354,19 +353,23 @@ impl SourceMaterials {
             }
         }
         let (cpu, gpu) = self.primary_bytes();
-        self.account_primary(stream, cpu, gpu, jobs, staging)?;
+        self.account_primary(stream, cpu, gpu, jobs, self.pending_primary(), staging)?;
         for index in 0..self.textures.len() {
             if stream.available_external_jobs() == 0 {
                 break;
             }
             let texture = &self.textures[index];
             if texture.failed
-                || texture.eager
+                || (texture.persistent && !self.fixed_admitted)
                 || texture.image.is_some()
                 || texture.levels.len() == texture.record.mips.len()
             {
                 continue;
             }
+            if texture.levels.is_empty() && stream.metrics().pending_work >= 32 {
+                continue;
+            }
+            let first = texture.levels.is_empty();
             let staging = texture.input_staging[texture.levels.len()];
             if staging > 32 * 1024 * 1024 {
                 return Err(ReferenceError(
@@ -382,10 +385,7 @@ impl SourceMaterials {
                 0
             };
             if decoded > stream.available_prototype_cpu_bytes()
-                && (self
-                    .textures
-                    .iter()
-                    .any(|t| !t.eager && pending_texture_cpu(t) != 0)
+                && (self.textures.iter().any(|t| pending_texture_cpu(t) != 0)
                     || self.world_primary.jobs < stream.presentation_allocation().jobs)
             {
                 // Let admitted decodes and GPU uploads drain before starting another texture.
@@ -396,6 +396,7 @@ impl SourceMaterials {
                 self.world_primary.cpu + decoded,
                 gpu,
                 self.world_primary.jobs + 1,
+                self.pending_primary() + usize::from(first),
                 self.world_primary.staging + staging,
             )?;
             let texture = &mut self.textures[index];
@@ -411,17 +412,13 @@ impl SourceMaterials {
                     .load(mip.file.clone()),
             );
         }
-        let assembled = assemble_textures(&mut self.textures, server, images, false);
+        let assembled = assemble_textures(&mut self.textures, server, images);
         if let Ok(bytes) = &assembled {
             self.texture_bytes += bytes;
         }
         let mut jobs = 0;
         let mut staging = 0;
-        for texture in self
-            .textures
-            .iter()
-            .filter(|t| !t.eager && t.image.is_none())
-        {
+        for texture in self.textures.iter().filter(|t| t.image.is_none()) {
             for (handle, bytes) in texture.levels.iter().zip(&texture.input_staging) {
                 if !images.contains(handle.id())
                     && !matches!(server.load_state(handle.id()), LoadState::Failed(_))
@@ -432,7 +429,7 @@ impl SourceMaterials {
             }
         }
         let (cpu, gpu) = self.primary_bytes();
-        self.account_primary(stream, cpu, gpu, jobs, staging)?;
+        self.account_primary(stream, cpu, gpu, jobs, self.pending_primary(), staging)?;
         if let Some(error) = failure {
             return Err(error);
         }
@@ -447,15 +444,14 @@ impl SourceMaterials {
         self.world_primary.assets.get(&asset).is_none_or(|paths| {
             paths.iter().all(|path| {
                 let t = &self.textures[self.texture_indices[path]];
-                t.eager
-                    || if t.image.is_some() {
-                        pending_texture_cpu(t) == 0
-                    } else {
-                        t.levels.iter().all(|h| {
-                            images.contains(h.id())
-                                || matches!(server.load_state(h.id()), LoadState::Failed(_))
-                        })
-                    }
+                if t.image.is_some() {
+                    pending_texture_cpu(t) == 0
+                } else {
+                    t.levels.iter().all(|h| {
+                        images.contains(h.id())
+                            || matches!(server.load_state(h.id()), LoadState::Failed(_))
+                    })
+                }
             })
         })
     }
@@ -499,7 +495,7 @@ impl SourceMaterials {
             self.records.retain(|r| r.asset != asset);
         }
         self.textures.retain(|texture| {
-            if !texture.eager && texture.users == 0 {
+            if !texture.persistent && texture.users == 0 {
                 if Arc::strong_count(&texture.owner) == 1 {
                     for level in &texture.levels {
                         images.remove(level.id());
@@ -573,7 +569,6 @@ impl SourceMaterials {
         if self.world_textures.admitted(&material.source) {
             return Ok(());
         }
-        let metrics = stream.metrics();
         let (cpu, gpu) = self.world_textures.bytes();
         self.world_textures.admit(
             material,
@@ -588,8 +583,8 @@ impl SourceMaterials {
             } else {
                 &reference.world.material_textures
             },
-            (256 * 1024 * 1024usize).saturating_sub(metrics.prototype_cpu_bytes) + cpu,
-            (512 * 1024 * 1024usize).saturating_sub(metrics.prototype_gpu_bytes) + gpu,
+            stream.available_prototype_cpu_bytes() + cpu,
+            stream.available_prototype_gpu_bytes() + gpu,
         )?;
         self.account_deferred(
             stream,
@@ -615,9 +610,7 @@ impl SourceMaterials {
         stream.set_presentation_allocation(allocation)?;
         self.world_deferred.jobs += free;
         self.world_deferred.staging += staging_available;
-        let available_cpu = (256 * 1024 * 1024usize)
-            .saturating_sub(stream.metrics().prototype_cpu_bytes)
-            + self.world_textures.bytes().0;
+        let available_cpu = stream.available_prototype_cpu_bytes() + self.world_textures.bytes().0;
         let result =
             self.world_textures
                 .prepare(server, images, free, staging_available, available_cpu);
@@ -630,5 +623,102 @@ impl SourceMaterials {
 impl PrimaryOwnership {
     pub fn asset_ids(&self) -> impl Iterator<Item = SourceAssetId> + '_ {
         self.assets.keys().copied()
+    }
+}
+
+impl SourceMaterials {
+    pub(super) fn select_lighting_textures(
+        &mut self,
+        reference: &ReferenceManifest,
+    ) -> Result<(), ReferenceError> {
+        for t in &reference.render_lighting.textures {
+            let file = &t.mips[0].file;
+            if let Some(&index) = self.texture_indices.get(file) {
+                let old = &self.textures[index].record;
+                if old.source != t.source
+                    || old.color_space != t.color_space
+                    || old.sampler.filter != t.sampler.filter
+                    || old.sampler.wrap_u != t.sampler.wrap_u
+                    || old.sampler.wrap_v != t.sampler.wrap_v
+                    || old.sampler.aniso != t.sampler.aniso
+                    || old.sampler.mip_bias.to_bits() != t.sampler.mip_bias.to_bits()
+                    || old.sampler.mip_count != t.sampler.mip_count
+                    || old.mips.len() != t.mips.len()
+                    || !old.mips.iter().zip(&t.mips).all(|(a, b)| {
+                        a.file == b.file && a.width == b.width && a.height == b.height
+                    })
+                {
+                    return Err(ReferenceError(
+                        "Conflicting persistent lighting sampler".into(),
+                    ));
+                }
+                self.textures[index].persistent = true;
+                continue;
+            }
+            let record = TextureRecord {
+                slot: String::new(),
+                source: t.source.clone(),
+                file: file.clone(),
+                color_space: t.color_space,
+                encoding: source::TextureEncoding::Rgba,
+                source_encoding: source::TextureEncoding::Rgba,
+                uv_channel: 0,
+                scale: [1., 1.],
+                offset: [0., 0.],
+                sampler: t.sampler.clone(),
+                mips: t.mips.clone(),
+            };
+            let input_staging = t
+                .mips
+                .iter()
+                .map(png_staging)
+                .collect::<Result<Vec<_>, _>>()?;
+            let pixel_bytes = pixels(&record)?;
+            let cpu_reservation = crate::reference::fixed_reservation::png_cpu(
+                pixel_bytes,
+                input_staging.iter().copied().max().unwrap_or(0),
+            )?;
+            self.texture_indices
+                .insert(file.clone(), self.textures.len());
+            self.textures.push(SourceTexture {
+                owner: Arc::new(()),
+                upload: default(),
+                failed: false,
+                persistent: true,
+                users: 0,
+                record: Arc::new(record),
+                levels: Vec::with_capacity(t.mips.len()),
+                input_staging,
+                pixel_bytes,
+                cpu_reservation,
+                image: None,
+                label: file.clone(),
+            });
+        }
+        Ok(())
+    }
+    pub(crate) fn cancel_fixed(&mut self) {
+        self.fixed_admitted = false;
+        for texture in self
+            .textures
+            .iter_mut()
+            .filter(|t| t.persistent && t.image.is_none())
+        {
+            texture.failed = true;
+        }
+    }
+    fn pending_primary(&self) -> usize {
+        self.textures
+            .iter()
+            .filter(|t| pending_texture_cpu(t) > 0)
+            .count()
+    }
+    pub(crate) fn fixed_textures_ready(&self) -> bool {
+        self.fixed_admitted
+            && self
+                .textures
+                .iter()
+                .filter(|t| t.persistent)
+                .all(|t| t.image.is_some() && t.upload.completed())
     }
 }

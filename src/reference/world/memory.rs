@@ -147,6 +147,7 @@ fields!(WorldRenderTarget:property,source,scale,offset);
 fields!(WorldGrassDisplacement:camera,follow,displacement,transform,follow_target,target,follow_height,border,writers);
 fields!(WorldGrassWriter:transform,owner,renderer,filter,mesh,materials,layer,enabled);
 
+fields!(super::super::FileReceipt:file,sha256);
 fields!(super::super::AssetRecord:path,sha256,root,dependencies);
 fields!(super::super::rendering::MaterialRecord:source,condition,keywords,properties);
 fields!(super::super::rendering::MaterialCondition:source);

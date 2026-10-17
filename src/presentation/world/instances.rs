@@ -42,6 +42,9 @@ struct Renderer {
     settings: Option<GrassSettings>,
 }
 struct Instance {
+    retirement: crate::world::renderer_pending::RendererRetirement,
+    continuation: Option<crate::world::renderer_pending::PipelineContinuation>,
+    upload: Option<Arc<crate::presentation::fixed_assets::MeshUpload>>,
     caps_bound: bool,
     placement: Placement,
     session: u64,
@@ -52,6 +55,8 @@ struct Instance {
     worlds: Vec<DMat4>,
     // Frozen source frame for procedural color, wind, and Grass inputs only.
     source_worlds: Vec<Mat4>,
+    // VehiclePose changes position and rotation. Retain the original composed scales.
+    scales: Vec<(Vec3, Vec3)>,
     renderers: Vec<Renderer>,
     lods: Vec<LodGroup>,
     ready: bool,
@@ -67,8 +72,33 @@ pub struct SourceInstances {
     pending: Option<Placement>,
 }
 impl SourceInstances {
+    pub(crate) fn drained(&self) -> bool {
+        self.instances
+            .iter()
+            .all(|i| i.continuation.as_ref().is_none_or(|c| c.drained()))
+    }
+    pub(crate) fn startup_audit(&self, grass: &GrassJobs) -> serde_json::Value {
+        serde_json::json!({
+            "pending_owner": self.pending.as_ref().map(|p| &p.prototype),
+            "unready": self.instances.iter().filter(|i| !i.ready).count(),
+            "grass_waits": self.instances.iter().filter(|i| !i.ready).flat_map(|i| &i.renderers)
+                .filter(|r| r.settings.is_some() && !grass.ready(r.entity)).count(),
+            "unready_renderers": self.instances.iter().filter(|i| !i.ready).flat_map(|i| &i.renderers)
+                .take(4).map(|r| serde_json::json!({
+                    "grass": r.settings.is_some(),
+                    "tickets": r.tickets.each_ref().map(|t| t.as_ref().map(|t| format!("{:?}", t.state()))),
+                })).collect::<Vec<_>>(),
+        })
+    }
     pub fn ready(&self) -> bool {
-        self.instances.iter().all(|i| i.ready && i.visible)
+        self.instances
+            .iter()
+            .all(|i| !i.retirement.started() && i.ready && i.visible)
+    }
+    pub(crate) fn uses_prototype(&self, source: &crate::reference::SourceId) -> bool {
+        self.instances
+            .iter()
+            .any(|i| i.placement.prototype == *source)
     }
     pub fn roots(&self) -> impl Iterator<Item = Entity> + '_ {
         self.instances.iter().map(|i| i.root)
@@ -113,16 +143,40 @@ impl SourceInstances {
             .flat_map(|i| i.renderers.iter().map(move |r| (r.mesh.id(), !i.ready)))
     }
 
+    pub fn request_descriptors(
+        &self,
+        stream: &mut WorldStream,
+        reference: &ReferenceManifest,
+        prototypes: &mut SourcePrototypes,
+    ) -> Result<(), ReferenceError> {
+        // Discover selected descriptors before material or payload readiness.
+        for index in 0..stream.pending_structures().len() {
+            let source = &stream.pending_structures()[index].prototype;
+            if prototypes.requested(source) {
+                continue;
+            }
+            let prototype = reference
+                .world
+                .prototypes
+                .iter()
+                .find(|p| p.source == *source)
+                .ok_or_else(|| ReferenceError("Missing generated structure prototype".into()))?;
+            prototypes.request(stream, &prototype.source)?;
+        }
+        Ok(())
+    }
     pub fn prepare(
         &mut self,
         stream: &mut WorldStream,
         reference: &ReferenceManifest,
         prototypes: &mut SourcePrototypes,
+        server: &AssetServer,
         assets: &Assets<SourceGltf>,
         meshes: &mut Assets<Mesh>,
         materials: &mut InstanceMaterials,
         grass: &mut GrassJobs,
         pipelines: &mut WorldPipelines,
+        fixed: &crate::presentation::fixed_assets::SourceFixedAssets,
         commands: &mut Commands,
         view: GrassView,
     ) -> Result<(), ReferenceError> {
@@ -158,17 +212,40 @@ impl SourceInstances {
                 })
                 .cloned();
         }
+        if let Some(placement) = self.pending.as_ref() {
+            if prototypes
+                .plan(stream.frame().request.session, &placement.prototype)
+                .is_some()
+            {
+                // Task 2B inserts the combined descriptor check before this call.
+                prototypes.admit_payload(stream, reference, server, &placement.prototype)?;
+            }
+        }
         // Full pending ownership must drain through publication before another instance starts.
         // Continue polling existing renderer work below, including its readiness transfer.
-        if let Some(placement) = self.pending.as_ref().filter(|_| stream.pending_room()) {
+        if let Some(placement) = self.pending.as_ref().filter(|placement| {
+            let child = reference
+                .world
+                .prototypes
+                .iter()
+                .find(|p| p.source == placement.prototype)
+                .is_some_and(|p| {
+                    p.deferred_materials
+                        .iter()
+                        .any(|m| m.shader.name == "Stix Games/Grass")
+                });
+            stream.can_request_independent(1 + usize::from(child))
+        }) {
             let prototype = reference
                 .world
                 .prototypes
                 .iter()
                 .find(|p| p.source == placement.prototype)
                 .ok_or_else(|| ReferenceError("Missing generated structure prototype".into()))?;
-            prototypes.request(stream, &placement.prototype)?;
-            let admitted = materials.admit(stream, reference, prototype, &placement.id)?;
+            let admitted = prototypes
+                .plan(stream.frame().request.session, &placement.prototype)
+                .is_some()
+                && materials.admit(stream, reference, prototype, &placement.id)?;
             if admitted {
                 if let Some(loaded) =
                     prototypes.loaded(stream.frame().request.session, &placement.prototype)
@@ -189,17 +266,22 @@ impl SourceInstances {
                             })
                             .sum::<usize>();
                         // Reservations include ECS storage, transforms, material bind groups, and LOD membership.
-                        let mut cpu = count * (2048 + std::mem::size_of::<DMat4>())
+                        let mut cpu = count
+                            * (2048
+                                + std::mem::size_of::<DMat4>()
+                                + std::mem::size_of::<(Vec3, Vec3)>())
+                            + std::mem::size_of::<Vec<()>>()
                             + primitives * (8192 + crate::presentation::caster_material::CPU_BYTES);
                         let mut gpu =
                             primitives * (2048 + crate::presentation::caster_material::gpu_bytes());
                         let objects = count + primitives;
-                        let mut a = stream.presentation_allocation();
-                        a.active_cpu += cpu;
-                        a.active_gpu += gpu;
-                        a.objects += objects;
-                        a.pending += 1;
-                        stream.set_presentation_allocation(a)?;
+                        let mut continuation = stream.reserve_instance_renderer(
+                            stream.frame().request,
+                            &placement.id,
+                            cpu,
+                            gpu,
+                            objects,
+                        )?;
                         let root_pose = local_root(placement, stream.origin);
                         let root = commands
                             .spawn((
@@ -672,6 +754,7 @@ impl SourceInstances {
                                             grass.request(
                                                 stream,
                                                 entity,
+                                                root,
                                                 Arc::clone(&patches),
                                                 mesh.clone(),
                                                 settings,
@@ -702,6 +785,9 @@ impl SourceInstances {
                                 }
                             }
                             Ok(Instance {
+                                retirement: Default::default(),
+                                continuation: None,
+                                upload: None,
                                 caps_bound: false,
                                 placement: placement.clone(),
                                 session: stream.frame().request.session,
@@ -715,6 +801,16 @@ impl SourceInstances {
                                     })
                                     .collect(),
                                 nodes,
+                                scales: worlds
+                                    .iter()
+                                    .zip(&source_worlds)
+                                    .map(|(world, source)| {
+                                        (
+                                            world.as_mat4().to_scale_rotation_translation().0,
+                                            source.to_scale_rotation_translation().0,
+                                        )
+                                    })
+                                    .collect(),
                                 worlds,
                                 source_worlds,
                                 renderers,
@@ -728,7 +824,15 @@ impl SourceInstances {
                             })
                         })();
                         match construction {
-                            Ok(instance) => self.instances.push(instance),
+                            Ok(mut instance) => {
+                                let upload = fixed.watch_meshes(
+                                    instance.renderers.iter().map(|r| r.mesh.clone()),
+                                );
+                                continuation.watch_upload(upload.receipt.clone());
+                                instance.continuation = Some(continuation);
+                                instance.upload = Some(upload);
+                                self.instances.push(instance);
+                            }
                             Err(error) => {
                                 commands.entity(root).despawn();
                                 for (entity, binding) in owned_bindings {
@@ -739,8 +843,8 @@ impl SourceInstances {
                                 a.active_cpu = a.active_cpu.saturating_sub(cpu);
                                 a.active_gpu = a.active_gpu.saturating_sub(gpu);
                                 a.objects = a.objects.saturating_sub(objects);
-                                a.pending = a.pending.saturating_sub(1);
                                 stream.set_presentation_allocation(a)?;
+                                stream.release_renderer_pending(&mut continuation)?;
                                 return Err(error);
                             }
                         }
@@ -750,7 +854,8 @@ impl SourceInstances {
             }
         }
         for instance in &mut self.instances {
-            if instance.ready
+            if instance.retirement.started()
+                || instance.ready
                 || instance.session != stream.frame().request.session
                 || !stream
                     .pending_structures()
@@ -769,6 +874,7 @@ impl SourceInstances {
                     renderer.tickets[0] = renderer.binding.visible.warm(
                         stream,
                         pipelines,
+                        instance.continuation.as_mut().unwrap(),
                         &renderer.mesh,
                         renderer.shadow,
                     )?;
@@ -779,6 +885,7 @@ impl SourceInstances {
                         variant.tickets[0] = variant.binding.visible.warm(
                             stream,
                             pipelines,
+                            instance.continuation.as_mut().unwrap(),
                             &renderer.mesh,
                             renderer.shadow,
                         )?;
@@ -786,28 +893,38 @@ impl SourceInstances {
                     complete &= ready(&variant.tickets[0])?;
                     if let Some(caster) = &variant.binding.caster {
                         if variant.tickets[1].is_none() {
-                            variant.tickets[1] =
-                                pipelines.request(stream, &renderer.mesh, caster, true)?;
+                            variant.tickets[1] = pipelines.request_continuation(
+                                stream,
+                                instance.continuation.as_mut().unwrap(),
+                                &renderer.mesh,
+                                caster,
+                                true,
+                            )?;
                         }
                         complete &= ready(&variant.tickets[1])?;
                     }
                 }
                 if let Some(caster) = &renderer.binding.caster {
                     if renderer.tickets[1].is_none() {
-                        renderer.tickets[1] =
-                            pipelines.request(stream, &renderer.mesh, caster, true)?;
+                        renderer.tickets[1] = pipelines.request_continuation(
+                            stream,
+                            instance.continuation.as_mut().unwrap(),
+                            &renderer.mesh,
+                            caster,
+                            true,
+                        )?;
                     }
                     complete &= ready(&renderer.tickets[1])?;
                 }
             }
-            if complete {
+            if complete && instance.continuation.as_ref().unwrap().drained() {
                 stream.bind_prototype(&instance.placement.prototype)?;
                 stream.bind_structure_recipe(&instance.placement.prototype)?;
-                stream.accept_structure_renderer(stream.frame().request, &instance.placement.id)?;
+                let claim = instance.continuation.as_mut().unwrap();
+                stream.accept_structure_renderer(claim.request(), &instance.placement.id, claim)?;
                 instance.ready = true;
-                let mut a = stream.presentation_allocation();
-                a.pending -= 1;
-                stream.set_presentation_allocation(a)?;
+                instance.continuation = None;
+                instance.upload = None;
             }
         }
         Ok(())
@@ -825,6 +942,9 @@ impl SourceInstances {
         self.rebase(stream.origin, commands);
         let frame = stream.frame();
         for instance in &mut self.instances {
+            if instance.retirement.started() {
+                continue;
+            }
             if !stream.bindings_ready(&instance.placement.id) {
                 if instance.visible {
                     commands.entity(instance.root).insert(Visibility::Hidden);
@@ -999,6 +1119,8 @@ impl SourceInstances {
                             }
                         }
                     }
+                    instance.worlds[index] = world;
+                    instance.source_worlds[index] = source_world;
                     let parent = if let Some(parent) = node.parent {
                         instance.worlds[prototype.nodes[parent as usize].gltf_node as usize]
                     } else {
@@ -1015,9 +1137,7 @@ impl SourceInstances {
                     continue;
                 };
                 let index = node.gltf_node as usize;
-                let (scale, _, _) = instance.worlds[index]
-                    .as_mat4()
-                    .to_scale_rotation_translation();
+                let scale = instance.scales[index].0;
                 let world = Mat4::from_scale_rotation_translation(
                     scale,
                     Quat::from_array(pose.rotation),
@@ -1025,8 +1145,7 @@ impl SourceInstances {
                 )
                 .as_dmat4();
                 instance.worlds[index] = world;
-                let (source_scale, _, _) =
-                    instance.source_worlds[index].to_scale_rotation_translation();
+                let source_scale = instance.scales[index].1;
                 instance.source_worlds[index] = Mat4::from_scale_rotation_translation(
                     source_scale,
                     Quat::from_array(pose.rotation),
@@ -1068,6 +1187,9 @@ impl SourceInstances {
         grass: &mut GrassJobs,
     ) {
         for instance in &mut self.instances {
+            if instance.retirement.started() {
+                continue;
+            }
             let prototype = reference
                 .world
                 .prototypes
@@ -1132,6 +1254,9 @@ impl SourceInstances {
         meshes: &Assets<Mesh>,
     ) -> Result<(), ReferenceError> {
         for instance in &self.instances {
+            if instance.retirement.started() {
+                continue;
+            }
             let prototype = reference
                 .world
                 .prototypes
@@ -1166,6 +1291,9 @@ impl SourceInstances {
         view: GrassView,
     ) -> Result<(), ReferenceError> {
         for instance in &self.instances {
+            if instance.retirement.started() {
+                continue;
+            }
             for renderer in &instance.renderers {
                 if renderer.settings.is_some() {
                     grass.request_view(stream, renderer.entity, view)?;
@@ -1186,18 +1314,34 @@ impl SourceInstances {
         let mut index = 0;
         while index < self.instances.len() {
             let id = &self.instances[index].placement.id;
-            if self.instances[index].session == stream.frame().request.session
+            let wanted = self.instances[index].session == stream.frame().request.session
                 && (stream.pending_structures().iter().any(|p| &p.id == id)
                     || stream
                         .frame()
                         .structures
                         .iter()
-                        .any(|s| &s.placement.id == id))
+                        .any(|s| &s.placement.id == id));
+            if self.instances[index].retirement.keep(wanted) {
+                index += 1;
+                continue;
+            }
+            let mut grass_drained = true;
+            for renderer in &self.instances[index].renderers {
+                grass_drained &=
+                    grass.retire(stream, renderer.entity, meshes, &mut materials.grass)?;
+            }
+            let parent_drained = self.instances[index]
+                .continuation
+                .as_ref()
+                .is_none_or(|c| c.drained());
+            if !self.instances[index]
+                .retirement
+                .drained(parent_drained, grass_drained)
             {
                 index += 1;
                 continue;
             }
-            let instance = self.instances.swap_remove(index);
+            let mut instance = self.instances.swap_remove(index);
             commands.entity(instance.root).despawn();
             for renderer in instance.renderers {
                 writers.retire(stream, renderer.entity)?;
@@ -1211,8 +1355,10 @@ impl SourceInstances {
             a.active_cpu = a.active_cpu.saturating_sub(instance.cpu);
             a.active_gpu = a.active_gpu.saturating_sub(instance.gpu);
             a.objects = a.objects.saturating_sub(instance.objects);
-            a.pending = a.pending.saturating_sub(usize::from(!instance.ready));
             stream.set_presentation_allocation(a)?;
+            if let Some(claim) = instance.continuation.as_mut() {
+                stream.release_renderer_pending(claim)?;
+            }
         }
         Ok(())
     }

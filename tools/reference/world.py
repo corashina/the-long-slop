@@ -417,8 +417,8 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     world['records']=list(records.values())
     from .world_spawn import project_runtime_receipts
     from .world_fields import project_runtime_fields
-    project_runtime_receipts(world,output)
-    project_runtime_fields(world,output)
+    project_runtime_receipts(world,world_probe.PROBE_ROOT)
+    project_runtime_fields(world,world_probe.PROBE_ROOT)
     return world
 
 def recover_catalog(source, reader, selected, database):
@@ -563,7 +563,11 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
         name=f'world-{identity[0].replace(".","-")}-{identity[1]}'
         exporter=GltfExporter(source,output/f'{name}.gltf',reader,index)
         report=exporter.export([root])
-        for material in [*report['materials'], *report['deferred_materials']]:
+        for material in report['materials']:
+            selected.record(source.get(material['source']['file'],material['source']['path_id']))
+            for texture in material['properties']['textures']:
+                selected.receipt(source.get(texture['source']['file'],texture['source']['path_id']))
+        for material in report['deferred_materials']:
             selected.record(source.get(material['source']['file'],material['source']['path_id']))
         hierarchy=source.hierarchy(root,activate_root=True)
         for node in hierarchy:

@@ -48,7 +48,7 @@ impl AssetLoader for SourceGltfLoader {
             .read_to_end(&mut bytes)
             .await?;
         if bytes.len() != settings.json_bytes {
-            return Err(invalid("Prototype changed after receipt preflight".into()));
+            return Err(invalid("Prototype changed from the receipt".into()));
         }
         let document = gltf::Gltf::from_slice(&bytes).map_err(|e| invalid(e.to_string()))?;
         let directory = context
@@ -78,7 +78,7 @@ impl AssetLoader for SourceGltfLoader {
                 .map_err(|e| invalid(e.to_string()))?;
             if data.len() != buffer.length() {
                 return Err(invalid(
-                    "Prototype buffer length differs from receipt preflight".into(),
+                    "Prototype buffer length differs from the receipt".into(),
                 ));
             }
             buffers.push(data);
@@ -95,7 +95,7 @@ impl AssetLoader for SourceGltfLoader {
             let Some(source_mesh) = node.mesh() else {
                 continue;
             };
-            let extras: super::preflight::NodeExtras = serde_json::from_str(
+            let extras: crate::reference::prototype_plan::NodeExtras = serde_json::from_str(
                 node.extras()
                     .as_ref()
                     .ok_or_else(|| invalid("Missing source renderer extras".into()))?

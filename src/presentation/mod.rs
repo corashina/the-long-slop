@@ -2,6 +2,7 @@ pub mod camera;
 mod candidate_upload;
 pub mod conditions;
 pub mod consumables;
+pub mod fixed_assets;
 pub mod gpu_prepare;
 pub mod instruments;
 pub mod lighting;

@@ -382,6 +382,18 @@ impl RoadIndex {
         self.sequence.state.next_segment == ROAD_SEGMENTS
     }
 
+    pub fn candidate_count(&self, bounds: WorldBounds) -> usize {
+        self.blocks
+            .iter()
+            .filter(|block| {
+                (0..3).all(|a| {
+                    block.bounds.min[a] <= bounds.max[a] && block.bounds.max[a] >= bounds.min[a]
+                })
+            })
+            .map(|block| (block.end - block.first) as usize)
+            .sum()
+    }
+
     /// Return candidate segment identities from intersecting prepared blocks.
     /// Call segment to refine candidates against their segment bounds.
     pub fn segments_in(&self, bounds: WorldBounds, output: &mut Vec<u32>) {

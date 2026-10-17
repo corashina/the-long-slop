@@ -1,5 +1,7 @@
 //! Ordinary 2D shadow atlas using Bevy's material shadow phases.
-use super::lighting::{ATLAS_SIZE, GpuShadow, LightingGpu, SHADOW_SLOTS, SourceLight, TILE_SIZE};
+use super::lighting::{
+    ATLAS_SIZE, GpuShadow, LightingGpu, SHADOW_BANK_SIZE, SHADOW_SLOTS, SourceLight, TILE_SIZE,
+};
 use bevy::camera::{
     primitives::{CUBE_MAP_FACES, CubemapFrusta, Frustum},
     visibility::RenderLayers,
@@ -175,7 +177,7 @@ fn prepare_views(
             layers.clone(),
             NoIndirectDrawing,
         ));
-        gpu.uniform.get_mut().shadows[slot_index] = GpuShadow {
+        let shadow = GpuShadow {
             clip_from_world: clip,
             rect: Vec4::new(
                 (TILE_SIZE - 2) as f32 / ATLAS_SIZE as f32,
@@ -185,6 +187,11 @@ fn prepare_views(
             ),
             bias: Vec4::new(normal_bias, depth_bias, 0., 0.),
         };
+        if slot_index < SHADOW_BANK_SIZE {
+            gpu.shadow_a.get_mut().shadows[slot_index] = shadow;
+        } else {
+            gpu.shadow_b.get_mut().shadows[slot_index - SHADOW_BANK_SIZE] = shadow;
+        }
     };
     for (entity, main, marker, light, layers, cube, frustum) in &points {
         if !marker.enabled || marker.faces == 0 {
