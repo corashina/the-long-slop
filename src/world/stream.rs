@@ -439,6 +439,12 @@ impl WorldStream {
             self.revise_selection();
         }
     }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn lod_owner(&self, source: &SourceId) -> Option<&SourceId> {
+        self.contents
+            .rules
+            .full_record_owner(&self.reference, source)
+    }
     pub fn seed(&self) -> i32 {
         self.seed
     }

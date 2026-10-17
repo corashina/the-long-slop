@@ -392,7 +392,10 @@ impl SourceInstances {
                                     },
                                 );
                             }
-                            let lods = LodGroup::for_prototype(&reference.world, prototype)?;
+                            let lods =
+                                LodGroup::for_prototype(&reference.world, prototype, |source| {
+                                    stream.lod_owner(source)
+                                })?;
                             let mut renderers = Vec::with_capacity(primitives);
                             for (source_index, source_node) in prototype.nodes.iter().enumerate() {
                                 if !source_node.renderer_enabled {

@@ -41,26 +41,16 @@ fn number(value: Option<&WorldValue>) -> Result<f32, ReferenceError> {
     }
 }
 impl LodGroup {
-    pub fn for_prototype(
+    pub fn for_prototype<'a>(
         reference: &WorldReference,
         prototype: &WorldPrototypeReference,
+        owner: impl Fn(&SourceId) -> Option<&'a SourceId>,
     ) -> Result<Vec<Self>, ReferenceError> {
-        let owner = |source: &SourceId| {
-            reference
-                .records
+        let node_for = |node_owner: &SourceId| {
+            prototype
+                .nodes
                 .iter()
-                .find(|r| r.source == *source)
-                .and_then(|r| link(r.fields.get("m_GameObject")))
-        };
-        let node_for = |owner: &SourceId| {
-            prototype.nodes.iter().position(|n| {
-                reference
-                    .records
-                    .iter()
-                    .find(|r| r.source == n.source)
-                    .and_then(|r| link(r.fields.get("m_GameObject")))
-                    == Some(owner)
-            })
+                .position(|n| owner(&n.source) == Some(node_owner))
         };
         let mut result = Vec::new();
         for record in reference
