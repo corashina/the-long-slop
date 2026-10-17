@@ -1379,7 +1379,8 @@ impl WorldStream {
         if !self.admit_generation(budget) {
             return;
         }
-        let can_request = self.metrics().pending_work < 32;
+        let metrics = self.metrics();
+        let can_request = metrics.pending_work < 32;
         if self.failure.is_some() {
             return;
         }
@@ -1405,7 +1406,7 @@ impl WorldStream {
         };
         let current = self.props.placements().len();
         let maximum = MAX_OBJECTS
-            .saturating_sub(self.metrics().generated_objects)
+            .saturating_sub(metrics.generated_objects)
             .saturating_add(current);
         if let Err(error) = self.props.advance(
             [self.request.player, self.request.vehicle],
