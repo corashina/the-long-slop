@@ -71,7 +71,6 @@ pub struct WorldFrame<'a> {
     pub structures: &'a [super::StructureInstance],
     pub supplies: &'a [PublishedSupply],
     pub startup: Option<&'a StartupTerrain>,
-    pub metrics: WorldMetrics,
     pub failure: Option<&'a str>,
 }
 pub struct PublishedSupply {
@@ -3663,7 +3662,6 @@ impl WorldStream {
             structures: &self.structures,
             supplies: &self.supplies,
             startup: self.startup.as_ref(),
-            metrics: self.metrics(),
             failure: self.failure.as_deref(),
         }
     }

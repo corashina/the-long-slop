@@ -337,7 +337,7 @@ pub(crate) mod browser {
         let snapshot = Snapshot {
             session: frame.request.session,
             revision: frame.request.revision,
-            world: frame.metrics,
+            world: runtime.stream.metrics(),
             startup: serde_json::json!({
                 "fixed": fixed.startup_audit(),
                 "simulation_seconds": runtime.simulation_seconds,
