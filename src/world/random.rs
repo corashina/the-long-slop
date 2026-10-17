@@ -1,7 +1,8 @@
 //! Installed mscorlib seeded subtractive random stream.
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RandomState {
+    #[serde(with = "random_values")]
     pub values: [i32; 56],
     pub next: usize,
     pub paired: usize,
@@ -107,5 +108,17 @@ impl SourceRandom {
             next: state.next,
             paired: state.paired,
         }
+    }
+}
+
+mod random_values {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    pub fn serialize<S: Serializer>(v: &[i32; 56], s: S) -> Result<S::Ok, S::Error> {
+        v.as_slice().serialize(s)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[i32; 56], D::Error> {
+        Vec::<i32>::deserialize(d)?
+            .try_into()
+            .map_err(|_| serde::de::Error::custom("Invalid random state length"))
     }
 }

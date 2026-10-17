@@ -1,3 +1,5 @@
+mod generation;
+pub use generation::*;
 pub mod changes;
 pub mod types;
 pub use changes::{
@@ -18,7 +20,8 @@ pub mod spawn_state;
 mod unity_random;
 pub use placement::{
     BUILDING_CHECKPOINT_INTERVAL, BuildingCheckpoint, BuildingGroupState, BuildingSequence,
-    FoundationPoint, PlacementIndex, SupplyDefinition, SupplyFluid, SupplyPoint,
+    FoundationPoint, PlacementIndex, PlacementIndexSnapshot, SupplyDefinition, SupplyFluid,
+    SupplyPoint,
 };
 pub use spawn_state::{SourceSpawnState, SpawnBoundary, SpawnContext, SpawnPhase};
 pub use unity_random::{UnityRandom, UnityRandomState};
@@ -26,8 +29,8 @@ mod road;
 pub use noise::{TerrainEvaluator, source_perlin};
 pub use random::{RandomState, SourceRandom};
 pub use road::{
-    ROAD_CHECKPOINT_INTERVAL, ROAD_CONTROLS, ROAD_SEGMENTS, RoadCheckpoint, RoadCurve, RoadIndex,
-    RoadSegment, RoadSequence, RoadState, deform_road,
+    ROAD_CHECKPOINT_INTERVAL, ROAD_CONTROLS, ROAD_SEGMENTS, RoadBlock, RoadCheckpoint, RoadCurve,
+    RoadIndex, RoadIndexSnapshot, RoadSegment, RoadSequence, RoadState, deform_road,
 };
 mod instances;
 pub use instances::{StructureInstance, StructureRecipe};

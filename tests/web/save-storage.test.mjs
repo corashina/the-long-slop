@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {webcrypto as crypto} from 'node:crypto';
 import {createSaveStorage, manifestStamp, verifyRecord} from '../../web/save-storage.js';
 
-const payload={schema_version:4,saved_at:'2026-10-12',world:{seed:42},source:{build_id:11140890}};
+const payload={schema_version:6,saved_at:'2026-10-12',world:{seed:42},source:{build_id:11140890}};
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 // Inject request events only. Real database behavior belongs to the browser fixture.
 function boundary(){
@@ -40,4 +40,12 @@ test('incompatible_upgrade_aborts_without_creating_a_store',async()=>{
 test('cancel_during_delayed_hash_never_opens_a_transaction',async()=>{
  let finish;const delayedCrypto={subtle:{digest:()=>new Promise(resolve=>{finish=resolve;})}};
  const b=boundary();const storage=createSaveStorage({indexedDB:b.indexedDB,crypto:delayedCrypto});const controller=new AbortController();const write=storage.write(payload,{signal:controller.signal});controller.abort();finish(new ArrayBuffer(32));await assert.rejects(write,{name:'AbortError'});assert.equal(b.indexedDB.args,undefined);
+});
+
+test('schema_5_rejection_preserves_stored_bytes',async()=>{
+ const {createSaveSession}=await import('../../web/save-session.js');
+ const b=boundary(); const write=b.storage.write({...payload,schema_version:5}); await connect(b); b.tx.oncomplete(); await write;
+ const before=JSON.stringify(b.tx.record); let commits=0;
+ const session=createSaveSession({storage:{read:async()=>b.tx.record,write:async()=>{throw new Error('Unexpected write');}},runtime:{prepare:async()=>{throw new Error('Schema version');},commit:async()=>{commits++;},discard:()=>{}}});
+ await assert.rejects(session.load(),/Schema version/); assert.equal(JSON.stringify(b.tx.record),before); assert.equal(commits,0);
 });

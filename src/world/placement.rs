@@ -4,15 +4,15 @@ use super::{
     WorldBounds, WorldLayer,
 };
 use crate::reference::{
-    ColliderGeometry, SourceId, Transform, WorldBuildingGroup, WorldBuildingReference,
-    WorldPrototypeReference, WorldReference, WorldSourceRecord, WorldValue,
+    ColliderGeometry, ReferenceError, SourceId, Transform, WorldBuildingGroup,
+    WorldBuildingReference, WorldPrototypeReference, WorldReference, WorldSourceRecord, WorldValue,
 };
 use std::{collections::HashMap, sync::Arc};
 
 pub const BUILDING_CHECKPOINT_INTERVAL: u32 = 32;
 const SOURCE_END: f64 = 5_000_000.0;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BuildingGroupState {
     pub available: Vec<i32>,
     pub current_available: Vec<i32>,
@@ -21,7 +21,7 @@ pub struct BuildingGroupState {
 }
 
 /// Boundary after a complete selection, including its following spacing draw.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BuildingCheckpoint {
     pub random: RandomState,
     pub groups: Vec<BuildingGroupState>,
@@ -54,7 +54,7 @@ pub struct SupplyDefinition {
     pub emission_max_rate: f32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SupplyPoint {
     pub building_index: u32,
     pub supply_index: usize,
@@ -74,7 +74,7 @@ impl SupplyPoint {
         }
     }
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FoundationPoint {
     pub building_index: u32,
     pub helper_index: usize,
@@ -295,6 +295,7 @@ impl Building {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 struct Block {
     checkpoint: BuildingCheckpoint,
     end: u32,
@@ -309,6 +310,7 @@ pub struct PlacementIndex {
     blocks: Vec<Block>,
     foundations: Vec<FoundationPoint>,
     supplies: Vec<SupplyPoint>,
+    checked_blocks: Vec<bool>,
 }
 impl PlacementIndex {
     pub fn new(reference: &WorldReference, seed: i32) -> Self {
@@ -332,6 +334,9 @@ impl PlacementIndex {
             sequence,
             replay,
             blocks: Vec::with_capacity(count.div_ceil(BUILDING_CHECKPOINT_INTERVAL as usize)),
+            checked_blocks: Vec::with_capacity(
+                count.div_ceil(BUILDING_CHECKPOINT_INTERVAL as usize),
+            ),
             foundations: Vec::with_capacity(count * max_helpers),
             supplies: Vec::with_capacity(count * max_supplies),
         }
@@ -344,6 +349,7 @@ impl PlacementIndex {
                 break;
             }
             if self.sequence.state.next_building % BUILDING_CHECKPOINT_INTERVAL == 0 {
+                self.checked_blocks.push(true);
                 self.blocks.push(Block {
                     checkpoint: self.sequence.checkpoint(),
                     end: self.sequence.state.next_building,
@@ -397,16 +403,18 @@ impl PlacementIndex {
     pub fn update_buildings_in(
         &mut self,
         bounds: WorldBounds,
+        required: u32,
         output: &mut Vec<Placement>,
         accept: impl Fn([f64; 3]) -> bool,
-    ) {
-        output.retain(|p| accept(p.pose.position));
+    ) -> Result<super::QueryStatus, ReferenceError> {
+        self.check_blocks(Some(bounds), false, required)?;
+        output.retain(|p| p.id.unit[0] < i64::from(required) && accept(p.pose.position));
         for block in &self.blocks {
             if !intersects(block.bounds, bounds, false) {
                 continue;
             }
             self.replay.restore(&block.checkpoint);
-            for _ in block.checkpoint.next_building..block.end {
+            for _ in block.checkpoint.next_building..block.end.min(required) {
                 let building = self.replay.advance().unwrap();
                 if accept(building.pose.position)
                     && !output.iter().any(|p| p.id.unit[0] == building.index as i64)
@@ -415,13 +423,20 @@ impl PlacementIndex {
                 }
             }
         }
+        Ok(super::QueryStatus::for_prefix(self.coverage(), required))
     }
 
     pub fn foundation_count(&self) -> usize {
         self.foundations.len()
     }
 
-    pub fn foundations_in(&self, bounds: WorldBounds, output: &mut Vec<FoundationPoint>) {
+    pub fn foundations_in(
+        &mut self,
+        bounds: WorldBounds,
+        required: u32,
+        output: &mut Vec<FoundationPoint>,
+    ) -> Result<super::QueryStatus, ReferenceError> {
+        self.check_blocks(Some(bounds), true, required)?;
         output.clear();
         for block in &self.blocks {
             if !intersects(block.bounds, bounds, true) {
@@ -433,14 +448,23 @@ impl PlacementIndex {
                     min: point.position.map(|v| v - r),
                     max: point.position.map(|v| v + r),
                 };
-                if intersects(influence, bounds, true) {
+                if point.building_index < required && intersects(influence, bounds, true) {
                     output.push(*point);
                 }
             }
         }
+        Ok(super::QueryStatus::for_prefix(self.coverage(), required))
     }
 
-    pub fn supplies_for_building(&self, index: u32, output: &mut Vec<SupplyPoint>) {
+    pub fn supplies_for_building(
+        &mut self,
+        index: u32,
+        output: &mut Vec<SupplyPoint>,
+    ) -> Result<super::QueryStatus, ReferenceError> {
+        let required = index
+            .checked_add(1)
+            .ok_or_else(super::generation::invalid)?;
+        self.check_blocks(None, false, required)?;
         output.clear();
         output.extend(
             self.supplies
@@ -448,16 +472,26 @@ impl PlacementIndex {
                 .filter(|point| point.building_index == index)
                 .copied(),
         );
+        Ok(super::QueryStatus::for_prefix(self.coverage(), required))
     }
 
-    pub fn nearest_supply_point(&self, point: [f64; 3]) -> Option<SupplyPoint> {
-        self.supplies
-            .iter()
-            .min_by(|a, b| {
-                distance_squared(a.cap_pose.position, point)
-                    .total_cmp(&distance_squared(b.cap_pose.position, point))
-            })
-            .copied()
+    pub fn nearest_supply_point(
+        &mut self,
+        point: [f64; 3],
+        required: u32,
+    ) -> Result<(super::QueryStatus, Option<SupplyPoint>), ReferenceError> {
+        self.check_blocks(None, false, required)?;
+        Ok((
+            super::QueryStatus::for_prefix(self.coverage(), required),
+            self.supplies
+                .iter()
+                .filter(|p| p.building_index < required)
+                .min_by(|a, b| {
+                    distance_squared(a.cap_pose.position, point)
+                        .total_cmp(&distance_squared(b.cap_pose.position, point))
+                })
+                .copied(),
+        ))
     }
 
     pub fn supply_definition(&self, point: &SupplyPoint) -> &SupplyDefinition {
@@ -471,7 +505,8 @@ impl PlacementIndex {
         self.blocks.len()
     }
     pub fn retained_index_bytes(&self) -> usize {
-        self.blocks.capacity() * std::mem::size_of::<Block>()
+        self.checked_blocks.capacity() * std::mem::size_of::<bool>()
+            + self.blocks.capacity() * std::mem::size_of::<Block>()
             + self.foundations.capacity() * std::mem::size_of::<FoundationPoint>()
             + self.supplies.capacity() * std::mem::size_of::<SupplyPoint>()
             + self
@@ -1014,4 +1049,269 @@ fn bound_prototype(prototype: &WorldPrototypeReference, records: &Records<'_>) -
             .fold(0., f64::max)
         * 1.0001
         + 0.01
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlacementIndexSnapshot {
+    pub state: BuildingCheckpoint,
+    blocks: Vec<Block>,
+    foundations: Vec<FoundationPoint>,
+    supplies: Vec<SupplyPoint>,
+}
+impl PlacementIndexSnapshot {
+    pub(crate) fn checkpoint_heap_bytes(&self) -> usize {
+        self.blocks
+            .iter()
+            .map(|b| checkpoint_heap(&b.checkpoint))
+            .sum()
+    }
+}
+impl PlacementIndex {
+    pub fn coverage(&self) -> u32 {
+        self.sequence.state.next_building
+    }
+    pub fn capture_index(&self) -> PlacementIndexSnapshot {
+        PlacementIndexSnapshot {
+            state: self.sequence.checkpoint(),
+            blocks: self.blocks.clone(),
+            foundations: self.foundations.clone(),
+            supplies: self.supplies.clone(),
+        }
+    }
+    fn valid_checkpoint(&self, c: &BuildingCheckpoint) -> bool {
+        let rules = &self.sequence.inputs.rules;
+        c.next_building as usize <= self.sequence.inputs.max_buildings
+            && c.next_distance.is_finite()
+            && c.next_distance >= 0.
+            && c.next_distance <= SOURCE_END * 2.
+            && c.draws >= 3
+            && c.draws <= 1_000_000_000
+            && c.random.next < 56
+            && c.random.paired < 56
+            && c.random.values.iter().all(|v| *v >= 0 && *v < i32::MAX)
+            && c.groups.len() == rules.groups.len()
+            && c.current_group < c.groups.len()
+            && c.groups.iter().zip(&rules.groups).all(|(g, r)| {
+                let pool = |v: &Vec<i32>| {
+                    v.len() <= r.types.len()
+                        && v.iter().enumerate().all(|(i, x)| {
+                            *x >= 0 && (*x as usize) < r.types.len() && !v[..i].contains(x)
+                        })
+                };
+                pool(&g.available)
+                    && pool(&g.current_available)
+                    && g.available.iter().all(|x| !g.current_available.contains(x))
+                    && g.current_count >= 0
+                    && g.current_count <= r.max_count + 1
+                    && g.current_max_count >= 0
+                    && g.current_max_count <= r.max_count
+            })
+    }
+    pub fn validate_index(&self, s: &PlacementIndexSnapshot) -> Result<(), ReferenceError> {
+        let invalid = super::generation::invalid;
+        let end = s.state.next_building;
+        if !self.valid_checkpoint(&s.state)
+            || s.blocks.len() != end.div_ceil(BUILDING_CHECKPOINT_INTERVAL) as usize
+        {
+            return Err(invalid());
+        }
+        let max_helpers = self
+            .sequence
+            .inputs
+            .prototypes
+            .iter()
+            .map(|p| p.helpers.len())
+            .max()
+            .unwrap_or(0);
+        let max_supplies = self
+            .sequence
+            .inputs
+            .prototypes
+            .iter()
+            .map(|p| p.supplies.len())
+            .max()
+            .unwrap_or(0);
+        if s.foundations.len() > end as usize * max_helpers
+            || s.supplies.len() > end as usize * max_supplies
+        {
+            return Err(invalid());
+        }
+        let initial = BuildingSequence::from_inputs(Arc::clone(&self.sequence.inputs)).checkpoint();
+        if s.blocks.first().map(|b| &b.checkpoint).unwrap_or(&s.state) != &initial {
+            return Err(invalid());
+        }
+        let mut helpers = 0;
+        let mut supplies = 0;
+        let mut distance = 0.;
+        let mut draws = 0;
+        for (i, b) in s.blocks.iter().enumerate() {
+            if !self.valid_checkpoint(&b.checkpoint)
+                || b.checkpoint.next_distance >= SOURCE_END
+                || b.checkpoint.next_building != i as u32 * BUILDING_CHECKPOINT_INTERVAL
+                || b.end != (b.checkpoint.next_building + BUILDING_CHECKPOINT_INTERVAL).min(end)
+                || !super::generation::valid_bounds(b.bounds)
+                || b.checkpoint.next_distance < distance
+                || b.checkpoint.draws < draws
+                || b.helpers.start != helpers
+                || b.helpers.end < b.helpers.start
+                || b.helpers.end > s.foundations.len()
+                || b.supplies.start != supplies
+                || b.supplies.end < b.supplies.start
+                || b.supplies.end > s.supplies.len()
+            {
+                return Err(invalid());
+            }
+            for p in &s.foundations[b.helpers.clone()] {
+                if !(b.checkpoint.next_building..b.end).contains(&p.building_index)
+                    || p.helper_index >= max_helpers
+                    || !p.position.iter().all(|x| x.is_finite())
+                    || !p.range_squared.iter().all(|x| x.is_finite() && *x >= 0.)
+                {
+                    return Err(invalid());
+                }
+            }
+            for p in &s.supplies[b.supplies.clone()] {
+                if !(b.checkpoint.next_building..b.end).contains(&p.building_index)
+                    || p.prototype_index >= self.sequence.inputs.prototypes.len()
+                    || p.supply_index
+                        >= self.sequence.inputs.prototypes[p.prototype_index]
+                            .supplies
+                            .len()
+                    || ![p.cap_pose, p.tank_pose].iter().all(|p| {
+                        p.position.iter().all(|x| x.is_finite())
+                            && p.rotation.iter().all(|x| x.is_finite())
+                    })
+                {
+                    return Err(invalid());
+                }
+            }
+            helpers = b.helpers.end;
+            supplies = b.supplies.end;
+            distance = b.checkpoint.next_distance;
+            draws = b.checkpoint.draws;
+        }
+        if helpers != s.foundations.len()
+            || supplies != s.supplies.len()
+            || s.state.next_distance < distance
+            || s.state.draws < draws
+        {
+            return Err(invalid());
+        }
+        if let Some(b) = s.blocks.last() {
+            let mut check = Self {
+                sequence: BuildingSequence::from_inputs(Arc::clone(&self.sequence.inputs)),
+                replay: BuildingSequence::from_inputs(Arc::clone(&self.sequence.inputs)),
+                blocks: Vec::new(),
+                foundations: Vec::new(),
+                supplies: Vec::new(),
+                checked_blocks: Vec::new(),
+            };
+            check.sequence.restore(&b.checkpoint);
+            check.prepare((b.end - b.checkpoint.next_building) as usize);
+            if check.sequence.checkpoint() != s.state
+                || check.blocks.first().is_none_or(|v| v.bounds != b.bounds)
+                || check.foundations != s.foundations[b.helpers.clone()]
+                || check.supplies != s.supplies[b.supplies.clone()]
+            {
+                return Err(invalid());
+            }
+        }
+        Ok(())
+    }
+    pub fn restore_index(&mut self, s: &PlacementIndexSnapshot) -> Result<(), ReferenceError> {
+        self.validate_index(s)?;
+        self.sequence.restore(&s.state);
+        self.blocks.clone_from(&s.blocks);
+        self.foundations.clone_from(&s.foundations);
+        self.supplies.clone_from(&s.supplies);
+        self.checked_blocks.clear();
+        self.checked_blocks.resize(s.blocks.len(), false);
+        Ok(())
+    }
+}
+
+impl PlacementIndex {
+    fn check_blocks(
+        &mut self,
+        bounds: Option<WorldBounds>,
+        horizontal: bool,
+        required: u32,
+    ) -> Result<(), ReferenceError> {
+        for i in 0..self.blocks.len() {
+            let b = &self.blocks[i];
+            if self.checked_blocks[i]
+                || b.checkpoint.next_building >= required
+                || bounds.is_some_and(|q| !intersects(b.bounds, q, horizontal))
+            {
+                continue;
+            }
+            self.replay.restore(&b.checkpoint);
+            let mut bounds = WorldBounds {
+                min: [f64::INFINITY; 3],
+                max: [f64::NEG_INFINITY; 3],
+            };
+            let mut helper = b.helpers.start;
+            let mut supply = b.supplies.start;
+            let bad = || {
+                ReferenceError(format!(
+                    "Saved building block {} differs",
+                    b.checkpoint.next_building
+                ))
+            };
+            for _ in b.checkpoint.next_building..b.end {
+                let building = self.replay.advance().ok_or_else(bad)?;
+                let p = &self.replay.inputs.prototypes[building.prototype_index];
+                extend(&mut bounds, building.bounds(p.radius));
+                for (helper_index, h) in p.helpers.iter().enumerate() {
+                    let position = place_point(building.pose, p.scale, h.position);
+                    let point = FoundationPoint {
+                        building_index: building.index,
+                        helper_index,
+                        position,
+                        range_squared: h.range_squared,
+                    };
+                    if self.foundations.get(helper) != Some(&point) {
+                        return Err(bad());
+                    }
+                    helper += 1;
+                    let radius = h.range_squared[0].max(h.range_squared[1]).sqrt() as f64;
+                    extend(
+                        &mut bounds,
+                        WorldBounds {
+                            min: position.map(|v| v - radius),
+                            max: position.map(|v| v + radius),
+                        },
+                    );
+                }
+                for (supply_index, s) in p.supplies.iter().enumerate() {
+                    let point = SupplyPoint {
+                        building_index: building.index,
+                        supply_index,
+                        cap_pose: place_pose(building.pose, p.scale, s.cap_pose),
+                        tank_pose: place_pose(building.pose, p.scale, s.tank_pose),
+                        prototype_index: building.prototype_index,
+                    };
+                    if self.supplies.get(supply) != Some(&point) {
+                        return Err(bad());
+                    }
+                    supply += 1;
+                }
+            }
+            let expected = self
+                .blocks
+                .get(i + 1)
+                .map(|b| b.checkpoint.clone())
+                .unwrap_or_else(|| self.sequence.checkpoint());
+            if bounds != b.bounds
+                || helper != b.helpers.end
+                || supply != b.supplies.end
+                || self.replay.checkpoint() != expected
+            {
+                return Err(bad());
+            }
+            self.checked_blocks[i] = true;
+        }
+        Ok(())
+    }
 }

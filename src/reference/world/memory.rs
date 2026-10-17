@@ -125,7 +125,7 @@ fields!(WorldStartupReference:group,source,pose);
 fields!(WorldCollisionRules:source,record_sha256,layers);
 fields!(WorldStartupHole:component,filter,mesh,mesh_sha256,vertices);
 fields!(WorldNoiseReference:amplitude,frequency,lacunarity,octaves,persistence);
-fields!(WorldRoadReference:source,prototypes,length,road_bone_num,road_bone_length,road_segment_length,road_above_terrain,width,scale,xmax_angle,ymax_angle,start_straight,straight_modifier,align_edge_of_the_world,aliign_road,align_buildings,force_homesick,def_point_range,def_point_step,add_point,building_bone_num,noises);
+fields!(WorldRoadReference:gen_at_start,gen_in_one_frame,source,prototypes,length,road_bone_num,road_bone_length,road_segment_length,road_above_terrain,width,scale,xmax_angle,ymax_angle,start_straight,straight_modifier,align_edge_of_the_world,aliign_road,align_buildings,force_homesick,def_point_range,def_point_step,add_point,building_bone_num,noises);
 fields!(WorldTerrainReference:source,prefabs,materials,textures,game_settings,tiles,edge_of_world,edge_of_world_gradient,edge_of_world_generation_dist,edge_of_world_warp_dist,edge_of_world_warp_offset,random_seed,seed);
 fields!(WorldGameSettings:source,biome,homesick_mode);
 fields!(WorldTileReference:tile_size,resolution,draw_distance,y_coord);

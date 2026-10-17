@@ -15,3 +15,9 @@ class WorldTests(unittest.TestCase):
         source = NS(read=lambda r: data if r is renderer else {'m_LocalAABB': bounds})
         result = recover_renderer(source, renderer, mesh)
         self.assertEqual(result['cast_shadows'], 2)
+
+    def test_generation_counts_are_required_and_checked(self):
+        from tools.reference.world import generation_counts
+        self.assertEqual(generation_counts({'genAtStart':100,'genInOneFrame':1}), {'genAtStart':100,'genInOneFrame':1})
+        for road in ({}, {'genAtStart':99,'genInOneFrame':1}, {'genAtStart':100,'genInOneFrame':2}):
+            with self.assertRaises((KeyError,ValueError)): generation_counts(road)

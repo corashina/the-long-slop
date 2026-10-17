@@ -132,6 +132,8 @@ pub struct WorldStream {
     binding_reserved: usize,
     lamp_bindings: Vec<content_lamps::LampBinding>,
     seed: i32,
+    package_id: String,
+    generation_revision: u64,
     structure_helpers: super::structure_helpers::StructureHelpers,
     reference: Arc<WorldReference>,
     presentation: PresentationAllocation,
@@ -303,30 +305,57 @@ impl WorldStream {
             }
         }
         crate::save::WorldSnapshot {
+            generation: super::GenerationSnapshot {
+                generator_contract: super::GENERATOR_CONTRACT,
+                package_id: self.package_id.clone(),
+                roads: self.roads.capture_index(),
+                placements: self.placements.capture_index(),
+            },
             seed: self.seed,
             changes,
             spawn: self.contents.state.capture_history(),
+        }
+    }
+    pub fn coverage(&self) -> super::GenerationCoverage {
+        super::GenerationCoverage {
+            road_end: self.roads.coverage(),
+            building_end: self.placements.coverage(),
+            revision: self.generation_revision,
         }
     }
     pub fn restore_save(
         &mut self,
         saved: &crate::save::WorldSnapshot,
     ) -> Result<(), ReferenceError> {
-        if self.seed != saved.seed || self.indices_ready || !self.structures.is_empty() {
+        if self.seed != saved.seed
+            || self.indices_ready
+            || !self.structures.is_empty()
+            || self.roads.coverage() != 0
+            || self.placements.coverage() != 0
+        {
             return Err(ReferenceError(
                 "Source save must enter an unprepared matching stream".into(),
             ));
         }
+        saved.generation.validate_identity(&self.package_id)?;
+        self.roads.validate_index(&saved.generation.roads)?;
+        self.placements
+            .validate_index(&saved.generation.placements)?;
         let history = super::SourceSpawnState::restore_history(saved.spawn.clone())?;
         if history.retained_bytes()
             + self.roads.retained_index_bytes()
             + self.placements.retained_index_bytes()
+            + saved.generation.placements.checkpoint_heap_bytes()
             > 16 * MIB
         {
             return Err(ReferenceError(
                 "Restored source history exceeds checkpoint budget".into(),
             ));
         }
+        self.roads.restore_index(&saved.generation.roads)?;
+        self.placements
+            .restore_index(&saved.generation.placements)?;
+        self.generation_revision += 1;
         self.contents.state = history;
         self.changes = saved.changes.clone();
         self.change_revision = u64::MAX;
@@ -510,6 +539,8 @@ impl WorldStream {
             terrain_layer: *terrain_layer as u8,
             road_layers,
             reference: Arc::clone(world),
+            package_id: reference.content_base.clone(),
+            generation_revision: 0,
             changes: super::ChangeRecords::default(),
             replay_roots: Vec::new(),
             replay_keys: Vec::new(),
@@ -1048,6 +1079,9 @@ impl WorldStream {
             let placement_ready = self
                 .placements
                 .prepare(if slots > road_work { 256 } else { 0 });
+            if before != (self.roads.coverage(), self.placements.coverage()) {
+                self.generation_revision += 1;
+            }
             self.indices_ready = road_ready && placement_ready;
             #[cfg(target_arch = "wasm32")]
             let elapsed = crate::browser::game_now() - started;
@@ -1117,11 +1151,24 @@ impl WorldStream {
                 .map(|root| window(root.pose.translation.map(f64::from), 150.0))
                 .reduce(union);
             if let Some(bounds) = bounds {
-                self.roads.segments_in(bounds, &mut self.startup_candidates);
+                assert_eq!(
+                    self.roads.segments_in(
+                        bounds,
+                        self.roads.coverage(),
+                        &mut self.startup_candidates
+                    ),
+                    super::QueryStatus::Complete
+                );
             }
         }
         if let Some(&index) = self.startup_candidates.get(self.startup_next) {
-            let segment = self.roads.prepare_segment(index, 8);
+            let segment = match self.roads.prepare_segment(index, 8) {
+                Ok(segment) => segment,
+                Err(error) => {
+                    self.failure = Some(error.0);
+                    return;
+                }
+            };
             self.last_road_work = self.roads.replay_work();
             if let Some(segment) = segment {
                 append_road_points(
@@ -1170,12 +1217,20 @@ impl WorldStream {
                     .into_iter()
                     .all(|f| source_distance_squared(f, p.pose.position) >= radius * radius)
         });
-        self.placements
-            .update_buildings_in(bounds, &mut self.wanted_structures, |position| {
+        let status = self.placements.update_buildings_in(
+            bounds,
+            self.placements.coverage(),
+            &mut self.wanted_structures,
+            |position| {
                 points
                     .into_iter()
                     .any(|p| source_distance_squared(p, position) < radius * radius)
-            });
+            },
+        );
+        if let Err(error) = status {
+            self.failure = Some(error.0);
+            return false;
+        }
         for placement in self
             .props
             .placements()
@@ -1674,7 +1729,8 @@ impl WorldStream {
                 window(self.road_focus[0], road_distance),
                 window(self.road_focus[1], road_distance),
             );
-            let candidates = self.roads.candidate_count(query);
+            let (status, candidates) = self.roads.candidate_count(query, self.roads.coverage());
+            assert_eq!(status, super::QueryStatus::Complete);
             let bytes = candidates.saturating_add(self.road_candidates.capacity())
                 * std::mem::size_of::<u32>();
             if !self.admit_generation(bytes) {
@@ -1689,7 +1745,11 @@ impl WorldStream {
             self.road_candidates
                 .try_reserve_exact(candidates)
                 .map_err(|_| ReferenceError("Selected road index allocation failed".into()))?;
-            self.roads.segments_in(query, &mut self.road_candidates);
+            assert_eq!(
+                self.roads
+                    .segments_in(query, self.roads.coverage(), &mut self.road_candidates),
+                super::QueryStatus::Complete
+            );
             let radius = self.reference.distances["RoadGenDist"];
             let margin = self.road_light.influence_margin();
             self.selected_roads.retain(|r| {
@@ -1794,7 +1854,13 @@ impl WorldStream {
         let segment = if let Some(i) = existing {
             self.selected_roads[i].segment
         } else {
-            let segment = self.roads.prepare_segment(index, 8);
+            let segment = match self.roads.prepare_segment(index, 8) {
+                Ok(segment) => segment,
+                Err(error) => {
+                    self.failure = Some(error.0);
+                    return;
+                }
+            };
             self.last_road_work = self.roads.replay_work();
             let Some(segment) = segment else {
                 return;
@@ -2032,8 +2098,14 @@ impl WorldStream {
                     0.0,
                     -key.unit[1] as f64 * tile.size as f64,
                 ];
-                self.placements
-                    .foundations_in(window(center, tile.size as f64), &mut generated);
+                if let Err(error) = self.placements.foundations_in(
+                    window(center, tile.size as f64),
+                    self.placements.coverage(),
+                    &mut generated,
+                ) {
+                    self.failure = Some(error.0);
+                    return;
+                }
                 self.structure_helpers
                     .append(&self.wanted_structures, &mut foundations);
                 foundations.extend(generated.iter().map(|p| TerrainFoundation {
@@ -2436,8 +2508,14 @@ impl WorldStream {
             self.failure = Some("Source helper context exceeds active CPU budget".into());
             return;
         }
-        self.placements
-            .foundations_in(bounds, &mut self.color_foundations);
+        if let Err(error) = self.placements.foundations_in(
+            bounds,
+            self.placements.coverage(),
+            &mut self.color_foundations,
+        ) {
+            self.failure = Some(error.0);
+            return;
+        }
         self.color_helpers.clear();
         if let Some(startup) = &self.startup {
             self.color_helpers.extend_from_slice(&startup.foundations);
@@ -2509,7 +2587,10 @@ impl WorldStream {
             return Err(ReferenceError("Source recovery index is preparing".into()));
         }
         if prefer_supply {
-            if let Some(supply) = self.placements.nearest_supply_point(point) {
+            if let (super::QueryStatus::Complete, Some(supply)) = self
+                .placements
+                .nearest_supply_point(point, self.placements.coverage())?
+            {
                 let pose = supply.cap_pose;
                 let owner = (supply.building_index, supply.supply_index);
                 self.request_at(pose.position, pose.position);
@@ -2758,8 +2839,13 @@ impl WorldStream {
         };
         let mut points = Vec::new();
         if placement.id.layer == WorldLayer::Building && placement.id.children.is_empty() {
-            self.placements
-                .supplies_for_building(placement.id.unit[0] as u32, &mut points);
+            if self
+                .placements
+                .supplies_for_building(placement.id.unit[0] as u32, &mut points)?
+                != super::QueryStatus::Complete
+            {
+                return Err(ReferenceError("Building supply prefix is preparing".into()));
+            }
         }
         if self.metrics().generated_objects + 1 + points.len() * 2 > MAX_OBJECTS {
             return Err(ReferenceError(format!(

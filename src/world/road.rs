@@ -84,7 +84,7 @@ impl RoadCurve {
 }
 
 /// Carried source values at the boundary before the next segment.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RoadState {
     pub next_segment: u32,
     pub source_position: [f64; 3],
@@ -92,7 +92,7 @@ pub struct RoadState {
     pub distance: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RoadCheckpoint {
     state: RoadState,
 }
@@ -103,7 +103,7 @@ impl RoadCheckpoint {
 }
 
 /// Source controls remain unconverted for source skinning and terrain alignment.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RoadSegment {
     pub index: u32,
     pub biome: u8,
@@ -304,11 +304,11 @@ impl RoadSequence {
     }
 }
 
-#[derive(Clone, Copy)]
-struct RoadBlock {
-    first: u32,
-    end: u32,
-    bounds: WorldBounds,
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RoadBlock {
+    pub first: u32,
+    pub end: u32,
+    pub bounds: WorldBounds,
 }
 
 const _: () = assert!(
@@ -382,40 +382,59 @@ impl RoadIndex {
         self.sequence.state.next_segment == ROAD_SEGMENTS
     }
 
-    pub fn candidate_count(&self, bounds: WorldBounds) -> usize {
-        self.blocks
+    pub fn candidate_count(
+        &self,
+        bounds: WorldBounds,
+        required: u32,
+    ) -> (super::QueryStatus, usize) {
+        let count = self
+            .blocks
             .iter()
             .filter(|block| {
                 (0..3).all(|a| {
                     block.bounds.min[a] <= bounds.max[a] && block.bounds.max[a] >= bounds.min[a]
                 })
             })
-            .map(|block| (block.end - block.first) as usize)
-            .sum()
+            .map(|block| block.end.min(required).saturating_sub(block.first) as usize)
+            .sum();
+        (
+            super::QueryStatus::for_prefix(self.coverage(), required),
+            count,
+        )
     }
 
     /// Return candidate segment identities from intersecting prepared blocks.
     /// Call segment to refine candidates against their segment bounds.
-    pub fn segments_in(&self, bounds: WorldBounds, output: &mut Vec<u32>) {
+    pub fn segments_in(
+        &self,
+        bounds: WorldBounds,
+        required: u32,
+        output: &mut Vec<u32>,
+    ) -> super::QueryStatus {
         output.clear();
         for block in &self.blocks {
             if (0..3).all(|a| {
                 block.bounds.min[a] <= bounds.max[a] && block.bounds.max[a] >= bounds.min[a]
             }) {
-                output.extend(block.first..block.end);
+                output.extend(block.first..block.end.min(required));
             }
         }
+        super::QueryStatus::for_prefix(self.coverage(), required)
     }
 
     /// Advance replay by a bounded number of source segments.
-    pub fn prepare_segment(&mut self, index: u32, limit: usize) -> Option<RoadSegment> {
+    pub fn prepare_segment(
+        &mut self,
+        index: u32,
+        limit: usize,
+    ) -> Result<Option<RoadSegment>, ReferenceError> {
         self.replay_work = 0;
         self.replay_ms = 0.;
         if index >= self.sequence.state.next_segment {
-            return None;
+            return Ok(None);
         }
         if (self.buffer_first..self.buffer_first + self.buffer.len() as u32).contains(&index) {
-            return Some(self.buffer[(index - self.buffer_first) as usize]);
+            return Ok(Some(self.buffer[(index - self.buffer_first) as usize]));
         }
         #[cfg(target_arch = "wasm32")]
         let replay_started = crate::browser::game_now();
@@ -433,8 +452,22 @@ impl RoadIndex {
             if self.replay_end > index {
                 break;
             }
-            self.buffer
-                .push(self.replay.advance(&self.terrain).unwrap());
+            let segment = self
+                .replay
+                .advance(&self.terrain)
+                .ok_or_else(super::generation::invalid)?;
+            if !(0..3).all(|a| {
+                segment.bounds.min[a] >= block.bounds.min[a]
+                    && segment.bounds.max[a] <= block.bounds.max[a]
+            }) {
+                self.buffer.clear();
+                self.replay_end = 0;
+                return Err(ReferenceError(format!(
+                    "Saved road block {} bounds differ",
+                    block.first
+                )));
+            }
+            self.buffer.push(segment);
             self.replay_end += 1;
             self.replay_work += 1;
         }
@@ -447,17 +480,36 @@ impl RoadIndex {
             self.replay_ms = replay_started.elapsed().as_secs_f64() * 1000.;
         }
         self.peak_replay_ms = self.peak_replay_ms.max(self.replay_ms);
-        (self.replay_end > index).then(|| self.buffer[(index - self.buffer_first) as usize])
+        if self.replay_end == block.end {
+            let expected = self
+                .checkpoints
+                .get((block.end / ROAD_CHECKPOINT_INTERVAL) as usize)
+                .filter(|c| c.state.next_segment == block.end)
+                .map(|c| c.state)
+                .unwrap_or(self.sequence.state);
+            let mut bounds = empty_bounds();
+            for s in &self.buffer {
+                for a in 0..3 {
+                    bounds.min[a] = bounds.min[a].min(s.bounds.min[a]);
+                    bounds.max[a] = bounds.max[a].max(s.bounds.max[a]);
+                }
+            }
+            if self.replay.state != expected || bounds != block.bounds {
+                self.buffer.clear();
+                self.replay_end = 0;
+                return Err(ReferenceError(format!(
+                    "Saved road block {} checkpoint differs",
+                    block.first
+                )));
+            }
+        }
+        Ok((self.replay_end > index).then(|| self.buffer[(index - self.buffer_first) as usize]))
     }
 
     /// Synchronous access for acceptance callers. Runtime jobs use prepare_segment.
-    pub fn segment(&mut self, index: u32) -> RoadSegment {
-        assert!(
-            index < self.prepared_segments(),
-            "road segment is not prepared"
-        );
-        self.prepare_segment(index, ROAD_CHECKPOINT_INTERVAL as usize)
-            .unwrap()
+    pub fn segment(&mut self, index: u32) -> Result<RoadSegment, ReferenceError> {
+        self.prepare_segment(index, ROAD_CHECKPOINT_INTERVAL as usize)?
+            .ok_or_else(|| ReferenceError(format!("Road segment {index} is not prepared")))
     }
 
     pub fn replay_ms(&self) -> f64 {
@@ -808,4 +860,101 @@ pub(crate) fn road_frames(
         frames.push(frame);
     }
     frames
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoadIndexSnapshot {
+    pub state: RoadState,
+    pub checkpoints: Vec<RoadCheckpoint>,
+    pub blocks: Vec<RoadBlock>,
+}
+impl RoadIndex {
+    pub fn coverage(&self) -> u32 {
+        self.sequence.state.next_segment
+    }
+    pub fn capture_index(&self) -> RoadIndexSnapshot {
+        RoadIndexSnapshot {
+            state: self.sequence.state,
+            checkpoints: self.checkpoints.clone(),
+            blocks: self.blocks.clone(),
+        }
+    }
+    pub fn validate_index(&self, s: &RoadIndexSnapshot) -> Result<(), ReferenceError> {
+        let valid_state = |v: RoadState| {
+            v.next_segment <= ROAD_SEGMENTS
+                && v.distance == f64::from(v.next_segment) * 100.
+                && v.source_position
+                    .iter()
+                    .all(|x| x.is_finite() && x.abs() <= super::MAX_ABSOLUTE_COORDINATE)
+                && v.source_rotation
+                    .iter()
+                    .all(|x| x.is_finite() && x.abs() <= 90.)
+        };
+        let end = s.state.next_segment;
+        let checkpoint_count = 1
+            + (end / ROAD_CHECKPOINT_INTERVAL) as usize
+            + usize::from(end == ROAD_SEGMENTS && end % ROAD_CHECKPOINT_INTERVAL != 0);
+        if !valid_state(s.state)
+            || s.blocks.len() != end.div_ceil(ROAD_CHECKPOINT_INTERVAL) as usize
+            || s.checkpoints.len() != checkpoint_count
+        {
+            return Err(super::generation::invalid());
+        }
+        let initial = self.checkpoints[0];
+        if s.checkpoints[0] != initial {
+            return Err(super::generation::invalid());
+        }
+        for (i, c) in s.checkpoints.iter().enumerate() {
+            if !valid_state(c.state)
+                || c.state.next_segment != (i as u32 * ROAD_CHECKPOINT_INTERVAL).min(ROAD_SEGMENTS)
+            {
+                return Err(super::generation::invalid());
+            }
+        }
+        for (i, b) in s.blocks.iter().enumerate() {
+            if b.first != i as u32 * ROAD_CHECKPOINT_INTERVAL
+                || b.end != (b.first + ROAD_CHECKPOINT_INTERVAL).min(end)
+                || !super::generation::valid_bounds(b.bounds)
+            {
+                return Err(super::generation::invalid());
+            }
+        }
+        if s.checkpoints
+            .last()
+            .is_some_and(|c| c.state.next_segment == end && c.state != s.state)
+        {
+            return Err(super::generation::invalid());
+        }
+        // Only the last block needs replay at restore. Earlier blocks remain saved state.
+        if let Some(b) = s.blocks.last() {
+            let mut replay = self.sequence.clone();
+            replay.restore(&s.checkpoints[s.blocks.len() - 1]);
+            let mut bounds = empty_bounds();
+            for _ in b.first..b.end {
+                let segment = replay
+                    .advance(&self.terrain)
+                    .ok_or_else(super::generation::invalid)?;
+                for a in 0..3 {
+                    bounds.min[a] = bounds.min[a].min(segment.bounds.min[a]);
+                    bounds.max[a] = bounds.max[a].max(segment.bounds.max[a]);
+                }
+            }
+            if replay.state != s.state || bounds != b.bounds {
+                return Err(super::generation::invalid());
+            }
+        }
+        Ok(())
+    }
+    pub fn restore_index(&mut self, s: &RoadIndexSnapshot) -> Result<(), ReferenceError> {
+        self.validate_index(s)?;
+        self.sequence.state = s.state;
+        self.checkpoints.clone_from(&s.checkpoints);
+        self.blocks.clone_from(&s.blocks);
+        self.buffer.clear();
+        self.buffer_first = 0;
+        self.replay_end = 0;
+        self.replay_work = 0;
+        Ok(())
+    }
 }

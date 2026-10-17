@@ -3,6 +3,21 @@ use crate::world::{AttachmentSnapshot, GeneratedId, ObjectKey, SpawnContext};
 
 impl SaveSnapshot {
     pub(super) fn validate_world(&self, reference: &ReferenceManifest) -> Result<(), SaveError> {
+        self.world
+            .generation
+            .validate_identity(&reference.content_base)
+            .map_err(|e| invalid(&e.0))?;
+        let roads = crate::world::RoadIndex::new(
+            crate::world::RoadSequence::new(&reference.world, self.world.seed)
+                .map_err(|e| invalid(&e.0))?,
+            crate::world::TerrainEvaluator::new(&reference.world, self.world.seed),
+        );
+        roads
+            .validate_index(&self.world.generation.roads)
+            .map_err(|e| invalid(&e.0))?;
+        crate::world::PlacementIndex::new(&reference.world, self.world.seed)
+            .validate_index(&self.world.generation.placements)
+            .map_err(|e| invalid(&e.0))?;
         let sources: HashSet<_> =
             reference
                 .world

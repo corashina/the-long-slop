@@ -393,7 +393,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     assembled=samples['assembled'][0]
     world={'sample_payload_sha256':PAYLOAD_SHA256,'managed_sha256':samples['managed_sha256'],'library':dict(schema_version=1,**samples['library']),
         'settings_context':CONTEXT,'spawn_context':recover_spawn_context(samples),'generation_frame':IDENTITY,'distances':assembled['distances'],'source_hashes':[],
-        'road':{'source':source_id(road_owner),'prototypes':road_roots,**{k:road[k] for k in road_fields}},
+        'road':{'source':source_id(road_owner),'prototypes':road_roots,**generation_counts(road),**{k:road[k] for k in road_fields}},
         'terrain':{'source':source_id(settings_owner),'prefabs':terrain_prefabs,'materials':terrain_materials,'textures':list(terrain_source.lighting_textures.values()),'game_settings':{'source':source_id(main_owner),**{k:main['GSettings'][k] for k in ('biome','homesickMode')}},
             'tiles':[{k:settings[t][k] for k in ('tileSize','resolution','drawDistance','YCoord')} for t in ('Terrain','DistantTerrain','DistantTerrain2')],
             **{k:settings[k] for k in ('edgeOfWorld','edgeOfWorldGradient','edgeOfWorldGenerationDist','edgeOfWorldWarpDist','edgeOfWorldWarpOffset','randomSeed','seed')}},
@@ -634,3 +634,9 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
             'materials':[dict(material,asset=index) for material in report['materials']]})
         print(f'Exported {name}: {len(nodes)} nodes, {len(colliders)} colliders',flush=True)
     return prototypes
+
+def generation_counts(road):
+    result = {name: road[name] for name in ('genAtStart', 'genInOneFrame')}
+    if any(type(value) is not int for value in result.values()) or result != {'genAtStart': 100, 'genInOneFrame': 1}:
+        raise ValueError('level1:64771 unsupported generation counts')
+    return result

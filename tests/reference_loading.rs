@@ -166,7 +166,7 @@ fn installed_manifest_checks_lod_bounds_and_initializes_runtime() {
     assert_eq!(large.prepared_segments(), ROAD_SEGMENTS);
     assert_eq!(small.checkpoint_count(), large.checkpoint_count());
     for index in [0, 255, 256, 1031, ROAD_SEGMENTS - 1] {
-        assert_eq!(small.segment(index), large.segment(index));
+        assert_eq!(small.segment(index).unwrap(), large.segment(index).unwrap());
     }
     eprintln!(
         "Both road indexes: {:?}; largest 256-section batch: {peak:?}",

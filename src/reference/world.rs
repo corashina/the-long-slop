@@ -250,6 +250,10 @@ pub struct WorldNoiseReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldRoadReference {
+    #[serde(rename = "genAtStart")]
+    pub gen_at_start: u32,
+    #[serde(rename = "genInOneFrame")]
+    pub gen_in_one_frame: u32,
     pub source: SourceId,
     #[serde(deserialize_with = "compact_vec")]
     pub prototypes: Vec<SourceId>,
@@ -796,6 +800,8 @@ impl WorldReference {
                 r.def_point_range,
                 r.def_point_step,
             ]) && r.length > 0.
+                && r.gen_at_start == 100
+                && r.gen_in_one_frame == 1
                 && r.road_bone_num > 0
                 && r.road_bone_length > 0.
                 && r.road_segment_length == r.road_bone_num as f32 * r.road_bone_length
