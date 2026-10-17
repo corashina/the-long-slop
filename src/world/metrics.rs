@@ -258,11 +258,15 @@ pub(crate) mod browser {
         materials: Res<SourceMaterials>,
         server: Res<AssetServer>,
         pipelines: Res<crate::presentation::world::pipelines::WorldPipelines>,
-        fixed: Res<crate::presentation::fixed_assets::SourceFixedAssets>,
+        fixed: (
+            Res<crate::presentation::fixed_assets::SourceFixedAssets>,
+            Res<crate::app::RuntimeReference>,
+        ),
     ) {
         if !crate::browser::game_measure_requested() {
             return;
         }
+        let (fixed, reference) = fixed;
         let mut mesh_owners = HashMap::new();
         for (_, handle) in &imported.gltfs {
             if let Some(gltf) = gltfs.get(handle) {
@@ -336,7 +340,21 @@ pub(crate) mod browser {
             world: frame.metrics,
             startup: serde_json::json!({
                 "fixed": fixed.startup_audit(),
+                "simulation_seconds": runtime.simulation_seconds,
+                "vehicles": (0..runtime.vehicles.len()).map(|index| serde_json::json!({
+                    "index": index,
+                    "active": runtime.physics.body_active(runtime.physics.chassis_handle(index)),
+                    "absolute_position": runtime.persistent_world.absolute_vehicle_position(
+                        &runtime.physics, &frame.origin, index),
+                })).collect::<Vec<_>>(),
+                "retained_source_bodies": runtime.area.bodies.iter().filter_map(|(id, handle)| {
+                    let record = reference.0.bodies.iter().find(|body| body.id == *id)?;
+                    runtime.persistent_world.body_snapshot(*handle, crate::save::BodyIdentity::Source {
+                        source: crate::save::SourceKey::from(&record.source),
+                    })
+                }).collect::<Vec<_>>(),
                 "player": {
+                    "absolute_position": frame.origin.absolute(runtime.area.player.body_pose(&runtime.physics).position),
                     "controller": runtime.area.player.body_pose(&runtime.physics).position,
                     "body": runtime.physics.rapier().bodies[runtime.area.player.body_handle()].translation().to_array(),
                     "grounded": runtime.area.player.grounded(),

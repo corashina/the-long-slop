@@ -28,6 +28,9 @@ struct SubmissionAcks {
     publication: AtomicU32,
 }
 impl SourceSubmissionAcks {
+    pub fn main_token(&self) -> u32 {
+        self.0.main.load(Ordering::Acquire)
+    }
     /// Called only after the owner's complete commands have entered the submitted frame.
     pub fn main_submitted(&self, token: u32) {
         self.0.main.fetch_max(token, Ordering::Release);
@@ -74,6 +77,9 @@ pub struct SourceViewClock {
     frame: u32,
 }
 impl SourceViewClock {
+    pub fn main_token(&self) -> u32 {
+        self.main_token
+    }
     fn consume(
         &mut self,
         acks: &SourceSubmissionAcks,

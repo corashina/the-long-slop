@@ -13,7 +13,7 @@ export class MenuState {
  ready(){if(this.state==='error')return;this.readyFlag=true;this.state=this.started?'pause-menu':'start-menu';if(!this.status||this.status==='Loading the garage...')this.status='The garage is ready.';}
  loading(){if(this.state==='error')return;if(!this.operation)this.generation++;this.pending=Boolean(this.operation);this.readyFlag=false;this.actions=0;this.state='loading';this.error='';this.status=this.operation?pendingText[this.operation]:'Loading the garage...';}
  fail(message){this.generation++;this.pending=false;this.operation='';this.readyFlag=false;this.state='error';this.error=message;this.status='';this.actions=this.started?ACTIONS.PAUSE:0;}
- pause(){if(!this.operation)this.generation++;this.pending=Boolean(this.operation);this.actions=this.started?ACTIONS.PAUSE:0;if(this.state==='error')return;if(this.state==='controls'){this.origin=this.started?'pause-menu':'start-menu';return;}this.state=this.readyFlag?(this.started?'pause-menu':'start-menu'):'loading';}
+ pause(saveSession){if(this.operation&&this.operation!=='save'&&saveSession?.cancel()){this.generation++;this.pending=false;this.operation='';this.status='';this.error='';}if(!this.operation)this.generation++;this.pending=Boolean(this.operation);this.actions=this.started?ACTIONS.PAUSE:0;if(this.state==='error')return;if(this.state==='controls'){this.origin=this.started?'pause-menu':'start-menu';return;}this.state=this.readyFlag?(this.started?'pause-menu':'start-menu'):'loading';}
  controls(){if(this.pending)return;if(this.state!=='start-menu' && this.state!=='pause-menu')return;this.origin=this.state;this.state='controls';}
  back(){if(this.state==='controls')this.state=this.origin;}
  recover(){if(this.state==='pause-menu'&&!this.pending&&!this.dead)this.actions=ACTIONS.RECOVER;}
@@ -93,7 +93,7 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,audio,d
   }
  }
  function flush(){const a=model.takeActions();if(a)queueAction(a);}
- function pause(){audio?.pause();clearInput();model.pause();if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();}
+ function pause(cancelPending=false){audio?.pause();clearInput();model.pause(cancelPending===true?saveSession:undefined);if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();}
  async function operate(operation){audio?.pause();clearInput();const pending=model.run(operation,saveSession);paint();await pending;flush();paint();}
  async function capture(){clearInput();const pending=captureWithAudio(model,ACTIONS.CONTINUE,async()=>{canvas.focus();await canvas.requestPointerLock();if(document.pointerLockElement!==canvas)throw Error('The browser did not capture the mouse.');},audio);paint();const success=await pending;if(!success && document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();}
  document.querySelector('#new-game').addEventListener('click',()=>operate('newGame'));
@@ -107,7 +107,7 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,audio,d
  const fullscreen=document.querySelector('#fullscreen');fullscreen.disabled=!document.fullscreenEnabled;
  fullscreen.addEventListener('click',async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.querySelector('main').requestFullscreen();}catch{model.error='Fullscreen is unavailable.';paint();}});
  document.addEventListener('fullscreenchange',()=>{fullscreen.textContent=document.fullscreenElement?'Exit fullscreen':'Fullscreen';resize();});
- window.addEventListener('keydown',event=>{if(event.code!=='Escape'||event.repeat)return;event.preventDefault();if(model.state==='controls'){model.back();paint();}else if(model.state==='playing'||model.pending)pause();});
+ window.addEventListener('keydown',event=>{if(event.code!=='Escape'||event.repeat)return;event.preventDefault();if(model.state==='controls'){model.back();paint();}else if(model.state==='playing'||model.pending)pause(true);});
  document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==canvas && model.state==='playing')pause();});
  window.addEventListener('blur',pause);document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});
  window.addEventListener('resize',resize);resize();paint();

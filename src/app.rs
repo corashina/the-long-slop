@@ -292,7 +292,7 @@ fn check_ready(
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
-    mut readiness: Local<u8>,
+    mut readiness: Local<crate::save::fresh_permit::PresentedFrames>,
     lighting: (
         Res<presentation::lighting::SourceLighting>,
         Res<presentation::source_lighting::SourceLighting>,
@@ -303,18 +303,23 @@ fn check_ready(
     plates: (
         Res<presentation::plates::PlateTextStatus>,
         Res<presentation::weather::WeatherRender>,
+        Res<presentation::view_frame::SourceSubmissionAcks>,
+        Res<presentation::view_frame::SourceViewClock>,
+        Res<presentation::view_frame::SourceSceneEpoch>,
     ),
 ) {
     let (lighting, source_lighting, fixed) = lighting;
-    let (plates, particles) = plates;
+    let (plates, particles, submissions, view_clock, epoch) = plates;
     if let Some(error) = mirrors.failure() {
         game_failure(&error);
         visuals.failed = true;
+        readiness.reset();
         return;
     }
     if let presentation::materials::RenderingState::Failed(error) = &source_lighting.state {
         game_failure(error);
         visuals.failed = true;
+        readiness.reset();
         return;
     }
     if let Some(error) = plates.failure() {
@@ -322,23 +327,27 @@ fn check_ready(
         visuals.failed = true;
     }
     if visuals.failed {
+        readiness.reset();
         return;
     }
     if let presentation::lighting::RenderingState::Failed(error) = &lighting.state {
         game_failure(error);
         visuals.failed = true;
+        readiness.reset();
         return;
     }
     if let presentation::materials::RenderingState::Failed(error) = &materials.state {
         game_failure(error);
         visuals.failed = true;
+        readiness.reset();
         return;
     }
     if drive.ready {
-        *readiness = 0;
+        readiness.reset();
         return;
     }
     if !fixed.payloads_ready() || !materials.fixed_textures_ready() {
+        readiness.reset();
         return;
     }
     if !drive
@@ -348,36 +357,44 @@ fn check_ready(
         .storage
         .initialization_ready()
     {
+        readiness.reset();
         return;
     }
     for (path, handle) in &visuals.handles {
         let Some((load, _, recursive)) = server.get_load_states(handle.id()) else {
+            readiness.reset();
             return;
         };
         if let LoadState::Failed(error) = load {
             game_failure(&format!("Cannot load {path}: {error}"));
             visuals.failed = true;
+            readiness.reset();
             return;
         }
         if let RecursiveDependencyLoadState::Failed(error) = recursive {
             game_failure(&format!("Cannot load dependencies for {path}: {error}"));
             visuals.failed = true;
+            readiness.reset();
             return;
         }
         if !server.is_loaded_with_dependencies(handle.id()) || !gltfs.contains(handle.id()) {
+            readiness.reset();
             return;
         }
         if gltfs.get(handle).unwrap().scenes.is_empty() {
             game_failure(&format!("Required source scene 0 is missing from {path}"));
             visuals.failed = true;
+            readiness.reset();
             return;
         }
     }
     if !lighting.materials_ready {
+        readiness.reset();
         return;
     }
     if !visuals.spawned {
         presentation::reference::spawn_scenes(&mut commands, &reference.0, &mut visuals, &gltfs);
+        readiness.reset();
         return;
     }
     match presentation::reference::bind(
@@ -399,50 +416,68 @@ fn check_ready(
                 &mut materials,
             ) {
                 Ok(true) => {}
-                Ok(false) => return,
+                Ok(false) => {
+                    readiness.reset();
+                    return;
+                }
                 Err(e) => {
                     game_failure(&e.to_string());
                     visuals.failed = true;
+                    readiness.reset();
                     return;
                 }
             }
             match &lighting.state {
-                presentation::lighting::RenderingState::Loading => return,
+                presentation::lighting::RenderingState::Loading => {
+                    readiness.reset();
+                    return;
+                }
                 presentation::lighting::RenderingState::Failed(error) => {
                     game_failure(error);
                     visuals.failed = true;
+                    readiness.reset();
                     return;
                 }
                 presentation::lighting::RenderingState::Ready => {}
             }
             if materials.state != presentation::materials::RenderingState::Ready {
+                readiness.reset();
                 return;
             }
             if !drive.runtime.world_supported()
                 || !drive.runtime.stream.required_ready()
                 || !lighting.road_lamps.ready()
             {
+                readiness.reset();
                 return;
             }
             if !mirrors.ready() || !plates.ready() {
+                readiness.reset();
                 return;
             }
             if source_lighting.state != presentation::materials::RenderingState::Ready {
+                readiness.reset();
                 return;
             }
             if !particles.prepared() {
+                readiness.reset();
                 return;
             }
-            *readiness += 1;
-            if *readiness >= 2 {
+            if readiness.observe(
+                drive.runtime.stream.frame().request.session,
+                epoch.0,
+                view_clock.main_token(),
+                submissions.main_token(),
+            ) {
                 drive.ready = true;
                 game_ready();
             }
         }
-        Ok(false) => {}
+        Ok(false) => readiness.reset(),
         Err(error) => {
             game_failure(&error);
             visuals.failed = true;
+            readiness.reset();
         }
     }
 }

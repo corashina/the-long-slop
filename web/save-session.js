@@ -50,11 +50,12 @@ export function createSaveSession({storage,runtime,onStatus=()=>{}}){
   });},
   newGame(){return run('newGame',operation=>prepare(operation,()=>runtime.prepareNewGame(operation.controller.signal)));},
   cancel(){
-   if(!active||active.committing)return;
+   if(!active||active.committing)return false;
    const operation=active;active=null;sequence++;
    operation.controller.abort();
    if(operation.candidate!==null){runtime.discard(operation.candidate);operation.candidate=null;}
    onStatus({operation:operation.name,state:'canceled'});
+   return true;
   }
  };
 }

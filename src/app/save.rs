@@ -1,12 +1,17 @@
 use super::*;
 use crate::presentation::save::PreparedPresentation;
+use crate::save::fresh_permit::FreshSessionPermit;
 use crate::save::{CameraSave, SaveError, SaveSnapshot, SourceHash, SourceStamp};
 use serde::Deserialize;
 
 #[derive(Resource)]
 pub struct SaveRequests {
     source: SourceStamp,
-    candidate: Option<Candidate>,
+    pending: Option<PendingPreparation>,
+}
+enum PendingPreparation {
+    Fresh(FreshSessionPermit),
+    Replacement(Candidate),
 }
 pub(crate) struct Candidate {
     id: u32,
@@ -25,16 +30,37 @@ struct Request {
     payload: serde_json::Value,
 }
 impl SaveRequests {
+    fn candidate(&self) -> Option<&Candidate> {
+        match self.pending.as_ref()? {
+            PendingPreparation::Replacement(c) => Some(c),
+            _ => None,
+        }
+    }
+    fn candidate_mut(&mut self) -> Option<&mut Candidate> {
+        match self.pending.as_mut()? {
+            PendingPreparation::Replacement(c) => Some(c),
+            _ => None,
+        }
+    }
+    fn take_candidate(&mut self) -> Option<Candidate> {
+        if matches!(self.pending, Some(PendingPreparation::Replacement(_))) {
+            let Some(PendingPreparation::Replacement(c)) = self.pending.take() else {
+                unreachable!()
+            };
+            Some(c)
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn hidden(&self) -> Option<&PreparedPresentation> {
-        self.candidate
-            .as_ref()
-            .and_then(|c| c.presentation.as_ref())
+        self.candidate().and_then(|c| c.presentation.as_ref())
     }
     pub(crate) fn freezes_world(&self) -> bool {
         self.hidden().is_some()
     }
     pub fn pending(&self) -> bool {
-        self.candidate.is_some()
+        self.pending.is_some()
     }
     pub fn new(reference: &ReferenceManifest, hash: String) -> Self {
         Self {
@@ -51,7 +77,7 @@ impl SaveRequests {
                     })
                     .collect(),
             },
-            candidate: None,
+            pending: None,
         }
     }
 }
@@ -91,12 +117,17 @@ fn process_request(
     let invalid = |message: &str| SaveError::ReconstructionFailure(message.into());
     match request.kind.as_str() {
         "Discard" => {
+            if let Some(PendingPreparation::Fresh(permit)) = requests.pending.as_ref() {
+                if Some(u64::from(permit.request_id)) == request.payload.as_u64() {
+                    requests.pending = None;
+                }
+                return Ok(String::new());
+            }
             if requests
-                .candidate
-                .as_ref()
+                .candidate()
                 .is_some_and(|candidate| Some(candidate.id as u64) == request.payload.as_u64())
             {
-                let candidate = requests.candidate.as_mut().unwrap();
+                let candidate = requests.candidate_mut().unwrap();
                 candidate.canceled = true;
                 if let Some(presentation) = &mut candidate.presentation {
                     presentation.cancel();
@@ -105,27 +136,43 @@ fn process_request(
             Ok(String::new())
         }
         "Commit" => {
+            if let Some(PendingPreparation::Fresh(permit)) = requests.pending.as_ref() {
+                let permit = *permit;
+                let generation = world
+                    .resource::<crate::presentation::view_frame::SourceSceneEpoch>()
+                    .0;
+                let id = request
+                    .payload
+                    .as_u64()
+                    .and_then(|id| u32::try_from(id).ok())
+                    .ok_or_else(|| invalid("Prepared session is stale"))?;
+                let mut drive = world.resource_mut::<Drive>();
+                if !drive.ready {
+                    return Err(invalid("The garage is not ready"));
+                }
+                permit.commit(id, &mut drive.runtime, generation)?;
+                super::clear_input(&mut drive);
+                drive.frame_steps = 0;
+                drive.render_delta_seconds = 0.;
+                requests.pending = None;
+                return Ok(String::new());
+            }
             if !requests
-                .candidate
-                .as_ref()
+                .candidate()
                 .is_some_and(|candidate| Some(candidate.id as u64) == request.payload.as_u64())
             {
                 return Err(invalid("Prepared session is missing"));
             }
-            if !requests
-                .candidate
-                .as_ref()
-                .is_some_and(|c| c.ready && !c.canceled)
-            {
+            if !requests.candidate().is_some_and(|c| c.ready && !c.canceled) {
                 return Err(invalid("Prepared renderer is not ready"));
             }
-            let candidate = requests.candidate.as_ref().unwrap();
+            let candidate = requests.candidate().unwrap();
             candidate.presentation.as_ref().unwrap().validate_commit(
                 &reference,
                 &candidate.runtime,
                 world,
             )?;
-            let mut candidate = requests.candidate.take().unwrap();
+            let mut candidate = requests.take_candidate().unwrap();
             candidate
                 .runtime
                 .stream
@@ -205,8 +252,20 @@ fn process_request(
                 return serde_json::to_string(&snapshot)
                     .map_err(|error| SaveError::CorruptData(error.to_string()));
             }
-            if requests.candidate.is_some() {
+            if requests.pending.is_some() {
                 return Err(invalid("A prepared session is pending"));
+            }
+            if request.kind == "PrepareNewGame" && !drive.runtime.started {
+                let permit = FreshSessionPermit::prepare(
+                    request.id,
+                    &drive.runtime,
+                    world
+                        .resource::<crate::presentation::view_frame::SourceSceneEpoch>()
+                        .0,
+                )?;
+                requests.pending = Some(PendingPreparation::Fresh(permit));
+                game_save_result(request.id, &request.kind, &request.id.to_string(), "");
+                return Ok(request.id.to_string());
             }
             let (mut runtime, camera) = if request.kind == "Prepare" {
                 let saved: SaveSnapshot = serde_json::from_value(request.payload.clone())
@@ -226,7 +285,7 @@ fn process_request(
             runtime.started = true;
             runtime.paused = true;
 
-            requests.candidate = Some(Candidate {
+            requests.pending = Some(PendingPreparation::Replacement(Candidate {
                 id: request.id,
                 runtime,
                 camera,
@@ -234,7 +293,7 @@ fn process_request(
                 kind: request.kind.clone(),
                 ready: false,
                 canceled: false,
-            });
+            }));
             Ok(request.id.to_string())
         }
         _ => Err(invalid("Unknown save request")),
@@ -243,7 +302,7 @@ fn process_request(
 
 fn advance(world: &mut World) {
     world.resource_scope(|world, mut requests: Mut<SaveRequests>| {
-        let Some(mut candidate) = requests.candidate.take() else {
+        let Some(mut candidate) = requests.take_candidate() else {
             return;
         };
         if candidate.canceled {
@@ -258,11 +317,11 @@ fn advance(world: &mut World) {
                 game_save_result(candidate.id, &candidate.kind, "", "Save operation canceled");
                 return;
             }
-            requests.candidate = Some(candidate);
+            requests.pending = Some(PendingPreparation::Replacement(candidate));
             return;
         }
         if candidate.ready {
-            requests.candidate = Some(candidate);
+            requests.pending = Some(PendingPreparation::Replacement(candidate));
             return;
         }
         let reference = world.resource::<RuntimeReference>().0.clone();
@@ -298,6 +357,6 @@ fn advance(world: &mut World) {
                 }
             }
         }
-        requests.candidate = Some(candidate);
+        requests.pending = Some(PendingPreparation::Replacement(candidate));
     });
 }

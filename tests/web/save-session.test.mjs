@@ -26,3 +26,14 @@ test('failed_load_keeps_runtime_and_reports_error',async()=>{
 test('cancel_after_commit_preserves_committed_candidate',async()=>{
  const committed=deferred();const {session,calls}=setup({runtime:{commit:async(token,onDispatch)=>{onDispatch();calls.commit.push(token);await committed.promise;}}});const operation=session.newGame();await tick();session.cancel();assert.equal(session.pending,true);committed.resolve();await operation;assert.deepEqual(calls.commit,[8]);assert.deepEqual(calls.discard,[]);assert.equal(calls.status.at(-1).state,'success');
 });
+
+test('menu_cancel_ignores_late_prepare_and_protects_dispatched_commit',async()=>{
+ const {MenuState}=await import('../../web/menu.js');
+ const candidate=deferred();const {session,calls}=setup({runtime:{prepareNewGame:()=>candidate.promise}});
+ const menu=new MenuState();menu.ready();const operation=menu.run('newGame',session);
+ menu.pause(session);assert.equal(menu.pending,false);candidate.resolve(19);await operation;
+ assert.equal(menu.started,false);assert.equal(menu.status,'');assert.deepEqual(calls.discard,[19]);
+ const committed=deferred();const second=setup({runtime:{commit:async(token,onDispatch)=>{onDispatch();await committed.promise;}}});
+ const next=menu.run('newGame',second.session);await tick();menu.pause(second.session);
+ assert.equal(menu.pending,true);committed.resolve();await next;assert.equal(menu.started,true);
+});

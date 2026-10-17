@@ -1,4 +1,5 @@
 //! Current browser save contract. Capture and reconstruction use stable source identities.
+pub mod fresh_permit;
 pub mod identity;
 pub mod schema;
 mod validate;
