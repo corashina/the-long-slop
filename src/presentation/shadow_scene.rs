@@ -2,15 +2,16 @@
 use super::surface_views::VIEW_COUNT;
 use super::{
     lighting_assets::LightingAssets,
-    lighting_scene::SourceSceneLighting,
+    lighting_scene::{SourceSceneLighting, SourceWorldOrigin},
     materials::{RenderingState, SourceMaterial, SourceMaterials},
     renderers::SourceRenderer,
     source_lighting::SourceLightingStatus,
     view_frame::SourceViewFrame,
 };
 use crate::reference::{
+    shadow_bounds::{BoundsKey, WorldBoundsCache},
     shadow_candidates::{Bounds, CandidateState},
-    shadow_frame::{CasterInput, prepare_frame},
+    shadow_frame::{CasterInput, ShadowViewCache, validate_casters},
     shadow_planes::CullPlanes,
     shadows::{ShadowFit, ShadowFitInput, source_atlas_size},
 };
@@ -33,6 +34,10 @@ pub struct ShadowScene {
     pub split_counts: [[usize; 4]; VIEW_COUNT],
     pub camera_visible: usize,
     pub shadow_only: usize,
+    bounds: WorldBoundsCache<Entity>,
+    caster_revision: u64,
+    casters_ready: bool,
+    views: [ShadowViewCache; VIEW_COUNT],
 }
 impl ShadowScene {
     pub fn capacity(&self) -> usize {
@@ -56,6 +61,7 @@ impl ShadowScene {
 pub fn prepare_scene(
     frame: Res<SourceViewFrame>,
     live: Res<SourceSceneLighting>,
+    origin: Res<SourceWorldOrigin>,
     assets: Option<Res<LightingAssets>>,
     source: Res<SourceMaterials>,
     materials: Res<Assets<SourceMaterial>>,
@@ -106,15 +112,19 @@ pub fn prepare_scene(
     let generated = 0;
     if imported > scene.imported_capacity || generated > scene.generated_capacity {
         scene.reserve(imported, generated);
+        scene.bounds.reserve(imported);
     }
-    scene.entities.clear();
-    scene.casters.clear();
+    let mut changed =
+        scene.bounds.begin(frame.session, frame.scene, origin.0) || !scene.casters_ready;
+    // An interrupted collection must not publish a prior view result after recovery.
+    scene.casters_ready = false;
     scene.camera_visible = 0;
     scene.shadow_only = 0;
     let fail = |message: &str| {
         *status.0.lock().unwrap() = RenderingState::Failed(message.into());
     };
     let mut imported = 0;
+    let mut row = 0;
 
     for (
         entity,
@@ -181,26 +191,29 @@ pub fn prepare_scene(
             0
         };
         let world = transform.affine();
-        let center = world.transform_point3a(bounds.center);
-        let e = world.matrix3.x_axis.abs() * bounds.half_extents.x
-            + world.matrix3.y_axis.abs() * bounds.half_extents.y
-            + world.matrix3.z_axis.abs() * bounds.half_extents.z;
-        let b = Bounds {
-            center: [center.x, center.y, -center.z],
-            extents: e.to_array(),
+        let key = BoundsKey::new(
+            world.to_cols_array(),
+            bounds.center.to_array(),
+            bounds.half_extents.to_array(),
+        );
+        let b = match scene.bounds.get_or_update(entity, key, || {
+            let center = world.transform_point3a(bounds.center);
+            let e = world.matrix3.x_axis.abs() * bounds.half_extents.x
+                + world.matrix3.y_axis.abs() * bounds.half_extents.y
+                + world.matrix3.z_axis.abs() * bounds.half_extents.z;
+            Bounds {
+                center: [center.x, center.y, -center.z],
+                extents: e.to_array(),
+            }
+        }) {
+            Ok(bounds) => bounds,
+            Err(error) => {
+                fail(error);
+                return;
+            }
         };
-        if b.center
-            .iter()
-            .chain(b.extents.iter())
-            .any(|v| !v.is_finite())
-            || b.extents.iter().any(|v| *v < 0.)
-        {
-            fail("Source shadow renderer bounds are nonfinite");
-            return;
-        }
         scene.camera_visible += usize::from(visible.get());
-        scene.entities.push(entity);
-        scene.casters.push(CasterInput {
+        let caster = CasterInput {
             bounds: b,
             state: CandidateState {
                 shadow_casting_mode: record.0.cast_shadows,
@@ -213,8 +226,33 @@ pub fn prepare_scene(
                 active_lod: 0,
             },
             material_has_caster: has_caster,
-        });
+        };
+        if let Some(previous) = scene.casters.get(row) {
+            changed |= scene.entities[row] != entity || !previous.unchanged(&caster);
+            scene.entities[row] = entity;
+            scene.casters[row] = caster;
+        } else {
+            changed = true;
+            scene.entities.push(entity);
+            scene.casters.push(caster);
+        }
+        row += 1;
     }
+    changed |= row != scene.casters.len();
+    scene.entities.truncate(row);
+    scene.casters.truncate(row);
+    scene.bounds.finish();
+    if changed {
+        if let Err(error) = validate_casters(&scene.casters) {
+            fail(error);
+            return;
+        }
+        scene.caster_revision = scene
+            .caster_revision
+            .checked_add(1)
+            .expect("Source shadow caster revision exhausted");
+    }
+    scene.casters_ready = true;
     let light = &assets.record.lights[0];
     let rotation = live.sun_rotation;
     let h = |v: Vec3| [v.x, v.y, -v.z];
@@ -225,8 +263,9 @@ pub fn prepare_scene(
     ];
     let scene = &mut *scene;
     for index in 0..VIEW_COUNT {
-        scene.masks[index].clear();
         let Some(v) = frame.views[index] else {
+            scene.masks[index].clear();
+            scene.views[index].clear();
             continue;
         };
         timing.face(index);
@@ -254,10 +293,11 @@ pub fn prepare_scene(
             shadow_strength: light.shadows.strength,
         };
         scene.masks[index].resize(scene.casters.len(), 0);
-        match prepare_frame(
+        match scene.views[index].prepare(
+            scene.caster_revision,
             &scene.casters,
             &mut scene.masks[index],
-            &CullPlanes {
+            CullPlanes {
                 camera: v.source_camera_planes,
                 shadow: v.source_shadow_planes,
             },

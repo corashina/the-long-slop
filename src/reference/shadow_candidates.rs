@@ -179,7 +179,7 @@ impl DirectionalHull {
 }
 /// Inputs are per-renderer state, before camera-visible phase batching.
 /// Active LOD state and renderer-array membership must come from their proved target contract.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CandidateState {
     pub shadow_casting_mode: u8,
     pub layer: u8,

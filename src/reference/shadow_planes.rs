@@ -25,6 +25,7 @@ pub fn extract_planes(matrix: [f32; 16]) -> [Plane; 6] {
     })
 }
 
+#[derive(Clone, Copy)]
 pub struct CullPlanes {
     pub camera: [Plane; 6],
     pub shadow: [Plane; 6],
