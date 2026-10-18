@@ -190,7 +190,7 @@ pub(crate) type DrawSourceMaterial = (
     SetSourceViewCamera,
     SetSourceViewLighting,
     SetMeshBindGroup<2>,
-    super::mirrors::SetMirrorMaterial<3>,
+    bevy::pbr::SetMaterialBindGroup<3>,
     DrawMesh,
     SourceDrawMark<false, true>,
     super::surface_pass::SetSourceAdditivePipeline,
@@ -208,7 +208,7 @@ pub(crate) type DrawSourceBase = (
     SetSourceViewCamera,
     SetSourceViewLighting,
     SetMeshBindGroup<2>,
-    super::mirrors::SetMirrorMaterial<3>,
+    bevy::pbr::SetMaterialBindGroup<3>,
     DrawMesh,
     SourceDrawMark<false, true>,
 );
@@ -240,7 +240,7 @@ pub(crate) type DrawSourceGlass = (
     SetSourceViewCamera,
     super::stained_glass::SetSourceGlassView,
     SetMeshBindGroup<2>,
-    super::mirrors::SetMirrorMaterial<3>,
+    bevy::pbr::SetMaterialBindGroup<3>,
     DrawMesh,
     SourceDrawMark<false, true>,
 );
@@ -253,7 +253,7 @@ pub(crate) type DrawSourceAdd = (
     SetSourceViewCamera,
     SetSourceViewLighting,
     SetMeshBindGroup<2>,
-    super::mirrors::SetMirrorMaterial<3>,
+    bevy::pbr::SetMaterialBindGroup<3>,
     DrawMesh,
     SourceDrawMark<true, true>,
 );

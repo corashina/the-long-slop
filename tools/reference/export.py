@@ -217,7 +217,7 @@ def verify_reference(output: Path, library) -> None:
     for record in evidence_receipts:checked(output,record)
     if json.loads((output/'conditions-evidence.json').read_bytes())['conditions']!=manifest['conditions']:
         raise ValueError('Condition evidence differs from runtime records')
-    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','mirror-evidence.json','plate-evidence.json','flashlights-evidence.json','driving-evidence.json','conditions-evidence.json'}
+    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','plate-evidence.json','flashlights-evidence.json','driving-evidence.json','conditions-evidence.json'}
     for asset in manifest['assets']:
         for record in [asset, *asset['dependencies']]:
             name = record.get('file', record.get('path')).removeprefix('reference/')
@@ -305,14 +305,16 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
             raise ValueError(f'Selected {name} starter link differs from the required car')
     # Every start car shares one garage spot. The project parks the other cars in the yard.
     relocate(source,roots['skoda'][0],SKODA_PARKING,180.)
-    from .mirrors import prepare_mirror_materials
-    prepare_mirror_materials(source, roots['lada'][0])
+    # Mirror glass uses the source material for disabled mirrors.
+    main = source.get('level1', 64919)
+    glass = source.resolve(main, source.read(main)['noMirrorMaterial'])
+    source.mirror_renderers = {}
     for node in [n for name in CARS for n in source.hierarchy(roots[name][0], activate_root=True)]:
         for reader in node['components']:
             if reader.type.name == 'MonoBehaviour' and source.class_name(reader) == 'mirrorscript':
                 data = source.read(reader)['M']
                 if data['R']['m_PathID'] and data['C']['m_PathID']:
-                    source.mirror_renderers[key(source.resolve(reader, data['R']))] = source.mirror_live_material
+                    source.mirror_renderers[key(source.resolve(reader, data['R']))] = glass
     prepare_conditions(source,[root for readers in roots.values() for root in readers])
     output.mkdir(parents=True, exist_ok=True)
     native_engine = native_engine_evidence(snapshot.root)
@@ -358,8 +360,6 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     (output/'driving-evidence.json').write_text(json.dumps(source.driving_evidence,indent=2,allow_nan=False),encoding='utf-8')
     from .plates import plate_source_evidence
     (output/'plate-evidence.json').write_text(json.dumps(plate_source_evidence(source,manifest['plates']),indent=2,allow_nan=False),encoding='utf-8')
-    from .mirrors import mirror_source_evidence
-    (output/'mirror-evidence.json').write_text(json.dumps(mirror_source_evidence(source,manifest['mirrors']),indent=2,allow_nan=False),encoding='utf-8')
     from .world import recover_world
     from .manifest import attach_world
     attach_world(manifest,recover_world(source,library,output,len(manifest['assets'])+1))

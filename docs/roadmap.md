@@ -7,7 +7,7 @@ Updated: 2026-10-15.
 ### Remote loading history
 
 Remote commit `3714dc0` recorded a 24 m startup gate, budget waits, and concurrent texture chunks.
-The combined source keeps complete startup generation, required content, graph and mirror receipts, and two presented frames.
+The combined source keeps complete startup generation, required content, graph receipts, and two presented frames.
 It keeps strict budgets and the current texture batch queue. It adds one-metre structure refresh and nearest-first preparation and publication.
 Item capture alone preserves the movement baseline. Request, road, and source input changes can still force an earlier refresh.
 Existing activity checks still require complete road, structure, light, revision, generation, and ground support.
@@ -21,7 +21,7 @@ Pending work stayed at 32 of 32, staging stayed at zero, and garage rendering st
 It proposed a comparison with `3dcb7ad` and an audit of prototype and texture budget waits.
 It reported four audio decode failures, about 40 s of shader compilation, and pressure on the prototype GPU budget.
 These reports remain historical evidence. Reproduce each result with matching assets before treating it as a current fault.
-Walk and drive outside the yard during current runtime checks. Inspect ground, streaming, budgets, mirrors, and allocator errors.
+Walk and drive outside the yard during current runtime checks. Inspect ground, streaming, budgets, and allocator errors.
 
 ### Inventory and clothing
 
@@ -45,7 +45,7 @@ The acquisition check confirms unchanged source values and valid links to the cu
 | 5 | Stopped | Add source box contents and one-time release. Save release state to prevent duplicates. |
 | 6 | Stopped | Add source shovel digging and buried-item recovery. Save burial and recovery state. |
 | 7 | Stopped | Add supported wearables, cigarettes, and holiday startup. Keep disabled starter apparel disabled. |
-| 8 | Stopped | Add both player skins, source pose and IK, wearable anchors, and camera visibility. Check mirrors, probes, and shadows. |
+| 8 | Stopped | Add both player skins, source pose and IK, wearable anchors, and camera visibility. Check probes and shadows. |
 | 9 | Stopped | Add appearance controls and remaining HUD behavior. Prepare and commit profiles atomically. |
 | 10 | Stopped | Compare the completed feature with the running source game. Record gameplay and visual limits. Use critical checks only. |
 
@@ -190,7 +190,7 @@ The checked source inputs and merged export are complete. The repaired diagnosti
 | --- | --- |
 | Vehicles and interaction | Two imported cars, vehicle selection, carry, parts, mechanisms, and source recovery |
 | Driving controls and transmission | Source pedal ramps, manual gears, clutch, two saved assists, control help, and gear feedback |
-| Rendering | Shared lighting, shadows, probes, camera effects, transparent glass, live mirrors, and source plates |
+| Rendering | Shared lighting, shadows, probes, camera effects, transparent glass, and source plates |
 | Audio | Source vehicle, interaction, and Lada radio audio |
 | Survival | Existing consumables, survival state, and sleep |
 | Portable flashlight | Source bindings, carried controls, storage restrictions, and shared light rendering |
@@ -385,8 +385,7 @@ Controlled lifecycle checks passed six stages. Both vehicle records survived a m
 Both probes published. Three main views completed, and three mirror submissions passed GPU validation.
 The merged motion pool retained 953 slots through the checked scene replacements.
 The checkout no longer contains the execution ledger or verification record. Read their historical versions from Git.
-Current renderer owners include [postprocessing](../src/presentation/postprocessing.rs), [probes](../src/presentation/probes.rs),
-and [mirror rendering](../src/presentation/mirrors.rs).
+Current renderer owners include [postprocessing](../src/presentation/postprocessing.rs) and [probes](../src/presentation/probes.rs).
 
 ### Rendering limits
 
@@ -403,5 +402,5 @@ That source proof resolves the former reload-versus-reset uncertainty.
 
 Source vehicle, interaction, and Lada radio audio are implemented. Assembled audible acceptance remains incomplete.
 See the [audio owner](../src/audio.rs) and [browser audio route](../web/audio.js) for the current implementation.
-Master includes save/load, two source cars, and live mirrors.
+Master includes save/load and two source cars. Live mirror views are removed and outside current scope.
 Survival and sleep are implemented in master. Weather simulation and reference data are removed and outside current scope. Multiplayer and deployment remain outside scope.

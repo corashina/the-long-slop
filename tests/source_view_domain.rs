@@ -29,7 +29,7 @@ fn source_culling_inverse_and_positions_share_source_world() {
 }
 
 #[test]
-fn candidate_mirror_views_use_private_pose_and_origin() {
+fn candidate_views_use_private_pose_and_origin() {
     use my_summer_slop::{
         reference::{shadow_candidates::DirectionalHull, shadow_planes::implicit_cull_planes},
         world::{RequiredView, WorldBounds},

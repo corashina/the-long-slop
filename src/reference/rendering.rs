@@ -126,7 +126,6 @@ pub struct ShaderProperties {
     pub colors: BTreeMap<String, [f32; 4]>,
     pub textures: Vec<TextureRecord>,
     pub defaults: BTreeMap<String, TextureDefault>,
-    pub exclusions: Vec<TextureExclusion>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,19 +135,6 @@ pub enum TextureDefault {
     Grey,
     Black,
     Bump,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TextureExclusion {
-    pub slot: String,
-    pub source: SourceId,
-    pub reason: ExclusionReason,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ExclusionReason {
-    LiveMirror,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -542,7 +528,6 @@ impl RenderingRecord {
                             } else {
                                 material.properties.defaults.is_empty()
                             }
-                            && material.properties.exclusions.is_empty()
                             && state.alpha_mode == AlphaMode::Mask
                             && state.cull == 2
                             && state.z_write
@@ -621,7 +606,6 @@ impl RenderingRecord {
                             && material.properties.colors.is_empty()
                             && material.properties.textures.is_empty()
                             && material.properties.defaults.is_empty()
-                            && material.properties.exclusions.is_empty()
                             && ["_Sag", "_SwaySpeed", "_SwayStrength"]
                                 .iter()
                                 .all(|key| material.properties.floats.contains_key(*key))
@@ -731,15 +715,6 @@ impl RenderingRecord {
                 slots == active,
                 &format!("{label}: missing active texture/default"),
             )?;
-            for exclusion in &material.properties.exclusions {
-                require(
-                    matches!(exclusion.slot.as_str(), "_MainTex" | "_EmissionMap")
-                        && source(&exclusion.source)
-                        && material.source.file == "sharedassets1.assets"
-                        && material.source.path_id == 624,
-                    &format!("{label}: live mirror exclusion"),
-                )?;
-            }
         }
         for asset in assets {
             if asset.id == sky_asset {

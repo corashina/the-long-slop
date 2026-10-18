@@ -1,6 +1,6 @@
 //! Source camera stack. GPU tokens are acknowledged after the render queue submission.
 use super::lighting_scene::PROBE_COUNT;
-use super::surface_views::{MIRROR_START, VIEW_COUNT};
+use super::surface_views::VIEW_COUNT;
 use super::{
     frame_copy::FrameCopy,
     lighting_assets::LightingRenderAssets,
@@ -301,10 +301,6 @@ impl Plugin for SourceFramePlugin {
             progress: progress.0.clone(),
             status,
             gate,
-            mirrors: app
-                .world()
-                .resource::<super::mirrors::MirrorGpuStatus>()
-                .clone(),
         });
         app.insert_resource(progress.clone())
             .add_plugins((
@@ -434,7 +430,7 @@ pub fn spawn_cameras(
     );
     image.texture_descriptor.usage |= TextureUsages::RENDER_ATTACHMENT;
     let capture = images.add(image);
-    for index in 0..MIRROR_START {
+    for index in 0..VIEW_COUNT {
         let (near, far, fov, mask, order, samples) = if index < 3 {
             let c = &record.cameras[index + 1];
             (
@@ -543,16 +539,10 @@ fn update_sky_extras(
     }
 }
 fn sort_sky(
-    views: Query<
-        (&ExtractedView, Option<&super::mirrors::MirrorViewRole>),
-        Or<(With<SourceSkyCamera>, With<super::mirrors::MirrorViewRole>)>,
-    >,
+    views: Query<&ExtractedView, With<SourceSkyCamera>>,
     mut phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
 ) {
-    for (view, role) in &views {
-        if matches!(role, Some(super::mirrors::MirrorViewRole::Normal)) {
-            continue;
-        }
+    for view in &views {
         if let Some(phase) = phases.get_mut(&view.retained_view_entity) {
             Transparent3d::sort(&mut phase.items);
         }
@@ -615,42 +605,7 @@ fn prepare_frame(
     }
     if let Some(clouds) = clouds.as_mut() {
         if sky_views.single().is_ok() {
-            clouds.write_live(0, Vec3::ZERO, sky_clip, &scene, &device, &queue);
-        }
-    }
-    for owner in 0..3 {
-        let Some(snapshot) = frame.views[MIRROR_START + owner] else {
-            continue;
-        };
-        let position = snapshot.view_from_world.inverse().w_axis.truncate();
-        let mut sky_projection = crate::reference::sky::source_sky_gpu_projection(
-            snapshot.implicit_projection.to_cols_array_2d(),
-            snapshot.near,
-        );
-        // MirrorProjection preserves its native upright render texture projection.
-        for column in &mut sky_projection {
-            column[1] = -column[1];
-        }
-        if let Some(sky) = sky.as_mut() {
-            sky.write_live(
-                7 + owner,
-                &scene,
-                position,
-                snapshot.far,
-                Mat4::from_cols_array_2d(&sky_projection) * snapshot.view_from_world,
-                &device,
-                &queue,
-            );
-        }
-        if let Some(clouds) = clouds.as_mut() {
-            clouds.write_live(
-                owner + 1,
-                position,
-                snapshot.raster_projection * snapshot.view_from_world,
-                &scene,
-                &device,
-                &queue,
-            );
+            clouds.write_live(Vec3::ZERO, sky_clip, &scene, &device, &queue);
         }
     }
     let Some((_, target)) = views.iter().find(|(source, _)| source.index == 2) else {
@@ -740,7 +695,6 @@ pub(crate) fn surface_ready(
         && effects.is_some_and(|effects| effects.ready(&cache))
         && state.sky
         && (index < 3
-            || index >= MIRROR_START
             || (state.presented
                 && frame.probe_job == Some(ProbeJob::Face((index - 3) as u8))
                 && probe.is_some_and(|p| {
@@ -914,7 +868,6 @@ fn render_sky(
         return;
     }
     if !clouds.encode(
-        0,
         context.command_encoder(),
         &cache,
         &allocator,
@@ -949,7 +902,6 @@ fn finish_surface(
         &super::camera_depth::CameraDepthState,
         &super::surface_graph::SurfaceViewTargets,
         &super::stained_glass::SourceGlassView,
-        Option<&super::mirrors::MirrorInstance>,
     )>,
     frame: Res<SourceViewFrame>,
     progress: Res<SourceGraphProgress>,
@@ -958,13 +910,10 @@ fn finish_surface(
     mut probe: Option<ResMut<ProbeFrame>>,
     cache: Res<PipelineCache>,
     effects: Res<super::source_effects::SourceEffects>,
-    mirror_outputs: Res<super::mirrors::MirrorOutputs>,
-    mirror_status: Res<super::mirrors::MirrorGpuStatus>,
     status: Res<SourceLightingStatus>,
     mut context: RenderContext,
 ) {
-    let (source, target, collector, lighting, shadow, depth, targets, glass, mirror_instance) =
-        view.into_inner();
+    let (source, target, collector, lighting, shadow, depth, targets, glass) = view.into_inner();
     if collector.encoded_frame() != frame.frame || glass.audit().frame != frame.frame {
         return;
     }
@@ -987,25 +936,6 @@ fn finish_surface(
         atlas_size: targets.0.atlas_size,
         physical_extent: [targets.0.colors.width, targets.0.colors.height],
     };
-    if source.index >= MIRROR_START {
-        let owner = source.index - MIRROR_START;
-        let Some(instance) = mirror_instance else {
-            return;
-        };
-        if !mirror_status.sky_ready(instance.0, owner, frame.frame) {
-            return;
-        }
-        let Some(output) = target.out_texture_color_attachment(None) else {
-            return;
-        };
-        if mirror_outputs.0[owner]
-            .as_ref()
-            .is_some_and(|copy| copy.encode(context.command_encoder(), &cache, output.view, None))
-        {
-            mirror_status.encoded(instance.0, owner, frame.frame);
-        }
-        return;
-    }
     if source.index >= 3 {
         let Some(probes) = probe.as_mut() else { return };
         let probe = &mut probes.probes[frame.probe_index];
@@ -1161,7 +1091,6 @@ struct SourceDiagnostics {
     progress: Arc<Mutex<FrameProgress>>,
     status: Arc<Mutex<RenderingState>>,
     gate: SourceExecutionGate,
-    mirrors: super::mirrors::MirrorGpuStatus,
 }
 static SOURCE_DIAGNOSTICS: OnceLock<SourceDiagnostics> = OnceLock::new();
 
@@ -1198,7 +1127,6 @@ pub fn source_render_audit() -> String {
         "state": state, "graph": &*progress,
         "graph_control_bytes": control_bytes(),
         "gpu_validated_generation": audit.gate.validated_generation(),
-        "mirrors": audit.mirrors.audit(),
     }))
     .expect("source diagnostic values serialize")
 }
@@ -1591,27 +1519,18 @@ fn clear_capture(
     );
 }
 fn render_capture_sky(
-    world: &World,
     view: ViewQuery<(
-        &ExtractedView,
         &SourceSurfaceView,
         &super::surface_graph::SurfaceViewTargets,
-        Option<&super::mirrors::MirrorInstance>,
     )>,
     sky: Res<SkyPass>,
     probe: Option<Res<ProbeFrame>>,
     frame: Res<SourceViewFrame>,
     cache: Res<PipelineCache>,
     status: Res<SourceLightingStatus>,
-    mirror_status: Res<super::mirrors::MirrorGpuStatus>,
-    clouds: Res<super::clouds::CloudPass>,
-    extras: Res<SkyExtras>,
-    phases: Res<ViewSortedRenderPhases<Transparent3d>>,
-    allocator: Res<bevy::render::mesh::allocator::MeshAllocator>,
     mut context: RenderContext,
 ) {
-    let entity = view.entity();
-    let (extracted, source, targets, instance) = view.into_inner();
+    let (source, targets) = view.into_inner();
     if source.index < 3 || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
         return;
     }
@@ -1622,57 +1541,10 @@ fn render_capture_sky(
         targets.0.colors.attachment(),
         None,
         &targets.0.depth.attachment,
-    ) {
-        if source.index < MIRROR_START {
-            if let Some(probe) = probe.as_ref() {
-                probe.probes[frame.probe_index].sky_frames[source.index - 3]
-                    .store(frame.frame, Ordering::Release);
-            }
-            return;
-        }
-        let owner = source.index - MIRROR_START;
-        let Some(instance) = instance else { return };
-        let Some(phase) = phases.get(&extracted.retained_view_entity) else {
-            return;
-        };
-        if let Err(error) = draw_extras(
-            3,
-            phase,
-            world,
-            entity,
-            &mut context,
-            &targets.0.colors,
-            &targets.0.depth.attachment,
-            &extras,
-        ) {
-            *status.0.lock().unwrap() = RenderingState::Failed(error);
-            return;
-        }
-        if !clouds.encode(
-            owner + 1,
-            context.command_encoder(),
-            &cache,
-            &allocator,
-            targets.0.colors.attachment(),
-            None,
-            &targets.0.depth.attachment,
-        ) {
-            return;
-        }
-        if let Err(error) = draw_extras(
-            4,
-            phase,
-            world,
-            entity,
-            &mut context,
-            &targets.0.colors,
-            &targets.0.depth.attachment,
-            &extras,
-        ) {
-            *status.0.lock().unwrap() = RenderingState::Failed(error);
-            return;
-        }
-        mirror_status.sky_encoded(instance.0, owner, frame.frame);
+    ) && let Some(probe) = probe.as_ref()
+    {
+        probe.probes[frame.probe_index].sky_frames[source.index - 3]
+            .store(frame.frame, Ordering::Release);
     }
 }
 fn filter_probe(

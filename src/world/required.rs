@@ -23,8 +23,8 @@ impl RequiredView {
                 || self.light_mask & layers != 0 && self.shadow.intersects(bounds))
     }
 }
-/// Complete source frontier: three stack views, twelve probe faces, three mirrors.
-pub const REQUIRED_VIEW_CAPACITY: usize = 18;
+/// Complete source frontier: three stack views and twelve probe faces.
+pub const REQUIRED_VIEW_CAPACITY: usize = 15;
 
 /// Inline storage starts with a real source view, including its valid shadow hull.
 pub struct RequiredViews {

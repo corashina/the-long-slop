@@ -15,7 +15,6 @@ pub(super) fn from_base(base: StandardMaterial, mask: u32, reflected: bool) -> S
     SourceMaterial {
         retained_color: None,
         preparation: default(),
-        mirror: None,
         base,
         extension: SourceExtension {
             lod_fade: 1.,

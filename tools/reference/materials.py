@@ -194,7 +194,7 @@ def recover_material(source, reader, color_override=None, condition=None, textur
     elif family in {'stained_glass', 'player_model'}: active = ['_MainTex', '_BumpMap']
     environments = dict(saved.get('m_TexEnvs', []))
     identity_uv = {'m_Scale': {'x': 1., 'y': 1.}, 'm_Offset': {'x': 0., 'y': 0.}}
-    textures = []; active_defaults = {}; exclusions = []
+    textures = []; active_defaults = {}
     for slot in active:
         env = environments.get(slot)
         pointer = env['m_Texture'] if env else {'m_PathID': 0}
@@ -276,7 +276,7 @@ def recover_material(source, reader, color_override=None, condition=None, textur
         'enable_instancing': bool(data['m_EnableInstancingVariants']),
         'condition': condition, 'keywords': keywords, 'state': state,
         'properties': {'floats': floats, 'colors': colors, 'textures': textures,
-                       'defaults': active_defaults, 'exclusions': exclusions}}
+                       'defaults': active_defaults}}
 
 
 def source_mip_images(texture):
@@ -371,7 +371,6 @@ def material_source_evidence(source, reader, record):
         'state': record['state'], 'channels': {slot: channels[slot] for slot in
             [*record['properties']['defaults'], *[t['slot'] for t in record['properties']['textures']]]},
         'textures': record['properties']['textures'], 'defaults': record['properties']['defaults'],
-        'exclusions': record['properties']['exclusions'],
         'transport_limits': (['Imported glTF retains the existing white PBR rope material.',
             'Source rope sag and sway are not implemented.'] if record['shader_family'] == 'amplify_rope' else
             ['Base glTF does not apply layered shader operations.',

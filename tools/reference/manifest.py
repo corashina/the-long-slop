@@ -417,8 +417,6 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         for asset_id, name in enumerate(roots, 1) for record in reports[name]['materials']]}
     result['pushables']=recover_pushables(source,nodes,components,item_nodes,colliders,bodies,player_record['action_masks']['push_mask'])
     result['action_bindings']=recover_bindings(source,nodes,components,item_nodes,colliders,mechanisms,openings,seats)
-    from .mirrors import recover_mirrors
-    result['mirrors']=recover_mirrors(source,nodes,components,pointer_node,item_nodes,reports)
     from .plates import recover_plates, plate_resources
     result['plates']=recover_plates(source,nodes,components,pointer_node,item_nodes,colliders,output)
     assets[1]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in plate_resources(result['plates']))
