@@ -99,16 +99,14 @@ type DrawCameraDepth = (
     DrawMesh,
     DepthMark<true>,
 );
-struct Route<P: super::motion_draw::MotionBatchItem> {
+struct Route<P: PhaseItem> {
     surface: Box<dyn Draw<P>>,
     depth: Box<dyn Draw<P>>,
-    motion: Box<dyn Draw<P>>,
 }
-impl<P: super::motion_draw::MotionBatchItem> Draw<P> for Route<P> {
+impl<P: PhaseItem> Draw<P> for Route<P> {
     fn prepare(&mut self, world: &World) {
         self.surface.prepare(world);
         self.depth.prepare(world);
-        self.motion.prepare(world);
     }
     fn draw<'w>(
         &mut self,
@@ -117,12 +115,6 @@ impl<P: super::motion_draw::MotionBatchItem> Draw<P> for Route<P> {
         view: Entity,
         item: &P,
     ) -> Result<(), DrawError> {
-        if world
-            .get::<super::motion_draw::MotionDrawView>(view)
-            .is_some_and(|state| state.active())
-        {
-            return super::motion_draw::split_draw(world, pass, view, item, &mut *self.motion);
-        }
         let state = world
             .get::<CameraDepthState>(view)
             .ok_or(DrawError::InvalidViewQuery)?;
@@ -133,7 +125,7 @@ impl<P: super::motion_draw::MotionBatchItem> Draw<P> for Route<P> {
         }
     }
 }
-/// Keep other material draw IDs inert in source-only depth and motion passes.
+/// Keep other material draw IDs inert in the source-only depth pass.
 struct OtherMaterialRoute<P: PhaseItem> {
     original: Box<dyn Draw<P>>,
 }
@@ -151,9 +143,6 @@ impl<P: PhaseItem> Draw<P> for OtherMaterialRoute<P> {
         if world
             .get::<CameraDepthState>(view)
             .is_some_and(|state| state.active.load(Ordering::Relaxed))
-            || world
-                .get::<super::motion_draw::MotionDrawView>(view)
-                .is_some_and(|state| state.active())
         {
             return Ok(());
         }
@@ -176,12 +165,11 @@ impl<P: PhaseItem> Draw<P> for Installing {
 }
 fn wrap<P>(world: &mut World) -> Result<(), String>
 where
-    P: super::motion_draw::MotionBatchItem,
+    P: CachedRenderPipelinePhaseItem,
 {
     let mut routes = Vec::with_capacity(2);
     for source_world in [false, true] {
         let depth = Box::new(RenderCommandState::<P, DrawCameraDepth>::new(world));
-        let motion = Box::new(RenderCommandState::<P, super::motion_draw::DrawMotion>::new(world));
         let functions = world
             .get_resource::<DrawFunctions<P>>()
             .ok_or("Source camera-depth draw table is missing")?;
@@ -196,11 +184,7 @@ where
             &mut table.draw_functions[id.0 as usize],
             Box::new(Installing),
         );
-        table.draw_functions[id.0 as usize] = Box::new(Route {
-            surface,
-            depth,
-            motion,
-        });
+        table.draw_functions[id.0 as usize] = Box::new(Route { surface, depth });
         routes.push(id.0 as usize);
     }
     let functions = world.resource::<DrawFunctions<P>>();

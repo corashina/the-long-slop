@@ -45,8 +45,6 @@ pub mod frame_copy;
 pub mod frame_graph;
 pub mod lighting_assets;
 pub mod lighting_scene;
-pub mod motion_draw;
-pub mod motion_vectors;
 pub mod particles;
 pub mod plates;
 pub mod postprocessing;

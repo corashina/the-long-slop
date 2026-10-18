@@ -54,7 +54,7 @@ impl GrabPassCache {
 #[derive(Clone, Copy, Debug, ShaderType)]
 pub struct GlassViewUniform {
     /// Source D3D11 and target share this reverse-Z device matrix.
-    pub nonjittered_clip_from_world: Mat4,
+    pub clip_from_world: Mat4,
     /// Source ProjectionParams.y/z: near/far.
     pub near_far: Vec4,
     /// Source D3D11 grab texels: (1/W,-1/H,W,H).
@@ -73,7 +73,7 @@ impl GlassViewUniform {
             return Err("Source glass view inputs are invalid");
         }
         Ok(Self {
-            nonjittered_clip_from_world: matrix,
+            clip_from_world: matrix,
             near_far: Vec4::new(near, far, 0., 0.),
             grab_texel_size: Vec4::new(
                 1. / extent.x as f32,
