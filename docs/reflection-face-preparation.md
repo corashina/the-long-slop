@@ -1,7 +1,8 @@
 # Reflection face preparation
 
-Status: runtime acceptance is incomplete. No accepted FPS result exists yet.
-The user requested a local merge on 2026-10-18.
+Status: implementation is merged and pushed to master.
+The user owns the remaining runtime and performance checks.
+On 2026-10-18, the user requested no further tests. No accepted FPS result exists yet.
 
 ## Scope
 
@@ -33,7 +34,7 @@ Idle probe phases leave the active phase map until their face is selected.
 Their bins and retained view identities stay cached. Resuming a face reuses that storage.
 This prevents Bevy from preparing idle face instances each frame.
 Scene restart resumes all six phases for warmup. Queue updates then remove obsolete scene entities.
-This merge integration still needs build and runtime verification.
+Runtime acceptance of this integration remains open.
 
 ## Verification
 
@@ -133,19 +134,23 @@ Both failed save preparation for `food.gltf` and Chromium pointer capture.
 Both recovered to Ready after context loss and reload, then accepted controlled walking.
 These are peer baseline observations, not final-source reflection acceptance.
 
-## Pending work
+## Release handoff
 
 The final source correction restricts new skip guards to probe indices 3 through 8.
 Stack and mirror preparation retain their original behavior.
-No release WASM build or runtime check covers the final correction and binned phase integration yet.
 The benchmark now checks submitted frames and capture-cycle progress.
 Those added sample checks also await runtime validation.
 
-Rebuild the corrected candidate in a coordinated resource window.
-Retain the sampler chat's stock-baseline atlas reproduction with the final evidence.
-Collect accepted FPS, frame-time, and preparation-time samples.
-Complete visual comparison for missing faces, stale content, and seams.
-Keep driving and repeated Load limitations explicit.
+[User checks](reflection-face-preparation-user-checks.md) describe the packages, launch commands, and remaining checks.
+The [build script](../scripts/build-reflection-comparison.ps1) creates a matched pair from one source commit.
+It pins the toolchain image and records source, asset, lockfile, and binary hashes in `comparison.json`.
+The baseline changes only the face selector. Both packages contain the same disabled opt-in counters.
+The script builds releases. It does not start a game, run tests, or collect measurements.
+
+The user will check garage views, driving, full capture cycles, new content, and repeated loads.
+The user will compare FPS, frame times, preparation time, and prepared face counts.
+Missing faces, stale content, seams, and reflection retention after capture failure remain visual checks.
+No coordination with other chats is required.
 
 The previous browser export call stalled for 1593 seconds.
 The tab was then closed and the resource window was released to the WebGL chat.
