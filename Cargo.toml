@@ -34,5 +34,11 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+# Release code with function names for browser profilers.
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = "line-tables-only"
+
 [patch.crates-io]
 bevy_render = { path = "vendor/bevy_render" }
