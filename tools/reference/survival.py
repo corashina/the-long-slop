@@ -36,10 +36,13 @@ def component(source, root, name):
     if len(matches)!=1:raise ValueError(f'{key(root)} requires one {name}')
     return matches[0]
 
+# Item database foods that use the single-use bite contract.
+FOOD_FIELDS=[('sausage','gkolbasz'),('bacon','gszalonna'),('roll','gzsemle'),('croissant','gkifli'),('linzer','glinzer'),('chocolate','gcsoki')]
+
 def selected_foods(source):
     database=source.get('level1',66024); db=source.read(database)
     player=source.get('level1',80125)
-    return [('sausage',source.transform_for(source.resolve(database,db['gkolbasz']))),
+    return [*[(kind,source.transform_for(source.resolve(database,db[field]))) for kind,field in FOOD_FIELDS],
             ('turd',source.transform_for(source.resolve(player,source.read(player)['GTurd'])))]
 
 def part_groups(source, edible):
@@ -170,7 +173,8 @@ def validate_survival_export(record: dict, manifest: dict) -> None:
     starter=nodes.get(item['node']) if item else None
     if not starter or starter['source']!=item['source'] or starter['source']!={'file':'level1','path_id':24573}:raise ValueError('Invalid starter food source')
     if len(record['starter_parts'])!=6 or any(not group or any(nodes.get(n,{}).get('asset')!=starter['asset'] for n in group) for group in record['starter_parts']):raise ValueError('Invalid starter parts')
-    if {f['kind'] for f in record['foods']}!={'sausage','turd'} or len(record['foods'])!=2:raise ValueError('Duplicate or missing prototype kind')
+    kinds=[kind for kind,_ in FOOD_FIELDS]+['turd']
+    if [f['kind'] for f in record['foods']]!=kinds:raise ValueError('Duplicate or missing prototype kind')
     assets={a['id']:a for a in manifest['assets']}
     for food in record['foods']:
         if not 0<=food['index']<food['bites'] or food['bites']!=len(food['parts']):raise ValueError('Exhausted food index')

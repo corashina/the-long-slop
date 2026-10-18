@@ -195,7 +195,11 @@ impl GarageRuntime {
             hp: prototype.effect.hp / divisor,
         });
         self.survival.show_stats();
-        self.emit_survival_audio(crate::audio::AudioKind::Eat);
+        self.emit_survival_audio(if prototype.sound == 1 {
+            crate::audio::AudioKind::EatCrunchy
+        } else {
+            crate::audio::AudioKind::Eat
+        });
         let bite = {
             let state = self.area.items.get_mut(item).unwrap();
             state.food.as_mut().unwrap().bite += 1;
@@ -486,7 +490,10 @@ impl GarageRuntime {
             .iter()
             .find(|b| b.kind == kind as u32)
             .unwrap();
-        let pose = if kind == crate::audio::AudioKind::Eat {
+        let pose = if matches!(
+            kind,
+            crate::audio::AudioKind::Eat | crate::audio::AudioKind::EatCrunchy
+        ) {
             self.area.player.view_pose(&self.physics)
         } else {
             self.area.player.body_pose(&self.physics)

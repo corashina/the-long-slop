@@ -60,7 +60,7 @@ Spray scene-color refraction and brush soft-particle depth fading remain bounded
 These known visual differences keep background refraction absent and brush intersections hard.
 The roadmap keeps Cleaning and painting Partial until the required checks and shared-renderer work pass.
 
-Survival includes health, food, water, bladder, bowel, sausage, toilet actions, healing, starvation, and death.
+Survival includes health, food, water, bladder, bowel, the seven source foods, toilet actions, healing, starvation, and death.
 Sleep follows source eligibility, hold progress, wake, and clock rules.
 Source sandstorms add movement, fog, light, wind, and particles.
 Engine heat follows the source cycle's ambient temperature.

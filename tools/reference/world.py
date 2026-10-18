@@ -23,7 +23,8 @@ RULE_CLASSES = {'roadscript', 'buildingscript', 'newRandomStuffSpawnScript', 'st
     'enginescript','coolantTankscript','seatscript','tankcapscript','gumiscript','wheelscript',
     'craftscript','partscript','capsscript','kozlampa','electronicsscript','headlightscript','rearlights','flashlightscript',
     'randomFlyer','newAiScript','nyulscript','paintingMain','childunparent','randomRock','RandomSpawnedObjScript','randomScaleScript','undergroundSpawnScript','spawnInBoxScript','paintingScript','ammoscript','foodscript','randomTypeSelector','ginlampscript','partconditionscript','partslotscript','wheelgraphicsscript','doorscript','benzinkutscript'}
-EDIBLE_COMPONENTS = {('sharedassets1.assets',134643),('sharedassets1.assets',149631)}
+# Sausage, bacon, roll, croissant, linzer, chocolate, and turd ediblescript components.
+EDIBLE_COMPONENTS = {('sharedassets1.assets',i) for i in (134643,134644,134645,134647,134641,134646,149631)}
 def selected_actions(source, scripts, actions):
     return sorted({source.class_name(c) for c in scripts
         if source.class_name(c) in actions and key(c) not in EDIBLE_COMPONENTS})

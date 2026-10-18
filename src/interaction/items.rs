@@ -572,6 +572,11 @@ impl ItemStore {
         self.body_ids.push(BodyId(u32::MAX));
         self.names.push(match reference.kind {
             crate::reference::FoodKind::Sausage => "Sausage".into(),
+            crate::reference::FoodKind::Bacon => "Bacon".into(),
+            crate::reference::FoodKind::Roll => "Bread roll".into(),
+            crate::reference::FoodKind::Croissant => "Croissant".into(),
+            crate::reference::FoodKind::Linzer => "Linzer".into(),
+            crate::reference::FoodKind::Chocolate => "Chocolate".into(),
             crate::reference::FoodKind::Turd => "Turd".into(),
         });
         self.states.push(ItemState {

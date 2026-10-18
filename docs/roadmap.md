@@ -321,7 +321,7 @@ The backlog does not expand approved implementation scope. Each new feature need
 | Inventory and clothing | Partial; tasks 3 to 10 stopped | Four slots and hand retrieval implemented. See the eight stopped tasks above. |
 | Cleaning and painting | Partial; merged | Verify active tools and lifecycle behavior in the matching package. Complete refraction and brush depth fading. |
 | Cargo and towing | Partial | Add general cargo locking, attachment objects, towing hooks, and trailers. Current storage locking covers flashlights. |
-| Full item range | Partial | Add remaining source food, tools, containers, and their actions. |
+| Full item range | Partial | All seven source foods are edible. Add oil and fuel cans, the toilet, remaining tools, containers, and their actions. |
 | Animals and enemies | Missing | Add rabbits, human enemies, movement, attacks, and spawn rules. |
 | Weapons | Missing | Add firearms, ammunition, reload actions, melee weapons, and projectiles. |
 | Damage and destruction | Partial | Add wounds, blood loss, combat damage, breakable objects, and death ragdolls. |
