@@ -64,6 +64,14 @@ The viewport was 1280 by 720, with DPR 1.
 The saved runtime receipt is `.cache/reflection-benchmark/candidate-functional.json`.
 It applies to the candidate hash above, not the later source correction.
 
+## Push verification on 2026-10-18
+
+The combined source passed `cargo test --locked`: 51 passed, zero failed, and 35 ignored.
+Three installed-source structure checks passed separately.
+`cargo check --locked --release --target wasm32-unknown-unknown --lib` passed with 11 existing warnings.
+These checks include the probe guards, retained binned phases, and shadow cache integration.
+They do not establish release performance or visual acceptance.
+
 ## Runtime observations
 
 The candidate completed startup and enabled New game.
@@ -129,12 +137,11 @@ These are peer baseline observations, not final-source reflection acceptance.
 
 The final source correction restricts new skip guards to probe indices 3 through 8.
 Stack and mirror preparation retain their original behavior.
-That correction has not been rebuilt or tested yet.
+No release WASM build or runtime check covers the final correction and binned phase integration yet.
 The benchmark now checks submitted frames and capture-cycle progress.
 Those added sample checks also await runtime validation.
 
 Rebuild the corrected candidate in a coordinated resource window.
-Run native checks again on the merged source.
 Retain the sampler chat's stock-baseline atlas reproduction with the final evidence.
 Collect accepted FPS, frame-time, and preparation-time samples.
 Complete visual comparison for missing faces, stale content, and seams.
