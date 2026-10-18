@@ -1,4 +1,5 @@
 //! Cached source shadow specialization and offscreen mesh queueing.
+use super::shadow_cache::SpecializationKey;
 use super::surface_views::{MIRROR_START, PROBE_START, VIEW_COUNT};
 use super::{
     caster::{CasterPasses, CasterUniform, CasterViews},
@@ -39,9 +40,10 @@ struct QueuedShadow {
     seen: u64,
 }
 struct CachedSpecialization {
-    mesh_key: MeshPipelineKey,
-    layout: MeshVertexBufferLayoutRef,
-    properties: Arc<MaterialProperties>,
+    key: SpecializationKey,
+    // Retain both allocations for as long as their pointer identities remain keys.
+    _layout: MeshVertexBufferLayoutRef,
+    _properties: Arc<MaterialProperties>,
     base: CachedRenderPipelineId,
 }
 #[derive(Resource)]
@@ -118,13 +120,14 @@ fn base_pipeline(
             material.properties.alpha_mode,
             &Msaa::from_samples(view_key.msaa_samples()),
         );
-    if let Some(entry) = state.specializations.iter().find(|entry| {
-        entry.mesh_key == key
-            && entry.layout == mesh.layout
-            && Arc::ptr_eq(&entry.properties, &material.properties)
-    }) {
-        return Ok(Some((entry.base, indexed)));
-    }
+    let cache_key = SpecializationKey::new(key.bits(), &mesh.layout.0, &material.properties);
+    let index = match state
+        .specializations
+        .binary_search_by_key(&cache_key, |entry| entry.key)
+    {
+        Ok(index) => return Ok(Some((state.specializations[index].base, indexed))),
+        Err(index) => index,
+    };
     if state.specializations.len() == state.specializations.capacity() {
         return Err("Source shadow specialization capacity was exceeded".into());
     }
@@ -138,12 +141,15 @@ fn base_pipeline(
     };
     let base = base_specialize(world, full, &layout, &properties)
         .map_err(|e| format!("Source shadow specialization: {e}"))?;
-    state.specializations.push(CachedSpecialization {
-        mesh_key: key,
-        layout,
-        properties,
-        base,
-    });
+    state.specializations.insert(
+        index,
+        CachedSpecialization {
+            key: cache_key,
+            _layout: layout,
+            _properties: properties,
+            base,
+        },
+    );
     Ok(Some((base, indexed)))
 }
 pub fn queue(world: &mut World) {

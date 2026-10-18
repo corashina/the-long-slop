@@ -14,3 +14,4 @@
 - Do not build features that the product specification lists as out of scope.
 - Do not implement reduced-motion variants or `prefers-reduced-motion` handling unless the user explicitly requests it.
 - Use the [stop-slop skill](https://github.com/hardikpandya/stop-slop/blob/main/SKILL.md) when writing or editing UI text and documentation.
+- Use subagents for independent tasks. Delegate merges and simple tasks to GPT-6 Luna subagents.
