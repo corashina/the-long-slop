@@ -28,6 +28,13 @@ That frontier is required preparation, separate from capture preparation.
 Capture order, acknowledgements, resolution, filtering, and publication are unchanged.
 `probes.rs` and `render_targets.rs` are unchanged.
 
+The local merge also retains master's binned shadow queue.
+Idle probe phases leave the active phase map until their face is selected.
+Their bins and retained view identities stay cached. Resuming a face reuses that storage.
+This prevents Bevy from preparing idle face instances each frame.
+Scene restart resumes all six phases for warmup. Queue updates then remove obsolete scene entities.
+This merge integration still needs build and runtime verification.
+
 ## Verification
 
 Seven native checks passed on the current base before the final guard correction:

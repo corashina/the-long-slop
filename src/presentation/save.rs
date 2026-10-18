@@ -620,9 +620,9 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
         return Err(fail("Reference bindings are not ready".into()));
     }
     for asset in reference.assets.iter().filter(|a| {
-        !matches!(
+        matches!(
             a.usage,
-            AssetUsage::WorldPrototype | AssetUsage::WorldMaterial
+            AssetUsage::UniqueScene | AssetUsage::RoadLampPrototype | AssetUsage::SkyPrototype
         )
     }) {
         let (_, handle) = visuals

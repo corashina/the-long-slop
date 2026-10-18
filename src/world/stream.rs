@@ -144,8 +144,8 @@ pub struct WorldStream {
     dependency_metadata: usize,
     changes: super::ChangeRecords,
     replay_roots: Vec<Placement>,
-    replay_keys: Vec<super::ObjectKey>,
-    replay_query: Vec<super::ObjectKey>,
+    replay_indices: Vec<super::changes::ChangeRecordIndex>,
+    replay_query: Vec<super::changes::ChangeRecordIndex>,
     change_revision: u64,
     change_bounds: Option<[WorldBounds; 2]>,
     imported_baselines: Vec<(crate::reference::ItemId, super::ObjectSnapshot)>,
@@ -404,13 +404,11 @@ impl WorldStream {
         self.required_ready()
             && self.change_bounds.is_some()
             && self.change_revision == self.changes.revision()
-            && self.replay_keys.iter().all(|key| {
+            && self.replay_indices.iter().all(|&index| {
+                let (key, change) = self.changes.get_indexed(index);
                 if matches!(key, super::ObjectKey::Imported(_)) {
                     return true;
                 }
-                let Some(change) = self.changes.get(key) else {
-                    return false;
-                };
                 change.snapshot.is_none()
                     || ((items.resolve_key(key).is_some()
                         || self.lamp_bindings.iter().any(|b| {
@@ -555,7 +553,7 @@ impl WorldStream {
             generation_revision: 0,
             changes: super::ChangeRecords::default(),
             replay_roots: Vec::new(),
-            replay_keys: Vec::new(),
+            replay_indices: Vec::new(),
             replay_query: Vec::new(),
             change_revision: u64::MAX,
             change_bounds: None,
@@ -1501,9 +1499,10 @@ impl WorldStream {
                 .get(super::ObjectKey::Generated(p.id.clone()))
                 .is_none_or(|change| {
                     change.snapshot.is_some()
-                        && self
-                            .replay_keys
-                            .contains(&super::ObjectKey::Generated(p.id.clone()))
+                        && self.replay_indices.iter().any(|&index| {
+                            matches!(self.changes.get_indexed(index).0,
+                                super::ObjectKey::Generated(id) if id == &p.id)
+                        })
                 })
         });
         self.wanted_structures.retain(|p| {
@@ -1519,15 +1518,14 @@ impl WorldStream {
                         source_distance_squared(f, p.pose.position)
                             < self.reference.distances["ItemSpawnDist"].powi(2)
                     })
-                || self.replay_keys.iter().any(|key| {
-                    self.changes.get(key).is_some_and(|c| {
-                        c.instance.as_ref() == Some(&p.id)
-                            || c.snapshot
+                || self.replay_indices.iter().any(|&index| {
+                    let (_, c) = self.changes.get_indexed(index);
+                    c.instance.as_ref() == Some(&p.id)
+                        || matches!(c.snapshot
                                 .as_ref()
                                 .and_then(|s| s.attachment.as_ref())
-                                .and_then(|a| a.owner.as_ref())
-                                == Some(&super::ObjectKey::Generated(p.id.clone()))
-                    })
+                                .and_then(|a| a.owner.as_ref()),
+                                Some(super::ObjectKey::Generated(id)) if id == &p.id)
                 })
         });
         let missing = |p: &Placement| !self.wanted_structures.iter().any(|w| w.id == p.id);
@@ -1580,15 +1578,14 @@ impl WorldStream {
         }
         for content in self.contents.instances() {
             let key = super::ObjectKey::Generated(content.placement.id.clone());
-            let selected = self.replay_keys.iter().any(|key| {
-                self.changes.get(key).is_some_and(|c| {
-                    c.instance.as_ref() == Some(&content.placement.id)
-                        || c.snapshot
+            let selected = self.replay_indices.iter().any(|&index| {
+                let (_, c) = self.changes.get_indexed(index);
+                c.instance.as_ref() == Some(&content.placement.id)
+                    || matches!(c.snapshot
                             .as_ref()
                             .and_then(|s| s.attachment.as_ref())
-                            .and_then(|a| a.owner.as_ref())
-                            == Some(&super::ObjectKey::Generated(content.placement.id.clone()))
-                })
+                            .and_then(|a| a.owner.as_ref()),
+                            Some(super::ObjectKey::Generated(id)) if id == &content.placement.id)
             });
             let changed = self.changes.get(&key);
             if changed.is_some_and(|c| c.snapshot.is_none() || !selected) {
@@ -1648,18 +1645,17 @@ impl WorldStream {
             .discard_replay_siblings(&self.wanted_structures);
         self.replay_roots.retain(|root| {
             !self.contents.replay_finished(&root.id)
-                || self.replay_keys.iter().any(|key| {
-                    self.changes.get(key).is_some_and(|change| {
-                        change.replay.as_ref().is_some_and(|p| p.id == root.id)
-                            && change.instance.as_ref().is_some_and(|id| {
-                                !self
-                                    .contents
-                                    .active
-                                    .iter()
-                                    .chain(&self.static_controls)
-                                    .any(|c| &c.content.placement.id == id && c.restored)
-                            })
-                    })
+                || self.replay_indices.iter().any(|&index| {
+                    let (_, change) = self.changes.get_indexed(index);
+                    change.replay.as_ref().is_some_and(|p| p.id == root.id)
+                        && change.instance.as_ref().is_some_and(|id| {
+                            !self
+                                .contents
+                                .active
+                                .iter()
+                                .chain(&self.static_controls)
+                                .any(|c| &c.content.placement.id == id && c.restored)
+                        })
                 })
         });
     }
@@ -1671,7 +1667,7 @@ impl WorldStream {
             max: [focus[0] + radius, f64::INFINITY, focus[2] + radius],
         });
         if self.change_revision != self.changes.revision() || self.change_bounds != Some(bounds) {
-            self.replay_keys.clear();
+            self.replay_indices.clear();
             for bounds in bounds {
                 let (count, bytes) = self.changes.query_reservation(bounds);
                 if count > MAX_OBJECTS
@@ -1687,14 +1683,14 @@ impl WorldStream {
                     return;
                 }
                 self.replay_query.reserve(count);
-                self.changes.changes_in(bounds, &mut self.replay_query);
-                for key in self.replay_query.drain(..) {
-                    if !self.replay_keys.contains(&key) {
-                        self.replay_keys.push(key);
+                self.changes.indices_in(bounds, &mut self.replay_query);
+                for index in self.replay_query.drain(..) {
+                    if !self.replay_indices.contains(&index) {
+                        self.replay_indices.push(index);
                     }
                 }
             }
-            if self.replay_keys.len() > MAX_OBJECTS {
+            if self.replay_indices.len() > MAX_OBJECTS {
                 self.failure = Some("Changed destination replay exceeds active admission".into());
                 return;
             }
@@ -1702,14 +1698,16 @@ impl WorldStream {
             self.change_bounds = Some(bounds);
         }
         self.replay_roots.retain(|root| {
-            self.replay_keys.iter().any(|key| {
+            self.replay_indices.iter().any(|&index| {
                 self.changes
-                    .get(key)
-                    .and_then(|c| c.replay.as_ref())
+                    .get_indexed(index)
+                    .1
+                    .replay
+                    .as_ref()
                     .is_some_and(|origin| origin.id == root.id)
             })
         });
-        // Selected keys are not work requests. Admit one caller at a time and
+        // Selected records are not work requests. Admit one caller at a time and
         // leave capacity for its first phase. Retry admission even with cached bounds.
         if !self.replay_roots.is_empty()
             || self.metrics().pending_work >= 31
@@ -1717,10 +1715,8 @@ impl WorldStream {
         {
             return;
         }
-        for key in &self.replay_keys {
-            let Some(change) = self.changes.get(key) else {
-                continue;
-            };
+        for &index in &self.replay_indices {
+            let (_, change) = self.changes.get_indexed(index);
             let Some(origin) = &change.replay else {
                 continue;
             };
@@ -3823,14 +3819,8 @@ impl WorldStream {
                     .iter()
                     .map(super::contents::placement_heap)
                     .sum::<usize>()
-                + (self.replay_keys.capacity() + self.replay_query.capacity())
-                    * std::mem::size_of::<super::ObjectKey>()
-                + self
-                    .replay_keys
-                    .iter()
-                    .chain(&self.replay_query)
-                    .map(super::changes::key_heap)
-                    .sum::<usize>()
+                + (self.replay_indices.capacity() + self.replay_query.capacity())
+                    * std::mem::size_of::<super::changes::ChangeRecordIndex>()
                 + self.static_controls.capacity()
                     * std::mem::size_of::<super::contents::ContentInstance>()
                 + self

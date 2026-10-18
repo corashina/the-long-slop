@@ -3087,7 +3087,6 @@ dependencies = [
  "bevy",
  "console_error_panic_hook",
  "gltf",
- "indexmap",
  "js-sys",
  "rapier3d",
  "serde",
