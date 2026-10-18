@@ -241,7 +241,7 @@ We preserve active scene owners until candidate uploads, pipelines, collision, a
 We added scoped GPU errors, completion receipts, separate mesh buffers, and combined memory charges.
 We patched the existing Bevy 0.19.1 pipeline cache to own candidate preparation, cancellation, and retries.
 We retain the original crate licenses and source provenance. The patch changes one upstream file.
-Generated meshes require checked renderer bounds and flags. Selected ShadowsOnly meshes skip visible and motion passes.
+Generated meshes require checked renderer bounds and flags. Selected ShadowsOnly meshes skip the visible pass.
 We published 365 asset entries and recorded hashes for 7,890 runtime files, including the WASM package.
 We retained master's latest depth/shadow bindings and connected candidate caster ownership.
 The earlier source-world package passed native/WASM builds, packaging, 22 shader variants, JavaScript syntax, and scoped whitespace checks.
@@ -364,7 +364,7 @@ The earlier merged package passed its recorded checks on 2026-10-13.
 | Shadows and sky | Three camera views, four main cascades, issued draws, GPU validation, upright image | `8182153` |
 | Reflection probe | Six 64x64 faces, two mip jobs, validated publication, resize | `1b77a1a` |
 | Motion producer | Camera and rigid motion fixture, matching submission tokens, resize | `538810e` |
-| Camera effects | AO, TAA, blur, exposure, bloom, grading, dither, callbacks, resize and steady storage | `6148e66` |
+| Camera effects | AO, exposure, bloom, grading, dither, callbacks, resize and steady storage | `6148e66` |
 | Stained glass | Both real door materials, two ordered overlap captures, probe views, resize and steady storage | `6f84766` |
 | Lifecycle and streaming | Cold restart, readiness, terminal faults, probe distance, two actual rebases, fixed motion slots | Final branch commit |
 

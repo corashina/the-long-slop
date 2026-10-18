@@ -43,7 +43,7 @@ pub struct LightingUniform {
     pub probe_center: [Vec4; super::lighting_scene::PROBE_COUNT],
     pub probe_extents: [Vec4; super::lighting_scene::PROBE_COUNT],
     pub source_time: Vec4,
-    pub nonjittered_clip_from_world: Mat4,
+    pub clip_from_world: Mat4,
     pub near_far: Vec4,
 }
 

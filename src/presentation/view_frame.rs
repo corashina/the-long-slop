@@ -1,5 +1,5 @@
 use super::lighting_scene::PROBE_COUNT;
-// One main-world view snapshot for raster, culling, motion, and shadow fitting.
+// One main-world view snapshot for raster, culling, and shadow fitting.
 use super::surface_views::{PROBE_START, VIEW_COUNT};
 use super::{
     lighting_assets::LightingAssets, lighting_scene::SourceSceneLighting,
@@ -9,7 +9,6 @@ use super::{
 use crate::reference::{
     reflections::{ProbeJob, ProbeSchedule, capture_view_from_world, prepare_probe_face},
     shadow_planes::{CullPlanes, implicit_cull_planes},
-    temporal::{TaaJitter, TaaSequence, jitter_perspective},
 };
 use bevy::render::{extract_resource::ExtractResource, view::ExtractedView};
 use bevy::{ecs as bevy_ecs, prelude::*, render as bevy_render};
@@ -69,8 +68,6 @@ pub fn restart_scene(world: &mut World) {
 #[derive(Resource, Default)]
 pub struct SourceViewClock {
     preparation_ready: bool,
-    taa: TaaSequence,
-    jitter: Option<TaaJitter>,
     probe: [ProbeSchedule; PROBE_COUNT],
     probe_index: usize,
     main_token: u32,
@@ -87,8 +84,6 @@ impl SourceViewClock {
     fn consume(
         &mut self,
         acks: &SourceSubmissionAcks,
-        spread: f32,
-        extent: [u32; 2],
         probe_enabled: [bool; PROBE_COUNT],
     ) -> Result<(), &'static str> {
         if self.main_token == 0 {
@@ -105,7 +100,6 @@ impl SourceViewClock {
                 .main_token
                 .checked_add(1)
                 .ok_or("Source main render token exhausted")?;
-            self.jitter = None;
         }
         if probe == self.probe_token {
             if self.probe[self.probe_index].job() == ProbeJob::RemainingMipsAndPublish
@@ -138,12 +132,6 @@ impl SourceViewClock {
                     .ok_or("Source probe job token exhausted")?;
             }
         }
-        if self.jitter.is_none() {
-            self.jitter = Some(self.taa.advance(spread, extent)?);
-        }
-        // A resize changes normalized jitter, not the source sample index.
-        let jitter = self.jitter.as_mut().unwrap();
-        jitter.uv = std::array::from_fn(|i| jitter.pixels[i] / extent[i] as f32);
         self.frame = self
             .frame
             .checked_add(1)
@@ -156,9 +144,7 @@ pub struct ViewSnapshot {
     pub extent: UVec2,
     pub view_from_world: Mat4,
     pub implicit_projection: Mat4,
-    pub nonjittered_projection: Mat4,
     pub raster_projection: Mat4,
-    pub culling_projection: Mat4,
     pub source_world_from_view: Mat4,
     pub source_camera_planes: [[f32; 4]; 6],
     pub source_shadow_planes: [[f32; 4]; 6],
@@ -186,7 +172,6 @@ pub struct SourceViewFrame {
     pub main_token: u32,
     pub probe_token: u32,
     pub probe_job: Option<ProbeJob>,
-    pub jitter: Option<TaaJitter>,
     pub views: [Option<ViewSnapshot>; VIEW_COUNT],
 }
 impl SourceViewFrame {
@@ -316,12 +301,7 @@ pub(crate) fn snapshot(
         return;
     }
     let main = input[1].unwrap().0;
-    if let Err(error) = clock.consume(
-        &acks,
-        assets.record.postprocessing.taa.jitter_spread,
-        main.to_array(),
-        activation.enabled,
-    ) {
+    if let Err(error) = clock.consume(&acks, activation.enabled) {
         *status.0.lock().unwrap() = RenderingState::Failed(error.into());
         graph.invalidate_loading();
         return;
@@ -358,14 +338,7 @@ pub(crate) fn snapshot(
             ))
         };
         Some(camera_snapshot(
-            extent,
-            view,
-            near,
-            far,
-            fov,
-            mask,
-            distance,
-            (index == 1).then_some(clock.jitter.unwrap()),
+            extent, view, near, far, fov, mask, distance,
         ))
     });
     let sky_clips = Some(sky_pose).map(|pose| {
@@ -400,7 +373,6 @@ pub(crate) fn snapshot(
         main_token: clock.main_token,
         probe_token: clock.probe_token,
         probe_job: job,
-        jitter: clock.jitter,
         views: snapshots,
     };
     graph.loading_snapshot(
@@ -439,8 +411,7 @@ pub fn apply_render_snapshot(
             view.clip_from_view = snapshot.raster_projection;
             view.clip_from_world = Some(snapshot.raster_projection * snapshot.view_from_world);
             view.invert_culling = state.index < 3;
-            state.nonjittered_clip_from_world =
-                snapshot.nonjittered_projection * snapshot.view_from_world;
+            state.clip_from_world = snapshot.raster_projection * snapshot.view_from_world;
             state.near = snapshot.near;
             state.far = snapshot.far;
         }
@@ -503,8 +474,6 @@ impl SourceViewClock {
             .probe_token
             .checked_add(1)
             .ok_or("Source probe render token exhausted")?;
-        self.taa = TaaSequence::default();
-        self.jitter = None;
         self.probe = std::array::from_fn(|_| ProbeSchedule::default());
         self.probe_index = 0;
         self.preparation_ready = false;
@@ -513,7 +482,7 @@ impl SourceViewClock {
         acks.0.publication.store(0, Ordering::Release);
         Ok(())
     }
-    /// The clock stores no world-space history. Preserve jitter and probe job order.
+    /// The clock stores no world-space history. Preserve probe job order.
     pub fn rebase(&mut self, delta: Vec3) -> Result<(), &'static str> {
         if !delta.is_finite() {
             return Err("Source view rebase delta is invalid");
@@ -543,7 +512,6 @@ pub(crate) fn camera_snapshot(
     fov: f32,
     mask: u32,
     distance: f32,
-    jitter: Option<TaaJitter>,
 ) -> ViewSnapshot {
     let implicit = Mat4::perspective_rh_gl(
         fov.to_radians(),
@@ -551,40 +519,14 @@ pub(crate) fn camera_snapshot(
         near,
         far,
     );
-    let current = if let Some(jitter) = jitter {
-        // The source helper is row-major; glam stores columns.
-        let rows = jitter_perspective(
-            implicit.transpose().to_cols_array_2d(),
-            near,
-            fov,
-            extent.x as f32 / extent.y as f32,
-            extent.to_array(),
-            jitter,
-        )
-        .expect("validated source view jitter");
-        Mat4::from_cols_array_2d(&rows).transpose()
-    } else {
-        implicit
-    };
     let source_view = Mat4::from_cols_array_2d(&crate::reference::view_math::source_culling_view(
         view.to_cols_array_2d(),
     ));
     let source_world_from_view = source_view.inverse();
-    let world_corners = corners((current * source_view).inverse());
-    let selected = if crate::reference::view_math::requires_implicit_projection(
-        world_corners,
-        source_world_from_view.w_axis.truncate().to_array(),
-        near,
-        far,
-    ) {
-        implicit
-    } else {
-        current
-    };
     // GetScriptableCullingParameters450659..450663 sets shadowNearOffset=0.
     // This is separate from the quality projection near_offset.
     let CullPlanes { camera, shadow } = implicit_cull_planes(
-        (selected * source_view).to_cols_array(),
+        (implicit * source_view).to_cols_array(),
         source_world_from_view.to_cols_array(),
         near,
         far,
@@ -595,9 +537,7 @@ pub(crate) fn camera_snapshot(
         extent,
         view_from_world: view,
         implicit_projection: implicit,
-        nonjittered_projection: gpu_projection(implicit),
-        raster_projection: gpu_projection(current),
-        culling_projection: selected,
+        raster_projection: gpu_projection(implicit),
         source_world_from_view,
         source_camera_planes: camera,
         source_shadow_planes: shadow,
@@ -650,7 +590,6 @@ pub(crate) fn append_probe_required_views(
             90.,
             probe.mask,
             probe.shadow_distance,
-            None,
         );
         required_view(&snapshot, origin, light_forward, light_mask)
     })

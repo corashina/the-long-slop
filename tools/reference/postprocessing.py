@@ -44,15 +44,6 @@ def recover_grading(settings):
     }
 
 
-def recover_taa(controls):
-    # pplayermelle.Start -> TurnOn overwrites the layer's serialized settings.
-    return {target: controls[source] for target, source in (
-        ('jitter_spread', 'AntialiasingJitterSpread'),
-        ('stationary_blending', 'AntialiasingStationaryBlending'),
-        ('motion_blending', 'AntialiasingMotionBlending'),
-        ('sharpness', 'AntialiasingSharpness'))}
-
-
 def recover_postprocessing(source):
     """Recover the selected main-camera stack after startup settings and volume blending."""
     from .source import source_id
@@ -65,13 +56,10 @@ def recover_postprocessing(source):
             raise ValueError(f'Unexpected inactive source effect {pid}')
         return reader, data
     layer_reader, layer = read('level1', 68049)
-    _, controls = read('level1', 64919)
-    _, controller = read('level1', 80667)
     bloom_reader, bloom = effect(1371)
     _, grading = effect(1375)
     _, ao = effect(1378)
     _, exposure = effect(1380)
-    _, motion = effect(1383)
     p = effective_parameter
     if p(ao, 'mode') != 1 or p(exposure, 'eyeAdaptation') != 0:
         raise ValueError('Unrecovered AO or exposure variant')
@@ -85,7 +73,6 @@ def recover_postprocessing(source):
     return {
         'main_layer': source_id(layer_reader),
         'stop_nan': bool(layer['stopNaNPropagation']),
-        'taa': recover_taa(controls),
         'exposure': {'filtering_percent': [filtering['x'], filtering['y']],
                      'luminance_ev': [p(exposure, 'minLuminance'), p(exposure, 'maxLuminance')],
                      'key': p(exposure, 'keyValue'), 'speed_up': p(exposure, 'speedUp'),
@@ -100,10 +87,6 @@ def recover_postprocessing(source):
                       'blur_tolerance': p(ao, 'blurTolerance', f32(-4.6)),
                       'upsample_tolerance': p(ao, 'upsampleTolerance', -12.),
                       'direct_lighting_strength': p(ao, 'directLightingStrength', 0.)},
-        'motion_blur': {'samples': p(motion, 'sampleCount'),
-                        'shutter_range': [controller['minShutter'], controller['maxShutter']],
-                        'speed_range': [controller['minSpeed'], controller['maxSpeed']],
-                        'shutter_lerp': controller['shutterLerp']},
         'grading': recover_grading(grading), 'blue_noise': blue_noise,
         'heat_haze_weight': 0.,
     }

@@ -42,7 +42,6 @@ struct PipelineJob {
     physical: UploadReceipt,
     session: u64,
     mesh: AssetId<Mesh>,
-    motion_mesh: AssetId<Mesh>,
     material: UntypedAssetId,
     material_type: &'static str,
     shadows: bool,
@@ -55,11 +54,6 @@ struct PipelineJob {
 #[derive(Clone)]
 pub struct PipelineTicket(Arc<Mutex<PipelineJob>>);
 impl PipelineTicket {
-    pub fn set_motion_mesh(&self, mesh: &Handle<Mesh>) {
-        let mut job = self.0.lock().unwrap();
-        assert!(!job.dispatched, "Motion mesh changed after specialization");
-        job.motion_mesh = mesh.id();
-    }
     pub fn retry(slot: &mut Option<Self>) {
         if slot.as_ref().is_some_and(|ticket| {
             let job = ticket.0.lock().unwrap();
@@ -310,7 +304,6 @@ impl WorldPipelines {
             physical: operation.physical.clone(),
             session: stream.frame().request.session,
             mesh: mesh.id(),
-            motion_mesh: mesh.id(),
             material: material.id().untyped(),
             material_type: std::any::type_name::<M>(),
             shadows,
@@ -664,9 +657,6 @@ fn compile_pair(
                             world
                                 .resource_mut::<crate::presentation::surface_pass::SurfacePasses>()
                                 .revisit(id);
-                            world
-                                .resource_mut::<crate::presentation::motion_draw::MotionPipelines>()
-                                .revisit(id);
                         }
                         if world
                             .resource::<super::super::pipeline_ownership::PipelineOwners>()
@@ -693,9 +683,6 @@ fn compile_pair(
                             world
                                 .resource_mut::<crate::presentation::surface_pass::SurfacePasses>()
                                 .revisit(id);
-                            world
-                                .resource_mut::<crate::presentation::motion_draw::MotionPipelines>()
-                                .revisit(id);
                         }
                     }
                     if !job.ids.contains(&id) {
@@ -719,31 +706,9 @@ fn compile_pair(
         job.waiting = "pipeline publication";
         return dispatched;
     }
-    let candidate_owner = (bank != 0).then(|| {
-        world
-            .resource::<CandidatePipelines>()
-            .1
-            .as_ref()
-            .unwrap()
-            .clone()
-    });
     let mut ready = true;
-    let mut waiting = "motion pipeline";
+    let mut waiting = "material pipeline";
     let mut failure = None;
-    for id in &job.ids {
-        match crate::presentation::motion_draw::prepare_world_motion(
-            world,
-            *id,
-            job.motion_mesh,
-            candidate_owner.clone(),
-        ) {
-            Ok(done) => ready &= done,
-            Err(error) => {
-                write_pipeline_diagnostic(&mut failure, format_args!("{error}"));
-                break;
-            }
-        }
-    }
     let cache = world.resource::<PipelineCache>();
     for id in &job.ids {
         match cache.get_render_pipeline_state(*id) {
@@ -826,9 +791,6 @@ fn physical_pipelines_settled(world: &World, job: &PipelineJob) -> bool {
                 CachedPipelineState::Ok(_) | CachedPipelineState::Err(_) => true,
                 _ => false,
             }
-            && world
-                .resource::<crate::presentation::motion_draw::MotionPipelines>()
-                .physically_settled(*id, cache)
             && world
                 .resource::<crate::presentation::caster::CasterPasses>()
                 .physically_settled(*id, cache)

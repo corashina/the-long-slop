@@ -22,10 +22,6 @@ fn source_culling_inverse_and_positions_share_source_world() {
     let target_point = Vector4::new(2.5, 1.25, -8., 1.);
     let source_point = reflection * target_point;
     assert!((source_view * source_point - target_view * target_point).norm() < 0.0001);
-    // This checks the distinct view-space conversion used by the motion producer.
-    let motion_world = (reflection * target_view).try_inverse().unwrap();
-    assert!((motion_world.column(3) - world.column(3)).norm() < 0.0001);
-    assert!((motion_world.column(3) - source_camera).norm() > 40.);
 }
 
 #[test]
