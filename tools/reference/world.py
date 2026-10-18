@@ -10,9 +10,10 @@ from .library.types import ObjectId
 from .gltf import GltfExporter, convert_bind_poses, converted_transform
 from .collision import geometry, world_pose
 from . import world_probe
+from . import draw_distance
 
 PAYLOAD_SHA256 = '243f2862c6fa3d38b4c7d8df56332a2016c09d412b11030564f7f21665ad8ad9'
-CONTEXT = 'saved_default_5000_frozen_generation_frame'
+CONTEXT = 'minimum_draw_distance_frozen_generation_frame'
 WORLD_DATABASE_ID = 66024
 BUILDING_FIELDS = ('berror','bkezdohaz','bkut','bbudi','bbenzinkut01','bbuszmegallo','blegjobbbenzinkut','bmuhely','bnagybenzinkut','boldhouse','boldpetrolstation','bturrethaz','bvizmu','btelefonfulke','bpost','bcabin','byellowfoodkut','bfalu01','bcastle')
 GENERATORS = (65060, 64958, 64720, 65037)
@@ -392,7 +393,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     road_fields=('length','roadBoneNum','roadBoneLength','roadSegmentLength','roadAboveTerrain','width','scale','XmaxAngle','YmaxAngle','startStraight','straightModifier','alignEdgeOfTheWorld','aliignRoad','alignBuildings','forceHomesick','noises','defPointRange','defPointStep','addPoint','buildingBoneNum')
     assembled=samples['assembled'][0]
     world={'sample_payload_sha256':PAYLOAD_SHA256,'managed_sha256':samples['managed_sha256'],'library':dict(schema_version=1,**samples['library']),
-        'settings_context':CONTEXT,'spawn_context':recover_spawn_context(samples),'generation_frame':IDENTITY,'distances':assembled['distances'],'source_hashes':[],
+        'settings_context':CONTEXT,'spawn_context':recover_spawn_context(samples),'generation_frame':IDENTITY,'distances':draw_distance.distances(source.read(source.get('level0',16865)),assembled['distances']),'source_hashes':[],
         'road':{'source':source_id(road_owner),'prototypes':road_roots,**generation_counts(road),**{k:road[k] for k in road_fields}},
         'terrain':{'source':source_id(settings_owner),'prefabs':terrain_prefabs,'materials':terrain_materials,'textures':list(terrain_source.lighting_textures.values()),'game_settings':{'source':source_id(main_owner),**{k:main['GSettings'][k] for k in ('biome','homesickMode')}},
             'tiles':[{k:settings[t][k] for k in ('tileSize','resolution','drawDistance','YCoord')} for t in ('Terrain','DistantTerrain','DistantTerrain2')],

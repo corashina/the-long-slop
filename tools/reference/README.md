@@ -206,7 +206,8 @@ Native and browser loaders share a 128 MiB manifest limit.
 All prototype node indices belong to one prototype instance.
 Road control counts and skin bone counts are separate.
 
-The world contract uses the saved 5,000-metre source settings profile.
+The world contract uses the source minimum draw distance of 500 metres.
+`draw_distance.py` holds this value for world distances, fog, and camera planes.
 It requires Task 1's checked local samples and retained source runs.
 Source captures, managed methods, and exported assets remain outside Git.
 Synthetic fixtures test contract rejection; they do not prove world generation parity.
