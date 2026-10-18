@@ -1,33 +1,8 @@
 # Project roadmap
 
-Updated: 2026-10-18.
+Updated: 2026-10-15.
 
 ## Current status
-
-### Renderer integration follow-up
-
-Local master includes shadow batching Stage 1 in `a3d27ea` and the GLES sampler cache in `d4ad2b0`.
-The source uses save schema 6 and includes the fixed asset-owner validation change from `6a557e0`.
-The package sections below record the older 2026-10-15 diagnostic candidate.
-They do not describe acceptance of the combined master build.
-
-The isolated sampler test reduced sampler binds by 37.8% and raised garage FPS by about 2%.
-Those results use base `75ebdffa`. Severe lag remains.
-See the [sampler results](../tools/benchmarks/samplers/RESULTS.md) and [batching status](performance/2026-10-17-opaque-shadow-batching.md).
-
-Remaining renderer work, in dependency order:
-
-1. Repair the legacy local-light shadow atlas read/write conflict that blocks sustained driving and road recovery.
-2. Run native checks and build a default release package from the combined master source.
-3. Check normal mouse input, Save/Load, repeated Load, recovery, and restart with the matching assets and schema 6.
-4. Repeat garage and driving FPS tests. Count WebGL calls in separate samples under an exclusive benchmark window.
-5. Check four shadow cascades, mirrors, reflection updates, streaming, rebasing, revisits, and resource recreation during those runs.
-6. Verify batching Stage 1 before implementing its two remaining stages or integrating other rendering experiments.
-
-The last sampler tests hit the atlas error, failed saved-scene admission, and failed Chromium mouse capture.
-The later asset-owner fix needs runtime confirmation. The atlas and input failures remain open.
-Matched benchmarks still need an isolated run without competing build or game work.
-The broader gameplay backlog remains below. Inventory and clothing tasks 3 to 10 remain stopped.
 
 ### Remote loading history
 
