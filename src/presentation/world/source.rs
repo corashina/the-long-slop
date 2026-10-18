@@ -1,7 +1,5 @@
 //! Source surfaces retain the same vertices and triangle ranges as collision publication.
-use super::super::materials::{
-    SourceCaster, SourceMaterial, SourceShadowMode, terrain::TerrainMaterial,
-};
+use super::super::materials::{SourceMaterial, SourceShadowMode, terrain::TerrainMaterial};
 use super::pipelines::{PipelineTicket, WorldPipelines};
 use crate::presentation::fixed_assets::{MeshUpload, SourceFixedAssets};
 use crate::presentation::materials::RenderingState;
@@ -23,7 +21,6 @@ use std::{collections::HashMap, sync::Arc};
 pub struct SurfaceMaterial {
     pub renderer: crate::reference::render_lighting::RendererRecord,
     pub material: Handle<SourceMaterial>,
-    pub caster: Option<Handle<crate::presentation::materials::lod::SurfaceCasterMaterial>>,
     pub layer: u8,
     pub shadow_mode: u8,
     pub receive_shadows: bool,
@@ -53,8 +50,6 @@ pub struct SourceWorldVisuals {
     pub(super) terrain: [Option<Handle<TerrainMaterial>>; 3],
     terrain_layers: [u8; 3],
     pub(super) terrain_records: [Option<crate::reference::render_lighting::RendererRecord>; 3],
-    terrain_casters:
-        [Option<Handle<crate::presentation::materials::lod::SurfaceCasterMaterial>>; 3],
     terrain_shadow_modes: [u8; 3],
 }
 impl SourceWorldVisuals {
@@ -118,26 +113,11 @@ impl SourceWorldVisuals {
         self.session = None;
     }
 
-    pub fn reset_bindings(
-        &mut self,
-        terrain: &mut Assets<TerrainMaterial>,
-        casters: &mut Assets<crate::presentation::materials::lod::SurfaceCasterMaterial>,
-    ) {
-        for (_, bindings) in self.road_materials.drain() {
-            for binding in bindings {
-                if let Some(handle) = binding.caster {
-                    casters.remove(handle.id());
-                }
-            }
-        }
+    pub fn reset_bindings(&mut self, terrain: &mut Assets<TerrainMaterial>) {
+        self.road_materials.clear();
         for handle in &mut self.terrain {
             if let Some(handle) = handle.take() {
                 terrain.remove(handle.id());
-            }
-        }
-        for handle in &mut self.terrain_casters {
-            if let Some(handle) = handle.take() {
-                casters.remove(handle.id());
             }
         }
     }
@@ -161,11 +141,9 @@ impl SourceWorldVisuals {
         material: Handle<TerrainMaterial>,
         layer: u8,
         shadow_mode: u8,
-        caster: Option<Handle<crate::presentation::materials::lod::SurfaceCasterMaterial>>,
     ) {
         self.terrain[tier] = Some(material);
         self.terrain_layers[tier] = layer;
-        self.terrain_casters[tier] = caster;
         self.terrain_shadow_modes[tier] = shadow_mode;
     }
     pub(crate) fn retire_stale(
@@ -247,7 +225,7 @@ impl SourceWorldVisuals {
                 handles.push(meshes.add(mesh));
                 records.push(record);
             }
-            let tickets = (0..handles.len() * 2).map(|_| None).collect();
+            let tickets = (0..handles.len()).map(|_| None).collect();
             let upload = fixed.watch_meshes(handles.iter().cloned());
             continuation.watch_upload(upload.receipt.clone());
             self.pending = Some(SurfacePreparation {
@@ -263,8 +241,8 @@ impl SourceWorldVisuals {
         let pending = self.pending.as_mut().unwrap();
         for index in 0..pending.meshes.len() {
             let source = stream.prepared_surface().unwrap().1.prototype.as_ref();
-            PipelineTicket::retry(&mut pending.tickets[index * 2]);
-            if pending.tickets[index * 2].is_none() {
+            PipelineTicket::retry(&mut pending.tickets[index]);
+            if pending.tickets[index].is_none() {
                 let ticket = if let Some(source) = source {
                     pipelines.request_continuation(
                         stream,
@@ -282,29 +260,9 @@ impl SourceWorldVisuals {
                         false,
                     )?
                 };
-                pending.tickets[index * 2] = ticket;
+                pending.tickets[index] = ticket;
             }
-            let source = stream.prepared_surface().unwrap().1.prototype.as_ref();
-            let caster = if let Some(source) = source {
-                self.road_materials[source][index].caster.as_ref()
-            } else {
-                self.terrain_casters[tier(key.layer)?].as_ref()
-            };
-            if let Some(caster) = caster {
-                PipelineTicket::retry(&mut pending.tickets[index * 2 + 1]);
-                if pending.tickets[index * 2 + 1].is_none() {
-                    pending.tickets[index * 2 + 1] = pipelines.request_continuation(
-                        stream,
-                        &mut pending.continuation,
-                        &pending.meshes[index],
-                        caster,
-                        true,
-                    )?;
-                }
-            }
-            if pending.tickets[index * 2].is_none()
-                || (caster.is_some() && pending.tickets[index * 2 + 1].is_none())
-            {
+            if pending.tickets[index].is_none() {
                 return Ok(());
             }
         }
@@ -400,18 +358,6 @@ impl SourceWorldVisuals {
                     if !binding.receive_shadows {
                         entity.insert(bevy::light::NotShadowReceiver);
                     }
-                    let entity = entity.id();
-                    if let Some(caster) = &binding.caster {
-                        commands.spawn((
-                            SourceCaster,
-                            Mesh3d(mesh.clone()),
-                            MeshMaterial3d(caster.clone()),
-                            Transform::default(),
-                            Visibility::Inherited,
-                            RenderLayers::layer(binding.layer as usize + 32),
-                            ChildOf(entity),
-                        ));
-                    }
                 } else {
                     let tier = tier(published.key.layer)?;
                     commands.spawn((
@@ -425,17 +371,6 @@ impl SourceWorldVisuals {
                         bevy::light::NotShadowCaster,
                         ChildOf(root),
                     ));
-                    if let Some(caster) = &self.terrain_casters[tier] {
-                        commands.spawn((
-                            SourceCaster,
-                            Mesh3d(mesh.clone()),
-                            MeshMaterial3d(caster.clone()),
-                            Transform::default(),
-                            Visibility::Inherited,
-                            RenderLayers::layer(self.terrain_layers[tier] as usize + 32),
-                            ChildOf(root),
-                        ));
-                    }
                 }
             }
             self.surfaces.push(SurfaceVisual {

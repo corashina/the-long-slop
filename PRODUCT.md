@@ -35,7 +35,8 @@ House switches use E or eligible LMB. Cabin controls follow source modes and doo
 Pause freezes cycle time, fades, and switch movement. Recovery preserves these states.
 Restart restores the garage and source startup state at 240 seconds.
 
-The renderer covers source shadows, sky, reflections, post effects, and stained glass.
+The renderer covers sun shadows, sky, reflections, post effects, and stained glass.
+Lamps light the scene but cast no shadows, for speed. Lamp shadows are outside current scope.
 Mirrors show the source glass material without a live view. Live mirror views are outside current scope.
 Source audio covers ignition, engine, horn, interaction sounds, and the Lada radio.
 One manual browser save slot stores both cars, items, mechanisms, pumps, and lamps.

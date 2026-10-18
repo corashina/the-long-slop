@@ -52,7 +52,6 @@ struct Instance {
     authored_mesh: Handle<Mesh>,
     material: Handle<GrassMaterial>,
     shadows: bool,
-    shadow_entity: Option<Entity>,
     bounds: bevy::camera::primitives::Aabb,
     latest: GrassView,
     accepted_view: Option<GrassView>,
@@ -211,7 +210,6 @@ impl GrassJobs {
         material: Handle<GrassMaterial>,
         view: GrassView,
         shadows: bool,
-        shadow_entity: Option<Entity>,
         bounds: bevy::camera::primitives::Aabb,
     ) -> Result<(), ReferenceError> {
         let group_idle = !self
@@ -267,7 +265,6 @@ impl GrassJobs {
             authored_mesh,
             material,
             shadows,
-            shadow_entity,
             bounds,
             latest: view,
             accepted_view: None,
@@ -447,13 +444,6 @@ impl GrassJobs {
                         MeshMaterial3d(material.clone()),
                         instance.bounds,
                     ));
-                    if let Some(entity) = instance.shadow_entity {
-                        commands.entity(entity).insert((
-                            Mesh3d(mesh.clone()),
-                            MeshMaterial3d(material.clone()),
-                            instance.bounds,
-                        ));
-                    }
                     instance.accepted_view = Some(view);
                     instance.accepted = Some(Geometry {
                         mesh,

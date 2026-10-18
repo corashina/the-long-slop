@@ -1,4 +1,4 @@
-use super::materials::{SourceCaster, SourceMaterial};
+use super::materials::SourceMaterial;
 use super::reference::{ReferenceVisuals, bind_node};
 use crate::app::{Drive, RuntimeReference};
 use crate::reference::{AssetUsage, ItemId, NodeId, SourceId};
@@ -52,7 +52,6 @@ pub(crate) fn sync(
     extras: Query<(Entity, &GltfExtras)>,
     parents: Query<&ChildOf>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
-    source_casters: Query<(), With<SourceCaster>>,
     source_materials: Query<(), With<MeshMaterial3d<SourceMaterial>>>,
     mut transforms: Query<&mut Transform, With<ConsumableScene>>,
     mut visibility: Query<&mut Visibility>,
@@ -198,9 +197,6 @@ pub(crate) fn sync(
                 continue;
             }
             for (primitive, parent) in &primitives {
-                if source_casters.contains(primitive) {
-                    continue;
-                }
                 let mut ancestor = parent.parent();
                 while ancestor != instance.root {
                     let Ok(link) = parents.get(ancestor) else {

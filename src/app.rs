@@ -955,7 +955,6 @@ fn sync_instruments(
     mut visuals: ResMut<InstrumentVisuals>,
     mut transforms: Query<&mut Transform, Without<DriveCamera>>,
     mut materials: Query<&mut MeshMaterial3d<presentation::materials::SourceMaterial>>,
-    mut casters: Query<&mut MeshMaterial3d<StandardMaterial>>,
 ) {
     let drive = &mut *drive;
     let run = &drive.runtime;
@@ -971,7 +970,6 @@ fn sync_instruments(
         &drive.instruments,
         &mut transforms,
         &mut materials,
-        &mut casters,
     );
 }
 fn active_camera(drive: &Drive) -> Transform {
