@@ -49,7 +49,6 @@ struct Instance {
     session: u64,
     settings: GrassSettings,
     patches: Arc<[GrassPatch]>,
-    authored_mesh: Handle<Mesh>,
     material: Handle<GrassMaterial>,
     shadows: bool,
     bounds: bevy::camera::primitives::Aabb,
@@ -205,7 +204,6 @@ impl GrassJobs {
         entity: Entity,
         parent: Entity,
         patches: Arc<[GrassPatch]>,
-        authored_mesh: Handle<Mesh>,
         settings: GrassSettings,
         material: Handle<GrassMaterial>,
         view: GrassView,
@@ -262,7 +260,6 @@ impl GrassJobs {
             session: stream.frame().request.session,
             settings,
             patches,
-            authored_mesh,
             material,
             shadows,
             bounds,
@@ -405,9 +402,6 @@ impl GrassJobs {
                         material,
                         instance.shadows,
                     )?;
-                    if let Some(ticket) = ticket {
-                        ticket.set_motion_mesh(&instance.authored_mesh);
-                    }
                 }
                 if let Some(ticket) = ticket {
                     match ticket.state() {

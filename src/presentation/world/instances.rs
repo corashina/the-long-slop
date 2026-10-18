@@ -590,11 +590,6 @@ impl SourceInstances {
                                             .entity(entity)
                                             .insert(bevy::light::NotShadowReceiver);
                                     }
-                                    commands.entity(entity).insert(
-                                        crate::presentation::motion_draw::AuthoredMotionMesh(
-                                            mesh.clone(),
-                                        ),
-                                    );
                                     if !is_grass {
                                         commands.entity(entity).insert(Mesh3d(mesh.clone()));
                                         binding.visible.insert(entity, commands);
@@ -669,7 +664,6 @@ impl SourceInstances {
                                                 entity,
                                                 root,
                                                 Arc::clone(&patches),
-                                                mesh.clone(),
                                                 settings,
                                                 handle.clone(),
                                                 view,

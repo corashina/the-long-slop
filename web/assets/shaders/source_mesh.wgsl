@@ -144,7 +144,7 @@ fn vertex(vertex_no_morph: Vertex, @location(8) bounds_center_usage: vec4<f32>, 
 #endif
 
 #ifdef SOURCE_TRANSPARENT
-    out.position = lighting.nonjittered_clip_from_world * out.world_position;
+    out.position = lighting.clip_from_world * out.world_position;
 #endif
     out.source_renderer = vec3(probe_weight(world_from_local,bounds_center_usage,bounds_extents_flags),bounds_extents_flags.w);
     out.source_fog = out.position.z;

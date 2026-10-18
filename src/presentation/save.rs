@@ -798,7 +798,6 @@ fn candidate_required_views(
             first.field_of_view,
             first.mask,
             lighting.shadows.distance,
-            None,
         ),
         candidate.stream.origin.offset,
         forward,
@@ -829,7 +828,6 @@ fn candidate_required_views(
                 stage.field_of_view,
                 stage.mask,
                 lighting.shadows.distance,
-                None,
             ),
         )?;
     }

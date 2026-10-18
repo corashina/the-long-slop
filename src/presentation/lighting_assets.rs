@@ -186,12 +186,8 @@ pub struct LightingShaders {
     pub histogram: Handle<Shader>,
     pub exposure: Handle<Shader>,
     pub probe: Handle<Shader>,
-    pub taa: Handle<Shader>,
     pub caster: Handle<Shader>,
     pub caster_math: Handle<Shader>,
-    pub motion_camera: Handle<Shader>,
-    pub motion_objects: Handle<Shader>,
-    pub motion_blur: Handle<Shader>,
     pub bloom: Handle<Shader>,
     pub lut: Handle<Shader>,
     pub uber: Handle<Shader>,
@@ -201,7 +197,7 @@ pub struct LightingShaders {
     pub ao_composite: Handle<Shader>,
 }
 impl LightingShaders {
-    pub(crate) fn handles(&self) -> [&Handle<Shader>; 22] {
+    pub(crate) fn handles(&self) -> [&Handle<Shader>; 18] {
         [
             &self.lighting,
             &self.cloud,
@@ -212,12 +208,8 @@ impl LightingShaders {
             &self.histogram,
             &self.exposure,
             &self.probe,
-            &self.taa,
             &self.caster,
             &self.caster_math,
-            &self.motion_camera,
-            &self.motion_objects,
-            &self.motion_blur,
             &self.bloom,
             &self.lut,
             &self.uber,

@@ -11,7 +11,7 @@ struct LightingUniform {
     probe_center: array<vec4<f32>, 2>,
     probe_extents: array<vec4<f32>, 2>,
     source_time: vec4<f32>,
-    nonjittered_clip_from_world: mat4x4<f32>,
+    clip_from_world: mat4x4<f32>,
     near_far: vec4<f32>,
 }
 @group(1) @binding(0) var<uniform> lighting: LightingUniform;

@@ -1,11 +1,10 @@
 //! Source camera effects and legacy callback copies share one submitted stack token.
 use super::{
     frame_copy::FrameCopy,
-    frame_graph::{MotionFrame, SourceGraphProgress},
+    frame_graph::SourceGraphProgress,
     lighting_assets::{LightingAssets, LightingRenderAssets},
     lighting_scene::SourceSceneLighting,
     materials::RenderingState,
-    motion_draw::MotionDrawView,
     postprocessing::chain::{PostFrame, PostShaders, PostTextures, SourceAoChain, SourcePostChain},
     render_targets::{HDR_FORMAT, SourceColorTargets},
     source_lighting::{SourceExecutionGate, SourceLightingStatus},
@@ -31,9 +30,7 @@ use std::sync::Arc;
 struct EffectInput {
     scene: u32,
     frame: u32,
-    shutter: f32,
     delta_seconds: f32,
-    initialized: bool,
 }
 fn snapshot_input(
     frame: Res<SourceViewFrame>,
@@ -52,26 +49,7 @@ fn snapshot_input(
     if !assets.loaded || frame.views[1].is_none() {
         return;
     }
-    let settings = assets.record.postprocessing.motion_blur;
-    if !input.initialized {
-        input.shutter = settings.shutter_range[0];
-        input.initialized = true;
-    }
-    let delta = drive.render_delta_seconds;
-    let physics = &drive.runtime.physics;
-    let body = if let Some(vehicle) = drive.runtime.area.player.seat_vehicle() {
-        physics.chassis_handle(vehicle)
-    } else {
-        drive.runtime.area.player.body_handle()
-    };
-    let speed = physics.rapier().bodies[body].linvel().length() * 3.6;
-    let speed_fraction = ((speed - settings.speed_range[0])
-        / (settings.speed_range[1] - settings.speed_range[0]))
-        .clamp(0., 1.);
-    let target = settings.shutter_range[0]
-        + (settings.shutter_range[1] - settings.shutter_range[0]) * speed_fraction;
-    input.shutter += (target - input.shutter) * (settings.shutter_lerp * delta).clamp(0., 1.);
-    input.delta_seconds = delta;
+    input.delta_seconds = drive.render_delta_seconds;
     input.frame = frame.frame;
 }
 
@@ -79,9 +57,9 @@ fn snapshot_input(
 pub(crate) struct EffectsAudit {
     scene: u32,
     first_token: u32,
-    first_before: [[u32; 5]; 3],
-    first_after: [[u32; 5]; 3],
-    histories: [[u32; 5]; 3],
+    first_before: [[u32; 3]; 3],
+    first_after: [[u32; 3]; 3],
+    histories: [[u32; 3]; 3],
     frame: u32,
     token: u32,
     ao_frame: u32,
@@ -105,7 +83,6 @@ pub(crate) struct EffectsAudit {
     callback_allocations: u32,
     validation: u32,
     validated: bool,
-    shutter: f32,
     delta_seconds: f32,
 }
 impl EffectsAudit {
@@ -206,8 +183,6 @@ fn shaders(assets: &LightingRenderAssets) -> PostShaders {
     let s = &assets.shaders;
     PostShaders {
         copy: s.copy.clone(),
-        taa: s.taa.clone(),
-        motion_blur: s.motion_blur.clone(),
         histogram: s.histogram.clone(),
         exposure: s.exposure.clone(),
         bloom: s.bloom.clone(),
@@ -251,8 +226,8 @@ fn prepare(
         let a = &mut effects.audit;
         a.scene = frame.scene;
         a.first_token = 0;
-        a.first_before = [[0; 5]; 3];
-        a.first_after = [[0; 5]; 3];
+        a.first_before = [[0; 3]; 3];
+        a.first_after = [[0; 3]; 3];
         a.submitted_token = 0;
         a.completed_tokens = [0; 3];
         a.validation = 0;
@@ -323,8 +298,6 @@ fn prepare(
                 &shaders,
                 &textures,
                 colors.resolved.sampled.as_ref().unwrap(),
-                ao.raw_depth(),
-                surfaces.targets.views[1].motion.sampled.as_ref().unwrap(),
                 extent,
                 record,
                 layer.scope,
@@ -421,8 +394,7 @@ fn begin_frame(
     effects.audit.callback_mask = 0;
     effects.audit.encoded_tokens = [0; 3];
     effects.audit.pipelines_ready = effects.ready(&cache);
-    effects.audit.inputs_ready = input.frame == frame.frame && input.initialized;
-    effects.audit.shutter = input.shutter;
+    effects.audit.inputs_ready = input.frame == frame.frame;
     effects.audit.delta_seconds = input.delta_seconds;
 }
 fn encode_ao(
@@ -466,9 +438,8 @@ fn encode_ao(
     }
 }
 fn encode_post(
-    view: ViewQuery<(&SourceSurfaceView, Option<&MotionDrawView>)>,
+    view: ViewQuery<&SourceSurfaceView>,
     mut effects: ResMut<SourceEffects>,
-    motion: Option<Res<MotionFrame>>,
     frame: Res<SourceViewFrame>,
     input: Res<EffectInput>,
     device: Res<RenderDevice>,
@@ -477,26 +448,16 @@ fn encode_post(
     status: Res<SourceLightingStatus>,
     mut context: RenderContext,
 ) {
-    let (view, motion_draw) = view.into_inner();
-    let index = view.index;
+    let index = view.into_inner().index;
     if index >= 3
         || input.frame != frame.frame
         || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
     {
         return;
     }
-    if index == 1
-        && (effects.audit.ao_frame != frame.frame
-            || !motion
-                .as_ref()
-                .is_some_and(|m| m.encoded(frame.frame, frame.main_token))
-            || !motion_draw.is_some_and(|m| m.encoded_token() == frame.main_token))
-    {
+    if (index == 1 && effects.audit.ao_frame != frame.frame) || frame.views[index].is_none() {
         return;
     }
-    let Some(snapshot) = frame.views[index].as_ref() else {
-        return;
-    };
     let Some(targets) = effects.targets.as_mut() else {
         return;
     };
@@ -507,10 +468,6 @@ fn encode_post(
         &cache,
         PostFrame {
             token: frame.main_token,
-            jitter_uv: frame.jitter.unwrap().uv,
-            near: snapshot.near,
-            far: snapshot.far,
-            shutter: input.shutter,
             delta_seconds: input.delta_seconds,
         },
         targets.colors.attachment(),

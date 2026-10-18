@@ -10,7 +10,6 @@ pub const HDR_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const DEPTH_FORMAT: TextureFormat = TextureFormat::Depth24PlusStencil8;
 pub const SHADOW_FORMAT: TextureFormat = TextureFormat::Depth16Unorm;
 pub const COLLECTOR_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
-pub const MOTION_FORMAT: TextureFormat = TextureFormat::Rg16Float;
 pub const EXPOSURE_FORMAT: TextureFormat = TextureFormat::R32Float;
 pub const HISTOGRAM_FORMAT: TextureFormat = TextureFormat::Rgba32Uint;
 
@@ -33,7 +32,6 @@ pub fn validate_source_device(
         DEPTH_FORMAT,
         SHADOW_FORMAT,
         COLLECTOR_FORMAT,
-        MOTION_FORMAT,
         HISTOGRAM_FORMAT,
         EXPOSURE_FORMAT,
     ] {
@@ -179,14 +177,13 @@ impl SourceColorTargets {
     }
 }
 
-/// Depth, motion, attenuation, and shadow storage belong to exactly one surface view.
+/// Depth, attenuation, and shadow storage belong to exactly one surface view.
 /// Color ownership is shared without sharing any writable view uniform.
 pub struct SourceViewTargets {
     pub colors: std::sync::Arc<SourceColorTargets>,
     pub atlas_size: u32,
     pub multisample_depth: Option<Target>,
     pub depth: Target,
-    pub motion: Target,
     pub collector: Target,
     pub atlas: Target,
     /// Excludes shared color storage. Count each color pair once in the graph total.
@@ -219,15 +216,6 @@ impl SourceViewTargets {
             )
         });
         let depth = Target::new(device, "source_depth", width, height, 1, DEPTH_FORMAT, true);
-        let motion = Target::new(
-            device,
-            "source_motion",
-            width,
-            height,
-            1,
-            MOTION_FORMAT,
-            true,
-        );
         let collector = Target::new(
             device,
             "source_screen_shadows",
@@ -249,19 +237,17 @@ impl SourceViewTargets {
         // D24S8 uses four logical bytes. Backend allocation overhead is excluded.
         let logical_bytes = u64::from(width)
             * u64::from(height)
-            * (12
-                + if samples > 1 {
-                    4 * u64::from(samples)
-                } else {
-                    0
-                })
+            * (8 + if samples > 1 {
+                4 * u64::from(samples)
+            } else {
+                0
+            })
             + 2 * u64::from(atlas_size).pow(2);
         Ok(Self {
             colors,
             atlas_size,
             multisample_depth,
             depth,
-            motion,
             collector,
             atlas,
             logical_bytes,

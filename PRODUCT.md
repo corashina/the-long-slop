@@ -37,7 +37,9 @@ Restart restores the garage and source startup state at 240 seconds.
 
 The renderer covers sun shadows, sky, reflections, post effects, and stained glass.
 Lamps light the scene but cast no shadows, for speed. Lamp shadows are outside current scope.
+Each reflection probe captures once per scene, then keeps that image.
 Mirrors show the source glass material without a live view. Live mirror views are outside current scope.
+Antialiasing uses MSAA only. Source motion blur and TAA are outside current scope.
 Source audio covers ignition, engine, horn, interaction sounds, and the Lada radio.
 One manual browser save slot stores both cars, items, mechanisms, pumps, and lamps.
 Driving includes source manual gears, clutch, Automatic clutch, and Automatic gears.

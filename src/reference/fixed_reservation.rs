@@ -466,7 +466,7 @@ pub fn fixed_room(
             .is_some_and(|n| n <= crate::world::stream::PROTOTYPE_GPU))
 }
 
-pub const FIXED_SHADER_PATHS: [&str; 35] = [
+pub const FIXED_SHADER_PATHS: [&str; 31] = [
     "shaders/source_lod.wgsl",
     "shaders/source_float_store.wgsl",
     "shaders/source_view_lighting.wgsl",
@@ -483,11 +483,7 @@ pub const FIXED_SHADER_PATHS: [&str; 35] = [
     "shaders/source_histogram.wgsl",
     "shaders/source_exposure.wgsl",
     "shaders/source_probe.wgsl",
-    "shaders/source_taa.wgsl",
     "shaders/source_caster.wgsl",
-    "shaders/source_motion_vectors.wgsl",
-    "shaders/source_motion_objects.wgsl",
-    "shaders/source_motion_blur.wgsl",
     "shaders/source_bloom.wgsl",
     "shaders/source_lut.wgsl",
     "shaders/source_uber.wgsl",

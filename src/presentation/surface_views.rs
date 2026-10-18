@@ -30,7 +30,7 @@ pub struct SourceSurfaceView {
     pub index: usize,
     pub near: f32,
     pub far: f32,
-    pub nonjittered_clip_from_world: Mat4,
+    pub clip_from_world: Mat4,
     pub shadow_fade: Vec4,
     pub shadow_fade_center: Vec4,
 }
@@ -206,12 +206,12 @@ pub fn prepare_views(
         let uniform = scene.for_view(
             source.shadow_fade,
             source.shadow_fade_center,
-            source.nonjittered_clip_from_world,
+            source.clip_from_world,
             source.near,
             source.far,
         );
         let glass_value = match GlassViewUniform::new(
-            source.nonjittered_clip_from_world,
+            source.clip_from_world,
             source.near,
             source.far,
             UVec2::new(target.colors.width, target.colors.height),

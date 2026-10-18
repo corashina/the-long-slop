@@ -3,7 +3,7 @@
 #import source_float_store::half4
 
 struct GlassViewUniform {
-    nonjittered_clip_from_world: mat4x4<f32>,
+    clip_from_world: mat4x4<f32>,
     near_far: vec4<f32>,
     grab_texel_size: vec4<f32>,
 }
@@ -52,7 +52,7 @@ struct GlassVertex {
 fn vertex(in: Vertex) -> GlassVertex {
     let world_from_local = mesh_functions::get_world_from_local(in.instance_index);
     let world = mesh_functions::mesh_position_local_to_world(world_from_local, vec4(in.position, 1.0));
-    let raster_clip = glass_view.nonjittered_clip_from_world * world;
+    let raster_clip = glass_view.clip_from_world * world;
     // Source D3D11 already uses the same reverse-Z device projection.
     let source_clip = raster_clip;
     var out: GlassVertex;

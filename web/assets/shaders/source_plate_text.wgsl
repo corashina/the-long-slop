@@ -16,7 +16,7 @@ struct Out { @builtin(position) position:vec4<f32>, @location(0) world:vec4<f32>
     var o:Out;
     let model=mesh_functions::get_world_from_local(v.instance);
     o.world=mesh_functions::mesh_position_local_to_world(model,vec4(v.position,1.));
-    o.position=lighting.nonjittered_clip_from_world*o.world;
+    o.position=lighting.clip_from_world*o.world;
     o.normal=normalize(mesh_functions::mesh_normal_local_to_world(v.normal,v.instance));
     o.tangent=normalize((model*vec4(-1.,0.,0.,0.)).xyz);
     o.uv=v.uv;
@@ -91,7 +91,7 @@ struct Out { @builtin(position) position:vec4<f32>, @location(0) world:vec4<f32>
         let specular=pow(max(dot(normal,normalize(direction+eye)),0.),shininess);
         light+=(diffuse*max(dot(normal,direction),0.)+plate.specular.rgb*specular)*lamp.color.rgb*weight;
     }
-    let clip=lighting.nonjittered_clip_from_world*i.world;
+    let clip=lighting.clip_from_world*i.world;
     light=mix(lighting.fog_color_density.rgb,light,fog_factor(clip.z,lighting.near_far.x,lighting.near_far.y));
     return vec4(light,color.a);
 }
