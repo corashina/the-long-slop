@@ -36,6 +36,7 @@ Pause freezes cycle time, fades, and switch movement. Recovery preserves these s
 Restart restores the garage and source startup state at 240 seconds.
 
 The renderer covers source shadows, sky, reflections, post effects, and stained glass.
+Each reflection probe captures once per scene, then keeps that image.
 Mirrors show the source glass material without a live view. Live mirror views are outside current scope.
 Source audio covers ignition, engine, horn, interaction sounds, and the Lada radio.
 One manual browser save slot stores both cars, items, mechanisms, pumps, and lamps.

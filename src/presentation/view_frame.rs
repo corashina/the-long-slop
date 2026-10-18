@@ -81,6 +81,9 @@ impl SourceViewClock {
     pub fn main_token(&self) -> u32 {
         self.main_token
     }
+    fn probe_wanted(&self, index: usize, probe_enabled: [bool; PROBE_COUNT]) -> bool {
+        probe_enabled[index] && !self.probe[index].published()
+    }
     fn consume(
         &mut self,
         acks: &SourceSubmissionAcks,
@@ -120,12 +123,13 @@ impl SourceViewClock {
                 .checked_add(1)
                 .ok_or("Source probe job token exhausted")?;
         }
-        if !probe_enabled[self.probe_index]
+        // Each probe captures once per scene. A published probe keeps its cubemap.
+        if !self.probe_wanted(self.probe_index, probe_enabled)
             && self.probe[self.probe_index].job() == ProbeJob::Face(0)
         {
             if let Some(index) = (1..PROBE_COUNT)
                 .map(|offset| (self.probe_index + offset) % PROBE_COUNT)
-                .find(|&index| probe_enabled[index])
+                .find(|&index| self.probe_wanted(index, probe_enabled))
             {
                 self.probe_index = index;
                 self.probe_token = self
@@ -324,7 +328,7 @@ pub(crate) fn snapshot(
     }
     clock.preparation_ready |= matches!(*status.0.lock().unwrap(), RenderingState::Ready);
     let warmup = !clock.preparation_ready;
-    let job = (activation.enabled[clock.probe_index]
+    let job = (clock.probe_wanted(clock.probe_index, activation.enabled)
         || clock.probe[clock.probe_index].job() != ProbeJob::Face(0))
     .then(|| clock.probe[clock.probe_index].job());
     let snapshots = std::array::from_fn(|index| {
