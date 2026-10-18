@@ -186,7 +186,7 @@ impl SourcePrototypes {
         if self.entries.iter().any(|e| e.source == *source) {
             return Ok(());
         }
-        if stream.metrics().pending_work >= 32 {
+        if stream.pending_work() >= 32 {
             return Ok(());
         }
         if self.entries.len() >= 8192 {

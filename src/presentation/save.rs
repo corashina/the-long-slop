@@ -59,15 +59,13 @@ impl PreparedPresentation {
                 .resource::<crate::app::Drive>()
                 .runtime
                 .stream
-                .metrics()
-                .generation_jobs
+                .generation_jobs()
                 == 0
             && world
                 .resource::<crate::app::Drive>()
                 .runtime
                 .stream
-                .metrics()
-                .pending_work
+                .pending_work()
                 == 0
     }
     pub fn new(

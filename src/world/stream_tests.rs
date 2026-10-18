@@ -1222,3 +1222,39 @@ fn replay_restore_replaces_selection_and_saved_readiness_checks_revision() {
     run.stream.select_changed_destinations();
     assert!(run.stream.saved_bindings_ready(&run.area.items));
 }
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn content_index_matches_linear_lookups() {
+    use super::super::contents::ContentInstance;
+    let reference = reference();
+    let mut stream = WorldStream::new(&reference, 42).unwrap();
+    let source = &reference.world.road.prototypes[0];
+    let placements: Vec<_> = (1..=5)
+        .map(|i| replay_placement(source, i, [i as f64, 0., 0.]))
+        .collect();
+    for placement in &placements[..3] {
+        let mut content = ContentInstance::for_structure(placement.clone());
+        content.poses.push(crate::vehicle::VehiclePose {
+            position: [placement.pose.position[0] as f32, 1., 2.],
+            rotation: [0., 0., 0., 1.],
+        });
+        stream.contents.active.push(content);
+    }
+    stream
+        .static_controls
+        .push(ContentInstance::for_structure(placements[3].clone()));
+    let mut index = super::super::ContentIndex::default();
+    stream.index_contents(&mut index);
+    for placement in &placements {
+        let id = &placement.id;
+        let content = stream.indexed_content(&index, id);
+        assert_eq!(content.bindings_ready(), stream.bindings_ready(id));
+        assert_eq!(content.node_pose(0), stream.generated_node_pose(id, 0));
+        assert_eq!(content.caps().len(), stream.generated_cap_visuals(id).len());
+        assert_eq!(
+            stream.indexed_appearance(&content, id).len(),
+            stream.appearance(id).len()
+        );
+    }
+}
