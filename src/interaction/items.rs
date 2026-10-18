@@ -137,9 +137,6 @@ impl ItemStore {
             .iter()
             .filter_map(|(key, id)| self.get(*id).map(|state| (key, state)))
     }
-    pub fn generated_item(&self, id: &GeneratedId) -> Option<&ItemState> {
-        self.generated.get(id).and_then(|item| self.get(*item))
-    }
     pub(crate) fn retained_binding_bytes(&self) -> usize {
         use super::memory::{map, set, strings, vector};
         set(&self.dirty)

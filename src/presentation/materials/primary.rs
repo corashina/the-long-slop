@@ -354,7 +354,7 @@ impl SourceMaterials {
                 {
                     continue;
                 }
-                if stream.pending_work() >= 32 {
+                if stream.metrics().pending_work >= 32 {
                     continue;
                 }
                 let staging = texture.input_staging;
@@ -626,11 +626,11 @@ impl SourceMaterials {
             self.world_textures.jobs(),
             self.world_textures.staging_bytes(),
         )?;
-        let pending = 32usize.saturating_sub(stream.pending_work());
+        let pending = 32usize.saturating_sub(stream.metrics().pending_work);
         let staging_available = stream.available_dependency_staging_bytes();
         let available_cpu = stream.available_prototype_cpu_bytes() + self.world_textures.bytes().0;
-        let releasable =
-            stream.generation_jobs() > 0 || stream.presentation_allocation().staging_bytes > 0;
+        let releasable = stream.metrics().generation_jobs > 0
+            || stream.presentation_allocation().staging_bytes > 0;
         let result = self.world_textures.prepare(
             server,
             images,
