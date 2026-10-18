@@ -3251,7 +3251,8 @@ impl WorldStream {
     ) -> Result<(), ReferenceError> {
         let owned = items.retained_binding_bytes()
             + interaction.retained_binding_bytes()
-            + wheels.retained_binding_bytes();
+            + wheels.retained_binding_bytes()
+            + physics.query_storage_bytes();
         let baseline = *self.binding_baseline.get_or_insert(owned);
         self.binding_bytes = owned.saturating_sub(baseline);
         self.binding_owner_bytes = owned;
@@ -3262,7 +3263,8 @@ impl WorldStream {
             self.binding_reserved = 0;
             self.binding_owner_bytes = items.retained_binding_bytes()
                 + interaction.retained_binding_bytes()
-                + wheels.retained_binding_bytes();
+                + wheels.retained_binding_bytes()
+                + physics.query_storage_bytes();
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
             return Err(error);
         }
@@ -3270,7 +3272,8 @@ impl WorldStream {
             self.binding_reserved = 0;
             self.binding_owner_bytes = items.retained_binding_bytes()
                 + interaction.retained_binding_bytes()
-                + wheels.retained_binding_bytes();
+                + wheels.retained_binding_bytes()
+                + physics.query_storage_bytes();
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
             return Err(error);
         }
@@ -3278,7 +3281,8 @@ impl WorldStream {
             self.binding_reserved = 0;
             self.binding_owner_bytes = items.retained_binding_bytes()
                 + interaction.retained_binding_bytes()
-                + wheels.retained_binding_bytes();
+                + wheels.retained_binding_bytes()
+                + physics.query_storage_bytes();
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
             return Err(error);
         }
@@ -3286,7 +3290,8 @@ impl WorldStream {
         self.sync_generated_food(reference, items, physics);
         self.binding_bytes = (items.retained_binding_bytes()
             + interaction.retained_binding_bytes()
-            + wheels.retained_binding_bytes())
+            + wheels.retained_binding_bytes()
+            + physics.query_storage_bytes())
         .saturating_sub(baseline);
 
         for supply in &mut self.supplies {
@@ -3375,7 +3380,8 @@ impl WorldStream {
         physics.refresh_queries();
         self.binding_owner_bytes = items.retained_binding_bytes()
             + interaction.retained_binding_bytes()
-            + wheels.retained_binding_bytes();
+            + wheels.retained_binding_bytes()
+            + physics.query_storage_bytes();
         self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
         self.binding_objects = items.len();
         self.binding_reserved = 0;
