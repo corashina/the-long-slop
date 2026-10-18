@@ -121,7 +121,7 @@ impl<P: super::motion_draw::MotionBatchItem> Draw<P> for Route<P> {
             .get::<super::motion_draw::MotionDrawView>(view)
             .is_some_and(|state| state.active())
         {
-            return super::motion_draw::split_draw(world, pass, view, item, &mut *self.motion);
+            return super::motion_draw::batch_draw(world, pass, view, item, &mut *self.motion);
         }
         let state = world
             .get::<CameraDepthState>(view)
