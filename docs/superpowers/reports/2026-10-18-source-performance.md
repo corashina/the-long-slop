@@ -38,6 +38,10 @@ Baseline and candidate input draw receipts passed `scripts/check-batching.mjs`. 
 
 No garage FPS sample passed acceptance. The first candidate sample had 24 pending world tasks and 2 jobs. A later sample started after the counts reached zero, then failed because world work changed during sampling. No valid matched A/B/A result exists. Driving FPS remains unmeasured. This branch has no verified speedup.
 
+### 2026-10-18 follow-up
+
+The Asset 735 load repair compiled and passed review. Its public Load retry stalled before commit or readback, so runtime success remains unverified. See the [Asset 735 report](2026-10-18-asset735-load-validation.md). The FPS limits above remain unchanged.
+
 Motion vectors retain the existing position-only coverage. This work adds no alpha or deformation parity claim.
 
 ## Frozen inputs and packages
