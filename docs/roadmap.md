@@ -34,7 +34,7 @@ The broader gameplay backlog remains below. Inventory and clothing tasks 3 to 10
 Remote commit `3714dc0` recorded a 24 m startup gate, budget waits, and concurrent texture chunks.
 The combined source keeps complete startup generation, required content, graph and mirror receipts, and two presented frames.
 It keeps strict budgets and the current texture batch queue. It adds one-metre structure refresh and nearest-first preparation and publication.
-Selection rebuilds still admit changed props and content. They do not reset the building window's one-metre movement threshold.
+Item capture alone preserves the movement baseline. Request, road, and source input changes can still force an earlier refresh.
 Existing activity checks still require complete road, structure, light, revision, generation, and ground support.
 
 The remote report measured New game at 43 s with cached assets and 79 s with a new profile.

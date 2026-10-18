@@ -1128,6 +1128,10 @@ impl WorldStream {
         self.publication_available = true;
         self.last_road_work = 0;
         self.last_terrain_work = 0;
+        // Request and source-input changes force structures. Captured item motion only
+        // revises replay selection; it must not restart the one-metre baseline.
+        let force_structures = self.plan_revision != self.request.revision
+            || self.selection_inputs != self.contents.input_revision();
         if self.selection_inputs != self.contents.input_revision()
             || self.selection_changes != self.changes.revision()
         {
@@ -1181,7 +1185,7 @@ impl WorldStream {
             return;
         }
         if self.plan_revision != self.request.revision {
-            if let Err(error) = self.plan() {
+            if let Err(error) = self.plan(force_structures) {
                 self.failure = Some(error.0);
             }
             if self.failure.is_some() || self.plan_revision != self.request.revision {
@@ -1299,34 +1303,28 @@ impl WorldStream {
         let numeric =
             |p: &Placement| p.id.layer == WorldLayer::Building && p.id.children.is_empty();
         let count = self.wanted_structures.iter().filter(|p| numeric(p)).count();
-        let mut removed = false;
-        if points
-            .into_iter()
-            .zip(self.structure_focus)
-            .any(|(a, b)| source_distance_squared(a, b) >= STRUCTURE_REFRESH_DISTANCE.powi(2))
-        {
-            removed = self.wanted_structures.iter().any(|p| {
-                numeric(p)
-                    && points
-                        .into_iter()
-                        .all(|f| source_distance_squared(f, p.pose.position) >= radius * radius)
-            });
-            let status = self.placements.update_buildings_in(
-                bounds,
-                self.placements.coverage(),
-                &mut self.wanted_structures,
-                |position| {
-                    points
-                        .into_iter()
-                        .any(|p| source_distance_squared(p, position) < radius * radius)
-                },
-            );
-            if let Err(error) = status {
-                self.failure = Some(error.0);
-                return false;
-            }
-            self.structure_focus = points;
+        let removed = self.wanted_structures.iter().any(|p| {
+            numeric(p)
+                && points
+                    .into_iter()
+                    .all(|f| source_distance_squared(f, p.pose.position) >= radius * radius)
+        });
+        let status = self.placements.update_buildings_in(
+            bounds,
+            self.placements.coverage(),
+            &mut self.wanted_structures,
+            |position| {
+                points
+                    .into_iter()
+                    .any(|p| source_distance_squared(p, position) < radius * radius)
+            },
+        );
+        if let Err(error) = status {
+            self.failure = Some(error.0);
+            return false;
         }
+        // Planning also forces refreshes. Movement starts from the last completed refresh.
+        self.structure_focus = points;
         for placement in self
             .props
             .placements()
@@ -1828,7 +1826,7 @@ impl WorldStream {
     pub fn prop_material(&self, placement: &Placement) -> Option<(&SourceId, &SourceId)> {
         self.props.material(placement)
     }
-    fn plan(&mut self) -> Result<(), ReferenceError> {
+    fn plan(&mut self, force_structures: bool) -> Result<(), ReferenceError> {
         let road_changed = self.planned_road_focus != self.road_focus;
         if road_changed {
             let road_distance =
@@ -1874,7 +1872,7 @@ impl WorldStream {
                 return Err(ReferenceError("Source object count exceeds8192".into()));
             }
         }
-        let buildings_changed = self.refresh_structures();
+        let buildings_changed = (force_structures || road_changed) && self.refresh_structures();
         self.terrain_context_dirty |= road_changed || buildings_changed;
         self.wanted_tiles.clear();
         if self.wanted_structures.len() > MAX_OBJECTS {

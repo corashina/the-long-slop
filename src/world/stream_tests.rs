@@ -11,42 +11,97 @@ fn reference() -> ReferenceManifest {
 
 #[test]
 #[ignore = "requires the installed source export"]
-fn structure_refresh_accumulates_both_foci_across_selection_rebuilds() {
+fn structure_refresh_accumulates_both_foci_and_forced_refreshes() {
     let reference = reference();
-    let mut stream = WorldStream::new(&reference, 42).unwrap();
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    run.stream.request_at([0.; 3], [0.; 3]);
     for _ in 0..10000 {
-        stream.prepare(100.);
-        assert!(stream.failure.is_none(), "{:?}", stream.failure);
-        if stream.startup.is_some() {
+        run.stream.prepare(100.);
+        assert!(run.stream.failure.is_none(), "{:?}", run.stream.failure);
+        if run.stream.startup.is_some() {
             break;
         }
     }
-    assert!(stream.startup.is_some());
-    stream.refresh_structures();
-    assert_eq!(stream.structure_focus, [[0.; 3]; 2]);
+    assert!(run.stream.startup.is_some());
+    run.stream.prepare(0.);
+    assert_eq!(run.stream.plan_revision, run.stream.request.revision);
+    assert_eq!(run.stream.structure_focus, [[0.; 3]; 2]);
+    let (item, body) = run
+        .stream
+        .imported_baselines
+        .iter()
+        .find_map(|(id, _)| {
+            let item = run.area.items.get(*id)?;
+            item.inactive_pose.is_none().then_some(())?;
+            Some((*id, item.body?))
+        })
+        .expect("imported item with a live physical body");
+    let capture_and_prepare = |run: &mut GarageRuntime, player, vehicle, expected| {
+        let mut pose = *run.physics.rapier().bodies[body].position();
+        pose.translation.y += 0.125;
+        run.physics.rapier_mut().bodies[body].set_position(pose, true);
+        run.area.items.sync_poses(&run.physics);
+        run.stream.request_at(player, vehicle);
+        let captured = run.stream.changes.revision();
+        run.stream.capture_changes(
+            &reference,
+            &mut run.area.items,
+            &run.area.interaction,
+            &run.physics,
+        );
+        assert_ne!(run.stream.changes.revision(), captured);
+        assert!(
+            run.stream
+                .changes
+                .get(super::super::ObjectKey::Imported(item))
+                .is_some()
+        );
+        let revision = run.stream.request.revision;
+        run.stream.prepare(0.);
+        assert_ne!(run.stream.request.revision, revision);
+        assert_eq!(run.stream.plan_revision, run.stream.request.revision);
+        assert_eq!(run.stream.selection_changes, run.stream.changes.revision());
+        assert_eq!(run.stream.structure_focus, expected);
+        assert!(run.stream.failure.is_none(), "{:?}", run.stream.failure);
+    };
     let vehicle = [0.; 3];
     for x in [0.25, 0.5, 0.75] {
-        stream.request_at([x, 0., 0.], vehicle);
-        // Moving items can rebuild selection without moving the building window.
-        stream.revise_selection();
-        stream.plan().unwrap();
-        assert_eq!(stream.structure_focus, [[0.; 3]; 2]);
+        capture_and_prepare(&mut run, [x, 0., 0.], vehicle, [[0.; 3]; 2]);
     }
-    stream.request_at([1., 0., 0.], vehicle);
-    assert_eq!(stream.structure_focus, [[1., 0., 0.], vehicle]);
-    stream.request_at([1., 0., 0.], [0., 0., 0.75]);
-    assert_eq!(stream.structure_focus, [[1., 0., 0.], vehicle]);
-    stream.request_at([1., 0., 0.], [0., 0., 1.]);
-    assert_eq!(stream.structure_focus, [[1., 0., 0.], [0., 0., 1.]]);
-    // Selection rebuilds preserve movement accumulated since the last window update.
-    stream.request_at([1.25, 0., 0.], [0., 0., 1.]);
-    stream.plan().unwrap();
-    assert_eq!(stream.structure_focus, [[1., 0., 0.], [0., 0., 1.]]);
-    stream.request_at([2., 0., 0.], [0., 0., 1.]);
-    assert_eq!(stream.structure_focus, [[2., 0., 0.], [0., 0., 1.]]);
-    stream.request_at([2.25, 0., 0.], [0., 0., 1.]);
-    assert_eq!(stream.structure_focus, [[2., 0., 0.], [0., 0., 1.]]);
-    assert!(stream.failure.is_none(), "{:?}", stream.failure);
+    capture_and_prepare(&mut run, [1., 0., 0.], vehicle, [[1., 0., 0.], vehicle]);
+    capture_and_prepare(
+        &mut run,
+        [1., 0., 0.],
+        [0., 0., 0.75],
+        [[1., 0., 0.], vehicle],
+    );
+    capture_and_prepare(
+        &mut run,
+        [1., 0., 0.],
+        [0., 0., 1.],
+        [[1., 0., 0.], [0., 0., 1.]],
+    );
+    // A forced selection rebuild also moves the distance baseline.
+    capture_and_prepare(
+        &mut run,
+        [1.25, 0., 0.],
+        [0., 0., 1.],
+        [[1., 0., 0.], [0., 0., 1.]],
+    );
+    run.stream.plan(true).unwrap();
+    assert_eq!(run.stream.structure_focus, [[1.25, 0., 0.], [0., 0., 1.]]);
+    capture_and_prepare(
+        &mut run,
+        [2., 0., 0.],
+        [0., 0., 1.],
+        [[1.25, 0., 0.], [0., 0., 1.]],
+    );
+    capture_and_prepare(
+        &mut run,
+        [2.25, 0., 0.],
+        [0., 0., 1.],
+        [[2.25, 0., 0.], [0., 0., 1.]],
+    );
 }
 
 #[test]
