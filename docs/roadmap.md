@@ -26,8 +26,27 @@ Remaining renderer work, in dependency order:
 
 The last sampler tests hit the atlas error, failed saved-scene admission, and failed Chromium mouse capture.
 The later asset-owner fix needs runtime confirmation. The atlas and input failures remain open.
-The current manual game session prevents concurrent build and benchmark work.
+Matched benchmarks still need an isolated run without competing build or game work.
 The broader gameplay backlog remains below. Inventory and clothing tasks 3 to 10 remain stopped.
+
+### Remote loading history
+
+Remote commit `3714dc0` recorded a 24 m startup gate, budget waits, and concurrent texture chunks.
+The combined source keeps complete startup generation, required content, graph and mirror receipts, and two presented frames.
+It keeps strict budgets and the current texture batch queue. It adds one-metre structure refresh and nearest-first preparation and publication.
+Selection rebuilds still admit changed props and content. They do not reset the building window's one-metre movement threshold.
+Existing activity checks still require complete road, structure, light, revision, generation, and ground support.
+
+The remote report measured New game at 43 s with cached assets and 79 s with a new profile.
+It reported 38 FPS, a player inside the garage, and a car on four wheels.
+Those measurements used an earlier export. They do not establish current runtime acceptance or speed.
+
+The report also recorded a stall on `10e58b9` with the then-current export.
+Pending work stayed at 32 of 32, staging stayed at zero, and garage rendering stayed in preparation.
+It proposed a comparison with `3dcb7ad` and an audit of prototype and texture budget waits.
+It reported four audio decode failures, about 40 s of shader compilation, and pressure on the prototype GPU budget.
+These reports remain historical evidence. Reproduce each result with matching assets before treating it as a current fault.
+Walk and drive outside the yard during current runtime checks. Inspect ground, streaming, budgets, mirrors, and allocator errors.
 
 ### Inventory and clothing
 

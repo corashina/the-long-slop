@@ -199,10 +199,15 @@ impl SourceInstances {
             self.pending = stream
                 .pending_structures()
                 .iter()
-                .find(|p| {
+                .filter(|p| {
                     stream.contents_initialized(&p.id)
                         && (stream.structure_required(&p.id) || required_ready)
                         && !self.instances.iter().any(|i| i.placement.id == p.id)
+                })
+                .min_by(|a, b| {
+                    stream
+                        .focus_distance_squared(a.pose.position)
+                        .total_cmp(&stream.focus_distance_squared(b.pose.position))
                 })
                 .cloned();
         }

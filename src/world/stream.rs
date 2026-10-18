@@ -23,6 +23,8 @@ const MAX_NEAR: usize = 512;
 const MAX_DISTANT: usize = 256;
 const MAX_OBJECTS: usize = 32768;
 const MAX_PENDING: usize = 32;
+/// Focus movement in metres before the structure window refreshes.
+const STRUCTURE_REFRESH_DISTANCE: f32 = 1.0;
 const ACTIVE_CPU: usize = 256 * MIB;
 const ACTIVE_GPU: usize = 128 * MIB;
 pub(crate) const PROTOTYPE_CPU: usize = 512 * MIB;
@@ -170,6 +172,8 @@ pub struct WorldStream {
     plan_revision: u64,
     selection_inputs: u64,
     road_focus: [[f64; 3]; 2],
+    /// Player and vehicle positions at the last structure refresh.
+    structure_focus: [[f64; 3]; 2],
     planned_road_focus: [[f64; 3]; 2],
     terrain_context_dirty: bool,
     selection_changes: u64,
@@ -586,6 +590,7 @@ impl WorldStream {
             plan_revision: 0,
             selection_inputs: 0,
             road_focus: [[f64::INFINITY; 3]; 2],
+            structure_focus: [[f64::INFINITY; 3]; 2],
             planned_road_focus: [[f64::INFINITY; 3]; 2],
             terrain_context_dirty: false,
             selection_changes: 0,
@@ -1050,7 +1055,14 @@ impl WorldStream {
             });
         self.request.player = player;
         self.request.vehicle = vehicle;
-        let buildings_changed = moved && self.initial_generation_ready && self.refresh_structures();
+        let structures_due = prop_changed
+            || eligibility_changed
+            || after
+                .into_iter()
+                .zip(self.structure_focus)
+                .any(|(a, b)| source_distance_squared(a, b) >= STRUCTURE_REFRESH_DISTANCE.powi(2));
+        let buildings_changed =
+            structures_due && self.initial_generation_ready && self.refresh_structures();
         self.terrain_context_dirty |= road_changed || buildings_changed;
         if changed || prop_changed || buildings_changed || eligibility_changed || replay_changed {
             self.revise_selection();
@@ -1287,25 +1299,33 @@ impl WorldStream {
         let numeric =
             |p: &Placement| p.id.layer == WorldLayer::Building && p.id.children.is_empty();
         let count = self.wanted_structures.iter().filter(|p| numeric(p)).count();
-        let removed = self.wanted_structures.iter().any(|p| {
-            numeric(p)
-                && points
-                    .into_iter()
-                    .all(|f| source_distance_squared(f, p.pose.position) >= radius * radius)
-        });
-        let status = self.placements.update_buildings_in(
-            bounds,
-            self.placements.coverage(),
-            &mut self.wanted_structures,
-            |position| {
-                points
-                    .into_iter()
-                    .any(|p| source_distance_squared(p, position) < radius * radius)
-            },
-        );
-        if let Err(error) = status {
-            self.failure = Some(error.0);
-            return false;
+        let mut removed = false;
+        if points
+            .into_iter()
+            .zip(self.structure_focus)
+            .any(|(a, b)| source_distance_squared(a, b) >= STRUCTURE_REFRESH_DISTANCE.powi(2))
+        {
+            removed = self.wanted_structures.iter().any(|p| {
+                numeric(p)
+                    && points
+                        .into_iter()
+                        .all(|f| source_distance_squared(f, p.pose.position) >= radius * radius)
+            });
+            let status = self.placements.update_buildings_in(
+                bounds,
+                self.placements.coverage(),
+                &mut self.wanted_structures,
+                |position| {
+                    points
+                        .into_iter()
+                        .any(|p| source_distance_squared(p, position) < radius * radius)
+                },
+            );
+            if let Err(error) = status {
+                self.failure = Some(error.0);
+                return false;
+            }
+            self.structure_focus = points;
         }
         for placement in self
             .props
@@ -3082,6 +3102,7 @@ impl WorldStream {
         if self.plan_revision != self.request.revision {
             return Ok(());
         }
+        let request = self.request;
         let ready = |placement: &&Placement| {
             !self
                 .structures
@@ -3099,7 +3120,12 @@ impl WorldStream {
                     self.publication_light(light, required_lights) && light.owned_by(&placement.id)
                 })
             })
-            .or_else(|| self.wanted_structures.iter().find(ready))
+            .or_else(|| {
+                self.wanted_structures.iter().filter(ready).min_by(|a, b| {
+                    focus_distance_squared(request, a.pose.position)
+                        .total_cmp(&focus_distance_squared(request, b.pose.position))
+                })
+            })
         else {
             return Ok(());
         };
@@ -3644,6 +3670,10 @@ impl WorldStream {
         self.failure = Some(error.0);
     }
 
+    /// Squared source distance from the nearer of the player and vehicle.
+    pub fn focus_distance_squared(&self, position: [f64; 3]) -> f32 {
+        focus_distance_squared(self.request, position)
+    }
     pub fn pending_structures(&self) -> &[Placement] {
         &self.wanted_structures
     }
@@ -4084,6 +4114,10 @@ fn append_road_points(output: &mut Vec<TerrainRoadPoint>, segment: RoadSegment, 
     }
 }
 
+fn focus_distance_squared(request: WorldRequest, position: [f64; 3]) -> f32 {
+    source_distance_squared(request.player, position)
+        .min(source_distance_squared(request.vehicle, position))
+}
 // Frozen source coordinates, with source float vector boundaries.
 fn source_distance_squared(a: [f64; 3], b: [f64; 3]) -> f32 {
     let x = a[0] as f32 - b[0] as f32;

@@ -8,6 +8,104 @@ fn reference() -> ReferenceManifest {
     )
     .unwrap()
 }
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn structure_refresh_accumulates_both_foci_across_selection_rebuilds() {
+    let reference = reference();
+    let mut stream = WorldStream::new(&reference, 42).unwrap();
+    for _ in 0..10000 {
+        stream.prepare(100.);
+        assert!(stream.failure.is_none(), "{:?}", stream.failure);
+        if stream.startup.is_some() {
+            break;
+        }
+    }
+    assert!(stream.startup.is_some());
+    stream.refresh_structures();
+    assert_eq!(stream.structure_focus, [[0.; 3]; 2]);
+    let vehicle = [0.; 3];
+    for x in [0.25, 0.5, 0.75] {
+        stream.request_at([x, 0., 0.], vehicle);
+        // Moving items can rebuild selection without moving the building window.
+        stream.revise_selection();
+        stream.plan().unwrap();
+        assert_eq!(stream.structure_focus, [[0.; 3]; 2]);
+    }
+    stream.request_at([1., 0., 0.], vehicle);
+    assert_eq!(stream.structure_focus, [[1., 0., 0.], vehicle]);
+    stream.request_at([1., 0., 0.], [0., 0., 0.75]);
+    assert_eq!(stream.structure_focus, [[1., 0., 0.], vehicle]);
+    stream.request_at([1., 0., 0.], [0., 0., 1.]);
+    assert_eq!(stream.structure_focus, [[1., 0., 0.], [0., 0., 1.]]);
+    // Selection rebuilds preserve movement accumulated since the last window update.
+    stream.request_at([1.25, 0., 0.], [0., 0., 1.]);
+    stream.plan().unwrap();
+    assert_eq!(stream.structure_focus, [[1., 0., 0.], [0., 0., 1.]]);
+    stream.request_at([2., 0., 0.], [0., 0., 1.]);
+    assert_eq!(stream.structure_focus, [[2., 0., 0.], [0., 0., 1.]]);
+    stream.request_at([2.25, 0., 0.], [0., 0., 1.]);
+    assert_eq!(stream.structure_focus, [[2., 0., 0.], [0., 0., 1.]]);
+    assert!(stream.failure.is_none(), "{:?}", stream.failure);
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn structure_publication_uses_nearest_focus_stable_ties_and_revision_guard() {
+    let mut reference = reference();
+    // Retain a checked source identity but remove collision from this ordering check.
+    let prototype = std::sync::Arc::get_mut(&mut reference.world)
+        .unwrap()
+        .prototypes
+        .iter_mut()
+        .find(|p| p.role == crate::reference::WorldPrototypeRole::Structure)
+        .unwrap();
+    prototype.nodes.clear();
+    prototype.bodies.clear();
+    prototype.colliders.clear();
+    let source = prototype.source.clone();
+    let scale = prototype.prefab_pose.scale;
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    let stream = &mut run.stream;
+    stream.request.player = [0.; 3];
+    stream.request.vehicle = [100., 0., 0.];
+    stream.wanted_structures = [50., 101., -1.]
+        .into_iter()
+        .enumerate()
+        .map(|(index, x)| {
+            let mut p = replay_placement(&source, index as u32, [x, 0., 0.]);
+            p.scale = scale;
+            p
+        })
+        .collect();
+    stream.reserve_prototype(source.clone(), 0, 0).unwrap();
+    stream.bind_prototype(&source).unwrap();
+    stream.bind_structure_recipe(&source).unwrap();
+    for index in 0..stream.wanted_structures.len() {
+        let id = stream.wanted_structures[index].id.clone();
+        let mut claim = stream
+            .reserve_instance_renderer(stream.request, &id, 0, 0, 0)
+            .unwrap();
+        stream
+            .accept_structure_renderer(stream.request, &id, &mut claim)
+            .unwrap();
+    }
+    assert_ne!(stream.plan_revision, stream.request.revision);
+    stream.publish_structure(&mut run.physics, &[]).unwrap();
+    assert!(
+        stream.structures.is_empty(),
+        "stale selection cannot publish"
+    );
+    stream.plan_revision = stream.request.revision;
+    for ordinal in [1, 2, 0] {
+        stream.publish_structure(&mut run.physics, &[]).unwrap();
+        assert_eq!(
+            stream.structures.last().unwrap().placement.id.ordinal,
+            ordinal
+        );
+    }
+    assert!(stream.ready_structures.is_empty());
+}
 fn views() -> [super::super::RequiredView; 1] {
     let planes = [
         [1., 0., 0., 150.],
