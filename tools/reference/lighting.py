@@ -7,6 +7,7 @@ from pathlib import Path
 from .source import Source, key, source_id, vector
 from .gltf import converted_transform, convert_point
 from .collision import world_pose
+from . import draw_distance
 
 HOUSE=(67484,68886,72019,75508,76065)
 IDENTITY={'translation':[0.,0.,0.],'rotation':[0.,0.,0.,1.],'scale':[1.,1.,1.]}
@@ -177,14 +178,12 @@ def gradient(data):
 
 def recover_fog_modifier(source):
     reader=source.get('level0',16865);settings=source.read(reader)
-    draw=settings['S']['FDrawDistance'];lo=settings['DDSmin'];hi=settings['DDSmax']
-    def f32(value):return struct.unpack('<f',struct.pack('<f',value))[0]
-    fraction=max(0.,min(1.,f32(f32(draw-lo['drawDistance'])/f32(hi['drawDistance']-lo['drawDistance']))))
-    modifier=f32(lo['fogModifier']+f32(f32(hi['fogModifier']-lo['fogModifier'])*fraction))
-    source.lighting_fog_evidence={'source':source_id(reader),'draw_distance':draw,
+    lo=settings['DDSmin'];hi=settings['DDSmax']
+    modifier=draw_distance.setting(settings,'fogModifier')
+    source.lighting_fog_evidence={'source':source_id(reader),'draw_distance':draw_distance.DRAW_DISTANCE,
         'minimum':{'draw_distance':lo['drawDistance'],'fog_modifier':lo['fogModifier']},
         'maximum':{'draw_distance':hi['drawDistance'],'fog_modifier':hi['fogModifier']},
-        'clamped_fraction':fraction,'fog_modifier':modifier,
+        'clamped_fraction':draw_distance.fraction(settings),'fog_modifier':modifier,
         'rule':'settingsscript.DrawDistanceChanged uses InverseLerp, then Lerp; each operation uses float32.'}
     return modifier
 
@@ -521,8 +520,7 @@ def recover_lighting(source: Source, roots: list, output: Path) -> dict:
     result['cameras']=[]
     player=source.get('level1',80125);pf=source.read(player)
     settings_reader=source.get('level0',16865);sf=source.read(settings_reader)
-    draw=sf['S']['FDrawDistance'];lo=sf['DDSmin'];hi=sf['DDSmax'];fraction=max(0.,min(1.,(draw-lo['drawDistance'])/(hi['drawDistance']-lo['drawDistance'])))
-    def setting(name):return lo[name]+(hi[name]-lo[name])*fraction
+    def setting(name):return draw_distance.setting(sf,name)
     result['startup_fog_density']*=cycle['fog_modifier']
     for role in ('Cam','mainCam','farCamera','skyCamera'):
         camera=source.resolve(player,pf[role]);cf=source.read(camera)

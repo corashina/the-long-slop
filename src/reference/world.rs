@@ -526,7 +526,7 @@ impl WorldReference {
             "world source sample/hash",
         )?;
         require(
-            self.settings_context == "saved_default_5000_frozen_generation_frame"
+            self.settings_context == "minimum_draw_distance_frozen_generation_frame"
                 && transform(&self.generation_frame),
             "world source context/frame",
         )?;
@@ -757,9 +757,9 @@ impl WorldReference {
             require(records.contains(s), &field(s, "required world input"))?;
         }
         require(
-            self.distances.get("drawDistance") == Some(&5000.)
+            self.distances.get("drawDistance") == Some(&500.)
                 && self.distances.values().all(|v| v.is_finite()),
-            "world saved-default distances",
+            "world minimum draw distances",
         )?;
         for name in [
             "TerrainGenDist",
