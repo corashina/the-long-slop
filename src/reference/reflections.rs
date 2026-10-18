@@ -6,6 +6,10 @@ pub enum ProbeJob {
     FirstMip,
     RemainingMipsAndPublish,
 }
+/// Warmup prepares every face. Runtime prepares only the current face job.
+pub fn prepare_probe_face(job: Option<ProbeJob>, face: usize, warmup: bool) -> bool {
+    face < 6 && (warmup || job == Some(ProbeJob::Face(face as u8)))
+}
 #[derive(Default)]
 pub struct ProbeSchedule {
     next: u8,

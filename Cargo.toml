@@ -26,7 +26,6 @@ wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "=0.4.79"
 gltf = { version = "=1.4.1", default-features = false, features = ["utils", "names", "extras"] }
 console_error_panic_hook = "=0.1.7"
-indexmap = "=2.14.2"
 
 [profile.release]
 opt-level = 3
@@ -37,3 +36,4 @@ strip = true
 
 [patch.crates-io]
 bevy_render = { path = "vendor/bevy_render" }
+wgpu-hal = { path = "vendor/wgpu-hal" }

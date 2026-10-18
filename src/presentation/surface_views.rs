@@ -84,6 +84,7 @@ impl SurfaceResources {
 
 pub fn prepare_views(
     mut commands: Commands,
+    frame: Res<super::view_frame::SourceViewFrame>,
     assets: Option<Res<LightingRenderAssets>>,
     scene: Res<SourceSceneLighting>,
     loading: Option<Res<MaterialLoading>>,
@@ -103,6 +104,10 @@ pub fn prepare_views(
     cache: Res<PipelineCache>,
     status: Res<SourceLightingStatus>,
 ) {
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::Surface,
+        &frame,
+    );
     if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
         return;
     }
@@ -206,6 +211,10 @@ pub fn prepare_views(
         return;
     };
     for (entity, source, _, _, bound, binding, glass) in &mut views {
+        if frame.skip_probe_preparation(source.index) {
+            continue;
+        }
+        timing.face(source.index);
         let target = &resources.targets.views[source.index];
         let uniform = scene.for_view(
             source.shadow_fade,

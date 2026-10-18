@@ -1,5 +1,5 @@
 //! Source candidate membership is independent of camera-visible phase lists.
-use super::surface_views::{MIRROR_START, VIEW_COUNT};
+use super::surface_views::VIEW_COUNT;
 use super::{
     lighting_assets::LightingAssets,
     lighting_scene::SourceSceneLighting,
@@ -84,11 +84,15 @@ pub fn prepare_scene(
         Without<super::materials::SourceMaterialWarmup>,
     >,
 ) {
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::Shadows,
+        &frame,
+    );
     scene.frame = 0;
     scene.fits = [None; VIEW_COUNT];
     scene.candidates = [0; VIEW_COUNT];
     scene.split_counts = [[0; 4]; VIEW_COUNT];
-    if frame.views[..MIRROR_START].iter().any(Option::is_none)
+    if !frame.required_views_ready()
         || source.state != RenderingState::Ready
         || master.road_lamps.recipe.is_none()
         || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
@@ -221,11 +225,11 @@ pub fn prepare_scene(
     ];
     let scene = &mut *scene;
     for index in 0..VIEW_COUNT {
-        scene.masks[index].resize(scene.casters.len(), 0);
-        scene.masks[index].fill(0);
+        scene.masks[index].clear();
         let Some(v) = frame.views[index] else {
             continue;
         };
+        timing.face(index);
         let atlas =
             source_atlas_size(v.extent.x, v.extent.y).expect("validated source view extent");
         let w = v.source_world_from_view;
@@ -274,7 +278,11 @@ pub fn prepare_scene(
         }
     }
     for (i, entity) in scene.entities.iter().enumerate() {
-        if scene.masks.iter().any(|m| m[i] != 0) {
+        if scene
+            .masks
+            .iter()
+            .any(|m| m.get(i).is_some_and(|mask| *mask != 0))
+        {
             if let Ok((_, _, _, _, mut visible, _, _, _, _, _, _, _)) = meshes.get_mut(*entity) {
                 if !visible.get() {
                     scene.shadow_only += 1;
@@ -288,8 +296,13 @@ pub fn prepare_scene(
 /// Copy bounded arrays into retained render-world storage. No manifest, material, or handle clones.
 pub fn extract_scene(
     input: bevy::render::Extract<Res<ShadowScene>>,
+    frame: bevy::render::Extract<Res<SourceViewFrame>>,
     mut output: ResMut<ShadowScene>,
 ) {
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::Extraction,
+        &frame,
+    );
     if input.capacity() == 0 {
         output.frame = 0;
         return;
@@ -308,6 +321,9 @@ pub fn extract_scene(
     output.casters.clear();
     output.casters.extend_from_slice(&input.casters);
     for i in 0..VIEW_COUNT {
+        if frame.views[i].is_some() {
+            timing.face(i);
+        }
         output.masks[i].clear();
         output.masks[i].extend_from_slice(&input.masks[i]);
     }

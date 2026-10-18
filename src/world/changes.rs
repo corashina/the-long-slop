@@ -51,6 +51,9 @@ pub struct ObjectChange {
     pub replay: Option<Placement>,
     pub instance: Option<super::GeneratedId>,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ChangeRecordIndex(usize);
+
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct ChangeRecords {
     records: Vec<(ObjectKey, ObjectChange)>,
@@ -291,7 +294,30 @@ impl ChangeRecords {
         }
         (count, bytes)
     }
-    pub fn changes_in(&self, bounds: WorldBounds, output: &mut Vec<ObjectKey>) {
+    pub(crate) fn get_indexed(&self, index: ChangeRecordIndex) -> (&ObjectKey, &ObjectChange) {
+        let (key, change) = &self.records[index.0];
+        (key, change)
+    }
+    pub(crate) fn indices_in(&self, bounds: WorldBounds, output: &mut Vec<ChangeRecordIndex>) {
+        output.clear();
+        let min = region(bounds.min);
+        let max = region(bounds.max);
+        for (_, indices) in self.regions.range((min.0, i64::MIN)..=(max.0, i64::MAX)) {
+            for &index in indices {
+                let (_, change) = &self.records[index];
+                if change.snapshot.as_ref().is_some_and(|s| {
+                    (0..3).all(|i| {
+                        s.pose.position[i] >= bounds.min[i] && s.pose.position[i] <= bounds.max[i]
+                    })
+                }) {
+                    output.push(ChangeRecordIndex(index));
+                }
+            }
+        }
+    }
+    // Test oracle: the previous key query stays independent of indexed access.
+    #[cfg(test)]
+    pub(super) fn old_keys_in(&self, bounds: WorldBounds, output: &mut Vec<ObjectKey>) {
         output.clear();
         let min = region(bounds.min);
         let max = region(bounds.max);

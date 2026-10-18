@@ -1,11 +1,11 @@
 //! Cached source shadow specialization and offscreen mesh queueing.
 use super::shadow_cache::SpecializationKey;
-use super::surface_views::VIEW_COUNT;
+use super::surface_views::{MIRROR_START, PROBE_START, VIEW_COUNT};
 use super::{
     caster::{CasterPasses, CasterUniform, CasterViews},
     lighting_scene::SourceSceneLighting,
     materials::RenderingState,
-    shadow_phase::{self, ShadowDrawState, SourceShadow},
+    shadow_phase::{self, ShadowBatchKey, ShadowDrawState, SourceShadow},
     shadow_scene::ShadowScene,
     source_lighting::SourceLightingStatus,
     surface_views::SourceSurfaceView,
@@ -27,11 +27,18 @@ use bevy::render::{
     render_phase::*,
     render_resource::*,
     renderer::{RenderDevice, RenderQueue},
-    sync_world::MainEntity,
+    sync_world::{MainEntity, MainEntityHashMap},
     view::{ExtractedView, RetainedViewEntity},
 };
 use bevy::{ecs as bevy_ecs, prelude::*};
 use std::sync::Arc;
+#[derive(Clone, PartialEq, Eq)]
+struct QueuedShadow {
+    key: ShadowBatchKey,
+    mesh: bevy::asset::AssetId<Mesh>,
+    batchable: bool,
+    seen: u64,
+}
 struct CachedSpecialization {
     key: SpecializationKey,
     // Retain both allocations for as long as their pointer identities remain keys.
@@ -43,6 +50,12 @@ struct CachedSpecialization {
 pub struct ShadowQueues {
     query: QueryState<(Entity, &'static SourceSurfaceView, &'static ExtractedView)>,
     specializations: Vec<CachedSpecialization>,
+    queued: [MainEntityHashMap<QueuedShadow>; VIEW_COUNT],
+    retained: [Option<RetainedViewEntity>; VIEW_COUNT],
+    // Keep idle face bins out of Bevy's per-frame instance preparation.
+    idle_probe_phases: [Option<BinnedRenderPhase<SourceShadow>>; 6],
+    revision: u64,
+    pub instances: [[u32; 4]; VIEW_COUNT],
     pub ready: [bool; VIEW_COUNT],
     pub frame: u32,
 }
@@ -51,6 +64,11 @@ impl FromWorld for ShadowQueues {
         Self {
             query: world.query(),
             specializations: Vec::new(),
+            queued: std::array::from_fn(|_| MainEntityHashMap::default()),
+            retained: [None; VIEW_COUNT],
+            idle_probe_phases: std::array::from_fn(|_| None),
+            revision: 0,
+            instances: [[0; 4]; VIEW_COUNT],
             ready: [false; VIEW_COUNT],
             frame: 0,
         }
@@ -135,8 +153,15 @@ fn base_pipeline(
     Ok(Some((base, indexed)))
 }
 pub fn queue(world: &mut World) {
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::Queue,
+        world.resource::<SourceViewFrame>(),
+    );
     world.resource_scope(|world, mut state: Mut<ShadowQueues>| {
         state.ready = [false; VIEW_COUNT];
+        state.instances = [[0; 4]; VIEW_COUNT];
+        state.revision += 1;
+        let revision = state.revision;
         state.frame = 0;
         if matches!(
             *world.resource::<SourceLightingStatus>().0.lock().unwrap(),
@@ -170,22 +195,50 @@ pub fn queue(world: &mut World) {
             }
             let draw = shadow_phase::draw_id(world.resource::<DrawFunctions<SourceShadow>>());
             world.resource_scope(
-                |world, mut phases: Mut<ViewSortedRenderPhases<SourceShadow>>| {
+                |world, mut phases: Mut<ViewBinnedRenderPhases<SourceShadow>>| {
+                    for index in PROBE_START..MIRROR_START {
+                        if world
+                            .resource::<SourceViewFrame>()
+                            .skip_probe_preparation(index)
+                        {
+                            if let Some(phase) =
+                                state.retained[index].and_then(|retained| phases.remove(&retained))
+                            {
+                                state.idle_probe_phases[index - PROBE_START] = Some(phase);
+                            }
+                        }
+                    }
                     for (index, view) in views.into_iter().enumerate() {
                         let Some((entity, retained, key)) = view else {
                             continue;
                         };
+                        timing.face(index);
+                        if state.retained[index] != Some(retained) {
+                            if let Some(previous) = state.retained[index].replace(retained) {
+                                phases.remove(&previous);
+                            }
+                            phases.remove(&retained);
+                            if (PROBE_START..MIRROR_START).contains(&index) {
+                                state.idle_probe_phases[index - PROBE_START] = None;
+                            }
+                        }
+                        if (PROBE_START..MIRROR_START).contains(&index) {
+                            if let Some(phase) = state.idle_probe_phases[index - PROBE_START].take()
+                            {
+                                phases.insert(retained, phase);
+                            }
+                        }
                         if !phases.contains_key(&retained) {
-                            phases.insert(retained, shadow_phase::reserved_phase(scene.capacity()));
+                            state.queued[index].clear();
                             world.entity_mut(entity).insert(ShadowDrawState::default());
                         }
+                        phases.prepare_for_new_frame(
+                            retained,
+                            bevy::render::batching::gpu_preprocessing::GpuPreprocessingMode::None,
+                        );
                         let phase = phases.get_mut(&retained).unwrap();
-                        if phase.items.capacity() < scene.capacity() {
-                            phase
-                                .items
-                                .reserve(scene.capacity().saturating_sub(phase.items.len()));
-                        }
-                        phase.clear();
+                        let queued = &mut state.queued[index];
+                        queued.reserve(scene.capacity().saturating_sub(queued.len()));
                         let mut ready = true;
                         for (item, main) in scene.entities.iter().enumerate() {
                             let mask = scene.masks[index][item];
@@ -217,23 +270,60 @@ pub fn queue(world: &mut World) {
                             {
                                 ready = false;
                             }
-                            if let Err(e) = shadow_phase::add_candidate(
-                                phase,
-                                SourceShadow {
-                                    entity: (Entity::PLACEHOLDER, main),
+                            let instances = world.resource::<RenderMeshInstances>();
+                            let Some(instance) = instances.render_mesh_queue_data(main) else {
+                                ready = false;
+                                continue;
+                            };
+                            let mesh = instance.mesh_asset_id();
+                            let batchable = instance.should_batch();
+                            let material = world.resource::<RenderMaterialInstances>().instances
+                                [&main]
+                                .asset_id;
+                            let next = QueuedShadow {
+                                key: ShadowBatchKey {
                                     pipeline,
                                     draw,
+                                    material,
                                     split_mask: mask,
                                     indexed: base.1,
-                                    batch_range: 0..1,
-                                    extra_index: PhaseItemExtraIndex::None,
                                 },
-                            ) {
-                                *world.resource::<SourceLightingStatus>().0.lock().unwrap() =
-                                    RenderingState::Failed(e.into());
-                                return;
+                                mesh,
+                                batchable,
+                                seen: revision,
+                            };
+                            let previous = state.queued[index].get(&main);
+                            if previous.is_none_or(|old| {
+                                old.key != next.key
+                                    || old.mesh != mesh
+                                    || old.batchable != batchable
+                            }) {
+                                phase.remove(main);
+                                phase.add(
+                                    next.key.clone(),
+                                    mesh,
+                                    (Entity::PLACEHOLDER, main),
+                                    InputUniformIndex::default(),
+                                    if batchable {
+                                        BinnedRenderPhaseType::BatchableMesh
+                                    } else {
+                                        BinnedRenderPhaseType::UnbatchableMesh
+                                    },
+                                );
+                            }
+                            state.queued[index].insert(main, next);
+                            for cascade in 0..4 {
+                                state.instances[index][cascade] +=
+                                    u32::from(mask & (1 << cascade) != 0);
                             }
                         }
+                        state.queued[index].retain(|main, queued| {
+                            if queued.seen == revision {
+                                return true;
+                            }
+                            phase.remove(*main);
+                            false
+                        });
                         state.ready[index] = ready;
                     }
                 },
@@ -296,6 +386,10 @@ pub fn write_cascades(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
 ) {
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::Cascades,
+        &frame,
+    );
     if scene.frame == 0 || scene.frame != frame.frame {
         return;
     }
@@ -311,6 +405,10 @@ pub fn write_cascades(
         h(rotation * -Vec3::Z),
     ];
     for (mut view, mut slots) in &mut views {
+        if frame.skip_probe_preparation(view.index) {
+            continue;
+        }
+        timing.face(view.index);
         let Some(fit) = scene.fits[view.index] else {
             view.shadow_fade = Vec4::ZERO;
             view.shadow_fade_center = Vec4::ZERO;
@@ -355,7 +453,7 @@ pub fn install(app: &mut App) {
                 .after(VisibilitySystems::CheckVisibility)
                 .before(VisibilitySystems::MarkNewlyHiddenEntitiesInvisible),
         )
-        .add_plugins(SortedRenderPhasePlugin::<SourceShadow, MeshPipeline>::new(
+        .add_plugins(BinnedRenderPhasePlugin::<SourceShadow, MeshPipeline>::new(
             default(),
         ));
     let render = app.sub_app_mut(RenderApp);

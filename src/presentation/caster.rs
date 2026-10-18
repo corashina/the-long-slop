@@ -332,12 +332,14 @@ impl CasterPasses {
 /// Shadow slots remain untouched until the source candidate set and cascade fit are ready.
 pub fn prepare_views(
     mut commands: Commands,
+    frame: Res<super::view_frame::SourceViewFrame>,
     assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,
     scene: Res<super::lighting_scene::SourceSceneLighting>,
     images: Res<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>,
     mut views: Query<
         (
             Entity,
+            &super::surface_views::SourceSurfaceView,
             &bevy::render::view::ExtractedView,
             Option<&mut CasterViews>,
         ),
@@ -348,6 +350,10 @@ pub fn prepare_views(
     cache: Res<PipelineCache>,
     status: Res<SourceLightingStatus>,
 ) {
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::Caster,
+        &frame,
+    );
     if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
         return;
     }
@@ -357,7 +363,11 @@ pub fn prepare_views(
     let Some(dither) = images.get(assets.caster_dither.id()) else {
         return;
     };
-    for (entity, view, existing) in &mut views {
+    for (entity, source, view, existing) in &mut views {
+        if frame.skip_probe_preparation(source.index) {
+            continue;
+        }
+        timing.face(source.index);
         // This is the same extracted projection used by the surface vertex path.
         // Explicit capture matrices retain their improper handedness and bypass pose reconstruction.
         let clip_from_world = view

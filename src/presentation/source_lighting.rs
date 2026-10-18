@@ -75,6 +75,7 @@ pub struct SourceViewLighting {
     bind_group: BindGroup,
     draw_epoch: AtomicU32,
     draw_counts: [AtomicU32; 4],
+    instance_counts: [AtomicU32; 4],
 }
 impl SourceViewLighting {
     pub fn new(
@@ -108,17 +109,23 @@ impl SourceViewLighting {
             bind_group,
             draw_epoch: AtomicU32::new(0),
             draw_counts: std::array::from_fn(|_| AtomicU32::new(0)),
+            instance_counts: std::array::from_fn(|_| AtomicU32::new(0)),
         }
     }
 
     /// Reset before each view invocation. Earlier draws cannot satisfy this submission.
     pub fn begin_draws(&self) {
-        for count in &self.draw_counts {
+        for count in self.draw_counts.iter().chain(self.instance_counts.iter()) {
             count.store(0, Ordering::Relaxed);
         }
         self.draw_epoch.fetch_add(1, Ordering::Relaxed);
     }
     /// Epoch, base attempts/successes, additive attempts/successes.
+    pub fn instances(&self) -> [u32; 4] {
+        self.instance_counts
+            .each_ref()
+            .map(|value| value.load(Ordering::Relaxed))
+    }
     pub fn draws(&self) -> [u32; 5] {
         [
             self.draw_epoch.load(Ordering::Relaxed),
@@ -161,13 +168,16 @@ impl<P: PhaseItem, const ADD: bool, const DONE: bool> RenderCommand<P>
     type ViewQuery = &'static SourceViewLighting;
     type ItemQuery = ();
     fn render<'w>(
-        _: &P,
+        item: &P,
         view: ROQueryItem<'w, '_, Self::ViewQuery>,
         _: Option<ROQueryItem<'w, '_, Self::ItemQuery>>,
         _: SystemParamItem<'w, '_, Self::Param>,
         _: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         view.draw_counts[usize::from(ADD) * 2 + usize::from(DONE)].fetch_add(1, Ordering::Relaxed);
+        let count = item.batch_range().end - item.batch_range().start;
+        view.instance_counts[usize::from(ADD) * 2 + usize::from(DONE)]
+            .fetch_add(count, Ordering::Relaxed);
         RenderCommandResult::Success
     }
 }

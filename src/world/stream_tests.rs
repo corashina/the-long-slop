@@ -577,3 +577,495 @@ fn complete_probe_union_preserves_revision_and_fresh_cycles() {
     }
     assert!(required.push(seed).is_err());
 }
+
+fn replay_placement(source: &SourceId, ordinal: u32, position: [f64; 3]) -> Placement {
+    Placement {
+        id: super::super::GeneratedId {
+            layer: WorldLayer::Nested,
+            generator: source.clone(),
+            unit: [0, 0],
+            ordinal,
+            children: vec![(source.clone(), ordinal)],
+        },
+        prototype: source.clone(),
+        pose: AbsolutePose {
+            position,
+            rotation: [0., 0., 0., 1.],
+        },
+        scale: [1.; 3],
+        bounds: WorldBounds {
+            min: position,
+            max: position,
+        },
+        object_seed: 42,
+    }
+}
+fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
+    super::super::ObjectSnapshot {
+        pose: AbsolutePose {
+            position,
+            rotation: [0., 0., 0., 1.],
+        },
+        condition: 0.5,
+        food: None,
+        temperature: None,
+        fluid_quantities: None,
+        valve: None,
+        lamp: None,
+        linear_velocity: [0.; 3],
+        angular_velocity: [0.; 3],
+        sleeping: false,
+        held: false,
+        attachment: None,
+        mechanism: None,
+    }
+}
+fn old_replay_keys(stream: &WorldStream) -> Vec<super::super::ObjectKey> {
+    let radius = f64::from(stream.reference.distances["ItemSpawnDist"]);
+    let mut result = Vec::new();
+    let mut query = Vec::new();
+    for focus in [stream.request.player, stream.request.vehicle] {
+        stream.changes.old_keys_in(
+            WorldBounds {
+                min: [focus[0] - radius, f64::NEG_INFINITY, focus[2] - radius],
+                max: [focus[0] + radius, f64::INFINITY, focus[2] + radius],
+            },
+            &mut query,
+        );
+        for key in query.drain(..) {
+            if !result.contains(&key) {
+                result.push(key);
+            }
+        }
+    }
+    result
+}
+fn assert_replay_selection(stream: &WorldStream) {
+    let expected: Vec<_> = old_replay_keys(stream)
+        .into_iter()
+        .map(|key| {
+            let change = stream.changes.get(&key).unwrap().clone();
+            (key, change)
+        })
+        .collect();
+    let actual: Vec<_> = stream
+        .replay_indices
+        .iter()
+        .map(|&index| {
+            let (key, change) = stream.changes.get_indexed(index);
+            (key.clone(), change.clone())
+        })
+        .collect();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn replay_index_query_matches_old_order_and_exact_bounds() {
+    use super::super::{ChangeRecords, ObjectKey};
+    let source = SourceId {
+        file: "replay-test".into(),
+        path_id: 1,
+    };
+    let mut changes = ChangeRecords::default();
+    let baseline = replay_snapshot([9000.; 3]);
+    let positions = [
+        [256., 0., 256.],
+        [-1., 4., 0.],
+        [0., 0., -1.],
+        [0., 9000., 0.],
+        [0., 0., 255.],
+        [0., 0., 256.],
+        [300., 0., 0.],
+        [0., 0., 9000.],
+    ];
+    for (i, position) in positions.into_iter().enumerate() {
+        let key = if i == 3 {
+            ObjectKey::Imported(crate::reference::ItemId(3))
+        } else {
+            ObjectKey::Generated(replay_placement(&source, i as u32, position).id)
+        };
+        changes.record(key, replay_snapshot(position), &baseline);
+    }
+    let removed = ObjectKey::Generated(replay_placement(&source, 9, [0.; 3]).id);
+    changes.record(removed.clone(), replay_snapshot([0.; 3]), &baseline);
+    changes.remove(removed.clone());
+    let bounds = [
+        WorldBounds {
+            min: [-1., f64::NEG_INFINITY, -1.],
+            max: [256., f64::INFINITY, 256.],
+        },
+        WorldBounds {
+            min: [0., -1., 0.],
+            max: [300., 1., 256.],
+        },
+        WorldBounds {
+            min: [0.; 3],
+            max: [0.; 3],
+        },
+    ];
+    let mut indices = Vec::new();
+    let mut keys = Vec::new();
+    for bounds in bounds {
+        changes.indices_in(bounds, &mut indices);
+        changes.old_keys_in(bounds, &mut keys);
+        let actual: Vec<_> = indices
+            .iter()
+            .map(|&i| changes.get_indexed(i).0.clone())
+            .collect();
+        assert_eq!(actual, keys);
+        assert!(!actual.contains(&removed));
+    }
+    assert!(changes.get(&removed).unwrap().snapshot.is_none());
+    // Serialization must contain stable records only.
+    let json = serde_json::to_value(&changes).unwrap();
+    assert_eq!(json.as_object().unwrap().len(), 1);
+    assert!(json.get("records").is_some());
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn replay_selector_refreshes_set_replay_forget_and_removal() {
+    use super::super::ObjectKey;
+    let reference = reference();
+    let mut stream = WorldStream::new(&reference, 42).unwrap();
+    let source = &reference.world.road.prototypes[0];
+    let radius = f64::from(stream.reference.distances["ItemSpawnDist"]);
+    stream.request.vehicle = [radius, 0., 0.];
+    let baseline = replay_snapshot([radius * 20.; 3]);
+    let deleted = ObjectKey::Generated(replay_placement(source, 1, baseline.pose.position).id);
+    stream.changes.record(
+        deleted.clone(),
+        replay_snapshot([radius * 10.; 3]),
+        &baseline,
+    );
+    let imported = ObjectKey::Imported(crate::reference::ItemId(999999));
+    stream.changes.record(
+        imported.clone(),
+        replay_snapshot([-radius, 9000., -radius]),
+        &baseline,
+    );
+    let player = replay_placement(source, 2, [radius * 0.5, 0., 0.]);
+    let vehicle = replay_placement(source, 3, [radius * 1.5, 0., 0.]);
+    let last = replay_placement(source, 4, [0.; 3]);
+    let player_key = ObjectKey::Generated(player.id.clone());
+    let vehicle_key = ObjectKey::Generated(vehicle.id.clone());
+    let last_key = ObjectKey::Generated(last.id.clone());
+    stream.changes.record(
+        player_key.clone(),
+        replay_snapshot(player.pose.position),
+        &baseline,
+    );
+    stream.changes.record(
+        vehicle_key.clone(),
+        replay_snapshot(vehicle.pose.position),
+        &baseline,
+    );
+    let mut attached = replay_snapshot(last.pose.position);
+    attached.attachment = Some(super::super::AttachmentSnapshot {
+        owner: Some(ObjectKey::Generated(vehicle.id.clone())),
+        slot: None,
+        local_pose: last.pose,
+    });
+    stream.changes.record(last_key.clone(), attached, &baseline);
+    stream.select_changed_destinations();
+    assert_replay_selection(&stream);
+    assert_eq!(old_replay_keys(&stream).last(), Some(&vehicle_key));
+    assert_eq!(
+        old_replay_keys(&stream)
+            .iter()
+            .filter(|k| **k == player_key)
+            .count(),
+        1
+    );
+    assert!(old_replay_keys(&stream).contains(&imported));
+    // The last selected record moves into an unselected deleted slot.
+    // Removing the selector revision check makes this selection assertion fail.
+    stream
+        .changes
+        .record(deleted.clone(), baseline.clone(), &baseline);
+    assert!(stream.changes.get(&deleted).is_none());
+    let _ = stream.metrics(); // Metrics must not dereference the stale selection.
+    stream.select_changed_destinations();
+    assert_replay_selection(&stream);
+    let revision = stream.change_revision;
+    stream.changes.set_replay(&player_key, &player, &player.id);
+    stream.changes.set_replay(&last_key, &last, &last.id);
+    stream.initial_generation_ready = true;
+    stream.select_changed_destinations();
+    assert_ne!(stream.change_revision, revision);
+    assert_replay_selection(&stream);
+    let first = old_replay_keys(&stream)
+        .iter()
+        .find_map(|key| stream.changes.get(key).unwrap().replay.clone())
+        .unwrap();
+    assert_eq!(stream.replay_roots, vec![first]);
+    let capacities = (
+        stream.replay_indices.capacity(),
+        stream.replay_query.capacity(),
+    );
+    stream.select_changed_destinations();
+    assert_eq!(
+        capacities,
+        (
+            stream.replay_indices.capacity(),
+            stream.replay_query.capacity()
+        )
+    );
+    assert_eq!(stream.replay_roots.len(), 1);
+    let (_, selected) = stream
+        .replay_indices
+        .iter()
+        .map(|&i| stream.changes.get_indexed(i))
+        .find(|(key, _)| **key == last_key)
+        .unwrap();
+    assert_eq!(selected.instance.as_ref(), Some(&last.id));
+    assert_eq!(
+        selected
+            .snapshot
+            .as_ref()
+            .unwrap()
+            .attachment
+            .as_ref()
+            .unwrap()
+            .owner,
+        Some(ObjectKey::Generated(vehicle.id.clone()))
+    );
+    stream.changes.remove(player_key.clone());
+    stream.select_changed_destinations();
+    assert_replay_selection(&stream);
+    assert!(stream.changes.get(&player_key).unwrap().snapshot.is_none());
+    assert_eq!(stream.replay_roots, vec![last]);
+    assert!(stream.failure.is_none(), "{:?}", stream.failure);
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn replay_predicates_match_old_keys_for_instances_owners_and_removals() {
+    use super::super::ObjectKey;
+    let reference = reference();
+    let mut stream = WorldStream::new(&reference, 42).unwrap();
+    let source = &reference.world.road.prototypes[0];
+    let far = f64::from(stream.reference.distances["ItemSpawnDist"]) * 10.;
+    let placements: Vec<_> = (1..=6)
+        .map(|i| replay_placement(source, i, [far, 0., 0.]))
+        .collect();
+    let baseline = replay_snapshot([far * 2.; 3]);
+    let leaf = ObjectKey::Generated(replay_placement(source, 10, [0.; 3]).id);
+    stream
+        .changes
+        .record(leaf.clone(), replay_snapshot([0.; 3]), &baseline);
+    stream
+        .changes
+        .set_replay(&leaf, &placements[0], &placements[0].id);
+    let mut attached = replay_snapshot([0.; 3]);
+    attached.attachment = Some(super::super::AttachmentSnapshot {
+        owner: Some(ObjectKey::Generated(placements[1].id.clone())),
+        slot: None,
+        local_pose: placements[1].pose,
+    });
+    stream.changes.record(
+        ObjectKey::Imported(crate::reference::ItemId(999999)),
+        attached,
+        &baseline,
+    );
+    let removed = ObjectKey::Generated(placements[2].id.clone());
+    stream
+        .changes
+        .record(removed.clone(), replay_snapshot([0.; 3]), &baseline);
+    stream
+        .changes
+        .set_replay(&removed, &placements[2], &placements[2].id);
+    stream.changes.remove(removed);
+    // A changed destination outside both windows must not retain its source instance.
+    let outside = ObjectKey::Generated(placements[4].id.clone());
+    stream
+        .changes
+        .record(outside.clone(), replay_snapshot([far; 3]), &baseline);
+    stream
+        .changes
+        .set_replay(&outside, &placements[4], &placements[4].id);
+    let direct = ObjectKey::Generated(placements[5].id.clone());
+    stream
+        .changes
+        .record(direct.clone(), replay_snapshot([0.; 3]), &baseline);
+    stream
+        .changes
+        .set_replay(&direct, &placements[5], &placements[5].id);
+    for placement in &placements {
+        stream
+            .contents
+            .active
+            .push(super::super::contents::ContentInstance::for_structure(
+                placement.clone(),
+            ));
+    }
+    let keys = old_replay_keys(&stream);
+    let expected: Vec<_> = placements
+        .iter()
+        .filter(|p| {
+            let selected = keys.iter().any(|key| {
+                stream.changes.get(key).is_some_and(|c| {
+                    c.instance.as_ref() == Some(&p.id)
+                        || c.snapshot
+                            .as_ref()
+                            .and_then(|s| s.attachment.as_ref())
+                            .and_then(|a| a.owner.as_ref())
+                            == Some(&ObjectKey::Generated(p.id.clone()))
+                })
+            });
+            stream
+                .changes
+                .get(ObjectKey::Generated(p.id.clone()))
+                .is_none_or(|c| c.snapshot.is_some() && selected)
+                && selected
+        })
+        .cloned()
+        .collect();
+    assert_eq!(
+        expected,
+        vec![
+            placements[0].clone(),
+            placements[1].clone(),
+            placements[5].clone()
+        ]
+    );
+    let history = stream.contents.state.capture_history();
+    stream.prepare_contents();
+    assert_eq!(stream.wanted_structures, expected);
+    // Existing unbound distant placements exercise the earlier retention predicate too.
+    stream.prepare_contents();
+    assert_eq!(stream.wanted_structures, expected);
+    assert_eq!(stream.contents.state.capture_history(), history);
+    assert!(stream.failure.is_none(), "{:?}", stream.failure);
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn replay_restore_replaces_selection_and_saved_readiness_checks_revision() {
+    use super::super::{ChangeRecords, ObjectKey};
+    let reference = reference();
+    let baseline = replay_snapshot([9000.; 3]);
+    let old = ObjectKey::Imported(crate::reference::ItemId(999998));
+    let replacement = ObjectKey::Imported(crate::reference::ItemId(999999));
+    let mut candidate = WorldStream::new(&reference, 42).unwrap();
+    candidate
+        .changes
+        .record(old.clone(), replay_snapshot([0.; 3]), &baseline);
+    candidate.select_changed_destinations();
+    let mut saved = crate::save::WorldSnapshot {
+        generation: super::super::GenerationSnapshot {
+            generator_contract: super::super::GENERATOR_CONTRACT,
+            package_id: candidate.package_id.clone(),
+            roads: candidate.roads.capture_index(),
+            placements: candidate.placements.capture_index(),
+        },
+        seed: 42,
+        changes: ChangeRecords::default(),
+        spawn: candidate.contents.state.capture_history(),
+    };
+    saved
+        .changes
+        .record(replacement.clone(), replay_snapshot([0.; 3]), &baseline);
+    assert_eq!(candidate.changes.revision(), saved.changes.revision());
+    candidate.restore_save(&saved).unwrap();
+    assert!(candidate.change_bounds.is_none());
+    assert_eq!(candidate.change_revision, u64::MAX);
+    let _ = candidate.metrics();
+    candidate.select_changed_destinations();
+    assert_replay_selection(&candidate);
+    assert_eq!(old_replay_keys(&candidate), vec![replacement.clone()]);
+    // The active stream owns its selection while the candidate is replaced and dropped.
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    prepare_ready(&mut run, &reference);
+    mechanism_binding_gate(&mut run, &reference);
+    let owner = run
+        .stream
+        .static_controls
+        .iter()
+        .find(|c| c.restored && c.item.is_some())
+        .unwrap();
+    let item = owner.item.unwrap();
+    let origin = owner.origin.clone();
+    let instance = owner.content.placement.id.clone();
+    let generated = run.area.items.object_key(item);
+    assert!(matches!(&generated, ObjectKey::Generated(_)));
+    let original = super::super::changes::capture(
+        item,
+        &run.area.items,
+        &run.area.interaction,
+        &run.physics,
+        &reference,
+    )
+    .unwrap();
+    let mut changed = original.clone();
+    changed.condition = if original.condition < 0.5 { 0.75 } else { 0.25 };
+    run.stream
+        .changes
+        .record(generated.clone(), changed, &original);
+    run.stream
+        .changes
+        .set_replay(&generated, &origin, &instance);
+    run.stream
+        .static_controls
+        .iter_mut()
+        .find(|c| c.item == Some(item))
+        .unwrap()
+        .restored = false;
+    run.stream.select_changed_destinations();
+    assert!(old_replay_keys(&run.stream).contains(&generated));
+    assert!(!run.stream.saved_bindings_ready(&run.area.items));
+    run.stream
+        .sync_supplies(
+            &reference,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.physics,
+            &mut run.wheels,
+        )
+        .unwrap();
+    assert_eq!(run.area.items.resolve_key(&generated), Some(item));
+    assert!(
+        run.stream
+            .static_controls
+            .iter()
+            .any(|c| c.item == Some(item) && c.restored)
+    );
+    assert!(run.stream.saved_bindings_ready(&run.area.items));
+    run.stream
+        .changes
+        .record(generated, original.clone(), &original);
+    run.stream.select_changed_destinations();
+    run.stream.changes.record(
+        old.clone(),
+        replay_snapshot(run.stream.request.player),
+        &baseline,
+    );
+    assert!(run.stream.required_ready());
+    assert!(!run.stream.saved_bindings_ready(&run.area.items));
+    run.stream.select_changed_destinations();
+    assert!(run.stream.saved_bindings_ready(&run.area.items));
+    drop(candidate);
+    saved.changes.remove(replacement);
+    assert_eq!(old_replay_keys(&run.stream), vec![old]);
+    assert!(run.stream.saved_bindings_ready(&run.area.items));
+    let missing = ObjectKey::Generated(
+        replay_placement(
+            &reference.world.road.prototypes[0],
+            900000,
+            run.stream.request.player,
+        )
+        .id,
+    );
+    run.stream.changes.record(
+        missing.clone(),
+        replay_snapshot(run.stream.request.player),
+        &baseline,
+    );
+    assert!(!run.stream.saved_bindings_ready(&run.area.items));
+    run.stream.select_changed_destinations();
+    assert!(!run.stream.saved_bindings_ready(&run.area.items));
+    run.stream.changes.remove(missing);
+    assert!(!run.stream.saved_bindings_ready(&run.area.items));
+    run.stream.select_changed_destinations();
+    assert!(run.stream.saved_bindings_ready(&run.area.items));
+}
