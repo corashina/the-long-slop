@@ -1,7 +1,7 @@
 # Single world camera and roadside reset
 
 Date: 2026-10-18
-Status: Written spec awaiting user review.
+Status: User approved the written spec for implementation planning on 2026-10-18.
 Baseline: `95fe026036f5b07014fe6f2d6bd0552b7fd6a740`.
 Branch: `codex/single-camera-roadside`.
 
