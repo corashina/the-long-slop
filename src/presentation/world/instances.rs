@@ -113,6 +113,7 @@ impl SourceInstances {
                 }
             }
         }
+        materials.cache.generated.reset();
         self.pending = None;
     }
 
@@ -419,6 +420,13 @@ impl SourceInstances {
                                 let receive = extras.receive_shadows.ok_or_else(|| {
                                     ReferenceError("Missing generated receiver state".into())
                                 })?;
+                                // LOD uniforms and warm tickets retain each renderer's original handles.
+                                let has_lod = lods.iter().any(|group| {
+                                    group
+                                        .levels
+                                        .iter()
+                                        .any(|level| level.nodes.contains(&source_index))
+                                });
                                 for primitive in loaded
                                     .plan
                                     .primitives
@@ -459,7 +467,7 @@ impl SourceInstances {
                                             placement,
                                             &source_node.source,
                                         );
-                                    let Some(binding) = materials.bind(
+                                    let Some(mut binding) = materials.bind(
                                         stream.frame().request.session,
                                         prototype,
                                         primitive,
@@ -499,8 +507,11 @@ impl SourceInstances {
                                             })
                                         });
                                         if let Some(color) = color {
-                                            materials.color(&binding, color)?;
+                                            materials.color(&mut binding, color)?;
                                         }
+                                    }
+                                    if has_lod {
+                                        materials.make_private(&mut binding);
                                     }
                                     let is_grass =
                                         matches!(binding.visible, InstanceMaterial::Grass(_));
@@ -554,7 +565,7 @@ impl SourceInstances {
                                                 m.source == source && m.asset == prototype.asset
                                             })
                                             .map(|m| (m.asset, m.gltf_material));
-                                        let variant = materials
+                                        let mut variant = materials
                                             .bind(
                                                 stream.frame().request.session,
                                                 prototype,
@@ -581,6 +592,9 @@ impl SourceInstances {
                                                         .into(),
                                                 )
                                             })?;
+                                        if has_lod {
+                                            materials.make_private(&mut variant);
+                                        }
                                         owned_bindings.push((entity, variant.clone()));
                                         variants.push(MaterialVariant {
                                             source: Some(source),
@@ -1025,6 +1039,7 @@ impl SourceInstances {
                     std::mem::swap(&mut renderer.binding, &mut variant.binding);
                     std::mem::swap(&mut renderer.material_source, &mut variant.source);
                     std::mem::swap(&mut renderer.tickets, &mut variant.tickets);
+                    renderer.lod_state = None;
                     renderer.binding.visible.replace(renderer.entity, commands);
                     renderer.binding.apply_sort(renderer.entity, commands);
                     if let Some(entity) = renderer.caster_entity {

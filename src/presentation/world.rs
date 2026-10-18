@@ -16,6 +16,7 @@ mod surface_bindings;
 pub mod grass_jobs;
 
 pub mod instance_materials;
+pub(crate) mod shared_materials;
 
 pub mod lod;
 

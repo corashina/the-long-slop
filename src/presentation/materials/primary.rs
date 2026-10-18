@@ -50,11 +50,12 @@ impl SourceMaterials {
 
     fn container_bytes(&self) -> usize {
         use std::mem::size_of;
-        self.sort_data.capacity()
-            * (size_of::<(
-                (SourceAssetId, u32),
-                super::super::transparent::SourceSortData,
-            )>() + 1)
+        self.generated.bytes()
+            + self.sort_data.capacity()
+                * (size_of::<(
+                    (SourceAssetId, u32),
+                    super::super::transparent::SourceSortData,
+                )>() + 1)
             + self.records.capacity() * size_of::<Arc<MaterialRecord>>()
             + self.textures.capacity() * size_of::<SourceTexture>()
             + self

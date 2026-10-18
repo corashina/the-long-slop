@@ -33,3 +33,8 @@ pub mod inventory;
 #[path = "presentation/world/preflight/selected.rs"]
 #[allow(dead_code)]
 mod selected_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "presentation/world/shared_materials.rs"]
+#[allow(dead_code)]
+mod shared_material_tests;
