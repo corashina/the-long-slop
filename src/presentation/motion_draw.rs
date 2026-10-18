@@ -2,6 +2,7 @@
 use super::{
     lighting_scene::SourceWorldOrigin,
     materials::{MaterialLoading, RenderingState},
+    motion_batch::{MotionInstance, MotionRunPlanner},
     motion_vectors::{MotionMode, MotionModelHistory, MotionObjectParams, SourceMotionPass},
     renderers::SourceRenderer,
     source_lighting::{SetSourceViewCamera, SourceLightingStatus},
@@ -138,10 +139,14 @@ struct MotionObject {
     entity: Option<Entity>,
     mesh: AssetId<Mesh>,
     history: Mutex<MotionModelHistory>,
-    uniform: UniformBuffer<MotionObjectParams>,
-    binding: BindGroup,
+    params: MotionObjectParams,
+    instance: Option<MotionInstance>,
     eligible: bool,
     frame: u32,
+}
+struct MotionInstanceBuffer {
+    data: GpuArrayBuffer<MotionObjectParams>,
+    binding: Option<(Buffer, BindGroup)>,
 }
 #[derive(Resource, Default)]
 pub struct MotionObjects {
@@ -154,6 +159,9 @@ pub struct MotionObjects {
     token: u32,
     origin: Option<[f64; 3]>,
     completed: AtomicU32,
+    gpu: Option<MotionInstanceBuffer>,
+    prepared_frame: u32,
+    prepared_view: Option<Entity>,
 }
 impl MotionObjects {
     pub fn matches(&self, frame: u32, token: u32) -> bool {
@@ -257,12 +265,11 @@ fn prepare_models(
     scene: Res<MotionScene>,
     frame: Res<SourceViewFrame>,
     mut objects: ResMut<MotionObjects>,
-    device: Res<RenderDevice>,
-    queue: Res<RenderQueue>,
-    cache: Res<PipelineCache>,
     status: Res<SourceLightingStatus>,
 ) {
     objects.frame = 0;
+    objects.prepared_frame = 0;
+    objects.prepared_view = None;
     if scene.frame == 0 {
         return;
     }
@@ -270,22 +277,15 @@ fn prepare_models(
         let capacity = scene.rows.capacity() - objects.slots.len();
         objects.slots.reserve_exact(capacity);
         objects.lookup.reserve(capacity);
-        let layout = cache.get_bind_group_layout(&SourceMotionPass::object_layout());
         for _ in 0..capacity {
             let history = MotionModelHistory::new(Mat4::IDENTITY, 0);
-            let mut uniform = UniformBuffer::from(history.params(0, MotionMode::Object));
-            uniform.write_buffer(&device, &queue);
-            let binding = device.create_bind_group(
-                "source_motion_object",
-                &layout,
-                &BindGroupEntries::single(uniform.binding().unwrap()),
-            );
+            let params = history.params(0, MotionMode::Object);
             objects.slots.push(MotionObject {
                 entity: None,
                 mesh: AssetId::default(),
                 history: Mutex::new(history),
-                uniform,
-                binding,
+                params,
+                instance: None,
                 eligible: false,
                 frame: 0,
             });
@@ -325,13 +325,98 @@ fn prepare_models(
         object.mesh = row.mesh;
         history.update(scene.token, row.model);
         object.eligible = row.camera_visible && history.eligible(scene.token, row.mode);
-        if object.eligible {
-            object.uniform.set(history.params(scene.token, row.mode));
-            object.uniform.write_buffer(&device, &queue);
-        }
+        object.params = history.params(scene.token, row.mode);
+        object.instance = None;
     }
     objects.token = scene.token;
     objects.frame = scene.frame;
+}
+
+fn prepare_phase_instances<P: MotionBatchItem>(
+    phase: &BinnedRenderPhase<P>,
+    instances: &RenderMeshInstances,
+    objects: &mut MotionObjects,
+    data: &mut GpuArrayBuffer<MotionObjectParams>,
+) {
+    let mut push = |main| {
+        if instances.mesh_asset_id(main).is_none() {
+            return;
+        }
+        let Some(&slot) = objects.lookup.get(&main.id()) else {
+            return;
+        };
+        let object = &mut objects.slots[slot];
+        if object.eligible && object.frame == objects.frame {
+            let index = data.push(object.params);
+            object.instance = Some(MotionInstance {
+                index: index.index,
+                dynamic_offset: index.dynamic_offset.map(Into::into),
+            });
+        }
+    };
+    for bin in phase.batchable_meshes.values() {
+        for main in bin.entities().keys() {
+            push(*main);
+        }
+    }
+    for bin in phase.unbatchable_meshes.values() {
+        for main in bin.entities.keys() {
+            push(*main);
+        }
+    }
+}
+
+/// Match the main camera's prepared bin order. Snapshot and history slot order can differ.
+fn prepare_instances(
+    mut objects: ResMut<MotionObjects>,
+    views: Query<(
+        Entity,
+        &super::surface_views::SourceSurfaceView,
+        &ExtractedView,
+    )>,
+    opaque: Res<ViewBinnedRenderPhases<Opaque3d>>,
+    masked: Res<ViewBinnedRenderPhases<AlphaMask3d>>,
+    instances: Res<RenderMeshInstances>,
+    device: Res<RenderDevice>,
+    queue: Res<RenderQueue>,
+    cache: Res<PipelineCache>,
+) {
+    if objects.frame == 0 {
+        return;
+    }
+    let Some((entity, _, view)) = views.iter().find(|(_, source, _)| source.index == 1) else {
+        return;
+    };
+    let (Some(opaque), Some(masked)) = (
+        opaque.get(&view.retained_view_entity),
+        masked.get(&view.retained_view_entity),
+    ) else {
+        return;
+    };
+    let mut gpu = objects.gpu.take().unwrap_or_else(|| MotionInstanceBuffer {
+        data: GpuArrayBuffer::new(&device.limits()),
+        binding: None,
+    });
+    gpu.data.clear();
+    prepare_phase_instances(opaque, &instances, &mut objects, &mut gpu.data);
+    prepare_phase_instances(masked, &instances, &mut objects, &mut gpu.data);
+    gpu.data.write_buffer(&device, &queue);
+    if let Some(BindingResource::Buffer(binding)) = gpu.data.binding()
+        && !gpu
+            .binding
+            .as_ref()
+            .is_some_and(|(old, _)| &**old == binding.buffer)
+    {
+        let group = device.create_bind_group(
+            "source_motion_instances",
+            &cache.get_bind_group_layout(&SourceMotionPass::object_layout(&device.limits())),
+            &BindGroupEntries::single(BindingResource::Buffer(binding.clone())),
+        );
+        gpu.binding = Some((binding.buffer.clone().into(), group));
+    }
+    objects.gpu = Some(gpu);
+    objects.prepared_frame = objects.frame;
+    objects.prepared_view = Some(entity);
 }
 
 #[derive(Resource, Default)]
@@ -454,7 +539,8 @@ pub fn prepare_world_motion(
         let mut descriptor = original.clone();
         descriptor.label = Some("source_world_authored_motion".into());
         descriptor.layout[1] = SourceMotionPass::object_camera_layout();
-        descriptor.layout[3] = SourceMotionPass::object_layout();
+        let limits = world.resource::<RenderDevice>().limits();
+        descriptor.layout[3] = SourceMotionPass::object_layout(&limits);
         descriptor.multisample = MultisampleState::default();
         descriptor.vertex.buffers = vec![
             mesh.layout
@@ -484,6 +570,7 @@ pub fn prepare_world_motion(
             &mut fragment.shader_defs,
         ] {
             defs.retain(|d| !matches!(d,ShaderDefVal::Bool(name,_) if name=="SOURCE_WORLD"));
+            motion_batch_def(defs, &limits);
         }
         descriptor.primitive.cull_mode = Some(Face::Back);
         descriptor.depth_stencil = Some(DepthStencilState {
@@ -530,6 +617,11 @@ fn source_flag(defs: &[ShaderDefVal], name: &str) -> bool {
     defs.iter()
         .any(|d| matches!(d,ShaderDefVal::Bool(key,true) if key==name))
 }
+fn motion_batch_def(defs: &mut Vec<ShaderDefVal>, limits: &WgpuLimits) {
+    if let Some(size) = GpuArrayBuffer::<MotionObjectParams>::batch_size(limits) {
+        defs.push(ShaderDefVal::UInt("SOURCE_MOTION_BATCH_SIZE".into(), size));
+    }
+}
 fn prepare_pipelines(
     mut pipelines: ResMut<MotionPipelines>,
     shaders: Res<super::fixed_assets::AdmittedShaders>,
@@ -538,6 +630,7 @@ fn prepare_pipelines(
     status: Res<SourceLightingStatus>,
     isolation: Res<super::world::pipelines::PipelineIsolation>,
     owners: Res<super::pipeline_ownership::PipelineOwners>,
+    device: Res<RenderDevice>,
 ) {
     let Some(shader) = shaders.get("shaders/source_motion_objects.wgsl") else {
         return;
@@ -594,7 +687,7 @@ fn prepare_pipelines(
         descriptor.label = Some("source_motion_object".into());
         descriptor.layout[0] = super::source_lighting::source_camera_layout();
         descriptor.layout[1] = SourceMotionPass::object_camera_layout();
-        descriptor.layout[3] = SourceMotionPass::object_layout();
+        descriptor.layout[3] = SourceMotionPass::object_layout(&device.limits());
         descriptor.multisample = MultisampleState::default();
         descriptor.vertex.shader = shader.clone();
         descriptor.vertex.entry_point = Some("object_vertex".into());
@@ -611,6 +704,7 @@ fn prepare_pipelines(
             &mut fragment.shader_defs,
         ] {
             defs.retain(|v|!matches!(v,ShaderDefVal::Bool(key,_) if key=="SOURCE_SURFACE" || key=="SOURCE_FORWARD_ADD"));
+            motion_batch_def(defs, &device.limits());
         }
         descriptor.primitive.cull_mode = Some(Face::Back);
         descriptor.depth_stencil = Some(DepthStencilState {
@@ -718,12 +812,18 @@ impl<P: CachedRenderPipelinePhaseItem> RenderCommand<P> for SelectMotion {
         let Some(pipeline) = cache.into_inner().get_render_pipeline(*id) else {
             return RenderCommandResult::Skip;
         };
-        if item.batch_range().len() != 1 {
-            return RenderCommandResult::Failure("Source motion requires one prepared instance");
-        }
+        let Some(instance) = object.instance else {
+            return RenderCommandResult::Failure("Source motion instance is missing");
+        };
+        let Some((_, binding)) = objects.gpu.as_ref().and_then(|gpu| gpu.binding.as_ref()) else {
+            return RenderCommandResult::Failure("Source motion buffer is missing");
+        };
         pass.set_render_pipeline(pipeline);
         pass.set_bind_group(1, &view.camera, &[]);
-        pass.set_bind_group(3, &object.binding, &[]);
+        match instance.dynamic_offset {
+            Some(offset) => pass.set_bind_group(3, binding, &[offset]),
+            None => pass.set_bind_group(3, binding, &[]),
+        }
         RenderCommandResult::Success
     }
 }
@@ -786,10 +886,12 @@ impl<P: PhaseItem> RenderCommand<P> for DrawAuthoredMotion {
                 pass.draw_indexed(
                     index.range.start..index.range.start + *count,
                     vertex.range.start as i32,
-                    0..1,
+                    item.batch_range().clone(),
                 );
             }
-            RenderMeshBufferInfo::NonIndexed => pass.draw(vertex.range.clone(), 0..1),
+            RenderMeshBufferInfo::NonIndexed => {
+                pass.draw(vertex.range.clone(), item.batch_range().clone())
+            }
         }
         RenderCommandResult::Success
     }
@@ -816,7 +918,7 @@ impl MotionBatchItem for AlphaMask3d {
         (self.batch_set_key.clone(), self.bin_key.clone())
     }
 }
-pub(crate) fn split_draw<'w, P: MotionBatchItem>(
+pub(crate) fn batch_draw<'w, P: MotionBatchItem>(
     world: &'w World,
     pass: &mut TrackedRenderPass<'w>,
     view: Entity,
@@ -843,6 +945,17 @@ pub(crate) fn split_draw<'w, P: MotionBatchItem>(
             DrawError::RenderCommandFailure("Source motion batch representative is missing"),
         )?;
         let mut slot = item.batch_range().start;
+        let mut runs = MotionRunPlanner::new();
+        let mut emit = |run: super::motion_batch::MotionRun<_, _>| {
+            let batch = P::new(
+                keys.0.clone(),
+                keys.1.clone(),
+                (Entity::PLACEHOLDER, run.first),
+                run.instances,
+                item.extra_index(),
+            );
+            draw.draw(world, pass, view, &batch)
+        };
         for (main, _) in bin.entities().iter().skip(start) {
             if slot == item.batch_range().end {
                 break;
@@ -855,15 +968,19 @@ pub(crate) fn split_draw<'w, P: MotionBatchItem>(
                 .ok_or(DrawError::RenderCommandFailure(
                     "Source motion batch model is missing",
                 ))?;
-            if object.eligible && object.frame == objects.frame {
-                let single = P::new(
-                    keys.0.clone(),
-                    keys.1.clone(),
-                    (Entity::PLACEHOLDER, *main),
-                    slot..slot + 1,
-                    item.extra_index(),
-                );
-                draw.draw(world, pass, view, &single)?;
+            let entry = if object.eligible && object.frame == objects.frame {
+                Some((
+                    object.mesh,
+                    *main,
+                    object.instance.ok_or(DrawError::RenderCommandFailure(
+                        "Source motion batch instance is missing",
+                    ))?,
+                ))
+            } else {
+                None
+            };
+            if let Some(run) = runs.push(entry) {
+                emit(run)?;
             }
             slot += 1;
         }
@@ -872,9 +989,31 @@ pub(crate) fn split_draw<'w, P: MotionBatchItem>(
                 "Source motion batch range is incomplete",
             ));
         }
+        if let Some(run) = runs.finish() {
+            emit(run)?;
+        }
         Ok(())
     } else if phase.unbatchable_meshes.contains_key(&keys) {
-        draw.draw(world, pass, view, item)
+        let object =
+            objects
+                .get(item.main_entity().id())
+                .ok_or(DrawError::RenderCommandFailure(
+                    "Source motion model is missing",
+                ))?;
+        if !object.eligible || object.frame != objects.frame {
+            return Ok(());
+        }
+        let instance = object.instance.ok_or(DrawError::RenderCommandFailure(
+            "Source motion instance is missing",
+        ))?;
+        let batch = P::new(
+            keys.0,
+            keys.1,
+            (item.entity(), item.main_entity()),
+            instance.index..instance.index + 1,
+            item.extra_index(),
+        );
+        draw.draw(world, pass, view, &batch)
     } else {
         Err(DrawError::RenderCommandFailure(
             "Source motion prepared bin is unsupported",
@@ -892,7 +1031,13 @@ pub fn render_objects(
     let cache = world.resource::<PipelineCache>();
     let pipelines = world.resource::<MotionPipelines>();
     let objects = world.resource::<MotionObjects>();
-    if !pipelines.ready(cache) || token == 0 || token != objects.token || objects.frame == 0 {
+    if !pipelines.ready(cache)
+        || token == 0
+        || token != objects.token
+        || objects.frame == 0
+        || objects.prepared_frame != objects.frame
+        || objects.prepared_view != Some(entity)
+    {
         return Ok(false);
     }
     let view = world
@@ -962,6 +1107,10 @@ pub fn install(app: &mut App) {
         .add_systems(
             Render,
             (prepare_models, prepare_pipelines).in_set(RenderSystems::PrepareResources),
+        )
+        .add_systems(
+            Render,
+            prepare_instances.in_set(RenderSystems::PrepareResourcesWritePhaseBuffers),
         );
 }
 

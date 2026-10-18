@@ -10,21 +10,142 @@ use super::{
 
 /// Each material primitive carries its complete renderer AABB.
 /// Repeated bounds from multiple valid material parts do not change the geometric union.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct CasterInput {
     pub bounds: Bounds,
     pub state: CandidateState,
     pub material_has_caster: bool,
 }
+impl CasterInput {
+    /// Compare every input bit, including signed zero in geometry.
+    pub fn unchanged(&self, other: &Self) -> bool {
+        self.bounds.center.map(f32::to_bits) == other.bounds.center.map(f32::to_bits)
+            && self.bounds.extents.map(f32::to_bits) == other.bounds.extents.map(f32::to_bits)
+            && self.state == other.state
+            && self.material_has_caster == other.material_has_caster
+    }
+}
+#[derive(Clone, Copy)]
 pub struct ShadowFrame {
     pub fit: ShadowFit,
     pub candidate_count: usize,
     pub split_counts: [usize; 4],
 }
 
+/// Run once when the ordered caster set changes, before preparing any view.
+pub fn validate_casters(casters: &[CasterInput]) -> Result<(), &'static str> {
+    if casters.iter().any(|caster| {
+        caster
+            .bounds
+            .center
+            .iter()
+            .chain(caster.bounds.extents.iter())
+            .any(|value| !value.is_finite())
+            || caster.bounds.extents.iter().any(|value| *value < 0.)
+    }) {
+        return Err("Source shadow scene has malformed bounds or planes");
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct ViewInput {
+    revision: u64,
+    planes: CullPlanes,
+    light_mask: u32,
+    view_mask: u32,
+    fit: ShadowFitInput,
+}
+impl ViewInput {
+    fn unchanged(&self, other: &Self) -> bool {
+        let words = |value: &Self| {
+            value
+                .planes
+                .camera
+                .into_iter()
+                .flatten()
+                .chain(value.planes.shadow.into_iter().flatten())
+                .chain(value.fit.frustum_points.into_iter().flatten())
+                .chain(value.fit.camera_basis.into_iter().flatten())
+                .chain(value.fit.camera_position)
+                .chain(value.fit.light_basis.into_iter().flatten())
+                .chain(value.fit.caster_min)
+                .chain(value.fit.caster_max)
+                .chain([
+                    value.fit.near,
+                    value.fit.far,
+                    value.fit.vertical_fov,
+                    value.fit.shadow_distance,
+                ])
+                .chain(value.fit.split_fractions)
+                .chain([value.fit.quality_near_offset, value.fit.shadow_strength])
+                .map(f32::to_bits)
+        };
+        self.revision == other.revision
+            && self.light_mask == other.light_mask
+            && self.view_mask == other.view_mask
+            && self.fit.tile_size == other.fit.tile_size
+            && words(self).eq(words(other))
+    }
+}
+
+/// Masks stay in the caller's retained storage. Clear this cache if that storage is cleared.
+/// Advance revision after any caster order, geometry, or eligibility change.
+#[derive(Default)]
+pub struct ShadowViewCache {
+    input: Option<ViewInput>,
+    result: Option<ShadowFrame>,
+    caster_min: [f32; 3],
+    caster_max: [f32; 3],
+}
+impl ShadowViewCache {
+    pub fn clear(&mut self) {
+        self.input = None;
+        self.result = None;
+    }
+    pub fn prepare(
+        &mut self,
+        revision: u64,
+        casters: &[CasterInput],
+        masks: &mut [u8],
+        planes: CullPlanes,
+        light_mask: u32,
+        view_mask: u32,
+        fit: &mut ShadowFitInput,
+    ) -> Result<Option<ShadowFrame>, &'static str> {
+        if casters.len() != masks.len() {
+            return Err("Source shadow candidate and mask counts differ");
+        }
+        let input = ViewInput {
+            revision,
+            planes,
+            light_mask,
+            view_mask,
+            fit: *fit,
+        };
+        if self
+            .input
+            .as_ref()
+            .is_some_and(|previous| previous.unchanged(&input))
+        {
+            fit.caster_min = self.caster_min;
+            fit.caster_max = self.caster_max;
+            return Ok(self.result);
+        }
+        self.clear();
+        let result = prepare_frame(casters, masks, &planes, light_mask, view_mask, fit)?;
+        self.input = Some(input);
+        self.result = result;
+        self.caster_min = fit.caster_min;
+        self.caster_max = fit.caster_max;
+        Ok(result)
+    }
+}
+
 /// The caller supplies stable entity order and preallocated output storage of the same length.
 /// fit_input contains this live view's matrices and source settings. This function fills its caster bounds.
 /// A valid empty candidate set returns None and leaves every output mask zero.
+/// The caller must validate caster bounds after each change with validate_casters.
 pub fn prepare_frame(
     casters: &[CasterInput],
     masks: &mut [u8],
@@ -43,15 +164,6 @@ pub fn prepare_frame(
         .chain(planes.shadow.iter())
         .flatten()
         .any(|value| !value.is_finite())
-        || casters.iter().any(|caster| {
-            caster
-                .bounds
-                .center
-                .iter()
-                .chain(caster.bounds.extents.iter())
-                .any(|value| !value.is_finite())
-                || caster.bounds.extents.iter().any(|value| *value < 0.)
-        })
     {
         return Err("Source shadow scene has malformed bounds or planes");
     }
@@ -129,6 +241,84 @@ pub fn prepare_frame(
 mod tests {
     use super::super::shadow_planes::implicit_cull_planes;
     use super::*;
+
+    #[test]
+    fn view_key_tracks_every_input_bit() {
+        let baseline = ViewInput {
+            revision: 1,
+            planes: CullPlanes {
+                camera: [[0.; 4]; 6],
+                shadow: [[0.; 4]; 6],
+            },
+            light_mask: 1,
+            view_mask: 1,
+            fit: ShadowFitInput {
+                frustum_points: [[0.; 3]; 8],
+                camera_basis: [[0.; 3]; 3],
+                camera_position: [0.; 3],
+                light_basis: [[0.; 3]; 3],
+                caster_min: [0.; 3],
+                caster_max: [0.; 3],
+                near: 0.,
+                far: 0.,
+                vertical_fov: 0.,
+                shadow_distance: 0.,
+                split_fractions: [0.; 3],
+                tile_size: [0; 2],
+                quality_near_offset: 0.,
+                shadow_strength: 0.,
+            },
+        };
+        assert!(baseline.unchanged(&baseline));
+        macro_rules! changed {
+            ($($field:tt)*) => {{
+                let mut input = baseline;
+                input.$($field)* = -0.;
+                assert!(!baseline.unchanged(&input), stringify!($($field)*));
+            }};
+        }
+        for i in 0..6 {
+            for j in 0..4 {
+                changed!(planes.camera[i][j]);
+                changed!(planes.shadow[i][j]);
+            }
+        }
+        for i in 0..8 {
+            for j in 0..3 {
+                changed!(fit.frustum_points[i][j]);
+            }
+        }
+        for i in 0..3 {
+            for j in 0..3 {
+                changed!(fit.camera_basis[i][j]);
+                changed!(fit.light_basis[i][j]);
+            }
+            changed!(fit.camera_position[i]);
+            changed!(fit.caster_min[i]);
+            changed!(fit.caster_max[i]);
+            changed!(fit.split_fractions[i]);
+        }
+        changed!(fit.near);
+        changed!(fit.far);
+        changed!(fit.vertical_fov);
+        changed!(fit.shadow_distance);
+        changed!(fit.quality_near_offset);
+        changed!(fit.shadow_strength);
+        for i in 0..2 {
+            let mut input = baseline;
+            input.fit.tile_size[i] = 1;
+            assert!(!baseline.unchanged(&input));
+        }
+        let mut input = baseline;
+        input.revision += 1;
+        assert!(!baseline.unchanged(&input));
+        input = baseline;
+        input.light_mask = 2;
+        assert!(!baseline.unchanged(&input));
+        input = baseline;
+        input.view_mask = 2;
+        assert!(!baseline.unchanged(&input));
+    }
 
     #[test]
     fn offscreen_draw_survives_preferred_fit_and_empty_frame_clears_masks() {

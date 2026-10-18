@@ -1,11 +1,11 @@
-pub const FIXED_DT: f32 = 1.0 / 60.0;
+pub const FIXED_DT: f32 = 0.01999999955;
 pub mod drivetrain;
 pub mod engine;
 pub mod input;
 pub mod instruments;
 pub mod radio;
 const MAX_FRAME_SECONDS: f64 = 0.1;
-const STEP_SECONDS: f64 = 1.0 / 60.0;
+const STEP_SECONDS: f64 = FIXED_DT as f64;
 
 pub mod keys {
     pub const FORWARD: u32 = 1;
@@ -116,7 +116,7 @@ impl StepClock {
         }
         self.touched_sleep |= time_scale > 1.;
         let cost = STEP_SECONDS / f64::from(time_scale);
-        let budget = if self.touched_sleep { 12 } else { 6 };
+        let budget = if self.touched_sleep { 12 } else { 5 };
         if self.steps >= budget {
             self.accumulator %= cost;
             return false;
@@ -135,5 +135,45 @@ impl StepClock {
 
     pub fn reset(&mut self) {
         *self = Self::default();
+    }
+}
+
+#[cfg(test)]
+mod step_clock_tests {
+    use super::{FIXED_DT, StepClock};
+
+    #[test]
+    fn normal_clock_advances_five_steps_per_tenth_second() {
+        let mut clock = StepClock::default();
+        clock.accept_frame(0.1);
+
+        for _ in 0..5 {
+            assert!(clock.take_step(1.));
+        }
+        assert!(!clock.take_step(1.));
+    }
+
+    #[test]
+    fn sleep_clock_keeps_double_time_scale_bounded() {
+        let mut clock = StepClock::default();
+        clock.accept_frame(0.1);
+
+        for _ in 0..10 {
+            assert!(clock.take_step(2.));
+        }
+        assert!(!clock.take_step(2.));
+    }
+
+    #[test]
+    fn fixed_steps_cover_one_simulation_second() {
+        let mut clock = StepClock::default();
+        let mut steps = 0;
+        for _ in 0..50 {
+            clock.accept_frame(f64::from(FIXED_DT));
+            steps += usize::from(clock.take_step(1.));
+        }
+
+        assert_eq!(steps, 50);
+        assert!((f64::from(FIXED_DT) * steps as f64 - 1.).abs() < 1.0e-6);
     }
 }

@@ -11,6 +11,7 @@ use super::{lighting, materials, reference::*};
 use crate::{
     reference::{AssetUsage, ReferenceManifest},
     save::SaveError,
+    simulation::FIXED_DT,
     starting_area::GarageRuntime,
 };
 use bevy::camera::CameraProjection;
@@ -214,7 +215,7 @@ impl PreparedPresentation {
         }
         candidate.stream.advance_generation();
         candidate.stream.set_overlap(self.overlap(world))?;
-        candidate.initialize_storage_frame(1. / 60.)?;
+        candidate.initialize_storage_frame(FIXED_DT)?;
         let pose = candidate.area.player.view_pose(&candidate.physics);
         let camera = if let Some(sleep) = candidate.sleep_camera() {
             super::camera::sleep_pose(sleep, &candidate.stream.origin)
@@ -647,7 +648,10 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
             }
         }
     }
-    if source.state != lighting::RenderingState::Ready
+    if !world
+        .resource::<super::fixed_assets::SourceFixedAssets>()
+        .payloads_ready()
+        || source.state != lighting::RenderingState::Ready
         || !source.materials_ready
         || source.warming
         || source.road_lamps.recipe.is_none()
@@ -671,9 +675,7 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
         }
     }
     for (_, path, handle) in &source.textures {
-        if !server.is_loaded_with_dependencies(handle.id())
-            || !world.resource::<Assets<Image>>().contains(handle.id())
-        {
+        if !world.resource::<Assets<Image>>().contains(handle.id()) {
             return Err(fail(path.clone()));
         }
     }

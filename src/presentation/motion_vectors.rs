@@ -137,12 +137,12 @@ impl SourceMotionPass {
             ),
         )
     }
-    pub fn object_layout() -> BindGroupLayoutDescriptor {
+    pub fn object_layout(limits: &WgpuLimits) -> BindGroupLayoutDescriptor {
         BindGroupLayoutDescriptor::new(
             "source_motion_object",
             &BindGroupLayoutEntries::single(
                 ShaderStages::VERTEX_FRAGMENT,
-                uniform_buffer::<MotionObjectParams>(false),
+                GpuArrayBuffer::<MotionObjectParams>::binding_layout(limits),
             ),
         )
     }
@@ -373,6 +373,37 @@ fn camera_params(snapshot: &ViewSnapshot, previous_vp: Mat4) -> Result<MotionCam
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn packed_params_keep_forced_zero_and_unsubmitted_history() {
+        let registered = Mat4::from_translation(Vec3::X);
+        let moved = Mat4::from_translation(Vec3::Y);
+        let mut history = MotionModelHistory::new(registered, 1);
+        history.update(1, moved);
+        let packed = [
+            history.params(1, MotionMode::Object),
+            history.params(1, MotionMode::ForceNoMotion),
+        ];
+        for params in packed {
+            assert_eq!(params.current_model, moved);
+            assert_eq!(params.previous_model, registered);
+        }
+        assert_eq!(packed[0].control.x, 0);
+        assert_eq!(packed[1].control.x, 1);
+        history.completed(2);
+        assert_eq!(
+            history.params(1, MotionMode::Object).previous_model,
+            registered
+        );
+        history.update(2, Mat4::IDENTITY);
+        assert_eq!(
+            history.params(2, MotionMode::Object).previous_model,
+            registered
+        );
+        history.completed(2);
+        assert!(!history.eligible(2, MotionMode::Object));
+        assert!(!history.eligible(2, MotionMode::Camera));
+        assert!(history.eligible(2, MotionMode::ForceNoMotion));
+    }
     #[test]
     fn rigid_history_uses_registration_completed_and_stale_frame_rules() {
         let registered = Mat4::IDENTITY;

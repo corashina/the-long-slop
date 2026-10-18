@@ -1,6 +1,7 @@
 //! Recovered Unity StableFit operations. Inputs come from each live view and its caster bounds.
 //! Conditional tests are equation fixtures; they are not source scene poses.
 
+#[derive(Clone, Copy)]
 pub struct ShadowFitInput {
     pub frustum_points: [[f32; 3]; 8],
     pub camera_basis: [[f32; 3]; 3],

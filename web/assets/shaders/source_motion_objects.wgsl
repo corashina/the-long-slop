@@ -1,4 +1,4 @@
-struct Vertex { @location(0) position: vec3<f32> }
+struct Vertex { @location(0) position: vec3<f32>, @builtin(instance_index) instance_index: u32 }
 #import source_float_store::half2
 struct MotionCamera {
     raster_vp: mat4x4<f32>, current_vp: mat4x4<f32>, previous_vp: mat4x4<f32>,
@@ -6,17 +6,24 @@ struct MotionCamera {
 }
 struct MotionObject { current_model: mat4x4<f32>, previous_model: mat4x4<f32>, control: vec4<u32> }
 @group(1) @binding(0) var<uniform> camera: MotionCamera;
-@group(3) @binding(0) var<uniform> object: MotionObject;
+#ifdef SOURCE_MOTION_BATCH_SIZE
+@group(3) @binding(0) var<uniform> objects: array<MotionObject, #{SOURCE_MOTION_BATCH_SIZE}u>;
+#else
+@group(3) @binding(0) var<storage> objects: array<MotionObject>;
+#endif
 struct ObjectOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) current_clip: vec4<f32>, @location(1) previous_clip: vec4<f32>,
+    @location(2) @interpolate(flat) force_zero: u32,
 }
 @vertex fn object_vertex(input: Vertex) -> ObjectOutput {
+    let object = objects[input.instance_index];
     let world = object.current_model * vec4(input.position, 1.);
     var output: ObjectOutput;
     output.position = camera.raster_vp * world;
     output.current_clip = camera.current_vp * world;
     output.previous_clip = camera.previous_vp * object.previous_model * vec4(input.position, 1.);
+    output.force_zero = object.control.x;
     return output;
 }
 fn viewport(clip: vec4<f32>) -> vec2<f32> {
@@ -25,5 +32,5 @@ fn viewport(clip: vec4<f32>) -> vec2<f32> {
 }
 @fragment fn object_fragment(input: ObjectOutput) -> @location(0) vec2<f32> {
     let velocity = viewport(input.current_clip) - viewport(input.previous_clip);
-    return half2(select(velocity, vec2(0.), object.control.x != 0u));
+    return half2(select(velocity, vec2(0.), input.force_zero != 0u));
 }

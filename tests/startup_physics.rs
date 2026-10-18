@@ -109,7 +109,9 @@ fn installed_spawn_alignment_and_settling() {
     assert_eq!(run.area.player.body_pose(&run.physics), physical);
 
     let mut peak_angular_speed = 0_f32;
-    for _ in 0..120 {
+    let settle_seconds = 2.0_f32;
+    let settle_steps = (settle_seconds / FIXED_DT).round() as usize;
+    for _ in 0..settle_steps {
         run.area
             .player
             .step(FrameInput::default(), &mut run.physics, FIXED_DT);

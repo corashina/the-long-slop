@@ -42,12 +42,28 @@ function assertReady(){
 export async function pause(){autoResume=false;input(0);if(!window.gameState.paused){actions=ACTIONS.PAUSE;await wait(()=>window.gameState.paused);}}
 export async function capture(){await pause();return bounded(saveRuntime.capture(),30000);}
 export async function load(saved){
- await pause();const controller=new AbortController();
+ await pause();const previous=await bounded(window.measureWorld(),30000),controller=new AbortController();
  const timer=setTimeout(()=>controller.abort(),120000);let token;
  try{token=await saveRuntime.prepare(structuredClone(saved),controller.signal);}
  finally{clearTimeout(timer);}
  await bounded(saveRuntime.commit(token));
- await wait(()=>audit()?.state==='Ready');await resume();
+ await wait(()=>audit()?.state==='Ready');
+ const committed=await bounded(saveRuntime.capture(),30000),current=await bounded(window.measureWorld(),30000);
+ if(current.session===previous.session)throw Error('Load did not commit a replacement session');
+ function compare(expected,actual,path){
+  if(typeof expected==='number'&&typeof actual==='number'&&Number.isFinite(actual)&&Math.abs(expected-actual)<=0.0001)return;
+  if(expected===actual)return;
+  if(expected===null||actual===null||typeof expected!=='object'||typeof actual!=='object'||Array.isArray(expected)!==Array.isArray(actual))throw Error(`Load readback mismatch: ${path}`);
+  const keys=Object.keys(expected).filter(key=>path!=='save'||key!=='saved_at').sort();
+  const actualKeys=Object.keys(actual).filter(key=>path!=='save'||key!=='saved_at').sort();
+  if(JSON.stringify(keys)!==JSON.stringify(actualKeys))throw Error(`Load readback keys mismatch: ${path}`);
+  for(const key of keys)compare(expected[key],actual[key],`${path}.${key}`);
+ }
+ compare(saved,committed,'save');
+ const before=read(),beforeAudit=audit();await resume();
+ await wait(()=>window.gameState.totalSteps>=before.totalSteps+2&&audit().graph.views[1].frame>beforeAudit.graph.views[1].frame);
+ const after=read(),afterAudit=audit();
+ return {previousSession:previous.session,committedSession:current.session,committed,before,after,beforeAudit,afterAudit};
 }
 export async function sample(label,seconds=10,keys=0,scene='garage'){
  assertReady();input(keys);

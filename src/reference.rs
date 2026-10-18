@@ -19,6 +19,7 @@ pub mod render_lighting;
 pub mod world;
 pub use world::*;
 pub mod rendering;
+pub mod shadow_bounds;
 pub mod shadow_candidates;
 pub mod shadow_frame;
 pub mod shadow_planes;

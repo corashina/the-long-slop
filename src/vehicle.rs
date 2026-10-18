@@ -1,3 +1,6 @@
+mod query_bounds;
+
+use query_bounds::QueryBounds;
 use rapier3d::control::{DynamicRayCastVehicleController, Wheel, WheelTuning};
 use rapier3d::math::{Pose, Rotation, Vector};
 pub use rapier3d::prelude::ColliderHandle;
@@ -90,6 +93,7 @@ struct VehicleBody {
 pub struct PhysicsWorld {
     pub(crate) inactive_bodies: std::collections::HashSet<RigidBodyHandle>,
     physics: rapier3d::prelude::PhysicsWorld,
+    query_bounds: QueryBounds,
     chassis: Vec<RigidBodyHandle>,
     vehicles: Vec<VehicleBody>,
 }
@@ -109,20 +113,22 @@ impl PhysicsWorld {
         for (vehicle, pose) in reference.vehicles.iter().zip(poses) {
             vehicles.push(VehicleBody::new(reference, vehicle, *pose, &mut physics)?);
         }
-        refresh_world_queries(&mut physics);
+        let mut query_bounds = QueryBounds::default();
+        query_bounds.refresh(&mut physics);
         let chassis: Vec<_> = vehicles.iter().map(|v| v.chassis).collect();
         for vehicle in &mut vehicles {
             // Reserve Rapier's four-wheel scratch buffers before the frame loop.
             vehicle.controller.update_vehicle(
                 FIXED_DT,
-                physics.broad_phase.as_query_pipeline_mut(
-                    physics.narrow_phase.query_dispatcher(),
-                    &mut physics.bodies,
-                    &mut physics.colliders,
-                    QueryFilter::default()
+                QueryPipelineMut {
+                    dispatcher: physics.narrow_phase.query_dispatcher(),
+                    bvh: &query_bounds.bvh,
+                    bodies: &mut physics.bodies,
+                    colliders: &mut physics.colliders,
+                    filter: QueryFilter::default()
                         .exclude_sensors()
                         .exclude_rigid_body(vehicle.chassis),
-                ),
+                },
             );
             vehicle
                 .controller
@@ -131,6 +137,7 @@ impl PhysicsWorld {
         }
         Ok(Self {
             physics,
+            query_bounds,
             chassis,
             vehicles,
             inactive_bodies: std::collections::HashSet::with_capacity(
@@ -363,15 +370,16 @@ impl PhysicsWorld {
         };
         vehicle.controller.update_vehicle(
             FIXED_DT,
-            self.physics.broad_phase.as_query_pipeline_mut(
-                self.physics.narrow_phase.query_dispatcher(),
-                &mut self.physics.bodies,
-                &mut self.physics.colliders,
-                QueryFilter::default()
+            QueryPipelineMut {
+                dispatcher: self.physics.narrow_phase.query_dispatcher(),
+                bvh: &self.query_bounds.bvh,
+                bodies: &mut self.physics.bodies,
+                colliders: &mut self.physics.colliders,
+                filter: QueryFilter::default()
                     .exclude_sensors()
                     .exclude_rigid_body(own)
                     .predicate(&not_own),
-            ),
+            },
         );
         for (wheel, &slot) in vehicle
             .controller
@@ -392,6 +400,7 @@ impl PhysicsWorld {
 
     pub fn step_physics(&mut self) {
         self.physics.step();
+        self.query_bounds.refresh(&mut self.physics);
     }
 
     pub fn capture_save(
@@ -557,27 +566,32 @@ impl PhysicsWorld {
     }
 
     pub fn refresh_queries(&mut self) {
-        refresh_world_queries(&mut self.physics);
+        self.query_bounds.refresh(&mut self.physics);
+    }
+
+    pub(crate) fn query_storage_bytes(&self) -> usize {
+        self.query_bounds.retained_bytes()
     }
 
     pub fn queries<'a>(&'a self, filter: QueryFilter<'a>) -> QueryPipeline<'a> {
-        self.physics.broad_phase.as_query_pipeline(
-            self.physics.narrow_phase.query_dispatcher(),
-            &self.physics.bodies,
-            &self.physics.colliders,
+        QueryPipeline {
+            dispatcher: self.physics.narrow_phase.query_dispatcher(),
+            bvh: &self.query_bounds.bvh,
+            bodies: &self.physics.bodies,
+            colliders: &self.physics.colliders,
             filter,
-        )
+        }
     }
 
     pub fn queries_mut<'a>(&'a mut self, filter: QueryFilter<'a>) -> QueryPipelineMut<'a> {
-        self.physics.broad_phase.as_query_pipeline_mut(
-            self.physics.narrow_phase.query_dispatcher(),
-            &mut self.physics.bodies,
-            &mut self.physics.colliders,
+        QueryPipelineMut {
+            dispatcher: self.physics.narrow_phase.query_dispatcher(),
+            bvh: &self.query_bounds.bvh,
+            bodies: &mut self.physics.bodies,
+            colliders: &mut self.physics.colliders,
             filter,
-        )
+        }
     }
-
     pub fn snapshot(&self, index: usize) -> VehicleSnapshot {
         let vehicle = &self.vehicles[index];
         let body = &self.physics.bodies[vehicle.chassis];
@@ -854,23 +868,6 @@ pub fn collider_builder(geometry: &ColliderGeometry) -> Result<ColliderBuilder, 
             triangles.clone(),
         )
         .map_err(|error| ReferenceError(format!("Invalid collision mesh: {error}"))),
-    }
-}
-
-fn refresh_world_queries(physics: &mut rapier3d::prelude::PhysicsWorld) {
-    // CollisionPipeline consumes body changes before PhysicsPipeline registers islands.
-    // Update query bounds while retaining those changes for the next fixed step.
-    physics
-        .bodies
-        .propagate_modified_body_positions_to_colliders(&mut physics.colliders);
-    for (handle, collider) in physics.colliders.iter() {
-        if collider.is_enabled() {
-            physics.broad_phase.set_aabb(
-                &physics.integration_parameters,
-                handle,
-                collider.compute_aabb(),
-            );
-        }
     }
 }
 

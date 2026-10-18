@@ -135,6 +135,9 @@ struct SourceTexture {
 #[derive(Resource, Clone)]
 pub struct SourceMaterials {
     pub preparation: super::gpu_prepare::GpuPreparation,
+    pub(crate) generated: super::world::shared_materials::SharedMaterials<
+        super::world::instance_materials::SharedBinding,
+    >,
     pub world_textures: world_textures::WorldTextures,
     pub world_primary: primary::PrimaryOwnership,
     pub world_deferred: primary::DeferredAllocation,
@@ -498,6 +501,7 @@ pub fn load_materials(
     }
     let mut source = SourceMaterials {
         preparation: default(),
+        generated: default(),
         world_textures: world_textures::WorldTextures::default(),
         world_primary: primary::PrimaryOwnership::default(),
         world_deferred: primary::DeferredAllocation::default(),
@@ -2148,6 +2152,12 @@ pub fn authored_material(
     material
 }
 impl SourceMaterials {
+    pub(crate) fn shareable_generated_primary(&self, identity: (source::AssetId, u32)) -> bool {
+        self.records
+            .iter()
+            .find(|record| (record.asset, record.gltf_material) == identity)
+            .is_some_and(|record| super::world::shared_materials::shareable_primary(record))
+    }
     pub fn textures_ready(&self) -> bool {
         self.textures.iter().all(|t| t.image.is_some())
     }

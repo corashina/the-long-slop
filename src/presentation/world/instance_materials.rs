@@ -1,5 +1,8 @@
 //! Generated renderer materials retain source identity and per-instance LOD inputs.
-use super::pipelines::{PipelineTicket, WorldPipelines};
+use super::{
+    pipelines::{PipelineTicket, WorldPipelines},
+    shared_materials::{MaterialIdentity, SharedMaterialKey},
+};
 use crate::reference::prototype_plan::PlanPrimitive;
 use crate::{
     presentation::materials::{
@@ -25,6 +28,12 @@ pub struct RendererMaterial {
     pub visible: InstanceMaterial,
     pub sort: Option<crate::presentation::transparent::SourceSortData>,
     pub caster: Option<Handle<LodCasterMaterial>>,
+    shared: Option<SharedMaterialKey>,
+}
+#[derive(Clone)]
+pub(crate) struct SharedBinding {
+    visible: InstanceMaterial,
+    caster: Option<Handle<LodCasterMaterial>>,
 }
 #[derive(SystemParam)]
 pub struct InstanceMaterials<'w> {
@@ -142,6 +151,15 @@ impl InstanceMaterials<'_> {
         let mask = 1u32 << layer;
         let mut caster = None;
         let mut sort = None;
+        let mut shared = None;
+        let key = |material| SharedMaterialKey {
+            session,
+            material,
+            layer,
+            receive,
+            shadow_mode,
+            reflected,
+        };
         let visible = if initial.is_none() && (selected.is_some() || primitive.has_source_material)
         {
             let Some(id) = selected.or(primitive.source_material.as_ref()) else {
@@ -171,6 +189,16 @@ impl InstanceMaterials<'_> {
                     )?))
                 }
                 "Standard (Specular setup)" => {
+                    let key = key(MaterialIdentity::Specular(id.clone()));
+                    if let Some(binding) = self.cache.generated.acquire(&key) {
+                        return Ok(Some(RendererMaterial {
+                            visible: binding.visible,
+                            caster: binding.caster,
+                            sort,
+                            shared: Some(key),
+                        }));
+                    }
+                    shared = Some(key);
                     let material = SpecularMaterial::from_source(
                         record,
                         &self.cache.world_textures,
@@ -219,6 +247,20 @@ impl InstanceMaterials<'_> {
             sort = self
                 .cache
                 .sort_data(identity, renderer, primitive.submesh)?;
+            if sort.is_none() {
+                let key = key(MaterialIdentity::Primary(identity.0, identity.1));
+                if let Some(binding) = self.cache.generated.acquire(&key) {
+                    return Ok(Some(RendererMaterial {
+                        visible: binding.visible,
+                        caster: binding.caster,
+                        sort,
+                        shared: Some(key),
+                    }));
+                }
+                if self.cache.shareable_generated_primary(identity) {
+                    shared = Some(key);
+                }
+            }
             if shadow_mode != 0 {
                 let mut base = materials::authored_caster_material(identity, &self.cache);
                 if shadow_mode == 2 {
@@ -260,17 +302,61 @@ impl InstanceMaterials<'_> {
                 self.grass.get_mut(h).unwrap().preparation = self.cache.preparation.clone()
             }
         }
+        if let Some(key) = &shared {
+            self.cache.generated.insert(
+                key.clone(),
+                SharedBinding {
+                    visible: visible.clone(),
+                    caster: caster.clone(),
+                },
+            );
+        }
         Ok(Some(RendererMaterial {
             visible,
             sort,
             caster,
+            shared,
         }))
+    }
+    /// Isolate before pipeline tickets or entities retain these handles.
+    pub fn make_private(&mut self, binding: &mut RendererMaterial) {
+        let Some(key) = binding.shared.take() else {
+            return;
+        };
+        let Self {
+            cache,
+            primary,
+            specular,
+            casters,
+            ..
+        } = self;
+        let private = cache.generated.make_private(&key, |shared| {
+            let visible = match &shared.visible {
+                InstanceMaterial::Primary(handle) => {
+                    let material = primary.get(handle).unwrap().clone();
+                    InstanceMaterial::Primary(primary.add(material))
+                }
+                InstanceMaterial::Specular(handle) => {
+                    let material = specular.get(handle).unwrap().clone();
+                    InstanceMaterial::Specular(specular.add(material))
+                }
+                _ => unreachable!("Only immutable primary and specular bindings are shared"),
+            };
+            let caster = shared.caster.as_ref().map(|handle| {
+                let material = casters.get(handle).unwrap().clone();
+                casters.add(material)
+            });
+            SharedBinding { visible, caster }
+        });
+        binding.visible = private.visible;
+        binding.caster = private.caster;
     }
     pub fn color(
         &mut self,
-        binding: &RendererMaterial,
+        binding: &mut RendererMaterial,
         color: [f32; 4],
     ) -> Result<(), ReferenceError> {
+        self.make_private(binding);
         let color = Color::srgba(color[0], color[1], color[2], color[3]);
         match &binding.visible {
             InstanceMaterial::Primary(h) => {
@@ -293,6 +379,13 @@ impl InstanceMaterials<'_> {
         Ok(())
     }
     pub fn fade(&mut self, binding: &RendererMaterial, fade: f32, source_position: Vec3) {
+        if binding.shared.is_some() {
+            assert_eq!(
+                fade, 1.,
+                "LOD bindings must be private before pipeline warmup"
+            );
+            return;
+        }
         match &binding.visible {
             InstanceMaterial::Primary(h) => {
                 if let Some(mut m) = self.primary.get_mut(h) {
@@ -323,6 +416,11 @@ impl InstanceMaterials<'_> {
         }
     }
     pub fn release(&mut self, binding: RendererMaterial) {
+        if let Some(key) = &binding.shared {
+            if !self.cache.generated.release(key) {
+                return;
+            }
+        }
         match binding.visible {
             InstanceMaterial::Primary(h) => {
                 self.primary.remove(h.id());
