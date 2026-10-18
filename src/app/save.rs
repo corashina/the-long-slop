@@ -221,7 +221,6 @@ fn process_request(
             drop(drive);
             crate::browser::game_loading();
             crate::presentation::view_frame::restart_scene(world);
-            crate::presentation::mirrors::reset_mirrors(world);
             crate::presentation::plates::reset_plate_text(world);
             Ok(String::new())
         }

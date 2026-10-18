@@ -866,7 +866,6 @@ fn make_material(
     SourceMaterial {
         retained_color: None,
         preparation: default(),
-        mirror: None,
         base: StandardMaterial {
             base_color_channel: main.map_or(bevy::mesh::UvChannel::Uv0, |texture| {
                 if texture.uv_channel == 0 {
@@ -1138,7 +1137,6 @@ use bevy::ecs::system::SystemParamItem;
 pub struct SourceMaterial {
     pub(crate) retained_color: Option<RetainedColor>,
     pub preparation: super::gpu_prepare::GpuPreparation,
-    pub(crate) mirror: Option<(u64, usize, bool)>,
     pub base: StandardMaterial,
     pub extension: SourceExtension,
 }
@@ -1159,7 +1157,6 @@ impl AsBindGroup for SourceMaterial {
     type Param = (
         <StandardMaterial as AsBindGroup>::Param,
         <SourceExtension as AsBindGroup>::Param,
-        SRes<super::mirrors::MirrorGpuStatus>,
     );
     fn label() -> &'static str {
         "source material"
@@ -1225,9 +1222,6 @@ impl AsBindGroup for SourceMaterial {
                 .find(|(binding, _)| *binding == 120)
                 .expect("source color binding") = (120, OwnedBindingResource::Buffer(buffer));
             retained.dirty = true;
-        }
-        if let Some((instance, owner, live)) = self.mirror {
-            params.2.record(instance, owner, live, &prepared.bindings);
         }
         Ok(prepared)
     }
@@ -2164,72 +2158,6 @@ pub fn authored_caster_material(
     base.normal_map_texture = None;
     base.depth_map = None;
     base
-}
-
-/// Both source slots use one texture bank and its single sampler.
-pub fn make_mirror_material(
-    record: &MaterialRecord,
-    source: &SourceMaterials,
-    target: Handle<Image>,
-    reflected: bool,
-    mask: u32,
-) -> SourceMaterial {
-    let mut material = make_material(record, reflected, mask, source);
-    let surface = &mut material.extension.surface;
-    for slot in [0usize, 4] {
-        surface.data.flags.y |= 1 << slot;
-        surface.data.banks[slot / 4][slot % 4] = 0;
-    }
-    material.base.base_color_texture = Some(target);
-    material
-}
-
-pub(crate) fn warm_mirror_material(
-    world: &World,
-    mesh: AssetId<Mesh>,
-    material: AssetId<SourceMaterial>,
-) {
-    let loading = world.resource::<MaterialLoading>();
-    let mut pending = loading.0.lock().unwrap();
-    pending.requests.push(PipelineRequest {
-        mesh,
-        material: material.untyped(),
-        label: "source mirror surface".into(),
-    });
-}
-
-pub(crate) fn release_mirror_warmup(
-    world: &World,
-    live: AssetId<SourceMaterial>,
-    disabled: AssetId<SourceMaterial>,
-) {
-    world
-        .resource::<MaterialLoading>()
-        .0
-        .lock()
-        .unwrap()
-        .requests
-        .retain(|request| {
-            request.material != live.untyped() && request.material != disabled.untyped()
-        });
-}
-
-/// Retain all source choices, including hidden lamps, for capture loading.
-pub(crate) fn mirror_warmup_pairs(world: &World, pairs: &mut Vec<(AssetId<Mesh>, UntypedAssetId)>) {
-    let loading = world.resource::<MaterialLoading>().0.lock().unwrap();
-    pairs.extend(loading.requests.iter().map(|r| (r.mesh, r.material)));
-    for target in &world
-        .resource::<super::lighting::SourceLighting>()
-        .lamp_materials
-    {
-        for choice in &target.choices {
-            for receiver in &choice.receivers {
-                if let Some(mesh) = world.get::<Mesh3d>(receiver.entity) {
-                    pairs.push((mesh.0.id(), receiver.material.id().untyped()));
-                }
-            }
-        }
-    }
 }
 
 impl SourceMaterials {

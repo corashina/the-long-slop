@@ -1,6 +1,6 @@
 use super::lighting_scene::PROBE_COUNT;
 // One main-world view snapshot for raster, culling, motion, and shadow fitting.
-use super::surface_views::{MIRROR_START, PROBE_START, VIEW_COUNT};
+use super::surface_views::{PROBE_START, VIEW_COUNT};
 use super::{
     lighting_assets::LightingAssets, lighting_scene::SourceSceneLighting,
     materials::RenderingState, source_lighting::SourceLightingStatus,
@@ -187,7 +187,7 @@ pub struct SourceViewFrame {
 }
 impl SourceViewFrame {
     pub fn skip_probe_preparation(&self, index: usize) -> bool {
-        (PROBE_START..MIRROR_START).contains(&index) && self.views[index].is_none()
+        index >= PROBE_START && self.views[index].is_none()
     }
     pub(crate) fn loading_key(&self) -> Option<crate::reference::loading_dispatch::LoadingKey> {
         Some(crate::reference::loading_dispatch::LoadingKey {
@@ -245,7 +245,6 @@ pub(crate) fn snapshot(
     drive: Res<crate::app::Drive>,
     requests: Res<crate::app::save::SaveRequests>,
     graph: Res<super::frame_graph::SourceGraphProgress>,
-    reference: Res<crate::app::RuntimeReference>,
     assets: Option<Res<LightingAssets>>,
     scene: Res<SourceSceneLighting>,
     epoch: Res<SourceSceneEpoch>,
@@ -254,7 +253,7 @@ pub(crate) fn snapshot(
     mut clock: ResMut<SourceViewClock>,
     mut frame: ResMut<SourceViewFrame>,
     status: Res<SourceLightingStatus>,
-    views: Query<(&SourceSurfaceView, &Camera, &GlobalTransform, &Projection)>,
+    views: Query<(&SourceSurfaceView, &Camera, &GlobalTransform)>,
     sky_view: Query<(&Camera, &GlobalTransform), With<super::frame_graph::SourceSkyCamera>>,
 ) {
     let mut timing = super::reflection_preparation::Timer::new(
@@ -281,7 +280,7 @@ pub(crate) fn snapshot(
         return;
     }
     let mut input = [None; VIEW_COUNT];
-    for (view, camera, pose, projection) in &views {
+    for (view, camera, pose) in &views {
         if view.index >= VIEW_COUNT || input[view.index].is_some() {
             *status.0.lock().unwrap() =
                 RenderingState::Failed("Source snapshot view identity is invalid".into());
@@ -289,9 +288,6 @@ pub(crate) fn snapshot(
             return;
         }
         if !camera.is_active {
-            if view.index >= MIRROR_START {
-                continue;
-            }
             return;
         }
         let Some(extent) = camera.physical_viewport_size() else {
@@ -300,26 +296,9 @@ pub(crate) fn snapshot(
         if extent.x == 0 || extent.y == 0 {
             return;
         }
-        let mirror = if view.index >= MIRROR_START {
-            let Projection::Custom(custom) = projection else {
-                return;
-            };
-            let p = &custom
-                .get::<super::mirrors::MirrorProjection>()
-                .expect("mirror projection")
-                .perspective;
-            Some((
-                p.near,
-                p.far,
-                p.fov.to_degrees(),
-                projection.get_clip_from_view(),
-            ))
-        } else {
-            None
-        };
-        input[view.index] = Some((extent, pose.to_matrix(), mirror));
+        input[view.index] = Some((extent, pose.to_matrix()));
     }
-    if input[..MIRROR_START].iter().any(Option::is_none) {
+    if input.iter().any(Option::is_none) {
         return;
     }
     let Ok((sky_camera, sky_pose)) = sky_view.single() else {
@@ -349,12 +328,10 @@ pub(crate) fn snapshot(
         || clock.probe[clock.probe_index].job() != ProbeJob::Face(0))
     .then(|| clock.probe[clock.probe_index].job());
     let snapshots = std::array::from_fn(|index| {
-        if (PROBE_START..MIRROR_START).contains(&index)
-            && !prepare_probe_face(job, index - PROBE_START, warmup)
-        {
+        if index >= PROBE_START && !prepare_probe_face(job, index - PROBE_START, warmup) {
             return None;
         }
-        let (extent, world_from_view, mirror) = input[index]?;
+        let (extent, world_from_view) = input[index]?;
         let (near, far, fov, mask, distance) = if index < 3 {
             let c = &assets.record.cameras[index + 1];
             (
@@ -364,20 +341,11 @@ pub(crate) fn snapshot(
                 c.mask,
                 assets.record.shadows.distance,
             )
-        } else if index < MIRROR_START {
+        } else {
             let p = &assets.record.probes[clock.probe_index];
             (p.near, p.far, 90., p.mask, p.shadow_distance)
-        } else {
-            let (near, far, fov, _) = mirror.unwrap();
-            (
-                near,
-                far,
-                fov,
-                reference.0.mirrors.mirrors[index - MIRROR_START].culling_mask,
-                assets.record.shadows.distance,
-            )
         };
-        let view = if index < 3 || index >= MIRROR_START {
+        let view = if index < 3 {
             world_from_view.inverse()
         } else {
             Mat4::from_cols_array_2d(&capture_view_from_world(
@@ -394,7 +362,6 @@ pub(crate) fn snapshot(
             mask,
             distance,
             (index == 1).then_some(clock.jitter.unwrap()),
-            mirror.map(|p| p.3),
         ))
     });
     let sky_clips = Some(sky_pose).map(|pose| {
@@ -573,7 +540,6 @@ pub(crate) fn camera_snapshot(
     mask: u32,
     distance: f32,
     jitter: Option<TaaJitter>,
-    raster_override: Option<Mat4>,
 ) -> ViewSnapshot {
     let implicit = Mat4::perspective_rh_gl(
         fov.to_radians(),
@@ -625,8 +591,8 @@ pub(crate) fn camera_snapshot(
         extent,
         view_from_world: view,
         implicit_projection: implicit,
-        nonjittered_projection: raster_override.unwrap_or_else(|| gpu_projection(implicit)),
-        raster_projection: raster_override.unwrap_or_else(|| gpu_projection(current)),
+        nonjittered_projection: gpu_projection(implicit),
+        raster_projection: gpu_projection(current),
         culling_projection: selected,
         source_world_from_view,
         source_camera_planes: camera,
@@ -669,7 +635,7 @@ pub(crate) fn append_probe_required_views(
     light_forward: [f32; 3],
     light_mask: u32,
 ) -> Result<(), crate::reference::ReferenceError> {
-    const _: () = assert!(crate::world::REQUIRED_VIEW_CAPACITY == 3 + PROBE_COUNT * 6 + 3);
+    const _: () = assert!(crate::world::REQUIRED_VIEW_CAPACITY == 3 + PROBE_COUNT * 6);
     views.append_probe_faces(enabled, |index, face| {
         let probe = &records[index];
         let snapshot = camera_snapshot(
@@ -680,7 +646,6 @@ pub(crate) fn append_probe_required_views(
             90.,
             probe.mask,
             probe.shadow_distance,
-            None,
             None,
         );
         required_view(&snapshot, origin, light_forward, light_mask)

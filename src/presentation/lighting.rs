@@ -189,7 +189,6 @@ impl SourceLighting {
     /// Replace owned light instances. Retain loaded scenes and prepared assets.
     pub fn reset_instances(&mut self, commands: &mut Commands) {
         self.road_lamps.reset_instances(commands);
-        self.sky.reset_views();
         for light in self.lights.drain(..) {
             commands.entity(light.entity).despawn();
         }

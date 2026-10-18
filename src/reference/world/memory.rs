@@ -152,7 +152,7 @@ fields!(super::super::FileReceipt:file,sha256);
 fields!(super::super::AssetRecord:path,sha256,root,dependencies);
 fields!(super::super::rendering::MaterialRecord:source,condition,keywords,properties);
 fields!(super::super::rendering::MaterialCondition:source);
-fields!(super::super::rendering::ShaderProperties:floats,colors,textures,defaults,exclusions);
+fields!(super::super::rendering::ShaderProperties:floats,colors,textures,defaults);
 fields!(super::super::rendering::TextureRecord:slot,source,storage);
 impl ImmutableInputBytes for super::super::rendering::TextureStorage {
     fn heap_bytes(&self) -> usize {
@@ -163,7 +163,6 @@ impl ImmutableInputBytes for super::super::rendering::TextureStorage {
     }
 }
 fields!(super::super::rendering::TextureMip:file);
-fields!(super::super::rendering::TextureExclusion:slot,source);
 inline!(super::super::rendering::TextureDefault);
 impl super::super::rendering::MaterialRecord {
     pub fn retained_cpu_bytes(&self) -> usize {

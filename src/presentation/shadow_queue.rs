@@ -1,6 +1,6 @@
 //! Cached source shadow specialization and offscreen mesh queueing.
 use super::shadow_cache::SpecializationKey;
-use super::surface_views::{MIRROR_START, PROBE_START, VIEW_COUNT};
+use super::surface_views::{PROBE_START, VIEW_COUNT};
 use super::{
     caster::{CasterPasses, CasterUniform, CasterViews},
     lighting_scene::SourceSceneLighting,
@@ -196,7 +196,7 @@ pub fn queue(world: &mut World) {
             let draw = shadow_phase::draw_id(world.resource::<DrawFunctions<SourceShadow>>());
             world.resource_scope(
                 |world, mut phases: Mut<ViewBinnedRenderPhases<SourceShadow>>| {
-                    for index in PROBE_START..MIRROR_START {
+                    for index in PROBE_START..VIEW_COUNT {
                         if world
                             .resource::<SourceViewFrame>()
                             .skip_probe_preparation(index)
@@ -218,11 +218,11 @@ pub fn queue(world: &mut World) {
                                 phases.remove(&previous);
                             }
                             phases.remove(&retained);
-                            if (PROBE_START..MIRROR_START).contains(&index) {
+                            if index >= PROBE_START {
                                 state.idle_probe_phases[index - PROBE_START] = None;
                             }
                         }
-                        if (PROBE_START..MIRROR_START).contains(&index) {
+                        if index >= PROBE_START {
                             if let Some(phase) = state.idle_probe_phases[index - PROBE_START].take()
                             {
                                 phases.insert(retained, phase);

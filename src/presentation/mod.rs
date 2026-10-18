@@ -8,7 +8,6 @@ pub mod instruments;
 pub mod lighting;
 pub mod materials;
 pub mod mechanisms;
-pub mod mirrors;
 pub mod reference;
 pub mod save;
 mod shadow_cache;

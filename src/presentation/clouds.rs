@@ -25,8 +25,8 @@ struct CloudBinding {
 }
 #[derive(Resource)]
 pub struct CloudPass {
-    pipelines: [CachedRenderPipelineId; 2],
-    bindings: [[CloudBinding; 2]; 4],
+    pipeline: CachedRenderPipelineId,
+    bindings: [CloudBinding; 2],
     models: [Mat4; 2],
     order: [usize; 2],
     mesh: AssetId<Mesh>,
@@ -81,46 +81,44 @@ impl CloudPass {
             dst_factor: BlendFactor::OneMinusSrcAlpha,
             operation: BlendOperation::Add,
         };
-        let pipelines = std::array::from_fn(|view| {
-            cache.queue_render_pipeline(RenderPipelineDescriptor {
-                label: Some("source_cloud".into()),
-                layout: vec![layout.clone()],
-                vertex: VertexState {
-                    shader: shader.clone(),
-                    entry_point: Some("vertex".into()),
-                    buffers: vec![vertex_layout.clone()],
-                    ..default()
-                },
-                fragment: Some(FragmentState {
-                    shader: shader.clone(),
-                    entry_point: Some("fragment".into()),
-                    targets: vec![Some(ColorTargetState {
-                        format: HDR_FORMAT,
-                        blend: Some(BlendState {
-                            color: blend,
-                            alpha: blend,
-                        }),
-                        write_mask: ColorWrites::ALL,
-                    })],
-                    ..default()
-                }),
-                primitive: PrimitiveState {
-                    cull_mode: None,
-                    ..default()
-                },
-                depth_stencil: Some(DepthStencilState {
-                    format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(false),
-                    depth_compare: Some(CompareFunction::GreaterEqual),
-                    stencil: default(),
-                    bias: default(),
-                }),
-                multisample: MultisampleState {
-                    count: if view == 0 { record.msaa_samples } else { 1 },
-                    ..default()
-                },
+        let pipeline = cache.queue_render_pipeline(RenderPipelineDescriptor {
+            label: Some("source_cloud".into()),
+            layout: vec![layout.clone()],
+            vertex: VertexState {
+                shader: shader.clone(),
+                entry_point: Some("vertex".into()),
+                buffers: vec![vertex_layout.clone()],
                 ..default()
-            })
+            },
+            fragment: Some(FragmentState {
+                shader: shader.clone(),
+                entry_point: Some("fragment".into()),
+                targets: vec![Some(ColorTargetState {
+                    format: HDR_FORMAT,
+                    blend: Some(BlendState {
+                        color: blend,
+                        alpha: blend,
+                    }),
+                    write_mask: ColorWrites::ALL,
+                })],
+                ..default()
+            }),
+            primitive: PrimitiveState {
+                cull_mode: None,
+                ..default()
+            },
+            depth_stencil: Some(DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(CompareFunction::GreaterEqual),
+                stencil: default(),
+                bias: default(),
+            }),
+            multisample: MultisampleState {
+                count: record.msaa_samples,
+                ..default()
+            },
+            ..default()
         });
         let root = &record.sky.cloud_root;
         // Makeskystuffvisible recenters this root at the sky camera before culling.
@@ -132,60 +130,52 @@ impl CloudPass {
         );
         let mut distances = [0.; 2];
         let mut models = [Mat4::IDENTITY; 2];
-        let bindings = std::array::from_fn(|_| {
-            std::array::from_fn(|index| {
-                let cloud = &record.sky.clouds[index];
-                let pose = &cloud.transform;
-                let model = root_matrix
-                    * Mat4::from_scale_rotation_translation(
-                        Vec3::from_array(pose.scale),
-                        Quat::from_array(pose.rotation),
-                        Vec3::from_array(pose.translation),
-                    );
-                models[index] = model;
-                let center =
-                    model.transform_point3(Vec3::from_array(record.sky.cloud_mesh.bounds_center));
-                distances[index] =
-                    -((center.y * center.y + center.x * center.x) + center.z * center.z);
-                let mut uniform = UniformBuffer::from(CloudParams {
-                    world_from_local: model,
-                    clip_from_world: Mat4::IDENTITY,
-                    uv: std::array::from_fn(|slot| {
-                        let texture = &cloud.textures[slot];
-                        Vec4::new(
-                            texture.scale[0],
-                            texture.scale[1],
-                            texture.offset[0],
-                            texture.offset[1],
-                        )
-                    }),
-                    color: Vec4::from_array(cloud.color),
-                    controls: Vec4::new(
-                        cloud.speed,
-                        record.sample.shader_time[0],
-                        cloud.density,
-                        0.,
-                    ),
-                });
-                uniform.write_buffer(device, queue);
-                let t = textures[index];
-                let group = device.create_bind_group(
-                    "source_cloud",
-                    &cache.get_bind_group_layout(&layout),
-                    &BindGroupEntries::sequential((
-                        uniform.binding().unwrap(),
-                        &t[0].texture_view,
-                        &t[0].sampler,
-                        &t[1].texture_view,
-                        &t[1].sampler,
-                        &t[2].texture_view,
-                        &t[2].sampler,
-                        &t[3].texture_view,
-                        &t[3].sampler,
-                    )),
+        let bindings = std::array::from_fn(|index| {
+            let cloud = &record.sky.clouds[index];
+            let pose = &cloud.transform;
+            let model = root_matrix
+                * Mat4::from_scale_rotation_translation(
+                    Vec3::from_array(pose.scale),
+                    Quat::from_array(pose.rotation),
+                    Vec3::from_array(pose.translation),
                 );
-                CloudBinding { uniform, group }
-            })
+            models[index] = model;
+            let center =
+                model.transform_point3(Vec3::from_array(record.sky.cloud_mesh.bounds_center));
+            distances[index] = -((center.y * center.y + center.x * center.x) + center.z * center.z);
+            let mut uniform = UniformBuffer::from(CloudParams {
+                world_from_local: model,
+                clip_from_world: Mat4::IDENTITY,
+                uv: std::array::from_fn(|slot| {
+                    let texture = &cloud.textures[slot];
+                    Vec4::new(
+                        texture.scale[0],
+                        texture.scale[1],
+                        texture.offset[0],
+                        texture.offset[1],
+                    )
+                }),
+                color: Vec4::from_array(cloud.color),
+                controls: Vec4::new(cloud.speed, record.sample.shader_time[0], cloud.density, 0.),
+            });
+            uniform.write_buffer(device, queue);
+            let t = textures[index];
+            let group = device.create_bind_group(
+                "source_cloud",
+                &cache.get_bind_group_layout(&layout),
+                &BindGroupEntries::sequential((
+                    uniform.binding().unwrap(),
+                    &t[0].texture_view,
+                    &t[0].sampler,
+                    &t[1].texture_view,
+                    &t[1].sampler,
+                    &t[2].texture_view,
+                    &t[2].sampler,
+                    &t[3].texture_view,
+                    &t[3].sampler,
+                )),
+            );
+            CloudBinding { uniform, group }
         });
         if distances[0] == distances[1] {
             return Err("Source cloud sort requires distinct startup distances".into());
@@ -196,7 +186,7 @@ impl CloudPass {
             [1, 0]
         };
         Ok(Self {
-            pipelines,
+            pipeline,
             bindings,
             models,
             order,
@@ -205,14 +195,11 @@ impl CloudPass {
         })
     }
     pub fn ready(&self, cache: &PipelineCache) -> bool {
-        self.pipelines
-            .iter()
-            .all(|id| cache.get_render_pipeline(*id).is_some())
+        cache.get_render_pipeline(self.pipeline).is_some()
     }
     /// Encode after the procedural sky into the same source MSAA attachments.
     pub fn encode(
         &self,
-        view: usize,
         encoder: &mut CommandEncoder,
         cache: &PipelineCache,
         allocator: &MeshAllocator,
@@ -220,8 +207,7 @@ impl CloudPass {
         resolve: Option<&TextureView>,
         depth: &TextureView,
     ) -> bool {
-        let Some(pipeline) = cache.get_render_pipeline(self.pipelines[usize::from(view != 0)])
-        else {
+        let Some(pipeline) = cache.get_render_pipeline(self.pipeline) else {
             return false;
         };
         let Some(vertices) = allocator.mesh_vertex_slice(&self.mesh) else {
@@ -252,7 +238,7 @@ impl CloudPass {
         pass.set_pipeline(pipeline);
         pass.set_vertex_buffer(0, *vertices.buffer.slice(..));
         for index in self.order {
-            pass.set_bind_group(0, &self.bindings[view][index].group, &[]);
+            pass.set_bind_group(0, &self.bindings[index].group, &[]);
             pass.draw(
                 vertices.range.start..vertices.range.start + self.vertices,
                 0..1,
@@ -276,20 +262,18 @@ pub fn prepare_clouds(
 ) {
     if let Some(pass) = existing {
         use bevy::shader::ShaderCacheError;
-        for pipeline in pass.pipelines {
-            match cache.get_render_pipeline_state(pipeline) {
-                CachedPipelineState::Err(
-                    ShaderCacheError::ShaderNotLoaded(_)
-                    | ShaderCacheError::ShaderImportNotYetAvailable,
-                ) => {}
-                CachedPipelineState::Err(error) => {
-                    *status.0.lock().expect("source lighting status lock") =
-                        super::materials::RenderingState::Failed(format!(
-                            "Source cloud pipeline: {error}"
-                        ));
-                }
-                _ => {}
+        match cache.get_render_pipeline_state(pass.pipeline) {
+            CachedPipelineState::Err(
+                ShaderCacheError::ShaderNotLoaded(_)
+                | ShaderCacheError::ShaderImportNotYetAvailable,
+            ) => {}
+            CachedPipelineState::Err(error) => {
+                *status.0.lock().expect("source lighting status lock") =
+                    super::materials::RenderingState::Failed(format!(
+                        "Source cloud pipeline: {error}"
+                    ));
             }
+            _ => {}
         }
         return;
     }
@@ -347,14 +331,13 @@ pub fn prepare_clouds(
 impl CloudPass {
     pub fn write_live(
         &mut self,
-        view: usize,
         position: Vec3,
         clip_from_world: Mat4,
         scene: &super::lighting_scene::SceneLighting,
         device: &RenderDevice,
         queue: &RenderQueue,
     ) {
-        for (index, binding) in self.bindings[view].iter_mut().enumerate() {
+        for (index, binding) in self.bindings.iter_mut().enumerate() {
             let value = binding.uniform.get_mut();
             value.world_from_local = Mat4::from_translation(position) * self.models[index];
             value.clip_from_world = clip_from_world;

@@ -21,10 +21,9 @@ use bevy::{ecs as bevy_ecs, prelude::*};
 
 pub const STACK_VIEWS: usize = 3;
 pub const PROBE_START: usize = STACK_VIEWS;
-pub const MIRROR_START: usize = PROBE_START + 6;
-pub const VIEW_COUNT: usize = MIRROR_START + 3;
+pub const VIEW_COUNT: usize = PROBE_START + 6;
 
-/// Stack views precede six probe faces and three optional mirror captures.
+/// Stack views precede six probe faces.
 /// Shadow values come from each view's source fit and collector preparation.
 #[derive(Component, Clone, Copy)]
 pub struct SourceSurfaceView {
@@ -147,9 +146,6 @@ pub fn prepare_views(
         Some(d),
         Some(e),
         Some(f),
-        _,
-        _,
-        _,
     ] = extents
     else {
         return;
@@ -162,15 +158,6 @@ pub fn prepare_views(
     {
         *status.0.lock().unwrap() =
             RenderingState::Failed("Source surface view extents disagree".into());
-        return;
-    }
-    if extents[MIRROR_START..]
-        .iter()
-        .flatten()
-        .any(|size| *size != UVec2::splat(256))
-    {
-        *status.0.lock().unwrap() =
-            RenderingState::Failed("Source mirror extent is invalid".into());
         return;
     }
     let needs_targets = existing.as_ref().is_none_or(|value| {
@@ -254,7 +241,7 @@ pub fn prepare_views(
             continue;
         }
         let cubes = std::array::from_fn(|index| {
-            if source.index < PROBE_START || source.index >= MIRROR_START {
+            if source.index < PROBE_START {
                 &resources.probes[index].published_view
             } else {
                 &resources.probes[index].capture_sample_view

@@ -1,5 +1,4 @@
 //! Compile admitted material variants before collision and visual publication.
-use crate::mirrors::capture::{GeneratedProof, SourceProof, TICKET_PIPELINES, proof_capacity};
 use crate::world::renderer_pending::{
     PIPELINE_BATCH_KEYS, PIPELINE_DIAGNOSTIC_BYTES, PipelineAccounting, PipelineBufferGrowth,
     PipelineContinuation, PipelineOperation, pipeline_diagnostic, pipeline_pair_ready,
@@ -29,9 +28,8 @@ use bevy::{
     },
     shader::ShaderCacheError,
 };
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
-const _: () = assert!(TICKET_PIPELINES == PIPELINE_BATCH_KEYS);
 fn arc_bytes<T>() -> usize {
     std::alloc::Layout::new::<[usize; 2]>()
         .extend(std::alloc::Layout::new::<T>())
@@ -91,7 +89,6 @@ pub struct WorldPipelines {
     accounting: PipelineAccounting,
     cache_reserved: bool,
     session: u64,
-    capture_proof: Option<Arc<Mutex<GeneratedProof>>>,
 }
 #[derive(Resource, Clone, ExtractResource, Default)]
 pub struct CandidatePipelines(
@@ -162,77 +159,6 @@ impl WorldPipelines {
         }
         Ok(())
     }
-    pub(crate) fn session(&self) -> u64 {
-        self.session
-    }
-    pub(crate) fn capture_proof(&self) -> Option<MutexGuard<'_, GeneratedProof>> {
-        self.capture_proof
-            .as_ref()
-            .map(|proof| proof.lock().unwrap())
-    }
-    pub(crate) fn refresh_capture_proof(
-        &self,
-        owners: &super::super::pipeline_ownership::PipelineOwners,
-    ) {
-        let Some(bank) = &self.jobs else {
-            return;
-        };
-        let bank = bank.lock().unwrap();
-        let Some(mut proof) = self.capture_proof() else {
-            return;
-        };
-        proof.ids.clear();
-        for ticket in bank.pairs.iter() {
-            let job = ticket.0.lock().unwrap();
-            proof.include_ticket(
-                self.session,
-                job.session,
-                job.state == RenderingState::Ready,
-                pipeline_pair_ready(&job.physical, job.spill),
-                Arc::strong_count(&ticket.0) > 1,
-                job.ids.iter().map(|id| {
-                    let owner = owners.owner(*id);
-                    SourceProof {
-                        id: id.id(),
-                        isolated: owner.as_ref().is_some_and(|o| o.isolated()),
-                        cancelled: owner.as_ref().is_some_and(|o| o.cancelled()),
-                    }
-                }),
-            );
-        }
-        proof.finish();
-    }
-    // Only the first terminal mirror failure requests this diagnostic.
-    pub(crate) fn write_capture_context(
-        &self,
-        id: CachedRenderPipelineId,
-        out: &mut impl std::fmt::Write,
-    ) {
-        let Some(bank) = &self.jobs else {
-            let _ = out.write_str("absent");
-            return;
-        };
-        let bank = bank.lock().unwrap();
-        for ticket in &bank.pairs {
-            let job = ticket.0.lock().unwrap();
-            if !job.ids.contains(&id) {
-                continue;
-            }
-            let _ = write!(
-                out,
-                "session={} state={:?} receipt={} live={} material={} mesh={:?} material_id={:?}",
-                job.session,
-                job.state,
-                job.physical.completed(),
-                Arc::strong_count(&ticket.0) > 1,
-                job.material_type,
-                job.mesh,
-                job.material
-            );
-            return;
-        }
-        let _ = out.write_str("absent");
-    }
     pub fn owns(&self, id: CachedRenderPipelineId) -> bool {
         self.jobs.as_ref().is_some_and(|bank| {
             bank.lock()
@@ -286,7 +212,7 @@ impl WorldPipelines {
         if let Some(parent) = parent.as_ref() {
             parent.validate(stream)?;
         }
-        // This local Arc adds no allocation. It keeps the bank lock order bank -> proof -> pair.
+        // This local Arc adds no allocation. It keeps the bank lock order bank -> pair.
         let mut shared = self.jobs.clone();
         let mut guard = shared.as_ref().map(|bank| bank.lock().unwrap());
         let append = guard.as_ref().and_then(|bank| {
@@ -321,19 +247,9 @@ impl WorldPipelines {
         let batch_capacity = batch_growth_plan.capacity;
         let pair_growth = pair_growth_plan.admitted;
         let batch_growth = batch_growth_plan.admitted;
-        let old_proof_capacity = self.capture_proof().map_or(0, |proof| proof.ids.capacity());
-        let proof_capacity = proof_capacity(old_proof_capacity, pair_len + 1);
-        let proof_growth =
-            usize::from(proof_capacity != old_proof_capacity) * proof_capacity * size_of::<usize>();
         let cpu = ticket_bytes()
             + pair_growth
             + batch_growth
-            + proof_growth
-            + if self.capture_proof.is_none() {
-                arc_bytes::<Mutex<GeneratedProof>>()
-            } else {
-                0
-            }
             + if shared.is_none() {
                 arc_bytes::<Mutex<PipelineBank>>()
             } else {
@@ -388,18 +304,8 @@ impl WorldPipelines {
             grow(&mut bank.batches, batch_capacity);
             released += batch_growth_plan.released;
         }
-        if proof_growth != 0 {
-            let ids = Vec::with_capacity(proof_capacity);
-            assert_eq!(ids.capacity(), proof_capacity);
-            if let Some(proof) = &self.capture_proof {
-                proof.lock().unwrap().ids = ids;
-            } else {
-                self.capture_proof = Some(Arc::new(Mutex::new(GeneratedProof { ids })));
-            }
-            released += old_proof_capacity * size_of::<usize>();
-        }
-        let ids = Vec::with_capacity(TICKET_PIPELINES);
-        assert_eq!(ids.capacity(), TICKET_PIPELINES);
+        let ids = Vec::with_capacity(PIPELINE_BATCH_KEYS);
+        assert_eq!(ids.capacity(), PIPELINE_BATCH_KEYS);
         let ticket = PipelineTicket(Arc::new(Mutex::new(PipelineJob {
             physical: operation.physical.clone(),
             session: stream.frame().request.session,
@@ -484,7 +390,7 @@ fn grow<T>(buffer: &mut Vec<T>, capacity: usize) {
 }
 fn ticket_bytes() -> usize {
     arc_bytes::<Mutex<PipelineJob>>()
-        + TICKET_PIPELINES * size_of::<CachedRenderPipelineId>()
+        + PIPELINE_BATCH_KEYS * size_of::<CachedRenderPipelineId>()
         + PIPELINE_DIAGNOSTIC_BYTES
 }
 

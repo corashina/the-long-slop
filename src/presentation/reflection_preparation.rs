@@ -1,8 +1,5 @@
 //! Opt-in CPU measurements. Disabled frames perform no clock reads or allocation.
-use super::{
-    surface_views::{MIRROR_START, PROBE_START},
-    view_frame::SourceViewFrame,
-};
+use super::{surface_views::PROBE_START, view_frame::SourceViewFrame};
 use crate::reference::reflections::ProbeJob;
 use std::sync::{
     Mutex,
@@ -79,13 +76,10 @@ impl Timer {
         }
     }
     pub fn face(&mut self, index: usize) {
-        self.faces += usize::from((PROBE_START..MIRROR_START).contains(&index));
+        self.faces += usize::from(index >= PROBE_START);
     }
     pub fn snapshots(&mut self, frame: &SourceViewFrame) {
-        self.faces = frame.views[PROBE_START..MIRROR_START]
-            .iter()
-            .flatten()
-            .count();
+        self.faces = frame.views[PROBE_START..].iter().flatten().count();
         self.job = if frame.preparation_warmup {
             9
         } else {

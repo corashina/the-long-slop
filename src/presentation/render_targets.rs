@@ -1,5 +1,5 @@
 //! Persistent source render targets. Allocation is restricted to startup or resize.
-use super::surface_views::{MIRROR_START, VIEW_COUNT};
+use super::surface_views::VIEW_COUNT;
 
 use bevy::render::{
     render_resource::*,
@@ -274,7 +274,6 @@ impl SourceViewTargets {
 pub struct SurfaceTargets {
     pub stack: std::sync::Arc<SourceColorTargets>,
     pub capture: std::sync::Arc<SourceColorTargets>,
-    pub mirrors: [std::sync::Arc<SourceColorTargets>; 3],
     pub views: [std::sync::Arc<SourceViewTargets>; VIEW_COUNT],
     pub logical_bytes: u64,
 }
@@ -286,20 +285,12 @@ impl SurfaceTargets {
         let capture_atlas = crate::reference::shadows::source_atlas_size(64, 64).unwrap();
         let stack = Arc::new(SourceColorTargets::new(device, width, height, 8)?);
         let capture = Arc::new(SourceColorTargets::new(device, 64, 64, 1)?);
-        let mirrors = [
-            Arc::new(SourceColorTargets::new(device, 256, 256, 1)?),
-            Arc::new(SourceColorTargets::new(device, 256, 256, 1)?),
-            Arc::new(SourceColorTargets::new(device, 256, 256, 1)?),
-        ];
-        let mirror_atlas = crate::reference::shadows::source_atlas_size(256, 256).unwrap();
         let mut views = Vec::with_capacity(VIEW_COUNT);
         for index in 0..VIEW_COUNT {
             let (color, atlas_size) = if index < 3 {
                 (&stack, atlas)
-            } else if index < MIRROR_START {
-                (&capture, capture_atlas)
             } else {
-                (&mirrors[index - MIRROR_START], mirror_atlas)
+                (&capture, capture_atlas)
             };
             views.push(Arc::new(SourceViewTargets::new(
                 device,
@@ -309,12 +300,10 @@ impl SurfaceTargets {
         }
         let logical_bytes = stack.logical_bytes
             + capture.logical_bytes
-            + mirrors.iter().map(|color| color.logical_bytes).sum::<u64>()
             + views.iter().map(|view| view.logical_bytes).sum::<u64>();
         Ok(Self {
             stack,
             capture,
-            mirrors,
             views: views.try_into().ok().unwrap(),
             logical_bytes,
         })
@@ -336,11 +325,6 @@ impl SurfaceTargets {
         self.stack = stack;
         self.logical_bytes = self.stack.logical_bytes
             + self.capture.logical_bytes
-            + self
-                .mirrors
-                .iter()
-                .map(|color| color.logical_bytes)
-                .sum::<u64>()
             + self
                 .views
                 .iter()

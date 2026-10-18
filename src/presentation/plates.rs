@@ -444,9 +444,7 @@ fn bind(world: &mut World) -> Result<(), String> {
     }
     if !world.resource::<PlateTextStatus>().ready() {
         super::materials::seal_plate_materials(world);
-        if world.resource::<SourceMaterials>().state == RenderingState::Ready
-            && world.resource::<super::mirrors::MirrorGpuStatus>().ready()
-        {
+        if world.resource::<SourceMaterials>().state == RenderingState::Ready {
             world.resource_mut::<PlateTextStatus>().state = RenderingState::Ready;
         }
     }
