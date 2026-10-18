@@ -1,7 +1,8 @@
 # GLES sampler cache results
 
-Date: 2026-10-17. Branch: `codex/gles-sampler-cache`. Keep unmerged.
-Base: `75ebdffa9b1512deff9b4e6fb7bf690a1a182cd5`.
+Measured: 2026-10-17. Sampler commit: `0595ac1` on `codex/gles-sampler-cache`.
+The user requested a local master merge on 2026-10-18. Merge commit: `d4ad2b0`.
+Benchmark base: `75ebdffa9b1512deff9b4e6fb7bf690a1a182cd5`.
 The `codex/opaque-stencil` experiment is excluded.
 
 The cache removes 37.8% of sampler binds in the garage.
@@ -127,12 +128,16 @@ Some repeated sampler calls remain because each pass starts unknown.
 - Both context-loss reloads reach Ready, present frames, and accept controlled walking input.
 - Normal Continue fails Chromium mouse capture in both builds. Normal mouse input remains unverified.
 
-The branch does not change the atlas, save admission, input capture, or rendering quality.
-It remains an isolated sampler experiment with a small measured garage benefit.
+The sampler change does not change the atlas, save admission, input capture, or rendering quality.
+The measurements above cover the sampler change alone. They do not measure the combined master build.
+New native checks, a release build, and runtime acceptance remain pending after integration.
+The manual game session holds the resource window, so this merge did not start another build or test.
 
 ## Evidence and rerun
 
-Raw reports, screenshots, package hashes, and build logs remain in `.cache/sampler-benchmark/` in this worktree.
+Raw reports, screenshots, package hashes, and build logs remain in the original sampler worktree:
+`C:/Users/Corashina/.codex/worktrees/gles-sampler-cache/the-long-drive-wasm/.cache/sampler-benchmark/`.
+The source merge does not copy those ignored files into the primary checkout.
 `reports/summary.json` contains accepted values, rejected samples, and missing evidence.
 `reports/environment.json` records the adapter and toolchain.
 `native-green.log`, `native-red.log`, and `native-green-restored.log` record the backend test checks.
