@@ -1,5 +1,5 @@
 //! Cached source shadow specialization and offscreen mesh queueing.
-use super::surface_views::VIEW_COUNT;
+use super::surface_views::{MIRROR_START, PROBE_START, VIEW_COUNT};
 use super::{
     caster::{CasterPasses, CasterUniform, CasterViews},
     lighting_scene::SourceSceneLighting,
@@ -50,6 +50,8 @@ pub struct ShadowQueues {
     specializations: Vec<CachedSpecialization>,
     queued: [MainEntityHashMap<QueuedShadow>; VIEW_COUNT],
     retained: [Option<RetainedViewEntity>; VIEW_COUNT],
+    // Keep idle face bins out of Bevy's per-frame instance preparation.
+    idle_probe_phases: [Option<BinnedRenderPhase<SourceShadow>>; 6],
     revision: u64,
     pub instances: [[u32; 4]; VIEW_COUNT],
     pub ready: [bool; VIEW_COUNT],
@@ -62,6 +64,7 @@ impl FromWorld for ShadowQueues {
             specializations: Vec::new(),
             queued: std::array::from_fn(|_| MainEntityHashMap::default()),
             retained: [None; VIEW_COUNT],
+            idle_probe_phases: std::array::from_fn(|_| None),
             revision: 0,
             instances: [[0; 4]; VIEW_COUNT],
             ready: [false; VIEW_COUNT],
@@ -144,6 +147,10 @@ fn base_pipeline(
     Ok(Some((base, indexed)))
 }
 pub fn queue(world: &mut World) {
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::Queue,
+        world.resource::<SourceViewFrame>(),
+    );
     world.resource_scope(|world, mut state: Mut<ShadowQueues>| {
         state.ready = [false; VIEW_COUNT];
         state.instances = [[0; 4]; VIEW_COUNT];
@@ -183,15 +190,37 @@ pub fn queue(world: &mut World) {
             let draw = shadow_phase::draw_id(world.resource::<DrawFunctions<SourceShadow>>());
             world.resource_scope(
                 |world, mut phases: Mut<ViewBinnedRenderPhases<SourceShadow>>| {
+                    for index in PROBE_START..MIRROR_START {
+                        if world
+                            .resource::<SourceViewFrame>()
+                            .skip_probe_preparation(index)
+                        {
+                            if let Some(phase) =
+                                state.retained[index].and_then(|retained| phases.remove(&retained))
+                            {
+                                state.idle_probe_phases[index - PROBE_START] = Some(phase);
+                            }
+                        }
+                    }
                     for (index, view) in views.into_iter().enumerate() {
                         let Some((entity, retained, key)) = view else {
                             continue;
                         };
+                        timing.face(index);
                         if state.retained[index] != Some(retained) {
                             if let Some(previous) = state.retained[index].replace(retained) {
                                 phases.remove(&previous);
                             }
                             phases.remove(&retained);
+                            if (PROBE_START..MIRROR_START).contains(&index) {
+                                state.idle_probe_phases[index - PROBE_START] = None;
+                            }
+                        }
+                        if (PROBE_START..MIRROR_START).contains(&index) {
+                            if let Some(phase) = state.idle_probe_phases[index - PROBE_START].take()
+                            {
+                                phases.insert(retained, phase);
+                            }
                         }
                         if !phases.contains_key(&retained) {
                             state.queued[index].clear();
@@ -351,6 +380,10 @@ pub fn write_cascades(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
 ) {
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::Cascades,
+        &frame,
+    );
     if scene.frame == 0 || scene.frame != frame.frame {
         return;
     }
@@ -366,6 +399,10 @@ pub fn write_cascades(
         h(rotation * -Vec3::Z),
     ];
     for (mut view, mut slots) in &mut views {
+        if frame.skip_probe_preparation(view.index) {
+            continue;
+        }
+        timing.face(view.index);
         let Some(fit) = scene.fits[view.index] else {
             view.shadow_fade = Vec4::ZERO;
             view.shadow_fade_center = Vec4::ZERO;

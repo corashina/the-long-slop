@@ -145,7 +145,12 @@ impl SourceTransparentPasses {
     }
 }
 pub(crate) fn prepare_pass_order(
-    mut views: Query<(&ExtractedView, &mut SourceTransparentPasses)>,
+    mut views: Query<(
+        &ExtractedView,
+        &mut SourceTransparentPasses,
+        &super::surface_views::SourceSurfaceView,
+    )>,
+    frame: Res<super::view_frame::SourceViewFrame>,
     phases: Res<ViewSortedRenderPhases<Transparent3d>>,
     metadata: Res<SourceSortIndex>,
     materials: Res<bevy::pbr::RenderMaterialInstances>,
@@ -155,8 +160,12 @@ pub(crate) fn prepare_pass_order(
     particles: Res<super::weather::ExtractedParticles>,
     lighting: Res<super::lighting::ExtractedLighting>,
 ) {
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::Transparent,
+        &frame,
+    );
     if !loading.is_ready() || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
-        for (_, mut order) in &mut views {
+        for (_, mut order, _) in &mut views {
             order.entries.clear();
         }
         return;
@@ -165,8 +174,12 @@ pub(crate) fn prepare_pass_order(
     let base = functions.id::<DrawSourceBase>();
     let add = functions.id::<DrawSourceAdd>();
     let glass = functions.id::<DrawSourceGlass>();
-    for (view, mut order) in &mut views {
+    for (view, mut order, source) in &mut views {
         order.entries.clear();
+        if frame.skip_probe_preparation(source.index) {
+            continue;
+        }
+        timing.face(source.index);
         let capacity = loading.transparent_pass_capacity().unwrap_or(0) + particles.uniforms.len();
         if order.entries.capacity() < capacity {
             order.entries.reserve_exact(capacity);

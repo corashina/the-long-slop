@@ -845,9 +845,7 @@ fn render_sky(
 ) {
     let entity = view.entity();
     let view = view.into_inner();
-    if frame.sky_clip_from_world.is_none()
-        || frame.views[..MIRROR_START].iter().any(Option::is_none)
-    {
+    if frame.sky_clip_from_world.is_none() || !frame.required_views_ready() {
         return;
     }
     let (Some(resources), Some(sky), Some(clouds)) = (resources, sky, clouds) else {
