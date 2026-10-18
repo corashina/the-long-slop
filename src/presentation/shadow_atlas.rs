@@ -10,7 +10,7 @@ use super::{
 };
 use bevy::prelude::*;
 use bevy::render::{
-    render_phase::ViewSortedRenderPhases,
+    render_phase::ViewBinnedRenderPhases,
     render_resource::*,
     renderer::{RenderContext, ViewQuery},
     view::ExtractedView,
@@ -29,17 +29,6 @@ pub fn tile_rect(atlas_size: u32, cascade: usize) -> [u32; 4] {
     ]
 }
 
-/// Required item counts precede draw commands, including commands which return Skip.
-fn expected_draws(phase: &bevy::render::render_phase::SortedRenderPhase<SourceShadow>) -> [u32; 4] {
-    let mut counts = [0; 4];
-    for item in phase.items.values() {
-        for (cascade, count) in counts.iter_mut().enumerate() {
-            *count += u32::from(item.split_mask & (1 << cascade) != 0);
-        }
-    }
-    counts
-}
-
 pub fn render_atlas(
     world: &World,
     view: ViewQuery<(
@@ -48,7 +37,7 @@ pub fn render_atlas(
         &ShadowDrawState,
         &SourceSurfaceView,
     )>,
-    phases: Res<ViewSortedRenderPhases<SourceShadow>>,
+    phases: Res<ViewBinnedRenderPhases<SourceShadow>>,
     cache: Res<PipelineCache>,
     frame: Res<SourceViewFrame>,
     queues: Res<ShadowQueues>,
@@ -72,13 +61,13 @@ pub fn render_atlas(
     };
     // Pipeline preparation is asynchronous. No partial atlas can be published.
     if phase
-        .items
-        .values()
-        .any(|item| cache.get_render_pipeline(item.pipeline).is_none())
+        .batchable_meshes
+        .keys()
+        .chain(phase.unbatchable_meshes.keys())
+        .any(|(key, _)| cache.get_render_pipeline(key.pipeline).is_none())
     {
         return;
     }
-    let expected = expected_draws(phase);
     state.begin();
     let mut pass = context.begin_tracked_render_pass(RenderPassDescriptor {
         label: Some("source_shadow_atlas"),
@@ -106,9 +95,14 @@ pub fn render_atlas(
     }
     drop(pass);
     let (epoch, attempted, issued) = state.counts();
-    if expected != attempted || expected != issued {
+    let instances = state.instance_counts();
+    if attempted != issued
+        || instances[0] != queues.instances[source.index]
+        || instances[1] != queues.instances[source.index]
+    {
         *status.0.lock().unwrap() = RenderingState::Failed(format!(
-            "Source shadow atlas skipped draw at epoch{epoch}: expected{expected:?}, attempted{attempted:?}, issued{issued:?}"
+            "Source shadow atlas skipped draw at epoch{epoch}: attempted{attempted:?}, issued{issued:?}, instances{instances:?}, required{:?}",
+            queues.instances[source.index]
         ));
         return;
     }

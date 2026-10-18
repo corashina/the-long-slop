@@ -6,25 +6,33 @@ use bevy::pbr::{DrawMesh, SetMeshBindGroup};
 use bevy::prelude::*;
 use bevy::render::{
     render_phase::*, render_resource::CachedRenderPipelineId, sync_world::MainEntity,
-    view::ExtractedView,
 };
 use std::{
     ops::Range,
     sync::atomic::{AtomicU32, Ordering},
 };
 
-/// One item retains all four recovered split bits. Batching cannot merge different masks.
-pub struct SourceShadow {
-    pub entity: (Entity, MainEntity),
+/// All members use the same draw state and recovered cascade membership.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ShadowBatchKey {
     pub pipeline: CachedRenderPipelineId,
     pub draw: DrawFunctionId,
+    pub material: bevy::asset::UntypedAssetId,
     pub split_mask: u8,
     pub indexed: bool,
+}
+impl PhaseItemBatchSetKey for ShadowBatchKey {
+    fn indexed(&self) -> bool {
+        self.indexed
+    }
+}
+pub struct SourceShadow {
+    pub entity: (Entity, MainEntity),
+    pub key: ShadowBatchKey,
     pub batch_range: Range<u32>,
     pub extra_index: PhaseItemExtraIndex,
 }
 impl PhaseItem for SourceShadow {
-    const AUTOMATIC_BATCHING: bool = false;
     fn entity(&self) -> Entity {
         self.entity.0
     }
@@ -32,7 +40,7 @@ impl PhaseItem for SourceShadow {
         self.entity.1
     }
     fn draw_function(&self) -> DrawFunctionId {
-        self.draw
+        self.key.draw
     }
     fn batch_range(&self) -> &Range<u32> {
         &self.batch_range
@@ -49,21 +57,25 @@ impl PhaseItem for SourceShadow {
 }
 impl CachedRenderPipelinePhaseItem for SourceShadow {
     fn cached_pipeline(&self) -> CachedRenderPipelineId {
-        self.pipeline
+        self.key.pipeline
     }
 }
-impl SortedPhaseItem for SourceShadow {
-    type SortKey = ();
-    fn sort_key(&self) {}
-    fn sort(_: &mut indexmap::IndexMap<(Entity, MainEntity), Self, bevy::ecs::entity::EntityHash>) {
-    }
-    fn recalculate_sort_keys(
-        _: &mut indexmap::IndexMap<(Entity, MainEntity), Self, bevy::ecs::entity::EntityHash>,
-        _: &ExtractedView,
-    ) {
-    }
-    fn indexed(&self) -> bool {
-        self.indexed
+impl BinnedPhaseItem for SourceShadow {
+    type BatchSetKey = ShadowBatchKey;
+    type BinKey = bevy::asset::AssetId<Mesh>;
+    fn new(
+        key: ShadowBatchKey,
+        _: Self::BinKey,
+        entity: (Entity, MainEntity),
+        batch_range: Range<u32>,
+        extra_index: PhaseItemExtraIndex,
+    ) -> Self {
+        Self {
+            entity,
+            key,
+            batch_range,
+            extra_index,
+        }
     }
 }
 
@@ -75,6 +87,8 @@ pub struct ShadowDrawState {
     epoch: AtomicU32,
     attempts: [AtomicU32; 4],
     successes: [AtomicU32; 4],
+    instance_attempts: [AtomicU32; 4],
+    instance_successes: [AtomicU32; 4],
 }
 impl ShadowDrawState {
     pub fn encoded_frame(&self) -> u32 {
@@ -86,13 +100,29 @@ impl ShadowDrawState {
     pub fn begin(&self) {
         self.encoded_frame.store(0, Ordering::Release);
         self.epoch.fetch_add(1, Ordering::Relaxed);
-        for count in self.attempts.iter().chain(self.successes.iter()) {
+        for count in self
+            .attempts
+            .iter()
+            .chain(self.successes.iter())
+            .chain(self.instance_attempts.iter())
+            .chain(self.instance_successes.iter())
+        {
             count.store(0, Ordering::Relaxed);
         }
     }
     pub fn select(&self, cascade: usize) {
         assert!(cascade < 4);
         self.cascade.store(cascade as u32, Ordering::Relaxed);
+    }
+    pub fn instance_counts(&self) -> [[u32; 4]; 2] {
+        [
+            self.instance_attempts
+                .each_ref()
+                .map(|v| v.load(Ordering::Relaxed)),
+            self.instance_successes
+                .each_ref()
+                .map(|v| v.load(Ordering::Relaxed)),
+        ]
     }
     pub fn counts(&self) -> (u32, [u32; 4], [u32; 4]) {
         (
@@ -115,13 +145,8 @@ impl RenderCommand<SourceShadow> for SelectCaster {
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let cascade = state.cascade.load(Ordering::Relaxed) as usize;
-        if item.split_mask & (1 << cascade) == 0 {
+        if item.key.split_mask & (1 << cascade) == 0 {
             return RenderCommandResult::Skip;
-        }
-        if item.batch_range.end != item.batch_range.start + 1 {
-            return RenderCommandResult::Failure(
-                "Source shadow requires one prepared mesh instance",
-            );
         }
         pass.set_bind_group(1, views.binding(cascade + 1), &[]);
         RenderCommandResult::Success
@@ -133,7 +158,7 @@ impl<const DONE: bool> RenderCommand<SourceShadow> for MarkDraw<DONE> {
     type ViewQuery = &'static ShadowDrawState;
     type ItemQuery = ();
     fn render<'w>(
-        _: &SourceShadow,
+        item: &SourceShadow,
         state: ROQueryItem<'w, '_, Self::ViewQuery>,
         _: Option<()>,
         _: SystemParamItem<'w, '_, Self::Param>,
@@ -146,6 +171,15 @@ impl<const DONE: bool> RenderCommand<SourceShadow> for MarkDraw<DONE> {
             &state.attempts
         };
         counts[index].fetch_add(1, Ordering::Relaxed);
+        let instances = if DONE {
+            &state.instance_successes
+        } else {
+            &state.instance_attempts
+        };
+        instances[index].fetch_add(
+            item.batch_range.end - item.batch_range.start,
+            Ordering::Relaxed,
+        );
         RenderCommandResult::Success
     }
 }
@@ -159,27 +193,6 @@ type DrawSourceShadow = (
     DrawMesh,
     MarkDraw<true>,
 );
-
-/// Call during loading for each source view. This bound covers all possible source caster primitives.
-pub fn reserved_phase(maximum_items: usize) -> SortedRenderPhase<SourceShadow> {
-    let mut phase = SortedRenderPhase::default();
-    phase.items.reserve(maximum_items);
-    phase
-}
-/// Capacity failures are explicit. Hull changes never grow the queue during rendering.
-pub fn add_candidate(
-    phase: &mut SortedRenderPhase<SourceShadow>,
-    item: SourceShadow,
-) -> Result<(), &'static str> {
-    if phase.items.len() == phase.items.capacity() && !phase.items.contains_key(&item.entity) {
-        return Err("Source shadow queue capacity was exceeded");
-    }
-    if item.split_mask & !15 != 0 {
-        return Err("Source shadow split mask has unsupported bits");
-    }
-    phase.add_retained(item);
-    Ok(())
-}
 
 /// Register once during renderer setup; draw-table entries remain unchanged during frames.
 pub fn register(app: &mut SubApp) {
