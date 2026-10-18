@@ -1055,16 +1055,13 @@ impl SourceContents {
         self.active
             .iter()
             .find(|c| &c.content.placement.id == id)
-            .map_or_else(
-                || self.cursor_appearance(id),
-                |c| c.content.appearance.as_slice(),
-            )
-    }
-    pub fn cursor_appearance(&self, id: &GeneratedId) -> &[super::NodeAppearance] {
-        self.cursors
-            .iter()
-            .find(|c| &c.parent.id == id)
-            .and_then(|c| c.root.as_ref().map(|c| c.appearance.as_slice()))
+            .map(|c| c.content.appearance.as_slice())
+            .or_else(|| {
+                self.cursors
+                    .iter()
+                    .find(|c| &c.parent.id == id)
+                    .and_then(|c| c.root.as_ref().map(|c| c.appearance.as_slice()))
+            })
             .unwrap_or(&[])
     }
     pub fn contains(&self, id: &GeneratedId) -> bool {

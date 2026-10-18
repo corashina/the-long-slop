@@ -43,7 +43,6 @@ pub(crate) mod renderer_pending;
 pub(crate) mod stream;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod upload_receipt;
-pub use stream::content_index::ContentIndex;
 pub use stream::{
     PresentationAllocation, PublishedSupply, PublishedSurface, SurfaceKey, WorldFrame,
     WorldRequest, WorldStream,

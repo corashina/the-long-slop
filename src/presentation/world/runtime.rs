@@ -101,8 +101,7 @@ impl WorldPresentation<'_, '_> {
     ) -> Result<(), ReferenceError> {
         let started = crate::browser::game_now();
         loop {
-            // Gameplay runs one step, so it skips the metrics walk.
-            let before = (budget_ms > 0.).then(|| stream.metrics());
+            let before = stream.metrics();
             let remaining = (budget_ms - (crate::browser::game_now() - started)).max(0.);
             self.prepare_step(
                 stream,
@@ -118,9 +117,10 @@ impl WorldPresentation<'_, '_> {
                 required_views,
                 remaining,
             )?;
-            if before.is_none_or(|before| {
-                crate::browser::game_now() - started >= budget_ms || before == stream.metrics()
-            }) {
+            if budget_ms <= 0.
+                || crate::browser::game_now() - started >= budget_ms
+                || before == stream.metrics()
+            {
                 return Ok(());
             }
         }
