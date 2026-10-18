@@ -650,7 +650,10 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
             }
         }
     }
-    if source.state != lighting::RenderingState::Ready
+    if !world
+        .resource::<super::fixed_assets::SourceFixedAssets>()
+        .payloads_ready()
+        || source.state != lighting::RenderingState::Ready
         || !source.materials_ready
         || source.warming
         || source.road_lamps.recipe.is_none()
@@ -674,9 +677,7 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
         }
     }
     for (_, path, handle) in &source.textures {
-        if !server.is_loaded_with_dependencies(handle.id())
-            || !world.resource::<Assets<Image>>().contains(handle.id())
-        {
+        if !world.resource::<Assets<Image>>().contains(handle.id()) {
             return Err(fail(path.clone()));
         }
     }
