@@ -6,7 +6,6 @@ use crate::{
         self, RenderingState, SourceMaterial, SourceMaterials,
         grass::{GrassView, material::GrassMaterial},
         impostor::ImpostorMaterial,
-        lod::{LodCaster, LodCasterMaterial},
         specular::SpecularMaterial,
     },
     reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
@@ -24,7 +23,6 @@ pub enum InstanceMaterial {
 pub struct RendererMaterial {
     pub visible: InstanceMaterial,
     pub sort: Option<crate::presentation::transparent::SourceSortData>,
-    pub caster: Option<Handle<LodCasterMaterial>>,
 }
 #[derive(SystemParam)]
 pub struct InstanceMaterials<'w> {
@@ -33,7 +31,6 @@ pub struct InstanceMaterials<'w> {
     pub specular: ResMut<'w, Assets<SpecularMaterial>>,
     pub impostors: ResMut<'w, Assets<ImpostorMaterial>>,
     pub grass: ResMut<'w, Assets<GrassMaterial>>,
-    pub casters: ResMut<'w, Assets<LodCasterMaterial>>,
 }
 impl InstanceMaterials<'_> {
     pub fn admit(
@@ -134,13 +131,11 @@ impl InstanceMaterials<'_> {
         selected: Option<&crate::reference::SourceId>,
         layer: u8,
         receive: bool,
-        shadow_mode: u8,
         reflected: bool,
         source_position: Vec3,
         view: GrassView,
     ) -> Result<Option<RendererMaterial>, ReferenceError> {
         let mask = 1u32 << layer;
-        let mut caster = None;
         let mut sort = None;
         let visible = if initial.is_none() && (selected.is_some() || primitive.has_source_material)
         {
@@ -177,26 +172,6 @@ impl InstanceMaterials<'_> {
                         mask,
                         reflected,
                     )?;
-                    if shadow_mode != 0 {
-                        caster = Some(self.casters.add(LodCasterMaterial::new(
-                            bevy::pbr::ExtendedMaterial {
-                                base: StandardMaterial {
-                                    cull_mode: if shadow_mode == 2 {
-                                        None
-                                    } else {
-                                        Some(if reflected {
-                                            bevy::render::render_resource::Face::Front
-                                        } else {
-                                            bevy::render::render_resource::Face::Back
-                                        })
-                                    },
-                                    ..default()
-                                },
-                                extension: LodCaster { fade: Vec4::X },
-                            },
-                            self.cache.preparation.clone(),
-                        )));
-                    }
                     InstanceMaterial::Specular(self.specular.add(material))
                 }
                 name => {
@@ -219,26 +194,6 @@ impl InstanceMaterials<'_> {
             sort = self
                 .cache
                 .sort_data(identity, renderer, primitive.submesh)?;
-            if shadow_mode != 0 {
-                let mut base = materials::authored_caster_material(identity, &self.cache);
-                if shadow_mode == 2 {
-                    base.cull_mode = None;
-                } else if reflected {
-                    base.cull_mode = base.cull_mode.map(|face| match face {
-                        bevy::render::render_resource::Face::Back => {
-                            bevy::render::render_resource::Face::Front
-                        }
-                        _ => bevy::render::render_resource::Face::Back,
-                    });
-                }
-                caster = Some(self.casters.add(LodCasterMaterial::new(
-                    bevy::pbr::ExtendedMaterial {
-                        base,
-                        extension: LodCaster { fade: Vec4::X },
-                    },
-                    self.cache.preparation.clone(),
-                )));
-            }
             InstanceMaterial::Primary(self.primary.add(materials::authored_material(
                 identity,
                 reflected,
@@ -260,11 +215,7 @@ impl InstanceMaterials<'_> {
                 self.grass.get_mut(h).unwrap().preparation = self.cache.preparation.clone()
             }
         }
-        Ok(Some(RendererMaterial {
-            visible,
-            sort,
-            caster,
-        }))
+        Ok(Some(RendererMaterial { visible, sort }))
     }
     pub fn color(
         &mut self,
@@ -316,11 +267,6 @@ impl InstanceMaterials<'_> {
                 }
             }
         }
-        if let Some(h) = &binding.caster {
-            if let Some(mut m) = self.casters.get_mut(h) {
-                m.extension.fade.x = fade;
-            }
-        }
     }
     pub fn release(&mut self, binding: RendererMaterial) {
         match binding.visible {
@@ -336,9 +282,6 @@ impl InstanceMaterials<'_> {
             InstanceMaterial::Grass(h) => {
                 self.grass.remove(h.id());
             }
-        }
-        if let Some(h) = binding.caster {
-            self.casters.remove(h.id());
         }
     }
 }

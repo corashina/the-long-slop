@@ -2,8 +2,7 @@
 use super::{SourceWorldVisuals, SurfaceMaterial, prototypes::SourcePrototypes};
 use crate::{
     presentation::materials::{
-        SourceMaterial, SourceMaterials, authored_caster_material, authored_material,
-        terrain::TerrainMaterial,
+        SourceMaterial, SourceMaterials, authored_material, terrain::TerrainMaterial,
     },
     reference::{ReferenceError, ReferenceManifest, WorldValue},
     world::WorldStream,
@@ -34,7 +33,6 @@ impl SourceWorldVisuals {
         cache: &mut SourceMaterials,
         materials: &mut Assets<SourceMaterial>,
         terrain: &mut Assets<TerrainMaterial>,
-        casters: &mut Assets<crate::presentation::materials::lod::SurfaceCasterMaterial>,
     ) -> Result<(), ReferenceError> {
         for source in &reference.world.road.prototypes {
             if !stream.road_prototype_required(source) {
@@ -140,21 +138,12 @@ impl SourceWorldVisuals {
                         cache.handles.insert(key, handle.clone());
                         handle
                     };
-                    let caster = (shadow_mode != 0).then(|| {
-                        casters.add(
-                            crate::presentation::materials::lod::SurfaceCasterMaterial::new(
-                                authored_caster_material((key.0, key.1), cache),
-                                cache.preparation.clone(),
-                            ),
-                        )
-                    });
                     bindings.push(SurfaceMaterial {
                         renderer: extras
                             .source_renderer
                             .clone()
                             .ok_or_else(|| ReferenceError("Missing road renderer record".into()))?,
                         material,
-                        caster,
                         layer,
                         shadow_mode,
                         receive_shadows,
@@ -191,18 +180,7 @@ impl SourceWorldVisuals {
                 receive,
             )?);
             terrain.get_mut(&material).unwrap().preparation = cache.preparation.clone();
-            let caster = (shadow_mode != 0).then(|| {
-                casters.add(
-                    crate::presentation::materials::lod::SurfaceCasterMaterial::new(
-                        StandardMaterial {
-                            cull_mode: None,
-                            ..default()
-                        },
-                        cache.preparation.clone(),
-                    ),
-                )
-            });
-            self.bind_terrain(tier, material, layer, shadow_mode, caster);
+            self.bind_terrain(tier, material, layer, shadow_mode);
             stream.bind_prototype(&record.source)?;
         }
         Ok(())

@@ -131,7 +131,7 @@ fn terrain_surface(v:TerrainOutput)->TerrainSurface {
     return TerrainSurface(albedo,normalize(mat3x3(v.tangent,v.bitangent,v.normal)*normal),smoothness);
 }
 
-#import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler, source_shadow}
+#import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler}
 #import source_view_lighting::{lighting, diffuse_sh, direct_attenuation, fog_factor, sun_cookie, sun_cookie_sampler}
 
 
@@ -193,7 +193,7 @@ fn fragment(in:TerrainOutput)->FragmentOutput {
         }
         if lamp.cookie_rect.x > 0.0 {
             var cookie_uv = vec2(0.0);
-            if lamp.direction_kind.w == 0.0 { cookie_uv = local.xy / lamp.shadow.w + lamp.cookie_rect.yz + 0.5; }
+            if lamp.direction_kind.w == 0.0 { cookie_uv = local.xy / lamp.cookie_size + lamp.cookie_rect.yz + 0.5; }
             else {
                 if local.z <= 0.0 { continue; }
                 cookie_uv = local.xy / local.w + 0.5;
@@ -203,7 +203,6 @@ fn fragment(in:TerrainOutput)->FragmentOutput {
             else if lamp.cookie_rect.x == 2.0 { weight *= textureSampleGrad(default_cookie, default_sampler, cookie_uv, dpdx(cookie_uv), dpdy(cookie_uv)).a; }
             else { weight *= textureSampleGrad(cookies, cookie_sampler, cookie_uv, i32(lamp.cookie_rect.w), dpdx(cookie_uv), dpdy(cookie_uv)).a; }
         }
-        if terrain.renderer.x != 0u { weight *= source_shadow(lamp, pbr.world_position.xyz, pbr.world_normal, depth); }
         light += source_brdf(diffuse, specular, smoothness, pbr.N, pbr.V, direction) * lamp.color.rgb * weight;
     }
     var out: FragmentOutput;

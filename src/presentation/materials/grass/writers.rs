@@ -1,11 +1,12 @@
-//! Dedicated source layer18 draw pass, before the accepted shadow atlas and camera passes.
+//! Dedicated source layer18 draw pass, before the camera passes.
 use super::displacement::{GrassCamera, GrassFrameUniform, GrassGpu, GrassGpuData};
 use bevy::{
-    ecs as bevy_ecs,
+    core_pipeline::schedule::RootNonCameraView,
+    ecs::{self as bevy_ecs, schedule::ScheduleLabel},
     mesh::VertexBufferLayout,
     prelude::*,
     render::{
-        Extract, ExtractSchedule, Render, RenderApp, RenderSystems,
+        Extract, ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems,
         render_resource::*,
         renderer::{RenderContext, RenderDevice, RenderQueue},
     },
@@ -88,12 +89,15 @@ impl Plugin for GrassDisplacementPlugin {
                     .chain()
                     .after(crate::presentation::fixed_assets::FixedShaderExtraction),
             )
+            .add_systems(RenderStartup, spawn_pass)
             .add_systems(Render, complete.in_set(RenderSystems::Cleanup))
-            .add_systems(
-                crate::presentation::shadows::SourceShadowPass,
-                draw.before(crate::presentation::shadows::DrawSourceShadows),
-            );
+            .add_systems(GrassWriterPass, draw);
     }
+}
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+struct GrassWriterPass;
+fn spawn_pass(mut commands: Commands) {
+    commands.spawn(RootNonCameraView(GrassWriterPass.intern()));
 }
 fn init(
     mut commands: Commands,

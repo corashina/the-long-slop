@@ -471,7 +471,7 @@ impl PreparedPresentation {
             r.grass.release_all(&mut r.meshes, &mut r.materials.grass);
             r.writers.release_all();
             r.surfaces.retire_session(&mut r.commands, &mut r.meshes);
-            r.surfaces.reset_bindings(&mut r.terrain, &mut r.casters);
+            r.surfaces.reset_bindings(&mut r.terrain);
             r.lights.road_lamps.reset_instances(&mut r.commands);
         }
         self.system.apply(world);
@@ -688,10 +688,10 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
     let authored = world.resource::<Assets<materials::SourceMaterial>>();
     for lamp in &source.lamp_materials {
         for choice in &lamp.choices {
-            choice.validate_assets(authored, standard)?;
+            choice.validate_assets(authored)?;
         }
     }
-    instruments.validate_assets(authored, standard)?;
+    instruments.validate_assets(authored)?;
     for entity in world.iter_entities() {
         // Generated GPU-only surfaces are validated by their pipeline tickets.
         if entity

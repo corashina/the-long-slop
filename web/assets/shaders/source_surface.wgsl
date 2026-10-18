@@ -11,7 +11,7 @@
 
 #import source_view_lighting::{lighting, diffuse_sh, indirect_specular, direct_attenuation, fog_factor, sun_cookie, sun_cookie_sampler}
 
-#import "shaders/source_lighting.wgsl"::{lamp_lighting, source_shadow, receiver, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler}
+#import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler}
 
 struct SourceUniform {
     color: vec4<f32>,
@@ -200,7 +200,7 @@ fn fragment(
         }
         if lamp.cookie_rect.x > 0.0 {
             var cookie_uv = vec2(0.0);
-            if lamp.direction_kind.w == 0.0 { cookie_uv = local.xy / lamp.shadow.w + lamp.cookie_rect.yz + 0.5; }
+            if lamp.direction_kind.w == 0.0 { cookie_uv = local.xy / lamp.cookie_size + lamp.cookie_rect.yz + 0.5; }
             else {
                 if local.z <= 0.0 { continue; }
                 cookie_uv = local.xy / local.w + 0.5;
@@ -213,7 +213,6 @@ fn fragment(
                 weight *= textureSampleGrad(cookies, cookie_sampler, array_uv, i32(lamp.cookie_rect.x) - 3, dpdx(array_uv), dpdy(array_uv)).a;
             }
         }
-        if receive_shadows { weight *= source_shadow(lamp, in.world_position.xyz, pbr.world_normal, view_depth); }
         light += source_brdf(diffuse, specular, smoothness, pbr.N, pbr.V, direction) * lamp.color.rgb * weight;
     }
 

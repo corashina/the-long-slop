@@ -9,7 +9,6 @@ use crate::{
     reference::{LightId, LightKind, LightingRecord},
 };
 use bevy::asset::{LoadState, RenderAssetUsages};
-use bevy::camera::visibility::RenderLayers;
 use bevy::ecs as bevy_ecs;
 use bevy::image::ImageSampler;
 use bevy::prelude::*;
@@ -23,12 +22,7 @@ use bevy::render::{
 use bevy::shader::Shader;
 use std::sync::{Arc, Mutex};
 
-// Separate buffers retain every source shadow face within the 16 KiB binding limit.
 pub const MAX_LIGHTS: usize = 64;
-pub const SHADOW_SLOTS: usize = 289;
-pub const SHADOW_BANK_SIZE: usize = 145;
-pub const ATLAS_SIZE: u32 = 6800;
-pub const TILE_SIZE: u32 = 400;
 #[derive(Clone, Debug, PartialEq)]
 pub enum RenderingState {
     Loading,
@@ -42,14 +36,8 @@ pub struct GpuLight {
     pub direction_kind: Vec4,
     pub color: Vec4,
     pub cookie_rect: Vec4,
-    pub shadow: Vec4,
     pub mask: UVec4,
-}
-#[derive(Clone, Copy, ShaderType, Default)]
-pub struct GpuShadow {
-    pub clip_from_world: Mat4,
-    pub rect: Vec4,
-    pub bias: Vec4,
+    pub cookie_size: f32,
 }
 #[derive(Clone, Copy, ShaderType)]
 pub struct LightingUniform {
@@ -68,30 +56,13 @@ impl Default for LightingUniform {
         }
     }
 }
-#[derive(Clone, Copy, ShaderType)]
-pub struct ShadowUniform<const N: usize> {
-    pub shadows: [GpuShadow; N],
-}
-impl<const N: usize> Default for ShadowUniform<N> {
-    fn default() -> Self {
-        Self {
-            shadows: [GpuShadow::default(); N],
-        }
-    }
-}
+/// Pose holder for one source light. Lamps light receivers but cast no shadows.
 #[derive(Component, Clone, Copy)]
-pub struct SourceLight {
-    pub index: usize,
-    pub shadow_start: usize,
-    pub faces: usize,
-    pub enabled: bool,
-}
+pub struct SourceLight;
 #[derive(Clone)]
 pub struct WorldBoundLight {
     pub record: crate::reference::LightReference,
     pub output: crate::lighting::LightOutput,
-    pub shadow_start: usize,
-    pub faces: usize,
 }
 #[derive(Clone)]
 pub struct BoundLight {
@@ -128,7 +99,7 @@ pub struct SourceLighting {
     pub materials_ready: bool,
     pub materials_prepared: bool,
     pub warming: bool,
-    pub warmups: Vec<(Entity, bool)>,
+    pub warmups: Vec<Entity>,
     pub lamp_materials: Vec<BoundLampMaterial>,
     control_poses: Vec<(usize, Entity)>,
     visibility: Vec<(usize, Entity)>,
@@ -146,7 +117,7 @@ impl SourceLighting {
         use std::mem::size_of;
         self.sky.materials.capacity() * size_of::<Handle<super::sky::SkyMaterial>>()
             + self.materials.capacity() * size_of::<AuthoredMaterial>()
-            + self.warmups.capacity() * size_of::<(Entity, bool)>()
+            + self.warmups.capacity() * size_of::<Entity>()
             + self.lamp_materials.capacity() * size_of::<BoundLampMaterial>()
             + self
                 .lamp_materials
@@ -182,7 +153,6 @@ impl SourceLighting {
             copy.uniform.lights[light.index] = GpuLight::default();
         }
         copy.uniform.counts.x = copy.road_lamps.fixed_lights as u32;
-        copy.uniform.counts.y = copy.road_lamps.fixed_shadows as u32;
         copy
     }
 
@@ -194,7 +164,6 @@ impl SourceLighting {
         }
         self.uniform.lights.fill(GpuLight::default());
         self.uniform.counts.x = 0;
-        self.uniform.counts.y = 0;
         for material in &mut self.lamp_materials {
             material.current = None;
         }
@@ -204,12 +173,6 @@ impl SourceLighting {
 #[derive(Resource)]
 pub struct LightingGpu {
     pub uniform: UniformBuffer<LightingUniform>,
-    pub shadow_a: UniformBuffer<ShadowUniform<SHADOW_BANK_SIZE>>,
-    pub shadow_b: UniformBuffer<ShadowUniform<{ SHADOW_SLOTS - SHADOW_BANK_SIZE }>>,
-    pub atlas: Texture,
-    pub atlas_view: TextureView,
-    pub shadow_sampler: Sampler,
-    pub hard_shadow_sampler: Sampler,
     pub cookie_sampler: Sampler,
     pub cookies: Option<[(TextureView, Sampler); 3]>,
     pub attenuation_view: TextureView,
@@ -223,7 +186,7 @@ pub(crate) struct ExtractedLighting {
     sky_shader: Option<AssetId<Shader>>,
     prepared: bool,
     warming: bool,
-    warmups: Vec<(bevy::render::sync_world::MainEntity, bool)>,
+    warmups: Vec<bevy::render::sync_world::MainEntity>,
     uniform: LightingUniform,
     cookies: Option<[AssetId<Image>; 3]>,
     status: Option<Arc<Mutex<RenderingState>>>,
@@ -236,44 +199,18 @@ pub(crate) struct LightingPipelineAudit {
     warming: bool,
     source_pipelines: u32,
     sky_pipelines: u32,
-    shadow_pipelines: u32,
     pending_pipelines: u32,
     error_pipelines: u32,
     receiver_warmups: u32,
-    shadow_warmups: u32,
     missing_receiver_warmups: u32,
-    missing_shadow_warmups: u32,
     first_missing_entity: Option<u64>,
-    // 0 = none, 1 = receiver, 2 = shadow caster.
-    first_missing_kind: u8,
-    expected_shadow_views: u32,
-    first_missing_observed_views: u32,
     predicates_ready: bool,
     required_counts_present: bool,
-}
-impl LightingPipelineAudit {
-    fn missing(
-        &mut self,
-        entity: bevy::render::sync_world::MainEntity,
-        shadow: bool,
-        observed: usize,
-    ) {
-        if shadow {
-            self.missing_shadow_warmups += 1;
-        } else {
-            self.missing_receiver_warmups += 1;
-        }
-        if self.first_missing_entity.is_none() {
-            self.first_missing_entity = Some(entity.id().to_bits());
-            self.first_missing_kind = if shadow { 2 } else { 1 };
-            self.first_missing_observed_views = observed as u32;
-        }
-    }
 }
 
 impl ExtractedLighting {
     pub(crate) fn is_warmup(&self, entity: bevy::render::sync_world::MainEntity) -> bool {
-        self.warming && self.warmups.iter().any(|(warmup, _)| *warmup == entity)
+        self.warming && self.warmups.contains(&entity)
     }
 }
 
@@ -287,7 +224,6 @@ impl Plugin for SourceLightingPlugin {
             .init_asset_loader::<super::textures::SourceImageLoader>()
             .add_plugins((
                 MaterialPlugin::<SourceMaterial>::default(),
-                super::shadows::SourceShadowPlugin,
                 super::sky::SourceSkyPlugin,
             ))
             .init_resource::<MaterialCache>()
@@ -337,9 +273,6 @@ pub fn load_lighting(commands: &mut Commands, _server: &AssetServer, lighting: &
         shader: default(),
         cookie_handles: None,
         status: Arc::new(Mutex::new(RenderingState::Loading)),
-    });
-    commands.insert_resource(bevy::light::PointLightShadowMap {
-        size: (TILE_SIZE - 2) as usize,
     });
 }
 struct PendingMaterial {
@@ -608,7 +541,6 @@ pub(crate) fn bind_lighting(
             ));
         }
     }
-    let mut shadow_start = 0;
     for (source_index, light) in r.lights.iter().enumerate() {
         if light.node.is_some_and(|id| {
             reference
@@ -620,20 +552,14 @@ pub(crate) fn bind_lighting(
             continue;
         }
         let index = source.lights.len();
-        let faces = if light.shadows.kind == 0 || light.kind == LightKind::Directional {
-            0
-        } else {
-            match light.kind {
-                LightKind::Point => 6,
-                LightKind::Directional => unreachable!("source sun uses its dedicated atlas"),
-                _ => 1,
-            }
-        };
-        if index == MAX_LIGHTS || shadow_start + faces > SHADOW_SLOTS {
-            source.state = RenderingState::Failed(format!(
-                "Light {} exceeds shadow atlas capacity",
-                light.id.0
-            ));
+        if index == MAX_LIGHTS {
+            source.state =
+                RenderingState::Failed(format!("Light {} exceeds light capacity", light.id.0));
+            return;
+        }
+        if light.kind == LightKind::Area {
+            source.state =
+                RenderingState::Failed(format!("Light {} has unsupported area type", light.id.0));
             return;
         }
         let node = light.node.and_then(|id| visuals.nodes.get(&id).copied());
@@ -644,57 +570,7 @@ pub(crate) fn bind_lighting(
         }
         let pose = Transform::from_translation(Vec3::from_array(light.pose.translation))
             .with_rotation(Quat::from_array(light.pose.rotation));
-        let mut entity = commands.spawn((
-            SourceLight {
-                index,
-                shadow_start,
-                faces,
-                enabled: light.enabled,
-            },
-            pose,
-            (0..32)
-                .filter(|layer| light.culling_mask & (1u32 << layer) != 0)
-                .flat_map(|layer| [layer, layer + 32])
-                .collect::<RenderLayers>(),
-        ));
-        if source.warming {
-            entity.insert(bevy::camera::visibility::NoFrustumCulling);
-        }
-        match light.kind {
-            LightKind::Directional => {}
-            LightKind::Point => {
-                entity.insert(PointLight {
-                    intensity: 0.,
-                    range: light.range_meters,
-                    shadow_maps_enabled: light.enabled,
-                    shadow_map_near_z: light.shadows.near_plane,
-                    shadow_depth_bias: light.shadows.bias,
-                    shadow_normal_bias: light.shadows.normal_bias,
-                    ..default()
-                });
-            }
-            LightKind::Spot => {
-                entity.insert(SpotLight {
-                    intensity: 0.,
-                    range: light.range_meters,
-                    outer_angle: light.full_cone_degrees.to_radians() * 0.5,
-                    inner_angle: light.inner_cone_degrees.to_radians() * 0.5,
-                    shadow_maps_enabled: light.enabled,
-                    shadow_map_near_z: light.shadows.near_plane,
-                    shadow_depth_bias: light.shadows.bias,
-                    shadow_normal_bias: light.shadows.normal_bias,
-                    ..default()
-                });
-            }
-            LightKind::Area => {
-                source.state = RenderingState::Failed(format!(
-                    "Light {} has unsupported area type",
-                    light.id.0
-                ));
-                return;
-            }
-        }
-        let entity = entity.id();
+        let entity = commands.spawn((SourceLight, pose)).id();
         let mut ancestor = light.node;
         let mut item = None;
         let mut body = None;
@@ -745,12 +621,7 @@ pub(crate) fn bind_lighting(
             0.,
             0.,
         );
-        source.uniform.lights[index].shadow = Vec4::new(
-            shadow_start as f32,
-            faces as f32,
-            light.shadows.strength,
-            light.cookie_size,
-        );
+        source.uniform.lights[index].cookie_size = light.cookie_size;
         source.uniform.lights[index].mask = UVec4::new(
             light.culling_mask,
             if light.kind == LightKind::Spot {
@@ -760,33 +631,14 @@ pub(crate) fn bind_lighting(
             } else {
                 0
             },
-            u32::from(light.shadows.kind),
+            0,
             0,
         );
-        shadow_start += faces;
     }
     source.uniform.counts.x = source.lights.len() as u32;
-    source.uniform.counts.y = shadow_start as u32;
     source.road_lamps.fixed_lights = source.lights.len();
-    source.road_lamps.fixed_shadows = shadow_start;
-    let road = &r.road_lamp;
-    let road_faces: usize = road
-        .lights
-        .iter()
-        .map(|id| {
-            let light = r.lights.iter().find(|l| l.id == *id).unwrap();
-            usize::from(light.shadows.kind != 0)
-        })
-        .sum();
-    source.road_lamps.capacity = (MAX_LIGHTS - source.lights.len()).min(if road_faces == 0 {
-        MAX_LIGHTS
-    } else {
-        (SHADOW_SLOTS - shadow_start) / road_faces
-    });
-    if road.lights.len() != 1
-        || source.lights.len() + source.road_lamps.capacity > MAX_LIGHTS
-        || shadow_start + source.road_lamps.capacity * road_faces > SHADOW_SLOTS
-    {
+    source.road_lamps.capacity = MAX_LIGHTS - source.lights.len();
+    if r.road_lamp.lights.len() != 1 {
         source.state =
             RenderingState::Failed("Source road lamp window exceeds renderer capacity".into());
         return;
@@ -823,13 +675,7 @@ pub(crate) fn sync_lighting(
     drive: Res<Drive>,
     mut source: ResMut<SourceLighting>,
     globals: Query<&GlobalTransform, Without<SourceLight>>,
-    mut lights: Query<(
-        &mut Transform,
-        &mut GlobalTransform,
-        &mut SourceLight,
-        Option<&mut PointLight>,
-        Option<&mut SpotLight>,
-    )>,
+    mut lights: Query<(&mut Transform, &mut GlobalTransform), With<SourceLight>>,
 ) {
     let cycle = drive.runtime.lighting.cycle.output();
     source.uniform.ambient = Vec4::new(
@@ -880,8 +726,7 @@ pub(crate) fn sync_lighting(
         } else {
             &drive.runtime.lighting.light_outputs()[bound.source_index]
         };
-        let Ok((mut pose, mut global, mut marker, point, spot)) = lights.get_mut(bound.entity)
-        else {
+        let Ok((mut pose, mut global)) = lights.get_mut(bound.entity) else {
             continue;
         };
         let mut next_pose = *pose;
@@ -895,21 +740,6 @@ pub(crate) fn sync_lighting(
         }
         pose.set_if_neq(next_pose);
         global.set_if_neq(GlobalTransform::from(next_pose));
-        let enabled = source.warming || (active && output.enabled);
-        if marker.enabled != enabled {
-            marker.enabled = enabled;
-        }
-        let shadows_enabled = enabled && marker.faces > 0;
-        if let Some(mut light) = point {
-            if light.shadow_maps_enabled != shadows_enabled {
-                light.shadow_maps_enabled = shadows_enabled;
-            }
-        }
-        if let Some(mut light) = spot {
-            if light.shadow_maps_enabled != shadows_enabled {
-                light.shadow_maps_enabled = shadows_enabled;
-            }
-        }
         let color = if record.kind == LightKind::Directional {
             cycle.directional_color
         } else {
@@ -1061,12 +891,7 @@ pub(crate) fn lighting_readiness(
     if source.bound && source.materials_prepared && conditions.prepared {
         let state = source.status.lock().unwrap().clone();
         if source.warming && state == RenderingState::Ready {
-            for light in &source.lights {
-                commands
-                    .entity(light.entity)
-                    .remove::<bevy::camera::visibility::NoFrustumCulling>();
-            }
-            for (entity, _) in source.warmups.drain(..) {
+            for entity in source.warmups.drain(..) {
                 commands.entity(entity).despawn();
             }
             super::world::finish_road_lamp_warmup(&mut commands, &mut source);
@@ -1078,41 +903,22 @@ pub(crate) fn lighting_readiness(
 }
 fn init_gpu(mut commands: Commands, device: Res<RenderDevice>, queue: Res<RenderQueue>) {
     let limits = device.limits();
-    let bytes = LightingUniform::min_size()
-        .get()
-        .max(ShadowUniform::<SHADOW_BANK_SIZE>::min_size().get())
-        .max(ShadowUniform::<{ SHADOW_SLOTS - SHADOW_BANK_SIZE }>::min_size().get());
-    let supported = limits.max_texture_dimension_2d >= ATLAS_SIZE
-        && u64::from(limits.max_uniform_buffer_binding_size) >= bytes;
+    let bytes = LightingUniform::min_size().get();
+    let supported = u64::from(limits.max_uniform_buffer_binding_size) >= bytes;
     let state = if supported {
         RenderingState::Loading
     } else {
         RenderingState::Failed(format!(
-            "Source lighting GPU limits: needs {ATLAS_SIZE}px atlas and {bytes}-byte uniform; device has {}px and {} bytes",
-            limits.max_texture_dimension_2d, limits.max_uniform_buffer_binding_size
+            "Source lighting GPU limits: needs {bytes}-byte uniform; device has {} bytes",
+            limits.max_uniform_buffer_binding_size
         ))
     };
     let status = Arc::new(Mutex::new(state));
     capture_gpu_errors(&device, status.clone());
     info!(
-        "Source GPU: {}px texture limit, {}-byte uniform limit; atlas {ATLAS_SIZE}px, uniform {bytes} bytes",
-        limits.max_texture_dimension_2d, limits.max_uniform_buffer_binding_size
+        "Source GPU: {}-byte uniform limit; uniform {bytes} bytes",
+        limits.max_uniform_buffer_binding_size
     );
-    let atlas = device.create_texture(&TextureDescriptor {
-        label: Some("source shadow atlas"),
-        size: Extent3d {
-            width: if supported { ATLAS_SIZE } else { 1 },
-            height: if supported { ATLAS_SIZE } else { 1 },
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: TextureFormat::Depth32Float,
-        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
-    let atlas_view = atlas.create_view(&default());
     let attenuation = device.create_texture_with_data(
         &queue,
         &TextureDescriptor {
@@ -1133,31 +939,11 @@ fn init_gpu(mut commands: Commands, device: Res<RenderDevice>, queue: Res<Render
         &crate::lighting::attenuation_table(),
     );
     let mut uniform = UniformBuffer::default();
-    let mut shadow_a = UniformBuffer::default();
-    let mut shadow_b = UniformBuffer::default();
     if supported {
         uniform.write_buffer(&device, &queue);
-        shadow_a.write_buffer(&device, &queue);
-        shadow_b.write_buffer(&device, &queue);
     }
     commands.insert_resource(LightingGpu {
         uniform,
-        shadow_a,
-        shadow_b,
-        atlas,
-        atlas_view,
-        shadow_sampler: device.create_sampler(&SamplerDescriptor {
-            compare: Some(CompareFunction::GreaterEqual),
-            mag_filter: FilterMode::Linear,
-            min_filter: FilterMode::Linear,
-            ..default()
-        }),
-        hard_shadow_sampler: device.create_sampler(&SamplerDescriptor {
-            compare: Some(CompareFunction::GreaterEqual),
-            mag_filter: FilterMode::Nearest,
-            min_filter: FilterMode::Nearest,
-            ..default()
-        }),
         cookie_sampler: device.create_sampler(&SamplerDescriptor {
             mag_filter: FilterMode::Linear,
             min_filter: FilterMode::Linear,
@@ -1194,7 +980,8 @@ fn extract_lighting(
                 source
                     .warmups
                     .iter()
-                    .map(|(entity, shadow)| ((*entity).into(), *shadow)),
+                    .copied()
+                    .map(bevy::render::sync_world::MainEntity::from),
             );
         } else if !source.warming {
             output.warmups.clear();
@@ -1237,8 +1024,6 @@ fn upload_lighting(
     gpu.sky_shader = extracted.sky_shader;
     gpu.uniform.set(extracted.uniform);
     gpu.uniform.write_buffer(&device, &queue);
-    gpu.shadow_a.write_buffer(&device, &queue);
-    gpu.shadow_b.write_buffer(&device, &queue);
     if gpu.cookies.is_none() {
         if let Some(ids) = extracted.cookies {
             if ids.iter().all(|id| images.get(*id).is_some()) {
@@ -1256,15 +1041,13 @@ fn check_pipelines(
     gpu: Res<LightingGpu>,
     extracted: Res<ExtractedLighting>,
     material_pipelines: Res<bevy::pbr::SpecializedMaterialPipelineCache>,
-    shadows: Res<bevy::pbr::SpecializedShadowMaterialPipelineCache>,
-    mut last: Local<(usize, usize)>,
+    mut last: Local<usize>,
     mut audit: ResMut<LightingPipelineAudit>,
 ) {
     *audit = LightingPipelineAudit {
         cookies: gpu.cookies.is_some(),
         prepared: extracted.prepared,
         warming: extracted.warming,
-        expected_shadow_views: extracted.uniform.counts.y,
         ..default()
     };
     let mut pending_pipelines = 0;
@@ -1272,7 +1055,6 @@ fn check_pipelines(
     let mut ready = gpu.cookies.is_some() && extracted.prepared;
     let mut count = 0;
     let mut sky_count = 0;
-    let mut shadow_count = 0;
     let mut inspect = |state: &CachedPipelineState| match state {
         CachedPipelineState::Ok(_) => {}
         CachedPipelineState::Err(
@@ -1316,66 +1098,47 @@ fn check_pipelines(
             }
         }
     }
-    for view in shadows.values() {
-        for (pipeline, _) in view.values() {
-            shadow_count += 1;
-            inspect(cache.get_render_pipeline_state(*pipeline));
-        }
-    }
     if extracted.warming {
-        for (entity, shadow) in &extracted.warmups {
-            if *shadow {
-                audit.shadow_warmups += 1;
-                let observed = shadows
-                    .values()
-                    .filter(|view| view.contains_key(entity))
-                    .count();
-                if observed != extracted.uniform.counts.y as usize {
-                    ready = false;
-                    audit.missing(*entity, true, observed);
-                }
-            } else {
-                audit.receiver_warmups += 1;
-                let observed = material_pipelines
-                    .values()
-                    .filter(|view| view.contains_key(entity))
-                    .count();
-                if observed == 0 {
-                    ready = false;
-                    audit.missing(*entity, false, observed);
-                }
+        for entity in &extracted.warmups {
+            audit.receiver_warmups += 1;
+            if !material_pipelines
+                .values()
+                .any(|view| view.contains_key(entity))
+            {
+                ready = false;
+                audit.missing_receiver_warmups += 1;
+                audit
+                    .first_missing_entity
+                    .get_or_insert(entity.id().to_bits());
             }
         }
     }
     audit.source_pipelines = count as u32;
     audit.sky_pipelines = sky_count as u32;
-    audit.shadow_pipelines = shadow_count as u32;
     audit.pending_pipelines = pending_pipelines;
     audit.error_pipelines = error_pipelines;
     audit.predicates_ready = ready;
-    audit.required_counts_present = count > 0 && sky_count > 0 && shadow_count > 0;
-    if *last != (count, shadow_count) {
-        info!("Source pipelines: {count} receiver, {shadow_count} shadow draws");
-        *last = (count, shadow_count);
+    audit.required_counts_present = count > 0 && sky_count > 0;
+    if *last != count {
+        info!("Source pipelines: {count} receiver");
+        *last = count;
     }
     if ready
         && count > 0
         && sky_count > 0
-        && shadow_count > 0
         && !matches!(*gpu.status.lock().unwrap(), RenderingState::Failed(_))
     {
         *gpu.status.lock().unwrap() = RenderingState::Ready;
     }
 }
 
-/// Register one source spot in a reserved slot. Shader and atlas allocations remain fixed.
+/// Register one source spot in a reserved slot. Shader allocations remain fixed.
 pub(crate) fn register_road_light(
     source: &mut SourceLighting,
     commands: &mut Commands,
     reference: &LightingRecord,
     slot: usize,
     node: Entity,
-    enabled: bool,
 ) -> Entity {
     let source_index = reference
         .lights
@@ -1384,36 +1147,7 @@ pub(crate) fn register_road_light(
         .unwrap();
     let light = &reference.lights[source_index];
     let index = source.road_lamps.fixed_lights + slot;
-    let shadow_start = source.road_lamps.fixed_shadows + slot;
-    let faces = usize::from(light.shadows.kind != 0);
-    let mut entity = commands.spawn((
-        SourceLight {
-            index,
-            shadow_start,
-            faces,
-            enabled,
-        },
-        Transform::default(),
-        SpotLight {
-            intensity: 0.,
-            range: light.range_meters,
-            outer_angle: light.full_cone_degrees.to_radians() * 0.5,
-            inner_angle: light.inner_cone_degrees.to_radians() * 0.5,
-            shadow_maps_enabled: enabled && faces > 0,
-            shadow_map_near_z: light.shadows.near_plane,
-            shadow_depth_bias: light.shadows.bias,
-            shadow_normal_bias: light.shadows.normal_bias,
-            ..default()
-        },
-        (0..32)
-            .filter(|layer| light.culling_mask & (1u32 << layer) != 0)
-            .flat_map(|layer| [layer, layer + 32])
-            .collect::<RenderLayers>(),
-    ));
-    if source.warming {
-        entity.insert(bevy::camera::visibility::NoFrustumCulling);
-    }
-    let entity = entity.id();
+    let entity = commands.spawn((SourceLight, Transform::default())).id();
     source.lights.push(BoundLight {
         world: None,
         index,
@@ -1430,22 +1164,16 @@ pub(crate) fn register_road_light(
     let half = (a + a) * std::f32::consts::PI;
     source.uniform.lights[index] = GpuLight {
         cookie_rect: Vec4::new(2., 0., 0., 0.),
-        shadow: Vec4::new(
-            shadow_start as f32,
-            faces as f32,
-            light.shadows.strength,
-            light.cookie_size,
-        ),
         mask: UVec4::new(
             light.culling_mask,
             (half.cos() / half.sin()).to_bits(),
-            light.shadows.kind as u32,
+            0,
             0,
         ),
+        cookie_size: light.cookie_size,
         ..default()
     };
     source.uniform.counts.x = source.uniform.counts.x.max(index as u32 + 1);
-    source.uniform.counts.y = source.uniform.counts.y.max((shadow_start + faces) as u32);
     entity
 }
 
@@ -1454,55 +1182,12 @@ pub(crate) fn register_world_light(
     commands: &mut Commands,
     light: &crate::world::WorldLight,
     slot: usize,
-    shadow_start: usize,
     node: Entity,
     enabled: bool,
 ) -> Entity {
     let record = &light.record;
     let index = source.road_lamps.fixed_lights + slot;
-    let faces = if record.shadows.kind == 0 {
-        0
-    } else if record.kind == LightKind::Point {
-        6
-    } else {
-        1
-    };
-    let mut entity = commands.spawn((
-        SourceLight {
-            index,
-            shadow_start,
-            faces,
-            enabled,
-        },
-        Transform::default(),
-        (32..64)
-            .filter(|layer| record.culling_mask & (1 << (layer - 32)) != 0)
-            .collect::<RenderLayers>(),
-    ));
-    if record.kind == LightKind::Point {
-        entity.insert(PointLight {
-            intensity: 0.,
-            range: record.range_meters,
-            shadow_maps_enabled: enabled && faces > 0,
-            shadow_map_near_z: record.shadows.near_plane,
-            shadow_depth_bias: record.shadows.bias,
-            shadow_normal_bias: record.shadows.normal_bias,
-            ..default()
-        });
-    } else {
-        entity.insert(SpotLight {
-            intensity: 0.,
-            range: record.range_meters,
-            outer_angle: record.full_cone_degrees.to_radians() * 0.5,
-            inner_angle: record.inner_cone_degrees.to_radians() * 0.5,
-            shadow_maps_enabled: enabled && faces > 0,
-            shadow_map_near_z: record.shadows.near_plane,
-            shadow_depth_bias: record.shadows.bias,
-            shadow_normal_bias: record.shadows.normal_bias,
-            ..default()
-        });
-    }
-    let entity = entity.id();
+    let entity = commands.spawn((SourceLight, Transform::default())).id();
     source.lights.push(BoundLight {
         body: None,
         item: None,
@@ -1513,8 +1198,6 @@ pub(crate) fn register_world_light(
                 enabled,
                 intensity: light.intensity,
             },
-            shadow_start,
-            faces,
         }),
         index,
         road: light.biome.is_some(),
@@ -1536,22 +1219,16 @@ pub(crate) fn register_world_light(
             0.,
             0.,
         ),
-        shadow: Vec4::new(
-            shadow_start as f32,
-            faces as f32,
-            record.shadows.strength,
-            record.cookie_size,
-        ),
         mask: UVec4::new(
             record.culling_mask,
             (half.cos() / half.sin()).to_bits(),
-            record.shadows.kind as u32,
+            0,
             0,
         ),
+        cookie_size: record.cookie_size,
         ..default()
     };
     source.uniform.counts.x = source.uniform.counts.x.max(index as u32 + 1);
-    source.uniform.counts.y = source.uniform.counts.y.max((shadow_start + faces) as u32);
     entity
 }
 
@@ -1569,20 +1246,6 @@ pub(crate) fn remove_road_light(
         .lights
         .iter()
         .map(|light| light.index + 1)
-        .max()
-        .unwrap_or(0) as u32;
-    source.uniform.counts.y = source
-        .lights
-        .iter()
-        .map(|light| {
-            if let Some(world) = &light.world {
-                world.shadow_start + world.faces
-            } else if light.road {
-                source.road_lamps.fixed_shadows + light.index - source.road_lamps.fixed_lights + 1
-            } else {
-                source.road_lamps.fixed_shadows
-            }
-        })
         .max()
         .unwrap_or(0) as u32;
 }

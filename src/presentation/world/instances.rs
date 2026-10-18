@@ -9,7 +9,7 @@ use super::{
 };
 use crate::{
     presentation::materials::{
-        SourceCaster, SourceShadowMode,
+        SourceShadowMode,
         grass::{GrassPatch, GrassSettings, GrassView},
     },
     reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
@@ -26,17 +26,16 @@ use std::sync::Arc;
 struct MaterialVariant {
     source: Option<crate::reference::SourceId>,
     binding: RendererMaterial,
-    tickets: [Option<PipelineTicket>; 2],
+    ticket: Option<PipelineTicket>,
 }
 struct Renderer {
     material_source: Option<crate::reference::SourceId>,
     variants: Vec<MaterialVariant>,
-    caster_entity: Option<Entity>,
     node: usize,
     entity: Entity,
     mesh: Handle<Mesh>,
     binding: RendererMaterial,
-    tickets: [Option<PipelineTicket>; 2],
+    ticket: Option<PipelineTicket>,
     shadow: bool,
     lod_state: Option<(bool, f32)>,
     settings: Option<GrassSettings>,
@@ -86,7 +85,7 @@ impl SourceInstances {
             "unready_renderers": self.instances.iter().filter(|i| !i.ready).flat_map(|i| &i.renderers)
                 .take(4).map(|r| serde_json::json!({
                     "grass": r.settings.is_some(),
-                    "tickets": r.tickets.each_ref().map(|t| t.as_ref().map(|t| format!("{:?}", t.state()))),
+                    "ticket": r.ticket.as_ref().map(|t| format!("{:?}", t.state())),
                 })).collect::<Vec<_>>(),
         })
     }
@@ -470,7 +469,6 @@ impl SourceInstances {
                                         selected,
                                         source_node.layer,
                                         receive,
-                                        shadow,
                                         world.determinant() < 0.,
                                         source_position,
                                         view,
@@ -570,7 +568,6 @@ impl SourceInstances {
                                                 Some(&source),
                                                 source_node.layer,
                                                 receive,
-                                                shadow,
                                                 world.determinant() < 0.,
                                                 source_position,
                                                 view,
@@ -585,7 +582,7 @@ impl SourceInstances {
                                         variants.push(MaterialVariant {
                                             source: Some(source),
                                             binding: variant,
-                                            tickets: [None, None],
+                                            ticket: None,
                                         });
                                     }
                                     if !receive {
@@ -598,7 +595,6 @@ impl SourceInstances {
                                         binding.visible.insert(entity, commands);
                                         binding.apply_sort(entity, commands);
                                     }
-                                    let mut skin_binding = None;
                                     if let Some(skin) = node.skin {
                                         let joints = asset
                                             .joints
@@ -617,46 +613,7 @@ impl SourceInstances {
                                                 .clone(),
                                             joints,
                                         };
-                                        commands.entity(entity).insert(binding.clone());
-                                        skin_binding = Some(binding);
-                                    }
-                                    let mut caster_entity = None;
-                                    if let Some(caster) = &binding.caster {
-                                        let caster = commands
-                                            .spawn((
-                                                SourceCaster,
-                                                Mesh3d(mesh.clone()),
-                                                MeshMaterial3d(caster.clone()),
-                                                Transform::default(),
-                                                Visibility::Inherited,
-                                                ChildOf(entity),
-                                                RenderLayers::layer(
-                                                    source_node.layer as usize + 32,
-                                                ),
-                                            ))
-                                            .id();
-                                        caster_entity = Some(caster);
-                                        if let Some(skin) = &skin_binding {
-                                            commands.entity(caster).insert(skin.clone());
-                                        }
-                                    } else if shadow != 0 && !is_grass {
-                                        let caster = commands
-                                            .spawn((
-                                                SourceCaster,
-                                                Mesh3d(mesh.clone()),
-                                                Transform::default(),
-                                                Visibility::Inherited,
-                                                ChildOf(entity),
-                                                RenderLayers::layer(
-                                                    source_node.layer as usize + 32,
-                                                ),
-                                            ))
-                                            .id();
-                                        binding.visible.insert(caster, commands);
-                                        caster_entity = Some(caster);
-                                        if let Some(skin) = &skin_binding {
-                                            commands.entity(caster).insert(skin.clone());
-                                        }
+                                        commands.entity(entity).insert(binding);
                                     }
                                     let (_patches, settings) = if is_grass {
                                         let record = prototype
@@ -693,19 +650,6 @@ impl SourceInstances {
                                         let patches = grass_patches(mesh_data, source_world)?;
                                         let settings = GrassSettings::from_source(record)?;
                                         if let InstanceMaterial::Grass(handle) = &binding.visible {
-                                            let caster = (shadow != 0).then(|| {
-                                                commands
-                                                    .spawn((
-                                                        SourceCaster,
-                                                        Transform::default(),
-                                                        Visibility::Inherited,
-                                                        ChildOf(entity),
-                                                        RenderLayers::layer(
-                                                            source_node.layer as usize + 32,
-                                                        ),
-                                                    ))
-                                                    .id()
-                                            });
                                             let bounds = grass_bounds(
                                                 &patches,
                                                 source_world,
@@ -724,7 +668,6 @@ impl SourceInstances {
                                                 handle.clone(),
                                                 view,
                                                 shadow != 0,
-                                                caster,
                                                 bounds,
                                             )?;
                                         }
@@ -735,12 +678,11 @@ impl SourceInstances {
                                     renderers.push(Renderer {
                                         material_source,
                                         variants,
-                                        caster_entity,
                                         node: source_index,
                                         entity,
                                         mesh,
                                         binding,
-                                        tickets: [None, None],
+                                        ticket: None,
                                         lod_state: None,
                                         shadow: shadow != 0,
                                         settings,
@@ -833,9 +775,9 @@ impl SourceInstances {
                     complete &= grass.ready(renderer.entity);
                     continue;
                 }
-                PipelineTicket::retry(&mut renderer.tickets[0]);
-                if renderer.tickets[0].is_none() {
-                    renderer.tickets[0] = renderer.binding.visible.warm(
+                PipelineTicket::retry(&mut renderer.ticket);
+                if renderer.ticket.is_none() {
+                    renderer.ticket = renderer.binding.visible.warm(
                         stream,
                         pipelines,
                         instance.continuation.as_mut().unwrap(),
@@ -843,11 +785,11 @@ impl SourceInstances {
                         renderer.shadow,
                     )?;
                 }
-                complete &= ready(&renderer.tickets[0])?;
+                complete &= ready(&renderer.ticket)?;
                 for variant in &mut renderer.variants {
-                    PipelineTicket::retry(&mut variant.tickets[0]);
-                    if variant.tickets[0].is_none() {
-                        variant.tickets[0] = variant.binding.visible.warm(
+                    PipelineTicket::retry(&mut variant.ticket);
+                    if variant.ticket.is_none() {
+                        variant.ticket = variant.binding.visible.warm(
                             stream,
                             pipelines,
                             instance.continuation.as_mut().unwrap(),
@@ -855,33 +797,7 @@ impl SourceInstances {
                             renderer.shadow,
                         )?;
                     }
-                    complete &= ready(&variant.tickets[0])?;
-                    if let Some(caster) = &variant.binding.caster {
-                        PipelineTicket::retry(&mut variant.tickets[1]);
-                        if variant.tickets[1].is_none() {
-                            variant.tickets[1] = pipelines.request_continuation(
-                                stream,
-                                instance.continuation.as_mut().unwrap(),
-                                &renderer.mesh,
-                                caster,
-                                true,
-                            )?;
-                        }
-                        complete &= ready(&variant.tickets[1])?;
-                    }
-                }
-                if let Some(caster) = &renderer.binding.caster {
-                    PipelineTicket::retry(&mut renderer.tickets[1]);
-                    if renderer.tickets[1].is_none() {
-                        renderer.tickets[1] = pipelines.request_continuation(
-                            stream,
-                            instance.continuation.as_mut().unwrap(),
-                            &renderer.mesh,
-                            caster,
-                            true,
-                        )?;
-                    }
-                    complete &= ready(&renderer.tickets[1])?;
+                    complete &= ready(&variant.ticket)?;
                 }
             }
             if complete && instance.continuation.as_ref().unwrap().drained() {
@@ -1018,27 +934,9 @@ impl SourceInstances {
                 {
                     std::mem::swap(&mut renderer.binding, &mut variant.binding);
                     std::mem::swap(&mut renderer.material_source, &mut variant.source);
-                    std::mem::swap(&mut renderer.tickets, &mut variant.tickets);
+                    std::mem::swap(&mut renderer.ticket, &mut variant.ticket);
                     renderer.binding.visible.replace(renderer.entity, commands);
                     renderer.binding.apply_sort(renderer.entity, commands);
-                    if let Some(entity) = renderer.caster_entity {
-                        if let Some(caster) = &renderer.binding.caster {
-                            commands.entity(entity).remove::<(
-                                MeshMaterial3d<crate::presentation::materials::SourceMaterial>,
-                                MeshMaterial3d<
-                                    crate::presentation::materials::specular::SpecularMaterial,
-                                >,
-                            )>();
-                            commands
-                                .entity(entity)
-                                .insert(MeshMaterial3d(caster.clone()));
-                        } else {
-                            commands.entity(entity).remove::<MeshMaterial3d<
-                                crate::presentation::materials::lod::LodCasterMaterial,
-                            >>();
-                            renderer.binding.visible.replace(entity, commands);
-                        }
-                    }
                 }
             }
             for (body, handle) in prototype.bodies.iter().zip(&published.bodies) {

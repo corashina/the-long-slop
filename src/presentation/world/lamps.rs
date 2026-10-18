@@ -4,38 +4,29 @@ use bevy::prelude::*;
 use crate::presentation::lighting::{
     RenderingState, SourceLighting, register_road_light, register_world_light, remove_road_light,
 };
-use crate::presentation::materials::{SourceCaster, SourceMaterial, SourceShadowMode};
-use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
+use crate::presentation::materials::SourceMaterial;
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::gltf::GltfExtras;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 
 #[derive(Clone)]
 pub(crate) struct RoadLampRecipe;
 
-#[derive(Clone, Copy)]
-struct ProxyAllocation {
-    slot: usize,
-    shadow_start: usize,
-    faces: usize,
-}
 #[derive(Clone)]
 struct SourceProxy {
     id: crate::world::GeneratedId,
     node: Entity,
     light: Entity,
     slot: usize,
-    shadow_start: usize,
-    faces: usize,
 }
 #[derive(Clone)]
 pub(crate) struct RoadLamps {
     source_proxies: Vec<SourceProxy>,
     required: Vec<crate::world::GeneratedId>,
-    allocation: [Option<ProxyAllocation>; crate::presentation::lighting::MAX_LIGHTS],
+    allocation: [Option<usize>; crate::presentation::lighting::MAX_LIGHTS],
     preflight_ready: bool,
     pub capacity: usize,
     pub fixed_lights: usize,
-    pub fixed_shadows: usize,
     pub recipe: Option<RoadLampRecipe>,
     prototype: Option<Entity>,
     prototype_ready: bool,
@@ -43,7 +34,7 @@ pub(crate) struct RoadLamps {
     prototype_nodes: Vec<(crate::reference::NodeId, Entity)>,
     prototype_light: Option<Entity>,
     origin: [f64; 3],
-    overlap: (usize, usize),
+    overlap: usize,
 }
 impl RoadLamps {
     pub fn clone_bytes(&self) -> usize {
@@ -53,17 +44,14 @@ impl RoadLamps {
                 * std::mem::size_of::<(crate::reference::NodeId, Entity)>()
     }
     pub fn clear_owned(&mut self) {
-        self.overlap = (
-            self.source_proxies.len(),
-            self.source_proxies.iter().map(|p| p.faces).sum(),
-        );
+        self.overlap = self.source_proxies.len();
         self.source_proxies.clear();
         self.required.clear();
         self.allocation.fill(None);
         self.preflight_ready = false;
     }
     pub fn end_overlap(&mut self) {
-        self.overlap = (0, 0);
+        self.overlap = 0;
     }
     pub fn ready(&self) -> bool {
         self.preflight_ready
@@ -100,7 +88,6 @@ impl RoadLamps {
             preflight_ready: false,
             capacity,
             fixed_lights: 0,
-            fixed_shadows: 0,
             recipe: None,
             prototype: None,
             prototype_ready: false,
@@ -108,7 +95,7 @@ impl RoadLamps {
             prototype_nodes: Vec::new(),
             prototype_light: None,
             origin: [f64::INFINITY; 3],
-            overlap: (0, 0),
+            overlap: 0,
         }
     }
 }
@@ -123,23 +110,18 @@ pub(crate) fn prepare_road_lamp(
     materials: Res<crate::presentation::materials::SourceMaterials>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
-    receivers: Query<
-        (
-            &Mesh3d,
-            &MeshMaterial3d<SourceMaterial>,
-            &Transform,
-            &Visibility,
-            &RenderLayers,
-            &SourceShadowMode,
-            Option<&bevy::light::NotShadowReceiver>,
-            Option<&Children>,
-            &crate::presentation::renderers::SourceRenderer,
-            &bevy::camera::primitives::Aabb,
-            &bevy::gltf::GltfMaterialExtras,
-        ),
-        Without<SourceCaster>,
-    >,
-    casters: Query<&MeshMaterial3d<StandardMaterial>, With<SourceCaster>>,
+    receivers: Query<(
+        &Mesh3d,
+        &MeshMaterial3d<SourceMaterial>,
+        &Transform,
+        &Visibility,
+        &bevy::camera::visibility::RenderLayers,
+        &crate::presentation::materials::SourceShadowMode,
+        Option<&bevy::light::NotShadowReceiver>,
+        &crate::presentation::renderers::SourceRenderer,
+        &bevy::camera::primitives::Aabb,
+        &bevy::gltf::GltfMaterialExtras,
+    )>,
 ) {
     if !source.bound
         || source.road_lamps.recipe.is_some()
@@ -250,14 +232,7 @@ pub(crate) fn prepare_road_lamp(
             .find(|(id, _)| Some(*id) == light.node)
             .unwrap()
             .1;
-        let entity = register_road_light(
-            &mut source,
-            &mut commands,
-            &manifest.lighting,
-            0,
-            node,
-            true,
-        );
+        let entity = register_road_light(&mut source, &mut commands, &manifest.lighting, 0, node);
         source.road_lamps.prototype_light = Some(entity);
         source.road_lamps.prototype_bound = true;
         return;
@@ -271,13 +246,7 @@ pub(crate) fn prepare_road_lamp(
         {
             continue;
         }
-        let Ok((_, _, _, _, _, mode, _, children, _, _, _)) = receivers.get(entity) else {
-            return;
-        };
-        if mode.0 != 0
-            && !children
-                .is_some_and(|children| children.iter().any(|child| casters.contains(child)))
-        {
+        if !receivers.contains(entity) {
             return;
         }
     }
@@ -298,24 +267,8 @@ pub(crate) fn prepare_road_lamp(
             if owner.parent() != entity {
                 continue;
             }
-            let (
-                mesh,
-                material,
-                pose,
-                visibility,
-                layers,
-                mode,
-                no_receive,
-                children,
-                renderer,
-                bounds,
-                material_extras,
-            ) = receivers.get(primitive).unwrap();
-            let caster = children.and_then(|children| {
-                children
-                    .iter()
-                    .find_map(|child| casters.get(child).ok().map(|m| m.0.clone()))
-            });
+            let (mesh, material, _, _, _, _, _, renderer, _, material_extras) =
+                receivers.get(primitive).unwrap();
             let warm = commands
                 .spawn((
                     mesh.clone(),
@@ -327,7 +280,7 @@ pub(crate) fn prepare_road_lamp(
                     NoFrustumCulling,
                 ))
                 .id();
-            source.warmups.push((warm, false));
+            source.warmups.push(warm);
             #[derive(serde::Deserialize)]
             struct MaterialIdentity {
                 asset: crate::reference::AssetId,
@@ -362,20 +315,6 @@ pub(crate) fn prepare_road_lamp(
                     source.state = RenderingState::Failed(error.0);
                     return;
                 }
-            }
-            if let Some(caster) = &caster {
-                let warm = commands
-                    .spawn((
-                        SourceCaster,
-                        mesh.clone(),
-                        MeshMaterial3d(caster.clone()),
-                        far,
-                        Visibility::Visible,
-                        (32..64).collect::<RenderLayers>(),
-                        NoFrustumCulling,
-                    ))
-                    .id();
-                source.warmups.push((warm, true));
             }
         }
     }
@@ -490,11 +429,7 @@ pub(crate) fn sync_source_lamps(
                 .iter()
                 .position(|id| id == &light.id)
                 .unwrap();
-            let ProxyAllocation {
-                slot,
-                shadow_start,
-                faces,
-            } = source.road_lamps.allocation[index].ok_or_else(|| {
+            let slot = source.road_lamps.allocation[index].ok_or_else(|| {
                 crate::reference::ReferenceError("Source lamp has no proxy admission".into())
             })?;
             let node = commands.spawn((pose, Visibility::Inherited)).id();
@@ -503,7 +438,6 @@ pub(crate) fn sync_source_lamps(
                 commands,
                 light,
                 slot,
-                shadow_start,
                 node,
                 light.enabled && (light.biome.is_none() || enabled),
             );
@@ -512,8 +446,6 @@ pub(crate) fn sync_source_lamps(
                 node,
                 light: entity,
                 slot,
-                shadow_start,
-                faces,
             });
         }
     }
@@ -554,37 +486,15 @@ pub(crate) fn source_lamp_admission(
     source.road_lamps.required.truncate(count);
     let required = source.road_lamps.required.len();
     let light_capacity = crate::presentation::lighting::MAX_LIGHTS - source.road_lamps.fixed_lights;
-    let shadow_capacity =
-        crate::presentation::lighting::SHADOW_SLOTS - source.road_lamps.fixed_shadows;
-    let shadow_count: usize = frame
-        .lights
-        .iter()
-        .filter(|l| source.road_lamps.required.contains(&l.id))
-        .map(|l| {
-            if l.record.shadows.kind == 0 {
-                0
-            } else if l.record.kind == crate::reference::LightKind::Point {
-                6
-            } else {
-                1
-            }
-        })
-        .sum();
-    if required + source.road_lamps.overlap.0 > light_capacity
-        || shadow_count + source.road_lamps.overlap.1 > shadow_capacity
-    {
+    if required + source.road_lamps.overlap > light_capacity {
         #[cfg(target_arch = "wasm32")]
         {
             let entries: Vec<_> = source.road_lamps.required.iter().filter_map(|id| {
                 frame.lights.iter().find(|light| &light.id == id).map(|light| {
-                    let faces = if light.record.shadows.kind == 0 { 0 }
-                        else if light.record.kind == crate::reference::LightKind::Point { 6 }
-                        else { 1 };
                     serde_json::json!({
                         "id": id,
                         "sourceId": light.record.source,
                         "prototypeId": light.prototype,
-                        "shadowFaces": faces,
                         "controllerOutput": {"enabled": light.enabled && (light.biome.is_none() || biome_enabled), "intensity": light.intensity},
                     })
                 })
@@ -595,23 +505,17 @@ pub(crate) fn source_lamp_admission(
                 serde_json::json!({
                     "id": bound.id,
                     "sourceId": record.source,
-                    "shadowFaces": if record.shadows.kind == 0 || record.kind == crate::reference::LightKind::Directional { 0 }
-                        else if record.kind == crate::reference::LightKind::Point { 6 } else { 1 },
                     "controllerOutput": {"enabled": output.enabled, "intensity": output.intensity},
                 })
             }).collect();
             crate::browser::game_startup_failure_details(&serde_json::json!({
                 "kind": "sourceLightAdmission",
                 "requiredLightEntries": required,
-                "requiredShadowFaces": shadow_count,
                 "availableLightEntries": light_capacity,
-                "availableShadowFaces": shadow_capacity,
-                "availableNewLightEntries": light_capacity.saturating_sub(source.road_lamps.overlap.0),
-                "availableNewShadowFaces": shadow_capacity.saturating_sub(source.road_lamps.overlap.1),
+                "availableNewLightEntries": light_capacity.saturating_sub(source.road_lamps.overlap),
                 "fixedLightEntries": source.road_lamps.fixed_lights,
-                "fixedShadowFaces": source.road_lamps.fixed_shadows,
                 "fixedEntries": fixed_entries,
-                "retainedOverlap": {"lightEntries": source.road_lamps.overlap.0, "shadowFaces": source.road_lamps.overlap.1},
+                "retainedOverlap": {"lightEntries": source.road_lamps.overlap},
                 "entries": entries,
             }).to_string());
         }
@@ -619,10 +523,8 @@ pub(crate) fn source_lamp_admission(
             "Required source lights exceed renderer capacity: {required}"
         )));
     }
-    // Simulate exact retained slot ranges before any region publishes.
+    // Simulate exact retained slots before any region publishes.
     let mut slots = [false; crate::presentation::lighting::MAX_LIGHTS];
-    let mut shadows = [false; crate::presentation::lighting::SHADOW_SLOTS];
-    shadows[..source.road_lamps.fixed_shadows].fill(true);
     for (index, id) in source.road_lamps.required.iter().enumerate() {
         if let Some(proxy) = source
             .road_lamps
@@ -631,46 +533,20 @@ pub(crate) fn source_lamp_admission(
             .find(|p| &p.id == id)
         {
             slots[proxy.slot] = true;
-            shadows[proxy.shadow_start..proxy.shadow_start + proxy.faces].fill(true);
-            source.road_lamps.allocation[index] = Some(ProxyAllocation {
-                slot: proxy.slot,
-                shadow_start: proxy.shadow_start,
-                faces: proxy.faces,
-            });
+            source.road_lamps.allocation[index] = Some(proxy.slot);
         }
     }
-    for (index, id) in source.road_lamps.required.iter().enumerate() {
+    for index in 0..source.road_lamps.required.len() {
         if source.road_lamps.allocation[index].is_some() {
             continue;
         }
-        let light = frame.lights.iter().find(|light| &light.id == id).unwrap();
-        let faces = if light.record.shadows.kind == 0 {
-            0
-        } else if light.record.kind == crate::reference::LightKind::Point {
-            6
-        } else {
-            1
-        };
         let slot = (0..light_capacity)
             .find(|slot| !slots[*slot])
             .ok_or_else(|| {
                 crate::reference::ReferenceError("Source light slot admission failed".into())
             })?;
-        let shadow_start = (source.road_lamps.fixed_shadows
-            ..=crate::presentation::lighting::SHADOW_SLOTS - faces)
-            .find(|start| shadows[*start..*start + faces].iter().all(|used| !used))
-            .ok_or_else(|| {
-                crate::reference::ReferenceError(
-                    "Source shadow atlas has no complete lamp range".into(),
-                )
-            })?;
         slots[slot] = true;
-        shadows[shadow_start..shadow_start + faces].fill(true);
-        source.road_lamps.allocation[index] = Some(ProxyAllocation {
-            slot,
-            shadow_start,
-            faces,
-        });
+        source.road_lamps.allocation[index] = Some(slot);
     }
     source.road_lamps.preflight_ready = true;
     let proxies = source.road_lamps.source_proxies.len()

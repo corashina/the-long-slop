@@ -1,6 +1,6 @@
 //! Retained source condition choices. Each owner has separate live and candidate material banks.
 use super::{
-    materials::{self, SourceCaster, SourceMaterial, SourceMaterials, SourceShadowMode},
+    materials::{self, SourceMaterial, SourceMaterials},
     reference::ReferenceVisuals,
     renderers::SourceRenderer,
     transparent::SourceSortData,
@@ -21,7 +21,6 @@ use std::collections::HashMap;
 
 struct Choice {
     material: Handle<SourceMaterial>,
-    caster: Handle<StandardMaterial>,
     sort: Option<SourceSortData>,
     color: Option<[f32; 4]>,
     dynamic_color: bool,
@@ -30,7 +29,6 @@ struct Receiver {
     entity: Entity,
     meshes: Vec<Handle<Mesh>>,
     bounds: Vec<(Aabb, SourceRenderer)>,
-    casters: Vec<Entity>,
     banks: [Vec<Choice>; 2],
 }
 struct Owner {
@@ -160,15 +158,6 @@ fn prepare(
                             bits | 1u32.checked_shl(layer as u32).unwrap_or(0)
                         })
                     });
-                let mode = world
-                    .get::<SourceShadowMode>(entity)
-                    .map_or(0, |mode| mode.0);
-                let casters: Vec<_> = world
-                    .get::<Children>(entity)
-                    .into_iter()
-                    .flat_map(|c| c.iter())
-                    .filter(|e| world.get::<SourceCaster>(*e).is_some())
-                    .collect();
                 let mut receiver = Receiver {
                     entity,
                     meshes: vec![base_mesh],
@@ -179,7 +168,6 @@ fn prepare(
                         },
                         metadata.clone(),
                     )],
-                    casters,
                     banks: std::array::from_fn(|_| Vec::with_capacity(5)),
                 };
                 if surface.use_mesh_list {
@@ -245,20 +233,6 @@ fn prepare(
                         let source = world.resource::<SourceMaterials>();
                         let mut material =
                             materials::authored_material(key, inverted, mask, source);
-                        let mut caster = materials::authored_caster_material(key, source);
-                        if inverted {
-                            caster.cull_mode = caster.cull_mode.map(|v| match v {
-                                bevy::render::render_resource::Face::Front => {
-                                    bevy::render::render_resource::Face::Back
-                                }
-                                bevy::render::render_resource::Face::Back => {
-                                    bevy::render::render_resource::Face::Front
-                                }
-                            });
-                        }
-                        if mode == 2 {
-                            caster.cull_mode = None;
-                        }
                         let dynamic_color = color_rule(surface, state_index);
                         if let Some(color) = if dynamic_color {
                             Some(surface.startup.color)
@@ -266,16 +240,12 @@ fn prepare(
                             state.color
                         } {
                             materials::set_source_color(&mut material, color);
-                            caster.base_color =
-                                Color::srgba(color[0], color[1], color[2], color[3]);
                         }
                         let sort = source
                             .sort_data(key, &metadata.0, slot as u32)
                             .map_err(|e| fail(e.to_string()))?;
                         materials::retain_color(&mut material, world);
                         let material = world.resource_mut::<Assets<SourceMaterial>>().add(material);
-                        let caster = world.resource_mut::<Assets<StandardMaterial>>().add(caster);
-                        materials::link_retained_color(&material, &caster, world);
                         for mesh in &receiver.meshes {
                             materials::warm_retained_material(
                                 world,
@@ -299,30 +269,10 @@ fn prepare(
                             world
                                 .resource_mut::<super::lighting::SourceLighting>()
                                 .warmups
-                                .push((id, false));
-                            if !receiver.casters.is_empty() {
-                                let id = world
-                                    .spawn((
-                                        SourceCaster,
-                                        Mesh3d(mesh.clone()),
-                                        MeshMaterial3d(caster.clone()),
-                                        materials::SourceMaterialWarmup,
-                                        far,
-                                        Visibility::Visible,
-                                        (32..64)
-                                            .collect::<bevy::camera::visibility::RenderLayers>(),
-                                        bevy::camera::visibility::NoFrustumCulling,
-                                    ))
-                                    .id();
-                                world
-                                    .resource_mut::<super::lighting::SourceLighting>()
-                                    .warmups
-                                    .push((id, true));
-                            }
+                                .push(id);
                         }
                         bank.push(Choice {
                             material,
-                            caster,
                             sort,
                             color: state.color,
                             dynamic_color,
@@ -384,34 +334,13 @@ fn prepare(
                 entity,
                 meshes: vec![mesh.clone()],
                 bounds: Vec::new(),
-                casters: world
-                    .get::<Children>(entity)
-                    .into_iter()
-                    .flat_map(|c| c.iter())
-                    .filter(|e| world.get::<SourceCaster>(*e).is_some())
-                    .collect(),
                 banks: std::array::from_fn(|_| Vec::with_capacity(1)),
             };
             for bank in &mut receiver.banks {
                 let mut material = original.clone();
                 materials::set_source_color(&mut material, tool.startup_color);
-                let mut caster = receiver
-                    .casters
-                    .first()
-                    .and_then(|entity| world.get::<MeshMaterial3d<StandardMaterial>>(*entity))
-                    .and_then(|handle| world.resource::<Assets<StandardMaterial>>().get(&handle.0))
-                    .cloned()
-                    .unwrap_or_else(|| material.base.clone());
-                caster.base_color = Color::srgba(
-                    tool.startup_color[0],
-                    tool.startup_color[1],
-                    tool.startup_color[2],
-                    tool.startup_color[3],
-                );
-                let caster = world.resource_mut::<Assets<StandardMaterial>>().add(caster);
                 materials::retain_color(&mut material, world);
                 let material = world.resource_mut::<Assets<SourceMaterial>>().add(material);
-                materials::link_retained_color(&material, &caster, world);
                 materials::warm_retained_material(
                     world,
                     mesh.id(),
@@ -434,28 +363,9 @@ fn prepare(
                 world
                     .resource_mut::<super::lighting::SourceLighting>()
                     .warmups
-                    .push((id, false));
-                if !receiver.casters.is_empty() {
-                    let id = world
-                        .spawn((
-                            SourceCaster,
-                            Mesh3d(mesh.clone()),
-                            MeshMaterial3d(caster.clone()),
-                            materials::SourceMaterialWarmup,
-                            far,
-                            Visibility::Visible,
-                            (32..64).collect::<bevy::camera::visibility::RenderLayers>(),
-                            bevy::camera::visibility::NoFrustumCulling,
-                        ))
-                        .id();
-                    world
-                        .resource_mut::<super::lighting::SourceLighting>()
-                        .warmups
-                        .push((id, true));
-                }
+                    .push(id);
                 bank.push(Choice {
                     material,
-                    caster,
                     sort,
                     color: None,
                     dynamic_color: true,
@@ -538,13 +448,6 @@ fn bind_owner(owner: &Owner, state: &ConditionState, bank: usize, world: &mut Wo
         } else {
             target.remove::<SourceSortData>();
         }
-        for &caster in &receiver.casters {
-            world.entity_mut(caster).insert((
-                Mesh3d(mesh.clone()),
-                MeshMaterial3d(choice.caster.clone()),
-                *bounds,
-            ));
-        }
     }
     for (index, &entity) in owner.objects.iter().enumerate() {
         world
@@ -599,9 +502,6 @@ impl ConditionVisuals {
                     if !world
                         .resource::<Assets<SourceMaterial>>()
                         .contains(choice.material.id())
-                        || !world
-                            .resource::<Assets<StandardMaterial>>()
-                            .contains(choice.caster.id())
                     {
                         return Err(fail("Condition material variant"));
                     }
@@ -830,11 +730,6 @@ fn apply_spray(
             color,
         );
         if bind {
-            for &caster in &receiver.casters {
-                world
-                    .entity_mut(caster)
-                    .insert(MeshMaterial3d(choice.caster.clone()));
-            }
             world
                 .entity_mut(receiver.entity)
                 .insert(MeshMaterial3d(choice.material.clone()));
