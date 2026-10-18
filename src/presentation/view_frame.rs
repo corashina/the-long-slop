@@ -1,13 +1,13 @@
 use super::lighting_scene::PROBE_COUNT;
 // One main-world view snapshot for raster, culling, motion, and shadow fitting.
-use super::surface_views::{MIRROR_START, VIEW_COUNT};
+use super::surface_views::{MIRROR_START, PROBE_START, VIEW_COUNT};
 use super::{
     lighting_assets::LightingAssets, lighting_scene::SourceSceneLighting,
     materials::RenderingState, source_lighting::SourceLightingStatus,
     surface_views::SourceSurfaceView,
 };
 use crate::reference::{
-    reflections::{ProbeJob, ProbeSchedule, capture_view_from_world},
+    reflections::{ProbeJob, ProbeSchedule, capture_view_from_world, prepare_probe_face},
     shadow_planes::{CullPlanes, implicit_cull_planes},
     temporal::{TaaJitter, TaaSequence, jitter_perspective},
 };
@@ -68,6 +68,7 @@ pub fn restart_scene(world: &mut World) {
 }
 #[derive(Resource, Default)]
 pub struct SourceViewClock {
+    preparation_ready: bool,
     taa: TaaSequence,
     jitter: Option<TaaJitter>,
     probe: [ProbeSchedule; PROBE_COUNT],
@@ -167,6 +168,7 @@ pub struct ViewSnapshot {
 #[derive(Resource, Clone, Default, ExtractResource)]
 pub struct SourceViewFrame {
     pub session: u64,
+    pub preparation_warmup: bool,
     pub motion_revision: u32,
     pub scene: u32,
     pub probe_enabled: [bool; PROBE_COUNT],
@@ -184,6 +186,9 @@ pub struct SourceViewFrame {
     pub views: [Option<ViewSnapshot>; VIEW_COUNT],
 }
 impl SourceViewFrame {
+    pub fn skip_probe_preparation(&self, index: usize) -> bool {
+        (PROBE_START..MIRROR_START).contains(&index) && self.views[index].is_none()
+    }
     pub(crate) fn loading_key(&self) -> Option<crate::reference::loading_dispatch::LoadingKey> {
         Some(crate::reference::loading_dispatch::LoadingKey {
             session: self.session,
@@ -196,6 +201,15 @@ impl SourceViewFrame {
             .iter()
             .enumerate()
             .fold(0, |mask, (i, enabled)| mask | (u32::from(*enabled) << i))
+    }
+    /// Stack views are mandatory. Probe snapshots follow warmup and the capture job.
+    pub fn required_views_ready(&self) -> bool {
+        self.frame != 0
+            && self.views[..PROBE_START].iter().all(Option::is_some)
+            && (0..6).all(|face| {
+                !prepare_probe_face(self.probe_job, face, self.preparation_warmup)
+                    || self.views[PROBE_START + face].is_some()
+            })
     }
 }
 fn source_transform(m: Mat4, p: Vec4) -> Vec4 {
@@ -243,6 +257,10 @@ pub(crate) fn snapshot(
     views: Query<(&SourceSurfaceView, &Camera, &GlobalTransform, &Projection)>,
     sky_view: Query<(&Camera, &GlobalTransform), With<super::frame_graph::SourceSkyCamera>>,
 ) {
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::Snapshot,
+        &frame,
+    );
     frame.session = drive.runtime.stream.frame().request.session;
     frame.scene = epoch.0;
     frame.probe_job = None;
@@ -325,7 +343,17 @@ pub(crate) fn snapshot(
         graph.invalidate_loading();
         return;
     }
+    clock.preparation_ready |= matches!(*status.0.lock().unwrap(), RenderingState::Ready);
+    let warmup = !clock.preparation_ready;
+    let job = (activation.enabled[clock.probe_index]
+        || clock.probe[clock.probe_index].job() != ProbeJob::Face(0))
+    .then(|| clock.probe[clock.probe_index].job());
     let snapshots = std::array::from_fn(|index| {
+        if (PROBE_START..MIRROR_START).contains(&index)
+            && !prepare_probe_face(job, index - PROBE_START, warmup)
+        {
+            return None;
+        }
         let (extent, world_from_view, mirror) = input[index]?;
         let (near, far, fov, mask, distance) = if index < 3 {
             let c = &assets.record.cameras[index + 1];
@@ -387,6 +415,7 @@ pub(crate) fn snapshot(
     });
     *frame = SourceViewFrame {
         session: drive.runtime.stream.frame().request.session,
+        preparation_warmup: warmup,
         scene: epoch.0,
         motion_revision: drive.runtime.audio_motion_revision,
         probe_enabled: activation.enabled,
@@ -399,9 +428,7 @@ pub(crate) fn snapshot(
         frame: clock.frame,
         main_token: clock.main_token,
         probe_token: clock.probe_token,
-        probe_job: (activation.enabled[clock.probe_index]
-            || clock.probe[clock.probe_index].job() != ProbeJob::Face(0))
-        .then(|| clock.probe[clock.probe_index].job()),
+        probe_job: job,
         jitter: clock.jitter,
         views: snapshots,
     };
@@ -410,6 +437,7 @@ pub(crate) fn snapshot(
         drive.ready || drive.runtime.started || requests.pending(),
         drive.runtime.stream.required_content().selection_revision,
     );
+    timing.snapshots(&frame);
 }
 /// Replace Bevy's frusta after its update, before either camera visibility system runs.
 pub fn publish_frusta(
@@ -508,6 +536,7 @@ impl SourceViewClock {
         self.jitter = None;
         self.probe = std::array::from_fn(|_| ProbeSchedule::default());
         self.probe_index = 0;
+        self.preparation_ready = false;
         acks.0.main.store(0, Ordering::Release);
         acks.0.probe.store(0, Ordering::Release);
         acks.0.publication.store(0, Ordering::Release);

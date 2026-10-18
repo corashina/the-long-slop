@@ -129,6 +129,10 @@ fn base_pipeline(
     Ok(Some((base, indexed)))
 }
 pub fn queue(world: &mut World) {
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::Queue,
+        world.resource::<SourceViewFrame>(),
+    );
     world.resource_scope(|world, mut state: Mut<ShadowQueues>| {
         state.ready = [false; VIEW_COUNT];
         state.frame = 0;
@@ -149,7 +153,9 @@ pub fn queue(world: &mut World) {
             }
             let mut views: [Option<(Entity, RetainedViewEntity, MeshPipelineKey)>; VIEW_COUNT] =
                 [None; VIEW_COUNT];
+            let mut retained_views = [None; VIEW_COUNT];
             for (entity, source, view) in state.query.iter(world) {
+                retained_views[source.index] = Some(view.retained_view_entity);
                 if world.resource::<SourceViewFrame>().views[source.index].is_none() {
                     continue;
                 }
@@ -165,10 +171,23 @@ pub fn queue(world: &mut World) {
             let draw = shadow_phase::draw_id(world.resource::<DrawFunctions<SourceShadow>>());
             world.resource_scope(
                 |world, mut phases: Mut<ViewSortedRenderPhases<SourceShadow>>| {
+                    for (index, retained) in retained_views.into_iter().enumerate() {
+                        if world
+                            .resource::<SourceViewFrame>()
+                            .skip_probe_preparation(index)
+                        {
+                            if let Some(phase) =
+                                retained.and_then(|retained| phases.get_mut(&retained))
+                            {
+                                phase.clear();
+                            }
+                        }
+                    }
                     for (index, view) in views.into_iter().enumerate() {
                         let Some((entity, retained, key)) = view else {
                             continue;
                         };
+                        timing.face(index);
                         if !phases.contains_key(&retained) {
                             phases.insert(retained, shadow_phase::reserved_phase(scene.capacity()));
                             world.entity_mut(entity).insert(ShadowDrawState::default());
@@ -290,6 +309,10 @@ pub fn write_cascades(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
 ) {
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::Cascades,
+        &frame,
+    );
     if scene.frame == 0 || scene.frame != frame.frame {
         return;
     }
@@ -305,6 +328,10 @@ pub fn write_cascades(
         h(rotation * -Vec3::Z),
     ];
     for (mut view, mut slots) in &mut views {
+        if frame.skip_probe_preparation(view.index) {
+            continue;
+        }
+        timing.face(view.index);
         let Some(fit) = scene.fits[view.index] else {
             view.shadow_fade = Vec4::ZERO;
             view.shadow_fade_center = Vec4::ZERO;

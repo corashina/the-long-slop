@@ -82,14 +82,16 @@ fn prepare(
     cache: Res<PipelineCache>,
     status: Res<SourceLightingStatus>,
 ) {
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::Collector,
+        &frame,
+    );
     let Some(shader) = shaders.get("shaders/source_shadow_collector.wgsl") else {
         return;
     };
     if scene.frame == 0
         || scene.frame != frame.frame
-        || frame.views[..super::surface_views::MIRROR_START]
-            .iter()
-            .any(Option::is_none)
+        || !frame.required_views_ready()
         || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
     {
         return;
@@ -142,6 +144,7 @@ fn prepare(
         let Some(snapshot) = frame.views[view.index] else {
             continue;
         };
+        timing.face(view.index);
         // Undo only the target clip conversion. Source shader60 then reconstructs
         // from its current projection; shader46 uses the implicit far ray.
         let mut p = snapshot.raster_projection.to_cols_array_2d();
