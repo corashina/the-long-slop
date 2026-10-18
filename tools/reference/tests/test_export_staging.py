@@ -31,7 +31,7 @@ class ExportStagingTests(unittest.TestCase):
                 def promote(*args):
                     raise ValueError('injected promote')
                 before = accepted.stat().st_mtime_ns
-                with patch('tools.reference.library.reader.LibraryReader', return_value=reader), patch('tools.reference.source.LibrarySource'), patch('tools.reference.library.storage.check_space'), patch('tools.reference.export._export_selected', side_effect=selected), patch('tools.reference.export.verify_reference', side_effect=verify), patch('tools.reference.export.promote_reference', side_effect=promote):
+                with patch('tools.reference.library.reader.LibraryReader', return_value=reader), patch('tools.reference.source.LibrarySource'), patch('tools.reference.library.storage.check_space'), patch('tools.reference.export._export_selected', side_effect=selected), patch('tools.reference.export.verify_reference', side_effect=verify), patch('tools.reference.runtime_package.publish_package'), patch('tools.reference.export.promote_reference', side_effect=promote):
                     with self.assertRaisesRegex(ValueError, 'injected '+failure):
                         derive_reference(snapshot, receipt, output)
                 self.assertEqual(accepted.read_bytes(), b'accepted')

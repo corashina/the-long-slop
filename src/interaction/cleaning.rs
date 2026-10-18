@@ -3,12 +3,12 @@ use super::{
     parts::PartAttachments,
 };
 use crate::conditions::{ConditionStore, RepairResult};
+use crate::particles::ParticleState;
 use crate::reference::{
     ColliderId, ConditionColliderBinding, ConditionId, ItemId, ReferenceError, ReferenceManifest,
     WashId,
 };
 use crate::vehicle::{PhysicsWorld, VehiclePose, from_rapier, to_rapier};
-use crate::weather::ParticleState;
 use rapier3d::{
     math::{Pose, Rotation, Vector},
     prelude::{ColliderHandle, QueryFilter, Ray},
@@ -294,21 +294,21 @@ impl CleaningTools {
             from_rapier(&(to_rapier(items.get(self.signals[index].item).unwrap().pose) * c.default))
         }
     }
-    pub fn particles(&self, tool: usize, particle: usize) -> &[crate::weather::ParticleOutput] {
+    pub fn particles(&self, tool: usize, particle: usize) -> &[crate::particles::ParticleOutput] {
         self.contacts[tool].particles[particle].particles()
     }
     pub fn spray_particles(
         &self,
         tool: usize,
         particle: usize,
-    ) -> &[crate::weather::ParticleOutput] {
+    ) -> &[crate::particles::ParticleOutput] {
         self.sprays[tool].particles[particle].particles()
     }
     pub fn wash_particles(
         &self,
         wash: usize,
         particle: usize,
-    ) -> &[crate::weather::ParticleOutput] {
+    ) -> &[crate::particles::ParticleOutput] {
         self.washes[wash].particles[particle].particles()
     }
     pub fn reset_contact(&mut self) {
@@ -653,7 +653,6 @@ impl CleaningTools {
                     frame.dt,
                     std::array::from_fn(|j| frame.origin[j] + f64::from(c.model.translation[j])),
                     s.emission[pi],
-                    &[],
                     physics,
                 );
             }
@@ -671,7 +670,6 @@ impl CleaningTools {
                         } else {
                             0.
                         },
-                        &[],
                         physics,
                     );
                 }
@@ -773,7 +771,6 @@ impl CleaningTools {
                     frame.dt,
                     std::array::from_fn(|j| frame.origin[j] + f64::from(root.translation[j])),
                     signal.emission[0],
-                    &[],
                     physics,
                 );
             }

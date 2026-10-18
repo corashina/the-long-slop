@@ -1283,11 +1283,9 @@ pub enum AudioKind {
     Urinate = 3,
     Sleep = 4,
     Death = 5,
-    Storm = 6,
     AmbientDay = 7,
     AmbientNight = 8,
     Shit = 9,
-    StormInside = 10,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -1346,8 +1344,42 @@ impl AudioState {
         self.survival_loops
             .retain(|v| v.kind != kind || v.emitter != emitter);
     }
-    pub fn remove_storm_loops(&mut self, storms: &[crate::weather::Storm]) {
-        self.survival_loops
-            .retain(|v| v.kind != AudioKind::Storm || storms.iter().any(|s| s.id.0 == v.emitter));
+}
+
+/// Day and night ambient channels, independent of particle effects.
+pub struct AmbientState {
+    modifier: f32,
+    only_modifier: f32,
+}
+
+impl AmbientState {
+    pub fn new(reference: &crate::reference::AmbientReference) -> Self {
+        Self {
+            modifier: reference.modifier,
+            only_modifier: reference.only_modifier,
+        }
+    }
+
+    pub fn gains(
+        &mut self,
+        reference: &crate::reference::AmbientReference,
+        cycle: &crate::lighting::CycleOutput,
+        dt: f32,
+    ) -> [f32; 2] {
+        use crate::lighting::CyclePhase;
+        let night = match cycle.phase {
+            CyclePhase::Night => 1.,
+            CyclePhase::Day => 0.,
+            CyclePhase::Dawn => 1. - cycle.progress,
+            CyclePhase::Dusk => cycle.progress,
+        };
+        let modifier =
+            self.modifier * self.only_modifier * (cycle.biome_color[0] - cycle.biome_color[2]);
+        let gains = [reference.day_volume, reference.night_volume]
+            .map(|v| ((v[0] + (v[1] - v[0]) * night) * modifier).clamp(0., 1.));
+        self.modifier = (self.modifier + dt * reference.recovery_per_second).clamp(0., 1.);
+        self.only_modifier =
+            (self.only_modifier + dt * reference.recovery_per_second).clamp(0., 1.);
+        gains
     }
 }

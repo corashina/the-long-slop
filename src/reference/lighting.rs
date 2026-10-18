@@ -441,7 +441,7 @@ impl LightingRecord {
             "startup overrides",
         )?;
         sky(&self.skybox)?;
-        for particle in manifest.weather.particles.iter().chain(
+        for particle in manifest.particles.iter().chain(
             manifest
                 .item_prototypes
                 .iter()

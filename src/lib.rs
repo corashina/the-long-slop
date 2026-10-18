@@ -13,6 +13,7 @@ pub mod fluids;
 pub mod interaction;
 pub mod lighting;
 pub mod mirrors;
+pub mod particles;
 pub mod plates;
 pub mod player;
 pub mod reference;
@@ -22,7 +23,6 @@ pub mod sleep;
 pub mod starting_area;
 pub mod survival;
 pub mod vehicle;
-pub mod weather;
 pub mod world;
 
 #[cfg(target_arch = "wasm32")]

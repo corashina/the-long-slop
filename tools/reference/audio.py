@@ -287,9 +287,8 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
         prefix='Burp' if role=='burp' else 'Fart'
         survival_groups.append((role,kind,sounds,group['clips'],source.resolve(player,pd[field]),[pd['min'+prefix+'Volume'],pd['max'+prefix+'Volume']],[pd['min'+prefix+'Pitch'],pd['max'+prefix+'Pitch']]))
     survival_groups.append(('death',5,main,[md['SdeathBell']],source.resolve(player,pd['SDeathBellSource']),[1.,1.],[.8,1.2]))
-    storm=source.get('sharedassets1.assets',158276)
     cycle=source.resolve(main,md['napszak']);cd=source.read(cycle)
-    for role,kind,owner,pointer in [('sleep',4,player,pd['SleepCamSource']),('storm',6,storm,source.read(storm)['source']),('storm_inside',10,cycle,cd['sandStormSource']),('ambient_day',7,cycle,cd['DayAmbientSound'][0]),('ambient_night',8,cycle,cd['NightAmbientSound'][0])]:
+    for role,kind,owner,pointer in [('sleep',4,player,pd['SleepCamSource']),('ambient_day',7,cycle,cd['DayAmbientSound'][0]),('ambient_night',8,cycle,cd['NightAmbientSound'][0])]:
         selected_source=source.resolve(owner,pointer);ad=source.read(selected_source)
         survival_groups.append((role,kind,selected_source,[ad['m_audioClip']],selected_source,[ad['m_Volume']]*2,[ad['m_Pitch']]*2))
 
@@ -309,7 +308,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
             'spatial_blend_curve':curve(d['panLevelCustomCurve']),'rolloff_curve':curve(d['rolloffCustomCurve'])}
         if role=='eat':
             for k in settings['spatial_blend_curve']['keys']:k['value']=1.
-        cls,name={'eat':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update'),'storm':('sandstormscript','Update')}.get(role,('napszakvaltakozas','FixedUpdate'))
+        cls,name={'eat':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update')}.get(role,('napszakvaltakozas','FixedUpdate'))
         audio['survival'].append({'role':role,'kind':kind,'source':source_id(owner),'audio_source':source_id(reader),
             'clips':[clip(source.resolve(owner,p)) for p in pointers], 'gain':gain,'pitch':pitch,'offset':offset,
             'settings':settings,'mixer':mixer(route),'doppler':d['DopplerLevel'],'pan':d['Pan2D'],'method':method(cls,name)})
@@ -472,3 +471,21 @@ def validate_audio_export(audio: dict, output: Path) -> None:
                 or not 0<=key['weighted_mode']<=3 for key in keys)
                 or any(a['time']>=b['time'] for a,b in zip(keys,keys[1:]))):
             raise ValueError(f'Invalid shared audio curve: {name}')
+
+
+def recover_ambient(source):
+    main=source.get('level1',64919)
+    cycle=source.resolve(main,source.read(main)['napszak']);cd=source.read(cycle)
+    from .survival import managed_evidence
+    managed_evidence(source,['public static float jamDecrease = 0.1f;'])
+    return {'source':source_id(cycle),
+        'day_volume':[cd['dayAmbientSoundVolumeDay'][0],cd['dayAmbientSoundVolumeNight'][0]],
+        'night_volume':[cd['nightAmbientSoundVolumeDay'][0],cd['nightAmbientSoundVolumeNight'][0]],
+        'modifier':cd['ambientSoundModifier'],'only_modifier':cd['onlyAmbientSoundModifier'],'recovery_per_second':0.1}
+
+def validate_ambient_export(record, library):
+    from .library.reader import LibraryReader
+    from .source import LibrarySource
+    source=LibrarySource(LibraryReader(library))
+    if record['ambient'] != recover_ambient(source):
+        raise ValueError('Selected ambient differs from source')

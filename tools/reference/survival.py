@@ -230,7 +230,7 @@ CIGARETTE_METHODS=[
 
 def recover_cigarette(source,root,manifest,output):
     from tempfile import TemporaryDirectory
-    from .weather import particle
+    from .particles import particle
     from .gltf import converted_transform
     from .lighting import rgba
     reader=component(source,root,'ediblescript');d=source.read(reader)
@@ -272,7 +272,7 @@ def recover_cigarette(source,root,manifest,output):
 
 def validate_cigarette(c,p,m):
     from .validation import record,array,number,u32,i32,boolean,string,source
-    from .weather import validate_particle_data
+    from .particles import validate_particle_data
     from .lighting import validate_light_payload
     def effect(v):record(v,dict.fromkeys(('food','water','bowel','hp'),number))
     def evidence(v):record(v,{'assembly_sha256':string,'methods':array(string)})
@@ -310,7 +310,7 @@ def validate_cigarette(c,p,m):
     textures={t['id'] for t in m['lighting']['textures']}
     if any(t['texture'] not in textures for mat in particle['materials'] for t in mat['textures']):raise ValueError('Cigarette particle texture')
     if c['evidence']['methods']!=CIGARETTE_METHODS:raise ValueError('Cigarette consumption method evidence')
-    if any(l['source']==e['light']['source'] for l in m['lighting']['lights']) or any(x['source']==particle['source'] for x in m['weather']['particles']):raise ValueError('Cigarette active effects publication')
+    if any(l['source']==e['light']['source'] for l in m['lighting']['lights']) or any(x['source']==particle['source'] for x in m['particles']):raise ValueError('Cigarette active effects publication')
 
 CIGARETTE_PARTICLE_MODULES={'ClampVelocityModule': False, 'CollisionModule': False, 'ColorBySpeedModule': False, 'ColorModule': True, 'CustomDataModule': False, 'EmissionModule': True, 'ExternalForcesModule': False, 'ForceModule': True, 'InheritVelocityModule': False, 'InitialModule': True, 'LifetimeByEmitterSpeedModule': False, 'LightsModule': False, 'NoiseModule': False, 'RotationBySpeedModule': False, 'RotationModule': False, 'ShapeModule': True, 'SizeBySpeedModule': False, 'SizeModule': True, 'SubModule': False, 'TrailModule': False, 'TriggerModule': False, 'UVModule': False, 'VelocityModule': True}
 

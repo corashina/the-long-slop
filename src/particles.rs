@@ -1,5 +1,4 @@
 //! Selected Unity particle modules. Absolute positions keep custom space stable across rebases.
-use super::{ShelterVolume, StormRandom};
 use crate::reference::{ParticleColor, ParticleCurve, ParticleReference};
 use crate::vehicle::PhysicsWorld;
 use rapier3d::math::{Pose, Rotation, Vector};
@@ -29,13 +28,12 @@ pub struct ParticleOutput {
 pub struct ParticleState {
     reference: ParticleReference,
     particles: Vec<ParticleOutput>,
-    random: StormRandom,
+    random: ParticleRandom,
     remainder: f32,
     elapsed: f32,
     last_emitter: Option<[f64; 3]>,
     pub(crate) rotation: Rotation,
     pub(crate) emission_rotation: Option<Rotation>,
-    pub(crate) radius_scale: f32,
     pub(crate) start_color: Option<[f32; 4]>,
     pub(crate) origin: [f64; 3],
     burst_started: bool,
@@ -45,13 +43,12 @@ impl ParticleState {
         Self {
             reference: reference.clone(),
             particles: Vec::with_capacity(reference.capacity as usize),
-            random: StormRandom(seed),
+            random: ParticleRandom(seed),
             remainder: 0.,
             elapsed: 0.,
             last_emitter: None,
             rotation: Rotation::IDENTITY,
             emission_rotation: None,
-            radius_scale: 1.,
             start_color: None,
             origin: [0.; 3],
             burst_started: false,
@@ -59,12 +56,6 @@ impl ParticleState {
     }
     pub fn particles(&self) -> &[ParticleOutput] {
         &self.particles
-    }
-    pub(crate) fn random_color_draw(&mut self) -> f32 {
-        self.random.unit()
-    }
-    pub fn time(&self) -> f32 {
-        self.elapsed
     }
     pub fn reset_emitter(&mut self) {
         self.last_emitter = None;
@@ -80,7 +71,6 @@ impl ParticleState {
         dt: f32,
         emitter_absolute: [f64; 3],
         strength: f32,
-        shelters: &[ShelterVolume],
         physics: &PhysicsWorld,
     ) {
         if !self.reference.flags["gameObject.active"] || !dt.is_finite() || dt <= 0. {
@@ -134,7 +124,6 @@ impl ParticleState {
             let thickness = r.scalars["ShapeModule.radiusThickness"];
             let inner = (1. - thickness).powi(3);
             let radius = r.scalars["ShapeModule.radius.value"]
-                * self.radius_scale
                 * (inner + (1. - inner) * self.random.unit()).cbrt();
             let mut position = if hemisphere {
                 direction * radius
@@ -155,23 +144,23 @@ impl ParticleState {
                 * Rotation::from_rotation_x(-e[0].to_radians())
                 * Rotation::from_rotation_z(e[2].to_radians());
             position = rotation * (shape * position);
-            let speed = curve(
+            let speed = particle_curve(
                 &r.curves["InitialModule.startSpeed"],
                 self.elapsed / r.duration,
                 self.random.unit(),
             );
-            let lifetime = curve(
+            let lifetime = particle_curve(
                 &r.curves["InitialModule.startLifetime"],
                 self.elapsed / r.duration,
                 self.random.unit(),
             );
-            let size = curve(
+            let size = particle_curve(
                 &r.curves["InitialModule.startSize"],
                 self.elapsed / r.duration,
                 self.random.unit(),
             );
             let color = self.start_color.unwrap_or_else(|| {
-                color(
+                particle_color(
                     &r.colors["InitialModule.startColor"],
                     0.,
                     self.random.unit(),
@@ -180,16 +169,16 @@ impl ParticleState {
             let mut force = Vector::ZERO;
             if r.module_flags.get("ForceModule") == Some(&true) {
                 force = Vector::new(
-                    curve(&r.curves["ForceModule.x"], 0., self.random.unit()),
-                    curve(&r.curves["ForceModule.y"], 0., self.random.unit()),
-                    -curve(&r.curves["ForceModule.z"], 0., self.random.unit()),
+                    particle_curve(&r.curves["ForceModule.x"], 0., self.random.unit()),
+                    particle_curve(&r.curves["ForceModule.y"], 0., self.random.unit()),
+                    -particle_curve(&r.curves["ForceModule.z"], 0., self.random.unit()),
                 );
                 if !r.flags["ForceModule.inWorldSpace"] {
                     force = rotation * force;
                 }
             }
             force.y -= 9.81
-                * curve(
+                * particle_curve(
                     &r.curves["InitialModule.gravityModifier"],
                     0.,
                     self.random.unit(),
@@ -208,7 +197,7 @@ impl ParticleState {
                 && r.scalars["InheritVelocityModule.m_Mode"] == 0.
             {
                 emitter_velocity
-                    * curve(&r.curves["InheritVelocityModule.m_Curve"], 0., inherit_draw)
+                    * particle_curve(&r.curves["InheritVelocityModule.m_Curve"], 0., inherit_draw)
             } else {
                 Vector::ZERO
             };
@@ -223,7 +212,7 @@ impl ParticleState {
                 }),
                 size,
                 color,
-                rotation: curve(
+                rotation: particle_curve(
                     &r.curves["InitialModule.startRotation"],
                     0.,
                     self.random.unit(),
@@ -242,7 +231,7 @@ impl ParticleState {
                 rotation_speed: r
                     .curves
                     .get("RotationModule.curve")
-                    .map_or(0., |c| curve(c, 0., self.random.unit())),
+                    .map_or(0., |c| particle_curve(c, 0., self.random.unit())),
                 size_draw: self.random.unit(),
                 velocity_draw,
                 inherit_draw,
@@ -264,14 +253,14 @@ impl ParticleState {
             let mut speed_modifier = 1.;
             if r.module_flags.get("VelocityModule") == Some(&true) {
                 module_velocity = Vector::new(
-                    curve(&r.curves["VelocityModule.x"], t, p.velocity_draw[0]),
-                    curve(&r.curves["VelocityModule.y"], t, p.velocity_draw[1]),
-                    -curve(&r.curves["VelocityModule.z"], t, p.velocity_draw[2]),
+                    particle_curve(&r.curves["VelocityModule.x"], t, p.velocity_draw[0]),
+                    particle_curve(&r.curves["VelocityModule.y"], t, p.velocity_draw[1]),
+                    -particle_curve(&r.curves["VelocityModule.z"], t, p.velocity_draw[2]),
                 );
                 if !r.flags["VelocityModule.inWorldSpace"] {
                     module_velocity = rotation * module_velocity;
                 }
-                speed_modifier = curve(
+                speed_modifier = particle_curve(
                     &r.curves["VelocityModule.speedModifier"],
                     t,
                     p.velocity_draw[0],
@@ -281,7 +270,7 @@ impl ParticleState {
                 && r.scalars["InheritVelocityModule.m_Mode"] == 1.
             {
                 module_velocity += emitter_velocity
-                    * curve(
+                    * particle_curve(
                         &r.curves["InheritVelocityModule.m_Curve"],
                         t,
                         p.inherit_draw,
@@ -308,7 +297,7 @@ impl ParticleState {
                 let size = p.start_size
                     * r.curves
                         .get("SizeModule.curve")
-                        .map_or(1., |c| curve(c, t, p.size_draw));
+                        .map_or(1., |c| particle_curve(c, t, p.size_draw));
                 if let Some((_, hit)) = physics
                     .queries(QueryFilter::default().predicate(&surfaces))
                     .cast_shape(
@@ -327,7 +316,7 @@ impl ParticleState {
                         return false;
                     }
                     p.age += p.lifetime
-                        * curve(
+                        * particle_curve(
                             &r.curves["CollisionModule.m_EnergyLossOnCollision"],
                             t,
                             p.collision_draw,
@@ -338,10 +327,19 @@ impl ParticleState {
                     let normal = hit.normal1.normalize_or_zero();
                     let inward = velocity.dot(normal).min(0.);
                     let bounced = (velocity - normal * inward)
-                        * (1. - curve(&r.curves["CollisionModule.m_Dampen"], t, p.collision_draw))
+                        * (1.
+                            - particle_curve(
+                                &r.curves["CollisionModule.m_Dampen"],
+                                t,
+                                p.collision_draw,
+                            ))
                         - normal
                             * inward
-                            * curve(&r.curves["CollisionModule.m_Bounce"], t, p.collision_draw);
+                            * particle_curve(
+                                &r.curves["CollisionModule.m_Bounce"],
+                                t,
+                                p.collision_draw,
+                            );
                     let speed = bounced.length();
                     if speed < r.scalars["CollisionModule.minKillSpeed"]
                         || speed > r.scalars["CollisionModule.maxKillSpeed"]
@@ -370,32 +368,18 @@ impl ParticleState {
             p.size = p.start_size
                 * r.curves
                     .get("SizeModule.curve")
-                    .map_or(1., |c| curve(c, t, p.size_draw));
+                    .map_or(1., |c| particle_curve(c, t, p.size_draw));
             let c = r
                 .colors
                 .get("ColorModule.gradient")
-                .map_or([1.; 4], |c| color(c, t, p.size_draw));
+                .map_or([1.; 4], |c| particle_color(c, t, p.size_draw));
             p.color = std::array::from_fn(|i| p.start_color[i] * c[i]);
-            if r.module_flags.get("TriggerModule") == Some(&true)
-                && r.scalars["TriggerModule.inside"] == 1.
-            {
-                let radius = p.size * 0.5 * r.scalars["TriggerModule.radiusScale"];
-                return !shelters.iter().any(|s| {
-                    (0..3)
-                        .map(|i| {
-                            let v = (p.absolute_position[i] - self.origin[i]) as f32;
-                            (v - v.clamp(s.bounds.min[i], s.bounds.max[i])).powi(2)
-                        })
-                        .sum::<f32>()
-                        <= radius * radius
-                });
-            }
             true
         });
     }
 }
 
-pub(crate) fn curve(c: &ParticleCurve, t: f32, draw: f32) -> f32 {
+pub(crate) fn particle_curve(c: &ParticleCurve, t: f32, draw: f32) -> f32 {
     use crate::simulation::engine::torque;
     match c.mode {
         0 => c.scalar,
@@ -409,7 +393,7 @@ pub(crate) fn curve(c: &ParticleCurve, t: f32, draw: f32) -> f32 {
         _ => unreachable!("validated particle curve"),
     }
 }
-pub(crate) fn color(c: &ParticleColor, t: f32, draw: f32) -> [f32; 4] {
+pub(crate) fn particle_color(c: &ParticleColor, t: f32, draw: f32) -> [f32; 4] {
     let mix = |a: [f32; 4], b: [f32; 4]| std::array::from_fn(|i| a[i] + (b[i] - a[i]) * draw);
     match c.mode {
         0 => c.max_color,
@@ -421,5 +405,53 @@ pub(crate) fn color(c: &ParticleColor, t: f32, draw: f32) -> [f32; 4] {
         ),
         4 => crate::lighting::gradient(&c.max_gradient, draw),
         _ => unreachable!("validated particle color"),
+    }
+}
+
+/// A separate deterministic stream. Unity's native random sequence is unrecovered.
+#[derive(Debug)]
+struct ParticleRandom(u64);
+impl ParticleRandom {
+    fn unit(&mut self) -> f32 {
+        self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        (crate::world::hash(self.0) >> 40) as f32 / 16_777_216.
+    }
+    fn range(&mut self, min: f32, max: f32) -> f32 {
+        min + (max - min) * self.unit()
+    }
+    fn inside_sphere(&mut self) -> [f32; 3] {
+        let vertical = self.range(-1., 1.);
+        let angle = self.range(0., std::f32::consts::TAU);
+        let radius = self.unit().cbrt();
+        let horizontal = (1. - vertical * vertical).sqrt();
+        [
+            horizontal * angle.cos() * radius,
+            vertical * radius,
+            horizontal * angle.sin() * radius,
+        ]
+    }
+}
+
+/// The same collision owner serves the player outlet and container outlets.
+pub(crate) fn fluid_reference(
+    p: &crate::reference::ParticleReference,
+) -> crate::reference::FluidParticleReference {
+    crate::reference::FluidParticleReference {
+        source: p.source.clone(),
+        local_pose: p.local_pose.clone(),
+        capacity: p.capacity,
+        cone_degrees: p.scalars["ShapeModule.angle"],
+        cone_radius: p.scalars["ShapeModule.radius.value"],
+        lifetime_seconds: p.curves["InitialModule.startLifetime"].scalar,
+        radius: p.curves["InitialModule.startSize"].scalar
+            * 0.5
+            * p.scalars["CollisionModule.radiusScale"],
+        gravity_multiplier: p.curves["InitialModule.gravityModifier"].scalar,
+        collision_mask: p.scalars["CollisionModule.collidesWith.m_Bits"] as u32,
+        bounce: p.curves["CollisionModule.m_Bounce"].scalar,
+        dampen: p.curves["CollisionModule.m_Dampen"].scalar,
+        max_speed: p.scalars["outlet.maxSpeed"],
+        min_rate: p.scalars["outlet.minRate"],
+        max_rate: p.scalars["outlet.maxRate"],
     }
 }

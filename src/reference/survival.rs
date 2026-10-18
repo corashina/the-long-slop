@@ -263,7 +263,7 @@ impl SurvivalReference {
                 require(
                     c.membership != 0
                         && m.nodes.iter().any(|n| n.id == c.node && n.asset == f.asset)
-                        && super::weather::valid_geometry(&c.geometry),
+                        && super::particles::valid_geometry(&c.geometry),
                     "food collider",
                 )?;
             }
@@ -321,7 +321,7 @@ impl SurvivalReference {
         let d = &self.drinking;
         require(
             d.evidence.valid()
-                && super::weather::valid_geometry(&d.geometry)
+                && super::particles::valid_geometry(&d.geometry)
                 && finite(&d.local_position)
                 && finite(&[d.radius, d.valve, d.particle_contact_radius_multiplier])
                 && d.radius > 0.
@@ -831,11 +831,7 @@ impl CigaretteConsumptionReference {
         particle.validate_data(1)?;
         require(
             !m.lighting.lights.iter().any(|l| l.source == e.light.source)
-                && !m
-                    .weather
-                    .particles
-                    .iter()
-                    .any(|x| x.source == particle.source),
+                && !m.particles.iter().any(|x| x.source == particle.source),
             "cigarette active effects publication",
         )?;
         Ok(())

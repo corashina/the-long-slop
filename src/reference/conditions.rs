@@ -670,15 +670,15 @@ fn validate_particle(
             && p.curves.values().all(|c| {
                 c.mode <= 3
                     && finite(&[c.scalar, c.min_scalar])
-                    && weather::curve_valid(&c.min_curve)
-                    && weather::curve_valid(&c.max_curve)
+                    && particles::curve_valid(&c.min_curve)
+                    && particles::curve_valid(&c.max_curve)
             })
             && p.colors.values().all(|c| {
                 c.mode <= 4
                     && finite(&c.min_color)
                     && finite(&c.max_color)
-                    && weather::gradient_valid(&c.min_gradient)
-                    && weather::gradient_valid(&c.max_gradient)
+                    && particles::gradient_valid(&c.min_gradient)
+                    && particles::gradient_valid(&c.max_gradient)
             })
             && !p.materials.is_empty()
             && p.materials.iter().all(|m| {

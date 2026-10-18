@@ -157,7 +157,7 @@ pub(crate) fn prepare_pass_order(
     loading: Res<MaterialLoading>,
     functions: Res<DrawFunctions<Transparent3d>>,
     status: Res<SourceLightingStatus>,
-    particles: Res<super::weather::ExtractedParticles>,
+    particles: Res<super::particles::ExtractedParticles>,
     lighting: Res<super::lighting::ExtractedLighting>,
 ) {
     let mut timing = super::reflection_preparation::Timer::new(
@@ -230,7 +230,7 @@ pub(crate) fn prepare_pass_order(
                 .get(&item.main_entity())
                 .is_some_and(|m| {
                     m.asset_id.type_id()
-                        == std::any::TypeId::of::<super::weather::ParticleMaterial>()
+                        == std::any::TypeId::of::<super::particles::ParticleMaterial>()
                 });
             // Retain the particle adapter's bias in the current squared-distance order.
             let distance = perspective_distance(mesh_center.to_array(), camera)
@@ -305,7 +305,7 @@ pub(crate) fn prepare_pass_order(
                         .get(&item.main_entity())
                         .is_some_and(|m| {
                             m.asset_id.type_id()
-                                == std::any::TypeId::of::<super::weather::ParticleMaterial>()
+                                == std::any::TypeId::of::<super::particles::ParticleMaterial>()
                                 || m.asset_id.type_id()
                                     == std::any::TypeId::of::<super::plates::PlateTextMaterial>()
                         })

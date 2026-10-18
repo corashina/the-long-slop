@@ -48,6 +48,7 @@ pub mod lighting_assets;
 pub mod lighting_scene;
 pub mod motion_draw;
 pub mod motion_vectors;
+pub mod particles;
 pub mod plates;
 pub mod postprocessing;
 pub mod probes;
@@ -70,7 +71,6 @@ pub mod surface_pass;
 pub mod surface_views;
 pub mod transparent;
 pub mod view_frame;
-pub mod weather;
 
 mod pipeline_ownership;
 

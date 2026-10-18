@@ -184,7 +184,6 @@ impl GarageRuntime {
         if pending.items.is_empty() {
             self.pending_restore = None;
         }
-        self.sync_weather_bindings(reference);
         Ok(true)
     }
     pub fn from_save(
@@ -467,7 +466,6 @@ impl GarageRuntime {
                 .cloned()
                 .collect(),
         });
-        candidate.sync_weather_bindings(reference);
         candidate.clear_input();
         candidate.paused = true;
         candidate.started = true;

@@ -54,9 +54,9 @@ pub use acquisition::*;
 pub mod inventory;
 pub mod survival;
 pub use inventory::*;
-pub mod weather;
+pub mod particles;
+pub use particles::*;
 pub use survival::*;
-pub use weather::*;
 pub mod instruments;
 pub mod ui;
 pub use instruments::*;
@@ -854,7 +854,8 @@ pub struct ReferenceManifest {
     pub audio: serde_json::Value,
     pub survival: SurvivalReference,
     pub sleep: SleepReference,
-    pub weather: WeatherReference,
+    pub particles: Vec<ParticleReference>,
+    pub ambient: AmbientReference,
     pub world: std::sync::Arc<WorldReference>,
     pub ui: UiReference,
     pub library: LibraryProvenance,
@@ -1030,7 +1031,8 @@ impl ReferenceManifest {
         item_prototypes::validate_prototypes(self)?;
         AudioGameplayReference::from_value(&self.audio)?;
         self.sleep.validate(self)?;
-        self.weather.validate(self)?;
+        particles::validate_particles(self)?;
+        self.ambient.validate()?;
         self.plates.validate(self)?;
         require(
             self.bodies.iter().all(|b| {

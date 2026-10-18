@@ -329,13 +329,11 @@ impl InteractionState {
                 contact: Some(fluid_contact::FluidContact::new(
                     &opening.particles,
                     reference
-                        .weather
                         .particles
                         .iter()
                         .find(|p| p.role == format!("outlet_{}", opening.id.0))
                         .unwrap(),
                     reference
-                        .weather
                         .particles
                         .iter()
                         .find(|p| p.role == format!("splash_{}", opening.id.0))

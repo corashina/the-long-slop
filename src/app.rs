@@ -197,7 +197,7 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
             presentation::mirrors::SourceMirrorPlugin,
             presentation::source_lighting::SourceLightingPlugin,
             presentation::frame_graph::SourceFramePlugin,
-            presentation::weather::SourceWeatherPlugin,
+            presentation::particles::SourceParticlePlugin,
             presentation::world::prototypes::SourcePrototypePlugin,
             presentation::world::pipelines::WorldPipelinePlugin,
         ))
@@ -331,7 +331,7 @@ fn check_ready(
     mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
     plates: (
         Res<presentation::plates::PlateTextStatus>,
-        Res<presentation::weather::WeatherRender>,
+        Res<presentation::particles::ParticleRender>,
         Res<presentation::view_frame::SourceSubmissionAcks>,
         Res<presentation::view_frame::SourceViewClock>,
         Res<presentation::view_frame::SourceSceneEpoch>,

@@ -89,7 +89,7 @@ def runtime_resources(manifest):
         elif isinstance(value, list):
             for child in value: collect(child)
     collect(manifest.get('lighting', {}))
-    collect(manifest.get('weather', {}))
+    collect(manifest.get('particles', []))
     collect(manifest.get('conditions', {}))
     collect(manifest.get('clothing', {}))
     for p in manifest.get('item_prototypes',[]):collect(p.get('consumable'))
@@ -159,7 +159,7 @@ def validate_runtime_paths(manifest):
                 raise ValueError('Invalid selected runtime dependency')
     for item in runtime_resources(manifest):
         name = item['path']
-        valid_prefix=name.startswith(('reference/lighting-','reference/texture-','reference/source-cloud.','reference/source-caster-dither-','reference/weather-' ))
+        valid_prefix=name.startswith(('reference/lighting-','reference/texture-','reference/source-cloud.','reference/source-caster-dither-' ))
         if not valid_prefix or len(Path(name).parts) != 2 or Path(name).suffix not in ('.gltf','.bin','.png','.smip','.txt','.json'):
             raise ValueError('Invalid selected runtime lighting resource')
     for item in plate_resources(manifest['plates']):
@@ -288,7 +288,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     roots['items'].append(source.transform_for(source.resolve(spare,source.read(spare)['m_GameObject'])))
     roots['items'].append(transform(3542))
     from .survival import prepare_food, recover_survival, bind_survival
-    from .weather import recover_weather, bind_weather
+    from .particles import recover_particles, recover_outlet_particles, validate_particles_export
+    from .audio import recover_ambient
     prepare_food(source, roots)
     food_roots=roots.pop('food')
     prefab=source.get('sharedassets1.assets',82556)
@@ -333,7 +334,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from .item_prototypes import prepare_item_prototypes, recover_item_prototypes, validate_item_prototypes
     prepare_item_prototypes(source, roots)
     recover_survival(source,roots,output)
-    recover_weather(source,output)
+    particles=recover_particles(source,output)
     roots['player']=[source.get('level1',39843)]
     source.lighting_prototype_roots.add(('level1',39843))
     report = {}
@@ -369,7 +370,11 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from .inventory import recover_inventory
     manifest['inventory'] = recover_inventory(source, manifest)
     bind_survival(source,manifest)
-    bind_weather(source,manifest)
+    particles.extend(recover_outlet_particles(source,manifest,output))
+    manifest['particles']=particles
+    manifest['ambient']=recover_ambient(source)
+    manifest['lighting']['textures']=list(source.lighting_textures.values())
+    validate_particles_export(particles,manifest)
     manifest['item_prototypes'] = recover_item_prototypes(source, manifest, output)
     from .clothing import recover_clothing,validate_clothing
     manifest['clothing'] = recover_clothing(source,manifest,output)

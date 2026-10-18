@@ -62,12 +62,13 @@ The roadmap keeps Cleaning and painting Partial until the required checks and sh
 
 Survival includes health, food, water, bladder, bowel, sausage, toilet actions, healing, starvation, and death.
 Sleep follows source eligibility, hold progress, wake, and clock rules.
-Source sandstorms add movement, fog, light, wind, and particles.
+Weather simulation and weather reference data are removed and outside current scope.
+Normal day/night, clouds, distance fog, ambient sound, and shared cleaning, fluid, and cigarette particles remain.
 Engine heat follows the source cycle's ambient temperature.
 
 Portable flashlights and source license plate text are implemented.
-Fatigue, beds, rain, snow, creatures, weapons, and further vehicles remain outside this stage.
-Saved needs and weather, autosave, general settings, control rebinding, multiplayer, and deployment remain outside this stage.
+Fatigue, beds, creatures, weapons, and further vehicles remain outside this stage.
+Saved needs, autosave, general settings, control rebinding, multiplayer, and deployment remain outside this stage.
 The two driving assists are the approved settings exception.
 The build does not claim identical Unity physics or full-game parity.
 

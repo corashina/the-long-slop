@@ -288,7 +288,7 @@ impl ItemPrototype {
                     && finite(&[c.friction, c.restitution])
                     && c.friction >= 0.
                     && c.restitution >= 0.
-                    && super::weather::valid_geometry(&c.geometry),
+                    && super::particles::valid_geometry(&c.geometry),
                 "prototype collider owner or shape",
             )?;
         }

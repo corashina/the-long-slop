@@ -743,11 +743,9 @@ impl AudioGameplayReference {
             (2, "fart"),
             (4, "sleep"),
             (5, "death"),
-            (6, "storm"),
             (7, "ambient_day"),
             (8, "ambient_night"),
             (9, "shit"),
-            (10, "storm_inside"),
         ] {
             require(
                 r.bindings
@@ -767,7 +765,7 @@ impl AudioGameplayReference {
                 "required audio clips and pitch",
             )?;
         }
-        require(r.bindings.len() == 10, "required audio roles")?;
+        require(r.bindings.len() == 8, "required audio roles")?;
         Ok(r)
     }
     pub fn binding(&self, kind: u32) -> &AudioGateBinding {
@@ -775,5 +773,35 @@ impl AudioGameplayReference {
             .iter()
             .find(|b| b.kind == kind)
             .expect("validated audio timing")
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AmbientReference {
+    pub source: SourceId,
+    pub day_volume: [f32; 2],
+    pub night_volume: [f32; 2],
+    pub modifier: f32,
+    pub only_modifier: f32,
+    pub recovery_per_second: f32,
+}
+impl AmbientReference {
+    pub(super) fn validate(&self) -> Result<(), ReferenceError> {
+        let ambient = self;
+        require(
+            ambient.source.file == "level1"
+                && ambient.source.path_id == 64920
+                && ambient
+                    .day_volume
+                    .iter()
+                    .chain(&ambient.night_volume)
+                    .chain([&ambient.modifier, &ambient.only_modifier])
+                    .all(|v| v.is_finite() && (0. ..=1.).contains(v))
+                && ambient.recovery_per_second.is_finite()
+                && ambient.recovery_per_second > 0.,
+            "ambient",
+        )?;
+        Ok(())
     }
 }

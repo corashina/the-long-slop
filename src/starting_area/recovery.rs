@@ -152,7 +152,6 @@ impl GarageRuntime {
             )
         })?;
         self.recovering = false;
-        self.sync_weather_bindings(reference);
         Ok(true)
     }
 }

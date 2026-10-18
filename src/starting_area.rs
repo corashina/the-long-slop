@@ -21,9 +21,8 @@ use rapier3d::prelude::{
 use std::collections::HashMap;
 
 mod survival;
-pub(crate) use survival::active_part as active_food_part;
-mod weather;
 pub use survival::DrinkResult;
+pub(crate) use survival::active_part as active_food_part;
 
 struct CompoundCollider {
     handle: crate::vehicle::ColliderHandle,
@@ -644,11 +643,10 @@ pub struct GarageRuntime {
     pub driving_assists: crate::reference::DrivingAssists,
     pub survival: crate::survival::SurvivalState,
     pub sleep: crate::sleep::SleepState,
-    pub weather: crate::weather::WeatherState,
+    ambient: crate::audio::AmbientState,
     pub urine: crate::interaction::fluid_contact::FluidContact,
     urine_reference: crate::reference::FluidParticleReference,
     urine_emission: [f32; 2],
-    weather_bindings: weather::WeatherBindings,
     sleep_camera: Option<crate::sleep::SleepCamera>,
     pub sleep_camera_allowed: bool,
     pub audio_motion_revision: u32,
@@ -735,33 +733,29 @@ impl GarageRuntime {
                 state.sync_lamps(&reference.lighting, &lighting);
                 state
             });
-        let weather_bindings = weather::WeatherBindings::new(reference, &area.bodies)?;
         let urine_visual = reference
-            .weather
             .particles
             .iter()
             .find(|p| p.role == "urine")
             .unwrap();
         let urine_splash = reference
-            .weather
             .particles
             .iter()
             .find(|p| p.role == "urine_splash")
             .unwrap();
-        let urine_reference = crate::weather::fluid_reference(urine_visual);
+        let urine_reference = crate::particles::fluid_reference(urine_visual);
         let urine = crate::interaction::fluid_contact::FluidContact::new(
             &urine_reference,
             urine_visual,
             urine_splash,
             0x70697373,
         );
-        let mut runtime = Self {
+        Ok(Self {
             driving_assists: reference.driving.default_assists,
             urine,
             urine_reference,
             urine_emission: [0.; 2],
-            weather: crate::weather::WeatherState::new(&reference.weather, seed as u64),
-            weather_bindings,
+            ambient: crate::audio::AmbientState::new(&reference.ambient),
             survival: crate::survival::SurvivalState::new(&reference.survival),
             sleep: crate::sleep::SleepState::new(&reference.sleep),
             sleep_camera: None,
@@ -821,9 +815,7 @@ impl GarageRuntime {
                     None
                 })
                 .collect(),
-        };
-        runtime.sync_weather_bindings(reference);
-        Ok(runtime)
+        })
     }
 
     pub fn advance_tools(
@@ -877,6 +869,20 @@ impl GarageRuntime {
 
     pub fn clock_factors(&self, reference: &ReferenceManifest) -> crate::sleep::ClockFactors {
         self.sleep.clock_factors(&reference.sleep)
+    }
+
+    fn advance_ambient(&mut self, reference: &ReferenceManifest, dt: f32) {
+        let gains = self
+            .ambient
+            .gains(&reference.ambient, self.lighting.cycle.output(), dt);
+        if let Some(audio) = &mut self.audio {
+            let position = self
+                .stream
+                .origin
+                .absolute(self.area.player.body_pose(&self.physics).position);
+            audio.source_loop(crate::audio::AudioKind::AmbientDay, 0, gains[0], position);
+            audio.source_loop(crate::audio::AudioKind::AmbientNight, 0, gains[1], position);
+        }
     }
 
     fn advance_light_fades(&mut self, reference: &ReferenceManifest, dt: f32) {
@@ -1265,7 +1271,7 @@ impl GarageRuntime {
             );
         }
         self.advance_urine(reference, FIXED_DT);
-        self.advance_weather(reference, FIXED_DT);
+        self.advance_ambient(reference, FIXED_DT);
         self.physics.step_physics();
         self.sample_survival_speed(reference);
         self.area.interaction.sync_mechanisms(&mut self.physics);
@@ -1405,7 +1411,6 @@ impl GarageRuntime {
                 &mut self.physics,
             )
             .expect("persistent world bindings");
-        self.sync_weather_bindings(reference);
         self.advance_light_fades(reference, FIXED_DT);
         self.advance_needs(reference, FIXED_DT, factors.need_scale);
         let was_sleeping = self.sleeping();
@@ -1774,7 +1779,6 @@ impl GarageRuntime {
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, true);
-        self.sync_weather_bindings(reference);
         self.startup_aligned = true;
         Ok(true)
     }

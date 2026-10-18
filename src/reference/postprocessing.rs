@@ -507,7 +507,7 @@ pub struct GlassesProfile {
 }
 impl SourceGradingSpline {
     fn valid(&self) -> bool {
-        super::weather::curve_valid(&self.curve)
+        super::particles::curve_valid(&self.curve)
             && super::finite(&self.cached_data)
             && self.cached_data.len() == 128
             && self.range.is_finite()

@@ -16,7 +16,7 @@ pub struct CloudOutput {
     pub speed: f32,
 }
 
-/// Clear-weather source signals. Angles use Unity Euler degrees; colors retain source channels.
+/// Source cycle signals. Angles use Unity Euler degrees; colors retain source channels.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CycleOutput {
     pub phase: CyclePhase,
@@ -66,10 +66,6 @@ pub struct CycleState {
     star_rotation: f32,
     previous_cycle_extra: f32,
     output: CycleOutput,
-    clear_output: CycleOutput,
-    reference: CycleReference,
-    sky_sample_time: f64,
-    sampled_sky: [f32; 4],
     terrain_color: [f32; 4],
     next_biome_refresh: f64,
 }
@@ -85,11 +81,7 @@ impl CycleState {
             cloud_coordinate: 0.,
             star_rotation: 0.,
             previous_cycle_extra: 0.,
-            clear_output: output.clone(),
-            sampled_sky: output.sky_tint,
             output,
-            reference: reference.clone(),
-            sky_sample_time: 0.,
             terrain_color: [0.; 4],
             next_biome_refresh: reference.biome_refresh_seconds as f64,
         }
@@ -133,7 +125,6 @@ impl CycleState {
             self.terrain_color,
         );
         self.set_sleep_progress(reference, advance.sleep_progress);
-        self.clear_output = self.output.clone();
         self.cycle_seconds = if cycle as f32 > reference.day_seconds + reference.night_seconds {
             0.
         } else {
@@ -164,124 +155,17 @@ impl CycleState {
             saved.star_rotation,
             self.terrain_color,
         );
-        self.clear_output = self.output.clone();
-        self.sampled_sky = self.output.sky_tint;
-        self.sky_sample_time = self.elapsed_seconds;
     }
     /// Felho changes material speed at sleep endpoints without advancing time.
     pub fn set_sleep_progress(&mut self, r: &CycleReference, progress: Option<f32>) {
         let p = progress.unwrap_or(1.);
-        for (index, (cloud, source)) in self.output.clouds.iter_mut().zip(&r.clouds).enumerate() {
+        for (cloud, source) in self.output.clouds.iter_mut().zip(&r.clouds) {
             cloud.speed = if p < 0.5 {
                 lerp(source.mid_speed, source.max_speed, inverse_lerp(0., 0.5, p))
             } else {
                 lerp(source.min_speed, source.mid_speed, inverse_lerp(0.5, 1., p))
             };
-            self.clear_output.clouds[index].speed = cloud.speed;
         }
-    }
-
-    /// Compose from retained clear values. SetBiome samples sky tint once per source second.
-    pub fn compose_weather(
-        &mut self,
-        weather: &crate::reference::WeatherReference,
-        influence: crate::weather::StormInfluence,
-    ) {
-        self.output = self.clear_output.clone();
-        let w = influence.strength.clamp(0., 1.);
-        let r = &self.reference;
-        let s = &weather.storm;
-        let o = &mut self.output;
-        if self.elapsed_seconds >= self.sky_sample_time + f64::from(r.biome_refresh_seconds) {
-            self.sky_sample_time = self.elapsed_seconds;
-            self.sampled_sky = color_lerp(self.clear_output.sky_tint, s.sky_color, w);
-        }
-        if influence.id.is_none() || w == 0. {
-            return;
-        }
-        o.sky_tint = self.sampled_sky;
-        o.directional_intensity *= lerp(1., s.intensity_multipler, w);
-        o.ambient *= lerp(1., s.ambient_multipler, w);
-        let p = o.progress;
-        let biome = o.biome_color;
-        let cube = w * w * w;
-        let day_ground = color_lerp(
-            biome_color(&r.day_ground_colors, biome),
-            s.sky_ground_color,
-            w,
-        );
-        let night_ground = biome_color(&r.night_ground_colors, biome);
-        o.ground_color = match o.phase {
-            CyclePhase::Day => day_ground,
-            CyclePhase::Night => night_ground,
-            CyclePhase::Dawn => color_lerp(night_ground, day_ground, p),
-            CyclePhase::Dusk => color_lerp(day_ground, night_ground, p),
-        };
-        o.atmosphere_thickness = match o.phase {
-            CyclePhase::Night => 0.,
-            CyclePhase::Day => lerp(1., s.atmosphere_thickness, cube),
-            _ => lerp(
-                s.atmosphere_thickness,
-                self.clear_output.atmosphere_thickness,
-                (1. - cube).max(p),
-            ),
-        };
-        let day_density = lerp(
-            biome_float(&r.day_fog_densities, biome),
-            s.fog_density,
-            cube,
-        );
-        let night_density = biome_float(&r.night_fog_densities, biome);
-        let day_fog = color_lerp(biome_color(&r.day_fog_colors, biome), s.fog_color, w);
-        let night_fog = biome_color(&r.night_fog_colors, biome);
-        let (density, color) = match o.phase {
-            CyclePhase::Day => (day_density, day_fog),
-            CyclePhase::Night => (night_density, night_fog),
-            CyclePhase::Dawn => (
-                lerp(night_density, day_density, inverse_lerp(0., 0.5, p)),
-                color_lerp(night_fog, day_fog, inverse_lerp(0.5, 1., p)),
-            ),
-            CyclePhase::Dusk => (
-                lerp(day_density, night_density, inverse_lerp(0.5, 1., p)),
-                color_lerp(day_fog, night_fog, inverse_lerp(0., 0.5, p)),
-            ),
-        };
-        o.fog_density = density * r.fog_modifier;
-        o.fog_color = color;
-        for (cloud, source) in o.clouds.iter_mut().zip(&r.clouds) {
-            let day = color_lerp(source.day_color, s.cloud_color, w);
-            let transition = color_lerp(source.transition_color, s.cloud_color, w);
-            cloud.color = match o.phase {
-                CyclePhase::Day => day,
-                CyclePhase::Night => source.night_color,
-                CyclePhase::Dawn if p < 0.5 => {
-                    color_lerp(source.night_color, transition, inverse_lerp(0.3, 0.5, p))
-                }
-                CyclePhase::Dawn => color_lerp(transition, day, (p - 0.5) * 2.),
-                CyclePhase::Dusk if p < 0.5 => color_lerp(day, transition, p * 2.),
-                CyclePhase::Dusk => {
-                    color_lerp(transition, source.night_color, inverse_lerp(0.5, 0.7, p))
-                }
-            };
-        }
-        let day_flare = biome_float(&r.flare_day, biome) * (1. - w);
-        let night_flare = biome_float(&r.flare_night, biome);
-        o.flare_brightness = match o.phase {
-            CyclePhase::Day => day_flare,
-            CyclePhase::Night => night_flare,
-            CyclePhase::Dawn => lerp3(
-                night_flare,
-                biome_float(&r.flare_dawn, biome) * (1. - w),
-                day_flare,
-                o.flare_progress,
-            ),
-            CyclePhase::Dusk => lerp3(
-                day_flare,
-                biome_float(&r.flare_dusk, biome) * (1. - w),
-                night_flare,
-                o.flare_progress,
-            ),
-        };
     }
 
     pub fn needs_terrain_color(&self, dt: f64) -> bool {

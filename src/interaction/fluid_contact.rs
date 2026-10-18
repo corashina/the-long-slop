@@ -24,7 +24,7 @@ pub struct FluidContact {
     random: u32,
     pub(crate) last_poured: f32,
     visual: crate::reference::ParticleReference,
-    pub(crate) splash: crate::weather::ParticleState,
+    pub(crate) splash: crate::particles::ParticleState,
     colors: [[f32; 4]; 6],
     start_color: [f32; 4],
     origin: [f64; 3],
@@ -44,7 +44,7 @@ impl FluidContact {
             random: seed.max(1),
             last_poured: 0.,
             visual: visual.clone(),
-            splash: crate::weather::ParticleState::new(splash, seed as u64),
+            splash: crate::particles::ParticleState::new(splash, seed as u64),
             colors: std::array::from_fn(|i| {
                 let c = visual.vectors[&format!("fluid.{i}")];
                 [
@@ -65,7 +65,7 @@ impl FluidContact {
     pub fn visual(&self) -> &crate::reference::ParticleReference {
         &self.visual
     }
-    pub fn splash(&self) -> &[crate::weather::ParticleOutput] {
+    pub fn splash(&self) -> &[crate::particles::ParticleOutput] {
         self.splash.particles()
     }
     pub(crate) fn set_color(&mut self, fractions: [f32; 6]) {
@@ -126,7 +126,6 @@ impl FluidContact {
             dt,
             std::array::from_fn(|i| cap_pose.translation[i] as f64 + self.origin[i]),
             0.,
-            &[],
             physics,
         );
         let emitter = cap_pose
@@ -164,7 +163,7 @@ impl FluidContact {
                 let offset_radius = self.random().sqrt() * reference.cone_radius;
                 let offset_angle = self.random() * std::f32::consts::TAU;
                 let draw = self.random();
-                let rotation = crate::weather::particle_curve(
+                let rotation = crate::particles::particle_curve(
                     &self.visual.curves["InitialModule.startRotation"],
                     0.,
                     draw,
@@ -191,9 +190,12 @@ impl FluidContact {
             particle.age += dt;
             let t = (particle.age / reference.lifetime_seconds).clamp(0., 1.);
             particle.size = self.visual.curves["InitialModule.startSize"].scalar
-                * crate::weather::particle_curve(&self.visual.curves["SizeModule.curve"], t, 0.);
-            let color =
-                crate::weather::particle_color(&self.visual.colors["ColorModule.gradient"], t, 0.);
+                * crate::particles::particle_curve(&self.visual.curves["SizeModule.curve"], t, 0.);
+            let color = crate::particles::particle_color(
+                &self.visual.colors["ColorModule.gradient"],
+                t,
+                0.,
+            );
             particle.color = std::array::from_fn(|i| particle.start_color[i] * color[i]);
             if particle.remaining <= 0. {
                 self.particles.swap_remove(index);

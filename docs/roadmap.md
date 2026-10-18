@@ -191,8 +191,8 @@ The checked source inputs and merged export are complete. The repaired diagnosti
 | Vehicles and interaction | Two imported cars, vehicle selection, carry, parts, mechanisms, and source recovery |
 | Driving controls and transmission | Source pedal ramps, manual gears, clutch, two saved assists, control help, and gear feedback |
 | Rendering | Shared lighting, shadows, probes, camera effects, transparent glass, live mirrors, and source plates |
-| Audio | Source vehicle, interaction, weather, and Lada radio audio |
-| Survival and weather | Existing consumables, survival state, sleep, weather, storm lighting, and particles |
+| Audio | Source vehicle, interaction, and Lada radio audio |
+| Survival | Existing consumables, survival state, and sleep |
 | Portable flashlight | Source bindings, carried controls, storage restrictions, and shared light rendering |
 | Cleaning and painting | Authored tools, cleaning, spray paint, wear, live conditions, and retained material updates |
 | Save/load | Browser storage, fleet, fluids, items, conditions, tools, inventory ownership, and scene replacement under strict schema 5 |
@@ -297,7 +297,7 @@ Source inputs are recovered. Finish package preparation before expanding gamepla
    Check collision seams, long drives, rebasing, revisits, retained objects, memory, and assembled audio.
 4. **Measure source driving behavior.** Collect matched original-game measurements before changing tire, rim, hub, suspension, or braking response.
    Then verify launch, both-car driving, wheel spin, and 30/60/120 FPS behavior against those measurements.
-5. **Complete save coverage.** Preserve needs, food progress, sleep, storms, toilet state, and radio state.
+5. **Complete save coverage.** Preserve needs, food progress, sleep, toilet state, and radio state.
    Add save slots and autosave after these owners restore correctly. Keep one current schema without migrations.
 6. **Expand gameplay in layers.** Add cargo, remaining items, the fleet, damage, weapons, and enemies in dependency order when authorized.
    Add clothing with inventory and towing with cargo. Connect settings, custom music, and remaining effects through their existing owners.
@@ -325,11 +325,12 @@ The backlog does not expand approved implementation scope. Each new feature need
 | Animals and enemies | Missing | Add rabbits, human enemies, movement, attacks, and spawn rules. |
 | Weapons | Missing | Add firearms, ammunition, reload actions, melee weapons, and projectiles. |
 | Damage and destruction | Partial | Add wounds, blood loss, combat damage, breakable objects, and death ragdolls. |
-| Complete save state | Partial | Preserve needs, food progress, sleep, storms, toilet state, and radio state; add save slots and autosave. |
+| Complete save state | Partial | Preserve needs, food progress, sleep, toilet state, and radio state; add save slots and autosave. |
+| Weather simulation and reference data | Removed; outside current scope | Sandstorms, storm wind forces, storm particles, storm audio and lighting, and weather reference data are out of scope. |
 | Settings and game setup | Partial | Add seed entry, source game options, editable controls, graphics, audio, and player settings. |
 | Custom radio music | Missing | Add user music playback through the existing audio owner. Source radio playback already exists. |
 | Multiplayer | Missing | Add the reference build's multiplayer behavior and shared state. |
-| Remaining visual effects | Partial | Add soft storm particles, brush depth fading, fluid refraction, and source death effects. |
+| Remaining visual effects | Partial | Add brush depth fading, fluid refraction, and source death effects. |
 
 Generated identities and change records are in master. Complete save state requires the remaining gameplay owners too.
 Source placement and imported geometry do not provide excluded item actions, vehicle mechanics, or enemy behavior.
@@ -337,8 +338,7 @@ Source placement and imported geometry do not provide excluded item actions, veh
 Follow the [work order](#work-order). Source-world integration is complete; package and runtime acceptance remain open.
 
 Implementation owners: [vehicles](vehicles.md), [save contract](../src/save/schema.rs),
-[survival](../src/survival.rs), [weather](../src/weather.rs), and [flashlight storage](../src/interaction/storage.rs).
-The selected source has no supported rain scheduler or active snow scheduler. Add neither without source evidence.
+[survival](../src/survival.rs) and [flashlight storage](../src/interaction/storage.rs).
 
 ## Remaining game comparison
 
@@ -404,4 +404,4 @@ That source proof resolves the former reload-versus-reset uncertainty.
 Source vehicle, interaction, and Lada radio audio are implemented. Assembled audible acceptance remains incomplete.
 See the [audio owner](../src/audio.rs) and [browser audio route](../web/audio.js) for the current implementation.
 Master includes save/load, two source cars, and live mirrors.
-Survival, sleep, and weather are now implemented in master. Multiplayer and deployment remain outside scope.
+Survival and sleep are implemented in master. Weather simulation and reference data are removed and outside current scope. Multiplayer and deployment remain outside scope.

@@ -293,7 +293,7 @@ def export_condition_variants(exporter, records, mapping):
 
 
 def recover_conditions(source, nodes, components, pointer_node, item_nodes, colliders, output) -> dict:
-    from .weather import particle
+    from .particles import particle
     import json
     repair,clean,managed=permission_tables(source)
     result={'surfaces':[],'brushes':[],'sprays':[],'washes':[],'collider_bindings':[],

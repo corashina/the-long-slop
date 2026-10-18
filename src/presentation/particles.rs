@@ -148,14 +148,13 @@ impl AsBindGroup for ParticleMaterial {
         .to_vec()
     }
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 enum Owner {
     Urine,
     Brush(usize),
     Spray(usize),
     Wash(usize),
     Outlet(u32),
-    Storm(crate::weather::StormId),
 }
 struct Group {
     owner: Owner,
@@ -164,15 +163,14 @@ struct Group {
     count: usize,
     order: Vec<usize>,
     entities: Vec<Entity>,
-    active: bool,
 }
 #[derive(Resource, Default)]
-pub(crate) struct WeatherRender {
+pub(crate) struct ParticleRender {
     mesh: Option<Handle<Mesh>>,
     groups: Vec<Group>,
     uniforms: Vec<ParticleUniform>,
 }
-impl WeatherRender {
+impl ParticleRender {
     pub(crate) fn prepared(&self) -> bool {
         self.mesh.is_some()
     }
@@ -181,14 +179,14 @@ impl WeatherRender {
 pub(crate) struct ExtractedParticles {
     pub(crate) uniforms: Vec<ParticleUniform>,
 }
-pub struct SourceWeatherPlugin;
-impl Plugin for SourceWeatherPlugin {
+pub struct SourceParticlePlugin;
+impl Plugin for SourceParticlePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<WeatherRender>()
+        app.init_resource::<ParticleRender>()
             .add_plugins(MaterialPlugin::<ParticleMaterial>::default())
             .add_systems(
                 PostUpdate,
-                sync_weather
+                sync_particles
                     .after(bevy::transform::TransformSystems::Propagate)
                     .after(super::lighting::sync_lighting)
                     .before(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
@@ -200,7 +198,7 @@ impl Plugin for SourceWeatherPlugin {
             .add_systems(Render, upload.in_set(RenderSystems::PrepareResources));
     }
 }
-fn extract(state: Extract<Res<WeatherRender>>, mut extracted: ResMut<ExtractedParticles>) {
+fn extract(state: Extract<Res<ParticleRender>>, mut extracted: ResMut<ExtractedParticles>) {
     extracted
         .uniforms
         .resize(state.uniforms.len(), ParticleUniform::default());
@@ -248,7 +246,7 @@ fn mesh() -> Mesh {
     .with_inserted_indices(Indices::U32(indices))
 }
 fn add_group(
-    state: &mut WeatherRender,
+    state: &mut ParticleRender,
     owner: Owner,
     index: usize,
     r: &ParticleReference,
@@ -256,16 +254,6 @@ fn add_group(
     commands: &mut Commands,
     materials: &mut Assets<ParticleMaterial>,
 ) {
-    // A destroyed storm's retained slots can serve the next storm of this source.
-    if let Some(g) = state
-        .groups
-        .iter_mut()
-        .find(|g| matches!(g.owner, Owner::Storm(_)) && !g.active && g.source == index)
-    {
-        g.owner = owner;
-        g.active = true;
-        return;
-    }
     let start = state.uniforms.len();
     let count = (r.capacity as usize).div_ceil(BATCH);
     let m = &r.materials[0];
@@ -338,16 +326,15 @@ fn add_group(
         count,
         order: Vec::with_capacity(r.capacity as usize),
         entities,
-        active: true,
     });
 }
 #[allow(clippy::too_many_arguments)]
-fn sync_weather(
+fn sync_particles(
     mut commands: Commands,
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
     lighting: Res<SourceLighting>,
-    mut state: ResMut<WeatherRender>,
+    mut state: ResMut<ParticleRender>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ParticleMaterial>>,
     mut visibility: Query<
@@ -359,10 +346,10 @@ fn sync_weather(
     if !lighting.bound {
         return;
     }
-    let r = &reference.0.weather;
+    let references = &reference.0.particles;
     if state.mesh.is_none() {
         state.mesh = Some(meshes.add(mesh()));
-        for (i, p) in r.particles.iter().enumerate().skip(2) {
+        for (i, p) in references.iter().enumerate() {
             let owner = if p.role.starts_with("urine") {
                 Owner::Urine
             } else {
@@ -418,30 +405,6 @@ fn sync_weather(
             }
         }
     }
-    for g in &mut state.groups {
-        if let Owner::Storm(id) = g.owner {
-            g.active = drive.runtime.weather.storms().iter().any(|s| s.id == id);
-        }
-    }
-    for storm in drive.runtime.weather.storms() {
-        for i in 0..2 {
-            if !state
-                .groups
-                .iter()
-                .any(|g| g.active && g.owner == Owner::Storm(storm.id) && g.source == i)
-            {
-                add_group(
-                    &mut state,
-                    Owner::Storm(storm.id),
-                    i,
-                    &r.particles[i],
-                    &lighting,
-                    &mut commands,
-                    &mut materials,
-                );
-            }
-        }
-    }
     let origin = drive.runtime.stream.origin.offset;
     let Ok(camera) = camera.single() else {
         return;
@@ -455,7 +418,7 @@ fn sync_weather(
             Owner::Spray(tool) => &reference.0.conditions.sprays[tool].particles[g.source],
             Owner::Brush(tool) => &reference.0.conditions.brushes[tool].particles[g.source],
             Owner::Wash(wash) => &reference.0.conditions.washes[wash].particles[g.source],
-            _ => &r.particles[g.source],
+            Owner::Urine | Owner::Outlet(_) => &references[g.source],
         };
         let fluid = match g.owner {
             Owner::Urine => Some(&drive.runtime.urine),
@@ -466,7 +429,7 @@ fn sync_weather(
                 .fluid_particles()
                 .find(|(key, _)| key.0 == id)
                 .map(|(_, p)| p),
-            Owner::Storm(_) | Owner::Brush(_) | Owner::Spray(_) | Owner::Wash(_) => None,
+            Owner::Brush(_) | Owner::Spray(_) | Owner::Wash(_) => None,
         };
         let splash = p.role.starts_with("splash") || p.role == "urine_splash";
         let particles = if let Owner::Wash(wash) = g.owner {
@@ -496,20 +459,12 @@ fn sync_weather(
                     .cleaning
                     .particles(tool, g.source),
             )
-        } else if let Owner::Storm(id) = g.owner {
-            drive
-                .runtime
-                .weather
-                .storms()
-                .iter()
-                .find(|s| s.id == id)
-                .map(|s| s.particles[g.source].particles())
         } else if splash {
             fluid.map(|f| f.splash())
         } else {
             None
         };
-        let count = if !g.active || !p.flags["gameObject.active"] || !p.flags["renderer.enabled"] {
+        let count = if !p.flags["gameObject.active"] || !p.flags["renderer.enabled"] {
             0
         } else {
             particles.map_or_else(|| fluid.map_or(0, |f| f.particles().len()), |p| p.len())

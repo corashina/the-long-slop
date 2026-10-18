@@ -151,7 +151,7 @@ def recover_camera_stack(source):
 def recover_glasses_profiles(source,manifest,output):
     from .source import source_id,key
     from .lighting import texture
-    from .weather import curve
+    from .particles import curve
     source.lighting_textures=getattr(source,'lighting_textures',{(t['source']['file'],t['source']['path_id']):t for t in manifest['lighting']['textures']})
     profiles=[]
     for pid in range(130128,130134):
@@ -184,7 +184,7 @@ def recover_glasses_profiles(source,manifest,output):
 def validate_glasses_profiles(profiles,manifest):
     from .survival import finite_record
     from .validation import record,array,number,u32,boolean,string,source,optional
-    from .weather import validate_curve
+    from .particles import validate_curve
     def spline(c):
         record(c,{'curve':validate_curve,'cached_data':array(number,128),'loop':boolean,'range':number,'zero_value':number})
     def parameters(d):
