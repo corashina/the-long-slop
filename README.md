@@ -23,6 +23,7 @@ node scripts/serve.mjs
 
 Open [the local game](http://127.0.0.1:4173). Wait for the scene. Select New game, then Continue to capture the mouse.
 Press Ctrl+C in the server terminal to stop it.
+For browser profiling, build with `./scripts/build.ps1 -Profiling`. The profiler then shows Rust function names.
 The exporter checks the Steam build and leaves Steam files unchanged.
 Git excludes recovered assets, source analysis, and `web/pkg`.
 A missing or invalid reference export stops loading.

@@ -183,6 +183,9 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
                         title: "My Summer Slop".into(),
                         canvas: Some("#game".into()),
                         fit_canvas_to_parent: true,
+                        // Render at CSS pixels. HiDPI scaling would multiply the pixel count.
+                        resolution: bevy::window::WindowResolution::default()
+                            .with_scale_factor_override(1.0),
                         prevent_default_event_handling: true,
                         ..default()
                     }),
