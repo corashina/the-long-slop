@@ -78,8 +78,12 @@ Preserve screenshots and report FPS, frame times, draw counts, instance coverage
 
 On 2026-10-18, the user requested merging the implemented Stage 1 into local master.
 This request replaces the earlier instruction to keep the branch unmerged.
+The local merge is `a3d27ea9ffa8de5e1d9338c3bcf88af231ac8481`.
+It integrates Stage 1 with startup commit `6a557e0733210d87d7ffbeb8db982cf28cfdd39b`.
 Stages 2 and 3 are not part of this merge.
 The merge includes the benchmark tools, but no benchmark result is available.
+Merged master passed `cargo test --locked --offline`: 48 passed, zero failed, and 33 ignored.
+The three benchmark scripts passed Node syntax checks.
 
 Remaining implementation:
 
@@ -90,6 +94,8 @@ Remaining implementation:
 Remaining verification:
 
 - Finish the exact-source matched baseline build and verify playable gameplay.
+- Build merged master for WASM. Its startup changes are newer than the tested Stage 1 package.
+- Use the same startup changes in both benchmark builds. Do not compare different startup revisions.
 - Check Stage 1 at runtime before implementing Stage 2.
 - Check Stage 2 at runtime before implementing Stage 3.
 - Measure garage and driving FPS, frame times, and draw counts with matched release builds.
