@@ -1,6 +1,6 @@
-//! Source camera stack. GPU tokens are acknowledged after the render queue submission.
+//! Source world camera. GPU tokens are acknowledged after the render queue submission.
 use super::lighting_scene::PROBE_COUNT;
-use super::surface_views::{MIRROR_START, VIEW_COUNT};
+use super::surface_views::{MIRROR_START, PROBE_START, VIEW_COUNT, WORLD_VIEWS};
 use super::{
     frame_copy::FrameCopy,
     lighting_assets::LightingRenderAssets,
@@ -79,7 +79,6 @@ struct FrameProgress {
     first_jitter: [f32; 2],
     jitter: [f32; 2],
     frame: u32,
-    mask: u16,
     sky: bool,
     presented: bool,
     token: u32,
@@ -159,7 +158,6 @@ impl SourceGraphProgress {
         let gpu = &s.gpu_boundary;
         let complete = s.presented
             && s.sky
-            && s.mask == 7
             && s.token != 0
             && s.motion.frame == s.frame
             && s.motion.submitted_token == s.token
@@ -435,14 +433,14 @@ pub fn spawn_cameras(
     image.texture_descriptor.usage |= TextureUsages::RENDER_ATTACHMENT;
     let capture = images.add(image);
     for index in 0..MIRROR_START {
-        let (near, far, fov, mask, order, samples) = if index < 3 {
-            let c = &record.cameras[index + 1];
+        let (near, far, fov, mask, order, samples) = if index < WORLD_VIEWS {
+            let world = super::camera::world_camera_settings(reference);
             (
-                c.near,
-                c.far,
-                c.field_of_view,
-                c.mask,
-                c.order as isize,
+                world.near,
+                world.far,
+                world.fov_degrees,
+                world.mask,
+                record.cameras[2].order as isize,
                 Msaa::Sample8,
             )
         } else {
@@ -476,33 +474,22 @@ pub fn spawn_cameras(
                 shadow_fade_center: Vec4::ZERO,
             },
         ));
-        if index == 1 {
+        if index == 0 {
             entity.insert(super::camera::DriveCamera);
         }
-        if index >= 3 {
+        if index >= PROBE_START {
             entity.insert(RenderTarget::Image(capture.clone().into()));
         }
     }
 }
 
-pub fn sync_stack_cameras(
+pub fn sync_sky_camera(
     main: Query<&Transform, (With<super::camera::DriveCamera>, Without<SourceSkyCamera>)>,
-    mut others: Query<
-        (
-            &mut Transform,
-            Option<&SourceSurfaceView>,
-            Has<SourceSkyCamera>,
-        ),
-        Without<super::camera::DriveCamera>,
-    >,
+    mut sky: Query<&mut Transform, (With<SourceSkyCamera>, Without<super::camera::DriveCamera>)>,
 ) {
     let Ok(main) = main.single() else { return };
-    for (mut transform, source, sky) in &mut others {
-        if sky {
-            *transform = Transform::from_rotation(main.rotation);
-        } else if source.is_some_and(|v| v.index < 3) {
-            *transform = *main;
-        }
+    for mut transform in &mut sky {
+        *transform = Transform::from_rotation(main.rotation);
     }
 }
 fn bind_sky_extras(
@@ -596,7 +583,7 @@ fn prepare_frame(
         }
     }
     if let (Some(sky), Some(ProbeJob::Face(face))) = (sky.as_mut(), frame.probe_job) {
-        if let Some(snapshot) = frame.views[3 + usize::from(face)] {
+        if let Some(snapshot) = frame.views[PROBE_START + usize::from(face)] {
             let projection =
                 Mat4::from_cols_array_2d(&crate::reference::sky::source_sky_gpu_projection(
                     snapshot.implicit_projection.to_cols_array_2d(),
@@ -653,7 +640,7 @@ fn prepare_frame(
             );
         }
     }
-    let Some((_, target)) = views.iter().find(|(source, _)| source.index == 2) else {
+    let Some((_, target)) = views.iter().find(|(source, _)| source.index == 0) else {
         return;
     };
     let Some(format) = target.out_texture_view_format() else {
@@ -664,7 +651,7 @@ fn prepare_frame(
             RenderingState::Failed("Source final display requires an sRGB view".into());
         return;
     }
-    let colors = resources.targets.stack.clone();
+    let colors = resources.targets.world.clone();
     if let Some(mut existing) = existing {
         if !Arc::ptr_eq(&existing.colors, &colors) {
             existing
@@ -739,10 +726,10 @@ pub(crate) fn surface_ready(
         && resources.is_some_and(|r| r.display.ready(&cache))
         && effects.is_some_and(|effects| effects.ready(&cache))
         && state.sky
-        && (index < 3
+        && (index < WORLD_VIEWS
             || index >= MIRROR_START
             || (state.presented
-                && frame.probe_job == Some(ProbeJob::Face((index - 3) as u8))
+                && frame.probe_job == Some(ProbeJob::Face((index - PROBE_START) as u8))
                 && probe.is_some_and(|p| {
                     p.probes[frame.probe_index].accepts(frame.probe_token)
                         && p.probes[frame.probe_index].filter.ready(&cache)
@@ -764,7 +751,7 @@ fn begin_frame(frame: Res<SourceViewFrame>, progress: Res<SourceGraphProgress>) 
             ..default()
         };
     }
-    if let Some(view) = frame.views[1] {
+    if let Some(view) = frame.views[0] {
         let extent = view.extent.to_array();
         if state.extent != extent {
             state.extent = extent;
@@ -774,7 +761,6 @@ fn begin_frame(frame: Res<SourceViewFrame>, progress: Res<SourceGraphProgress>) 
     }
     state.jitter = frame.jitter.map_or([0.; 2], |j| j.pixels);
     state.frame = frame.frame;
-    state.mask = 0;
     state.sky = false;
     state.presented = false;
 }
@@ -874,7 +860,7 @@ fn render_sky(
         context
             .command_encoder()
             .begin_render_pass(&RenderPassDescriptor {
-                label: Some("source_stack_clear"),
+                label: Some("source_world_clear"),
                 color_attachments: &colors,
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
                     view: &resources.sky_depth,
@@ -1006,10 +992,10 @@ fn finish_surface(
         }
         return;
     }
-    if source.index >= 3 {
+    if source.index >= PROBE_START {
         let Some(probes) = probe.as_mut() else { return };
         let probe = &mut probes.probes[frame.probe_index];
-        let face = (source.index - 3) as u8;
+        let face = (source.index - PROBE_START) as u8;
         if probe.sky_frames[usize::from(face)].load(Ordering::Acquire) != frame.frame {
             return;
         }
@@ -1036,11 +1022,10 @@ fn finish_surface(
         probe.encoded_token = Some(frame.probe_token);
         return;
     }
-    if !effects.encoded(source.index, frame.frame, frame.main_token) {
+    if !effects.encoded(frame.frame, frame.main_token) {
         return;
     }
-    state.mask |= 1 << source.index;
-    if source.index == 2 && state.mask == 7 && state.sky {
+    if source.index == 0 && state.sky {
         let Some(output) = target.out_texture_color_attachment(None) else {
             return;
         };
@@ -1568,7 +1553,7 @@ fn clear_capture(
     mut context: RenderContext,
 ) {
     let (source, targets) = view.into_inner();
-    if source.index < 3 {
+    if source.index < WORLD_VIEWS {
         return;
     }
     let colors = [Some(RenderPassColorAttachment {
@@ -1612,11 +1597,12 @@ fn render_capture_sky(
 ) {
     let entity = view.entity();
     let (extracted, source, targets, instance) = view.into_inner();
-    if source.index < 3 || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+    if source.index < WORLD_VIEWS || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
+    {
         return;
     }
     if sky.encode(
-        source.index - 2,
+        source.index - PROBE_START + 1,
         context.command_encoder(),
         &cache,
         targets.0.colors.attachment(),
@@ -1625,7 +1611,7 @@ fn render_capture_sky(
     ) {
         if source.index < MIRROR_START {
             if let Some(probe) = probe.as_ref() {
-                probe.probes[frame.probe_index].sky_frames[source.index - 3]
+                probe.probes[frame.probe_index].sky_frames[source.index - PROBE_START]
                     .store(frame.frame, Ordering::Release);
             }
             return;
@@ -1772,11 +1758,11 @@ fn prepare_motion(
         return;
     }
     let (Some(snapshot), Some(assets), Some(origin)) =
-        (frame.views[1].as_ref(), assets, objects.origin())
+        (frame.views[0].as_ref(), assets, objects.origin())
     else {
         return;
     };
-    let Some((entity, _, targets, draw)) = views.iter().find(|(_, view, _, _)| view.index == 1)
+    let Some((entity, _, targets, draw)) = views.iter().find(|(_, view, _, _)| view.index == 0)
     else {
         return;
     };
@@ -1891,14 +1877,14 @@ fn encode_motion_camera(
     mut context: RenderContext,
 ) {
     let (source, targets) = view.into_inner();
-    if source.index != 1
+    if source.index != 0
         || !objects.matches(frame.frame, frame.main_token)
         || !pipelines.ready(&cache)
         || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
     {
         return;
     }
-    let (Some(motion), Some(snapshot)) = (motion.as_mut(), frame.views[1].as_ref()) else {
+    let (Some(motion), Some(snapshot)) = (motion.as_mut(), frame.views[0].as_ref()) else {
         return;
     };
     if motion.first_token == 0 {
@@ -1935,7 +1921,7 @@ fn encode_motion_objects(
     mut context: RenderContext,
 ) {
     let entity = view.entity();
-    if view.into_inner().index != 1
+    if view.into_inner().index != 0
         || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
     {
         return;
@@ -1969,7 +1955,7 @@ fn submit_motion(
     let Some(motion) = motion.as_mut() else {
         return;
     };
-    let Some((_, draw)) = views.iter().find(|(view, _)| view.index == 1) else {
+    let Some((_, draw)) = views.iter().find(|(view, _)| view.index == 0) else {
         return;
     };
     let mut state = progress.0.lock().unwrap();

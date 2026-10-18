@@ -33,7 +33,7 @@ for(const path of process.argv.slice(2)){
  if(report.frames){
   assert.equal(report.canvas[0],1280);assert.equal(report.canvas[1],720);assert.equal(report.dpr,1);
   assert.ok(report.after.totalSteps>report.before.totalSteps,`${path}: physics did not advance`);
-  assert.ok(report.afterAudit.graph.views[1].frame>report.beforeAudit.graph.views[1].frame,`${path}: main render submissions did not advance`);
+  assert.ok(report.afterAudit.graph.views[0].frame>report.beforeAudit.graph.views[0].frame,`${path}: main render submissions did not advance`);
   assert.equal(report.before.paused,false);assert.equal(report.after.paused,false);
  }
  console.log(JSON.stringify({path,fps:report.fps,mean:report.mean,p95:report.p95,currentShadowDraws:draws,currentShadowInstances:hasInstanceData?instances:null,batchedCascades:batched,glDrawsPerFrame:report.perFrame?Object.values(report.perFrame).reduce((sum,value)=>sum+value.calls,0):null}));

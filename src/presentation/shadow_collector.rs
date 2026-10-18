@@ -162,7 +162,7 @@ fn prepare(
                 snapshot.far / snapshot.near - 1.,
                 1.,
                 1. - light.shadows.strength,
-                if view.index == 1 { 1. } else { 0. },
+                if view.index == 0 { 1. } else { 0. },
             ),
             atlas: Vec4::new(
                 1. / targets.0.atlas_size as f32,

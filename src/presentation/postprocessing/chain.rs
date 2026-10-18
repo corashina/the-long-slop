@@ -13,7 +13,7 @@ use super::{
     taa::TaaPass,
     uber::{MainInputs, UberPass},
 };
-use crate::reference::postprocessing::{CameraEffectScope, PostprocessingRecord};
+use crate::reference::postprocessing::PostprocessingRecord;
 use bevy::prelude::*;
 use bevy::render::{
     render_resource::*,
@@ -88,14 +88,13 @@ struct MainChain {
 }
 pub struct SourcePostChain {
     pub extent: [u32; 2],
-    pub scope: CameraEffectScope,
     pub logical_bytes: u64,
     pub startup_count: u32,
     pub resize_count: u32,
     _initial: ColorTarget,
     copy: CopyPass,
     uber: UberPass,
-    main: Option<MainChain>,
+    main: MainChain,
     stop_nan: bool,
     completed: u32,
     pending: Option<u32>,
@@ -113,7 +112,6 @@ impl SourcePostChain {
         motion: &TextureView,
         extent: [u32; 2],
         record: &PostprocessingRecord,
-        scope: CameraEffectScope,
         stop_nan: bool,
         previous: Option<Self>,
     ) -> Result<Self, String> {
@@ -122,15 +120,12 @@ impl SourcePostChain {
         {
             return Err("Invalid source postprocessing extent".into());
         }
-        if previous.as_ref().is_some_and(|old| old.scope != scope) {
-            return Err("Source effect scope changed without layer reconstruction".into());
-        }
         let startup_count = previous.as_ref().map_or(1, |old| old.startup_count);
         let resize_count = previous.as_ref().map_or(0, |old| old.resize_count + 1);
         let completed = previous.as_ref().map_or(0, |old| old.completed);
         let initial = ColorTarget::new(device, extent);
         let (mut copy, old_main, old_uber) = match previous {
-            Some(old) => (old.copy, old.main, Some(old.uber)),
+            Some(old) => (old.copy, Some(old.main), Some(old.uber)),
             None => (
                 CopyPass::new(device, cache, shaders.copy.clone(), source),
                 None,
@@ -138,7 +133,7 @@ impl SourcePostChain {
             ),
         };
         copy.rebind(device, cache, source);
-        let main = if scope == CameraEffectScope::MainStack {
+        let main = {
             let (old_taa, old_motion, old_histogram, old_exposure, old_bloom, old_lut, lut_baked) =
                 match old_main {
                     Some(old) => (
@@ -224,7 +219,7 @@ impl SourcePostChain {
                     &record.grading,
                 )?
             };
-            Some(MainChain {
+            MainChain {
                 _taa_output: taa_output,
                 taa,
                 motion,
@@ -233,25 +228,22 @@ impl SourcePostChain {
                 bloom,
                 lut,
                 lut_baked,
-            })
-        } else {
-            None
+            }
         };
-        let inputs = main.as_ref().map(|main| MainInputs {
+        let inputs = MainInputs {
             bloom: main.bloom.output(),
             exposure: main.exposure.views(),
             dirt: textures.dirt,
             dirt_extent: textures.dirt_extent,
             lut: main.lut.output(),
             sample_scale: main.bloom.layout.sample_scale,
-        });
+        };
         let uber = UberPass::new(
             device,
             queue,
             cache,
             shaders.uber.clone(),
-            main.as_ref()
-                .map_or(&initial.view, |main| main.motion.output()),
+            main.motion.output(),
             textures.noise,
             extent,
             record,
@@ -259,20 +251,16 @@ impl SourcePostChain {
             old_uber,
         )?;
         let area = u64::from(extent[0]) * u64::from(extent[1]);
-        let logical_bytes = area * 8
-            + main.as_ref().map_or(0, |main| {
-                area * 8
-                    + main.taa.logical_bytes
-                    + main.motion.layout.logical_bytes()
-                    + main.histogram.layout.logical_bytes()
-                    + 8
-                    + main.bloom.layout.logical_bytes()
-                    + LUT_BYTES
-                    + CURVE_BYTES
-            });
+        let logical_bytes = area * 16
+            + main.taa.logical_bytes
+            + main.motion.layout.logical_bytes()
+            + main.histogram.layout.logical_bytes()
+            + 8
+            + main.bloom.layout.logical_bytes()
+            + LUT_BYTES
+            + CURVE_BYTES;
         Ok(Self {
             extent,
-            scope,
             logical_bytes,
             startup_count,
             resize_count,
@@ -294,46 +282,37 @@ impl SourcePostChain {
     pub fn ready(&self, cache: &PipelineCache) -> bool {
         self.copy.ready(cache)
             && self.uber.ready(cache)
-            && self.main.as_ref().is_none_or(|main| {
-                main.taa.ready(cache)
-                    && main.motion.ready(cache)
-                    && main.histogram.ready(cache)
-                    && main.exposure.ready(cache)
-                    && main.bloom.ready(cache)
-                    && main.lut.ready(cache)
-            })
+            && self.main.taa.ready(cache)
+            && self.main.motion.ready(cache)
+            && self.main.histogram.ready(cache)
+            && self.main.exposure.ready(cache)
+            && self.main.bloom.ready(cache)
+            && self.main.lut.ready(cache)
     }
     pub fn failure(&self, cache: &PipelineCache) -> Option<String> {
         self.copy
             .failure(cache)
             .or_else(|| self.uber.failure(cache))
-            .or_else(|| {
-                self.main.as_ref().and_then(|main| {
-                    main.taa
-                        .failure(cache)
-                        .or_else(|| main.motion.failure(cache))
-                        .or_else(|| main.histogram.failure(cache))
-                        .or_else(|| main.exposure.failure(cache))
-                        .or_else(|| main.bloom.failure(cache))
-                        .or_else(|| main.lut.failure(cache))
-                })
-            })
+            .or_else(|| self.main.taa.failure(cache))
+            .or_else(|| self.main.motion.failure(cache))
+            .or_else(|| self.main.histogram.failure(cache))
+            .or_else(|| self.main.exposure.failure(cache))
+            .or_else(|| self.main.bloom.failure(cache))
+            .or_else(|| self.main.lut.failure(cache))
     }
     pub fn recreate(&mut self) {
         self.pending = None;
         self.completed = 0;
         self.uber.recreate();
-        if let Some(main) = &mut self.main {
-            main.taa.recreate();
-            main.exposure.recreate();
-            main.motion.reset_history();
-            main.lut_baked = false;
-        }
+        self.main.taa.recreate();
+        self.main.exposure.recreate();
+        self.main.motion.reset_history();
+        self.main.lut_baked = false;
     }
     /// Noise index, TAA next/initialized, exposure output/initialized.
     pub fn history(&self) -> [u32; 5] {
-        let taa = self.main.as_ref().map_or([0; 2], |m| m.taa.history());
-        let exposure = self.main.as_ref().map_or([0; 2], |m| m.exposure.history());
+        let taa = self.main.taa.history();
+        let exposure = self.main.exposure.history();
         [
             self.uber.noise_index(),
             taa[0],
@@ -344,11 +323,9 @@ impl SourcePostChain {
     }
     pub fn reset_history(&mut self) {
         self.pending = None;
-        if let Some(main) = &mut self.main {
-            main.taa.reset_history();
-            main.motion.reset_history();
-            main.exposure.reset_history();
-        }
+        self.main.taa.reset_history();
+        self.main.motion.reset_history();
+        self.main.exposure.reset_history();
     }
     /// Image histories remain intact during floating-origin transport.
     pub fn rebase(&mut self, _delta: Vec3) {}
@@ -382,7 +359,8 @@ impl SourcePostChain {
         }
         self.copy
             .encode(encoder, cache, &self._initial.view, self.stop_nan);
-        let exposure_index = if let Some(main) = &mut self.main {
+        let exposure_index = {
+            let main = &mut self.main;
             main.taa.encode(
                 encoder,
                 device,
@@ -406,8 +384,6 @@ impl SourcePostChain {
                 main.lut.encode(encoder, cache);
             }
             index
-        } else {
-            0
         };
         if !self.uber.encode(
             encoder,
@@ -427,12 +403,10 @@ impl SourcePostChain {
         if token <= self.completed || self.pending != Some(token) {
             return false;
         }
-        if let Some(main) = &mut self.main {
-            main.taa.completed();
-            main.motion.completed();
-            main.exposure.completed();
-            main.lut_baked = true;
-        }
+        self.main.taa.completed();
+        self.main.motion.completed();
+        self.main.exposure.completed();
+        self.main.lut_baked = true;
         self.uber.completed();
         self.completed = token;
         self.pending = None;

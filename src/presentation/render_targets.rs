@@ -1,5 +1,5 @@
 //! Persistent source render targets. Allocation is restricted to startup or resize.
-use super::surface_views::{MIRROR_START, VIEW_COUNT};
+use super::surface_views::{MIRROR_START, VIEW_COUNT, WORLD_VIEWS};
 
 use bevy::render::{
     render_resource::*,
@@ -124,7 +124,7 @@ impl Target {
     }
 }
 
-/// One color pair is shared by the main camera stack. Probe faces reuse a second pair.
+/// The world view owns one color pair. Probe faces reuse a second pair.
 pub struct SourceColorTargets {
     pub width: u32,
     pub height: u32,
@@ -269,10 +269,10 @@ impl SourceViewTargets {
     }
 }
 
-/// Three stack views share color storage; six capture views share single-sample scratch.
+/// The world view owns MSAA color storage; six capture views share single-sample scratch.
 /// Depth and collector storage never alias between views.
 pub struct SurfaceTargets {
-    pub stack: std::sync::Arc<SourceColorTargets>,
+    pub world: std::sync::Arc<SourceColorTargets>,
     pub capture: std::sync::Arc<SourceColorTargets>,
     pub mirrors: [std::sync::Arc<SourceColorTargets>; 3],
     pub views: [std::sync::Arc<SourceViewTargets>; VIEW_COUNT],
@@ -282,9 +282,9 @@ impl SurfaceTargets {
     pub fn new(device: &RenderDevice, width: u32, height: u32) -> Result<Self, String> {
         use std::sync::Arc;
         let atlas = crate::reference::shadows::source_atlas_size(width, height)
-            .ok_or("Source stack atlas extent is invalid")?;
+            .ok_or("Source world atlas extent is invalid")?;
         let capture_atlas = crate::reference::shadows::source_atlas_size(64, 64).unwrap();
-        let stack = Arc::new(SourceColorTargets::new(device, width, height, 8)?);
+        let world = Arc::new(SourceColorTargets::new(device, width, height, 8)?);
         let capture = Arc::new(SourceColorTargets::new(device, 64, 64, 1)?);
         let mirrors = [
             Arc::new(SourceColorTargets::new(device, 256, 256, 1)?),
@@ -294,8 +294,8 @@ impl SurfaceTargets {
         let mirror_atlas = crate::reference::shadows::source_atlas_size(256, 256).unwrap();
         let mut views = Vec::with_capacity(VIEW_COUNT);
         for index in 0..VIEW_COUNT {
-            let (color, atlas_size) = if index < 3 {
-                (&stack, atlas)
+            let (color, atlas_size) = if index < WORLD_VIEWS {
+                (&world, atlas)
             } else if index < MIRROR_START {
                 (&capture, capture_atlas)
             } else {
@@ -307,12 +307,12 @@ impl SurfaceTargets {
                 atlas_size,
             )?));
         }
-        let logical_bytes = stack.logical_bytes
+        let logical_bytes = world.logical_bytes
             + capture.logical_bytes
             + mirrors.iter().map(|color| color.logical_bytes).sum::<u64>()
             + views.iter().map(|view| view.logical_bytes).sum::<u64>();
         Ok(Self {
-            stack,
+            world,
             capture,
             mirrors,
             views: views.try_into().ok().unwrap(),
@@ -320,21 +320,21 @@ impl SurfaceTargets {
         })
     }
     /// Main resize preserves fixed capture targets and published probe storage.
-    pub fn resize_stack(
+    pub fn resize_world(
         &mut self,
         device: &RenderDevice,
         width: u32,
         height: u32,
     ) -> Result<(), String> {
         let atlas = crate::reference::shadows::source_atlas_size(width, height)
-            .ok_or("Source stack atlas extent is invalid")?;
-        let stack = std::sync::Arc::new(SourceColorTargets::new(device, width, height, 8)?);
-        for index in 0..3 {
+            .ok_or("Source world atlas extent is invalid")?;
+        let world = std::sync::Arc::new(SourceColorTargets::new(device, width, height, 8)?);
+        for index in 0..WORLD_VIEWS {
             self.views[index] =
-                std::sync::Arc::new(SourceViewTargets::new(device, stack.clone(), atlas)?);
+                std::sync::Arc::new(SourceViewTargets::new(device, world.clone(), atlas)?);
         }
-        self.stack = stack;
-        self.logical_bytes = self.stack.logical_bytes
+        self.world = world;
+        self.logical_bytes = self.world.logical_bytes
             + self.capture.logical_bytes
             + self
                 .mirrors
@@ -348,7 +348,7 @@ impl SurfaceTargets {
                 .sum::<u64>();
         Ok(())
     }
-    pub const TEXTURES: u32 = 3 + 3 * 5 + 6 * 4 + 3 * 5;
+    pub const TEXTURES: u32 = 3 + WORLD_VIEWS as u32 * 5 + 6 * 4 + 3 * 5;
 }
 
 /// A scratch cube has fixed per-face render views and per-mip sample views.

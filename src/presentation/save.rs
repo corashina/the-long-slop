@@ -791,14 +791,14 @@ fn candidate_required_views(
         .map(f32::to_radians);
     let forward = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::NEG_Z;
     let forward = [forward.x, forward.y, -forward.z];
-    let first = &lighting.cameras[1];
+    let first = super::camera::world_camera_settings(reference);
     let first = required_view(
         &camera_snapshot(
             extent,
             camera.inverse(),
             first.near,
             first.far,
-            first.field_of_view,
+            first.fov_degrees,
             first.mask,
             lighting.shadows.distance,
             None,
@@ -821,23 +821,6 @@ fn candidate_required_views(
         )?)?;
         Ok(())
     };
-    // Each candidate owns its view list. No live camera resource changes here.
-    for stage in &lighting.cameras[2..4] {
-        append(
-            views,
-            camera_snapshot(
-                extent,
-                camera.inverse(),
-                stage.near,
-                stage.far,
-                stage.field_of_view,
-                stage.mask,
-                lighting.shadows.distance,
-                None,
-                None,
-            ),
-        )?;
-    }
     let mut positions = [Vec3::ZERO; super::lighting_scene::PROBE_COUNT];
     let mut enabled = [false; super::lighting_scene::PROBE_COUNT];
     for (index, probe) in lighting.probes.iter().enumerate() {

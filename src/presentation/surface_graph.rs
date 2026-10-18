@@ -247,7 +247,9 @@ fn transparent(
     }
     glass.completed(
         frame.frame,
-        if source_view.index < 3 || source_view.index >= super::surface_views::MIRROR_START {
+        if source_view.index < super::surface_views::WORLD_VIEWS
+            || source_view.index >= super::surface_views::MIRROR_START
+        {
             frame.main_token
         } else {
             frame.probe_token

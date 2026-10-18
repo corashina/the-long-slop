@@ -81,7 +81,7 @@ fn snapshot_models(
     output.rows.clear();
     if !master.materials_prepared
         || master.warming
-        || frame.views[1].is_none()
+        || frame.views[0].is_none()
         || frame.main_token == 0
         || shadow.capacity() == 0
     {

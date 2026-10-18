@@ -1,6 +1,6 @@
 use super::lighting_scene::PROBE_COUNT;
 // One main-world view snapshot for raster, culling, motion, and shadow fitting.
-use super::surface_views::{MIRROR_START, PROBE_START, VIEW_COUNT};
+use super::surface_views::{MIRROR_START, PROBE_START, VIEW_COUNT, WORLD_VIEWS};
 use super::{
     lighting_assets::LightingAssets, lighting_scene::SourceSceneLighting,
     materials::RenderingState, source_lighting::SourceLightingStatus,
@@ -193,7 +193,7 @@ impl SourceViewFrame {
         Some(crate::reference::loading_dispatch::LoadingKey {
             session: self.session,
             scene: self.scene,
-            extent: self.views[1]?.extent.to_array(),
+            extent: self.views[0]?.extent.to_array(),
         })
     }
     pub(crate) fn probe_mask(&self) -> u32 {
@@ -202,7 +202,7 @@ impl SourceViewFrame {
             .enumerate()
             .fold(0, |mask, (i, enabled)| mask | (u32::from(*enabled) << i))
     }
-    /// Stack views are mandatory. Probe snapshots follow warmup and the capture job.
+    /// The world view is mandatory. Probe snapshots follow warmup and the capture job.
     pub fn required_views_ready(&self) -> bool {
         self.frame != 0
             && self.views[..PROBE_START].iter().all(Option::is_some)
@@ -332,7 +332,7 @@ pub(crate) fn snapshot(
     {
         return;
     }
-    let main = input[1].unwrap().0;
+    let main = input[0].unwrap().0;
     if let Err(error) = clock.consume(
         &acks,
         assets.record.postprocessing.taa.jitter_spread,
@@ -355,13 +355,13 @@ pub(crate) fn snapshot(
             return None;
         }
         let (extent, world_from_view, mirror) = input[index]?;
-        let (near, far, fov, mask, distance) = if index < 3 {
-            let c = &assets.record.cameras[index + 1];
+        let (near, far, fov, mask, distance) = if index < WORLD_VIEWS {
+            let world = super::camera::world_camera_settings(&reference.0);
             (
-                c.near,
-                c.far,
-                c.field_of_view,
-                c.mask,
+                world.near,
+                world.far,
+                world.fov_degrees,
+                world.mask,
                 assets.record.shadows.distance,
             )
         } else if index < MIRROR_START {
@@ -377,11 +377,11 @@ pub(crate) fn snapshot(
                 assets.record.shadows.distance,
             )
         };
-        let view = if index < 3 || index >= MIRROR_START {
+        let view = if index < WORLD_VIEWS || index >= MIRROR_START {
             world_from_view.inverse()
         } else {
             Mat4::from_cols_array_2d(&capture_view_from_world(
-                index - 3,
+                index - PROBE_START,
                 scene.probe_position[clock.probe_index].to_array(),
             ))
         };
@@ -393,7 +393,7 @@ pub(crate) fn snapshot(
             fov,
             mask,
             distance,
-            (index == 1).then_some(clock.jitter.unwrap()),
+            (index == 0).then_some(clock.jitter.unwrap()),
             mirror.map(|p| p.3),
         ))
     });
@@ -467,7 +467,7 @@ pub fn apply_render_snapshot(
             view.world_from_view = GlobalTransform::from(snapshot.view_from_world.inverse());
             view.clip_from_view = snapshot.raster_projection;
             view.clip_from_world = Some(snapshot.raster_projection * snapshot.view_from_world);
-            view.invert_culling = state.index < 3;
+            view.invert_culling = state.index < WORLD_VIEWS;
             state.nonjittered_clip_from_world =
                 snapshot.nonjittered_projection * snapshot.view_from_world;
             state.near = snapshot.near;
@@ -669,7 +669,8 @@ pub(crate) fn append_probe_required_views(
     light_forward: [f32; 3],
     light_mask: u32,
 ) -> Result<(), crate::reference::ReferenceError> {
-    const _: () = assert!(crate::world::REQUIRED_VIEW_CAPACITY == 3 + PROBE_COUNT * 6 + 3);
+    const _: () =
+        assert!(crate::world::REQUIRED_VIEW_CAPACITY == WORLD_VIEWS + PROBE_COUNT * 6 + 3);
     views.append_probe_faces(enabled, |index, face| {
         let probe = &records[index];
         let snapshot = camera_snapshot(
