@@ -980,9 +980,11 @@ fn finish_surface(
         glass: glass.audit(),
         camera_depth: depth.counts(),
         surface: lighting.draws(),
+        surface_instances: lighting.instances(),
         shadow_epoch,
         shadow_attempts,
         shadow_issued,
+        shadow_instances: shadow.instance_counts(),
         collector_frame: collector.encoded_frame(),
         atlas_size: targets.0.atlas_size,
         physical_extent: [targets.0.colors.width, targets.0.colors.height],
@@ -1148,9 +1150,11 @@ struct ViewAudit {
     glass: super::stained_glass::GlassAudit,
     camera_depth: [u32; 3],
     surface: [u32; 5],
+    surface_instances: [u32; 4],
     shadow_epoch: u32,
     shadow_attempts: [u32; 4],
     shadow_issued: [u32; 4],
+    shadow_instances: [[u32; 4]; 2],
     collector_frame: u32,
     atlas_size: u32,
     physical_extent: [u32; 2],
@@ -1255,6 +1259,9 @@ struct GpuBoundary {
     transparent_phases: u32,
     shadow_phases: u32,
     shadow_scene_frame: u32,
+    shadow_candidates: [usize; super::surface_views::VIEW_COUNT],
+    shadow_split_counts: [[usize; 4]; super::surface_views::VIEW_COUNT],
+    shadow_offscreen_casters: usize,
     shadow_queue_frame: u32,
     shadow_ready_mask: u16,
     snapshot_frame: u32,
@@ -1439,8 +1446,13 @@ fn gpu_boundaries(
         .get_resource::<ViewSortedRenderPhases<Transparent3d>>()
         .map_or(0, |p| p.len() as u32);
     boundary.shadow_phases = world
-        .get_resource::<ViewSortedRenderPhases<super::shadow_phase::SourceShadow>>()
+        .get_resource::<ViewBinnedRenderPhases<super::shadow_phase::SourceShadow>>()
         .map_or(0, |p| p.len() as u32);
+    if let Some(scene) = world.get_resource::<super::shadow_scene::ShadowScene>() {
+        boundary.shadow_candidates = scene.candidates;
+        boundary.shadow_split_counts = scene.split_counts;
+        boundary.shadow_offscreen_casters = scene.shadow_only;
+    }
     boundary.shadow_scene_frame = world
         .get_resource::<super::shadow_scene::ShadowScene>()
         .map_or(0, |s| s.frame);
