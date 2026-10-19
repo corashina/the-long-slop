@@ -158,7 +158,7 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 10. **Track physics query mutations.**
-    Status: Implemented on `codex/physics-query-mutations`, unmerged. Native mutation checks and WASM compilation passed. Runtime acceptance and performance remain unverified. Owner: [vehicle query bounds](../src/vehicle/query_bounds.rs).
+    Status: Merged into master from `codex/physics-query-mutations`. Targeted native query checks and WASM compilation passed after integration. Runtime acceptance and performance remain unverified. Owner: [vehicle query bounds](../src/vehicle/query_bounds.rs).
     Effect: Replace repeated query-bound scans with complete mutation tracking. Evidence: [checks and limits](performance/2026-10-19-physics-query-mutations.md).
     Prompt:
     ```text

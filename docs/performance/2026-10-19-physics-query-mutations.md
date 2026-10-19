@@ -1,7 +1,7 @@
 # Physics query mutation tracking
 
 Date: 2026-10-19.
-Branch: `codex/physics-query-mutations`, unmerged.
+Branch: `codex/physics-query-mutations`, merged into master.
 Implementation base: `8eca150d90e7d0fa216823276c01825f8b1189d1`.
 Design: [Approved specification](../superpowers/specs/2026-10-19-physics-query-mutations-design.md).
 Plan: [Implementation plan](../superpowers/plans/2026-10-19-physics-query-mutations.md).
@@ -135,6 +135,22 @@ Reparenting a `DisabledByParent` collider to an enabled fixed body preserves tha
 The differential test requires the scan's absence until later parent disable and enable notifications restore the collider.
 The implementation does not change this dependency behavior.
 
+## Integration on master
+
+The feature branch started at `6dc8d57c063328eff11ec4f7ed3a0dd9682406ed`.
+It merged `origin/master` at `8af3958c7ceefadd2970f4a9858a0753814beafc`.
+The integrated source is at merge commit `261a28e75a39f0f55829b1834bafcaec15557e9f`.
+The merge preserved the latest roadmap entries and master changes to streaming and terrain.
+No merge conflict required manual resolution.
+
+The requested `./scripts/check.ps1 -Filter query_bounds` ran on the integrated source.
+Formatting and the WASM library check passed.
+All 14 query-bounds tests passed, with 47 other tests filtered out.
+Four existing dead-code warnings appeared in `src/world/renderer_pending.rs`.
+Four existing unused-variable or mutability warnings appeared in `src/presentation/materials.rs`.
+The full output is in the temporary log `C:\Users\Corashina\AppData\Local\Temp\physics-query-merge-check.log`.
+Runtime acceptance and performance remain unverified.
+
 ## Verification results
 
 Commands run from the isolated worktree:
@@ -206,4 +222,4 @@ Garage and driving FPS, average frame time, p95, p99, and query preparation CPU 
 A separately approved milestone must use the roadmap's matched release A/B/A protocol and exclusive benchmark windows.
 That milestone must record package and asset hashes, viewport, DPR, profile, starting state, and route.
 Instrumented work counts must remain separate from uninstrumented frame times.
-The branch remains unmerged. Reduced owned scan work alone does not establish a performance gain.
+Reduced owned scan work alone does not establish a performance gain.
