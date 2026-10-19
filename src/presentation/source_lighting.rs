@@ -31,7 +31,7 @@ use std::{
 };
 
 /// Same layout as source_lighting.wgsl. Source constants are uploaded without unit conversion.
-#[derive(Clone, Copy, Debug, ShaderType)]
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub struct LightingUniform {
     pub ambient_sh: [Vec4; 7],
     pub sun_radiance: Vec4,
@@ -137,6 +137,9 @@ impl SourceViewLighting {
     }
 
     /// Update every view before graph execution. This does not allocate GPU resources.
+    pub fn unchanged(&self, value: &LightingUniform) -> bool {
+        self.uniform.get() == value
+    }
     pub fn write(&mut self, value: LightingUniform, device: &RenderDevice, queue: &RenderQueue) {
         self.uniform.set(value);
         self.uniform.write_buffer(device, queue);

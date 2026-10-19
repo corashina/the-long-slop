@@ -129,7 +129,16 @@ pub(crate) fn extract_shadows_only(
         Query<(Entity, &SourceRenderer), Without<super::save::HiddenWorld>>,
     >,
     mut target: ResMut<ShadowsOnly>,
+    frame: Res<super::view_frame::SourceViewFrame>,
 ) {
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::ShadowMembership,
+        &frame,
+    );
+    let capacity = target.0.capacity();
+    if timing.enabled() {
+        timing.work(source.iter().count(), 0, 1);
+    }
     target.0.clear();
     target.0.extend(
         source
@@ -137,6 +146,7 @@ pub(crate) fn extract_shadows_only(
             .filter(|(_, r)| r.0.cast_shadows == 3)
             .map(|(e, _)| e),
     );
+    timing.capacity(target.0.capacity() > capacity);
 }
 /// ShadowsOnly renderers remain in light passes and skip camera passes.
 pub struct SourceCameraVisible;

@@ -51,7 +51,7 @@ impl GrabPassCache {
     }
 }
 
-#[derive(Clone, Copy, Debug, ShaderType)]
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub struct GlassViewUniform {
     /// Source D3D11 and target share this reverse-Z device matrix.
     pub clip_from_world: Mat4,
@@ -209,6 +209,9 @@ impl SourceGlassView {
     }
     pub fn captures(&self) -> u32 {
         self.captures.load(Ordering::Relaxed)
+    }
+    pub fn unchanged(&self, value: &GlassViewUniform) -> bool {
+        self.uniform.get() == value
     }
     pub fn write(
         &mut self,

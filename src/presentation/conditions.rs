@@ -684,6 +684,10 @@ pub(crate) fn sync_conditions(world: &mut World) {
             apply_spray(receivers, color, visuals.bank, world, false);
         }
         visuals.apply_visibility(world);
+        let mut timing = super::reflection_preparation::Timer::new(
+            super::reflection_preparation::Stage::ConditionTools,
+            world.resource::<super::view_frame::SourceViewFrame>(),
+        );
         for (index, (_, model, _)) in visuals.tools.iter().enumerate() {
             let Some(model) = model else { continue };
             let pose = world
@@ -706,6 +710,16 @@ pub(crate) fn sync_conditions(world: &mut World) {
             let local =
                 Transform::from_matrix(Mat4::from(basis.inverse() * desired.compute_affine()));
             if let Some(mut transform) = world.get_mut::<Transform>(*model) {
+                if timing.enabled() {
+                    timing.work(
+                        1,
+                        usize::from(
+                            transform.translation == local.translation
+                                && transform.rotation == local.rotation,
+                        ),
+                        1,
+                    );
+                }
                 transform.translation = local.translation;
                 transform.rotation = local.rotation;
             }
