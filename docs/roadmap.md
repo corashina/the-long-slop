@@ -9,8 +9,10 @@ Master contains the source world, two cars, parts, mechanisms, survival, sleep, 
 It also contains source audio, flashlights, plates, cleaning, painting, driving controls, and inventory tasks 1 and 2.
 Builds and reviews passed. Runtime acceptance of the merged game is still open.
 
-The last package reached "The garage is ready." New game then failed with `Missing source asset: reference/food.gltf`.
-The file exists. Session validation looks for its lazy prototype in the eager scene cache.
+The current export stops loading before renderer creation because material data contains an unexpected `exclusions` field.
+The baseline and scene-resolution releases reject the same export. Performance remains unmeasured.
+An earlier package reached "The garage is ready." New game then failed with `Missing source asset: reference/food.gltf`.
+That file exists. Session validation looks for its lazy prototype in the eager scene cache.
 
 ## Work order
 
@@ -45,7 +47,7 @@ Stopped at the user's request. Branch: `codex/inventory-clothing`.
 
 ## Performance improvements
 
-These 15 proposals are ordered from easiest to hardest, not by execution order. These proposals have no verified performance gain.
+These 15 improvements are ordered from easiest to hardest, not by execution order. No performance gain is verified.
 Review each proposal against current source and profile evidence before implementation. Items 2 and 5 change image quality and need specific approval.
 Start profiling with items 3, 4, or 7 for fidelity-preserving work, or item 1 for startup. This suggestion does not change the work order.
 
@@ -56,22 +58,29 @@ Use this prompt preamble for each item:
 Effort estimates include developer work, builds, critical checks, and browser verification. One day means eight hours. Blockers can extend these estimates.
 
 1. **Compress startup downloads.**
-   Status: Implemented and merged into local master at `499b685`. Playable startup remains blocked by a WASM/export mismatch.
-   Checks: [Brotli delivery results](performance/2026-10-19-startup-brotli.md). No startup speed gain is verified.
-   Difficulty: Easy. Estimate: 1–2 days. Owners: [startup server](../scripts/serve.mjs), [world assets](../web/world-assets.js).
-   Effect: Serve startup WASM and JSON with build-time Brotli compression. Preserve receipt checks and avoid recompressing compressed images.
-   Prompt:
-   ```text
-   Inspect the startup server and asset receipt path. Add build-time Brotli for WASM and JSON, with Content-Encoding negotiation, Vary, ETag, and HEAD support. In world-assets.js, keep encoded header length separate from decoded receipt bytes and hashes. Do not recompress images that are already compressed. Compare cold and cached startup with matched exports.
-   ```
+   Status: Implemented and merged into local master at `499b685`. Merge notes are in `b46c862`.
+   The worktree is archived. The `codex/startup-brotli` branch remains.
+   Owners: [startup server](../scripts/serve.mjs), [world assets](../web/world-assets.js).
+   Build-time Brotli covers WASM and current package JSON. Receipt checks remain intact. Compressed images remain unchanged.
+   Checks: 46 web checks passed. Package receipt verification passed. Tested HTTP transfers used 90.17% fewer body bytes.
+   Conditional requests returned 304 without a body. No startup speed gain is verified.
+   Results: [Brotli delivery results](performance/2026-10-19-startup-brotli.md).
+   Local evidence: `.cache/performance/2026-10-19-startup-brotli/` retains measurements and the compression index.
+   Blocker: The installed WASM rejects manifest field `exclusions` under identity and Brotli delivery. New game remains disabled.
+   Remaining: Build matching release WASM and export. Compare cold and cached playable startup in exclusive matched A/B/A runs.
+   Check real input, active physics, submitted frames, streaming, and Save/Load. Garage and driving frame times remain unmeasured.
 
 2. **Lower internal rendering resolution.**
-   Status: Implemented in `codex/scene-resolution`; runtime acceptance and performance remain unverified. See [checks and export blocker](performance/2026-10-19-scene-resolution.md). Difficulty: Easy to moderate. Estimate: 1–2 days. Owner: [canvas sizing](../src/app.rs).
-   Effect: An optional 0.75 scene scale uses 56% of the pixels and softens the scene image. Keep UI and text at native resolution.
-   Prompt:
-   ```text
-   Inspect app.rs window and canvas sizing, then add an optional 0.75 scene scale. Keep UI and text at native resolution. Check projection, pointer mapping, resize, and reflection probes as separate paths. Compare image quality and frame times at both scales; treat this as an image-quality option.
-   ```
+   Status: Implemented and merged into master at `fad65b2`. Source commit: `b08a292`.
+   Owner: [scene sizing](../src/app.rs). Controls offers 100% and 75%; each page starts at 100%.
+   Scene targets and effects scale together. UI, mouse deltas, projection, shadow resolution, and 64×64 probes keep their existing paths.
+   Checks: Release WASM build and packaging passed. Merged checks passed: 63 native tests and 47 web tests. WASM check passed.
+   Results: [Scene resolution checks](performance/2026-10-19-scene-resolution.md).
+   Local evidence: `.cache/performance/2026-10-19-scene-resolution/` retains packages, receipts, and merge checks.
+   Blocker: Both releases reject the installed export's unexpected `exclusions` field before renderer creation.
+   Remaining: Check image quality, resize, fullscreen, aiming, probes, streaming, and Save/Load at both scales.
+   Measure garage and driving average, p95, and p99 frame times in exclusive matched release A/B/A runs.
+   Runtime acceptance and performance gains remain unverified.
 
 3. **Reuse unchanged content lookup tables.**
    Status: Proposed. Difficulty: Moderate. Estimate: 1–2 days. Owners: [content index](../src/world/content_index.rs), [instance presentation](../src/presentation/world/instances.rs).

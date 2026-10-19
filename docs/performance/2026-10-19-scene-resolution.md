@@ -1,7 +1,8 @@
 # Optional scene resolution
 
 Roadmap item 2. Source build `11140890`. Branch `codex/scene-resolution`.
-Base revision `1103368`. Keep this branch unmerged.
+Base revision `1103368`. Master includes source commit `b08a292` through merge `fad65b2`.
+The user authorized the merge and push on 2026-10-19.
 
 ## Behavior
 
@@ -51,12 +52,22 @@ Image quality, target resize, fullscreen, pointer capture, real input, physics, 
 probe publication, streaming, and Save/Load remain unverified at runtime.
 No performance gain or source runtime parity is established.
 
+## Merge checks
+
+Master includes the remote README and roadmap cleanup, startup Brotli, and scene resolution.
+Merge `fad65b2` passed 63 native tests, with 36 ignored, and 47 web tests.
+The merged WASM compile check passed with the same five material warnings.
+The merged Rust source tree matches the verified release source at `b08a292`.
+The source tree hash is `e70c3b7b39267eb6654fad3d338c9112b4d5a153`.
+The temporary worktree is archived. The source branch remains available.
+Build packages, receipts, and merge logs remain in the primary checkout's ignored evidence directory.
+
 ## Run
 
-Use the worktree in PowerShell:
+Use the primary checkout in PowerShell:
 
 ```powershell
-Set-Location 'C:\Users\Corashina\.codex\worktrees\scene-resolution\the-long-drive-wasm'
+Set-Location 'C:\Users\Corashina\Documents\Projects\the-long-drive-wasm'
 pwsh -File .\scripts\build.ps1
 $env:PORT='4289'
 $env:BENCH_VARIANT='candidate'
@@ -64,7 +75,10 @@ node .\scripts\serve-shadow-cache-benchmark.mjs
 ```
 
 Open `http://127.0.0.1:4289/`. A matching export must pass validation before gameplay can start.
-The worktree links the installed source assets and retains its own WASM package.
+The primary checkout retains the installed source assets.
+Preserved packages and receipts are under `.cache/performance/2026-10-19-scene-resolution/`.
+The candidate package is under `candidate/pkg/`. The baseline package is under `benchmark/master-baseline/pkg/`.
+Merge checks are recorded under `.cache/merge-scene-resolution/`.
 
 After New game, check real input, active physics, and submitted frames.
 Close competing game tabs and wait for builds to finish before measuring.
