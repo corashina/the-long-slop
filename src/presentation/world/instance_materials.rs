@@ -25,7 +25,7 @@ pub enum InstanceMaterial {
 #[derive(Clone)]
 pub struct RendererMaterial {
     pub visible: InstanceMaterial,
-    pub sort: Option<crate::presentation::transparent::SourceSortData>,
+    pub sort: Option<crate::presentation::renderer_visibility::SourceSortData>,
     shared: Option<SharedMaterialKey>,
 }
 #[derive(Clone)]
@@ -434,7 +434,7 @@ impl RendererMaterial {
                 .insert((sort, bevy::render::batching::NoAutomaticBatching));
         } else {
             commands.entity(entity).remove::<(
-                crate::presentation::transparent::SourceSortData,
+                crate::presentation::renderer_visibility::SourceSortData,
                 bevy::render::batching::NoAutomaticBatching,
             )>();
         }

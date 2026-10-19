@@ -109,8 +109,10 @@ pub fn prepare_surface_passes(
             continue;
         }
         let base = CachedRenderPipelineId::new(index);
-        // Installed Unlit/Color and stained glass have no ForwardAdd pass.
-        let partner = if flag(&fragment.shader_defs, "SOURCE_STANDARD") {
+        // Installed Unlit/Color and stained glass have no ForwardAdd pass. Single-pass surfaces include it.
+        let partner = if flag(&fragment.shader_defs, "SOURCE_STANDARD")
+            && !flag(&fragment.shader_defs, "SOURCE_FORWARD_ONE")
+        {
             let _queue = if let Some(owner) = owners.owner(base) {
                 match super::pipeline_ownership::queue_scope(&cache) {
                     Ok(scope) => Some(scope),
@@ -124,16 +126,18 @@ pub fn prepare_surface_passes(
             };
             let mut add = descriptor.clone();
             add.label = Some("source_surface_add".into());
-            add.vertex
-                .shader_defs
-                .push(ShaderDefVal::Bool("SOURCE_FORWARD_ADD".into(), true));
+            add.vertex.shader_defs.extend([
+                ShaderDefVal::Bool("SOURCE_FORWARD_ADD".into(), true),
+                ShaderDefVal::Bool("SOURCE_LAMPS".into(), true),
+            ]);
             let fragment = add.fragment.as_mut().unwrap();
             fragment.shader_defs.retain(
                 |value| !matches!(value,ShaderDefVal::Bool(name,_) if name == "SOURCE_REPLACEMENT"),
             );
-            fragment
-                .shader_defs
-                .push(ShaderDefVal::Bool("SOURCE_FORWARD_ADD".into(), true));
+            fragment.shader_defs.extend([
+                ShaderDefVal::Bool("SOURCE_FORWARD_ADD".into(), true),
+                ShaderDefVal::Bool("SOURCE_LAMPS".into(), true),
+            ]);
             for target in fragment.targets.iter_mut().flatten() {
                 let source = target
                     .blend

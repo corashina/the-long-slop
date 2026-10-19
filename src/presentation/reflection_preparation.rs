@@ -17,12 +17,11 @@ pub enum Stage {
     Caster,
     Surface,
     Transparent,
-    ShadowMembership,
     ConditionTools,
     LightingControls,
     LightingUpload,
 }
-const STAGES: usize = 13;
+const STAGES: usize = 12;
 const NAMES: [&str; STAGES] = [
     "snapshot",
     "shadows",
@@ -33,7 +32,6 @@ const NAMES: [&str; STAGES] = [
     "caster",
     "surface",
     "transparent",
-    "shadow_membership",
     "condition_tools",
     "lighting_controls",
     "lighting_upload",
@@ -48,7 +46,6 @@ struct Measurement {
     items: u64,
     unchanged: u64,
     writes: u64,
-    capacity_growths: u64,
     upload_bytes: u64,
 }
 static ENABLED: AtomicBool = AtomicBool::new(false);
@@ -62,7 +59,6 @@ static MEASUREMENTS: Mutex<[[Measurement; STAGES]; 10]> = Mutex::new(
         items: 0,
         unchanged: 0,
         writes: 0,
-        capacity_growths: 0,
         upload_bytes: 0,
     }; STAGES]; 10],
 );
@@ -103,9 +99,6 @@ impl Timer {
         self.work.unchanged += unchanged as u64;
         self.work.writes += writes as u64;
     }
-    pub fn capacity(&mut self, grew: bool) {
-        self.work.capacity_growths += u64::from(grew);
-    }
     pub fn upload(&mut self, bytes: u64) {
         self.work.upload_bytes += bytes;
     }
@@ -140,7 +133,6 @@ impl Drop for Timer {
         value.items += self.work.items;
         value.unchanged += self.work.unchanged;
         value.writes += self.work.writes;
-        value.capacity_growths += self.work.capacity_growths;
         value.upload_bytes += self.work.upload_bytes;
     }
 }

@@ -1,7 +1,7 @@
 // Run in a focused game tab after New game and real input checks.
-import {measureShadowCache} from '/__measure.mjs';
+import {measureContentIndex} from './measure-content-index.mjs';
 
-export async function measureSceneResolution({scale=1,durationMs=15000,instrument=false,label='scene'}={}){
+export async function measureSceneResolution({scale=1,durationMs=15000,instrument=false,label='scene',scenario='garage'}={}){
  if(![1,.75].includes(scale))throw Error('Use scale 1 or 0.75');
  if(!window.gameState.started)throw Error('Start New game and verify real input before measuring');
  const control=document.querySelector('#scene-resolution');
@@ -18,5 +18,5 @@ export async function measureSceneResolution({scale=1,durationMs=15000,instrumen
   readyFrames=audit.state==='Ready'&&audit.graph.extent.every((side,i)=>side===expected[i])&&audit.graph.presented?readyFrames+1:0;
   if(performance.now()-start>60000)throw Error('Scene resolution did not settle');
  }
- return measureShadowCache({durationMs,instrument,label,resume:true});
+ return measureContentIndex({durationMs,instrument,label,scenario,sceneScale:scale});
 }

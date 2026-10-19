@@ -36,7 +36,7 @@ export async function measureFrameSetup({instrument = false, label = 'frame-setu
     for (const [name, original] of saved) gl[name] = original;
   }
   const stages = Object.fromEntries(setup.stages.map((name, index) => {
-    const sum = {calls: 0, total_ms: 0, items: 0, unchanged: 0, writes: 0, capacity_growths: 0, upload_bytes: 0};
+    const sum = {calls: 0, total_ms: 0, items: 0, unchanged: 0, writes: 0, upload_bytes: 0};
     for (const job of setup.measurements) for (const key of Object.keys(sum)) sum[key] += job[index][key];
     return [name, sum];
   }));

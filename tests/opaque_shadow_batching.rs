@@ -66,6 +66,24 @@ fn changed_or_missing_preparation_keeps_materials_separate() {
 }
 
 #[test]
+fn specular_casters_require_current_preparation_and_full_lod() {
+    let opaque = CasterBatchState::opaque_specular((1 << 0) | (1 << 3), 1.);
+    assert_eq!(opaque.material_key(17, 4, Some(4)), None);
+    assert_eq!(opaque.material_key(29, 4, Some(4)), None);
+    assert_eq!(opaque.material_key(17, 4, None), Some(17));
+    assert_eq!(opaque.material_key(17, 5, Some(4)), Some(17));
+    assert_eq!(opaque.material_key(17, 5, Some(5)), None);
+    for lod_fade in [-1., -0.5, 0., 0.5, f32::NAN, f32::INFINITY] {
+        let state = CasterBatchState::opaque_specular(9, lod_fade);
+        assert_eq!(state.material_key(17, 4, Some(4)), Some(17));
+    }
+    for flag in [1 << 8, 1 << 9, 1 << 10] {
+        let state = CasterBatchState::opaque_specular(9 | flag, 1.);
+        assert_eq!(state.material_key(17, 4, Some(4)), Some(17));
+    }
+}
+
+#[test]
 fn shared_bins_preserve_geometry_draw_state_and_exact_cascade_instances() {
     type Key = ShadowBatchKey<u32, u32, u32>;
     let key = Key {
@@ -129,6 +147,19 @@ fn shared_bins_preserve_geometry_draw_state_and_exact_cascade_instances() {
             },
         ),
     ];
+    // Specular materials share their own pipeline. Reflected winding uses another pipeline.
+    for pipeline in [20, 21] {
+        for _ in 0..2 {
+            fixtures.push((
+                Key {
+                    pipeline,
+                    ..key.clone()
+                },
+                10,
+                CasterBatchState::opaque_specular(9, 1.),
+            ));
+        }
+    }
     // Every nonzero cascade mask has distinct membership. This includes shadow-only entities.
     for split_mask in 1..16 {
         fixtures.push((
@@ -156,7 +187,7 @@ fn shared_bins_preserve_geometry_draw_state_and_exact_cascade_instances() {
             .or_insert_with(Vec::new)
             .push(instance);
     }
-    assert_eq!(old.len() - shared.len(), 3);
+    assert_eq!(old.len() - shared.len(), 5);
     let merged = &shared[&(key, 10)];
     assert_eq!(merged.len(), 3);
     assert_eq!(merged[0], (0, [0, 2, -3]));

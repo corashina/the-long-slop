@@ -188,7 +188,6 @@ impl<P: PhaseItem, const ADD: bool, const DONE: bool> RenderCommand<P>
 }
 
 pub(crate) type DrawSourceMaterial = (
-    super::renderers::SourceCameraVisible,
     SourceDrawMark<false, false>,
     super::surface_pass::SourcePairReady,
     SetItemPipeline,
@@ -206,7 +205,6 @@ pub(crate) type DrawSourceMaterial = (
 
 /// Transparent passes are dispatched separately through the source comparator.
 pub(crate) type DrawSourceBase = (
-    super::renderers::SourceCameraVisible,
     SourceDrawMark<false, false>,
     super::surface_pass::SourcePairReady,
     SetItemPipeline,
@@ -218,7 +216,6 @@ pub(crate) type DrawSourceBase = (
     SourceDrawMark<false, true>,
 );
 pub(crate) type DrawSourceWorld = (
-    super::renderers::SourceCameraVisible,
     SetItemPipeline,
     SetSourceViewCamera,
     SetSourceViewLighting,
@@ -238,7 +235,6 @@ pub(crate) type DrawSourcePlate = (
     SourceDrawMark<false, true>,
 );
 pub(crate) type DrawSourceGlass = (
-    super::renderers::SourceCameraVisible,
     SourceDrawMark<false, false>,
     super::surface_pass::SourcePairReady,
     SetItemPipeline,
@@ -251,7 +247,6 @@ pub(crate) type DrawSourceGlass = (
 );
 
 pub(crate) type DrawSourceAdd = (
-    super::renderers::SourceCameraVisible,
     SourceDrawMark<true, false>,
     super::surface_pass::SourcePairReady,
     super::surface_pass::SetSourceAdditivePipeline,
@@ -487,6 +482,10 @@ impl Plugin for SourceLightingPlugin {
                 .init_resource::<super::transparent::SourceSortIndex>()
                 .add_systems(
                     bevy::render::ExtractSchedule,
+                    super::transparent::extract_sort_index,
+                )
+                .add_systems(
+                    bevy::render::ExtractSchedule,
                     super::lighting_assets::extract_lighting_assets,
                 )
                 .insert_resource(gate)
@@ -529,11 +528,7 @@ impl Plugin for SourceLightingPlugin {
                 .add_render_command::<Transparent3d, DrawSourceGlass>()
                 .add_systems(
                     Render,
-                    (
-                        super::transparent::update_sort_index,
-                        super::transparent::prepare_pass_order,
-                    )
-                        .chain()
+                    super::transparent::prepare_pass_order
                         .after(RenderSystems::PhaseSort)
                         .after(super::surface_pass::prepare_surface_passes)
                         .before(RenderSystems::Render),

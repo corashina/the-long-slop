@@ -4,6 +4,7 @@ use super::{
     render_targets::{DEPTH_FORMAT, SHADOW_FORMAT},
     source_lighting::SourceLightingStatus,
 };
+use crate::reference::shadow_profile;
 use bevy::ecs as bevy_ecs;
 use bevy::prelude::*;
 use bevy::render::{
@@ -44,6 +45,7 @@ struct CasterBinding {
 #[derive(Component)]
 pub struct CasterViews {
     slots: [CasterBinding; 5],
+    pub(crate) shadow_key: Option<super::shadow_preparation::CascadeKey>,
 }
 impl CasterViews {
     pub fn new(
@@ -63,7 +65,11 @@ impl CasterViews {
                 clip_from_view: Mat4::IDENTITY,
             });
             uniform.set_label(Some("source_caster_uniform"));
-            uniform.write_buffer(device, queue);
+            {
+                let mut timing = shadow_profile::Timer::new(shadow_profile::Stage::Upload);
+                uniform.write_buffer(device, queue);
+                timing.upload(CasterUniform::min_size().get());
+            }
             let binding = device.create_bind_group(
                 "source_caster_view",
                 &cache.get_bind_group_layout(&caster_layout()),
@@ -71,7 +77,10 @@ impl CasterViews {
             );
             CasterBinding { uniform, binding }
         });
-        Self { slots }
+        Self {
+            slots,
+            shadow_key: None,
+        }
     }
     pub fn write(
         &mut self,
@@ -80,8 +89,27 @@ impl CasterViews {
         device: &RenderDevice,
         queue: &RenderQueue,
     ) {
+        let mut timing = shadow_profile::Timer::new(shadow_profile::Stage::Upload);
+        let words = |v: &CasterUniform| {
+            v.clip_from_world
+                .to_cols_array()
+                .into_iter()
+                .chain(v.direction_to_light.to_array())
+                .chain(v.bias.to_array())
+                .chain(v.view_from_world.to_cols_array())
+                .chain(v.world_from_view.to_cols_array())
+                .chain(v.clip_from_view.to_cols_array())
+        };
+        if super::shadow_preparation::same_floats(
+            words(self.slots[index].uniform.get()),
+            words(&value),
+        ) {
+            timing.hit();
+            return;
+        }
         self.slots[index].uniform.set(value);
         self.slots[index].uniform.write_buffer(device, queue);
+        timing.upload(CasterUniform::min_size().get());
     }
     pub fn uniform(&self, index: usize) -> &CasterUniform {
         self.slots[index].uniform.get()
@@ -275,7 +303,7 @@ impl CasterPasses {
                     &mut descriptor.vertex.shader_defs,
                     &mut fragment.shader_defs,
                 ] {
-                    defs.retain(|v|!matches!(v,ShaderDefVal::Bool(n,_)if n=="SOURCE_SURFACE"||n=="SOURCE_FORWARD_ADD"||n=="SOURCE_WORLD"));
+                    defs.retain(|v|!matches!(v,ShaderDefVal::Bool(n,_)if n=="SOURCE_SURFACE"||n=="SOURCE_FORWARD_ADD"||n=="SOURCE_FORWARD_ONE"||n=="SOURCE_LAMPS"||n=="SOURCE_WORLD"));
                     defs.push(ShaderDefVal::Bool("SOURCE_CASTER".into(), true));
                     if world_shader {
                         defs.push(ShaderDefVal::Bool("PREPASS_PIPELINE".into(), true));

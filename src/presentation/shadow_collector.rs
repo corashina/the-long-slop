@@ -12,6 +12,7 @@ use super::{
     surface_views::SourceSurfaceView,
     view_frame::SourceViewFrame,
 };
+use crate::reference::shadow_profile;
 use bevy::render::{
     Render, RenderApp, RenderSystems,
     render_resource::{binding_types::*, *},
@@ -36,6 +37,7 @@ struct CollectorUniform {
 pub struct CollectorView {
     targets: Arc<SourceViewTargets>,
     uniform: UniformBuffer<CollectorUniform>,
+    key: super::shadow_preparation::CollectorKey,
     binding: BindGroup,
     pipeline: CachedRenderPipelineId,
     pub prepared_frame: u32,
@@ -86,6 +88,7 @@ fn prepare(
         super::reflection_preparation::Stage::Collector,
         &frame,
     );
+    let mut shadow_timing = shadow_profile::Timer::new(shadow_profile::Stage::Collector);
     let Some(shader) = shaders.get("shaders/source_shadow_collector.wgsl") else {
         return;
     };
@@ -140,11 +143,27 @@ fn prepare(
             return;
         }
     }
-    for (entity, view, targets, previous) in &mut views {
+    for (entity, view, targets, mut previous) in &mut views {
         let Some(snapshot) = frame.views[view.index] else {
             continue;
         };
         timing.face(view.index);
+        let key = super::shadow_preparation::CollectorKey {
+            view: scene.view_revision(view.index, &frame),
+            projection: snapshot.raster_projection.to_cols_array().map(f32::to_bits),
+            view_from_world: snapshot.view_from_world.to_cols_array().map(f32::to_bits),
+            near_far_strength: [snapshot.near, snapshot.far, light.shadows.strength]
+                .map(f32::to_bits),
+            atlas_size: targets.0.atlas_size,
+            primary: view.index == 0,
+        };
+        if let Some(old) = previous.as_deref_mut() {
+            if Arc::ptr_eq(&old.targets, &targets.0) && old.key == key {
+                old.prepared_frame = frame.frame;
+                shadow_timing.hit();
+                continue;
+            }
+        }
         // Undo only the target clip conversion. Source shader60 then reconstructs
         // from its current projection; shader46 uses the implicit far ray.
         let mut p = snapshot.raster_projection.to_cols_array_2d();
@@ -199,14 +218,40 @@ fn prepare(
         }
         if let Some(mut old) = previous {
             if Arc::ptr_eq(&old.targets, &targets.0) {
-                old.uniform.set(value);
-                old.uniform.write_buffer(&device, &queue);
+                let mut upload = shadow_profile::Timer::new(shadow_profile::Stage::Upload);
+                let words = |v: &CollectorUniform| {
+                    v.inverse_projection
+                        .to_cols_array()
+                        .into_iter()
+                        .chain(v.world_from_view.to_cols_array())
+                        .chain(
+                            v.world_to_shadow
+                                .into_iter()
+                                .flat_map(|m| m.to_cols_array()),
+                        )
+                        .chain(v.spheres.into_iter().flat_map(|v| v.to_array()))
+                        .chain(v.radii_squared.to_array())
+                        .chain(v.projection.to_array())
+                        .chain(v.atlas.to_array())
+                };
+                if super::shadow_preparation::same_floats(words(old.uniform.get()), words(&value)) {
+                    upload.hit();
+                } else {
+                    old.uniform.set(value);
+                    old.uniform.write_buffer(&device, &queue);
+                    upload.upload(CollectorUniform::min_size().get());
+                }
+                old.key = key;
                 old.prepared_frame = frame.frame;
                 continue;
             }
         }
         let mut uniform = UniformBuffer::from(value);
-        uniform.write_buffer(&device, &queue);
+        {
+            let mut upload = shadow_profile::Timer::new(shadow_profile::Stage::Upload);
+            uniform.write_buffer(&device, &queue);
+            upload.upload(CollectorUniform::min_size().get());
+        }
         let compare = device.create_sampler(&SamplerDescriptor {
             label: Some("source_shadow_linear_compare"),
             compare: Some(CompareFunction::GreaterEqual),
@@ -227,6 +272,7 @@ fn prepare(
         commands.entity(entity).insert(CollectorView {
             targets: targets.0.clone(),
             uniform,
+            key,
             binding,
             pipeline: id,
             prepared_frame: frame.frame,

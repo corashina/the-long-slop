@@ -1,7 +1,7 @@
 //! Depth and shadow draws share the surface alpha data, without surface lighting textures.
 use super::{
     gpu_prepare::GpuPreparation,
-    materials::{SourceMaterial, SourceUniform},
+    materials::{SourceMaterial, SourceUniform, specular::SpecularMaterial},
 };
 use bevy::asset::{AssetEvent, AssetId, UntypedAssetId};
 use bevy::ecs::{
@@ -9,10 +9,11 @@ use bevy::ecs::{
     query::ROQueryItem,
     system::{SystemParamItem, lifetimeless::SRes},
 };
-use bevy::pbr::{RenderMaterialInstances, SetMaterialBindGroup};
+use bevy::pbr::{PreparedMaterial, RenderMaterialInstances, SetMaterialBindGroup};
 use bevy::prelude::*;
 use bevy::render::{
     Extract, ExtractSchedule, Render, RenderApp, RenderSystems,
+    erased_render_asset::ErasedRenderAssets,
     render_asset::RenderAssets,
     render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
     render_resource::{binding_types::*, *},
@@ -29,10 +30,20 @@ struct Input {
     texture: Option<AssetId<Image>>,
     color: Option<super::materials::RetainedColor>,
 }
+struct SpecularInput {
+    revision: u64,
+    preparation: GpuPreparation,
+    batch: super::shadow_batch::CasterBatchState,
+}
 #[derive(Resource, Default)]
 struct Inputs {
     revision: u64,
     materials: BTreeMap<AssetId<SourceMaterial>, Input>,
+}
+#[derive(Resource, Default)]
+struct SpecularInputs {
+    revision: u64,
+    materials: BTreeMap<AssetId<SpecularMaterial>, SpecularInput>,
 }
 struct Material {
     revision: u64,
@@ -86,6 +97,35 @@ fn extract(
             }
             AssetEvent::Removed { id } => {
                 inputs.revision += 1;
+                inputs.materials.remove(&id);
+            }
+            _ => {}
+        }
+    }
+}
+fn extract_specular(
+    assets: Extract<Res<Assets<SpecularMaterial>>>,
+    mut events: Extract<MessageReader<AssetEvent<SpecularMaterial>>>,
+    mut inputs: ResMut<SpecularInputs>,
+) {
+    for event in events.read() {
+        match *event {
+            AssetEvent::Added { id } | AssetEvent::Modified { id } => {
+                let Some(material) = assets.get(id) else {
+                    continue;
+                };
+                inputs.revision += 1;
+                let revision = inputs.revision;
+                inputs.materials.insert(
+                    id,
+                    SpecularInput {
+                        revision,
+                        preparation: material.preparation.clone(),
+                        batch: material.shadow_batch_state(),
+                    },
+                );
+            }
+            AssetEvent::Removed { id } | AssetEvent::Unused { id } => {
                 inputs.materials.remove(&id);
             }
             _ => {}
@@ -193,8 +233,27 @@ pub fn ready(world: &World, id: AssetId<SourceMaterial>) -> bool {
             .is_some_and(|material| material.revision == input.revision)
     })
 }
-/// Queue only current prepared primary casters into material-independent shadow bins.
+/// Queue only current prepared opaque casters into material-independent shadow bins.
 pub fn shadow_material(world: &World, id: UntypedAssetId) -> Option<UntypedAssetId> {
+    if id.type_id() == std::any::TypeId::of::<SpecularMaterial>() {
+        let Some(input) = world
+            .resource::<SpecularInputs>()
+            .materials
+            .get(&id.typed::<SpecularMaterial>())
+        else {
+            return Some(id);
+        };
+        if input.preparation.cancelled() {
+            return Some(id);
+        }
+        // Bevy removes the old PreparedMaterial before preparing an extracted update.
+        // A present material therefore represents this revision, including after retries.
+        let prepared = world
+            .resource::<ErasedRenderAssets<PreparedMaterial>>()
+            .get(id)
+            .map(|_| input.revision);
+        return input.batch.material_key(id, input.revision, prepared);
+    }
     if id.type_id() != std::any::TypeId::of::<SourceMaterial>() {
         return Some(id);
     }
@@ -254,7 +313,8 @@ impl<P: PhaseItem> RenderCommand<P> for SetCasterMaterial {
 pub fn install(app: &mut App) {
     app.sub_app_mut(RenderApp)
         .init_resource::<Inputs>()
+        .init_resource::<SpecularInputs>()
         .init_resource::<CasterMaterials>()
-        .add_systems(ExtractSchedule, extract)
+        .add_systems(ExtractSchedule, (extract, extract_specular))
         .add_systems(Render, prepare.in_set(RenderSystems::PrepareBindGroups));
 }
