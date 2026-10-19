@@ -393,3 +393,13 @@ Implementation waits for plan review and an execution choice.
 Native execution is recommended because task selection and measurement are sequential.
 Use GPT-6.1 Sol with high reasoning for implementation and any delegated review.
 Never use GPT-6 Astra.
+
+## Approved startup prerequisite
+
+The user approved this scope extension on 2026-10-19.
+Before Task 2 resumes, repair authored reflection probe slots in the existing two-slot renderer.
+Keep absent slots disabled across startup, scene reset, distance checks, and prepared load.
+Preserve source registration, distance cadence, GPU capacity, shader layout, and manifest contents.
+Reject zero probes and counts above capacity at the data boundary.
+Verify critical native regressions and the routine WASM check before review.
+Release and browser acceptance remain the next parent-owned Task 2 milestone.

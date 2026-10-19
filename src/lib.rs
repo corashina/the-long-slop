@@ -39,3 +39,7 @@ mod selected_tests;
 #[path = "presentation/world/shared_materials.rs"]
 #[allow(dead_code)]
 mod shared_material_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "presentation/probe_activation.rs"]
+mod probe_activation_tests;

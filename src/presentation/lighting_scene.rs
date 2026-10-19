@@ -13,29 +13,9 @@ use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::{ecs as bevy_ecs, render as bevy_render};
 
-pub const PROBE_COUNT: usize = 2;
+pub use super::probe_activation::ProbeActivation;
+pub use crate::reference::reflections::PROBE_COUNT;
 
-#[derive(Resource)]
-pub struct ProbeActivation {
-    pub enabled: [bool; PROBE_COUNT],
-    pub checks: u32,
-    pub distance_squared: [f32; PROBE_COUNT],
-    scene: u32,
-    elapsed: f32,
-    last_check: f32,
-}
-impl Default for ProbeActivation {
-    fn default() -> Self {
-        Self {
-            enabled: [true; PROBE_COUNT],
-            checks: 0,
-            distance_squared: [0.; PROBE_COUNT],
-            scene: 0,
-            elapsed: 0.,
-            last_check: 0.,
-        }
-    }
-}
 #[derive(Resource, Default)]
 pub struct SourceWorldOrigin(pub [f64; 3]);
 
@@ -112,14 +92,6 @@ pub(crate) fn sync_lighting(
     origin.0 = drive.runtime.area.origin;
     match scene_value(&assets, &visuals, &master, &drive, &reference, &transforms) {
         Ok(mut value) => {
-            if activation.scene != epoch.0 {
-                activation.scene = epoch.0;
-                activation.enabled = [true; PROBE_COUNT];
-                activation.elapsed = 0.;
-                activation.last_check = 0.;
-                activation.checks = 0;
-            }
-            activation.elapsed += drive.render_delta_seconds;
             let player = Vec3::from_array(
                 drive
                     .runtime
@@ -128,16 +100,16 @@ pub(crate) fn sync_lighting(
                     .body_pose(&drive.runtime.physics)
                     .position,
             );
-            for index in 0..PROBE_COUNT {
-                activation.distance_squared[index] =
-                    player.distance_squared(value.probe_position[index]);
-            }
-            // ReflectionDisableDistance checks registered probes every five seconds.
-            if activation.elapsed - activation.last_check >= 5. {
-                activation.last_check = activation.elapsed;
-                activation.enabled = activation.distance_squared.map(|distance| distance < 2500.);
-                activation.checks += 1;
-            }
+            let distances = value
+                .probe_position
+                .map(|position| player.distance_squared(position));
+            activation.update(
+                epoch.0,
+                crate::reference::reflections::probe_slots(assets.record.probes.len())
+                    .expect("validated source probe slots"),
+                drive.render_delta_seconds,
+                distances,
+            );
             for index in 0..PROBE_COUNT {
                 value.probe_extents[index].w = f32::from(activation.enabled[index]);
             }
@@ -166,9 +138,6 @@ fn scene_value(
         .all(|value| value.is_finite())
     {
         return Err("Nonfinite world origin".into());
-    }
-    if assets.record.probes.len() != PROBE_COUNT {
-        return Err("Selected vehicle reflection probe count is invalid".into());
     }
     let mut positions = [Vec3::ZERO; PROBE_COUNT];
     let mut centers = [Vec4::ZERO; PROBE_COUNT];

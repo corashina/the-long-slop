@@ -808,14 +808,12 @@ fn candidate_required_views(
     let views = views.get_or_insert_with(|| Box::new(crate::world::RequiredViews::new(first)));
     views.reset(first);
     let mut positions = [Vec3::ZERO; super::lighting_scene::PROBE_COUNT];
-    let mut enabled = [false; super::lighting_scene::PROBE_COUNT];
+    // Source registration applies the reflection setting before the first distance check.
+    let enabled = crate::reference::reflections::probe_slots(lighting.probes.len())?;
     for (index, probe) in lighting.probes.iter().enumerate() {
-        enabled[index] = probe.enabled;
-        if probe.enabled {
-            positions[index] = candidate_node_pose(probe.node, world, updates)?
-                .w_axis
-                .truncate();
-        }
+        positions[index] = candidate_node_pose(probe.node, world, updates)?
+            .w_axis
+            .truncate();
     }
     super::view_frame::append_probe_required_views(
         views,

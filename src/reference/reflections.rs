@@ -1,5 +1,16 @@
 //! Native IndividualFaces order. A job advances only after its GPU work is encoded.
 
+pub const PROBE_COUNT: usize = 2;
+
+/// Fixed renderer slots registered by the selected source vehicle.
+pub fn probe_slots(count: usize) -> Result<[bool; PROBE_COUNT], super::ReferenceError> {
+    super::require(
+        (1..=PROBE_COUNT).contains(&count),
+        "Selected vehicle reflection probe count must be between one and two",
+    )?;
+    Ok(std::array::from_fn(|index| index < count))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProbeJob {
     Face(u8),
@@ -102,4 +113,20 @@ pub fn capture_view_from_world(face: usize, target_position: [f32; 3]) -> [[f32;
     }
     matrix[3][3] = 1.;
     matrix
+}
+
+/// Retain a valid source slot when no other capture is pending.
+pub fn pending_probe_index(
+    current: usize,
+    probes: &[ProbeSchedule; PROBE_COUNT],
+    enabled: [bool; PROBE_COUNT],
+) -> usize {
+    let wanted = |index: usize| enabled[index] && !probes[index].published();
+    if !wanted(current) && probes[current].job() == ProbeJob::Face(0) {
+        return (1..PROBE_COUNT)
+            .map(|offset| (current + offset) % PROBE_COUNT)
+            .find(|&index| wanted(index))
+            .unwrap_or(current);
+    }
+    current
 }

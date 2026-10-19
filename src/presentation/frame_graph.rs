@@ -180,7 +180,10 @@ impl SourceGraphProgress {
     pub fn probe_readiness(&self) -> (bool, bool) {
         let state = self.0.lock().unwrap();
         (
-            state.probes.iter().all(|probe| probe.pipelines_ready),
+            state
+                .probes
+                .iter()
+                .all(|probe| !probe.enabled || probe.pipelines_ready),
             state
                 .probes
                 .iter()

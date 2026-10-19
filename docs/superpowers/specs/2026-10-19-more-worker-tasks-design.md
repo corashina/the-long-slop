@@ -283,3 +283,13 @@ This commit contains the design only.
 No worker implementation or measured performance result is claimed.
 After written-spec approval, create the implementation plan with the writing-plans skill.
 The user reviews that plan and selects its execution method before implementation.
+
+## Approved startup prerequisite
+
+The user approved this scope extension on 2026-10-19.
+Before Task 2 resumes, repair authored reflection probe slots in the existing two-slot renderer.
+Keep absent slots disabled across startup, scene reset, distance checks, and prepared load.
+Preserve source registration, distance cadence, GPU capacity, shader layout, and manifest contents.
+Reject zero probes and counts above capacity at the data boundary.
+Verify critical native regressions and the routine WASM check before review.
+Release and browser acceptance remain the next parent-owned Task 2 milestone.

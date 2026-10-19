@@ -48,6 +48,7 @@ pub mod lighting_scene;
 pub mod particles;
 pub mod plates;
 pub mod postprocessing;
+mod probe_activation;
 pub mod probes;
 mod reflection_preparation;
 pub mod render_targets;

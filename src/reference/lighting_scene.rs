@@ -215,10 +215,8 @@ impl LightingRecord {
                 previous = Some((mip.width, mip.height));
             }
         }
-        require(
-            !self.lights.is_empty() && !self.probes.is_empty(),
-            "lighting light/probe inventory",
-        )?;
+        super::reflections::probe_slots(self.probes.len())?;
+        require(!self.lights.is_empty(), "lighting light inventory")?;
         let mut identities = HashSet::new();
         for light in &self.lights {
             require(
