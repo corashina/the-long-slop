@@ -119,7 +119,10 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 7. **Batch opaque shadows across surface materials.**
-   Status: Proposed. Difficulty: Hard. Estimate: 3–5 days. Owner: [shadow phase](../src/presentation/shadow_phase.rs).
+   Status: Implemented and merged into master on 2026-10-19 at `1989b3a`. Source commit: `3b17ccc`.
+   Runtime performance remains unverified.
+   Owner: [shadow phase](../src/presentation/shadow_phase.rs).
+   Scope and checks: [opaque shadow batching](performance/2026-10-19-opaque-shadow-material-batching.md).
    Effect: Reduce draw splits by material identity for proven equivalent opaque casters.
    Prompt:
    ```text
@@ -127,15 +130,20 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 8. **Update shadow scenes incrementally.**
-   Status: Proposed. Difficulty: Hard. Estimate: 4–7 days. Owner: [shadow scene](../src/presentation/shadow_scene.rs).
-   Effect: Reuse cached caster data and skip copies when the scene has not changed.
-   Prompt:
-   ```text
-   Reuse existing shadow caches. Track caster addition, removal, visibility, material and scene changes, origin shifts, and recovery. Skip unchanged scans and copies while preserving camera-dependent caster selection and fitting. Verify moving objects during driving, stream changes, origin shifts, and repeated Load.
-   ```
+   Status: Implemented and merged into master on 2026-10-19 at `5004b7e`. Source commit: `194e5ec`.
+   Runtime performance remains unverified.
+   Owner: [shadow scene](../src/presentation/shadow_scene.rs).
+   Caster component changes update cached rows. Membership, scene, origin, and recovery changes rebuild the ordered collection.
+   Revisions skip unchanged caster and mask copies. Camera-dependent selection, fitting, and per-frame visibility remain.
+   See the [implementation note](performance/2026-10-19-incremental-shadow-scene.md) for checks and limits.
 
 9. **Select local lights per object.**
-   Status: Proposed. Difficulty: Hard. Estimate: 4–7 days. Owner: [surface shader](../web/assets/shaders/source_surface.wgsl).
+   Status: Implemented and merged into master on 2026-10-19. Source commit: `f7b7e53`.
+   Runtime acceptance and performance remain unverified.
+   Owner: [surface shader](../web/assets/shaders/source_surface.wgsl).
+   The additive vertex pass builds a conservative 64-bit mask from full renderer bounds.
+   Selected lights keep source slot order. Deformed meshes retain all eligible local lights.
+   See the [implementation and check note](performance/2026-10-19-object-local-lights.md).
    Effect: Skip only local lights that cannot affect an object's full bounds.
    Prompt:
    ```text
