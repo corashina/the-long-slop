@@ -34,7 +34,7 @@ The readiness check uses the scaled scene extent and the native window target.
   The browser control returned 0.75 and 1 through the real selector.
   These checks displayed Controls through DevTools because startup could not complete.
 
-The installed export blocks runtime checks before renderer creation.
+The frozen export used for these checks blocked runtime checks before renderer creation.
 The baseline browser, candidate browser, and native validator report:
 
 ```text
@@ -42,10 +42,15 @@ unknown field `exclusions`, expected one of `floats`, `colors`, `textures`, `def
 at line 1 column 7001259
 ```
 
-The installed manifest has SHA-256
+The tested manifest has SHA-256
 `a041ac29e18acf889c3c5aa50a909ad103aa5ceb4b98e50402f4e7a714cef288`.
 Two retained exports also fail the current contract because file records lack `bytes`.
 The implementation does not change these exports or weaken validation.
+
+The installed export changed during merge finalization. Its SHA-256 is
+`20c89ef5c9e7ce2ae922f2dc6fa30d88eb3528a470a4e8b446655f9af6bc6ecb`.
+The current native manifest validator accepts that export. Fresh browser checks remain open.
+The earlier browser failures describe the frozen export above.
 
 Garage and driving FPS, average frame time, p95, and p99 remain unmeasured.
 Image quality, target resize, fullscreen, pointer capture, real input, physics, submitted frames,

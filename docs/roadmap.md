@@ -9,8 +9,9 @@ Master contains the source world, two cars, parts, mechanisms, survival, sleep, 
 It also contains source audio, flashlights, plates, cleaning, painting, driving controls, and inventory tasks 1 and 2.
 Builds and reviews passed. Runtime acceptance of the merged game is still open.
 
-The current export stops loading before renderer creation because material data contains an unexpected `exclusions` field.
-The baseline and scene-resolution releases reject the same export. Performance remains unmeasured.
+The export used for scene-resolution checks stopped loading at an unexpected `exclusions` field in material data.
+The installed export changed after those checks. Its native manifest validation now passes.
+Fresh browser acceptance and performance measurements remain open.
 An earlier package reached "The garage is ready." New game then failed with `Missing source asset: reference/food.gltf`.
 That file exists. Session validation looks for its lazy prototype in the eager scene cache.
 
@@ -66,7 +67,8 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    Conditional requests returned 304 without a body. No startup speed gain is verified.
    Results: [Brotli delivery results](performance/2026-10-19-startup-brotli.md).
    Local evidence: `.cache/performance/2026-10-19-startup-brotli/` retains measurements and the compression index.
-   Blocker: The installed WASM rejects manifest field `exclusions` under identity and Brotli delivery. New game remains disabled.
+   Earlier blocker: The tested WASM and export mismatched at field `exclusions` under identity and Brotli delivery.
+   The replaced export passes native manifest validation. Fresh browser checks remain open.
    Remaining: Build matching release WASM and export. Compare cold and cached playable startup in exclusive matched A/B/A runs.
    Check real input, active physics, submitted frames, streaming, and Save/Load. Garage and driving frame times remain unmeasured.
 
@@ -77,7 +79,8 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    Checks: Release WASM build and packaging passed. Merged checks passed: 63 native tests and 47 web tests. WASM check passed.
    Results: [Scene resolution checks](performance/2026-10-19-scene-resolution.md).
    Local evidence: `.cache/performance/2026-10-19-scene-resolution/` retains packages, receipts, and merge checks.
-   Blocker: Both releases reject the installed export's unexpected `exclusions` field before renderer creation.
+   Earlier blocker: Both releases rejected the frozen export's unexpected `exclusions` field before renderer creation.
+   The replaced export passes native manifest validation. Fresh browser checks remain open.
    Remaining: Check image quality, resize, fullscreen, aiming, probes, streaming, and Save/Load at both scales.
    Measure garage and driving average, p95, and p99 frame times in exclusive matched release A/B/A runs.
    Runtime acceptance and performance gains remain unverified.
