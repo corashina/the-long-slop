@@ -118,9 +118,6 @@ def validate_particle_export(particles, manifest, library):
     from tempfile import TemporaryDirectory
     from pathlib import Path
     checked=LibrarySource(LibraryReader(library))
-    from .export import CARS,SKODA_PARKING,relocate
-    skoda=checked.transform_for(checked.get('level1',CARS['skoda'][0]))
-    relocate(checked,skoda,SKODA_PARKING,180.)
     checked.lighting={'textures':manifest['lighting']['textures']}
     checked.lighting_textures={(t['source']['file'],t['source']['path_id']):t for t in manifest['lighting']['textures']}
     with TemporaryDirectory(prefix='source-particles-') as temp:

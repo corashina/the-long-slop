@@ -1,11 +1,10 @@
 # Vehicles
 
-The game has two source cars. Both use the same code path.
+The startup export contains the Lada. The Skoda is excluded for now.
 
 | Car | Source root | Start | Engine |
 | --- | --- | --- | --- |
 | Lada 2101 | `level1` GO 17687, `StartCar02` | Garage spot | Front, petrol |
-| Skoda (Car01) | `level1` GO 6890, `StartCar01` | Yard north of the garage | Rear, petrol |
 
 ## Selection
 
@@ -24,8 +23,7 @@ Rejected cars:
 ## Project change
 
 In the source, all start cars share one garage spot. The game can show one start car.
-The exporter moves the Skoda to Unity position (38.5, z 58.5) and turns it 180 degrees.
-This spot is clear of home colliders and faces the road.
+The export selects the Lada at that spot. It adds no car to the yard.
 
 ## Model
 
@@ -100,7 +98,7 @@ See [current verification](verification.md#driving-branch-verification-2026-10-1
 ## Add the next car
 
 1. Add the car to `CARS` in `tools/reference/export.py`: root GameObject, start-car name, and starter link.
-2. Give it a parking spot with `relocate`. Check the spot against home colliders and the terrain.
+2. Check its source pose against other cars, home colliders, and the terrain.
 3. Run the runtime export. The exporter stops when a source record is missing.
 4. Run the production tests with the new manifest.
 

@@ -517,7 +517,7 @@ fn prepare_frame(
         }
     }
     if let (Some(sky), Some(ProbeJob::Face(face))) = (sky.as_mut(), frame.probe_job) {
-        if let Some(snapshot) = frame.views[3 + usize::from(face)] {
+        if let Some(snapshot) = frame.views[PROBE_START + usize::from(face)] {
             let projection =
                 Mat4::from_cols_array_2d(&crate::reference::sky::source_sky_gpu_projection(
                     snapshot.implicit_projection.to_cols_array_2d(),
