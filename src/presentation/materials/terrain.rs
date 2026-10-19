@@ -221,6 +221,14 @@ impl Material for TerrainMaterial {
             Mesh::ATTRIBUTE_COLOR.at_shader_location(3),
             Mesh::ATTRIBUTE_TANGENT.at_shader_location(4),
         ])?];
+        descriptor.primitive.front_face = if key
+            .mesh_key
+            .contains(bevy::pbr::MeshPipelineKey::INVERT_CULLING)
+        {
+            FrontFace::Cw
+        } else {
+            FrontFace::Ccw
+        };
         let definition =
             ShaderDefVal::UInt("TERRAIN_ARRAYS".into(), u32::from(key.bind_group_data));
         descriptor.vertex.shader_defs.push(definition.clone());

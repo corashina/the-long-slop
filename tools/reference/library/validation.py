@@ -415,28 +415,32 @@ def validate_library(snapshot: Snapshot, catalog: Catalog, exports: tuple[AssetE
 
 
 def _verify_managed(snapshot, root):
+    from .managed import verify_managed_export
+
     manifest = json.loads((root / 'managed/manifest.json').read_bytes())
     if manifest.get('schema_version') != SCHEMA_VERSION:
         raise ValueError('Unknown managed manifest schema')
     files = {}
     for item in manifest['files']:
+        if item['file'] in files:
+            raise ValueError('Duplicate managed analysis receipt')
         _add(files, FileRecord(**item))
-    required = {'managed/Assembly-CSharp.cs', 'managed/decompilation.json', 'managed/diagnostics.json',
-                'managed/index.json', 'managed/analysis.json'}
-    if set(files) != required:
+    assemblies = tuple(item for item in snapshot.files if item.file.startswith('TheLongDrive_Data/Managed/')
+                       and item.file.lower().endswith('.dll'))
+    report, managed_files = verify_managed_export(snapshot.root, assemblies, root, snapshot.manifest_sha256)
+    expected = {item.file: item for item in managed_files}
+    expected['managed/analysis.json'] = _receipt(root, 'managed/analysis.json')
+    if files != expected:
         raise ValueError('Incomplete managed analysis receipts')
     _check_files(root, files)
-    data = {name: json.loads((root / name).read_bytes()) for name in required if name.endswith('.json')}
-    if any(d.get('schema_version') != SCHEMA_VERSION for d in data.values()):
+    analysis = json.loads((root / 'managed/analysis.json').read_bytes())
+    if analysis.get('schema_version') != SCHEMA_VERSION:
         raise ValueError('Unknown managed analysis schema')
-    index, decomp, diagnostics = (data[f'managed/{name}.json'] for name in ('index', 'decompilation', 'diagnostics'))
-    if not all(d.get('complete') is True for d in (index, decomp, diagnostics)):
-        raise ValueError('Incomplete managed analysis')
-    expected = {f.file: f.sha256 for f in snapshot.files if f.file.startswith('TheLongDrive_Data/Managed/') and f.file.lower().endswith('.dll')}
-    if {a['file']: a['sha256'] for a in index['assemblies']} != expected or diagnostics['source_manifest_sha256'] != snapshot.manifest_sha256:
-        raise ValueError('Managed analysis source mismatch')
-    if decomp['input']['sha256'] != expected['TheLongDrive_Data/Managed/Assembly-CSharp.dll'] or FileRecord(**decomp['output']) != files['managed/Assembly-CSharp.cs']:
-        raise ValueError('Managed decompilation provenance mismatch')
+    if analysis['managed_files'] != [asdict(item) for item in managed_files]:
+        raise ValueError('Managed analysis report receipts mismatch')
+    actual = {path.relative_to(root).as_posix() for path in (root / 'managed').rglob('*') if path.is_file()}
+    if actual != set(files) | {'managed/manifest.json'}:
+        raise ValueError('Untracked managed analysis files')
     return {'root': 'records', 'manifest': asdict(_receipt(root, 'managed/manifest.json')),
             'files': [asdict(f) for f in sorted(files.values(), key=lambda f: f.file)]}
 

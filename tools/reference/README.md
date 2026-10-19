@@ -57,6 +57,53 @@ It preserves the installed tree and complete object graph before converting deve
 It derives the garage, Lada, supplies, road pole, sky, and selected world prototypes from the accepted library.
 Git ignores recovered files and decompiled code. The exporter leaves Steam files unchanged.
 
+## Full managed reference
+
+Export all managed assemblies from the accepted source archive:
+
+```powershell
+tools/reference/.venv/Scripts/python.exe -m tools.reference.managed_export
+tools/reference/.venv/Scripts/python.exe -m tools.reference.managed_export --verify
+```
+
+Refresh affected assemblies after fixing a decompiler warning:
+
+```powershell
+tools/reference/.venv/Scripts/python.exe -m tools.reference.managed_export --refresh-warnings
+```
+
+The refresh checks retained hashes, stages a full copy, and exports only affected assemblies again.
+It replaces the retained export after the staged files pass verification. Failed stages remain available for inspection.
+
+Read `.cache/reference-library/decompiled/report.md` for assembly totals and gap counts.
+Read `.cache/reference-library/decompiled/managed/coverage.json` for each method and diagnostic.
+Each assembly has a C# file, a decompilation receipt, and a method coverage receipt.
+The exporter adds a `.methods.cs` supplement for bodies that ILSpy hides in normal C# output.
+These supplements preserve method bodies for reference. They are not standalone build projects.
+The separate reference directory leaves accepted asset records unchanged.
+Use `--output <directory>/managed` with a new directory for another export.
+The exporter requires an empty destination and keeps failed output for inspection.
+
+The verifier compares MethodDef tokens, signatures, flags, body addresses, and IL hashes with the metadata index.
+It also checks source hashes, output hashes, and the exact assembly list.
+The report uses three results:
+
+- `accounting_complete`: Each indexed method has one coverage record.
+- `il_complete`: Each IL body has C# output without unresolved decompiler diagnostics.
+- `complete`: No export gaps remain, including native or runtime bodies without IL.
+
+Abstract declarations do not require a body.
+Native calls, runtime methods, missing bodies, failed methods, and decompiler warnings appear in `gaps`.
+Method coverage does not prove behavior or recover the original source project.
+Native engine code remains outside this managed export.
+Some shipped framework stubs contain an invalid integer return after a helper that always throws.
+The exporter normalizes that unreachable return to `null` only after it proves the exact caller and helper IL.
+It preserves the helper call, source DLLs, raw IL, hashes, and original diagnostic.
+The verifier compares each resolution with independent metadata evidence in `verified_throw_stubs`.
+Read `resolved_warnings` for these reconstructed returns. They are not original C# source recovery.
+The normal library exporter uses the same tools and requires the full managed receipts.
+An older partial managed stage fails verification until you rebuild that stage.
+
 ## Stages and storage
 
 Run commands from the repository root. Use one current schema; obsolete schemas fail validation.

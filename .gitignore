@@ -4,6 +4,7 @@
 /.cache/
 /.impeccable/review/
 /.superpowers/
+/docs/superpowers/
 /Steam/
 /steam/
 *.log
@@ -14,3 +15,10 @@ __pycache__/
 
 /web/assets/runtime/
 /web/assets/runtime-*/
+
+.env
+.env.*
+!.env.example
+Thumbs.db
+.DS_Store
+/.worktrees/

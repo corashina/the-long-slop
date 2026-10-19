@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 from dataclasses import asdict
 from pathlib import Path
 
-from .archive import sha256
+from .archive import _check_path, sha256, validate_paths
 from .records import _file, _json
 from .types import Catalog, DATA_DIRECTORY, FileRecord, ObjectId, SCHEMA_VERSION, Snapshot
 
@@ -26,47 +26,277 @@ def preflight_managed() -> None:
 def index_managed(snapshot: Snapshot, output: Path) -> tuple[FileRecord, ...]:
     assemblies = tuple(item for item in snapshot.files if item.file.startswith(f'{DATA_DIRECTORY}/Managed/')
                        and item.file.lower().endswith('.dll'))
+    files = export_managed(snapshot.root, assemblies, output, snapshot.manifest_sha256)
+    report = json.loads((output / 'managed/coverage.json').read_bytes())
+    if not report['accounting_complete']:
+        raise ValueError('Managed method accounting incomplete. See managed/coverage.json')
+    return files
+
+
+def _source_assemblies(source_root, assemblies):
+    assemblies = tuple(sorted(assemblies, key=lambda item: item.file))
     if not assemblies:
         raise ValueError('No archived managed assemblies')
+    validate_paths([item.file for item in assemblies])
     for item in assemblies:
-        path = snapshot.root / item.file
+        path = source_root / item.file
+        _check_path(path, source_root.resolve())
         if path.stat().st_size != item.bytes or sha256(path) != item.sha256:
             raise ValueError(f'Managed source hash mismatch: {item.file}')
+    return assemblies
+
+
+def _receipt(output, name):
+    path = output / name
+    validate_paths([name])
+    _check_path(path, output.resolve())
+    return FileRecord(name, path.stat().st_size, sha256(path))
+
+
+def _method_reason(method):
+    if method['flags'] & 0x400:
+        return 'abstract'
+    if method['flags'] & 0x2000:
+        return 'pinvoke'
+    if method['implementation_flags'] & 0x1000:
+        return 'internal_call'
+    if method['implementation_flags'] & 3 == 3:
+        return 'runtime'
+    return 'missing_il_body'
+
+
+def _verified_resolution(row, method, methods, proof):
+    keys = {'kind', 'method_token', 'caller_il_hex', 'caller_il_sha256', 'callee_token',
+            'callee_signature', 'callee_il_hex', 'callee_il_sha256', 'exception_constructor_token',
+            'exception_constructor_type', 'exception_constructor_signature'}
+    if (row['resolution'] != proof or set(proof) != keys or proof['kind'] != 'verified_nonreturning_stub'
+            or proof['method_token'] != method['token'] or row['status'] != 'decompiled'
+            or row['diagnostics'] or row['reason'] is not None
+            or row['resolved_diagnostics'] != ['IL_0007: Expected Obj, but got I4']):
+        raise ValueError('Invalid resolved managed warning')
+    caller, callee = bytes.fromhex(proof['caller_il_hex']), bytes.fromhex(proof['callee_il_hex'])
+    target = methods.get(proof['callee_token'])
+    if (len(caller) != 7 or caller[0] != 0x28 or caller[5:] != b'\x16\x2a'
+            or int.from_bytes(caller[1:5], 'little') != proof['callee_token']
+            or len(callee) != 6 or callee[0] != 0x73 or callee[-1] != 0x7a
+            or int.from_bytes(callee[1:5], 'little') != proof['exception_constructor_token']
+            or hashlib.sha256(caller).hexdigest() != proof['caller_il_sha256']
+            or proof['caller_il_sha256'] != method['il_sha256']
+            or hashlib.sha256(callee).hexdigest() != proof['callee_il_sha256']
+            or target is None or target['type'] != 'Unity.ThrowStub'
+            or target['name'] != 'ThrowNotSupportedException' or not target['rva']
+            or target['signature'] != proof['callee_signature'] or proof['callee_signature'] != '000001'
+            or target['il_sha256'] != proof['callee_il_sha256']
+            or proof['exception_constructor_type'] != 'System.PlatformNotSupportedException'
+            or proof['exception_constructor_signature'] != '200001'):
+        raise ValueError('Managed nonreturning-stub proof mismatch')
+
+
+def _assembly_coverage(output, assembly, methods, proofs):
+    stem = Path(assembly['file']).stem
+    receipt_name = 'decompilation.json' if stem == 'Assembly-CSharp' else f'{stem}.decompilation.json'
+    receipt_file = _receipt(output, f'managed/{receipt_name}')
+    receipt = _checked_json(output, receipt_file)
+    expected_input = {'file': assembly['file'], 'sha256': assembly['sha256']}
+    if receipt['input'] != expected_input or receipt['mode'] != 'whole_module':
+        raise ValueError(f'Managed decompilation input mismatch: {stem}')
+    if (receipt['method_count'] != assembly['method_count']
+            or receipt['type_count'] != assembly['type_count']):
+        raise ValueError(f'Managed decompilation count mismatch: {stem}')
+    records = [receipt_file]
+    expected_outputs = {'output': f'managed/{stem}.cs', 'coverage': f'managed/{stem}.coverage.json',
+                        'supplement': f'managed/{stem}.methods.cs'}
+    for key, name in expected_outputs.items():
+        item = receipt.get(key)
+        if item is None and key == 'supplement':
+            continue
+        record = FileRecord(**item)
+        if record.file != name:
+            raise ValueError(f'Managed output identity mismatch: {stem}.{key}')
+        _checked_file(output, record)
+        records.append(record)
+    coverage = _checked_json(output, FileRecord(**receipt['coverage']))
+    if coverage['input'] != expected_input:
+        raise ValueError(f'Managed coverage input mismatch: {stem}')
+    expected = {method['token']: method for method in methods}
+    observed = {method['token']: method for method in coverage['methods']}
+    if (len(expected) != len(methods) or len(observed) != len(coverage['methods'])
+            or expected.keys() != observed.keys()):
+        raise ValueError(f'Managed method token coverage mismatch: {stem}')
+    fields = ('token', 'type', 'rva', 'flags', 'implementation_flags', 'signature', 'il_sha256')
+    gaps, statuses, resolved = [], Counter(), []
+    code_files = {item.file for item in records if item.file.endswith('.cs')}
+    for token, method in expected.items():
+        row = observed[token]
+        if any(row[field] != method[field] for field in fields) or row['name'] != method['name']:
+            raise ValueError(f'Managed method identity mismatch: {stem}:0x{token:08x}')
+        status = row['status']
+        if status not in ('decompiled', 'warning', 'failed', 'declaration_only'):
+            raise ValueError(f'Unknown managed method status: {stem}:0x{token:08x}')
+        if not isinstance(row['diagnostics'], list) or any(not isinstance(value, str) for value in row['diagnostics']):
+            raise ValueError(f'Invalid managed method diagnostics: {stem}:0x{token:08x}')
+        if method['rva']:
+            if (status == 'declaration_only' or (status in ('decompiled', 'warning') and row['source'] not in code_files)
+                    or (status == 'decompiled' and row['diagnostics'])):
+                raise ValueError(f'Invalid managed body coverage: {stem}:0x{token:08x}')
+        elif status != 'declaration_only' or row['reason'] != _method_reason(method):
+            raise ValueError(f'Invalid managed declaration coverage: {stem}:0x{token:08x}')
+        if row['source'] is not None and row['source'] not in code_files:
+            raise ValueError(f'Unknown managed method source: {stem}:0x{token:08x}')
+        if token in proofs and status == 'decompiled' and (
+                'resolution' not in row or 'resolved_diagnostics' not in row):
+            raise ValueError(f'Missing resolved managed warning proof: {stem}:0x{token:08x}')
+        if 'resolution' in row or 'resolved_diagnostics' in row:
+            if ('resolution' not in row or 'resolved_diagnostics' not in row or token not in proofs
+                    or row['source'] != f'managed/{stem}.cs'):
+                raise ValueError(f'Orphan resolved managed warning: {stem}:0x{token:08x}')
+            _verified_resolution(row, method, expected, proofs[token])
+            resolved.append({'assembly': assembly['file'], **row})
+        statuses[status] += 1
+        if status in ('warning', 'failed') or (not method['rva'] and row['reason'] != 'abstract'):
+            gaps.append({'kind': 'method', 'assembly': assembly['file'], **row})
+    gaps.extend({'kind': 'module_diagnostic', 'assembly': assembly['file'], 'diagnostics': [message]}
+                for message in receipt['diagnostics'])
+    il_complete = not receipt['diagnostics'] and all(
+        observed[token]['status'] == 'decompiled' for token, method in expected.items() if method['rva'])
+    entry = {key: assembly[key] for key in ('file', 'name', 'version', 'mvid', 'bytes', 'sha256', 'type_count', 'method_count')}
+    entry.update({'decompilation': asdict(receipt_file), 'output': receipt['output'],
+                  'coverage': receipt['coverage'], 'supplement': receipt.get('supplement'),
+                  'accounting_complete': True, 'il_complete': il_complete,
+                  'complete': receipt['complete'] is True and not gaps,
+                  'statuses': dict(sorted(statuses.items())), 'diagnostics': receipt['diagnostics'],
+                  'resolved_warnings': len(resolved)})
+    return entry, records, gaps, resolved
+
+
+def _coverage_report(source_root, assemblies, output, source_manifest_sha256, strict, executions=()):
+    assemblies = _source_assemblies(source_root, assemblies)
+    index_file = _receipt(output, 'managed/index.json')
+    index = _checked_json(output, index_file)
+    expected = {item.file: asdict(item) for item in assemblies}
+    indexed = {item['file']: item for item in index['assemblies']}
+    if (len(indexed) != len(index['assemblies']) or expected.keys() != indexed.keys()
+            or any(any(indexed[name][key] != item[key] for key in ('bytes', 'sha256'))
+                   for name, item in expected.items())):
+        raise ValueError('Managed index source mismatch')
+    methods = defaultdict(list)
+    for method in index['methods']:
+        if method['assembly'] not in indexed:
+            raise ValueError('Managed index has an unknown method assembly')
+        methods[method['assembly']].append(method)
+    proofs = defaultdict(dict)
+    method_tokens = {name: {method['token'] for method in values} for name, values in methods.items()}
+    for item in index['verified_throw_stubs']:
+        if set(item) != {'assembly', 'proof'} or item['assembly'] not in indexed:
+            raise ValueError('Invalid indexed nonreturning-stub proof')
+        token = item['proof']['method_token']
+        if token in proofs[item['assembly']]:
+            raise ValueError('Duplicate indexed nonreturning-stub proof')
+        if token not in method_tokens.get(item['assembly'], set()):
+            raise ValueError('Unknown indexed nonreturning-stub method')
+        proofs[item['assembly']][token] = item['proof']
+    rows, records, gaps, failures, statuses, resolved = [], [index_file], [], [], Counter(), []
+    for name, assembly in indexed.items():
+        try:
+            if len(methods[name]) != assembly['method_count']:
+                raise ValueError(f'Managed indexed method count mismatch: {name}')
+            entry, outputs, assembly_gaps, assembly_resolved = _assembly_coverage(output, assembly, methods[name], proofs[name])
+            records.extend(outputs)
+            gaps.extend(assembly_gaps)
+            statuses.update(entry['statuses'])
+            resolved.extend(assembly_resolved)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            if strict:
+                raise ValueError(f'Managed coverage invalid: {name}: {error}') from error
+            failures.append({'assembly': name, 'error': str(error)})
+            gaps.append({'kind': 'assembly_failure', 'assembly': name, 'diagnostics': [str(error)]})
+            entry = {key: assembly[key] for key in ('file', 'name', 'version', 'mvid', 'bytes', 'sha256', 'type_count', 'method_count')}
+            stem = Path(name).stem
+            receipt_name = 'decompilation.json' if stem == 'Assembly-CSharp' else f'{stem}.decompilation.json'
+            retained = [_receipt(output, f'managed/{filename}') for filename in (
+                receipt_name, f'{stem}.cs', f'{stem}.coverage.json', f'{stem}.methods.cs')
+                if (output / 'managed' / filename).is_file()]
+            records.extend(retained)
+            entry.update({'accounting_complete': False, 'il_complete': False, 'complete': False,
+                          'diagnostics': [str(error)], 'retained_files': [asdict(item) for item in retained]})
+        rows.append(entry)
+    execution_failures = [execution for execution in executions if execution['exit_code'] != 0]
+    gaps.extend({'kind': 'process_diagnostic', 'assembly': execution['source'],
+                 'exit_code': execution['exit_code'], 'diagnostics': [execution['stderr']]}
+                for execution in execution_failures)
+    report = {'schema_version': SCHEMA_VERSION, 'source_manifest_sha256': source_manifest_sha256,
+              'index': asdict(index_file), 'assemblies': rows, 'gaps': gaps, 'failures': failures,
+              'resolved_warnings': resolved,
+              'accounting_complete': index['complete'] is True and not failures,
+              'il_complete': not execution_failures and all(row['il_complete'] for row in rows),
+              'complete': index['complete'] is True and not execution_failures and all(row['complete'] for row in rows),
+              'summary': {'assemblies': len(rows), 'types': sum(row['type_count'] for row in rows),
+                          'methods': sum(row['method_count'] for row in rows),
+                          'accounted_methods': sum(statuses.values()), 'statuses': dict(sorted(statuses.items())),
+                          'gaps': len(gaps), 'failed_assemblies': len(failures),
+                          'resolved_warnings': len(resolved),
+                          'failed_executions': len(execution_failures),
+                          'gap_reasons': dict(sorted(Counter(gap.get('reason') or gap['kind'] for gap in gaps).items()))},
+              'index_diagnostics': index['diagnostics']}
+    validate_paths([record.file for record in records])
+    return report, records
+
+
+def export_managed(source_root, assemblies, output, source_manifest_sha256=None):
+    """Export every assembly before reporting failures. Preserve failed evidence."""
+    assemblies = _source_assemblies(source_root, assemblies)
     managed = output / 'managed'
+    source, target = source_root.resolve(), managed.resolve()
+    if source.is_relative_to(target) or target.is_relative_to(source):
+        raise ValueError('Managed output overlaps the source archive')
     managed.mkdir(parents=True, exist_ok=True)
-    steps = (['-Mode', 'Index', '-AssemblyPath', str(snapshot.root / DATA_DIRECTORY / 'Managed')],
-             ['-AssemblyPath', str(snapshot.root / DATA_DIRECTORY / 'Managed/Assembly-CSharp.dll')])
-    for arguments in steps:
+    if any(managed.iterdir()):
+        raise ValueError(f'Managed output must be empty: {managed}')
+    commands = [(['-Mode', 'Index', '-AssemblyPath', str(source_root / DATA_DIRECTORY / 'Managed')], 'index')]
+    commands.extend((['-AssemblyPath', str(source_root / item.file)], item.file) for item in assemblies)
+    executions = []
+    for arguments, name in commands:
+        print(f'Managed export: {name}', flush=True)
         result = subprocess.run(['pwsh', '-NoProfile', '-File', str(SCRIPT), *arguments,
                                  '-OutputPath', str(managed)], capture_output=True, text=True)
-        if result.returncode:
-            _file(output, 'managed/diagnostics.json', _json({'schema_version': SCHEMA_VERSION,
-                  'complete': False, 'arguments': arguments, 'stdout': result.stdout,
-                  'stderr': result.stderr, 'source_files': [asdict(item) for item in assemblies]}))
-            raise ValueError(f'Managed analysis incomplete: {result.stderr.strip()}')
-    index = json.loads((managed / 'index.json').read_bytes())
-    decompilation = json.loads((managed / 'decompilation.json').read_bytes())
-    expected = {item.file: item.sha256 for item in assemblies}
-    observed = {item['file']: item['sha256'] for item in index['assemblies']}
-    if expected != observed or not index['complete'] or not decompilation['complete']:
-        raise ValueError('Managed analysis incomplete: source index or decompilation mismatch')
-    if decompilation['input']['sha256'] != expected[f'{DATA_DIRECTORY}/Managed/Assembly-CSharp.dll']:
-        raise ValueError('Managed analysis incomplete: decompiler input hash mismatch')
-    _checked_file(output, FileRecord(**decompilation['output']))
-    for item in assemblies:
-        if sha256(snapshot.root / item.file) != item.sha256:
-            raise ValueError(f'Managed source changed: {item.file}')
-    _file(output, 'managed/diagnostics.json', _json({'schema_version': SCHEMA_VERSION,
-          'complete': True, 'source_manifest_sha256': snapshot.manifest_sha256,
-          'source_files': [asdict(item) for item in assemblies],
-          'index_diagnostics': index['diagnostics'], 'decompiler_diagnostics': decompilation['diagnostics']}))
-    names = ('Assembly-CSharp.cs', 'decompilation.json', 'diagnostics.json', 'index.json')
-    return tuple(FileRecord(f'managed/{name}', (managed / name).stat().st_size, sha256(managed / name))
-                 for name in names)
+        executions.append({'source': name, 'exit_code': result.returncode,
+                           'stdout': result.stdout, 'stderr': result.stderr})
+    try:
+        report, records = _coverage_report(source_root, assemblies, output, source_manifest_sha256, False, executions)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        _file(output, 'managed/diagnostics.json', _json({'schema_version': SCHEMA_VERSION,
+              'complete': False, 'source_manifest_sha256': source_manifest_sha256,
+              'source_files': [asdict(item) for item in assemblies], 'executions': executions,
+              'error': str(error)}))
+        raise
+    records.append(_file(output, 'managed/coverage.json', _json(report)))
+    records.append(_file(output, 'managed/diagnostics.json', _json({'schema_version': SCHEMA_VERSION,
+          'complete': report['accounting_complete'], 'source_manifest_sha256': source_manifest_sha256,
+          'source_files': [asdict(item) for item in assemblies], 'executions': executions})))
+    return tuple(sorted(records, key=lambda item: item.file))
+
+
+def verify_managed_export(source_root, assemblies, output, source_manifest_sha256=None):
+    """Hash retained evidence and recompute method coverage without decompilation."""
+    coverage_file = _receipt(output, 'managed/coverage.json')
+    diagnostics_file = _receipt(output, 'managed/diagnostics.json')
+    diagnostics = _checked_json(output, diagnostics_file)
+    if (diagnostics['complete'] is not True or diagnostics['source_manifest_sha256'] != source_manifest_sha256
+            or diagnostics['source_files'] != [asdict(item) for item in sorted(assemblies, key=lambda item: item.file)]):
+        raise ValueError('Managed diagnostics source mismatch')
+    saved = _checked_json(output, coverage_file)
+    report, records = _coverage_report(source_root, assemblies, output, source_manifest_sha256, True, diagnostics['executions'])
+    if saved != report or not report['accounting_complete']:
+        raise ValueError('Managed coverage differs from verified methods')
+    records.extend((coverage_file, diagnostics_file))
+    validate_paths([record.file for record in records])
+    return report, tuple(sorted(records, key=lambda item: item.file))
 
 
 def _checked_file(output, record):
+    validate_paths([record.file])
     path = output / record.file
+    _check_path(path, output.resolve())
     raw = path.read_bytes()
     if len(raw) != record.bytes or hashlib.sha256(raw).hexdigest() != record.sha256:
         raise ValueError(f'Managed output hash mismatch: {record.file}')
