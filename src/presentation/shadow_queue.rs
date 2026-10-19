@@ -552,6 +552,7 @@ pub fn graph_ready(
     cache: Res<PipelineCache>,
     surface: Res<super::surface_pass::SurfacePasses>,
     caster: Res<CasterPasses>,
+    owners: Res<super::pipeline_ownership::PipelineOwners>,
     loading: Res<super::materials::MaterialLoading>,
     status: Res<SourceLightingStatus>,
 ) -> bool {
@@ -561,8 +562,8 @@ pub fn graph_ready(
         && queues.frame == frame.frame
         && queues.ready[view.index]
         && loading.is_ready()
-        && surface.ready(&cache)
-        && caster.ready(&cache)
+        && surface.ready(&cache, &owners)
+        && caster.ready(&cache, &owners)
         && collector.is_some_and(|c| c.prepared_frame == frame.frame && c.ready(&cache))
         && !matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
 }

@@ -1290,15 +1290,16 @@ fn gpu_boundaries(
     boundary.source_camera_ready = world
         .get_resource::<SourceViewCamera>()
         .is_some_and(|c| c.ready());
+    let owners = world.resource::<super::pipeline_ownership::PipelineOwners>();
     if let Some(surface) = world.get_resource::<super::surface_pass::SurfacePasses>() {
-        boundary.source_surface_ready = surface.ready(cache);
+        boundary.source_surface_ready = surface.ready(cache, owners);
         let (base, add) = surface.counts();
         boundary.source_surface_pipelines = base as u32;
         boundary.source_add_pipelines = add as u32;
     }
     boundary.source_caster_ready = world
         .get_resource::<super::caster::CasterPasses>()
-        .is_some_and(|p| p.ready(cache));
+        .is_some_and(|p| p.ready(cache, owners));
     boundary.source_sky_ready = world
         .get_resource::<SkyPass>()
         .is_some_and(|p| p.ready(cache));

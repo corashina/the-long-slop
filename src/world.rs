@@ -34,6 +34,8 @@ mod instances;
 pub use instances::{StructureInstance, StructureRecipe};
 pub(crate) mod metrics;
 pub use metrics::WorldMetrics;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod pipeline_ownership;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod renderer_pending;
 pub(crate) mod stream;

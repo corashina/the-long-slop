@@ -108,14 +108,15 @@ fn opaque(
     masked: Res<ViewBinnedRenderPhases<AlphaMask3d>>,
     pipelines: Res<SurfacePasses>,
     casters: Res<super::caster::CasterPasses>,
+    owners: Res<super::pipeline_ownership::PipelineOwners>,
     cache: Res<PipelineCache>,
     status: Res<SourceLightingStatus>,
     loading: Res<MaterialLoading>,
     mut context: RenderContext,
 ) {
     if !loading.is_ready()
-        || !pipelines.ready(&cache)
-        || !casters.ready(&cache)
+        || !pipelines.ready(&cache, &owners)
+        || !casters.ready(&cache, &owners)
         || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
     {
         return;
@@ -175,14 +176,15 @@ fn transparent(
     phases: Res<ViewSortedRenderPhases<Transparent3d>>,
     pipelines: Res<SurfacePasses>,
     casters: Res<super::caster::CasterPasses>,
+    owners: Res<super::pipeline_ownership::PipelineOwners>,
     cache: Res<PipelineCache>,
     status: Res<SourceLightingStatus>,
     loading: Res<MaterialLoading>,
     mut context: RenderContext,
 ) {
     if !loading.is_ready()
-        || !pipelines.ready(&cache)
-        || !casters.ready(&cache)
+        || !pipelines.ready(&cache, &owners)
+        || !casters.ready(&cache, &owners)
         || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
     {
         return;

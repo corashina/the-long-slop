@@ -211,13 +211,14 @@ pub fn camera_depth(
     opaque: Res<ViewBinnedRenderPhases<Opaque3d>>,
     masked: Res<ViewBinnedRenderPhases<AlphaMask3d>>,
     pipelines: Res<CasterPasses>,
+    owners: Res<super::pipeline_ownership::PipelineOwners>,
     cache: Res<PipelineCache>,
     status: Res<SourceLightingStatus>,
     loading: Res<MaterialLoading>,
     mut context: RenderContext,
 ) {
     if !loading.is_ready()
-        || !pipelines.ready(&cache)
+        || !pipelines.ready(&cache, &owners)
         || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
     {
         return;
