@@ -109,9 +109,10 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 6. **Split expensive streaming steps.**
-   Status: Terrain work now resumes at deadline checks on `codex/streaming-step-budget`, not merged.
-   Native terrain measurements selected the stage. Browser testing is deferred by request.
-   Driving frame times and runtime acceptance remain unverified. Earlier profiling hit mouse capture and Load failures.
+   Status: Implemented. Terrain work now resumes at deadline checks. Source commit: `760af3d`.
+   Native terrain measurements selected the stage. Native tests and the WASM compile check passed.
+   Browser testing is deferred by request. Driving frame times and runtime acceptance remain unverified.
+   Earlier profiling hit mouse capture and Load failures.
    Checks and profiling commands: [Streaming stage measurements](performance/2026-10-19-streaming-steps.md).
    Difficulty: Hard. Estimate: 3–5 days. Owner: [world runtime](../src/presentation/world/runtime.rs).
    Effect: Bound measured long driving stages as resumable work within the current frame budget.

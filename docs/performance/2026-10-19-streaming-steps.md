@@ -6,7 +6,7 @@ Roadmap item 6 requires driving measurements before a streaming stage is split.
 The branch starts at `8eca150d90e7d0fa216823276c01825f8b1189d1`.
 Steam build `11140890` remains the source authority.
 
-The branch adds an opt-in profiler and deadline checks inside terrain construction.
+The implementation adds an opt-in profiler and deadline checks inside terrain construction.
 The user approved implementation with browser testing deferred.
 Native measurements selected terrain. No accepted driving profile selected this stage.
 No browser performance gain is verified.
@@ -59,7 +59,7 @@ The existing collision priority, completed-surface publication, and source road 
   Garage and driving average, p95, and p99 frame times still require matched release A/B/A runs.
 - No new release package has been built for the terrain split. Full checks remain deferred.
 
-The native check log is `.cache/streaming-step-budget/check.log` in this worktree.
+The native check log is `.cache/performance/2026-10-19-streaming-step-budget/terrain-split-check.log` in the main checkout.
 Repeat the export-dependent checks with the frozen assets mounted at `web/assets`:
 
 ```text
@@ -121,10 +121,10 @@ Local evidence is in `.cache/performance/2026-10-19-streaming-step-budget/` in t
 
 The preserved profiling release contains the profiler without the terrain split.
 It remains the baseline package. Rebuild a candidate release before comparing this change.
-Start the benchmark server, or use the existing server on port 4226:
+Start the benchmark server:
 
 ```powershell
-Set-Location 'C:/Users/Corashina/.codex/worktrees/streaming-step-budget/the-long-drive-wasm'
+Set-Location 'C:/Users/Corashina/Documents/Projects/the-long-drive-wasm'
 $env:BENCH_VARIANT = 'baseline'
 $env:BENCH_ASSET_ROOT = 'C:/Users/Corashina/Documents/Projects/the-long-drive-wasm/.cache/performance/2026-10-19-streaming-step-budget/assets'
 $env:BENCH_PACKAGE_ROOT = 'C:/Users/Corashina/Documents/Projects/the-long-drive-wasm/.cache/performance/2026-10-19-streaming-step-budget/profile-baseline/pkg'
