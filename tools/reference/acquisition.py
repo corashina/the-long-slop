@@ -9,8 +9,8 @@ STATION_PREFABS = (26573, 27344, 41123)
 
 ASSEMBLY_SHA256 = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e'
 TEXT_SHA256 = '22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee'
-# Accepted build 11140890 contract, recovered from the checked source receipt.
-CONTRACT_SHA256 = 'b163e5d3ea6a8c61acee51251c42216880eb679130b9af87204b62b9efba642c'
+# Selected Lada contract, recovered from the checked build 11140890 source receipt.
+CONTRACT_SHA256 = 'dfc55b58ab0fe3eeb66befc68074d48b93a945d00265641b60fa87ecc5eab730'
 
 
 def _block(code, start):
@@ -274,6 +274,7 @@ def recover_acquisition(source, manifest):
     terrain=source.get('level1',64898);td=source.read(terrain)
     startup_packs=[]
     for field,pack_id,car_id in [('StartCar01',14079,69517),('StartCar02',14082,77839)]:
+        if not any(car['source']=={'file':'level1','path_id':car_id} for car in manifest['vehicles']):continue
         group=source.resolve(terrain,td[field]);go=source.get('level1',pack_id)
         s=startup(go);root=source.transform_for(go)
         cigi=component(source,root,'cigiscript')
@@ -569,8 +570,10 @@ def _validate_objects(a,manifest,prototype,table):
         if v['car'] is not None:_source(v['car'])
         if v['started'] or v['loaded'] or v['buried'] or v['car'] is not None or v['fixed_in_car']!=0:
             raise ValueError('Startup instance initialization differs')
-    if len(_list(a['startup_packs']))!=2:raise ValueError('Selected-car startup packs differ')
-    for index,(v,expected) in enumerate(zip(a['startup_packs'],STARTUP_PACKS,strict=True)):
+    selected_packs=[(index,expected) for index,expected in enumerate(STARTUP_PACKS)
+        if any(car['source']=={'file':'level1','path_id':expected['vehicle']} for car in manifest['vehicles'])]
+    if len(_list(a['startup_packs']))!=len(selected_packs) or len(selected_packs)!=len(manifest['vehicles']):raise ValueError('Selected-car startup packs differ')
+    for v,(index,expected) in zip(a['startup_packs'],selected_packs,strict=True):
         _shape(v,instance_fields+' prototype group group_pose group_active vehicle pack cigarette_prefab ammo');instance(v)
         prototype(v['prototype'],74);_pose(v['group_pose']);_boolean(v['group_active'])
         if [v['pose'],v['group_pose']]!=CHECKED_POSES[2+index*2:4+index*2]:raise ValueError('Startup pack pose owner differs')

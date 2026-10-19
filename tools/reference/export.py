@@ -1,7 +1,6 @@
 """Offline export for the selected Steam build."""
 import argparse
 import hashlib
-import math
 import json
 import re
 import subprocess
@@ -103,34 +102,7 @@ def runtime_resources(manifest):
 
 
 # Start cars in manifest order: root GameObject, starter field, and starter GameObject.
-CARS={'lada':(17687,'StartCar02',206),'skoda':(6890,'StartCar01',298)}
-# Unity world x and z of the parked Skoda, on the flat yard north of the garage.
-SKODA_PARKING=(38.5,58.5)
-
-
-def relocate(source, transform, position, yaw_degrees):
-    """Move a root transform in world x and z and turn it about world y."""
-    from .collision import quaternion_product
-    from .gltf import transform_point
-    from .source import vector
-    chain=source.chain(transform);data=chain[0]
-    parent_position=(0.,0.,0.);parent_rotation=(0.,0.,0.,1.);parent_scale=(1.,1.,1.)
-    for item in chain[1:]:
-        parent_position=transform_point(parent_position,vector(item['m_LocalPosition']),vector(item['m_LocalRotation'],4),vector(item['m_LocalScale']))
-        parent_rotation=quaternion_product(vector(item['m_LocalRotation'],4),parent_rotation)
-        parent_scale=tuple(parent_scale[i]*vector(item['m_LocalScale'])[i] for i in range(3))
-    if any(abs(v-1.)>1e-6 for v in parent_scale):raise ValueError('Relocated car parent must not scale')
-    world_position=transform_point(vector(data['m_LocalPosition']),parent_position,parent_rotation,(1.,1.,1.))
-    world_rotation=quaternion_product(parent_rotation,vector(data['m_LocalRotation'],4))
-    half=math.radians(yaw_degrees)*.5
-    rotation=quaternion_product((0.,math.sin(half),0.,math.cos(half)),world_rotation)
-    target=(position[0],world_position[1],position[1])
-    inverse=(-parent_rotation[0],-parent_rotation[1],-parent_rotation[2],parent_rotation[3])
-    offset=tuple(target[i]-parent_position[i] for i in range(3))
-    local=transform_point(offset,(0.,0.,0.),inverse,(1.,1.,1.))
-    local_rotation=quaternion_product(inverse,rotation)
-    data['m_LocalPosition']=dict(zip('xyz',local))
-    data['m_LocalRotation']=dict(zip('xyzw',local_rotation))
+CARS={'lada':(17687,'StartCar02',206)}
 
 
 def validate_runtime_paths(manifest):
@@ -303,8 +275,6 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     for name,(go,field,starter) in CARS.items():
         if starters[field]['m_PathID']!=starter or source.read(roots[name][0])['m_Father']['m_PathID']!=source.transform_for(source.get('level1',starter)).path_id:
             raise ValueError(f'Selected {name} starter link differs from the required car')
-    # Every start car shares one garage spot. The project parks the other cars in the yard.
-    relocate(source,roots['skoda'][0],SKODA_PARKING,180.)
     # Mirror glass uses the source material for disabled mirrors.
     main = source.get('level1', 64919)
     glass = source.resolve(main, source.read(main)['noMirrorMaterial'])

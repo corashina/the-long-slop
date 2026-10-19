@@ -2,6 +2,36 @@ use my_summer_slop::reference::{MAX_MANIFEST_BYTES, ReferenceManifest};
 
 #[test]
 #[ignore = "requires the installed source export"]
+fn installed_startup_selects_only_garage_lada() {
+    let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+    let reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();
+    assert_eq!(reference.vehicles.len(), 1);
+    assert_eq!(reference.vehicles[0].source.path_id, 77839);
+    let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(
+        manifest["assets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|asset| { asset["path"] != "reference/skoda.gltf" })
+    );
+    let packs = manifest["acquisition"]["startup_packs"]
+        .as_array_mut()
+        .unwrap();
+    assert_eq!(packs.len(), 1);
+    assert_eq!(packs[0]["vehicle"]["path_id"], 77839);
+    packs.clear();
+    let bytes = serde_json::to_vec(&manifest).unwrap();
+    assert!(
+        ReferenceManifest::from_runtime_json(&bytes)
+            .unwrap_err()
+            .to_string()
+            .contains("selected packs")
+    );
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
 fn installed_manifest_checks_lod_bounds_and_initializes_runtime() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let mut reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();

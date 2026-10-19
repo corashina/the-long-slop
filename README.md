@@ -1,7 +1,7 @@
 # My Summer Slop
 
 Prepare a fixed Lada 2101 in the starting garage. Drive onto the desert road.
-A source Skoda waits in the yard north of the garage. Read [vehicles](docs/vehicles.md).
+Read [vehicles](docs/vehicles.md) for the selected car and source records.
 The home, car, and supplies come from installed Steam build 11140890.
 Rust, Bevy, and Rapier run the browser game through WebAssembly.
 

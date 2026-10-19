@@ -638,8 +638,15 @@ impl AcquisitionReference {
                 "Box content count source",
             )?;
         }
+        let startup_packs = STARTUP_PACKS.iter().filter(|expected| {
+            m.vehicles
+                .iter()
+                .any(|car| source_is(&car.source, "level1", expected[5]))
+        });
         require(
-            self.packs.len() == 1 && self.startup_packs.len() == 2,
+            self.packs.len() == 1
+                && self.startup_packs.len() == m.vehicles.len()
+                && self.startup_packs.len() == startup_packs.clone().count(),
             "selected packs",
         )?;
         let pack = &self.packs[0];
@@ -658,7 +665,7 @@ impl AcquisitionReference {
             "pack source rules",
         )?;
         validate_ammo(&pack.ammo, "sharedassets1.assets", 141757)?;
-        for (v, expected) in self.startup_packs.iter().zip(STARTUP_PACKS) {
+        for (v, expected) in self.startup_packs.iter().zip(startup_packs) {
             prototype(&v.prototype, Some(74), m)?;
             require(
                 [
