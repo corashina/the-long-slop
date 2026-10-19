@@ -400,9 +400,16 @@ impl PhysicsWorld {
     }
 
     pub fn step_physics(&mut self) {
+        for body in self.physics.islands.active_bodies() {
+            self.query_bounds.mark_simulated_body(body);
+        }
         self.physics.step();
+        for body in self.physics.islands.active_bodies() {
+            self.query_bounds.mark_simulated_body(body);
+        }
+        self.query_bounds.requeue_step_mutations();
         self.query_bounds.refresh(&mut self.physics);
-        self.query_bounds.clear_step();
+        self.query_bounds.finish_step();
     }
 
     pub fn capture_save(

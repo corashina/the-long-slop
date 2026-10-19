@@ -1,7 +1,10 @@
 use super::*;
 use rapier3d::math::{Rotation, Vector};
 use rapier3d::parry::bounding_volume::BoundingVolume;
-use rapier3d::prelude::{ColliderBuilder, QueryFilter, QueryPipeline, Ray, RigidBodyBuilder};
+use rapier3d::prelude::{
+    ColliderBuilder, QueryFilter, QueryPipeline, Ray, RigidBodyBuilder, SharedShape,
+};
+use std::sync::Arc;
 
 #[test]
 fn direct_mutations_refresh_hits_without_rebuilding_unchanged_bounds() {
@@ -11,7 +14,7 @@ fn direct_mutations_refresh_hits_without_rebuilding_unchanged_bounds() {
     assert_eq!(ray_hit(&physics, 0.0, 0.0), Some(collider));
     let capacities = (
         physics.query_bounds.states.capacity(),
-        physics.query_bounds.changed.capacity(),
+        physics.query_bounds.queue_capacities(),
         physics.query_bounds.retained_bytes(),
     );
     for _ in 0..8 {
@@ -21,7 +24,7 @@ fn direct_mutations_refresh_hits_without_rebuilding_unchanged_bounds() {
         capacities,
         (
             physics.query_bounds.states.capacity(),
-            physics.query_bounds.changed.capacity(),
+            physics.query_bounds.queue_capacities(),
             physics.query_bounds.retained_bytes()
         )
     );
@@ -127,12 +130,17 @@ fn query_refresh_keeps_new_bodies_and_contacts_in_the_physics_pipeline() {
         ColliderBuilder::ball(0.5),
     );
     physics.query_bounds.refresh(&mut physics.physics);
+    let mut scan = super::reference::ScanBounds::default();
+    assert_matches_scan(&mut physics, &mut scan, &[Vector::Y * 3.0]);
     for _ in 0..240 {
         physics.query_bounds.refresh(&mut physics.physics);
         physics.step_physics();
-        physics.query_bounds.refresh(&mut physics.physics);
+        let point = physics.rapier().bodies[body].translation();
+        assert_eq!(ray_hit(&physics, point.x, point.z), Some(collider));
+        assert_matches_scan(&mut physics, &mut scan, &[point]);
     }
     assert!((physics.rapier().bodies[body].translation().y - 0.5).abs() < 0.05);
+    assert!(physics.rapier().bodies[body].is_sleeping());
     assert_eq!(ray_hit(&physics, 0.0, 0.0), Some(collider));
     assert!(
         physics
@@ -151,13 +159,7 @@ fn query_refresh_keeps_new_bodies_and_contacts_in_the_physics_pipeline() {
 
 #[test]
 fn public_queries_follow_step_without_an_extra_caller_refresh() {
-    let mut world = super::super::PhysicsWorld {
-        inactive_bodies: Default::default(),
-        physics: PhysicsWorld::new(),
-        query_bounds: QueryBounds::default(),
-        chassis: Vec::new(),
-        vehicles: Vec::new(),
-    };
+    let mut world = empty_world();
     world.set_gravity(Vector::ZERO);
     let (body, collider) = world.insert(
         RigidBodyBuilder::dynamic().linvel(Vector::new(60.0, 0.0, 0.0)),
@@ -187,9 +189,11 @@ fn public_queries_follow_step_without_an_extra_caller_refresh() {
 }
 
 pub(super) fn empty_world() -> crate::vehicle::PhysicsWorld {
+    let mut physics = PhysicsWorld::new();
+    physics.integration_parameters.dt = crate::simulation::FIXED_DT;
     crate::vehicle::PhysicsWorld {
         inactive_bodies: Default::default(),
-        physics: PhysicsWorld::new(),
+        physics,
         query_bounds: QueryBounds::default(),
         chassis: Vec::new(),
         vehicles: Vec::new(),
@@ -408,4 +412,461 @@ fn tracked_edits_cover_optional_handles_and_lifecycle() {
     world.refresh_queries();
     assert_eq!(world.query_bounds.pending_counts(), (0, 0, 0));
     assert_eq!(ray_hit(&world, 0.0, 0.0), None);
+}
+
+#[test]
+fn idle_refresh_and_sparse_edits_visit_only_queued_handles() {
+    let mut world = empty_world();
+    // Warm body and removal storage before the standalone scene fixes membership.
+    let (temporary, _) = world.insert(RigidBodyBuilder::fixed(), ColliderBuilder::ball(0.5));
+    world.refresh_queries();
+    world.remove_body(temporary);
+    world.refresh_queries();
+    let mut edited = None;
+    for i in 0..1024 {
+        edited =
+            Some(world.insert_collider(
+                ColliderBuilder::ball(1.0).translation(Vector::X * (i as f32 * 4.0)),
+            ));
+    }
+    world.refresh_queries();
+    world.step_physics();
+    world.refresh_queries();
+    assert_eq!(
+        world.query_bounds.last_work(),
+        RefreshWork {
+            bodies: 0,
+            colliders: 0,
+            aabbs: 0
+        }
+    );
+    let edited = edited.unwrap();
+    for radius in [1.5, 2.0] {
+        world.edit_collider(edited, |collider| {
+            collider.shape_mut().as_ball_mut().unwrap().radius = radius
+        });
+    }
+    world.refresh_queries();
+    assert_eq!(
+        world.query_bounds.last_work(),
+        RefreshWork {
+            bodies: 0,
+            colliders: 1,
+            aabbs: 1
+        }
+    );
+    world.step_physics();
+    let (parent, _) = world.insert(
+        RigidBodyBuilder::fixed().translation(Vector::Z * 8.0),
+        ColliderBuilder::ball(0.5),
+    );
+    world.refresh_queries();
+    world.step_physics();
+    world.edit_body(parent, |body| body.user_data = 1);
+    world.refresh_queries();
+    assert_eq!(
+        world.query_bounds.last_work(),
+        RefreshWork {
+            bodies: 1,
+            colliders: 1,
+            aabbs: 0
+        }
+    );
+    world.step_physics();
+    let before = world.query_bounds.queue_capacities();
+    for _ in 0..8 {
+        world.refresh_queries();
+        assert_eq!(
+            world.query_bounds.last_work(),
+            RefreshWork {
+                bodies: 0,
+                colliders: 0,
+                aabbs: 0
+            }
+        );
+        assert_eq!(before, world.query_bounds.queue_capacities());
+    }
+}
+
+#[test]
+fn in_place_shape_and_local_pose_edits_match_scan() {
+    let mut world = empty_world();
+    world.set_gravity(Vector::ZERO);
+    let ball = world.insert_collider(ColliderBuilder::ball(1.0));
+    let (parent, child) = world.insert(
+        RigidBodyBuilder::fixed().translation(Vector::X * 10.0),
+        ColliderBuilder::cuboid(0.5, 0.5, 0.5),
+    );
+    let samples = [0.0, 2.5, 10.0, 14.0].map(|x| Vector::X * x);
+    let mut scan = super::reference::ScanBounds::default();
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    world.edit_collider(ball, |collider| {
+        collider.shape_mut().as_ball_mut().unwrap().radius = 3.0
+    });
+    world.edit_collider(child, |collider| {
+        collider.set_translation_wrt_parent(Vector::X * 4.0)
+    });
+    let parent_pose = *world.rapier().bodies[parent].position();
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    assert_eq!(ray_hit(&world, 2.5, 0.0), Some(ball));
+    assert_eq!(ray_hit(&world, 10.0, 0.0), None);
+    assert_eq!(ray_hit(&world, 14.0, 0.0), Some(child));
+    world.step_physics();
+    assert_eq!(*world.rapier().bodies[parent].position(), parent_pose);
+    assert_eq!(ray_hit(&world, 14.0, 0.0), Some(child));
+    assert_matches_scan(&mut world, &mut scan, &samples);
+}
+
+#[test]
+fn generation_reuse_does_not_remove_replacement() {
+    let mut world = empty_world();
+    let samples = [0.0, 8.0, 16.0, 24.0].map(|x| Vector::X * x);
+    let mut scan = super::reference::ScanBounds::default();
+    let (first_parent, first) = world.insert(RigidBodyBuilder::fixed(), ColliderBuilder::ball(0.5));
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    world.remove_body(first_parent);
+    let (second_parent, second) = world.insert(
+        RigidBodyBuilder::fixed().translation(Vector::X * 8.0),
+        ColliderBuilder::ball(0.5),
+    );
+    world.remove_body(second_parent);
+    let (_, third) = world.insert(
+        RigidBodyBuilder::fixed().translation(Vector::X * 16.0),
+        ColliderBuilder::ball(0.5),
+    );
+    assert_eq!(first.into_raw_parts().0, second.into_raw_parts().0);
+    assert_eq!(second.into_raw_parts().0, third.into_raw_parts().0);
+    assert_ne!(first, second);
+    assert_ne!(second, third);
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    assert_eq!(ray_hit(&world, 0.0, 0.0), None);
+    assert_eq!(ray_hit(&world, 8.0, 0.0), None);
+    assert_eq!(ray_hit(&world, 16.0, 0.0), Some(third));
+    for _ in 0..2 {
+        world.query_bounds.requeue_step_mutations();
+    }
+    assert_eq!(world.query_bounds.pending_counts(), (1, 1, 0));
+    world.refresh_queries();
+    assert_eq!(
+        world.query_bounds.last_work(),
+        RefreshWork {
+            bodies: 1,
+            colliders: 1,
+            aabbs: 0
+        }
+    );
+    world.step_physics();
+    assert_eq!(
+        world.query_bounds.last_work(),
+        RefreshWork {
+            bodies: 1,
+            colliders: 1,
+            aabbs: 0
+        }
+    );
+    assert_eq!(world.query_bounds.step_counts(), (0, 0));
+    assert_eq!(ray_hit(&world, 16.0, 0.0), Some(third));
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    let old_parent = world.insert_body(RigidBodyBuilder::fixed());
+    let new_parent = world.insert_body(RigidBodyBuilder::fixed());
+    world.set_collider_parent(third, Some(old_parent));
+    world.set_collider_parent(third, Some(new_parent));
+    world.remove_body(old_parent);
+    assert!(world.rapier().colliders.contains(third));
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    world.remove_body(new_parent);
+    let (fourth_parent, fourth) = world.insert(
+        RigidBodyBuilder::fixed().translation(Vector::X * 24.0),
+        ColliderBuilder::ball(0.5),
+    );
+    world.remove_body(fourth_parent);
+    let fifth = world.insert_collider(ColliderBuilder::ball(0.5).translation(Vector::X * 8.0));
+    assert_eq!(third.into_raw_parts().0, fourth.into_raw_parts().0);
+    assert_eq!(fourth.into_raw_parts().0, fifth.into_raw_parts().0);
+    assert_ne!(third, fourth);
+    assert_ne!(fourth, fifth);
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    assert_eq!(ray_hit(&world, 16.0, 0.0), None);
+    assert_eq!(ray_hit(&world, 24.0, 0.0), None);
+    assert_eq!(ray_hit(&world, 8.0, 0.0), Some(fifth));
+}
+
+#[test]
+fn fixed_parent_enablement_survives_intervening_refresh() {
+    let mut world = empty_world();
+    let (parent, child) = world.insert(RigidBodyBuilder::fixed(), ColliderBuilder::ball(0.5));
+    let other = world.insert_body(RigidBodyBuilder::fixed().translation(Vector::X * 8.0));
+    let samples = [Vector::ZERO, Vector::X * 8.0];
+    let mut scan = super::reference::ScanBounds::default();
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    world.step_physics();
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    for enabled in [false, true, false] {
+        world.edit_body(parent, |body| body.set_enabled(enabled));
+        assert_matches_scan(&mut world, &mut scan, &samples);
+        if !enabled {
+            assert_eq!(ray_hit(&world, 0.0, 0.0), None);
+        }
+        world.step_physics();
+        assert_eq!(ray_hit(&world, 0.0, 0.0), enabled.then_some(child));
+        assert_matches_scan(&mut world, &mut scan, &samples);
+    }
+    assert!(!world.rapier().colliders[child].is_enabled());
+    world.set_collider_parent(child, Some(other));
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    world.step_physics();
+    assert_eq!(ray_hit(&world, 8.0, 0.0), None);
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    // Rapier retains DisabledByParent on reparenting until an enablement notification.
+    for enabled in [false, true] {
+        world.edit_body(other, |body| body.set_enabled(enabled));
+        assert_matches_scan(&mut world, &mut scan, &samples);
+        world.step_physics();
+        assert_eq!(ray_hit(&world, 8.0, 0.0), enabled.then_some(child));
+        assert_matches_scan(&mut world, &mut scan, &samples);
+    }
+}
+
+#[test]
+fn simulation_motion_sleep_wake_and_kinematic_queries_match_scan() {
+    let mut world = empty_world();
+    world.set_gravity(Vector::ZERO);
+    let (dynamic, dc) = world.insert(
+        RigidBodyBuilder::dynamic().linvel(Vector::X * 3.0),
+        ColliderBuilder::ball(0.1),
+    );
+    let (velocity, vc) = world.insert(
+        RigidBodyBuilder::kinematic_velocity_based()
+            .translation(Vector::X * 8.0)
+            .linvel(Vector::X * 6.0),
+        ColliderBuilder::ball(0.1),
+    );
+    let (position, pc) = world.insert(
+        RigidBodyBuilder::kinematic_position_based().translation(Vector::X * 16.0),
+        ColliderBuilder::ball(0.1),
+    );
+    let mut scan = super::reference::ScanBounds::default();
+    let initial = [0.0, 8.0, 16.0, 20.0].map(|x| Vector::X * x);
+    assert_matches_scan(&mut world, &mut scan, &initial);
+    world.edit_body(position, |body| {
+        body.set_next_kinematic_translation(Vector::X * 20.0)
+    });
+    world.refresh_queries();
+    world.step_physics();
+    let samples: Vec<_> = [dynamic, velocity, position]
+        .map(|body| world.rapier().bodies[body].translation())
+        .into_iter()
+        .collect();
+    for (sample, collider) in samples.iter().zip([dc, vc, pc]) {
+        assert_eq!(ray_hit(&world, sample.x, sample.z), Some(collider));
+    }
+    assert!(samples[0].x > 0.0 && samples[1].x > 8.0);
+    assert_eq!(samples[2].x, 20.0);
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    world.edit_body(dynamic, |body| body.sleep());
+    world.refresh_queries();
+    world.step_physics();
+    assert!(world.rapier().bodies[dynamic].is_sleeping());
+    assert_matches_scan(&mut world, &mut scan, &samples);
+
+    // A moving body wakes a sleeping body through contact, without an owner edit.
+    let (sleeper, sleeper_collider) = world.insert(
+        RigidBodyBuilder::dynamic()
+            .translation(Vector::X * 40.0)
+            .sleeping(true),
+        ColliderBuilder::ball(0.5),
+    );
+    world.insert(
+        RigidBodyBuilder::dynamic()
+            .translation(Vector::X * 38.9)
+            .linvel(Vector::X * 10.0),
+        ColliderBuilder::ball(0.5),
+    );
+    assert_matches_scan(&mut world, &mut scan, &[Vector::X * 40.0]);
+    let mut woke = false;
+    for _ in 0..12 {
+        world.step_physics();
+        let point = world.rapier().bodies[sleeper].translation();
+        assert_eq!(ray_hit(&world, point.x, point.z), Some(sleeper_collider));
+        assert_matches_scan(&mut world, &mut scan, &[point]);
+        woke |= !world.rapier().bodies[sleeper].is_sleeping();
+    }
+    assert!(woke);
+    assert!(world.rapier().bodies[sleeper].translation().x > 40.0);
+    assert!(
+        world
+            .rapier()
+            .narrow_phase
+            .contact_pairs()
+            .any(|pair| pair.has_any_active_contact())
+    );
+}
+
+#[test]
+fn private_controller_impulses_keep_post_step_queries_current() {
+    use crate::reference::{
+        AnchorId, ItemId, SourceId, WheelFrictionCurve, WheelHubReference, WheelSlotId,
+        WheelSlotReference,
+    };
+    use crate::vehicle::{DriveTorques, InstalledWheel, VehicleBody};
+    use rapier3d::control::{
+        DynamicRayCastVehicleController, KinematicCharacterController, WheelTuning,
+    };
+    let mut world = empty_world();
+    world.set_gravity(Vector::ZERO);
+    world.insert(
+        RigidBodyBuilder::fixed().translation(Vector::new(0.0, -0.5, 0.0)),
+        ColliderBuilder::cuboid(10.0, 0.5, 10.0),
+    );
+    let (chassis, chassis_collider) = world.insert(
+        RigidBodyBuilder::dynamic().translation(Vector::Y * 0.75),
+        ColliderBuilder::cuboid(0.25, 0.1, 0.25),
+    );
+    let mut controller = DynamicRayCastVehicleController::new(chassis);
+    controller.index_forward_axis = 2;
+    controller.add_wheel(
+        Vector::ZERO,
+        -Vector::Y,
+        Vector::X,
+        0.75,
+        0.25,
+        &WheelTuning::default(),
+    );
+    let resting_wheel = controller.wheels()[0];
+    let friction = WheelFrictionCurve {
+        extremum_slip: 1.0,
+        extremum_value: 1.0,
+        asymptote_slip: 2.0,
+        asymptote_value: 0.5,
+        stiffness: 1.0,
+    };
+    let reference = WheelSlotReference {
+        id: WheelSlotId(0),
+        source: SourceId {
+            file: "fixture".into(),
+            path_id: 0,
+        },
+        anchor: AnchorId(0),
+        mount_anchor: AnchorId(0),
+        wheel: ItemId(0),
+        tire: ItemId(0),
+        rim: ItemId(0),
+        radius: 0.25,
+        suspension_distance: 1.0,
+        center: [0.0; 3],
+        spring: 100.0,
+        damper: 1.0,
+        target_position: 0.5,
+        steer: false,
+        drive: false,
+        brake: false,
+        handbrake: false,
+        forward_friction: friction,
+        sideways_friction: friction,
+        wheel_mass_kg: 1.0,
+        rotational_damping: 0.0,
+        force_application_distance_m: 0.0,
+        sideways_stiffness_modifier: 1.0,
+        hub: WheelHubReference {
+            radius_m: 0.1,
+            mass_kg: 1.0,
+            forward_stiffness: 1.0,
+            sideways_stiffness: 1.0,
+        },
+        tire_condition_range: [0, 100],
+        rim_condition_range: [0, 100],
+        rim_main_types: Vec::new(),
+        rim_types: Vec::new(),
+    };
+    world.chassis.push(chassis);
+    world.vehicles.push(VehicleBody {
+        chassis,
+        controller,
+        resting_wheels: [resting_wheel; 4],
+        wheel_references: std::array::from_fn(|_| reference.clone()),
+        suspension_lengths: [0.75; 4],
+        max_steer: 0.0,
+        brake_torque: 0.0,
+        handbrake_torque: 0.0,
+        active_slots: vec![0],
+        installed: [Some(InstalledWheel {
+            radius: 0.25,
+            condition: 1.0,
+        }); 4],
+        wheel_rotations: [0.0; 4],
+        wheel_rpm: [0.0; 4],
+        last_handbrake: 0.0,
+    });
+    let mut scan = super::reference::ScanBounds::default();
+    assert_matches_scan(&mut world, &mut scan, &[Vector::Y * 0.75]);
+    let before = world.rapier().bodies[chassis].linvel();
+    world.apply_vehicle_forces(
+        0,
+        crate::simulation::DriveInput::default(),
+        DriveTorques::default(),
+    );
+    assert_ne!(world.rapier().bodies[chassis].linvel(), before);
+    assert!(
+        world.vehicles[0].controller.wheels()[0]
+            .raycast_info()
+            .is_in_contact
+    );
+    world.step_physics();
+    let point = world.rapier().bodies[chassis].translation();
+    assert_eq!(ray_hit(&world, point.x, point.z), Some(chassis_collider));
+    assert_matches_scan(&mut world, &mut scan, &[point]);
+    world.apply_vehicle_forces(
+        0,
+        crate::simulation::DriveInput::default(),
+        DriveTorques::default(),
+    );
+    assert!(
+        world.vehicles[0].controller.wheels()[0]
+            .raycast_info()
+            .is_in_contact
+    );
+
+    let mut character_world = empty_world();
+    character_world.set_gravity(Vector::ZERO);
+    let (pushed, pushed_collider) = character_world.insert(
+        RigidBodyBuilder::dynamic()
+            .translation(Vector::X * 2.0)
+            .sleeping(true),
+        ColliderBuilder::ball(0.5),
+    );
+    let controller = KinematicCharacterController::default();
+    let shape = rapier3d::parry::shape::Ball::new(0.5);
+    let mut character_scan = super::reference::ScanBounds::default();
+    assert_matches_scan(
+        &mut character_world,
+        &mut character_scan,
+        &[Vector::X * 2.0],
+    );
+    let mut collisions = Vec::new();
+    controller.move_shape(
+        crate::simulation::FIXED_DT,
+        &character_world.queries(QueryFilter::default()),
+        &shape,
+        &Pose::IDENTITY,
+        Vector::X * 3.0,
+        |collision| collisions.push(collision),
+    );
+    assert!(!collisions.is_empty());
+    character_world.solve_character_collision_impulses(
+        &controller,
+        crate::simulation::FIXED_DT,
+        QueryFilter::default(),
+        &shape,
+        80.0,
+        &collisions,
+    );
+    assert!(character_world.rapier().bodies[pushed].linvel().x > 0.0);
+    assert!(!character_world.rapier().bodies[pushed].is_sleeping());
+    character_world.step_physics();
+    let point = character_world.rapier().bodies[pushed].translation();
+    assert_eq!(
+        ray_hit(&character_world, point.x, point.z),
+        Some(pushed_collider)
+    );
+    assert_matches_scan(&mut character_world, &mut character_scan, &[point]);
 }
