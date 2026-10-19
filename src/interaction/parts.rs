@@ -88,7 +88,7 @@ impl PartAttachments {
             }
         }
         for p in &self.parts {
-            physics.rapier_mut().bodies[p.body.unwrap()].set_enabled(p.slot.is_none());
+            physics.edit_body(p.body.unwrap(), |body| body.set_enabled(p.slot.is_none()));
             if let Some(slot) = p.slot {
                 mechanisms.mount_part(
                     p.reference.node,
@@ -423,7 +423,7 @@ impl PartAttachments {
             assembly_fluids: Vec::with_capacity(1),
         });
         for &(_, handle) in colliders {
-            physics.rapier_mut().colliders[handle].set_density(0.);
+            physics.edit_collider(handle, |collider| collider.set_density(0.));
         }
         self.cache_assembly_mass(items);
         Ok(())
@@ -576,7 +576,7 @@ impl PartAttachments {
         }
         self.parts[i].slot = Some(s);
         self.slots[s].part = Some(i);
-        physics.rapier_mut().bodies[self.parts[i].body.unwrap()].set_enabled(false);
+        physics.edit_body(self.parts[i].body.unwrap(), |body| body.set_enabled(false));
         items.get_mut(item).unwrap().location = ItemLocation::PartSlot(id);
         let old = to_rapier(items.get(item).unwrap().pose);
         let world = self.slots[s].mount_pose
@@ -628,7 +628,7 @@ impl PartAttachments {
             .map(|(h, c)| (ColliderId((c.user_data >> 64) as u32), h))
             .collect();
         for p in &mut self.parts {
-            let body = physics.rapier_mut().insert_body(
+            let body = physics.insert_body(
                 RigidBodyBuilder::dynamic()
                     .enabled(false)
                     .ccd_enabled(true)
@@ -645,7 +645,7 @@ impl PartAttachments {
                 shape.part_local = to_rapier(items.get(p.reference.item).unwrap().pose).inverse()
                     * *collider.position();
                 // Source dry mass already includes these shapes.
-                physics.rapier_mut().colliders[h].set_density(0.);
+                physics.edit_collider(h, |collider| collider.set_density(0.));
             }
             if let Some(slot) = p.slot {
                 items.get_mut(p.reference.item).unwrap().location =
@@ -879,11 +879,12 @@ impl PartAttachments {
         let parent = items.get(item).unwrap().body.unwrap();
         let velocity = physics.rapier().bodies[parent].velocity_at_point(world.translation);
         let angular = physics.rapier().bodies[parent].angvel();
-        let b = &mut physics.rapier_mut().bodies[body];
-        b.set_position(world, true);
-        b.set_enabled(true);
-        b.set_linvel(velocity, true);
-        b.set_angvel(angular, true);
+        physics.edit_body(body, |b| {
+            b.set_position(world, true);
+            b.set_enabled(true);
+            b.set_linvel(velocity, true);
+            b.set_angvel(angular, true);
+        });
         self.parts[i].pose = world;
         self.parts[i].slot = None;
         self.slots[s].part = None;
@@ -911,7 +912,7 @@ impl PartAttachments {
         let s = self.slot_indices[&id];
         self.parts[i].slot = Some(s);
         self.slots[s].part = Some(i);
-        physics.rapier_mut().bodies[self.parts[i].body.unwrap()].set_enabled(false);
+        physics.edit_body(self.parts[i].body.unwrap(), |body| body.set_enabled(false));
         items.get_mut(item).unwrap().location = ItemLocation::PartSlot(id);
         let old = to_rapier(items.get(item).unwrap().pose);
         let world = self.slots[s].mount_pose
@@ -960,17 +961,17 @@ impl PartAttachments {
             for shape in &p.shapes {
                 let handle = shape.handle.unwrap();
                 let local = inverse * delta * *physics.rapier().colliders[handle].position();
-                let world = physics.rapier_mut();
-                world
-                    .colliders
-                    .set_parent(handle, Some(body), &mut world.bodies);
-                world.colliders[handle].set_position_wrt_parent(local);
-                crate::vehicle::set_collider_enabled(
-                    &mut world.colliders[handle],
-                    p.slot
-                        .is_none_or(|s| !self.slots[s].reference.disable_colliders_on_craft)
-                        && shape.enabled,
-                );
+
+                physics.set_collider_parent(handle, Some(body));
+                physics.edit_collider(handle, |collider| collider.set_position_wrt_parent(local));
+                physics.edit_collider(handle, |collider| {
+                    crate::vehicle::set_collider_enabled(
+                        collider,
+                        p.slot
+                            .is_none_or(|s| !self.slots[s].reference.disable_colliders_on_craft)
+                            && shape.enabled,
+                    )
+                });
             }
         }
     }
@@ -988,7 +989,7 @@ impl PartAttachments {
             .usable
             .and_then(|usable| m.uncraft(usable, p.reference.node));
         if let Some(rotation) = rotation {
-            physics.rapier_mut().bodies[p.body.unwrap()].set_rotation(rotation, true);
+            physics.edit_body(p.body.unwrap(), |body| body.set_rotation(rotation, true));
         }
         m.set_mounted(item, false);
     }
@@ -1085,26 +1086,27 @@ impl PartAttachments {
                             .unwrap_or(self.parts[i].pose * shape.part_local)
                 };
                 let h = shape.handle.unwrap();
-                let world = physics.rapier_mut();
-                if world.colliders[h].parent() != Some(body) {
-                    world.colliders.set_parent(h, Some(body), &mut world.bodies);
+
+                if physics.rapier().colliders[h].parent() != Some(body) {
+                    physics.set_collider_parent(h, Some(body));
                 }
-                let c = &mut world.colliders[h];
-                if c.position_wrt_parent() != Some(&local) {
-                    c.set_position_wrt_parent(local);
-                }
-                let enabled = self.parts[i]
-                    .slot
-                    .is_none_or(|s| !self.slots[s].reference.disable_colliders_on_craft)
-                    && shape.enabled;
-                if c.is_enabled() != enabled {
-                    crate::vehicle::set_collider_enabled(c, enabled);
-                }
-                if vehicle.is_some() {
-                    c.user_data |= VEHICLE_COLLIDER_FLAG;
-                } else {
-                    c.user_data &= !VEHICLE_COLLIDER_FLAG;
-                }
+                physics.edit_collider(h, |c| {
+                    if c.position_wrt_parent() != Some(&local) {
+                        c.set_position_wrt_parent(local);
+                    }
+                    let enabled = self.parts[i]
+                        .slot
+                        .is_none_or(|s| !self.slots[s].reference.disable_colliders_on_craft)
+                        && shape.enabled;
+                    if c.is_enabled() != enabled {
+                        crate::vehicle::set_collider_enabled(c, enabled);
+                    }
+                    if vehicle.is_some() {
+                        c.user_data |= VEHICLE_COLLIDER_FLAG;
+                    } else {
+                        c.user_data &= !VEHICLE_COLLIDER_FLAG;
+                    }
+                });
             }
         }
         self.sync(items, physics)
@@ -1207,9 +1209,8 @@ impl PartAttachments {
                     .sum::<f32>())
             .max(0.001);
             if self.parts[i].mass != mass {
-                let world = physics.rapier_mut();
-                world.bodies[body].set_additional_mass(mass, true);
-                world.bodies[body].recompute_mass_properties_from_colliders(&world.colliders);
+                physics.edit_body(body, |body| body.set_additional_mass(mass, true));
+                physics.recompute_body_mass(body);
                 self.parts[i].mass = mass;
             }
         }

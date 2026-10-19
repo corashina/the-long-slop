@@ -1,7 +1,7 @@
 //! Byte boundary for one terrain tile job. Values cross it without change.
 use super::{
     TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainMesh, TerrainRoadPoint,
-    TerrainSettings, TerrainTile, surface,
+    TerrainSettings, TerrainTile,
 };
 
 /// One tile job. Tile jobs use every road point without a radius filter.
@@ -89,87 +89,138 @@ impl Reader<'_> {
     }
 }
 
-/// Decode one job and generate its tile.
-pub fn evaluate(input: &[u8]) -> Result<TerrainMesh, String> {
-    let mut reader = Reader(input);
-    let settings = TerrainSettings {
-        seed: reader.bytes().map(i32::from_le_bytes)?,
-        edge: reader.f32()?,
-        edge_gradient: reader.f32()?,
-    };
-    let unit = [
-        reader.bytes().map(i64::from_le_bytes)?,
-        reader.bytes().map(i64::from_le_bytes)?,
-    ];
-    let tier = reader.u32()?;
-    let size = reader.u32()?;
-    let resolution = reader.u32()?;
-    let draw_distance = reader.u32()?;
-    let biome = reader.u32()?;
-    if tier > 2 || size == 0 || !(4..=1024).contains(&resolution) {
-        return Err(format!(
-            "Invalid terrain job tile {tier} {size} {resolution}"
-        ));
-    }
-    let tile = TerrainTile {
-        tier: tier as usize,
-        size,
-        resolution,
-        draw_distance,
-        y: reader.f32()?,
-        material_scale: reader.f32()?,
-    };
-    let biome_override = match biome {
-        u32::MAX => None,
-        0..=2 => Some(biome as u8),
-        _ => return Err(format!("Invalid terrain job biome {biome}")),
-    };
-    let count = reader.count(24)?;
-    let mut roads = Vec::with_capacity(count);
-    for _ in 0..count {
-        roads.push(TerrainRoadPoint {
-            position: reader.f32s()?,
-            segment_origin: reader.f32s()?,
-            range: reader.f32()?,
-        });
-    }
-    let count = reader.count(20)?;
-    let mut foundations = Vec::with_capacity(count);
-    for _ in 0..count {
-        foundations.push(TerrainFoundation {
-            position: reader.f32s()?,
-            range_squared: reader.f32s()?,
-        });
-    }
-    let count = reader.count(48)?;
-    let mut holes = Vec::with_capacity(count);
-    for _ in 0..count {
-        let corners: [f32; 12] = reader.f32s()?;
-        holes.push(std::array::from_fn(|i| {
-            [corners[i * 3], corners[i * 3 + 1], corners[i * 3 + 2]]
-        }));
-    }
-    if !reader.0.is_empty() {
-        return Err("Terrain job input has trailing bytes".into());
-    }
-    let evaluator = TerrainEvaluator::new(settings);
-    Ok(surface(
-        unit,
-        TerrainContext {
-            evaluator: &evaluator,
+/// One decoded tile job with retained phase and output storage.
+pub struct TerrainTask {
+    evaluator: TerrainEvaluator,
+    tile: TerrainTile,
+    biome_override: Option<u8>,
+    roads: Vec<TerrainRoadPoint>,
+    foundations: Vec<TerrainFoundation>,
+    holes: Vec<[[f32; 3]; 4]>,
+    job: crate::TerrainSurfaceJob,
+    output: TerrainMesh,
+}
+impl TerrainTask {
+    pub fn new(input: &[u8]) -> Result<Self, String> {
+        let mut reader = Reader(input);
+        let settings = TerrainSettings {
+            seed: reader.bytes().map(i32::from_le_bytes)?,
+            edge: reader.f32()?,
+            edge_gradient: reader.f32()?,
+        };
+        let unit = [
+            reader.bytes().map(i64::from_le_bytes)?,
+            reader.bytes().map(i64::from_le_bytes)?,
+        ];
+        let tier = reader.u32()?;
+        let size = reader.u32()?;
+        let resolution = reader.u32()?;
+        let draw_distance = reader.u32()?;
+        let biome = reader.u32()?;
+        if tier > 2 || size == 0 || !(4..=1024).contains(&resolution) {
+            return Err(format!(
+                "Invalid terrain job tile {tier} {size} {resolution}"
+            ));
+        }
+        let tile = TerrainTile {
+            tier: tier as usize,
+            size,
+            resolution,
+            draw_distance,
+            y: reader.f32()?,
+            material_scale: reader.f32()?,
+        };
+        let biome_override = match biome {
+            u32::MAX => None,
+            0..=2 => Some(biome as u8),
+            _ => return Err(format!("Invalid terrain job biome {biome}")),
+        };
+        let count = reader.count(24)?;
+        let mut roads = Vec::with_capacity(count);
+        for _ in 0..count {
+            roads.push(TerrainRoadPoint {
+                position: reader.f32s()?,
+                segment_origin: reader.f32s()?,
+                range: reader.f32()?,
+            });
+        }
+        let count = reader.count(20)?;
+        let mut foundations = Vec::with_capacity(count);
+        for _ in 0..count {
+            foundations.push(TerrainFoundation {
+                position: reader.f32s()?,
+                range_squared: reader.f32s()?,
+            });
+        }
+        let count = reader.count(48)?;
+        let mut holes = Vec::with_capacity(count);
+        for _ in 0..count {
+            let corners: [f32; 12] = reader.f32s()?;
+            holes.push(std::array::from_fn(|i| {
+                [corners[i * 3], corners[i * 3 + 1], corners[i * 3 + 2]]
+            }));
+        }
+        if !reader.0.is_empty() {
+            return Err("Terrain job input has trailing bytes".into());
+        }
+        let evaluator = TerrainEvaluator::new(settings);
+        let mut job = crate::TerrainSurfaceJob::default();
+        let mut output = TerrainMesh::default();
+        job.begin(
+            unit,
+            TerrainContext {
+                evaluator: &evaluator,
+                tile,
+                roads: &roads,
+                road_radius_squared: None,
+                foundations: &foundations,
+                holes: &holes,
+                biome_override,
+            },
+            &mut output,
+        );
+        Ok(Self {
+            evaluator,
             tile,
-            roads: &roads,
-            road_radius_squared: None,
-            foundations: &foundations,
-            holes: &holes,
             biome_override,
-        },
-    ))
+            roads,
+            foundations,
+            holes,
+            job,
+            output,
+        })
+    }
+    pub fn advance(&mut self, should_yield: impl FnMut() -> bool) -> bool {
+        self.job.advance(
+            TerrainContext {
+                evaluator: &self.evaluator,
+                tile: self.tile,
+                roads: &self.roads,
+                road_radius_squared: None,
+                foundations: &self.foundations,
+                holes: &self.holes,
+                biome_override: self.biome_override,
+            },
+            &mut self.output,
+            should_yield,
+        )
+    }
+    pub fn into_mesh(self) -> TerrainMesh {
+        self.output
+    }
+}
+
+/// Decode one job and generate its tile in the background worker.
+pub fn evaluate(input: &[u8]) -> Result<TerrainMesh, String> {
+    let mut task = TerrainTask::new(input)?;
+    while !task.advance(|| false) {}
+    Ok(task.into_mesh())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::surface;
 
     /// The worker boundary must return the same tile as a direct call.
     #[test]
@@ -234,6 +285,13 @@ mod tests {
             },
         );
         let encoded = evaluate(&bytes).unwrap();
+        let mut task = TerrainTask::new(&bytes).unwrap();
+        let mut calls = 1;
+        while !task.advance(|| true) {
+            calls += 1;
+        }
+        assert!(calls > 1);
+        let resumed = task.into_mesh();
         assert_eq!(encoded.vertices.len(), 21 * 21);
         assert!(encoded.triangles.len() < 20 * 20 * 2);
         let bits = |mesh: &TerrainMesh| {
@@ -247,6 +305,9 @@ mod tests {
             .map(|values| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>())
         };
         assert_eq!(bits(&encoded), bits(&direct));
+        assert_eq!(bits(&resumed), bits(&direct));
+        assert_eq!(resumed.triangles, direct.triangles);
+        assert_eq!(resumed.origin, direct.origin);
         assert_eq!(encoded.triangles, direct.triangles);
         assert_eq!(encoded.origin, direct.origin);
         assert!(evaluate(&bytes[..bytes.len() - 1]).is_err());

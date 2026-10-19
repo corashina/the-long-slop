@@ -4,10 +4,10 @@ mod noise;
 mod random;
 mod surface;
 
-pub use job::{TerrainJob, evaluate};
+pub use job::{TerrainJob, TerrainTask, evaluate};
 pub use noise::{TerrainEvaluator, TerrainSettings, source_perlin};
 pub use random::{RandomState, SourceRandom};
 pub use surface::{
-    TerrainContext, TerrainFoundation, TerrainMesh, TerrainRoadPoint, TerrainTile, biome, surface,
-    surface_origin,
+    TerrainContext, TerrainFoundation, TerrainMesh, TerrainRoadPoint, TerrainSurfaceJob,
+    TerrainTile, biome, surface, surface_origin,
 };

@@ -13,9 +13,11 @@ export function contentIndexSampleFailures(sample) {
  return failures;
 }
 
-export async function measureContentIndex({durationMs=10000,instrument=false,label='sample',scenario='garage'}={}) {
+export async function measureContentIndex({durationMs=10000,instrument=false,profileStreaming=false,label='sample',scenario='garage'}={}) {
  if(!Number.isFinite(durationMs)||durationMs<1000)throw Error('durationMs must be at least 1000');
  if(typeof instrument!=='boolean')throw Error('instrument must be a boolean');
+ if(typeof profileStreaming!=='boolean')throw Error('profileStreaming must be a boolean');
+ if(instrument&&profileStreaming)throw Error('Collect streaming stages and WebGL calls separately');
  if(!['garage','driving'].includes(scenario))throw Error('scenario must be garage or driving');
  if(!/^[a-z0-9][a-z0-9-]{0,95}$/.test(label))throw Error('Invalid receipt label');
  const configResponse=await fetch('/__benchmark-config');
@@ -23,7 +25,8 @@ export async function measureContentIndex({durationMs=10000,instrument=false,lab
  const configuration=await configResponse.json();
  const canvas=document.querySelector('#game'),gl=canvas?.getContext('webgl2');
  if(!gl||typeof window.gamePerformanceFrame!=='function'||typeof window.measureWorld!=='function')throw Error('The game is unavailable');
- const {source_render_audit}=await import('/pkg/my_summer_slop.js');
+ const {source_render_audit,streaming_profile,streaming_profile_audit}=await import('/pkg/my_summer_slop.js');
+ if(profileStreaming&&(!streaming_profile||!streaming_profile_audit))throw Error('Streaming profiler is unavailable');
  const snapshot=()=>({...window.gameState,fluidVolumes:undefined,inventory:undefined});
  const before=await window.measureWorld();
  const stateBefore=snapshot(),auditBefore=JSON.parse(source_render_audit());
@@ -43,8 +46,9 @@ export async function measureContentIndex({durationMs=10000,instrument=false,lab
  };
  const eventTypes=['keydown','keyup','mousedown','mouseup','mousemove'];
  const started=performance.now();
- let elapsed;
+ let elapsed,streamingProfile=null;
  try {
+  if(profileStreaming)streaming_profile(true);
   document.addEventListener('visibilitychange',visibilityChanged);
   document.addEventListener('pointerlockchange',pointerLockChanged);
   window.addEventListener('blur',blurred);
@@ -63,6 +67,7 @@ export async function measureContentIndex({durationMs=10000,instrument=false,lab
   await new Promise(resolve=>setTimeout(resolve,durationMs));
   elapsed=performance.now()-started;
  } finally {
+  if(profileStreaming){streamingProfile=JSON.parse(streaming_profile_audit());streaming_profile(false);}
   window.gamePerformanceFrame=originalFrame;
   for(const [name,original] of originals)gl[name]=original;
   for(const type of eventTypes)document.removeEventListener(type,inputEvent,true);
@@ -76,7 +81,7 @@ export async function measureContentIndex({durationMs=10000,instrument=false,lab
  const percentile=p=>intervals.length?intervals[Math.ceil(intervals.length*p)-1]:null;
  const info=gl.getExtension('WEBGL_debug_renderer_info');
  input.codes=[...codes].sort();
- const result={label,scenario,instrument,configuration,recordedAt:new Date().toISOString(),
+ const result={label,scenario,instrument,profileStreaming,streamingProfile,configuration,recordedAt:new Date().toISOString(),
   elapsedMs:elapsed,requestedDurationMs:durationMs,frames,fps:frames*1000/elapsed,
   intervals:{count:intervals.length,meanMs:intervals.length?intervals.reduce((sum,value)=>sum+value,0)/intervals.length:null,p95Ms:percentile(.95),p99Ms:percentile(.99),maxMs:intervals.at(-1)??null},
   submissionDelta:auditAfter.graph.effects.submitted_token-auditBefore.graph.effects.submitted_token,
@@ -91,10 +96,10 @@ export async function measureContentIndex({durationMs=10000,instrument=false,lab
   stateBefore,stateAfter,auditBefore,auditAfter,before,after};
  result.failures=contentIndexSampleFailures(result);
  result.valid=result.failures.length===0;
- result.performanceSample=result.valid&&!instrument;
+ result.performanceSample=result.valid&&!instrument&&!profileStreaming;
  const saved=await fetch(`/__benchmark-result/${label}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(result)});
  if(!saved.ok)throw Error(`Benchmark receipt could not be saved: HTTP ${saved.status}`);
- return {label,scenario,valid:result.valid,failures:result.failures,instrument,performanceSample:result.performanceSample,
+ return {label,scenario,valid:result.valid,failures:result.failures,instrument,profileStreaming,streamingProfile,performanceSample:result.performanceSample,
   realInputObserved:result.realInputObserved,elapsedMs:elapsed,frames,submissionDelta:result.submissionDelta,
   fps:result.fps,intervals:result.intervals,steps:[stateBefore.totalSteps,stateAfter.totalSteps],travelDeltaM:result.travelDeltaM,
   settled:result.settled,counts,receipt:await saved.json()};

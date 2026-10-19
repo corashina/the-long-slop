@@ -90,13 +90,13 @@ pub enum TerrainPoll {
 }
 
 /// One tile job at a time. The browser runs it in a Web Worker with its own WASM.
-/// Native runs it at submission, through the same byte boundary.
+/// Native resumes it during polling, through the same byte boundary.
 #[derive(Default)]
 pub struct TerrainWorker {
     #[cfg(not(target_arch = "wasm32"))]
     next: u32,
     #[cfg(not(target_arch = "wasm32"))]
-    result: Option<(u32, Result<terrain::TerrainMesh, String>)>,
+    result: Option<(u32, Result<terrain::TerrainTask, String>)>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -104,14 +104,21 @@ impl TerrainWorker {
     /// Call only when `poll` returns `Idle`.
     pub fn submit(&mut self, input: &[u8]) -> u32 {
         self.next = self.next.wrapping_add(1);
-        self.result = Some((self.next, terrain::evaluate(input)));
+        self.result = Some((self.next, terrain::TerrainTask::new(input)));
         self.next
     }
-    pub fn poll(&mut self) -> Result<TerrainPoll, ReferenceError> {
-        match &self.result {
+    pub fn poll(
+        &mut self,
+        should_yield: impl FnMut() -> bool,
+    ) -> Result<TerrainPoll, ReferenceError> {
+        match &mut self.result {
             None => Ok(TerrainPoll::Idle),
             Some((_, Err(error))) => Err(ReferenceError(format!("Terrain worker: {error}"))),
-            Some((id, Ok(_))) => Ok(TerrainPoll::Ready(*id)),
+            Some((id, Ok(task))) => Ok(if task.advance(should_yield) {
+                TerrainPoll::Ready(*id)
+            } else {
+                TerrainPoll::Busy
+            }),
         }
     }
     /// Move the ready result into an empty `surface`.
@@ -119,6 +126,7 @@ impl TerrainWorker {
         let Some((_, Ok(mesh))) = self.result.take() else {
             unreachable!("Terrain worker has no result");
         };
+        let mesh = mesh.into_mesh();
         surface.origin = surface_origin(unit, tile);
         surface.vertices = mesh.vertices;
         surface.normals = mesh.normals;
@@ -139,7 +147,10 @@ impl TerrainWorker {
     pub fn submit(&mut self, input: &[u8]) -> u32 {
         crate::browser::game_terrain_submit(input)
     }
-    pub fn poll(&mut self) -> Result<TerrainPoll, ReferenceError> {
+    pub fn poll(
+        &mut self,
+        _should_yield: impl FnMut() -> bool,
+    ) -> Result<TerrainPoll, ReferenceError> {
         match crate::browser::game_terrain_poll() {
             Ok(-1) => Ok(TerrainPoll::Idle),
             Ok(-2) => Ok(TerrainPoll::Busy),
@@ -178,3 +189,7 @@ impl TerrainWorker {
         crate::browser::game_terrain_discard();
     }
 }
+
+#[cfg(test)]
+#[path = "terrain_tests.rs"]
+mod tests;

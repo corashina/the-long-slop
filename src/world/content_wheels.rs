@@ -87,8 +87,9 @@ pub(super) fn bind(
                 }
                 layers |= 1 << prototype.nodes[collider.node as usize].layer;
                 let id = interaction.allocate_generated_collider()?;
-                physics.rapier_mut().colliders[*handle].user_data =
-                    ((id.0 as u128) << 64) | (item.0 as u128 + 1);
+                physics.edit_collider(*handle, |collider| {
+                    collider.user_data = ((id.0 as u128) << 64) | (item.0 as u128 + 1);
+                });
                 interaction.bind_surface(
                     *handle,
                     ActionBinding {

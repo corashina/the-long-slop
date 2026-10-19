@@ -8,6 +8,7 @@ use std::collections::HashSet;
 pub(super) struct PendingRestore {
     items: Vec<ItemSnapshot>,
     carry: Option<CarrySnapshot>,
+    inventory: Option<InventorySnapshot>,
     ids: IdentityMap,
     ready: bool,
     motion: Vec<BodySnapshot>,
@@ -105,8 +106,59 @@ impl GarageRuntime {
         if !self.stream.saved_bindings_ready(&self.area.items) {
             return Ok(false);
         }
+        ids.bind_generated(&self.area.items);
+        if let Some(inventory) = &pending.inventory {
+            // Generated locations depend on bindings which do not exist in from_save.
+            for (slot, instance) in inventory.slots.iter().enumerate() {
+                let Some(instance @ InstanceId::Generated { .. }) = instance else {
+                    continue;
+                };
+                let Ok(id) = ids.item(instance) else {
+                    return Ok(false);
+                };
+                let state = self.area.items.get(id).ok_or_else(|| {
+                    SaveError::ReconstructionFailure("Missing inventory item".into())
+                })?;
+                let body = state.body.ok_or_else(|| {
+                    SaveError::ReconstructionFailure("Missing inventory body".into())
+                })?;
+                let rule = self.area.interaction.pickup_rule(id);
+                if state.removed || !rule.is_some_and(|p| p.can_inventory && !p.cant_pickup) {
+                    return Err(SaveError::InvalidLinks(
+                        "Item cannot enter inventory".into(),
+                    ));
+                }
+                self.area.inventory.slots[slot] = Some(id);
+                if slot as u8 != inventory.selected {
+                    self.area.items.get_mut(id).unwrap().location =
+                        crate::interaction::items::ItemLocation::Stored(slot as u8);
+                    self.physics
+                        .edit_body(body, |state| state.set_enabled(false));
+                }
+            }
+            if let Some(instance @ InstanceId::Generated { .. }) = &inventory.equipped {
+                let Ok(id) = ids.item(instance) else {
+                    return Ok(false);
+                };
+                let state = self.area.items.get(id).unwrap();
+                if state.removed
+                    || state.body.is_none()
+                    || !self
+                        .area
+                        .interaction
+                        .pickup_rule(id)
+                        .is_some_and(|p| p.can_hold_right_hand && !p.cant_pickup)
+                {
+                    return Err(SaveError::InvalidLinks("Equipment ownership".into()));
+                }
+                self.area.interaction.equipment.retrieve(
+                    id,
+                    &mut self.area.items,
+                    &mut self.physics,
+                );
+            }
+        }
         if let Some(carry) = &pending.carry {
-            ids.bind_generated(&self.area.items);
             let Ok(id) = ids.item(&carry.item) else {
                 return Ok(false);
             };
@@ -135,12 +187,12 @@ impl GarageRuntime {
         self.wheels.sync(&mut self.area.items, &mut self.physics)?;
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, true);
-        let world = self.physics.rapier_mut();
-        for (_, body) in world.bodies.iter_mut() {
+
+        self.physics.edit_bodies(|_, body, colliders| {
             if body.is_dynamic() {
-                body.recompute_mass_properties_from_colliders(&world.colliders);
+                body.recompute_mass_properties_from_colliders(colliders);
             }
-        }
+        });
         for record in &pending.motion {
             let handle = match &record.identity {
                 BodyIdentity::Source { source } => {
@@ -151,14 +203,15 @@ impl GarageRuntime {
                 }
             };
             if let Some(handle) = handle.filter(|h| self.physics.body_active(*h)) {
-                let body = &mut self.physics.rapier_mut().bodies[handle];
-                body.set_linvel(record.linear_velocity.into(), false);
-                body.set_angvel(record.angular_velocity.into(), false);
-                if record.sleeping {
-                    body.sleep();
-                } else {
-                    body.wake_up(true);
-                }
+                self.physics.edit_body(handle, |body| {
+                    body.set_linvel(record.linear_velocity.into(), false);
+                    body.set_angvel(record.angular_velocity.into(), false);
+                    if record.sleeping {
+                        body.sleep();
+                    } else {
+                        body.wake_up(true);
+                    }
+                });
             }
         }
         if !pending.motion.is_empty() {
@@ -178,8 +231,11 @@ impl GarageRuntime {
             }
         }
         pending.motion.clear();
+        self.stream
+            .release_saved_item_locations(&self.area.items, &pending.items);
         self.physics.refresh_queries();
         pending.carry = None;
+        pending.inventory = None;
         pending.ready = true;
         if pending.items.is_empty() {
             self.pending_restore = None;
@@ -244,9 +300,48 @@ impl GarageRuntime {
             .iter_mut()
             .zip(&saved.inventory.slots)
         {
-            *slot = instance.as_ref().map(|id| ids.item(id)).transpose()?;
+            *slot = instance
+                .as_ref()
+                .filter(|i| matches!(i, InstanceId::Initial { .. }))
+                .map(|id| ids.item(id))
+                .transpose()?;
         }
         candidate.stream.restore_save(&saved.world)?;
+        let mut protected = Vec::new();
+        for instance in saved
+            .inventory
+            .slots
+            .iter()
+            .flatten()
+            .chain(saved.inventory.equipped.iter())
+            .chain(saved.player.carry.iter().map(|c| &c.item))
+            .chain(
+                saved
+                    .items
+                    .iter()
+                    .filter(|i| !matches!(i.location, ItemLocationSave::World))
+                    .map(|i| &i.instance),
+            )
+        {
+            if let InstanceId::Generated { id } = instance {
+                protected.push(crate::world::ObjectKey::Generated(id.clone()));
+            }
+        }
+        for item in &saved.items {
+            match &item.location {
+                ItemLocationSave::GeneratedAttachment { attachment } => {
+                    protected.extend(attachment.owner.iter().cloned());
+                }
+                ItemLocationSave::Attached {
+                    owner: InstanceId::Generated { id },
+                } => {
+                    protected.push(crate::world::ObjectKey::Generated(id.clone()));
+                }
+                _ => (),
+            }
+        }
+        candidate.stream.protect_saved_items(&protected);
+        candidate.stream.hold_saved_item_locations();
         candidate.stream.origin.offset = saved.player.pose.position;
         candidate.area.sync_origin(candidate.stream.origin.offset);
         let vehicle = saved
@@ -288,12 +383,12 @@ impl GarageRuntime {
         candidate.area.items.sync_poses(&candidate.physics);
         // Rapier defers collider and additional-mass updates until a step or recomputation.
         // Commit them while paused, before restoring motion and sleep.
-        let world = candidate.physics.rapier_mut();
-        for (_, body) in world.bodies.iter_mut() {
+
+        candidate.physics.edit_bodies(|_, body, colliders| {
             if body.is_dynamic() {
-                body.recompute_mass_properties_from_colliders(&world.colliders);
+                body.recompute_mass_properties_from_colliders(colliders);
             }
-        }
+        });
         // Mass and collider assembly may wake bodies. Restore velocities and sleep last.
         for record in saved
             .bodies
@@ -312,20 +407,21 @@ impl GarageRuntime {
                     })?,
             };
             if candidate.physics.body_active(handle) {
-                let body = &mut candidate.physics.rapier_mut().bodies[handle];
-                body.set_linvel(
-                    rapier3d::math::Vector::from_array(record.linear_velocity),
-                    false,
-                );
-                body.set_angvel(
-                    rapier3d::math::Vector::from_array(record.angular_velocity),
-                    false,
-                );
-                if record.sleeping {
-                    body.sleep();
-                } else {
-                    body.wake_up(true);
-                }
+                candidate.physics.edit_body(handle, |body| {
+                    body.set_linvel(
+                        rapier3d::math::Vector::from_array(record.linear_velocity),
+                        false,
+                    );
+                    body.set_angvel(
+                        rapier3d::math::Vector::from_array(record.angular_velocity),
+                        false,
+                    );
+                    if record.sleeping {
+                        body.sleep();
+                    } else {
+                        body.wake_up(true);
+                    }
+                });
             }
         }
         candidate
@@ -353,7 +449,12 @@ impl GarageRuntime {
                 &mut candidate.physics,
             )?;
         }
-        if let Some(instance) = &saved.inventory.equipped {
+        if let Some(instance) = saved
+            .inventory
+            .equipped
+            .as_ref()
+            .filter(|i| matches!(i, InstanceId::Initial { .. }))
+        {
             let id = ids.item(instance)?;
             candidate.area.interaction.equipment.retrieve(
                 id,
@@ -457,6 +558,7 @@ impl GarageRuntime {
                 .carry
                 .clone()
                 .filter(|c| matches!(c.item, InstanceId::Generated { .. })),
+            inventory: Some(saved.inventory.clone()),
             ids: IdentityMap::new(reference)?,
             ready: false,
             motion: saved
@@ -487,7 +589,7 @@ impl GarageRuntime {
         ids.bind_generated(&self.area.items);
         let origin = &self.stream.origin;
         let (wheels, tires) = self.wheels.capture_save(&ids, &self.physics)?;
-        let required: Vec<_> = self
+        let mut required: Vec<_> = self
             .pending_restore
             .iter()
             .flat_map(|p| &p.items)
@@ -499,6 +601,17 @@ impl GarageRuntime {
                 }
             })
             .collect();
+        for item in self
+            .area
+            .items
+            .iter()
+            .filter(|i| !matches!(i.location, crate::interaction::items::ItemLocation::World))
+        {
+            let key = self.area.items.object_key(item.id);
+            if matches!(key, crate::world::ObjectKey::Generated(_)) {
+                required.push(key);
+            }
+        }
         let world = self.stream.capture_save(
             reference,
             &self.area.items,

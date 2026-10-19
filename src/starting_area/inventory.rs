@@ -22,7 +22,10 @@ impl StartingArea {
         }
         if let Some(id) = self.interaction.held() {
             if self.inventory.slots[self.inventory.selected as usize].is_none()
-                && self.inventory_items.contains(&id)
+                && self
+                    .interaction
+                    .pickup_rule(id)
+                    .is_some_and(|p| p.can_inventory)
                 && !self.inventory.slots.contains(&Some(id))
             {
                 self.inventory.slots[self.inventory.selected as usize] = Some(id);
@@ -86,7 +89,10 @@ impl StartingArea {
                 return Ok(false);
             };
             if item.removed
-                || !self.inventory_items.contains(&id)
+                || !self
+                    .interaction
+                    .pickup_rule(id)
+                    .is_some_and(|p| p.can_inventory)
                 || !(body.is_dynamic() || item.location == ItemLocation::Equipped)
                 || item.inactive_pose.is_some()
             {
@@ -129,7 +135,7 @@ impl StartingArea {
             }
             let item = self.items.get_mut(id).unwrap();
             item.location = ItemLocation::Stored(selected as u8);
-            physics.rapier_mut().bodies[item.body.unwrap()].set_enabled(false);
+            physics.edit_body(item.body.unwrap(), |body| body.set_enabled(false));
         }
         match command {
             InventoryCommand::Select(i) => {
@@ -149,7 +155,7 @@ impl StartingArea {
         if let Some(id) = self.inventory.slots[self.inventory.selected as usize] {
             self.inventory_offsets[self.inventory.selected as usize] = None;
             let body = self.items.get(id).unwrap().body.unwrap();
-            physics.rapier_mut().bodies[body].set_enabled(true);
+            physics.edit_body(body, |body| body.set_enabled(true));
             self.items.get_mut(id).unwrap().location = ItemLocation::World;
             if to_hand {
                 self.interaction
@@ -175,7 +181,7 @@ impl StartingArea {
                             * (Vector::from_array(reference.player.carry_anchor_offset) + offset),
                     view.rotation * rotation,
                 ) * to_rapier(self.items.get(id).unwrap().local_pose).inverse();
-                physics.rapier_mut().bodies[body].set_position(target, false);
+                physics.edit_body(body, |body| body.set_position(target, false));
                 self.interaction
                     .pickup_item(
                         id,
@@ -227,9 +233,10 @@ impl StartingArea {
                         ),
                     )
                 });
-                let body = &mut physics.rapier_mut().bodies[h];
-                body.set_position(storage * to_rapier(frame.1), false);
-                body.set_enabled(false);
+                physics.edit_body(h, |body| {
+                    body.set_position(storage * to_rapier(frame.1), false);
+                    body.set_enabled(false);
+                });
             }
         }
     }

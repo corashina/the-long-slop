@@ -601,9 +601,51 @@ impl SaveSnapshot {
     ) -> Result<(), SaveError> {
         let saved = &self.inventory;
         data(saved.selected < 4, "Selected inventory slot")?;
+        let generated_state =
+            |instance: &InstanceId| -> Result<&crate::world::ObjectSnapshot, SaveError> {
+                let InstanceId::Generated { id } = instance else {
+                    unreachable!()
+                };
+                let change = self
+                    .world
+                    .changes
+                    .get(crate::world::ObjectKey::Generated(id.clone()))
+                    .ok_or_else(|| invalid("Missing generated inventory item"))?;
+                let snapshot = change
+                    .snapshot
+                    .as_ref()
+                    .ok_or_else(|| invalid("Removed generated inventory item"))?;
+                links(snapshot.attachment.is_none(), "Attached inventory item")?;
+                Ok(snapshot)
+            };
+        let mut generated_members = HashSet::new();
         let mut members = HashMap::new();
         for (slot, instance) in saved.slots.iter().enumerate() {
             if let Some(instance) = instance {
+                if matches!(instance, InstanceId::Generated { .. }) {
+                    links(
+                        generated_members.insert(instance),
+                        "Duplicate inventory member",
+                    )?;
+                    let state = generated_state(instance)?;
+                    let selected = slot as u8 == saved.selected;
+                    let carried = self
+                        .player
+                        .carry
+                        .as_ref()
+                        .is_some_and(|c| &c.item == instance);
+                    let equipped = saved.equipped.as_ref() == Some(instance);
+                    links(
+                        if selected {
+                            carried != equipped
+                        } else {
+                            !carried && !equipped
+                        },
+                        "Inventory location",
+                    )?;
+                    links(state.held == carried, "Generated inventory carry ownership")?;
+                    continue;
+                }
                 let id = ids.item(instance)?;
                 links(
                     members.insert(id, slot as u8).is_none(),
@@ -632,7 +674,25 @@ impl SaveSnapshot {
                 )?;
             }
         }
-        let equipped = saved.equipped.as_ref().map(|i| ids.item(i)).transpose()?;
+        if let Some(instance @ InstanceId::Generated { .. }) = &saved.equipped {
+            let state = generated_state(instance)?;
+            links(
+                saved.slots[saved.selected as usize].as_ref() == Some(instance)
+                    && !state.held
+                    && self
+                        .player
+                        .carry
+                        .as_ref()
+                        .is_none_or(|c| &c.item != instance),
+                "Equipment ownership",
+            )?;
+        }
+        let equipped = saved
+            .equipped
+            .as_ref()
+            .filter(|i| matches!(i, InstanceId::Initial { .. }))
+            .map(|i| ids.item(i))
+            .transpose()?;
         for (&id, item) in items {
             match item.location {
                 ItemLocationSave::Stored { slot } => {

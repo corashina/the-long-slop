@@ -211,9 +211,10 @@ impl PersistentWorld {
                 .find(|r| r.handle == Some(handle))
                 .and_then(|r| r.state)
                 .is_some_and(|s| s.enabled);
-            let body = &mut physics.rapier_mut().bodies[handle];
-            body.set_position(to_rapier(pose), false);
-            body.set_enabled(enabled);
+            physics.edit_body(handle, |body| {
+                body.set_position(to_rapier(pose), false);
+                body.set_enabled(enabled);
+            });
         }
         for &handle in bodies {
             for record in self.records.iter_mut().filter(|r| r.handle == Some(handle)) {
@@ -439,21 +440,22 @@ impl PersistentWorld {
                 if active {
                     if let Some(state) = self.records[index].state.take() {
                         changed = true;
-                        let body = &mut physics.rapier_mut().bodies[handle];
-                        let pose = to_rapier(VehiclePose {
-                            position: stream.origin.local(state.pose.position),
-                            rotation: state.pose.rotation,
+                        physics.edit_body(handle, |body| {
+                            let pose = to_rapier(VehiclePose {
+                                position: stream.origin.local(state.pose.position),
+                                rotation: state.pose.rotation,
+                            });
+                            body.set_position(pose, false);
+                            body.set_next_kinematic_position(pose);
+                            body.set_enabled(state.enabled);
+                            body.set_linvel(Vector::from_array(state.linear), false);
+                            body.set_angvel(Vector::from_array(state.angular), false);
+                            if state.sleeping {
+                                body.sleep();
+                            } else {
+                                body.wake_up(true);
+                            }
                         });
-                        body.set_position(pose, false);
-                        body.set_next_kinematic_position(pose);
-                        body.set_enabled(state.enabled);
-                        body.set_linvel(Vector::from_array(state.linear), false);
-                        body.set_angvel(Vector::from_array(state.angular), false);
-                        if state.sleeping {
-                            body.sleep();
-                        } else {
-                            body.wake_up(true);
-                        }
                         physics.inactive_bodies.remove(&handle);
                         for item in area
                             .items
@@ -464,7 +466,7 @@ impl PersistentWorld {
                         }
                     }
                     if stored {
-                        physics.rapier_mut().bodies[handle].set_enabled(false);
+                        physics.edit_body(handle, |body| body.set_enabled(false));
                     }
                 } else if physics.body_active(handle) {
                     changed = true;
@@ -505,11 +507,12 @@ impl PersistentWorld {
                     }
                     self.records[index].state = Some(state);
                     physics.inactive_bodies.insert(handle);
-                    let body = &mut physics.rapier_mut().bodies[handle];
-                    body.set_enabled(false);
-                    body.set_translation(Vector::ZERO, false);
-                    body.set_linvel(Vector::ZERO, false);
-                    body.set_angvel(Vector::ZERO, false);
+                    physics.edit_body(handle, |body| {
+                        body.set_enabled(false);
+                        body.set_translation(Vector::ZERO, false);
+                        body.set_linvel(Vector::ZERO, false);
+                        body.set_angvel(Vector::ZERO, false);
+                    });
                 }
             }
         }

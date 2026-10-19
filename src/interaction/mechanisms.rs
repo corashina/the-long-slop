@@ -981,13 +981,13 @@ impl MechanismState {
             if f.inactive || !f.driven {
                 continue;
             }
-            if let Some(handle) = f.handle
-                && let Some(body) = physics.rapier_mut().bodies.get_mut(handle)
-            {
-                if commit {
-                    body.set_position(f.world, false);
-                }
-                body.set_next_kinematic_position(f.world);
+            if let Some(handle) = f.handle {
+                physics.try_edit_body(handle, |body| {
+                    if commit {
+                        body.set_position(f.world, false);
+                    }
+                    body.set_next_kinematic_position(f.world);
+                });
             }
         }
     }

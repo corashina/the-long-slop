@@ -61,7 +61,7 @@ export async function load(saved){
  }
  compare(saved,committed,'save');
  const before=read(),beforeAudit=audit();await resume();
- await wait(()=>window.gameState.totalSteps>=before.totalSteps+2&&audit().graph.views[1].frame>beforeAudit.graph.views[1].frame);
+ await wait(()=>window.gameState.totalSteps>=before.totalSteps+2&&audit().graph.views[0].frame>beforeAudit.graph.views[0].frame);
  const after=read(),afterAudit=audit();
  return {previousSession:previous.session,committedSession:current.session,committed,before,after,beforeAudit,afterAudit};
 }
@@ -86,7 +86,7 @@ export async function sample(label,seconds=10,keys=0,scene='garage'){
  if(scene==='garage'&&(afterWorld.world.generation_jobs||afterWorld.world.pending_work||beforeWorld.world.generated_objects!==afterWorld.world.generated_objects))throw Error('Garage world work changed during sampling');
  if(scene==='driving'&&(!before.seated||!after.seated||Math.hypot(after.absoluteX-before.absoluteX,after.absoluteZ-before.absoluteZ)<.25))throw Error('Driving sample requires a seated player and vehicle movement');
  if(after.totalSteps<=before.totalSteps||count===0)throw Error('Game frames or physics did not advance');
- if(afterAudit.graph.views[1].frame<=beforeAudit.graph.views[1].frame)throw Error('Main render submissions did not advance');
+ if(afterAudit.graph.views[0].frame<=beforeAudit.graph.views[0].frame)throw Error('Main render submissions did not advance');
  if(overflow)throw Error('Timing buffer capacity exceeded');
  const times=buffer.subarray(0,count),measuredMs=times.reduce((sum,value)=>sum+value,0);times.sort();
  const gl=document.querySelector('#game').getContext('webgl2'),info=gl.getExtension('WEBGL_debug_renderer_info');
@@ -105,7 +105,7 @@ export async function draws(targetFrames=120){
   await next();for(const value of Object.values(counts)){value.calls=0;value.instances=0;}sampleFrames=0;
   await wait(()=>sampleFrames>=targetFrames);
   const afterAudit=assertReady(),after=read();
-  if(after.totalSteps<=before.totalSteps||afterAudit.graph.views[1].frame<=beforeAudit.graph.views[1].frame)throw Error('Draw sample requires advancing physics and render submissions');
+  if(after.totalSteps<=before.totalSteps||afterAudit.graph.views[0].frame<=beforeAudit.graph.views[0].frame)throw Error('Draw sample requires advancing physics and render submissions');
   return {sampleFrames,before,after,beforeAudit,afterAudit,counts,perFrame:Object.fromEntries(Object.entries(counts).map(([name,value])=>[name,{calls:value.calls/sampleFrames,instances:value.instances/sampleFrames}]))};
  }
  finally {window.gamePerformanceFrame=originalFrame;for(const name of names)prototype[name]=saved[name];}

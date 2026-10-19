@@ -27,7 +27,12 @@ pub struct StructureRecipe {
     colliders: Vec<ColliderRecipe>,
 }
 
+pub(crate) fn fixed_decoration_source(source: &SourceId) -> bool {
+    source.file == "sharedassets1.assets" && matches!(source.path_id, 84448 | 69558 | 66737 | 79572)
+}
+
 pub struct StructureInstance {
+    pub(crate) fixed_decoration: bool,
     pub cpu_bytes: usize,
     pub placement: Placement,
     pub bodies: Vec<RigidBodyHandle>,
@@ -88,9 +93,28 @@ impl StructureRecipe {
         scale: [f32; 3],
         appearance: &[super::spawn_appearance::NodeAppearance],
     ) -> Result<Self, ReferenceError> {
-        if scale[0] <= 0. || scale[0] != scale[1] || scale[1] != scale[2] {
+        let nonuniform = scale[0] != scale[1] || scale[1] != scale[2];
+        let checked_nonuniform = fixed_decoration_source(&prototype.source)
+            && prototype
+                .bodies
+                .iter()
+                .all(|b| b.pose.rotation == [0., 0., 0., 1.])
+            && prototype
+                .colliders
+                .iter()
+                .filter(|c| c.source_empty_mesh.is_none())
+                .all(|c| {
+                    matches!(
+                        c.geometry,
+                        Some(
+                            crate::reference::ColliderGeometry::Convex { .. }
+                                | crate::reference::ColliderGeometry::Trimesh { .. }
+                        )
+                    )
+                });
+        if scale.iter().any(|v| !v.is_finite() || *v <= 0.) || (nonuniform && !checked_nonuniform) {
             return Err(ReferenceError(
-                "Unresolved nonuniform source structure collision scale".into(),
+                "Unresolved source structure collision scale or rotated body".into(),
             ));
         }
         let active = |mut node: usize| {
@@ -132,7 +156,7 @@ impl StructureRecipe {
             bodies.push(BodyRecipe {
                 builder,
                 pose: to_rapier(VehiclePose {
-                    position: body.pose.translation.map(|v| v * scale[0]),
+                    position: std::array::from_fn(|i| body.pose.translation[i] * scale[i]),
                     rotation: body.pose.rotation,
                 }),
             });
@@ -170,7 +194,7 @@ impl StructureRecipe {
             };
             let layer = prototype.nodes[record.node as usize].layer as usize;
             let deformed = node_scaled_geometry(prototype, record, geometry, appearance)?;
-            let scaled = scaled_geometry(&deformed, scale[0]);
+            let scaled = scaled_geometry(&deformed, scale);
             let collider = collider_builder(&scaled)?
                 .friction(friction)
                 .restitution(restitution)
@@ -203,6 +227,7 @@ impl StructureRecipe {
         &self,
         placement: Placement,
         origin: WorldOrigin,
+        fixed_decoration: bool,
         physics: &mut PhysicsWorld,
     ) -> Result<StructureInstance, ReferenceError> {
         if placement.prototype != self.source {
@@ -221,24 +246,27 @@ impl StructureRecipe {
         });
         let mut bodies = Vec::with_capacity(self.bodies.len());
         let mut colliders = Vec::with_capacity(self.colliders.len());
-        let world = physics.rapier_mut();
+
         for body in &self.bodies {
-            bodies.push(world.insert_body(body.builder.clone().pose(root * body.pose)));
+            let mut body = body.builder.clone().pose(root * body.pose).build();
+            if fixed_decoration {
+                body.set_body_type(rapier3d::prelude::RigidBodyType::Fixed, false);
+            }
+            bodies.push(physics.insert_body(body));
         }
         for source in &self.colliders {
             let mut collider = source.collider.clone();
             let handle = if let Some(body) = source.body {
-                world
-                    .colliders
-                    .insert_with_parent(collider, bodies[body], &mut world.bodies)
+                physics.insert_collider_with_parent(collider, bodies[body])
             } else {
                 collider.set_position(root * *collider.position());
-                world.colliders.insert(collider)
+                physics.insert_collider(collider)
             };
             colliders.push((source.source.clone(), handle));
         }
         physics.refresh_queries();
         Ok(StructureInstance {
+            fixed_decoration,
             cpu_bytes: self.instance_bytes() + super::contents::placement_heap(&placement),
             placement,
             bodies,
@@ -253,7 +281,7 @@ impl StructureInstance {
             physics.remove_collider(collider);
         }
         for body in self.bodies {
-            physics.rapier_mut().remove_body(body);
+            physics.remove_body(body);
         }
         physics.refresh_queries();
     }
@@ -261,10 +289,10 @@ impl StructureInstance {
 
 fn scaled_geometry(
     source: &crate::reference::ColliderGeometry,
-    scale: f32,
+    scale: [f32; 3],
 ) -> crate::reference::ColliderGeometry {
     use crate::reference::ColliderGeometry::*;
-    let point = |p: [f32; 3]| p.map(|v| v * scale);
+    let point = |p: [f32; 3]| std::array::from_fn(|i| p[i] * scale[i]);
     match source {
         Box {
             center,
@@ -277,12 +305,12 @@ fn scaled_geometry(
         },
         Sphere { center, radius } => Sphere {
             center: point(*center),
-            radius: radius * scale,
+            radius: radius * scale[0],
         },
         Capsule { a, b, radius } => Capsule {
             a: point(*a),
             b: point(*b),
-            radius: radius * scale,
+            radius: radius * scale[0],
         },
         Convex { points } => Convex {
             points: points.iter().copied().map(point).collect(),

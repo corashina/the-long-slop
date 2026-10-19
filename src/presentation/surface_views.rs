@@ -1,4 +1,4 @@
-//! Persistent targets and lighting bindings for the nine source surface views.
+//! Persistent targets and lighting bindings for the world and probe views.
 use super::{
     lighting_assets::LightingRenderAssets,
     lighting_scene::{PROBE_COUNT, SourceSceneLighting},
@@ -19,11 +19,11 @@ use bevy::render::{
 };
 use bevy::{ecs as bevy_ecs, prelude::*};
 
-pub const STACK_VIEWS: usize = 3;
-pub const PROBE_START: usize = STACK_VIEWS;
+pub const WORLD_VIEWS: usize = 1;
+pub const PROBE_START: usize = WORLD_VIEWS;
 pub const VIEW_COUNT: usize = PROBE_START + 6;
 
-/// Stack views precede six probe faces.
+/// The world view precedes six probe faces.
 /// Shadow values come from each view's source fit and collector preparation.
 #[derive(Component, Clone, Copy)]
 pub struct SourceSurfaceView {
@@ -125,7 +125,12 @@ pub fn prepare_views(
         if source.index >= VIEW_COUNT
             || extents[source.index].is_some()
             || view.target_format != HDR_FORMAT
-            || msaa.samples() != if source.index < 3 { MSAA_SAMPLES } else { 1 }
+            || msaa.samples()
+                != if source.index < WORLD_VIEWS {
+                    MSAA_SAMPLES
+                } else {
+                    1
+                }
         {
             *status.0.lock().unwrap() = RenderingState::Failed(
                 "Source surface view identity, format, or sample count is invalid".into(),
@@ -137,42 +142,31 @@ pub fn prepare_views(
         }
         extents[source.index] = Some(view.viewport.zw());
     }
-    let [
-        Some(far),
-        Some(main),
-        Some(foreground),
-        Some(a),
-        Some(b),
-        Some(c),
-        Some(d),
-        Some(e),
-        Some(f),
-    ] = extents
-    else {
-        return;
-    };
-    if far != main
-        || foreground != main
-        || [a, b, c, d, e, f]
-            .iter()
-            .any(|size| *size != UVec2::splat(64))
+    let Some(main) = extents[0] else { return };
+    if extents[PROBE_START..]
+        .iter()
+        .flatten()
+        .any(|size| *size != UVec2::splat(64))
     {
         *status.0.lock().unwrap() =
             RenderingState::Failed("Source surface view extents disagree".into());
         return;
     }
-    let Some(snapshot) = frame.views[1] else {
+    if extents[PROBE_START..].iter().any(Option::is_none) {
+        return;
+    }
+    let Some(snapshot) = frame.views[0] else {
         return;
     };
     let native = snapshot.native_extent;
     let Some(atlas) = crate::reference::shadows::source_atlas_size(native.x, native.y) else {
         *status.0.lock().unwrap() =
-            RenderingState::Failed("Source stack atlas extent is invalid".into());
+            RenderingState::Failed("Source world atlas extent is invalid".into());
         return;
     };
     let needs_targets = existing.as_ref().is_none_or(|value| {
-        value.targets.stack.width != main.x
-            || value.targets.stack.height != main.y
+        value.targets.world.width != main.x
+            || value.targets.world.height != main.y
             || value.targets.views[0].atlas_size != atlas
     });
     if needs_targets {
@@ -180,7 +174,7 @@ pub fn prepare_views(
             // Window resize does not invalidate the fixed-resolution published probe.
             match existing
                 .targets
-                .resize_stack(&device, main.x, main.y, atlas)
+                .resize_world(&device, main.x, main.y, atlas)
             {
                 Ok(()) => {}
                 Err(error) => {

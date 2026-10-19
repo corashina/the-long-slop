@@ -1,5 +1,5 @@
 //! Persistent source render targets. Allocation is restricted to startup or resize.
-use super::surface_views::VIEW_COUNT;
+use super::surface_views::{VIEW_COUNT, WORLD_VIEWS};
 
 use bevy::render::{
     render_resource::*,
@@ -125,7 +125,7 @@ impl Target {
     }
 }
 
-/// One color pair is shared by the main camera stack. Probe faces reuse a second pair.
+/// The world view owns one color pair. Probe faces reuse a second pair.
 pub struct SourceColorTargets {
     pub width: u32,
     pub height: u32,
@@ -262,10 +262,10 @@ impl SourceViewTargets {
     }
 }
 
-/// Three stack views share color storage; six capture views share single-sample scratch.
+/// The world view owns color storage; six capture views share single-sample scratch.
 /// Depth and collector storage never alias between views.
 pub struct SurfaceTargets {
-    pub stack: std::sync::Arc<SourceColorTargets>,
+    pub world: std::sync::Arc<SourceColorTargets>,
     pub capture: std::sync::Arc<SourceColorTargets>,
     pub views: [std::sync::Arc<SourceViewTargets>; VIEW_COUNT],
     pub logical_bytes: u64,
@@ -274,7 +274,7 @@ impl SurfaceTargets {
     pub fn new(device: &RenderDevice, width: u32, height: u32, atlas: u32) -> Result<Self, String> {
         use std::sync::Arc;
         let capture_atlas = crate::reference::shadows::source_atlas_size(64, 64).unwrap();
-        let stack = Arc::new(SourceColorTargets::new(
+        let world = Arc::new(SourceColorTargets::new(
             device,
             width,
             height,
@@ -283,8 +283,8 @@ impl SurfaceTargets {
         let capture = Arc::new(SourceColorTargets::new(device, 64, 64, 1)?);
         let mut views = Vec::with_capacity(VIEW_COUNT);
         for index in 0..VIEW_COUNT {
-            let (color, atlas_size) = if index < 3 {
-                (&stack, atlas)
+            let (color, atlas_size) = if index < WORLD_VIEWS {
+                (&world, atlas)
             } else {
                 (&capture, capture_atlas)
             };
@@ -294,36 +294,36 @@ impl SurfaceTargets {
                 atlas_size,
             )?));
         }
-        let logical_bytes = stack.logical_bytes
+        let logical_bytes = world.logical_bytes
             + capture.logical_bytes
             + views.iter().map(|view| view.logical_bytes).sum::<u64>();
         Ok(Self {
-            stack,
+            world,
             capture,
             views: views.try_into().ok().unwrap(),
             logical_bytes,
         })
     }
     /// Main resize preserves fixed capture targets and published probe storage.
-    pub fn resize_stack(
+    pub fn resize_world(
         &mut self,
         device: &RenderDevice,
         width: u32,
         height: u32,
         atlas: u32,
     ) -> Result<(), String> {
-        let stack = std::sync::Arc::new(SourceColorTargets::new(
+        let world = std::sync::Arc::new(SourceColorTargets::new(
             device,
             width,
             height,
             MSAA_SAMPLES,
         )?);
-        for index in 0..3 {
+        for index in 0..WORLD_VIEWS {
             self.views[index] =
-                std::sync::Arc::new(SourceViewTargets::new(device, stack.clone(), atlas)?);
+                std::sync::Arc::new(SourceViewTargets::new(device, world.clone(), atlas)?);
         }
-        self.stack = stack;
-        self.logical_bytes = self.stack.logical_bytes
+        self.world = world;
+        self.logical_bytes = self.world.logical_bytes
             + self.capture.logical_bytes
             + self
                 .views
@@ -332,7 +332,6 @@ impl SurfaceTargets {
                 .sum::<u64>();
         Ok(())
     }
-    pub const TEXTURES: u32 = 3 + 3 * 5 + 6 * 4 + 3 * 5;
 }
 
 /// A scratch cube has fixed per-face render views and per-mip sample views.

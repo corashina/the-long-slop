@@ -9,6 +9,24 @@ pub enum CameraMode {
     Chase,
 }
 
+pub struct WorldCameraSettings {
+    pub near: f32,
+    pub far: f32,
+    pub fov_degrees: f32,
+    pub mask: u32,
+}
+
+pub fn world_camera_settings(
+    reference: &crate::reference::ReferenceManifest,
+) -> WorldCameraSettings {
+    WorldCameraSettings {
+        near: 0.05,
+        far: 15000.0,
+        fov_degrees: reference.player.field_of_view_degrees,
+        mask: 0x14DA8F33,
+    }
+}
+
 #[derive(Component)]
 pub struct DriveCamera;
 

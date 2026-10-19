@@ -116,3 +116,5 @@ pub(crate) fn hash(mut value: u64) -> u64 {
     value ^ (value >> 31)
 }
 pub mod texture_batch_ownership;
+
+pub mod stream_profile;

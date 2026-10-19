@@ -165,158 +165,291 @@ pub fn surface_origin(unit: [i64; 2], tile: TerrainTile) -> [f64; 3] {
     ]
 }
 
-/// Source terrain tile generation, in source phase order.
-pub fn surface(unit: [i64; 2], context: TerrainContext<'_>) -> TerrainMesh {
-    let tile = context.tile;
-    let n = tile.resolution as usize;
-    let side = n + 2;
-    let spacing = (tile.size as f64 / (n - 1) as f64) as f32;
-    let offset = -(tile.size as f32) * 0.5;
-    let origin = surface_origin(unit, tile);
-    let mut border = Vec::with_capacity(side * side);
-    let mut border_normals = vec![[0.0; 3]; side * side];
-    let mut output = TerrainMesh {
-        origin,
-        vertices: Vec::with_capacity(n * n),
-        normals: Vec::with_capacity(n * n),
-        tangents: Vec::with_capacity(n * n),
-        uv: Vec::with_capacity(n * n),
-        colors: Vec::with_capacity(n * n),
-        triangles: Vec::with_capacity((n - 1) * (n - 1) * 2),
-    };
-    for i in 0..side * side {
-        let x = (((i % side) as f64 - 1.0) * spacing as f64 + offset as f64) as f32;
-        let z = (((i / side) as f64 - 1.0) * spacing as f64 + offset as f64) as f32;
-        let point = [
-            (x as f64 + origin[0] as f32 as f64) as f32,
-            (z as f64 + (-origin[2]) as f32 as f64) as f32,
-        ];
-        border.push([x, context.height(point), z]);
+/// All phases retain their cursors across deadline checks and the 4096-work cap.
+/// A check follows at least 32 work units. One operation can use up to seven units.
+#[derive(Default)]
+pub struct TerrainSurfaceJob {
+    border: Vec<[f32; 3]>,
+    border_normals: Vec<[f32; 3]>,
+    cursor: usize,
+    phase: u8,
+    hole: usize,
+    nearest: (usize, f32),
+    write: usize,
+    work: usize,
+}
+impl TerrainSurfaceJob {
+    pub fn prepared_vertices(&self) -> usize {
+        self.work
     }
-    for i in 0..(side - 1) * (side - 1) {
-        let a = (i / (side - 1)) * side + i % (side - 1);
-        let b = a + side;
-        for triangle in [[a, b, b + 1], [b + 1, a + 1, a]] {
-            let [a, b, c] = triangle.map(|j| Vector::from_array(border[j]));
-            let cross = (b - a).cross(c - a);
-            let normal = if cross.length() > 0.00001 {
-                cross.normalize()
-            } else {
-                Vector::ZERO
+    pub fn allocation_bound(tile: TerrainTile) -> usize {
+        let n = tile.resolution as usize;
+        (n + 2) * (n + 2) * 24
+            + n * n * 64
+            + (n - 1) * (n - 1) * 24
+            + std::mem::size_of::<std::ops::Range<usize>>()
+    }
+    pub fn retained_bytes(&self) -> usize {
+        (self.border.capacity() + self.border_normals.capacity()) * 12
+    }
+    pub fn begin(&mut self, unit: [i64; 2], context: TerrainContext<'_>, output: &mut TerrainMesh) {
+        let tile = context.tile;
+        let n = tile.resolution as usize;
+        *self = Self::default();
+        output.origin = [
+            unit[0] as f64 * tile.size as f64,
+            tile.y as f64,
+            -(unit[1] as f64 * tile.size as f64),
+        ];
+        output.vertices.clear();
+        output.normals.clear();
+        output.tangents.clear();
+        output.colors.clear();
+        output.uv.clear();
+        output.triangles.clear();
+        self.border.reserve_exact((n + 2) * (n + 2));
+        self.border_normals.reserve_exact((n + 2) * (n + 2));
+        output.vertices.reserve_exact(n * n);
+        output.normals.reserve_exact(n * n);
+        output.tangents.reserve_exact(n * n);
+        output.colors.reserve_exact(n * n);
+        output.uv.reserve_exact(n * n);
+        output.triangles.reserve_exact((n - 1) * (n - 1) * 2);
+    }
+    pub fn advance(
+        &mut self,
+        context: TerrainContext<'_>,
+        output: &mut TerrainMesh,
+        mut should_yield: impl FnMut() -> bool,
+    ) -> bool {
+        let tile = context.tile;
+        let n = tile.resolution as usize;
+        let side = n + 2;
+        let spacing = (tile.size as f64 / (n - 1) as f64) as f32;
+        let offset = -(tile.size as f32) * 0.5;
+        let mut remaining = 4096;
+        let mut checkpoint = 0;
+        while self.phase < 8 {
+            // Always advance one small slice, even after the caller's deadline.
+            if checkpoint >= 32 {
+                if should_yield() {
+                    break;
+                }
+                checkpoint = 0;
+            }
+            let cost = match self.phase {
+                1 => 6,
+                3 => 5,
+                2 => 7,
+                5 | 7 => 3,
+                _ => 1,
             };
-            for j in triangle {
-                border_normals[j] = (Vector::from_array(border_normals[j]) + normal).to_array();
+            if remaining < cost {
+                break;
+            }
+            remaining -= cost;
+            self.work += cost;
+            checkpoint += cost;
+            let i = self.cursor;
+            match self.phase {
+                0 => {
+                    let x = (((i % side) as f64 - 1.0) * spacing as f64 + offset as f64) as f32;
+                    let z = (((i / side) as f64 - 1.0) * spacing as f64 + offset as f64) as f32;
+                    let point = [
+                        (x as f64 + output.origin[0] as f32 as f64) as f32,
+                        (z as f64 + (-output.origin[2]) as f32 as f64) as f32,
+                    ];
+                    self.border.push([x, context.height(point), z]);
+                    self.border_normals.push([0.0; 3]);
+                    self.cursor += 1;
+                    if self.cursor == side * side {
+                        self.phase = 1;
+                        self.cursor = 0;
+                    }
+                }
+                1 => {
+                    let a = (i / (side - 1)) * side + i % (side - 1);
+                    let b = a + side;
+                    for triangle in [[a, b, b + 1], [b + 1, a + 1, a]] {
+                        let [a, b, c] = triangle.map(|j| Vector::from_array(self.border[j]));
+                        let cross = (b - a).cross(c - a);
+                        let normal = if cross.length() > 0.00001 {
+                            cross.normalize()
+                        } else {
+                            Vector::ZERO
+                        };
+                        for j in triangle {
+                            self.border_normals[j] =
+                                (Vector::from_array(self.border_normals[j]) + normal).to_array();
+                        }
+                    }
+                    self.cursor += 1;
+                    if self.cursor == (side - 1) * (side - 1) {
+                        self.phase = 2;
+                        self.cursor = 0;
+                    }
+                }
+                2 => {
+                    let x = i % n;
+                    let z = i / n;
+                    let j = (z + 1) * side + x + 1;
+                    output.vertices.push(self.border[j]);
+                    let normal = Vector::from_array(self.border_normals[j]);
+                    output.normals.push(if normal.length() > 0.00001 {
+                        normal.normalize().to_array()
+                    } else {
+                        [0.0; 3]
+                    });
+                    if x < n - 1 && z < n - 1 {
+                        let a = i as u32;
+                        let b = a + n as u32;
+                        output.triangles.extend([[a, b, b + 1], [b + 1, a + 1, a]]);
+                    }
+                    self.cursor += 1;
+                    if self.cursor == n * n {
+                        self.phase = 3;
+                        self.cursor = 0;
+                        self.nearest = (usize::MAX, f32::MAX);
+                    }
+                }
+                3 | 4 | 5 => {
+                    if tile.tier != 0 || self.hole == context.holes.len() {
+                        self.phase = 6;
+                        self.cursor = 0;
+                        continue;
+                    }
+                    let hole = context.holes[self.hole].map(|p| {
+                        [
+                            (p[0] as f64 - output.origin[0]) as f32,
+                            p[1],
+                            (p[2] as f64 + output.origin[2]) as f32,
+                        ]
+                    });
+                    if self.phase == 3 {
+                        let j = (i / (n - 1)) * n + i % (n - 1);
+                        let d = horizontal_squared(output.vertices[j], hole[2]);
+                        if d < self.nearest.1 {
+                            self.nearest = (j, d);
+                        }
+                        self.cursor += 1;
+                        if self.cursor == (n - 1) * (n - 1) {
+                            if self.nearest.1 < (spacing as f64 * 3.0) as f32 {
+                                let j = self.nearest.0;
+                                output.vertices[j] = hole[2];
+                                output.vertices[j + 1] = hole[3];
+                                output.vertices[j + n] = hole[0];
+                                output.vertices[j + n + 1] = hole[1];
+                            }
+                            self.phase = 4;
+                            self.cursor = 0;
+                        }
+                    } else if self.phase == 4 {
+                        let point = &mut output.vertices[i];
+                        let inside = inside_source_hole(*point, &hole);
+                        let mut nearest = None;
+                        let mut closest = f32::MAX;
+                        let squared = (spacing as f64 * spacing as f64) as f32;
+                        for (j, corner) in hole.iter().enumerate() {
+                            let d = horizontal_squared(*point, *corner);
+                            if d < closest && (inside || d < squared) {
+                                nearest = Some(j);
+                                closest = d;
+                            }
+                        }
+                        if let Some(j) = nearest {
+                            *point = hole[j];
+                        }
+                        self.cursor += 1;
+                        if self.cursor == n * n {
+                            self.phase = 5;
+                            self.cursor = 0;
+                            self.write = 0;
+                        }
+                    } else {
+                        if i < output.triangles.len() {
+                            let triangle = output.triangles[i];
+                            let center = std::array::from_fn(|axis| {
+                                let ab = (output.vertices[triangle[0] as usize][axis] as f64
+                                    + output.vertices[triangle[1] as usize][axis] as f64)
+                                    as f32;
+                                let sum = (ab as f64
+                                    + output.vertices[triangle[2] as usize][axis] as f64)
+                                    as f32;
+                                (sum as f64 / 3.0) as f32
+                            });
+                            if !inside_source_hole(center, &hole) {
+                                output.triangles[self.write] = triangle;
+                                self.write += 1;
+                            }
+                            self.cursor += 1;
+                        }
+                        if self.cursor == output.triangles.len() {
+                            output.triangles.truncate(self.write);
+                            self.hole += 1;
+                            self.phase = 3;
+                            self.cursor = 0;
+                            self.nearest = (usize::MAX, f32::MAX);
+                        }
+                    }
+                }
+                6 => {
+                    let p = output.vertices[i];
+                    let reciprocal = (1.0 / tile.size as f64) as f32;
+                    output.uv.push([
+                        (reciprocal as f64 * p[0] as f64) as f32,
+                        (reciprocal as f64 * p[2] as f64) as f32,
+                    ]);
+                    let grid = self.border[(i / n + 1) * side + i % n + 1];
+                    let mut color = context.evaluator.color(
+                        [
+                            (grid[0] as f64 + output.origin[0] as f32 as f64) as f32,
+                            (grid[2] as f64 + (-output.origin[2]) as f32 as f64) as f32,
+                        ],
+                        p[1],
+                    );
+                    if let Some(biome) = context.biome_override {
+                        let alpha = color[3];
+                        color = match biome {
+                            0 => [1.0, 0.0, 0.0, alpha],
+                            1 => [0.0, 0.0, 1.0, alpha],
+                            2 => [0.0, 1.0, 0.0, alpha],
+                            _ => color,
+                        };
+                    }
+                    output.colors.push(color);
+                    output.vertices[i][2] = -p[2];
+                    output.normals[i][2] = -output.normals[i][2];
+                    // Source missing tangent (1,0,0,1), reflected once.
+                    output.tangents.push([1.0, 0.0, 0.0, -1.0]);
+                    self.cursor += 1;
+                    if self.cursor == n * n {
+                        self.phase = 7;
+                        self.cursor = 0;
+                    }
+                }
+                7 => {
+                    if i < output.triangles.len() {
+                        output.triangles[i].swap(1, 2);
+                        self.cursor += 1;
+                    }
+                    if self.cursor == output.triangles.len() {
+                        self.phase = 8;
+                    }
+                }
+                _ => unreachable!(),
             }
         }
+        self.phase == 8
     }
-    for i in 0..n * n {
-        let x = i % n;
-        let z = i / n;
-        let j = (z + 1) * side + x + 1;
-        output.vertices.push(border[j]);
-        let normal = Vector::from_array(border_normals[j]);
-        output.normals.push(if normal.length() > 0.00001 {
-            normal.normalize().to_array()
-        } else {
-            [0.0; 3]
-        });
-        if x < n - 1 && z < n - 1 {
-            let a = i as u32;
-            let b = a + n as u32;
-            output.triangles.extend([[a, b, b + 1], [b + 1, a + 1, a]]);
-        }
-    }
-    if tile.tier == 0 {
-        for hole in context.holes {
-            cut_hole(&mut output, hole, n, spacing);
-        }
-    }
-    let reciprocal = (1.0 / tile.size as f64) as f32;
-    for i in 0..n * n {
-        let p = output.vertices[i];
-        output.uv.push([
-            (reciprocal as f64 * p[0] as f64) as f32,
-            (reciprocal as f64 * p[2] as f64) as f32,
-        ]);
-        let grid = border[(i / n + 1) * side + i % n + 1];
-        let mut color = context.evaluator.color(
-            [
-                (grid[0] as f64 + origin[0] as f32 as f64) as f32,
-                (grid[2] as f64 + (-origin[2]) as f32 as f64) as f32,
-            ],
-            p[1],
-        );
-        if let Some(biome) = context.biome_override {
-            let alpha = color[3];
-            color = match biome {
-                0 => [1.0, 0.0, 0.0, alpha],
-                1 => [0.0, 0.0, 1.0, alpha],
-                2 => [0.0, 1.0, 0.0, alpha],
-                _ => color,
-            };
-        }
-        output.colors.push(color);
-        output.vertices[i][2] = -p[2];
-        output.normals[i][2] = -output.normals[i][2];
-        // Source missing tangent (1,0,0,1), reflected once.
-        output.tangents.push([1.0, 0.0, 0.0, -1.0]);
-    }
-    for triangle in &mut output.triangles {
-        triangle.swap(1, 2);
-    }
-    output
 }
 
-fn cut_hole(output: &mut TerrainMesh, hole: &[[f32; 3]; 4], n: usize, spacing: f32) {
-    let origin = output.origin;
-    let hole = hole.map(|p| {
-        [
-            (p[0] as f64 - origin[0]) as f32,
-            p[1],
-            (p[2] as f64 + origin[2]) as f32,
-        ]
-    });
-    let mut nearest = (usize::MAX, f32::MAX);
-    for i in 0..(n - 1) * (n - 1) {
-        let j = (i / (n - 1)) * n + i % (n - 1);
-        let d = horizontal_squared(output.vertices[j], hole[2]);
-        if d < nearest.1 {
-            nearest = (j, d);
-        }
-    }
-    if nearest.1 < (spacing as f64 * 3.0) as f32 {
-        let j = nearest.0;
-        output.vertices[j] = hole[2];
-        output.vertices[j + 1] = hole[3];
-        output.vertices[j + n] = hole[0];
-        output.vertices[j + n + 1] = hole[1];
-    }
-    let squared = (spacing as f64 * spacing as f64) as f32;
-    for point in &mut output.vertices {
-        let inside = inside_source_hole(*point, &hole);
-        let mut nearest = None;
-        let mut closest = f32::MAX;
-        for (j, corner) in hole.iter().enumerate() {
-            let d = horizontal_squared(*point, *corner);
-            if d < closest && (inside || d < squared) {
-                nearest = Some(j);
-                closest = d;
-            }
-        }
-        if let Some(j) = nearest {
-            *point = hole[j];
-        }
-    }
-    let vertices = &output.vertices;
-    output.triangles.retain(|triangle| {
-        let center = std::array::from_fn(|axis| {
-            let ab = (vertices[triangle[0] as usize][axis] as f64
-                + vertices[triangle[1] as usize][axis] as f64) as f32;
-            let sum = (ab as f64 + vertices[triangle[2] as usize][axis] as f64) as f32;
-            (sum as f64 / 3.0) as f32
-        });
-        !inside_source_hole(center, &hole)
-    });
+/// Source terrain tile generation, in source phase order.
+pub fn surface(unit: [i64; 2], context: TerrainContext<'_>) -> TerrainMesh {
+    let mut output = TerrainMesh::default();
+    let mut job = TerrainSurfaceJob::default();
+    job.begin(unit, context, &mut output);
+    while !job.advance(context, &mut output, || false) {}
+    output
 }
 
 fn horizontal_squared(a: [f32; 3], b: [f32; 3]) -> f32 {

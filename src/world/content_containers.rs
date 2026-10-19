@@ -165,8 +165,10 @@ pub(super) fn bind(
             if rules.root(world, source)? == &node.source {
                 interaction.bind_generated_cap(*handle, cap_item);
                 let user_data = physics.rapier().colliders[*handle].user_data;
-                physics.rapier_mut().colliders[*handle].user_data =
-                    (user_data & !0xffff_ffff_ffff_ffff) | (cap_item.0 as u128 + 1);
+                physics.edit_collider(*handle, |collider| {
+                    collider.user_data =
+                        (user_data & !0xffff_ffff_ffff_ffff) | (cap_item.0 as u128 + 1);
+                });
             }
         }
     }

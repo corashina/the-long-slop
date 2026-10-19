@@ -30,7 +30,6 @@ pub struct UberPass {
     sequence: DitherSequence,
     pending: Option<DitherSequence>,
     extent: [u32; 2],
-    main: bool,
 }
 impl UberPass {
     pub fn new(
@@ -42,7 +41,7 @@ impl UberPass {
         noise: [&TextureView; 64],
         extent: [u32; 2],
         record: &PostprocessingRecord,
-        main: Option<MainInputs<'_>>,
+        input: MainInputs<'_>,
         previous: Option<Self>,
     ) -> Result<Self, String> {
         if extent.contains(&0) {
@@ -59,24 +58,22 @@ impl UberPass {
             ),
         )
         .to_vec();
-        if main.is_some() {
-            entries.extend(
-                BindGroupLayoutEntries::with_indices(
-                    ShaderStages::FRAGMENT,
+        entries.extend(
+            BindGroupLayoutEntries::with_indices(
+                ShaderStages::FRAGMENT,
+                (
+                    (5, texture_2d(TextureSampleType::Float { filterable: true })),
                     (
-                        (5, texture_2d(TextureSampleType::Float { filterable: true })),
-                        (
-                            6,
-                            texture_2d(TextureSampleType::Float { filterable: false }),
-                        ),
-                        (7, texture_2d(TextureSampleType::Float { filterable: true })),
-                        (8, texture_3d(TextureSampleType::Float { filterable: true })),
-                        (9, sampler(SamplerBindingType::Filtering)),
+                        6,
+                        texture_2d(TextureSampleType::Float { filterable: false }),
                     ),
-                )
-                .to_vec(),
-            );
-        }
+                    (7, texture_2d(TextureSampleType::Float { filterable: true })),
+                    (8, texture_3d(TextureSampleType::Float { filterable: true })),
+                    (9, sampler(SamplerBindingType::Filtering)),
+                ),
+            )
+            .to_vec(),
+        );
         let layout = BindGroupLayoutDescriptor::new("source_uber", &entries);
         let pipeline = previous.as_ref().map_or_else(
             || {
@@ -91,11 +88,7 @@ impl UberPass {
                     fragment: Some(FragmentState {
                         shader,
                         entry_point: Some("uber".into()),
-                        shader_defs: if main.is_some() {
-                            vec!["SOURCE_UBER_MAIN".into()]
-                        } else {
-                            vec![]
-                        },
+                        shader_defs: vec!["SOURCE_UBER_MAIN".into()],
                         targets: vec![Some(ColorTargetState {
                             format: TextureFormat::Rgba16Float,
                             blend: None,
@@ -125,32 +118,30 @@ impl UberPass {
             dirt: Vec4::new(1., 1., 0., 0.),
             grading: Vec4::new(1. / 33., 32., record.grading.post_exposure.exp2(), 0.),
         };
-        if let Some(input) = main.as_ref() {
-            if input.dirt_extent.contains(&0) {
-                return Err("Source bloom dirt extent is invalid".into());
-            }
-            params.bloom = Vec4::new(
-                input.sample_scale,
-                (record.bloom.intensity / 10.).exp2() - 1.,
-                record.bloom.dirt_intensity,
-                0.,
-            );
-            let c = record.bloom.color;
-            params.tint = Vec4::from_array([
-                super::bloom::gamma_to_linear(c[0]),
-                super::bloom::gamma_to_linear(c[1]),
-                super::bloom::gamma_to_linear(c[2]),
-                c[3],
-            ]);
-            let image_aspect = input.dirt_extent[0] as f32 / input.dirt_extent[1] as f32;
-            let screen_aspect = extent[0] as f32 / extent[1] as f32;
-            if image_aspect > screen_aspect {
-                params.dirt.x = screen_aspect / image_aspect;
-                params.dirt.z = (1. - params.dirt.x) / 2.;
-            } else {
-                params.dirt.y = image_aspect / screen_aspect;
-                params.dirt.w = (1. - params.dirt.y) / 2.;
-            }
+        if input.dirt_extent.contains(&0) {
+            return Err("Source bloom dirt extent is invalid".into());
+        }
+        params.bloom = Vec4::new(
+            input.sample_scale,
+            (record.bloom.intensity / 10.).exp2() - 1.,
+            record.bloom.dirt_intensity,
+            0.,
+        );
+        let c = record.bloom.color;
+        params.tint = Vec4::from_array([
+            super::bloom::gamma_to_linear(c[0]),
+            super::bloom::gamma_to_linear(c[1]),
+            super::bloom::gamma_to_linear(c[2]),
+            c[3],
+        ]);
+        let image_aspect = input.dirt_extent[0] as f32 / input.dirt_extent[1] as f32;
+        let screen_aspect = extent[0] as f32 / extent[1] as f32;
+        if image_aspect > screen_aspect {
+            params.dirt.x = screen_aspect / image_aspect;
+            params.dirt.z = (1. - params.dirt.x) / 2.;
+        } else {
+            params.dirt.y = image_aspect / screen_aspect;
+            params.dirt.w = (1. - params.dirt.y) / 2.;
         }
         let mut uniform = UniformBuffer::from(params);
         uniform.write_buffer(device, queue);
@@ -171,7 +162,7 @@ impl UberPass {
             address_mode_v: AddressMode::Repeat,
             ..default()
         });
-        let bindings = (0..if main.is_some() { 128 } else { 64 })
+        let bindings = (0..128)
             .map(|i| {
                 let mut entries = BindGroupEntries::sequential((
                     uniform.binding().unwrap(),
@@ -181,18 +172,16 @@ impl UberPass {
                     &point,
                 ))
                 .to_vec();
-                if let Some(input) = main.as_ref() {
-                    entries.extend(
-                        BindGroupEntries::with_indices((
-                            (5, input.bloom),
-                            (6, input.exposure[i / 64]),
-                            (7, input.dirt),
-                            (8, input.lut),
-                            (9, &repeat),
-                        ))
-                        .to_vec(),
-                    );
-                }
+                entries.extend(
+                    BindGroupEntries::with_indices((
+                        (5, input.bloom),
+                        (6, input.exposure[i / 64]),
+                        (7, input.dirt),
+                        (8, input.lut),
+                        (9, &repeat),
+                    ))
+                    .to_vec(),
+                );
                 device.create_bind_group(
                     "source_uber",
                     &cache.get_bind_group_layout(&layout),
@@ -207,7 +196,6 @@ impl UberPass {
             sequence: previous.map_or_else(DitherSequence::default, |old| old.sequence),
             pending: None,
             extent,
-            main: main.is_some(),
         })
     }
     pub fn recreate(&mut self) {
@@ -238,7 +226,7 @@ impl UberPass {
         resolve: &TextureView,
         exposure_index: usize,
     ) -> bool {
-        if !self.ready(cache) || exposure_index > usize::from(self.main) {
+        if !self.ready(cache) || exposure_index > 1 {
             return false;
         }
         let mut sequence = self.sequence.clone();

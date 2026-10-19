@@ -59,15 +59,8 @@ impl CarryState {
             ));
         }
         let pose = *physics.rapier().bodies[body].position();
-        let anchor = physics
-            .rapier_mut()
-            .insert_body(RigidBodyBuilder::kinematic_position_based().pose(pose));
-        let joint = physics.rapier_mut().impulse_joints.insert(
-            anchor,
-            body,
-            FixedJointBuilder::new(),
-            false,
-        );
+        let anchor = physics.insert_body(RigidBodyBuilder::kinematic_position_based().pose(pose));
+        let joint = physics.insert_impulse_joint(anchor, body, FixedJointBuilder::new(), false);
         self.anchor = Some(anchor);
         self.held = Some(HeldState {
             item,
@@ -77,7 +70,7 @@ impl CarryState {
             joint,
             local_pose: to_rapier(crate::save::local_pose(&saved.local_grip)),
         });
-        physics.rapier_mut().bodies[body].enable_ccd(true);
+        physics.edit_body(body, |body| body.enable_ccd(true));
         self.cancel_input();
         Ok(())
     }
@@ -187,13 +180,15 @@ impl CarryState {
         let direction = to_rapier(player.view_pose(physics)).rotation * -Vector::Z;
         let item = self.drop(items, physics)?;
         if charge > self.reference.throw_minimum {
-            physics.rapier_mut().bodies[body].apply_impulse(
-                direction
-                    * charge
-                    * self.reference.throw_multiplier
-                    * self.reference.source_force_interval,
-                true,
-            );
+            physics.edit_body(body, |body| {
+                body.apply_impulse(
+                    direction
+                        * charge
+                        * self.reference.throw_multiplier
+                        * self.reference.source_force_interval,
+                    true,
+                )
+            });
         }
         Some(item)
     }
@@ -246,9 +241,9 @@ impl CarryState {
     }
     pub fn drop(&mut self, items: &mut ItemStore, physics: &mut PhysicsWorld) -> Option<ItemId> {
         let held = self.held.take()?;
-        physics.rapier_mut().impulse_joints.remove(held.joint, true);
+        physics.remove_impulse_joint(held.joint, true);
         if self.plates.contains(&held.item) {
-            physics.rapier_mut().bodies[held.body].set_gravity_scale(1., true);
+            physics.edit_body(held.body, |body| body.set_gravity_scale(1., true));
         }
         if let Some(item) = items.get_mut(held.item) {
             item.location = ItemLocation::World;
@@ -302,23 +297,16 @@ impl CarryState {
         let item = items.get_mut(id).unwrap();
         let pose = *physics.rapier().bodies[body].position();
         let anchor = *self.anchor.get_or_insert_with(|| {
-            physics
-                .rapier_mut()
-                .insert_body(RigidBodyBuilder::kinematic_position_based().pose(pose))
+            physics.insert_body(RigidBodyBuilder::kinematic_position_based().pose(pose))
         });
-        physics.rapier_mut().bodies[anchor].set_position(pose, false);
-        let joint = physics.rapier_mut().impulse_joints.insert(
-            anchor,
-            body,
-            FixedJointBuilder::new(),
-            true,
-        );
+        physics.edit_body(anchor, |body| body.set_position(pose, false));
+        let joint = physics.insert_impulse_joint(anchor, body, FixedJointBuilder::new(), true);
         let view = to_rapier(player.view_pose(physics));
         let local_pose = to_rapier(item.local_pose);
         let item_pose = pose * local_pose;
-        physics.rapier_mut().bodies[body].enable_ccd(true);
+        physics.edit_body(body, |body| body.enable_ccd(true));
         if self.plates.contains(&id) {
-            physics.rapier_mut().bodies[body].set_gravity_scale(0., true);
+            physics.edit_body(body, |body| body.set_gravity_scale(0., true));
         }
         self.held = Some(HeldState {
             item: id,
@@ -491,7 +479,7 @@ impl CarryState {
                 desired.rotation = current.rotation;
             }
         }
-        physics.rapier_mut().bodies[anchor].set_next_kinematic_position(desired);
+        physics.edit_body(anchor, |body| body.set_next_kinematic_position(desired));
         false
     }
 }

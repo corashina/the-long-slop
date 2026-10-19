@@ -45,8 +45,15 @@ impl WorldStream {
                 i += 1;
                 continue;
             }
-            interaction.remove_generated_light(self.lamp_bindings.swap_remove(i).control);
+            let binding = self.lamp_bindings.swap_remove(i);
+            interaction.remove_generated_light(binding.control);
             self.lamp_binding_revision += 1;
+            let mut key = binding.parent;
+            key.children.push((binding.source, 0));
+            if self.changes.forget(&ObjectKey::Generated(key)) {
+                self.invalidate_changed_selection();
+            }
+            self.changes_prune_due = true;
         }
         loop {
             let next = self
@@ -184,7 +191,9 @@ impl WorldStream {
                             return Err(error);
                         }
                     };
-                    physics.rapier_mut().colliders[*handle].user_data |= (id.0 as u128) << 64;
+                    physics.edit_collider(*handle, |collider| {
+                        collider.user_data |= (id.0 as u128) << 64;
+                    });
                 }
                 interaction.bind_generated_light(control, id);
             }
@@ -229,14 +238,16 @@ impl WorldStream {
                     .iter()
                     .find(|c| &c.source == source)
                     .unwrap();
-                physics.rapier_mut().colliders[*handle].set_enabled(
-                    collider.enabled
-                        && super::super::spawn_appearance::node_active(
-                            prototype,
-                            collider.node as usize,
-                            appearance,
-                        ),
-                );
+                physics.edit_collider(*handle, |state| {
+                    state.set_enabled(
+                        collider.enabled
+                            && super::super::spawn_appearance::node_active(
+                                prototype,
+                                collider.node as usize,
+                                appearance,
+                            ),
+                    )
+                });
             }
             binding.collision_dirty = false;
         }

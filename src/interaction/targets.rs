@@ -142,10 +142,11 @@ impl InteractionState {
         if self.collider_bindings.get(&handle) == Some(&binding) {
             return;
         }
-        let collider = &mut physics.rapier_mut().colliders[handle];
-        let mut groups = collider.collision_groups();
-        groups.memberships = rapier3d::prelude::Group::from_bits_truncate(layers);
-        collider.set_collision_groups(groups);
+        physics.edit_collider(handle, |collider| {
+            let mut groups = collider.collision_groups();
+            groups.memberships = rapier3d::prelude::Group::from_bits_truncate(layers);
+            collider.set_collision_groups(groups);
+        });
         self.bind_surface(handle, binding);
     }
 
