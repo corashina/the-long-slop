@@ -1,6 +1,8 @@
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(js_namespace = window, js_name = gameSceneScale)]
+    pub fn game_scene_scale() -> f32;
     #[wasm_bindgen(js_name = gameAudioError)]
     pub fn game_audio_error(message: &str);
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioSurvival)]

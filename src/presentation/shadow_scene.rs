@@ -269,8 +269,8 @@ pub fn prepare_scene(
             continue;
         };
         timing.face(index);
-        let atlas =
-            source_atlas_size(v.extent.x, v.extent.y).expect("validated source view extent");
+        let atlas = source_atlas_size(v.native_extent.x, v.native_extent.y)
+            .expect("validated source view extent");
         let w = v.source_world_from_view;
         let mut input = ShadowFitInput {
             frustum_points: v.frustum_points,

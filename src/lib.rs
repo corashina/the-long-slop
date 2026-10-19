@@ -16,6 +16,8 @@ pub mod particles;
 pub mod plates;
 pub mod player;
 pub mod reference;
+#[cfg(any(target_arch = "wasm32", test))]
+mod render_scale;
 pub mod save;
 pub mod simulation;
 pub mod sleep;

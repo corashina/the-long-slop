@@ -52,7 +52,7 @@ export async function measureShadowCache({durationMs=10000,instrument=false,labe
  const playing=stateBefore.started&&stateAfter.started&&!stateBefore.paused&&!stateAfter.paused&&stateAfter.totalSteps>stateBefore.totalSteps;
  const valid=auditBefore.state==='Ready'&&auditAfter.state==='Ready'&&frames>0&&submissionDelta===frames&&!hiddenDuringSample&&(!resume||(playing&&settled&&pausedFrames===0&&notStartedFrames===0));
  const result={valid,submissionDelta,pausedFrames,notStartedFrames,hiddenDuringSample,elapsedMs:elapsed,frames,fps:frames*1000/elapsed,
-  intervals:{meanMs:sorted.reduce((a,b)=>a+b,0)/sorted.length,p50Ms:percentile(.5),p95Ms:percentile(.95),maxMs:sorted.at(-1)},
+  intervals:{meanMs:sorted.reduce((a,b)=>a+b,0)/sorted.length,p50Ms:percentile(.5),p95Ms:percentile(.95),p99Ms:percentile(.99),maxMs:sorted.at(-1)},
   instrument,counts,perFrame:Object.fromEntries(Object.entries(counts).map(([name,count])=>[name,count/frames])),
   canvas:[canvas.width,canvas.height],dpr:devicePixelRatio,visibility:document.visibilityState,
   gpu:info?gl.getParameter(info.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER),
