@@ -1044,7 +1044,7 @@ fn prewarm_materials(world: &mut World) {
                 || uniforms > limits.max_uniform_buffers_per_shader_stage
             {
                 pending.state = RenderingState::Failed(format!(
-                    "{label}: WebGL2 layout requires {textures} textures, {samplers} samplers, {uniforms} uniforms; limits are {}, {}, {}",
+                    "{label}: layout requires {textures} textures, {samplers} samplers, {uniforms} uniforms; limits are {}, {}, {}",
                     limits.max_sampled_textures_per_shader_stage,
                     limits.max_samplers_per_shader_stage,
                     limits.max_uniform_buffers_per_shader_stage

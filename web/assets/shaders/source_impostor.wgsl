@@ -127,7 +127,7 @@ struct ImpostorFragment {
 }
 
 #ifndef PREPASS_PIPELINE
-#import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler}
+#import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, cookie_uv_gradient, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler}
 #import source_view_lighting::{lighting, diffuse_sh, direct_attenuation, fog_factor, sun_cookie, sun_cookie_sampler}
 
 
@@ -213,6 +213,8 @@ fn fragment(in:ImpostorOutput)->ImpostorFragment {
     let screen=lighting.clip_from_world*pbr.world_position;
     let screen_uv=screen.xy/screen.w*vec2(.5,-.5)+.5;
     light+=source_brdf(diffuse,specular,smoothness,pbr.N,pbr.V,lighting.direction_to_sun.xyz)*lighting.sun_radiance.rgb*direct_attenuation(pbr.world_position.xyz,screen_uv,depth,impostor.renderer.z != 0u);
+    let world_dx = dpdx(pbr.world_position);
+    let world_dy = dpdy(pbr.world_position);
     for (var i = 0u; i < lamp_lighting.counts.x; i += 1u) {
         let lamp = lamp_lighting.lights[i];
         if (receiver.x & lamp.mask.x) == 0u { continue; }
@@ -236,9 +238,11 @@ fn fragment(in:ImpostorOutput)->ImpostorFragment {
                 cookie_uv = local.xy / local.w + 0.5;
                 if any(cookie_uv < vec2(0.0)) || any(cookie_uv > vec2(1.0)) { continue; }
             }
-            if lamp.cookie_rect.x == 1.0 { weight *= textureSampleGrad(sun_cookie, sun_cookie_sampler, cookie_uv, dpdx(cookie_uv), dpdy(cookie_uv)).a; }
-            else if lamp.cookie_rect.x == 2.0 { weight *= textureSampleGrad(default_cookie, default_sampler, cookie_uv, dpdx(cookie_uv), dpdy(cookie_uv)).a; }
-            else { weight *= textureSampleGrad(cookies, cookie_sampler, cookie_uv, i32(lamp.cookie_rect.w), dpdx(cookie_uv), dpdy(cookie_uv)).a; }
+            let uv_dx = cookie_uv_gradient(lamp, local, world_dx);
+            let uv_dy = cookie_uv_gradient(lamp, local, world_dy);
+            if lamp.cookie_rect.x == 1.0 { weight *= textureSampleGrad(sun_cookie, sun_cookie_sampler, cookie_uv, uv_dx, uv_dy).a; }
+            else if lamp.cookie_rect.x == 2.0 { weight *= textureSampleGrad(default_cookie, default_sampler, cookie_uv, uv_dx, uv_dy).a; }
+            else { weight *= textureSampleGrad(cookies, cookie_sampler, cookie_uv, i32(lamp.cookie_rect.w), uv_dx, uv_dy).a; }
         }
         light += source_brdf(diffuse, specular, smoothness, pbr.N, pbr.V, direction) * lamp.color.rgb * weight;
     }
