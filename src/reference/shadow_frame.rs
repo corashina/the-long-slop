@@ -93,14 +93,26 @@ impl ViewInput {
 /// Advance revision after any caster order, geometry, or eligibility change.
 #[derive(Default)]
 pub struct ShadowViewCache {
+    revision: u64,
     input: Option<ViewInput>,
     result: Option<ShadowFrame>,
     caster_min: [f32; 3],
     caster_max: [f32; 3],
 }
 impl ShadowViewCache {
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+    fn advance_revision(&mut self) {
+        self.revision = self
+            .revision
+            .checked_add(1)
+            .expect("Source shadow view revision exhausted");
+    }
     pub fn clear(&mut self) {
-        self.input = None;
+        if self.input.take().is_some() {
+            self.advance_revision();
+        }
         self.result = None;
     }
     pub fn prepare(
@@ -132,7 +144,10 @@ impl ShadowViewCache {
             fit.caster_max = self.caster_max;
             return Ok(self.result);
         }
-        self.clear();
+        self.input = None;
+        self.result = None;
+        // Failed preparation can also change masks. Recovery must invalidate extraction.
+        self.advance_revision();
         let result = prepare_frame(casters, masks, &planes, light_mask, view_mask, fit)?;
         self.input = Some(input);
         self.result = result;

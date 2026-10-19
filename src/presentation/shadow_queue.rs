@@ -240,7 +240,7 @@ pub fn queue(world: &mut World) {
                         let queued = &mut state.queued[index];
                         queued.reserve(scene.capacity().saturating_sub(queued.len()));
                         let mut ready = true;
-                        for (item, main) in scene.entities.iter().enumerate() {
+                        for (item, main) in scene.caster_data.entities.iter().enumerate() {
                             let mask = scene.masks[index][item];
                             if mask == 0 {
                                 continue;

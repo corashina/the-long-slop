@@ -127,12 +127,11 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 8. **Update shadow scenes incrementally.**
-   Status: Proposed. Difficulty: Hard. Estimate: 4–7 days. Owner: [shadow scene](../src/presentation/shadow_scene.rs).
-   Effect: Reuse cached caster data and skip copies when the scene has not changed.
-   Prompt:
-   ```text
-   Reuse existing shadow caches. Track caster addition, removal, visibility, material and scene changes, origin shifts, and recovery. Skip unchanged scans and copies while preserving camera-dependent caster selection and fitting. Verify moving objects during driving, stream changes, origin shifts, and repeated Load.
-   ```
+   Status: Implemented on `codex/incremental-shadow-scene`, unmerged. Runtime performance remains unverified.
+   Owner: [shadow scene](../src/presentation/shadow_scene.rs).
+   Caster component changes update cached rows. Membership, scene, origin, and recovery changes rebuild the ordered collection.
+   Revisions skip unchanged caster and mask copies. Camera-dependent selection, fitting, and per-frame visibility remain.
+   See the [implementation note](performance/2026-10-19-incremental-shadow-scene.md) for checks and limits.
 
 9. **Select local lights per object.**
    Status: Proposed. Difficulty: Hard. Estimate: 4–7 days. Owner: [surface shader](../web/assets/shaders/source_surface.wgsl).
