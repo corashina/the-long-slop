@@ -118,7 +118,7 @@ pub(crate) fn prepare_road_lamp(
         &bevy::camera::visibility::RenderLayers,
         &crate::presentation::materials::SourceShadowMode,
         Option<&bevy::light::NotShadowReceiver>,
-        &crate::presentation::renderers::SourceRenderer,
+        &crate::presentation::renderer_visibility::SourceRenderer,
         &bevy::camera::primitives::Aabb,
         &bevy::gltf::GltfMaterialExtras,
     )>,
@@ -273,7 +273,7 @@ pub(crate) fn prepare_road_lamp(
                 .spawn((
                     mesh.clone(),
                     material.clone(),
-                    crate::presentation::materials::SourceMaterialWarmup,
+                    crate::presentation::renderer_visibility::SourceMaterialWarmup,
                     far,
                     Visibility::Visible,
                     bevy::light::NotShadowCaster,

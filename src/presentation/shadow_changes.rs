@@ -1,10 +1,10 @@
 //! Main-world caster mutation inputs. ViewVisibility is refreshed separately every frame.
 use super::{
     materials::{
-        SourceMaterial, SourceMaterialWarmup, grass::material::GrassMaterial,
-        impostor::ImpostorMaterial, specular::SpecularMaterial, terrain::TerrainMaterial,
+        SourceMaterial, grass::material::GrassMaterial, impostor::ImpostorMaterial,
+        specular::SpecularMaterial, terrain::TerrainMaterial,
     },
-    renderers::SourceRenderer,
+    renderer_visibility::{SourceMaterialWarmup, SourceRenderer},
 };
 use bevy::ecs as bevy_ecs;
 use bevy::{

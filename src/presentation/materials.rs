@@ -9,6 +9,7 @@ use crate::world::upload_receipt;
 mod world_texture_upload;
 pub mod world_textures;
 use super::primary_image::{SourcePrimaryImage, SourcePrimaryImageSettings};
+use super::renderer_visibility::SourceMaterialWarmup;
 use crate::reference::{
     self as source, AssetUsage, MaterialRecord, ReferenceManifest, ShaderFamily, TextureRecord,
 };
@@ -142,7 +143,7 @@ pub struct SourceMaterials {
     pub world_deferred: primary::DeferredAllocation,
     pub standard_records: HashMap<AssetId<StandardMaterial>, (source::AssetId, u32)>,
     records: Vec<Arc<MaterialRecord>>,
-    sort_data: HashMap<(source::AssetId, u32), super::transparent::SourceSortData>,
+    sort_data: HashMap<(source::AssetId, u32), super::renderer_visibility::SourceSortData>,
     textures: Vec<SourceTexture>,
     texture_indices: HashMap<String, usize>,
     pub handles: HashMap<(source::AssetId, u32, bool, u32), Handle<SourceMaterial>>,
@@ -254,9 +255,6 @@ impl MaterialLoading {
         audit
     }
 }
-#[derive(Component)]
-pub struct SourceMaterialWarmup;
-
 struct LoadingData {
     requests: Vec<PipelineRequest>,
     sealed: bool,
@@ -278,7 +276,7 @@ impl SourceMaterials {
         identity: (source::AssetId, u32),
         renderer: &source::render_lighting::RendererRecord,
         slot: u32,
-    ) -> Result<Option<super::transparent::SourceSortData>, source::ReferenceError> {
+    ) -> Result<Option<super::renderer_visibility::SourceSortData>, source::ReferenceError> {
         let Some(mut sort) = self.sort_data.get(&identity).copied() else {
             return Ok(None);
         };
@@ -307,9 +305,6 @@ impl Plugin for SourceMaterialPlugin {
         app.add_plugins((
             ExtractResourcePlugin::<MaterialLoading>::default(),
             ExtractResourcePlugin::<RetainedColors>::default(),
-            bevy::render::extract_component::ExtractComponentPlugin::<
-                super::transparent::SourceSortData,
-            >::default(),
             MaterialPlugin::<terrain::TerrainMaterial>::default(),
             MaterialPlugin::<specular::SpecularMaterial>::default(),
             MaterialPlugin::<impostor::ImpostorMaterial>::default(),
@@ -329,6 +324,16 @@ impl Plugin for SourceMaterialPlugin {
         }))))
         .init_resource::<RetainedColors>()
         .init_resource::<super::renderers::RendererMeshes>()
+        .init_resource::<super::renderer_visibility::CameraVisibility>()
+        .add_systems(
+            PostUpdate,
+            super::renderer_visibility::filter_camera_visibility
+                .after(bevy::camera::visibility::VisibilitySystems::CheckVisibility)
+                .before(super::shadow_scene::prepare_scene)
+                .before(
+                    bevy::camera::visibility::VisibilitySystems::MarkNewlyHiddenEntitiesInvisible,
+                ),
+        )
         .add_systems(
             Update,
             super::renderers::bind_renderer_meshes
@@ -354,17 +359,10 @@ impl Plugin for SourceMaterialPlugin {
                     .after(RenderSystems::PrepareBindGroups)
                     .before(prewarm_materials),
             );
-            render
-                .init_resource::<super::renderers::ShadowsOnly>()
-                .add_systems(
-                    bevy::render::ExtractSchedule,
-                    super::renderers::extract_shadows_only,
-                )
-                .init_resource::<WarmedPipelines>()
-                .add_systems(
-                    Render,
-                    prewarm_materials.after(RenderSystems::PrepareBindGroups),
-                );
+            render.init_resource::<WarmedPipelines>().add_systems(
+                Render,
+                prewarm_materials.after(RenderSystems::PrepareBindGroups),
+            );
         }
     }
 }
@@ -395,7 +393,7 @@ pub fn load_materials(
             .or_insert(next);
         sort_data.insert(
             (record.asset, record.gltf_material),
-            super::transparent::SourceSortData {
+            super::renderer_visibility::SourceSortData {
                 material_identity: runtime_material,
                 glass_source: if record.shader_family == ShaderFamily::StainedGlass {
                     record.source.path_id
@@ -578,7 +576,7 @@ pub(crate) fn bind_authored_materials(
             &GlobalTransform,
             Option<&bevy::camera::visibility::RenderLayers>,
             &GltfExtras,
-            &super::renderers::SourceRenderer,
+            &super::renderer_visibility::SourceRenderer,
         ),
         (Without<super::sky::SkyMesh>, Without<SourceMaterialWarmup>),
     >,
@@ -1726,7 +1724,7 @@ pub fn bind_materials(
 #[derive(Clone)]
 pub struct LampReceiverChoice {
     entity: Entity,
-    sort: Option<super::transparent::SourceSortData>,
+    sort: Option<super::renderer_visibility::SourceSortData>,
     material: Handle<SourceMaterial>,
 }
 #[derive(Clone)]
@@ -1766,7 +1764,7 @@ pub(crate) fn prepare_lamp_materials(
         &Mesh3d,
         &MeshMaterial3d<SourceMaterial>,
         &GlobalTransform,
-        &super::renderers::SourceRenderer,
+        &super::renderer_visibility::SourceRenderer,
         &GltfExtras,
     )>,
 ) {
@@ -1948,7 +1946,7 @@ pub(crate) fn sync_lamp_materials(
             } else {
                 commands
                     .entity(receiver.entity)
-                    .remove::<super::transparent::SourceSortData>();
+                    .remove::<super::renderer_visibility::SourceSortData>();
             }
         }
         target.current = Some(key);

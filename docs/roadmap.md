@@ -27,7 +27,7 @@ Moderate means limited changes. Hard means several connected systems. Very hard 
 Follow [AGENTS.md](../AGENTS.md) for checks. Run only critical tests.
 Release builds, full checks, and browser acceptance require an explicit request or an agreed milestone.
 Use isolated `codex/` worktrees for architecture and performance work. Keep changes unmerged unless authorized.
-Measure source driving before changing tire, rim, hub, suspension, or brake behavior.
+Measure source driving before changing tire, rim, hub, suspension, or brake driving physics.
 Measure performance with matched release A/B/A runs. Report startup, garage, and local driving separately.
 
 Use this prompt template:
@@ -46,7 +46,6 @@ Verify = code exists. Partial = known behavior gaps. Missing = no complete gamep
 | --- | --- | --- | --- | --- |
 | G01 | Reliable session start. [Session](../src/app/save.rs), [menu](../web/menu.js) | Hard | Verify | Use matching assets and WASM. Verify New game, mouse capture, pause, Continue, restart, and cold Load. |
 | G02 | Remove and install Lada parts. [Parts](../src/interaction/parts.rs) | Hard | Verify | Remove and reinstall the engine, radiator, body parts, seats, and plates. Preserve identities, fluids, mass, and collision. |
-| G03 | Assemble wheels. [Wheels](../src/interaction/wheels.rs) | Hard | Verify | Remove hubcaps and wheels. Split and join tires and rims. Enforce source fit rules and update mass. |
 | G04 | Fill and drain fluids. [Fluids](../src/fluids.rs), [interaction](../src/interaction.rs) | Hard | Verify | Operate caps and containers. Verify pouring, spilling, mixtures, empty supplies, and fluid retention after part removal. |
 | G05 | Start and maintain the engine. [Engine](../src/simulation/engine.rs) | Hard | Verify | Verify ignition, starter, fuel use, cooling, oil effects, stalling, and missing-part behavior. |
 | G06 | Clean, restore, and paint. [Tools](../src/interaction/cleaning.rs), [conditions](../src/conditions.rs) | Hard | Partial | Verify rubbing, repair stages, paint, tool depletion, and visible changes. Complete spray refraction and soft-particle depth fading. |
@@ -66,6 +65,9 @@ G12 requires a reliable local driving area. It does not require extended road ge
 G13 follows the approved garage state. Saved survival needs remain deferred.
 G15 covers defects in the selected experience. It does not reopen the old optimization proposal list.
 G16 requires real input, active physics, visible results, and submitted frames on the same tested package.
+It also requires the seven deferred G03 wheel checks in the [wheel audit](g03-wheel-audit.md).
+Verify hubcaps, complete wheels, tire separation, compatible assembly, fit rejection, step requirements, and repeated cycles.
+Check identity, condition, ownership, mass, and collision through each transition.
 
 Startup selection, 2026-10-19: the runtime export contains only the garage Lada.
 The yard Skoda and its parking code are removed. The Lada record and pose are unchanged.
