@@ -4132,6 +4132,9 @@ fn source_distance_squared(a: [f64; 3], b: [f64; 3]) -> f32 {
 #[path = "content_bindings.rs"]
 pub(crate) mod content_bindings;
 
+#[path = "content_index.rs"]
+pub(crate) mod content_index;
+
 #[path = "content_lamps.rs"]
 mod content_lamps;
 

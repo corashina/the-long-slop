@@ -209,7 +209,6 @@ mod tests {
                 colors: Default::default(),
                 textures: vec![],
                 defaults: Default::default(),
-                exclusions: vec![],
             },
         };
         assert!(shareable_primary(&record));

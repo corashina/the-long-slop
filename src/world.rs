@@ -41,6 +41,7 @@ pub use metrics::WorldMetrics;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod renderer_pending;
 pub(crate) mod stream;
+pub use stream::content_index::ContentIndex;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod upload_receipt;
 pub use stream::{

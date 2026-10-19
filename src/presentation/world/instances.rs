@@ -46,6 +46,9 @@ struct Instance {
     upload: Option<Arc<crate::presentation::fixed_assets::MeshUpload>>,
     caps_bound: bool,
     placement: Placement,
+    prototype: usize,
+    structure: usize,
+    settled: bool,
     session: u64,
     root: Entity,
     nodes: Vec<Entity>,
@@ -69,6 +72,7 @@ struct Instance {
 pub struct SourceInstances {
     instances: Vec<Instance>,
     pending: Option<Placement>,
+    contents: crate::world::ContentIndex,
 }
 impl SourceInstances {
     pub(crate) fn drained(&self) -> bool {
@@ -133,6 +137,7 @@ impl SourceInstances {
                 scale: Vec3::from_array(instance.placement.scale),
             });
             instance.origin = origin.offset;
+            instance.settled = false;
         }
     }
     pub(crate) fn measurement_meshes(
@@ -226,12 +231,13 @@ impl SourceInstances {
                 });
             stream.can_request_independent(1 + usize::from(child))
         }) {
-            let prototype = reference
+            let prototype_index = reference
                 .world
                 .prototypes
                 .iter()
-                .find(|p| p.source == placement.prototype)
+                .position(|p| p.source == placement.prototype)
                 .ok_or_else(|| ReferenceError("Missing generated structure prototype".into()))?;
+            let prototype = &reference.world.prototypes[prototype_index];
             let admitted = prototypes
                 .plan(stream.frame().request.session, &placement.prototype)
                 .is_some()
@@ -709,6 +715,9 @@ impl SourceInstances {
                                 upload: None,
                                 caps_bound: false,
                                 placement: placement.clone(),
+                                prototype: prototype_index,
+                                structure: 0,
+                                settled: false,
                                 session: stream.frame().request.session,
                                 root,
                                 active_nodes: prototype
@@ -837,37 +846,41 @@ impl SourceInstances {
         materials: &mut InstanceMaterials,
     ) -> Result<(), ReferenceError> {
         self.rebase(stream.origin, commands);
+        stream.index_contents(&mut self.contents);
         let frame = stream.frame();
         for instance in &mut self.instances {
             if instance.retirement.started() {
                 continue;
             }
-            if !stream.bindings_ready(&instance.placement.id) {
+            let content = stream.indexed_content(&self.contents, &instance.placement.id);
+            if !content.bindings_ready() {
                 if instance.visible {
                     commands.entity(instance.root).insert(Visibility::Hidden);
                     instance.visible = false;
                 }
                 continue;
             }
-            let Some(published) = frame
+            let cached = frame
                 .structures
-                .iter()
-                .find(|s| s.placement.id == instance.placement.id)
-            else {
+                .get(instance.structure)
+                .filter(|s| s.placement.id == instance.placement.id);
+            let Some(published) = cached.or_else(|| {
+                let index = frame
+                    .structures
+                    .iter()
+                    .position(|s| s.placement.id == instance.placement.id)?;
+                instance.structure = index;
+                Some(&frame.structures[index])
+            }) else {
                 continue;
             };
             if !instance.visible {
                 commands.entity(instance.root).insert(Visibility::Inherited);
                 instance.visible = true;
             }
-            let prototype = reference
-                .world
-                .prototypes
-                .iter()
-                .find(|p| p.source == instance.placement.prototype)
-                .ok_or_else(|| ReferenceError("Missing visible source prototype".into()))?;
+            let prototype = &reference.world.prototypes[instance.prototype];
             if !instance.caps_bound {
-                for cap in stream.generated_cap_visuals(&instance.placement.id) {
+                for cap in content.caps() {
                     crate::presentation::reference::bind_generated_cap(
                         commands,
                         cap,
@@ -877,11 +890,10 @@ impl SourceInstances {
                 }
                 instance.caps_bound = true;
             }
-            let appearance = stream.appearance(&instance.placement.id);
+            let appearance = stream.indexed_appearance(&content, &instance.placement.id);
             let food = items
-                .generated_bindings()
-                .find(|(id, item)| **id == instance.placement.id && item.food.is_some())
-                .map(|(_, item)| item);
+                .generated_item(&instance.placement.id)
+                .filter(|item| item.food.is_some());
             if let Some(item) = food {
                 let recipe = &reference.survival.foods[item.food.unwrap().prototype_index];
                 let root = reference
@@ -905,8 +917,13 @@ impl SourceInstances {
                     ));
                 }
             }
+            let mut moved = false;
             for (i, node) in prototype.nodes.iter().enumerate() {
-                if let Some(pose) = stream.lamp_button_pose(&instance.placement.id, &node.source) {
+                if let Some((_, pose)) = stream
+                    .indexed_lamp_buttons(&self.contents, &instance.placement.id)
+                    .find(|(button, _)| *button == &node.source)
+                {
+                    moved = true;
                     if let Ok(mut transform) =
                         transforms.get_mut(instance.nodes[node.gltf_node as usize])
                     {
@@ -977,6 +994,7 @@ impl SourceInstances {
                     ),
                 ) * Mat4::from_scale(scale);
                 if instance.worlds[index] != world {
+                    moved = true;
                     let delta = world * instance.worlds[index].inverse();
                     let source_changed = source_world != instance.source_worlds[index];
                     let source_delta = source_world * instance.source_worlds[index].inverse();
@@ -1012,19 +1030,37 @@ impl SourceInstances {
                     }
                 }
             }
+            let pose_world =
+                |instance: &Instance, index: usize, pose: crate::vehicle::VehiclePose| {
+                    Mat4::from_scale_rotation_translation(
+                        instance.scales[index].0,
+                        Quat::from_array(pose.rotation),
+                        Vec3::from_array(pose.position),
+                    )
+                    .as_dmat4()
+                };
+            moved = moved
+                || prototype
+                    .nodes
+                    .iter()
+                    .enumerate()
+                    .any(|(node_index, node)| {
+                        let index = node.gltf_node as usize;
+                        content.node_pose(node_index).is_some_and(|pose| {
+                            instance.worlds[index] != pose_world(instance, index, pose)
+                        })
+                    });
+            let settled = instance.settled && !moved;
+            instance.settled = !moved;
+            if settled {
+                continue;
+            }
             for (node_index, node) in prototype.nodes.iter().enumerate() {
-                let Some(pose) = stream.generated_node_pose(&instance.placement.id, node_index)
-                else {
+                let Some(pose) = content.node_pose(node_index) else {
                     continue;
                 };
                 let index = node.gltf_node as usize;
-                let scale = instance.scales[index].0;
-                let world = Mat4::from_scale_rotation_translation(
-                    scale,
-                    Quat::from_array(pose.rotation),
-                    Vec3::from_array(pose.position),
-                )
-                .as_dmat4();
+                let world = pose_world(instance, index, pose);
                 instance.worlds[index] = world;
                 let source_scale = instance.scales[index].1;
                 instance.source_worlds[index] = Mat4::from_scale_rotation_translation(
@@ -1071,12 +1107,7 @@ impl SourceInstances {
             if instance.retirement.started() {
                 continue;
             }
-            let prototype = reference
-                .world
-                .prototypes
-                .iter()
-                .find(|p| p.source == instance.placement.prototype)
-                .expect("admitted prototype");
+            let prototype = &reference.world.prototypes[instance.prototype];
             for renderer in &mut instance.renderers {
                 let mut visible = true;
                 let mut fade = 1.0;
@@ -1138,12 +1169,7 @@ impl SourceInstances {
             if instance.retirement.started() {
                 continue;
             }
-            let prototype = reference
-                .world
-                .prototypes
-                .iter()
-                .find(|p| p.source == instance.placement.prototype)
-                .expect("admitted prototype");
+            let prototype = &reference.world.prototypes[instance.prototype];
             for renderer in &instance.renderers {
                 let node = &prototype.nodes[renderer.node];
                 if reference
