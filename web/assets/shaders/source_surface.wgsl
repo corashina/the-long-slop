@@ -11,7 +11,7 @@
 
 #import source_view_lighting::{lighting, diffuse_sh, indirect_specular, direct_attenuation, fog_factor, sun_cookie, sun_cookie_sampler}
 
-#import "shaders/source_lighting.wgsl"::{lamp_lighting, object_first_light, receiver, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler}
+#import "shaders/source_lighting.wgsl"::{lamp_lighting, object_first_light, receiver, cookie_uv_gradient, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler}
 
 struct SourceUniform {
     color: vec4<f32>,
@@ -185,6 +185,8 @@ fn fragment(
     let receive_shadows = (u32(source_renderer.z) & 2u) != 0u;
     let sun_attenuation = direct_attenuation(in.world_position.xyz,source_screen.xy/source_screen.w,view_depth,receive_shadows);
     light = source_brdf(diffuse,specular,smoothness,pbr.N,pbr.V,lighting.direction_to_sun.xyz)*lighting.sun_radiance.xyz*sun_attenuation;
+    let world_dx = dpdx(in.world_position);
+    let world_dy = dpdy(in.world_position);
     // Visit low bits first. Floating-point accumulation keeps source slot order.
     var remaining = source_lights;
     loop {
@@ -216,11 +218,15 @@ fn fragment(
                 cookie_uv = local.xy / local.w + 0.5;
                 if any(cookie_uv < vec2(0.0)) || any(cookie_uv > vec2(1.0)) { continue; }
             }
-            if lamp.cookie_rect.x == 1.0 { weight *= textureSampleGrad(sun_cookie, sun_cookie_sampler, cookie_uv, dpdx(cookie_uv), dpdy(cookie_uv)).a; }
-            else if lamp.cookie_rect.x == 2.0 { weight *= textureSampleGrad(default_cookie, default_sampler, cookie_uv, dpdx(cookie_uv), dpdy(cookie_uv)).a; }
+            let uv_dx = cookie_uv_gradient(lamp, local, world_dx);
+            let uv_dy = cookie_uv_gradient(lamp, local, world_dy);
+            if lamp.cookie_rect.x == 1.0 { weight *= textureSampleGrad(sun_cookie, sun_cookie_sampler, cookie_uv, uv_dx, uv_dy).a; }
+            else if lamp.cookie_rect.x == 2.0 { weight *= textureSampleGrad(default_cookie, default_sampler, cookie_uv, uv_dx, uv_dy).a; }
             else {
-                let array_uv = select(cookie_uv, cookie_uv * 0.5 + 0.25, lamp.cookie_rect.x > 3.0);
-                weight *= textureSampleGrad(cookies, cookie_sampler, array_uv, i32(lamp.cookie_rect.x) - 3, dpdx(array_uv), dpdy(array_uv)).a;
+                let half = lamp.cookie_rect.x > 3.0;
+                let array_uv = select(cookie_uv, cookie_uv * 0.5 + 0.25, half);
+                let scale = select(1.0, 0.5, half);
+                weight *= textureSampleGrad(cookies, cookie_sampler, array_uv, i32(lamp.cookie_rect.x) - 3, uv_dx * scale, uv_dy * scale).a;
             }
         }
         light += source_brdf(diffuse, specular, smoothness, pbr.N, pbr.V, direction) * lamp.color.rgb * weight;

@@ -95,7 +95,7 @@ fn vertex(input:GrassVertex)->GrassOutput {
 #ifdef PREPASS_PIPELINE
 @fragment fn fragment(input:GrassOutput) {if input.alive<.5 || !source_lod_keep(input.position.xy,grass.lod.x) {discard;}}
 #else
-#import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler}
+#import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, cookie_uv_gradient, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler}
 #import source_view_lighting::{lighting, diffuse_sh, direct_attenuation, fog_factor, sun_cookie, sun_cookie_sampler}
 #import bevy_pbr::{forward_io::FragmentOutput,pbr_types::pbr_input_new}
 @fragment
@@ -103,6 +103,7 @@ fn fragment(input:GrassOutput)->FragmentOutput {
     if input.alive<.5 || !source_lod_keep(input.position.xy,grass.lod.x) {discard;}
     let sun_uv=(lighting.cookie_from_world*vec4(input.world,1.)).xy;
     var color=lighting.sun_radiance.rgb*input.color.rgb*textureSample(sun_cookie,sun_cookie_sampler,sun_uv).a;
+    let world_dx=dpdx(vec4(input.world,1.));let world_dy=dpdy(vec4(input.world,1.));
     for(var i=0u;i<lamp_lighting.counts.x;i+=1u){
         let lamp=lamp_lighting.lights[i];if (receiver.x & lamp.mask.x)==0u {continue;}
         var weight=1.;let local=lamp.cookie_from_world*vec4(input.world,1.);
@@ -115,9 +116,10 @@ fn fragment(input:GrassOutput)->FragmentOutput {
         if lamp.cookie_rect.x>0. {
             var uv=local.xy/lamp.cookie_size+lamp.cookie_rect.yz+.5;
             if lamp.direction_kind.w!=0. {if local.z<=0. {continue;} uv=local.xy/local.w+.5;if any(uv<vec2(0.))||any(uv>vec2(1.)){continue;}}
-            if lamp.cookie_rect.x==1. {weight*=textureSampleGrad(sun_cookie,sun_cookie_sampler,uv,dpdx(uv),dpdy(uv)).a;}
-            else if lamp.cookie_rect.x==2. {weight*=textureSampleGrad(default_cookie,default_sampler,uv,dpdx(uv),dpdy(uv)).a;}
-            else {weight*=textureSampleGrad(cookies,cookie_sampler,uv,i32(lamp.cookie_rect.w),dpdx(uv),dpdy(uv)).a;}
+            let uv_dx=cookie_uv_gradient(lamp,local,world_dx);let uv_dy=cookie_uv_gradient(lamp,local,world_dy);
+            if lamp.cookie_rect.x==1. {weight*=textureSampleGrad(sun_cookie,sun_cookie_sampler,uv,uv_dx,uv_dy).a;}
+            else if lamp.cookie_rect.x==2. {weight*=textureSampleGrad(default_cookie,default_sampler,uv,uv_dx,uv_dy).a;}
+            else {weight*=textureSampleGrad(cookies,cookie_sampler,uv,i32(lamp.cookie_rect.w),uv_dx,uv_dy).a;}
         }
         color+=lamp.color.rgb*input.color.rgb*weight;
     }

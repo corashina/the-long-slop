@@ -14,6 +14,12 @@ struct SourceLighting {
     counts: vec4<u32>,
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> lamp_lighting: SourceLighting;
+// Cookie UV derivative by the chain rule. Callers take world derivatives before the lamp loop, in uniform control flow.
+fn cookie_uv_gradient(lamp: SourceLight, local: vec4<f32>, world_gradient: vec4<f32>) -> vec2<f32> {
+    let local_gradient = lamp.cookie_from_world * world_gradient;
+    if lamp.direction_kind.w == 0.0 { return local_gradient.xy / lamp.cookie_size; }
+    return (local_gradient.xy * local.w - local.xy * local_gradient.w) / (local.w * local.w);
+}
 @group(#{MATERIAL_BIND_GROUP}) @binding(103) var cookies: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var cookie_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(105) var attenuation: texture_2d<f32>;
