@@ -281,3 +281,18 @@ impl PushState {
         Some(target.item)
     }
 }
+
+#[cfg(test)]
+impl PushState {
+    pub(super) fn wheel_actions_fixture(player: PlayerReference) -> Self {
+        Self {
+            rules: HashMap::new(),
+            player,
+            steering_angles: Vec::new(),
+            grip: None,
+            cancelled: false,
+            steer: None,
+            target: None,
+        }
+    }
+}

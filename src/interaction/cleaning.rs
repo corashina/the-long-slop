@@ -895,3 +895,22 @@ pub(crate) fn validate_tools(
     }
     Ok(())
 }
+
+#[cfg(test)]
+impl CleaningTools {
+    pub(super) fn empty_for_wheel_actions() -> Self {
+        Self {
+            states: Vec::new(),
+            contacts: Vec::new(),
+            sprays: Vec::new(),
+            signals: Vec::new(),
+            bindings: HashMap::new(),
+            item_conditions: HashMap::new(),
+            texts: HashMap::new(),
+            washes: Vec::new(),
+            wash_indices: HashMap::new(),
+            wash_colliders: Vec::new(),
+            collider_enabled: HashMap::new(),
+        }
+    }
+}

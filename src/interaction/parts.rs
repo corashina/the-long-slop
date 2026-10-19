@@ -1228,3 +1228,22 @@ fn error(s: &str) -> ReferenceError {
 fn rotation(q: [f32; 4]) -> rapier3d::math::Rotation {
     rapier3d::math::Rotation::from_xyzw(q[0], q[1], q[2], q[3])
 }
+
+#[cfg(test)]
+impl PartAttachments {
+    pub(super) fn empty_for_wheel_actions() -> Self {
+        Self {
+            scan_mask: 1,
+            scan_radius: 1.,
+            parts: Vec::new(),
+            indices: HashMap::new(),
+            slots: Vec::new(),
+            slot_indices: HashMap::new(),
+            collider_slots: HashMap::new(),
+            wheel_covers: HashMap::new(),
+            chassis: Vec::new(),
+            bound: false,
+            plate_mass: Vec::new(),
+        }
+    }
+}

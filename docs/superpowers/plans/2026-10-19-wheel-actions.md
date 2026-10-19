@@ -10,7 +10,7 @@
 
 **Spec:** [Approved wheel action specification](../specs/2026-10-19-wheel-actions-design.md).
 
-Status: Implementation plan awaiting user review.
+Status: Implementation complete. Independent reviews pending.
 Worktree: `C:/Users/Corashina/.codex/worktrees/codebase-architecture/the-long-drive-wasm`.
 Branch: `codex/codebase-architecture`.
 Starting commit: `3157f5a`.
@@ -108,7 +108,7 @@ pub(crate) fn complete_wheel_action(
 `None` preserves the notice. `Some("")` clears it. Other values replace it.
 The notice result does not encode operation success.
 
-- [ ] **Step 1: Write the critical failing tests and their small fixture.**
+- [x] **Step 1: Write the critical failing tests and their small fixture.**
 
 Register the private `wheel_actions` module from `src/interaction.rs` for the failing-test run.
 Register `tests.rs` and `fixture.rs` under that module with `#[cfg(test)]`.
@@ -155,7 +155,7 @@ Move its body beyond `carry_drop_distance`, then submit an ASSEMBLE press.
 Run the real interaction step. Check the returned Drop and unchanged tire attachment.
 Dispatch a wheel action only if the final returned action is `InteractionAction::Wheel`.
 
-- [ ] **Step 2: Confirm the tests fail for the missing wheel action implementation.**
+- [x] **Step 2: Confirm the tests fail for the missing wheel action implementation.**
 
 Run `./scripts/check.ps1 -Filter wheel_actions`.
 Resolve formatting errors before treating the run as a failing behavior check.
@@ -164,7 +164,7 @@ Confirm that the compiler error points into the registered wheel module or its t
 A successful zero-test run is not an accepted initial failure.
 An unavailable toolchain or invalid fixture is not the expected failure.
 
-- [ ] **Step 3: Implement the enum and executor.**
+- [x] **Step 3: Implement the enum and executor.**
 
 Add the exact interfaces above in `src/interaction/wheel_actions.rs`.
 Keep `mod wheel_actions` and add `pub use wheel_actions::WheelAction` in `src/interaction.rs`.
@@ -178,7 +178,7 @@ Call `drop_held` rather than its lower-level carry method.
 Keep preflight before carry release for installation.
 Keep release before attempted split or join. Add no rollback.
 
-- [ ] **Step 4: Migrate runtime dispatch and audio in the same change.**
+- [x] **Step 4: Migrate runtime dispatch and audio in the same change.**
 
 Replace the four runtime wheel branches with one nested variant branch.
 Pass the original input and aim, plus existing borrowed owners.
@@ -189,7 +189,7 @@ Update audio matching for the nested variant.
 Remove and install use the wheel item. Join uses the tire.
 Keep split completion as `PartRemove(tire)` and keep the current audio drain point.
 
-- [ ] **Step 5: Run targeted checks and inspect the complete diff.**
+- [x] **Step 5: Run targeted checks and inspect the complete diff.**
 
 Run `./scripts/check.ps1 -Filter wheel_actions`.
 Expected: the nine named tests execute and pass, formatting passes, and the workspace WASM compile check passes.
@@ -205,7 +205,7 @@ Check that generated-wheel registration, save reconstruction, and assembly algor
 Check that only test code changed in the eleven fixture-support owner files.
 Do not run full checks, release builds, or browser acceptance for this task.
 
-- [ ] **Step 6: Commit the complete working change.**
+- [x] **Step 6: Commit the complete working change.**
 
 Stage only the files in this plan that changed.
 Commit with `refactor: complete wheel actions within interaction`.

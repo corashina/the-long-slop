@@ -1009,3 +1009,24 @@ pub enum ControlAction {
     InteriorLight(u8),
     ToggleHomeLight(SourceId),
 }
+
+#[cfg(test)]
+impl MechanismState {
+    pub(super) fn empty_for_wheel_actions() -> Self {
+        Self {
+            radio_controls: HashMap::new(),
+            radio_seconds: 0.,
+            last_radio_tune: 0.,
+            radio_repeat: 1.,
+            controls: Vec::new(),
+            items: HashMap::new(),
+            frames: Vec::new(),
+            nodes: HashMap::new(),
+            bodies: HashMap::new(),
+            scroll_sensitivity: 1.,
+            control_action: None,
+            item_nodes: HashMap::new(),
+            order: Vec::new(),
+        }
+    }
+}

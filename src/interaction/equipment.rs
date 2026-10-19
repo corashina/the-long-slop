@@ -93,3 +93,14 @@ impl EquipmentState {
         });
     }
 }
+
+#[cfg(test)]
+impl EquipmentState {
+    pub(super) fn empty_for_wheel_actions() -> Self {
+        Self {
+            item: None,
+            anchor: NodeId(0),
+            colliders: Vec::new(),
+        }
+    }
+}

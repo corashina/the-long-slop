@@ -1,5 +1,5 @@
 //! Source audio signals and bounded completed-action events.
-use crate::interaction::InteractionAction;
+use crate::interaction::{InteractionAction, WheelAction};
 use crate::reference::{AudioReference, ColliderId, ItemId, NodeId, ReferenceManifest};
 use crate::starting_area::StartingArea;
 use crate::vehicle::{PhysicsWorld, to_rapier};
@@ -540,9 +540,9 @@ impl AudioState {
             }
             InteractionAction::PartInstall(item)
             | InteractionAction::PartRemove(item)
-            | InteractionAction::WheelRemove(item)
-            | InteractionAction::WheelInstall { item, .. } => Some(item),
-            InteractionAction::WheelJoin { tire, .. } => Some(tire),
+            | InteractionAction::Wheel(WheelAction::Remove(item))
+            | InteractionAction::Wheel(WheelAction::Install { item, .. }) => Some(item),
+            InteractionAction::Wheel(WheelAction::Join { tire, .. }) => Some(tire),
             _ => None,
         };
         if let Some(id) = item.and_then(|item| self.crafted.get(&item)).copied() {

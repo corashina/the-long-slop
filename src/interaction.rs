@@ -13,6 +13,8 @@ pub mod parts;
 pub mod push;
 pub mod storage;
 pub mod targets;
+mod wheel_actions;
+pub use wheel_actions::WheelAction;
 pub mod wheels;
 use feedback::ActionMask;
 pub use targets::{InteractionBlock, LightAim, ResolvedAim};
@@ -76,20 +78,11 @@ pub enum InteractionAction {
         poured_liters: f32,
         fractions: [f32; 6],
     },
-    WheelRemove(ItemId),
+    Wheel(WheelAction),
     PartRemove(ItemId),
     PlateRemove(ItemId),
     PlateMount(ItemId),
     PartInstall(ItemId),
-    WheelInstall {
-        item: ItemId,
-        target: WheelSlotId,
-    },
-    WheelSplit(ItemId),
-    WheelJoin {
-        rim: ItemId,
-        tire: ItemId,
-    },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1431,10 +1424,10 @@ impl InteractionState {
                 match slot {
                     SlotTarget::Wheel(slot) => {
                         self.carry.cancel_input();
-                        action = Some(InteractionAction::WheelInstall {
+                        action = Some(InteractionAction::Wheel(WheelAction::Install {
                             item: held,
                             target: slot,
-                        });
+                        }));
                     }
                     SlotTarget::Attachment(target) => {
                         self.mount_plate(held, target, items, physics)
@@ -1456,7 +1449,7 @@ impl InteractionState {
                 }
             } else if let (Some(rim), Some(tire)) = (available.rim, available.tire) {
                 self.carry.cancel_input();
-                action = Some(InteractionAction::WheelJoin { rim, tire });
+                action = Some(InteractionAction::Wheel(WheelAction::Join { rim, tire }));
             }
         }
         if input.pressed & keys::GRAB != 0
@@ -1467,7 +1460,7 @@ impl InteractionState {
         {
             if available.actions.0 & ActionMask::DISMOUNT != 0 {
                 if let Some(rim) = available.rim {
-                    action = Some(InteractionAction::WheelSplit(rim));
+                    action = Some(InteractionAction::Wheel(WheelAction::Split(rim)));
                 } else if let Some(target) = grab_target {
                     if self.attachments.contains(target.item) {
                         self.remove_plate(target.item, target.point, player, items, physics)
@@ -1486,7 +1479,7 @@ impl InteractionState {
                         action = Some(InteractionAction::PartRemove(target.item));
                         self.completed_action(InteractionAction::PartRemove(target.item));
                     } else {
-                        action = Some(InteractionAction::WheelRemove(target.item));
+                        action = Some(InteractionAction::Wheel(WheelAction::Remove(target.item)));
                     }
                 }
             } else if available.actions.0 & ActionMask::PICKUP != 0
@@ -1562,7 +1555,7 @@ impl InteractionState {
                 matches!(item.location, ItemLocation::Held | ItemLocation::World)
             })
         {
-            action = Some(InteractionAction::WheelSplit(item));
+            action = Some(InteractionAction::Wheel(WheelAction::Split(item)));
         }
         if self.carry.step(carry_input, player, physics, dt)
             && let Some(item) = self.drop_held(items, physics)

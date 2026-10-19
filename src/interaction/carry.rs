@@ -483,3 +483,24 @@ impl CarryState {
         false
     }
 }
+
+#[cfg(test)]
+impl CarryState {
+    pub(super) fn wheel_actions_fixture(
+        player: PlayerReference,
+        rules: &[(ItemId, PickupReference)],
+    ) -> Self {
+        Self {
+            reference: player,
+            rules: rules.iter().cloned().collect(),
+            plates: Default::default(),
+            held: None,
+            anchor: None,
+            acquisition_held: false,
+            throw_charge: 0.,
+            throwing: false,
+            charge_falling: false,
+            charge_stopped: false,
+        }
+    }
+}

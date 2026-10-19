@@ -1025,121 +1025,18 @@ impl GarageRuntime {
                 }
                 self.notice = "";
             }
-            Some(InteractionAction::WheelRemove(item)) => {
-                if let Some(slot) = self.wheels.slot_for_item(item) {
-                    self.notice =
-                        match self
-                            .wheels
-                            .remove(slot, &mut self.area.items, &mut self.physics)
-                        {
-                            Ok(rim) => {
-                                self.area
-                                    .interaction
-                                    .completed_action(InteractionAction::WheelRemove(rim));
-                                let point = aim.grab_target.map_or(
-                                    self.area.items.get(rim).unwrap().pose.position,
-                                    |target| target.point,
-                                );
-                                match self.area.interaction.pickup_item(
-                                    rim,
-                                    point,
-                                    &self.area.player,
-                                    &mut self.area.items,
-                                    &mut self.physics,
-                                ) {
-                                    Ok(()) => "",
-                                    Err(_) => "Cannot carry this wheel.",
-                                }
-                            }
-                            Err(_) => "Cannot remove this wheel.",
-                        };
+            Some(InteractionAction::Wheel(action)) => {
+                if let Some(notice) = self.area.interaction.complete_wheel_action(
+                    action,
+                    input,
+                    aim,
+                    &mut self.wheels,
+                    &self.area.player,
+                    &mut self.area.items,
+                    &mut self.physics,
+                ) {
+                    self.notice = notice;
                 }
-            }
-            Some(InteractionAction::WheelInstall { item, target }) => {
-                if self
-                    .wheels
-                    .can_install(item, target, &self.area.items)
-                    .is_err()
-                {
-                    self.notice = "This wheel does not fit the slot.";
-                } else {
-                    self.area
-                        .interaction
-                        .drop_held(&mut self.area.items, &mut self.physics);
-                    self.notice = if self
-                        .wheels
-                        .install(item, target, &mut self.area.items, &mut self.physics)
-                        .is_ok()
-                    {
-                        self.area
-                            .interaction
-                            .completed_action(InteractionAction::WheelInstall { item, target });
-                        if let Some(sensor) = self.wheels.sensor(target) {
-                            self.area.interaction.bind_wheel_sensor(
-                                sensor,
-                                item,
-                                &mut self.physics,
-                            );
-                        }
-                        ""
-                    } else {
-                        "This wheel does not fit the slot."
-                    };
-                }
-            }
-            Some(InteractionAction::WheelSplit(rim)) => {
-                self.area
-                    .interaction
-                    .drop_held(&mut self.area.items, &mut self.physics);
-                if let Ok((_, tire)) =
-                    self.wheels
-                        .split(rim, &mut self.area.items, &mut self.physics)
-                {
-                    self.area
-                        .interaction
-                        .completed_action(InteractionAction::PartRemove(tire));
-                    self.notice = "";
-                    if input.pressed & keys::GRAB != 0 {
-                        let point =
-                            aim.focus_target.or(aim.grab_target).map_or(
-                                self.area.items.get(tire).unwrap().pose.position,
-                                |target| target.point,
-                            );
-                        if self
-                            .area
-                            .interaction
-                            .pickup_item(
-                                tire,
-                                point,
-                                &self.area.player,
-                                &mut self.area.items,
-                                &mut self.physics,
-                            )
-                            .is_err()
-                        {
-                            self.notice = "Cannot carry this tire.";
-                        }
-                    }
-                } else {
-                    self.notice = "Cannot dismount this tire.";
-                }
-            }
-            Some(InteractionAction::WheelJoin { rim, tire }) => {
-                self.area
-                    .interaction
-                    .drop_held(&mut self.area.items, &mut self.physics);
-                self.notice = if self
-                    .wheels
-                    .assemble(rim, tire, &mut self.area.items, &mut self.physics)
-                    .is_ok()
-                {
-                    self.area
-                        .interaction
-                        .completed_action(InteractionAction::WheelJoin { rim, tire });
-                    ""
-                } else {
-                    "This tire does not fit the rim."
-                };
             }
             _ => {}
         }

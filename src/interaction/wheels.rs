@@ -1168,3 +1168,63 @@ fn item_pose(
 fn error(message: &str) -> ReferenceError {
     ReferenceError(message.into())
 }
+
+#[cfg(test)]
+impl WheelAssemblies {
+    pub(super) fn wheel_actions_fixture(
+        rim: ItemId,
+        tire: ItemId,
+        spare: ItemId,
+        slot: WheelSlotId,
+        spare_fits: bool,
+    ) -> Self {
+        let parts = [(rim, true, 5.), (tire, false, 7.), (spare, true, 3.)]
+            .into_iter()
+            .enumerate()
+            .map(|(i, (item, rim, mass))| Part {
+                item,
+                rim,
+                radius: if rim { 0.2 } else { 0.3 },
+                quality: 1.,
+                mass,
+                last_mass: f32::NAN,
+                rotation: Rotation::IDENTITY,
+                tire_mount: rim.then_some(Pose::IDENTITY),
+                tire: (i == 0).then_some(1),
+                collider_ids: vec![ColliderId(item.0 + 1)],
+                colliders: Vec::new(),
+                free_body: None,
+            })
+            .collect();
+        let mut compatible = HashSet::from([rim]);
+        if spare_fits {
+            compatible.insert(spare);
+        }
+        Self {
+            rules: Vec::new(),
+            parts,
+            indices: HashMap::from([(rim, 0), (tire, 1), (spare, 2)]),
+            slots: vec![Slot {
+                id: slot,
+                vehicle: 0,
+                index: 0,
+                rim: None,
+                original_rim: rim,
+                hub_to_mount: Pose::IDENTITY,
+                compatible,
+                last_support: None,
+                sensor: None,
+            }],
+            tire_fits: HashSet::from([(rim, tire)]),
+            vehicles: vec![VehicleMass {
+                tanks: Vec::new(),
+                base_mass: 100.,
+                last_mass: f32::NAN,
+            }],
+            generated_tanks: Vec::new(),
+            bound: false,
+            general_mass: Vec::new(),
+            covers: HashMap::new(),
+        }
+    }
+}
