@@ -35,6 +35,16 @@ Run formatting, native tests, and the release WASM check:
 
 Docker caches use `tld-wasm-cargo` and `tld-wasm-target`.
 The build script writes the browser package to `web/pkg`.
+It also prepares Brotli downloads in `.cache/http-compression`. Keep that directory with the server deployment.
+After replacing an export without rebuilding WASM, prepare its downloads and restart the server:
+
+```powershell
+node scripts/prepare-http-compression.mjs
+```
+
+The server negotiates Brotli for WASM and current package JSON. It keeps images and package receipts unchanged.
+Run `node scripts/measure-startup-downloads.mjs` to check transfer bytes, decoded hashes, and conditional cache requests.
+This check measures HTTP transfers. It does not measure playable startup.
 
 ## Development asset library
 

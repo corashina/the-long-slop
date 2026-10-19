@@ -11,6 +11,8 @@ try {
         --mount 'type=volume,source=tld-wasm-target,target=/target' `
         --env "CARGO_TARGET_DIR=$cargoTarget" $image `
         sh -c 'cargo build --locked --release --target wasm32-unknown-unknown --lib && mkdir -p web/pkg && wasm-bindgen --target web --out-dir web/pkg --out-name my_summer_slop "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/my_summer_slop.wasm"'
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & node "$PSScriptRoot/prepare-http-compression.mjs"
     exit $LASTEXITCODE
 } catch {
     Write-Error $_

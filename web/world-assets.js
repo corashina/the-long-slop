@@ -42,7 +42,9 @@ export async function readAsset(base,receipt,signal){
   try{
    if(!response.ok)throw Error('Asset HTTP '+response.status+': '+receipt.file);
    const declared=response.headers.get('content-length');
-   if(declared!==null&&(!/^\d+$/.test(declared)||Number(declared)!==receipt.bytes))throw Error('Asset declared size differs: '+receipt.file);
+   const encoding=response.headers.get('content-encoding')?.trim().toLowerCase();
+   // Fetch decodes the body, but Content-Length still describes the encoded bytes.
+   if(declared!==null&&(!/^\d+$/.test(declared)||((!encoding||encoding==='identity')&&Number(declared)!==receipt.bytes)))throw Error('Asset declared size differs: '+receipt.file);
    if(!response.body)throw Error('Missing asset body.');
    bytes=new Uint8Array(receipt.bytes);reader=response.body.getReader();
    for(;;){const {done,value}=await reader.read();if(done)break;
