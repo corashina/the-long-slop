@@ -319,7 +319,7 @@ pub(crate) fn prepare_instruments(
         &Mesh3d,
         &MeshMaterial3d<SourceMaterial>,
         &GlobalTransform,
-        &super::renderers::SourceRenderer,
+        &super::renderer_visibility::SourceRenderer,
         &bevy::gltf::GltfExtras,
     )>,
 ) {
@@ -391,7 +391,7 @@ pub(crate) fn prepare_instruments(
                 let mut warm = commands.spawn((
                     mesh.clone(),
                     MeshMaterial3d(material.clone()),
-                    crate::presentation::materials::SourceMaterialWarmup,
+                    crate::presentation::renderer_visibility::SourceMaterialWarmup,
                     renderer.clone(),
                     far,
                     Visibility::Visible,

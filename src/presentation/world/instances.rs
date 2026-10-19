@@ -531,7 +531,7 @@ impl SourceInstances {
                                             ChildOf(nodes[node.index as usize]),
                                             RenderLayers::layer(source_node.layer as usize),
                                             SourceShadowMode(shadow),
-                                            crate::presentation::renderers::SourceRenderer(
+                                            crate::presentation::renderer_visibility::SourceRenderer(
                                                 extras.source_renderer.clone().ok_or_else(
                                                     || {
                                                         ReferenceError(
