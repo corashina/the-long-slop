@@ -336,6 +336,9 @@ impl SourceContents {
             .chain(replays.iter().take(1).map(|p| (p, true)))
         {
             let p = instance;
+            if !replay_only && replays.iter().any(|root| root.id == p.id) {
+                continue;
+            }
             if self
                 .cursors
                 .iter()

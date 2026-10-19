@@ -671,8 +671,10 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
         }
     }
     for (_, path, handle) in &source.textures {
-        if !server.is_loaded_with_dependencies(handle.id())
-            || !world.resource::<Assets<Image>>().contains(handle.id())
+        if matches!(
+            server.get_load_state(handle.id()),
+            Some(bevy::asset::LoadState::Failed(_))
+        ) || !world.resource::<Assets<Image>>().contains(handle.id())
         {
             return Err(fail(path.clone()));
         }

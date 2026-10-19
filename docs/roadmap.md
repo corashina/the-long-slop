@@ -216,7 +216,9 @@ The integration replaces the obsolete station generator with checked source-worl
 | Revisits | Stable identities, absolute poses, compact change records, attachment state, and source replay |
 | Final corrections | Loader headroom, double-precision local transforms, and lazy painting assets |
 
-We retain each changed object as a compact record. Active geometry has separate limits.
+We retain nearby changed objects as compact records. Active geometry has separate limits.
+Carried, stored, equipped, mounted, and attached items keep their records after their source owner retires.
+Abandoned roadside records expire after both the player and car leave the source and destination.
 Changed-object records have no fixed count limit. Source checkpoints and first-call history share a 16 MiB limit.
 Active CPU/GPU limits are 256/128 MiB. Prototype CPU/GPU limits are 512/1,024 MiB.
 The object cap is 32,768. See [matching package](#matching-package) for the retained build and deferred acceptance.

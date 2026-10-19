@@ -2,7 +2,7 @@
 use super::{AbsolutePose, ObjectKey, Placement, WorldBounds};
 use crate::reference::SourceId;
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -60,6 +60,10 @@ pub struct ChangeRecords {
     #[serde(skip)]
     identities: HashMap<ObjectKey, usize>,
     #[serde(skip)]
+    attachment_owners: HashMap<ObjectKey, usize>,
+    #[serde(skip)]
+    attachment_owner_bytes: usize,
+    #[serde(skip)]
     regions: BTreeMap<(i64, i64), Vec<usize>>,
     #[serde(skip)]
     revision: u64,
@@ -113,6 +117,26 @@ impl ChangeRecords {
     pub fn revision(&self) -> u64 {
         self.revision
     }
+    pub(crate) fn has_attachment_dependents(&self, key: &ObjectKey) -> bool {
+        self.attachment_owners.contains_key(key)
+    }
+    fn index_attachment_owner(&mut self, owner: &ObjectKey) {
+        if let Some(count) = self.attachment_owners.get_mut(owner) {
+            *count += 1;
+        } else {
+            self.attachment_owners.insert(owner.clone(), 1);
+            self.attachment_owner_bytes += key_heap(owner);
+        }
+    }
+    fn unindex_attachment_owner(&mut self, owner: &ObjectKey) {
+        let count = self.attachment_owners.get_mut(owner).unwrap();
+        *count -= 1;
+        if *count == 0 {
+            self.attachment_owners.remove(owner);
+            self.attachment_owner_bytes =
+                self.attachment_owner_bytes.saturating_sub(key_heap(owner));
+        }
+    }
     pub fn record(&mut self, key: ObjectKey, current: ObjectSnapshot, baseline: &ObjectSnapshot) {
         if &current == baseline {
             self.forget(&key);
@@ -125,6 +149,22 @@ impl ChangeRecords {
             return;
         }
         if let Some(&index) = self.identities.get(&key) {
+            let old_owner = self.records[index]
+                .1
+                .snapshot
+                .as_ref()
+                .and_then(attachment_owner);
+            let new_owner = attachment_owner(&current);
+            if old_owner != new_owner {
+                let old_owner = old_owner.cloned();
+                let new_owner = new_owner.cloned();
+                if let Some(owner) = old_owner.as_ref() {
+                    self.unindex_attachment_owner(owner);
+                }
+                if let Some(owner) = new_owner.as_ref() {
+                    self.index_attachment_owner(owner);
+                }
+            }
             let old_region = self.records[index]
                 .1
                 .snapshot
@@ -222,6 +262,22 @@ impl ChangeRecords {
     }
     fn insert(&mut self, key: ObjectKey, change: ObjectChange) {
         let index = if let Some(&index) = self.identities.get(&key) {
+            let old_owner = self.records[index]
+                .1
+                .snapshot
+                .as_ref()
+                .and_then(attachment_owner);
+            let new_owner = change.snapshot.as_ref().and_then(attachment_owner);
+            if old_owner != new_owner {
+                let old_owner = old_owner.cloned();
+                let new_owner = new_owner.cloned();
+                if let Some(owner) = old_owner.as_ref() {
+                    self.unindex_attachment_owner(owner);
+                }
+                if let Some(owner) = new_owner.as_ref() {
+                    self.index_attachment_owner(owner);
+                }
+            }
             self.unindex(index);
             self.payload_bytes = self
                 .payload_bytes
@@ -230,6 +286,9 @@ impl ChangeRecords {
             self.records[index].1 = change;
             index
         } else {
+            if let Some(owner) = change.snapshot.as_ref().and_then(attachment_owner) {
+                self.index_attachment_owner(owner);
+            }
             let index = self.records.len();
             self.identities.insert(key.clone(), index);
             self.payload_bytes += change_heap(&key, &change);
@@ -245,6 +304,15 @@ impl ChangeRecords {
         let Some(index) = self.identities.remove(key) else {
             return false;
         };
+        if let Some(owner) = self.records[index]
+            .1
+            .snapshot
+            .as_ref()
+            .and_then(attachment_owner)
+            .cloned()
+        {
+            self.unindex_attachment_owner(&owner);
+        }
         self.unindex(index);
         let last = self.records.len() - 1;
         if index != last {
@@ -262,6 +330,23 @@ impl ChangeRecords {
         }
         self.revision = self.revision.wrapping_add(1);
         true
+    }
+    pub(crate) fn retain(
+        &mut self,
+        mut keep: impl FnMut(&ObjectKey, &ObjectChange) -> bool,
+    ) -> bool {
+        let revision = self.revision;
+        let mut index = 0;
+        while index < self.records.len() {
+            let (key, change) = &self.records[index];
+            if keep(key, change) {
+                index += 1;
+            } else {
+                let key = key.clone();
+                self.forget(&key);
+            }
+        }
+        self.revision != revision
     }
     pub fn get(&self, key: impl std::borrow::Borrow<ObjectKey>) -> Option<&ObjectChange> {
         self.identities
@@ -341,12 +426,71 @@ impl ChangeRecords {
             + self.identities.capacity().saturating_mul(2)
                 * (std::mem::size_of::<(ObjectKey, usize)>() + 1)
             + 16
+            + self.attachment_owners.capacity().saturating_mul(2)
+                * (std::mem::size_of::<(ObjectKey, usize)>() + 1)
+            + 16
+            + self.attachment_owner_bytes
             + self.payload_bytes
             + self.region_bytes
             + (self.regions.len() + 1)
                 * (11 * std::mem::size_of::<((i64, i64), Vec<usize>)>()
                     + 12 * std::mem::size_of::<usize>()
                     + 64)
+    }
+}
+fn attachment_owner(snapshot: &ObjectSnapshot) -> Option<&ObjectKey> {
+    snapshot.attachment.as_ref()?.owner.as_ref()
+}
+/// Both source and destination must leave both horizontal focus windows.
+pub(crate) fn roadside_change_expired(
+    change: &ObjectChange,
+    foci: [[f64; 3]; 2],
+    radius_squared: f32,
+) -> bool {
+    let Some(source) = &change.replay else {
+        return false;
+    };
+    foci.into_iter().all(|focus| {
+        super::contents::distance(focus, source.pose.position) >= radius_squared
+            && change.snapshot.as_ref().is_none_or(|snapshot| {
+                super::contents::distance(focus, snapshot.pose.position) >= radius_squared
+            })
+    })
+}
+pub(crate) fn external_attachment(change: &ObjectChange, records: &ChangeRecords) -> bool {
+    change
+        .snapshot
+        .as_ref()
+        .and_then(|s| s.attachment.as_ref())
+        .is_some_and(|attachment| {
+            attachment.owner.as_ref().is_none_or(|owner| {
+                records.get(owner).is_none_or(|parent| {
+                    change.instance.is_none() || parent.instance != change.instance
+                })
+            })
+        })
+}
+/// Keep each external child and every recorded owner up to the root.
+pub(crate) fn external_attachment_chain(
+    records: &ChangeRecords,
+    dependencies: &mut HashSet<ObjectKey>,
+) {
+    dependencies.clear();
+    for (key, change) in records.iter() {
+        if !external_attachment(change, records) {
+            continue;
+        }
+        let mut next = Some(key);
+        while let Some(key) = next {
+            if !dependencies.insert(key.clone()) {
+                break;
+            }
+            next = records
+                .get(key)
+                .and_then(|record| record.snapshot.as_ref())
+                .and_then(|snapshot| snapshot.attachment.as_ref())
+                .and_then(|attachment| attachment.owner.as_ref());
+        }
     }
 }
 pub(crate) fn key_heap(key: &ObjectKey) -> usize {

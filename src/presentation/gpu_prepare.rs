@@ -139,8 +139,19 @@ pub fn bind_group<M: AsBindGroup>(
     }
     let _scope = owner.scope(device);
     let layout = cache.get_bind_group_layout(descriptor);
-    let UnpreparedBindGroup { bindings } =
+    let UnpreparedBindGroup { mut bindings } =
         material.unprepared_bind_group(&layout, device, param, true)?;
+    for (_, binding) in &mut bindings.0 {
+        if let OwnedBindingResource::Data(data) = binding {
+            *binding = OwnedBindingResource::Buffer(device.create_buffer_with_data(
+                &BufferInitDescriptor {
+                    label: Some(M::label()),
+                    contents: &data.0,
+                    usage: BufferUsages::UNIFORM,
+                },
+            ));
+        }
+    }
     let entries = bindings
         .iter()
         .map(|(index, binding)| BindGroupEntry {

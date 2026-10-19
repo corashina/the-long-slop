@@ -22,7 +22,10 @@ impl StartingArea {
         }
         if let Some(id) = self.interaction.held() {
             if self.inventory.slots[self.inventory.selected as usize].is_none()
-                && self.inventory_items.contains(&id)
+                && self
+                    .interaction
+                    .pickup_rule(id)
+                    .is_some_and(|p| p.can_inventory)
                 && !self.inventory.slots.contains(&Some(id))
             {
                 self.inventory.slots[self.inventory.selected as usize] = Some(id);
@@ -86,7 +89,10 @@ impl StartingArea {
                 return Ok(false);
             };
             if item.removed
-                || !self.inventory_items.contains(&id)
+                || !self
+                    .interaction
+                    .pickup_rule(id)
+                    .is_some_and(|p| p.can_inventory)
                 || !(body.is_dynamic() || item.location == ItemLocation::Equipped)
                 || item.inactive_pose.is_some()
             {
