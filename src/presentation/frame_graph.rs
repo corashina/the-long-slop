@@ -110,14 +110,19 @@ impl SourceGraphProgress {
         state.prepared_content = None;
         state.loading.invalidate();
     }
-    pub(crate) fn loading_snapshot(&self, frame: &SourceViewFrame, bypass: bool, revision: u64) {
+    pub(crate) fn loading_snapshot(
+        &self,
+        frame: &SourceViewFrame,
+        bypass: bool,
+        revision: u64,
+    ) -> (bool, bool) {
         let Some(key) = frame.loading_key() else {
-            return;
+            return (false, false);
         };
         let mut state = self.0.lock().unwrap();
         // Preparation can change the required selection after check_ready.
         let complete = state.prepared_content == Some((key.session, revision));
-        state.loading.snapshot(
+        let restart = state.loading.snapshot(
             key,
             frame.frame,
             bypass,
@@ -125,6 +130,7 @@ impl SourceGraphProgress {
             revision,
             frame.probe_mask(),
         );
+        (state.loading.captures_allowed(), restart)
     }
     pub(crate) fn complete_scene(
         &self,

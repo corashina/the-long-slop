@@ -231,6 +231,7 @@ pub fn gpu_projection(source: Mat4) -> Mat4 {
 }
 /// Runs after current physical extents and transforms, before source frustum publication.
 pub(crate) fn snapshot(
+    mut commands: Commands,
     drive: Res<crate::app::Drive>,
     requests: Res<crate::app::save::SaveRequests>,
     graph: Res<super::frame_graph::SourceGraphProgress>,
@@ -375,11 +376,17 @@ pub(crate) fn snapshot(
         probe_job: job,
         views: snapshots,
     };
-    graph.loading_snapshot(
+    let (captures_allowed, restart) = graph.loading_snapshot(
         &frame,
         drive.ready || drive.runtime.started || requests.pending(),
         drive.runtime.stream.required_content().selection_revision,
     );
+    if !captures_allowed || restart {
+        frame.probe_job = None;
+    }
+    if restart {
+        commands.queue(restart_scene);
+    }
     timing.snapshots(&frame);
 }
 /// Replace Bevy's frusta after its update, before either camera visibility system runs.

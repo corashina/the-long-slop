@@ -42,7 +42,15 @@ impl<const N: usize> LoadingDispatch<N> {
         content: bool,
         revision: u64,
         enabled: u32,
-    ) {
+    ) -> bool {
+        let restart = !bypass
+            && self.mode == Mode::Full
+            && self.key.is_some_and(|previous| previous.scene == key.scene)
+            && (self.key != Some(key)
+                || !content
+                || self
+                    .content
+                    .is_none_or(|(r, mask, _)| r != revision || mask != enabled));
         if self.key != Some(key) {
             self.key = Some(key);
             self.content = None;
@@ -56,14 +64,14 @@ impl<const N: usize> LoadingDispatch<N> {
         if bypass {
             self.mode = Mode::Bypass;
             self.content = None;
-            return;
+            return false;
         }
         if self.mode == Mode::Bypass {
-            return;
+            return false;
         }
         if !content {
             self.content = None;
-            return;
+            return restart;
         }
         self.mode = Mode::Full;
         if self
@@ -72,6 +80,10 @@ impl<const N: usize> LoadingDispatch<N> {
         {
             self.content = Some((revision, enabled, frame));
         }
+        restart
+    }
+    pub fn captures_allowed(&self) -> bool {
+        self.mode == Mode::Bypass || self.content.is_some()
     }
     pub fn allows(&self, key: LoadingKey, frame: u32) -> bool {
         self.mode != Mode::Cadenced
@@ -152,33 +164,71 @@ mod tests {
         }
     }
     #[test]
-    fn every_probe_stage_waits_for_three_skipped_snapshots() {
+    fn startup_probes_wait_for_complete_content_then_publish_once() {
         use crate::reference::reflections::{ProbeJob, ProbeSchedule};
         let k = key();
         let mut policy = LoadingDispatch::<2>::default();
-        let mut schedule = ProbeSchedule::default();
-        for stage in 0..8 {
-            let job = schedule.job();
-            assert_eq!(
-                job,
-                match stage {
-                    0..=5 => ProbeJob::Face(stage),
-                    6 => ProbeJob::FirstMip,
-                    _ => ProbeJob::RemainingMipsAndPublish,
-                }
-            );
-            for offset in 1..=3 {
-                let frame = u32::from(stage) * 4 + offset;
-                policy.snapshot(k, frame, false, false, 1, 3);
-                assert!(!policy.allows(k, frame));
-                assert_eq!(schedule.job(), job);
-            }
-            let frame = u32::from(stage + 1) * 4;
-            policy.snapshot(k, frame, false, false, 1, 3);
-            assert!(policy.allows(k, frame));
-            schedule.complete(job).unwrap();
+        let mut probes = [ProbeSchedule::default(), ProbeSchedule::default()];
+        for frame in 1..=8 {
+            assert!(!policy.snapshot(k, frame, false, false, 1, 3));
+            assert!(!policy.captures_allowed());
+            assert_eq!(policy.allows(k, frame), frame % 4 == 0);
+            assert!(probes.iter().all(|probe| probe.job() == ProbeJob::Face(0)));
         }
-        assert!(schedule.published());
+        let mut frame = 9;
+        for (index, probe) in probes.iter_mut().enumerate() {
+            for _ in 0..8 {
+                assert!(!policy.snapshot(k, frame, false, true, 1, 3));
+                assert!(policy.captures_allowed());
+                let job = probe.job();
+                if job == ProbeJob::Face(0) {
+                    policy.capture_started(k, frame, index);
+                }
+                probe.complete(job).unwrap();
+                if probe.published() {
+                    policy.publication_validated(k, index);
+                }
+                frame += 1;
+            }
+        }
+        assert!(probes.iter().all(ProbeSchedule::published));
+        assert!(policy.fresh(k, 1, 3));
+    }
+    #[test]
+    fn loading_changes_restart_both_capture_owners_but_bypass_does_not() {
+        let k = key();
+        let resized = LoadingKey {
+            extent: [900, 600],
+            ..k
+        };
+        for (next, content, revision, mask) in [
+            (resized, true, 1, 3),
+            (k, true, 2, 3),
+            (k, true, 1, 1),
+            (k, false, 1, 3),
+        ] {
+            let mut p = LoadingDispatch::<2>::default();
+            assert!(!p.snapshot(k, 1, false, true, 1, 3));
+            p.capture_started(k, 1, 0);
+            assert!(p.snapshot(next, 2, false, content, revision, mask));
+            assert!(!p.snapshot(
+                LoadingKey { scene: 2, ..next },
+                3,
+                false,
+                content,
+                revision,
+                mask
+            ));
+        }
+        let mut p = LoadingDispatch::<2>::default();
+        p.snapshot(k, 1, false, true, 1, 3);
+        p.invalidate();
+        assert!(!p.captures_allowed());
+        assert!(p.snapshot(k, 2, false, true, 1, 3));
+        assert!(!p.snapshot(k, 3, true, false, 1, 3));
+        assert!(!p.snapshot(resized, 4, false, false, 2, 1));
+        assert!(p.captures_allowed());
+        assert!(p.fresh(resized, 2, 1));
     }
     #[test]
     fn keys_masks_failures_and_later_presentations_reset_the_proof() {
