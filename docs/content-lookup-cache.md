@@ -17,7 +17,20 @@ These checks ran on the feature branch. They do not verify the merged tree.
 - Both cache tests passed after caching was restored.
 - Both standard release builds passed.
 
-The merged-tree checks are pending. Garage and driving frame times remain unmeasured. No A/B/A samples were collected, so no performance gain is verified.
+## Merged-tree checks
+
+These checks passed on merge commit `1c104988fa18853e8dbf447d5fe7ef8c95a0c559` in one container with exit code 0. The container image was `sha256:b3b065a8a465210384242521959d701e952aad17ddcfdd4102d42dc68f21d96c`.
+
+- `cargo fmt --all -- --check` passed.
+- `cargo test --locked --lib cache`: 2 passed.
+- `cargo test --locked --lib hash_matches_keep_original_order`: 1 passed.
+- `cargo test --locked --lib membership_revisions_cover_push_remove_and_retain -- --include-ignored`: 1 passed.
+- `cargo check --locked --target wasm32-unknown-unknown --lib` passed.
+- `node --test tests/web/content-index-benchmark.test.mjs`: 3 passed.
+
+The first web test attempt could not access localhost in the sandbox (`EACCES`). The elevated retry passed. Rust reported existing warnings in unrelated renderer and material files. No fixes were needed.
+
+The merged-check log is `.cache/merge-content-lookup/merged-checks.log`. Full tests, release builds, and browser acceptance were not rerun during integration. Garage and driving frame times remain unmeasured. No A/B/A samples were collected, so no performance gain is verified.
 
 ## Historical release evidence
 

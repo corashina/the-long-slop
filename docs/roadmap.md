@@ -91,7 +91,7 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    Status: Implemented and merged into master on 2026-10-19. Runtime performance remains unverified.
    Owners: [content index](../src/world/content_index.rs), [instance presentation](../src/presentation/world/instances.rs).
    The cache keeps membership and order. Lookups read live pose and appearance.
-   See the [validation note](content-lookup-cache.md) for feature-branch checks and historical benchmark limits.
+   See the [validation note](content-lookup-cache.md) for merged-tree checks and historical benchmark limits.
 
 4. **Remove redundant fullscreen image copies.**
    Status: Proposed. Difficulty: Moderate. Estimate: 1–3 days. Owner: [source effects](../src/presentation/source_effects.rs).
