@@ -1208,7 +1208,7 @@ impl WorldStream {
         }
     }
     /// Keep payload construction and renderer publication downstream from source selection.
-    pub fn prepare_geometry(&mut self) {
+    fn prepare_geometry(&mut self, should_yield: impl FnMut() -> bool) {
         if self.failure.is_some()
             || self.ready.is_some()
             || !self.initial_generation_ready
@@ -1223,7 +1223,7 @@ impl WorldStream {
             .iter()
             .any(|key| self.local_collision_pending(*key))
         {
-            self.prepare_terrain();
+            self.prepare_terrain(should_yield);
         } else if self.required.roads.iter().any(|id| {
             !self
                 .surfaces
@@ -1233,15 +1233,28 @@ impl WorldStream {
         {
             self.prepare_road();
         } else {
-            self.prepare_terrain();
+            self.prepare_terrain(should_yield);
         }
     }
     pub fn prepare(&mut self, budget_ms: f64) {
+        #[cfg(target_arch = "wasm32")]
+        let started = crate::browser::game_now();
+        #[cfg(not(target_arch = "wasm32"))]
+        let started = std::time::Instant::now();
+        // Zero requests one driving step. Bound its terrain work to a 1 ms slice.
+        // Loading keeps its supplied budget, including time spent on descriptors.
+        let limit_ms = if budget_ms == 0. { 1. } else { budget_ms };
         let mut timer =
             super::stream_profile::Timer::new(super::stream_profile::Stage::StreamDescriptors);
         self.prepare_descriptors(budget_ms);
         timer.next(super::stream_profile::Stage::StreamGeometry);
-        self.prepare_geometry();
+        self.prepare_geometry(|| {
+            #[cfg(target_arch = "wasm32")]
+            let elapsed = crate::browser::game_now() - started;
+            #[cfg(not(target_arch = "wasm32"))]
+            let elapsed = started.elapsed().as_secs_f64() * 1000.;
+            elapsed >= limit_ms
+        });
     }
     fn prepare_startup(&mut self) {
         if self.startup_candidates.is_empty() && self.startup_next == 0 {
@@ -2180,7 +2193,7 @@ impl WorldStream {
                 && self.reference.road.prototypes[r.segment.biome as usize] == *source
         })
     }
-    fn prepare_terrain(&mut self) {
+    fn prepare_terrain(&mut self, should_yield: impl FnMut() -> bool) {
         let _timer = super::stream_profile::Timer::new(super::stream_profile::Stage::Terrain);
         if self.terrain_work.is_none()
             && (self.available_external_jobs() == 0 || !self.can_request_independent(1))
@@ -2324,6 +2337,7 @@ impl WorldStream {
                 biome_override: source_override(&self.reference),
             },
             &mut work.surface,
+            should_yield,
         );
         self.last_terrain_work = work.job.prepared_vertices() - before;
         if done {

@@ -24,20 +24,20 @@ fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
     allocation.pending = MAX_PENDING;
     stream.set_presentation_allocation(allocation).unwrap();
 
-    stream.prepare_terrain();
+    stream.prepare_terrain(|| true);
     assert!(stream.terrain_work.is_none());
     assert!(stream.ready.is_none());
     assert_eq!(stream.metrics().pending_work, MAX_PENDING);
 
     allocation.pending -= 1;
     stream.set_presentation_allocation(allocation).unwrap();
-    stream.prepare_terrain();
+    stream.prepare_terrain(|| true);
     assert!(stream.terrain_work.is_some());
     assert_eq!(stream.metrics().pending_work, MAX_PENDING);
     stream.set_presentation_allocation(allocation).unwrap();
 
     for _ in 0..1000 {
-        stream.prepare_terrain();
+        stream.prepare_terrain(|| true);
         assert!(stream.failure.is_none(), "{:?}", stream.failure);
         assert_eq!(stream.metrics().pending_work, MAX_PENDING);
         if stream.ready.is_some() {
@@ -46,6 +46,19 @@ fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
     }
     assert!(stream.terrain_work.is_none());
     assert!(stream.ready.is_some());
+    let bytes = stream.metrics().pending_bytes;
+    stream.ready = None;
+    assert!(stream.metrics().pending_bytes < bytes);
+
+    // A stale request cannot finish or publish its retained terrain work.
+    stream.prepare_terrain(|| true);
+    assert!(stream.terrain_work.is_some());
+    let bytes = stream.metrics().pending_bytes;
+    stream.request.revision += 1;
+    stream.prepare_terrain(|| true);
+    assert!(stream.terrain_work.is_none());
+    assert!(stream.ready.is_none());
+    assert!(stream.metrics().pending_bytes < bytes);
 }
 
 #[test]

@@ -201,7 +201,8 @@ impl TerrainContext<'_> {
     }
 }
 
-/// Every phase shares one 4096-vertex work allowance per update.
+/// All phases retain their cursors across deadline checks and the 4096-work cap.
+/// A check follows at least 32 work units. One operation can use up to seven units.
 #[derive(Default)]
 pub struct TerrainSurfaceJob {
     border: Vec<[f32; 3]>,
@@ -258,14 +259,27 @@ impl TerrainSurfaceJob {
         output.triangles.reserve_exact((n - 1) * (n - 1) * 2);
         output.submeshes.reserve_exact(1);
     }
-    pub fn advance(&mut self, context: TerrainContext<'_>, output: &mut WorldSurface) -> bool {
+    pub fn advance(
+        &mut self,
+        context: TerrainContext<'_>,
+        output: &mut WorldSurface,
+        mut should_yield: impl FnMut() -> bool,
+    ) -> bool {
         let tile = context.tile;
         let n = tile.resolution as usize;
         let side = n + 2;
         let spacing = (tile.size as f64 / (n - 1) as f64) as f32;
         let offset = -(tile.size as f32) * 0.5;
         let mut remaining = 4096;
+        let mut checkpoint = 0;
         while self.phase < 8 {
+            // Always advance one small slice, even after the caller's deadline.
+            if checkpoint >= 32 {
+                if should_yield() {
+                    break;
+                }
+                checkpoint = 0;
+            }
             let cost = match self.phase {
                 1 => 6,
                 3 => 5,
@@ -278,6 +292,7 @@ impl TerrainSurfaceJob {
             }
             remaining -= cost;
             self.work += cost;
+            checkpoint += cost;
             let i = self.cursor;
             match self.phase {
                 0 => {
@@ -480,7 +495,7 @@ pub fn terrain_surface(
 ) {
     let mut job = TerrainSurfaceJob::default();
     job.begin(unit, context, output);
-    while !job.advance(context, output) {}
+    while !job.advance(context, output, || false) {}
 }
 
 fn horizontal_squared(a: [f32; 3], b: [f32; 3]) -> f32 {
@@ -506,3 +521,7 @@ fn inside_source_hole(point: [f32; 3], hole: &[[f32; 3]; 4]) -> bool {
         + triangle_area(hole[2], hole[0], point) as f64;
     ((area - pieces) as f32).abs() < 0.2
 }
+
+#[cfg(test)]
+#[path = "terrain_tests.rs"]
+mod tests;
