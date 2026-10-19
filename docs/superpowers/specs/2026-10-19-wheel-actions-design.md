@@ -1,7 +1,7 @@
 # Wheel action ownership
 
 Date: 2026-10-19.
-Status: Written specification awaiting user review.
+Status: Approved by the user on 2026-10-19.
 Branch: `codex/codebase-architecture`.
 Base: `d5b9b9835eeece5000eb8eb0c5d5c582afae8837`.
 
@@ -18,7 +18,7 @@ The behavior below records the inspected checkout. It does not establish source 
 Any discovered source mismatch requires a separate behavior change.
 
 The user approved this design in chat.
-That approval permits this specification. Implementation planning follows written-spec approval.
+The user also approved this written specification. Implementation planning is authorized.
 
 ## Current behavior
 
