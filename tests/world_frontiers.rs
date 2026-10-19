@@ -15,10 +15,7 @@ fn reference() -> &'static WorldReference {
 }
 
 fn road(r: &WorldReference) -> RoadIndex {
-    RoadIndex::new(
-        RoadSequence::new(r, 42).unwrap(),
-        TerrainEvaluator::new(r, 42),
-    )
+    RoadIndex::new(RoadSequence::new(r, 42).unwrap(), terrain_evaluator(r, 42))
 }
 #[test]
 #[ignore = "requires the installed source export"]
@@ -26,7 +23,7 @@ fn incremental_matches_sequential() {
     let r = reference();
     let mut index = road(&r);
     let mut sequence = RoadSequence::new(&r, 42).unwrap();
-    let terrain = TerrainEvaluator::new(&r, 42);
+    let terrain = terrain_evaluator(&r, 42);
     let mut buildings = PlacementIndex::new(&r, 42);
     let mut sequential = BuildingSequence::new(&r, 42);
     let mut expected_buildings = Vec::new();

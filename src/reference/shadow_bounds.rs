@@ -20,19 +20,16 @@ impl BoundsKey {
 struct Row {
     key: BoundsKey,
     bounds: Bounds,
-    seen: u64,
 }
 pub struct WorldBoundsCache<K> {
     rows: HashMap<K, Row>,
     epoch: Option<(u64, u32, [u64; 3])>,
-    frame: u64,
 }
 impl<K> Default for WorldBoundsCache<K> {
     fn default() -> Self {
         Self {
             rows: HashMap::new(),
             epoch: None,
-            frame: 0,
         }
     }
 }
@@ -48,10 +45,6 @@ impl<K: Eq + Hash> WorldBoundsCache<K> {
             self.rows.clear();
         }
         self.epoch = Some(epoch);
-        self.frame = self
-            .frame
-            .checked_add(1)
-            .expect("Source shadow bounds frame exhausted");
         changed
     }
     pub fn get_or_update(
@@ -60,9 +53,8 @@ impl<K: Eq + Hash> WorldBoundsCache<K> {
         key: BoundsKey,
         calculate: impl FnOnce() -> Bounds,
     ) -> Result<Bounds, &'static str> {
-        if let Some(row) = self.rows.get_mut(&entity) {
+        if let Some(row) = self.rows.get(&entity) {
             if row.key == key {
-                row.seen = self.frame;
                 return Ok(row.bounds);
             }
         }
@@ -76,18 +68,11 @@ impl<K: Eq + Hash> WorldBoundsCache<K> {
         {
             return Err("Source shadow renderer bounds are nonfinite");
         }
-        self.rows.insert(
-            entity,
-            Row {
-                key,
-                bounds,
-                seen: self.frame,
-            },
-        );
+        self.rows.insert(entity, Row { key, bounds });
         Ok(bounds)
     }
-    /// Remove entities that left the caster query or lost material/layer membership.
-    pub fn finish(&mut self) {
-        self.rows.retain(|_, row| row.seen == self.frame);
+    /// Membership changes rebuild the complete ordered collection.
+    pub fn clear(&mut self) {
+        self.rows.clear();
     }
 }

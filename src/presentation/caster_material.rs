@@ -3,7 +3,7 @@ use super::{
     gpu_prepare::GpuPreparation,
     materials::{SourceMaterial, SourceUniform},
 };
-use bevy::asset::{AssetEvent, AssetId};
+use bevy::asset::{AssetEvent, AssetId, UntypedAssetId};
 use bevy::ecs::{
     self as bevy_ecs,
     query::ROQueryItem,
@@ -25,6 +25,7 @@ struct Input {
     revision: u64,
     preparation: GpuPreparation,
     data: SourceUniform,
+    batch: super::shadow_batch::CasterBatchState,
     texture: Option<AssetId<Image>>,
     color: Option<super::materials::RetainedColor>,
 }
@@ -77,6 +78,7 @@ fn extract(
                         revision,
                         preparation: material.preparation.clone(),
                         data: material.caster_data(),
+                        batch: material.shadow_batch_state(),
                         color: material.retained_color.clone(),
                         texture: material.base.base_color_texture.as_ref().map(Handle::id),
                     },
@@ -190,6 +192,25 @@ pub fn ready(world: &World, id: AssetId<SourceMaterial>) -> bool {
             .get(&id)
             .is_some_and(|material| material.revision == input.revision)
     })
+}
+/// Queue only current prepared primary casters into material-independent shadow bins.
+pub fn shadow_material(world: &World, id: UntypedAssetId) -> Option<UntypedAssetId> {
+    if id.type_id() != std::any::TypeId::of::<SourceMaterial>() {
+        return Some(id);
+    }
+    let typed = id.typed::<SourceMaterial>();
+    let Some(input) = world.resource::<Inputs>().materials.get(&typed) else {
+        return Some(id);
+    };
+    if input.preparation.cancelled() {
+        return Some(id);
+    }
+    let prepared = world
+        .resource::<CasterMaterials>()
+        .materials
+        .get(&typed)
+        .map(|material| material.revision);
+    input.batch.material_key(id, input.revision, prepared)
 }
 pub struct SetCasterMaterial;
 impl<P: PhaseItem> RenderCommand<P> for SetCasterMaterial {

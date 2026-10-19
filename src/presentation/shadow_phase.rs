@@ -13,14 +13,11 @@ use std::{
 };
 
 /// All members use the same draw state and recovered cascade membership.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ShadowBatchKey {
-    pub pipeline: CachedRenderPipelineId,
-    pub draw: DrawFunctionId,
-    pub material: bevy::asset::UntypedAssetId,
-    pub split_mask: u8,
-    pub indexed: bool,
-}
+pub type ShadowBatchKey = super::shadow_batch::ShadowBatchKey<
+    CachedRenderPipelineId,
+    DrawFunctionId,
+    bevy::asset::UntypedAssetId,
+>;
 impl PhaseItemBatchSetKey for ShadowBatchKey {
     fn indexed(&self) -> bool {
         self.indexed

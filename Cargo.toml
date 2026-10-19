@@ -7,10 +7,14 @@ rust-version = "1.99"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[workspace]
+members = ["crates/terrain", "crates/terrain-worker"]
+
 [dependencies]
 rapier3d = "=0.36.0"
 serde = { version = "=1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "=1.0.151", features = ["float_roundtrip", "raw_value"] }
+terrain = { path = "crates/terrain" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 async-lock = "=3.4.2"
@@ -26,6 +30,9 @@ wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "=0.4.79"
 gltf = { version = "=1.4.1", default-features = false, features = ["utils", "names", "extras"] }
 console_error_panic_hook = "=0.1.7"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+naga = { version = "=29.0.4", features = ["wgsl-in", "glsl-out"] }
 
 [profile.release]
 opt-level = 3

@@ -41,10 +41,8 @@ fn installed_manifest_checks_lod_bounds_and_initializes_runtime() {
     std::sync::Arc::make_mut(&mut reference.world)
         .records
         .push(root);
-    let evaluator = my_summer_slop::world::TerrainEvaluator::new(
-        &reference.world,
-        reference.world.terrain.seed,
-    );
+    let evaluator =
+        my_summer_slop::world::terrain_evaluator(&reference.world, reference.world.terrain.seed);
     my_summer_slop::world::StartupTerrain::new(&reference.world, &evaluator, &[])
         .expect("installed startup frames initialize");
     let mut runtime = my_summer_slop::starting_area::GarageRuntime::new(&reference)
@@ -142,7 +140,7 @@ fn installed_manifest_checks_lod_bounds_and_initializes_runtime() {
     let seed = reference.world.terrain.seed;
     let mut small = RoadIndex::new(
         RoadSequence::new(&reference.world, seed).unwrap(),
-        my_summer_slop::world::TerrainEvaluator::new(&reference.world, seed),
+        my_summer_slop::world::terrain_evaluator(&reference.world, seed),
     );
     let mut large = RoadIndex::new(
         RoadSequence::new(&reference.world, seed).unwrap(),

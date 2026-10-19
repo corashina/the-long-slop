@@ -12,6 +12,8 @@ pub const SHADOW_FORMAT: TextureFormat = TextureFormat::Depth16Unorm;
 pub const COLLECTOR_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
 pub const EXPOSURE_FORMAT: TextureFormat = TextureFormat::R32Float;
 pub const HISTOGRAM_FORMAT: TextureFormat = TextureFormat::Rgba32Uint;
+/// The source uses 8 samples. Four samples is an approved image-quality change.
+pub const MSAA_SAMPLES: u32 = 4;
 
 /// Validate the wgpu device contract, separately from raw WebGL capability probes.
 pub fn validate_source_device(
@@ -139,7 +141,11 @@ impl SourceColorTargets {
         samples: u32,
     ) -> Result<Self, String> {
         let limit = device.limits().max_texture_dimension_2d;
-        if width == 0 || height == 0 || width > limit || height > limit || !matches!(samples, 1 | 8)
+        if width == 0
+            || height == 0
+            || width > limit
+            || height > limit
+            || !matches!(samples, 1 | MSAA_SAMPLES)
         {
             return Err("Source color extent or sample count is unsupported".into());
         }
@@ -267,7 +273,12 @@ impl SurfaceTargets {
     pub fn new(device: &RenderDevice, width: u32, height: u32, atlas: u32) -> Result<Self, String> {
         use std::sync::Arc;
         let capture_atlas = crate::reference::shadows::source_atlas_size(64, 64).unwrap();
-        let stack = Arc::new(SourceColorTargets::new(device, width, height, 8)?);
+        let stack = Arc::new(SourceColorTargets::new(
+            device,
+            width,
+            height,
+            MSAA_SAMPLES,
+        )?);
         let capture = Arc::new(SourceColorTargets::new(device, 64, 64, 1)?);
         let mut views = Vec::with_capacity(VIEW_COUNT);
         for index in 0..VIEW_COUNT {
@@ -300,7 +311,12 @@ impl SurfaceTargets {
         height: u32,
         atlas: u32,
     ) -> Result<(), String> {
-        let stack = std::sync::Arc::new(SourceColorTargets::new(device, width, height, 8)?);
+        let stack = std::sync::Arc::new(SourceColorTargets::new(
+            device,
+            width,
+            height,
+            MSAA_SAMPLES,
+        )?);
         for index in 0..3 {
             self.views[index] =
                 std::sync::Arc::new(SourceViewTargets::new(device, stack.clone(), atlas)?);

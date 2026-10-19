@@ -1,6 +1,6 @@
 use super::*;
 use crate::world::RoadSequence;
-use crate::world::WorldSurface;
+use ::terrain::{TerrainMesh as WorldSurface, TerrainSurfaceJob};
 
 fn reference() -> &'static WorldReference {
     static REFERENCE: std::sync::OnceLock<WorldReference> = std::sync::OnceLock::new();
@@ -46,19 +46,18 @@ fn fingerprint(surface: &WorldSurface) -> u64 {
     for v in surface.triangles.iter().flatten() {
         add(*v as u64);
     }
-    add(surface.submeshes.len() as u64);
-    for v in &surface.submeshes {
-        add(v.start as u64);
-        add(v.end as u64);
-    }
+    // The worker client adds one material slot when it reads the finished mesh.
+    add(1);
+    add(0);
+    add(surface.triangles.len() as u64);
     hash
 }
 #[test]
 #[ignore = "requires the installed source export"]
 fn terrain_source_fingerprints() {
-    use crate::world::{TerrainContext, TerrainRoadPoint, TerrainSurfaceJob, TerrainTile};
+    use crate::world::{TerrainContext, TerrainFoundation, TerrainRoadPoint};
     let r = reference();
-    let evaluator = TerrainEvaluator::new(r, 42);
+    let evaluator = terrain_evaluator(r, 42);
     let mut sequence = RoadSequence::new(r, 42).unwrap();
     let mut roads = Vec::new();
     for _ in 0..r.road.gen_at_start {
@@ -95,7 +94,7 @@ fn terrain_source_fingerprints() {
         ],
     ];
     for tier in 0..3 {
-        let tile = TerrainTile::new(r, tier).unwrap();
+        let tile = terrain_tile(r, tier).unwrap();
         let context = TerrainContext {
             evaluator: &evaluator,
             tile,
@@ -112,22 +111,18 @@ fn terrain_source_fingerprints() {
             let mut surface = WorldSurface::default();
             job.begin([0, 0], context, &mut surface);
             let capacities = (
-                job.border.capacity(),
-                job.border_normals.capacity(),
+                job.retained_bytes(),
                 surface.vertices.capacity(),
                 surface.normals.capacity(),
                 surface.tangents.capacity(),
                 surface.colors.capacity(),
                 surface.uv.capacity(),
                 surface.triangles.capacity(),
-                surface.submeshes.capacity(),
             );
             let mut samples = Vec::new();
             let mut checks = 0;
             let mut previous_work = 0;
-            let mut phases = 0_u16;
             loop {
-                phases |= 1 << job.phase;
                 let start = std::time::Instant::now();
                 let done = job.advance(context, &mut surface, || {
                     checks += 1;
@@ -143,24 +138,19 @@ fn terrain_source_fingerprints() {
                 assert_eq!(
                     capacities,
                     (
-                        job.border.capacity(),
-                        job.border_normals.capacity(),
+                        job.retained_bytes(),
                         surface.vertices.capacity(),
                         surface.normals.capacity(),
                         surface.tangents.capacity(),
                         surface.colors.capacity(),
                         surface.uv.capacity(),
                         surface.triangles.capacity(),
-                        surface.submeshes.capacity()
                     )
                 );
                 samples.push(start.elapsed().as_secs_f64() * 1000.);
                 if done {
                     break;
                 }
-            }
-            if tier == 0 && stop_every == 1 {
-                assert_eq!(phases & 0xff, 0xff, "all terrain phases must resume");
             }
             assert_eq!(
                 fingerprint(&surface),

@@ -1,5 +1,5 @@
 //! Source procedural sky. All seven view bindings are allocated during loading.
-use super::render_targets::{DEPTH_FORMAT, HDR_FORMAT};
+use super::render_targets::{DEPTH_FORMAT, HDR_FORMAT, MSAA_SAMPLES};
 use crate::reference::{lighting_scene::LightingRecord, sky::source_sky_vertices};
 use bevy::mesh::VertexBufferLayout;
 use bevy::render::{
@@ -104,7 +104,7 @@ impl SkyPass {
                 }),
                 multisample: MultisampleState {
                     // Native probe scratch inherits its one-sample destination descriptor.
-                    count: if index == 0 { record.msaa_samples } else { 1 },
+                    count: if index == 0 { MSAA_SAMPLES } else { 1 },
                     ..default()
                 },
                 ..default()

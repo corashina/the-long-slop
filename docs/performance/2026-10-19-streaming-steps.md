@@ -13,18 +13,23 @@ No browser performance gain is verified.
 
 Driving passes a zero budget to `WorldPresentation::prepare`.
 This value permits one complete presentation step. It does not impose a full-frame time limit.
-Terrain now uses a 1 ms slice within that step.
+Native terrain polling now uses a 1 ms slice within that step.
+Browser terrain generation runs in a Web Worker after master item 14.
 
 ## Terrain split
 
+The merge with master moves `TerrainSurfaceJob` into `crates/terrain/src/surface.rs`.
 `TerrainSurfaceJob::advance` accepts a yield callback. Every caller uses the new signature.
 All eight phases retain their cursors when the callback requests a yield.
 A checkpoint follows 32 to 38 weighted work units.
 An expired deadline still permits one small slice, so work cannot stall.
 The existing 4096-work cap remains.
 
-`WorldStream::prepare` includes descriptor time in the terrain deadline.
-A positive loading budget keeps its supplied duration. Zero selects the 1 ms driving slice.
+`TerrainTask` retains decoded input and output across native worker polls.
+`WorldStream::prepare` includes descriptor time in the native terrain deadline.
+A positive loading budget keeps its supplied duration. Zero selects the native 1 ms driving slice.
+Browser worker generation uses the same state machine in its separate WASM memory.
+It completes off the render thread. The browser worker protocol is unchanged.
 Terrain setup and final bounds calculation remain synchronous.
 Other presentation stages also remain synchronous. This is not a strict whole-frame deadline.
 A checkpoint can exceed its deadline by one slice.
@@ -39,7 +44,8 @@ These are native diagnostics, not release frame times or driving benchmarks.
 
 Reservations still occur before job construction.
 The split adds no allocation to job advancement. Capacity checks cover every output vector and both border vectors.
-Stale requests discard their job and pending bytes.
+Stale requests discard native tasks immediately and release their pending bytes.
+Browser jobs retain the existing in-flight result drain.
 The existing collision priority, completed-surface publication, and source road generation paths are unchanged.
 
 ## Terrain split checks
@@ -49,9 +55,11 @@ The existing collision priority, completed-surface publication, and source road 
   They cover admission at capacity, continuation at capacity, stale-request cancellation, and pending-byte release.
 - Terrain fingerprints match values captured before the split for all three source tiers.
   Checks force yields after each checkpoint and after every third checkpoint.
-  The near-terrain check resumes all eight phases, including both holes.
+  The near-terrain check covers all eight phases, including both holes.
   It also exercises a live 1 ms deadline and verifies that advancement does not grow vector capacities.
-- WASM compile check passed with five warnings in unchanged material code.
+- Shared terrain crate test passed. It checks encoded jobs and forced-yield results.
+- Five web tests passed for the sampler and terrain worker bridge.
+- Workspace WASM compile check passed with four warnings in unchanged material code.
 - Formatting and diff checks passed. No current check failed.
   The earlier export-dependent publication failure below was not retested.
 - Browser testing is deferred at the user's request.
@@ -60,12 +68,15 @@ The existing collision priority, completed-surface publication, and source road 
 - No new release package has been built for the terrain split. Full checks remain deferred.
 
 The native check log is `.cache/performance/2026-10-19-streaming-step-budget/terrain-split-check.log` in the main checkout.
-Repeat the export-dependent checks with the frozen assets mounted at `web/assets`:
+The merge check log is `.cache/performance/2026-10-19-streaming-step-budget/terrain-split-merge-check.log` in the main checkout.
+Repeat the checks with the frozen assets mounted at `web/assets`:
 
 ```text
 cargo test --locked --lib
+cargo test --locked -p terrain
 cargo test --locked --lib terrain_ -- --ignored --nocapture
-cargo check --locked --target wasm32-unknown-unknown --lib
+cargo check --locked --workspace --target wasm32-unknown-unknown --lib
+node --test tests/web/content-index-benchmark.test.mjs tests/web/terrain.test.mjs
 ```
 
 ## Profiler

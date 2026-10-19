@@ -59,6 +59,12 @@ fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
     assert!(stream.terrain_work.is_none());
     assert!(stream.ready.is_none());
     assert!(stream.metrics().pending_bytes < bytes);
+    assert_eq!(
+        stream.terrain_worker.poll(|| true).unwrap(),
+        TerrainPoll::Idle
+    );
+    stream.prepare_terrain(|| true);
+    assert!(stream.terrain_work.as_ref().unwrap().id.is_some());
 }
 
 #[test]
