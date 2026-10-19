@@ -1,12 +1,10 @@
 //! Source camera stack. GPU tokens are acknowledged after the render queue submission.
 use super::lighting_scene::PROBE_COUNT;
-use super::surface_views::{MIRROR_START, VIEW_COUNT};
+use super::surface_views::VIEW_COUNT;
 use super::{
     frame_copy::FrameCopy,
     lighting_assets::LightingRenderAssets,
     materials::RenderingState,
-    motion_draw::{MotionDrawView, MotionObjects, MotionPipelines},
-    motion_vectors::SourceMotionPass,
     probes::{ProbeFilter, ProbePublication},
     source_lighting::{SourceExecutionGate, SourceLightingStatus, SourceViewCamera},
     source_sky::SkyPass,
@@ -76,8 +74,6 @@ struct FrameProgress {
     scene: u32,
     extent: [u32; 2],
     first_token: u32,
-    first_jitter: [f32; 2],
-    jitter: [f32; 2],
     frame: u32,
     mask: u16,
     sky: bool,
@@ -89,7 +85,6 @@ struct FrameProgress {
     cpu_boundary: CpuBoundary,
     gpu_boundary: GpuBoundary,
     probes: [ProbeAudit; PROBE_COUNT],
-    motion: MotionAudit,
     effects: super::source_effects::EffectsAudit,
 }
 #[derive(Resource, Clone, Default)]
@@ -161,9 +156,6 @@ impl SourceGraphProgress {
             && s.sky
             && s.mask == 7
             && s.token != 0
-            && s.motion.frame == s.frame
-            && s.motion.submitted_token == s.token
-            && s.motion.validated
             && s.effects.complete(s.frame, s.token)
             && s.validated;
         [
@@ -246,51 +238,6 @@ impl ProbeState {
     }
 }
 
-#[derive(Clone, Copy, Default, serde::Serialize)]
-struct MotionAudit {
-    first_token: u32,
-    first_draws: [u32; 3],
-    first_camera_registered: bool,
-    pipelines_ready: bool,
-    objects_ready: bool,
-    frame: u32,
-    camera_token: u32,
-    object_token: u32,
-    submitted_token: u32,
-    registered_objects: u32,
-    allocated_slots: u32,
-    reused_slots: u32,
-    draws: [u32; 3],
-    extent: [u32; 2],
-    validation: u32,
-    validated: bool,
-    resize_count: u32,
-    rebase_count: u32,
-}
-#[derive(Resource)]
-pub(crate) struct MotionFrame {
-    motion_revision: u32,
-    scene: u32,
-    first_token: u32,
-    first_draws: [u32; 3],
-    first_camera_registered: bool,
-    pass: Option<SourceMotionPass>,
-    targets: Arc<super::render_targets::SourceViewTargets>,
-    origin: [f64; 3],
-    camera_frame: u32,
-    camera_token: u32,
-    submitted_token: u32,
-    validation: u32,
-    resize_count: u32,
-    rebase_count: u32,
-}
-
-impl MotionFrame {
-    pub(crate) fn encoded(&self, frame: u32, token: u32) -> bool {
-        self.camera_frame == frame && self.camera_token == token
-    }
-}
-
 pub struct SourceFramePlugin;
 impl Plugin for SourceFramePlugin {
     fn build(&self, app: &mut App) {
@@ -301,10 +248,6 @@ impl Plugin for SourceFramePlugin {
             progress: progress.0.clone(),
             status,
             gate,
-            mirrors: app
-                .world()
-                .resource::<super::mirrors::MirrorGpuStatus>()
-                .clone(),
         });
         app.insert_resource(progress.clone())
             .add_plugins((
@@ -325,7 +268,6 @@ impl Plugin for SourceFramePlugin {
         super::shadow_queue::install(app);
         super::caster_material::install(app);
         super::shadow_collector::install(app);
-        super::motion_draw::install(app);
         super::source_effects::install(app);
         let render = app.sub_app_mut(RenderApp);
         render
@@ -334,12 +276,7 @@ impl Plugin for SourceFramePlugin {
             .add_systems(Render, gpu_boundaries.in_set(RenderSystems::Cleanup))
             .add_systems(
                 Render,
-                (
-                    update_sky_extras,
-                    prepare_frame,
-                    prepare_probe,
-                    prepare_motion,
-                )
+                (update_sky_extras, prepare_frame, prepare_probe)
                     .after(RenderSystems::PrepareResources)
                     .before(RenderSystems::Render),
             )
@@ -366,11 +303,6 @@ impl Plugin for SourceFramePlugin {
                         .in_set(SourceSurfaceStage::ShadowAtlas)
                         .run_if(surface_ready)
                         .run_if(super::shadow_queue::graph_ready),
-                    (encode_motion_camera, encode_motion_objects)
-                        .chain()
-                        .in_set(SourceSurfaceStage::Motion)
-                        .run_if(surface_ready)
-                        .run_if(super::shadow_queue::collector_encoded),
                     finish_surface
                         .in_set(SourceSurfaceStage::AfterTransparent)
                         .run_if(surface_ready),
@@ -385,7 +317,7 @@ impl Plugin for SourceFramePlugin {
             )
             .add_systems(
                 RenderGraph,
-                (submitted, submit_motion, super::source_effects::submitted)
+                (submitted, super::source_effects::submitted)
                     .chain()
                     .in_set(RenderGraphSystems::Finish),
             );
@@ -434,7 +366,7 @@ pub fn spawn_cameras(
     );
     image.texture_descriptor.usage |= TextureUsages::RENDER_ATTACHMENT;
     let capture = images.add(image);
-    for index in 0..MIRROR_START {
+    for index in 0..VIEW_COUNT {
         let (near, far, fov, mask, order, samples) = if index < 3 {
             let c = &record.cameras[index + 1];
             (
@@ -471,7 +403,7 @@ pub fn spawn_cameras(
                 index,
                 near,
                 far,
-                nonjittered_clip_from_world: Mat4::IDENTITY,
+                clip_from_world: Mat4::IDENTITY,
                 shadow_fade: Vec4::ZERO,
                 shadow_fade_center: Vec4::ZERO,
             },
@@ -543,16 +475,10 @@ fn update_sky_extras(
     }
 }
 fn sort_sky(
-    views: Query<
-        (&ExtractedView, Option<&super::mirrors::MirrorViewRole>),
-        Or<(With<SourceSkyCamera>, With<super::mirrors::MirrorViewRole>)>,
-    >,
+    views: Query<&ExtractedView, With<SourceSkyCamera>>,
     mut phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
 ) {
-    for (view, role) in &views {
-        if matches!(role, Some(super::mirrors::MirrorViewRole::Normal)) {
-            continue;
-        }
+    for view in &views {
         if let Some(phase) = phases.get_mut(&view.retained_view_entity) {
             Transparent3d::sort(&mut phase.items);
         }
@@ -615,42 +541,7 @@ fn prepare_frame(
     }
     if let Some(clouds) = clouds.as_mut() {
         if sky_views.single().is_ok() {
-            clouds.write_live(0, Vec3::ZERO, sky_clip, &scene, &device, &queue);
-        }
-    }
-    for owner in 0..3 {
-        let Some(snapshot) = frame.views[MIRROR_START + owner] else {
-            continue;
-        };
-        let position = snapshot.view_from_world.inverse().w_axis.truncate();
-        let mut sky_projection = crate::reference::sky::source_sky_gpu_projection(
-            snapshot.implicit_projection.to_cols_array_2d(),
-            snapshot.near,
-        );
-        // MirrorProjection preserves its native upright render texture projection.
-        for column in &mut sky_projection {
-            column[1] = -column[1];
-        }
-        if let Some(sky) = sky.as_mut() {
-            sky.write_live(
-                7 + owner,
-                &scene,
-                position,
-                snapshot.far,
-                Mat4::from_cols_array_2d(&sky_projection) * snapshot.view_from_world,
-                &device,
-                &queue,
-            );
-        }
-        if let Some(clouds) = clouds.as_mut() {
-            clouds.write_live(
-                owner + 1,
-                position,
-                snapshot.raster_projection * snapshot.view_from_world,
-                &scene,
-                &device,
-                &queue,
-            );
+            clouds.write_live(Vec3::ZERO, sky_clip, &scene, &device, &queue);
         }
     }
     let Some((_, target)) = views.iter().find(|(source, _)| source.index == 2) else {
@@ -740,7 +631,6 @@ pub(crate) fn surface_ready(
         && effects.is_some_and(|effects| effects.ready(&cache))
         && state.sky
         && (index < 3
-            || index >= MIRROR_START
             || (state.presented
                 && frame.probe_job == Some(ProbeJob::Face((index - 3) as u8))
                 && probe.is_some_and(|p| {
@@ -772,7 +662,6 @@ fn begin_frame(frame: Res<SourceViewFrame>, progress: Res<SourceGraphProgress>) 
             state.validated = false;
         }
     }
-    state.jitter = frame.jitter.map_or([0.; 2], |j| j.pixels);
     state.frame = frame.frame;
     state.mask = 0;
     state.sky = false;
@@ -914,7 +803,6 @@ fn render_sky(
         return;
     }
     if !clouds.encode(
-        0,
         context.command_encoder(),
         &cache,
         &allocator,
@@ -949,7 +837,6 @@ fn finish_surface(
         &super::camera_depth::CameraDepthState,
         &super::surface_graph::SurfaceViewTargets,
         &super::stained_glass::SourceGlassView,
-        Option<&super::mirrors::MirrorInstance>,
     )>,
     frame: Res<SourceViewFrame>,
     progress: Res<SourceGraphProgress>,
@@ -958,13 +845,10 @@ fn finish_surface(
     mut probe: Option<ResMut<ProbeFrame>>,
     cache: Res<PipelineCache>,
     effects: Res<super::source_effects::SourceEffects>,
-    mirror_outputs: Res<super::mirrors::MirrorOutputs>,
-    mirror_status: Res<super::mirrors::MirrorGpuStatus>,
     status: Res<SourceLightingStatus>,
     mut context: RenderContext,
 ) {
-    let (source, target, collector, lighting, shadow, depth, targets, glass, mirror_instance) =
-        view.into_inner();
+    let (source, target, collector, lighting, shadow, depth, targets, glass) = view.into_inner();
     if collector.encoded_frame() != frame.frame || glass.audit().frame != frame.frame {
         return;
     }
@@ -987,25 +871,6 @@ fn finish_surface(
         atlas_size: targets.0.atlas_size,
         physical_extent: [targets.0.colors.width, targets.0.colors.height],
     };
-    if source.index >= MIRROR_START {
-        let owner = source.index - MIRROR_START;
-        let Some(instance) = mirror_instance else {
-            return;
-        };
-        if !mirror_status.sky_ready(instance.0, owner, frame.frame) {
-            return;
-        }
-        let Some(output) = target.out_texture_color_attachment(None) else {
-            return;
-        };
-        if mirror_outputs.0[owner]
-            .as_ref()
-            .is_some_and(|copy| copy.encode(context.command_encoder(), &cache, output.view, None))
-        {
-            mirror_status.encoded(instance.0, owner, frame.frame);
-        }
-        return;
-    }
     if source.index >= 3 {
         let Some(probes) = probe.as_mut() else { return };
         let probe = &mut probes.probes[frame.probe_index];
@@ -1070,7 +935,6 @@ fn submitted(
     if state.presented {
         if state.first_token == 0 {
             state.first_token = state.token;
-            state.first_jitter = state.jitter;
         }
         acks.main_submitted(state.token);
         if state.validation == 0 {
@@ -1161,7 +1025,6 @@ struct SourceDiagnostics {
     progress: Arc<Mutex<FrameProgress>>,
     status: Arc<Mutex<RenderingState>>,
     gate: SourceExecutionGate,
-    mirrors: super::mirrors::MirrorGpuStatus,
 }
 static SOURCE_DIAGNOSTICS: OnceLock<SourceDiagnostics> = OnceLock::new();
 
@@ -1198,7 +1061,6 @@ pub fn source_render_audit() -> String {
         "state": state, "graph": &*progress,
         "graph_control_bytes": control_bytes(),
         "gpu_validated_generation": audit.gate.validated_generation(),
-        "mirrors": audit.mirrors.audit(),
     }))
     .expect("source diagnostic values serialize")
 }
@@ -1394,9 +1256,7 @@ fn gpu_boundaries(
     boundary.lighting_render_assets = stamps[2].is_some();
     if let Some(master) = world.get_resource::<super::lighting::LightingGpu>() {
         boundary.master_cookies = master.cookies.is_some();
-        boundary.master_uniform = master.uniform.buffer().is_some()
-            && master.shadow_a.buffer().is_some()
-            && master.shadow_b.buffer().is_some();
+        boundary.master_uniform = master.uniform.buffer().is_some();
         boundary.master_state = match &*master.status.lock().unwrap() {
             super::lighting::RenderingState::Loading => 0,
             super::lighting::RenderingState::Ready => 1,
@@ -1591,27 +1451,18 @@ fn clear_capture(
     );
 }
 fn render_capture_sky(
-    world: &World,
     view: ViewQuery<(
-        &ExtractedView,
         &SourceSurfaceView,
         &super::surface_graph::SurfaceViewTargets,
-        Option<&super::mirrors::MirrorInstance>,
     )>,
     sky: Res<SkyPass>,
     probe: Option<Res<ProbeFrame>>,
     frame: Res<SourceViewFrame>,
     cache: Res<PipelineCache>,
     status: Res<SourceLightingStatus>,
-    mirror_status: Res<super::mirrors::MirrorGpuStatus>,
-    clouds: Res<super::clouds::CloudPass>,
-    extras: Res<SkyExtras>,
-    phases: Res<ViewSortedRenderPhases<Transparent3d>>,
-    allocator: Res<bevy::render::mesh::allocator::MeshAllocator>,
     mut context: RenderContext,
 ) {
-    let entity = view.entity();
-    let (extracted, source, targets, instance) = view.into_inner();
+    let (source, targets) = view.into_inner();
     if source.index < 3 || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
         return;
     }
@@ -1622,57 +1473,10 @@ fn render_capture_sky(
         targets.0.colors.attachment(),
         None,
         &targets.0.depth.attachment,
-    ) {
-        if source.index < MIRROR_START {
-            if let Some(probe) = probe.as_ref() {
-                probe.probes[frame.probe_index].sky_frames[source.index - 3]
-                    .store(frame.frame, Ordering::Release);
-            }
-            return;
-        }
-        let owner = source.index - MIRROR_START;
-        let Some(instance) = instance else { return };
-        let Some(phase) = phases.get(&extracted.retained_view_entity) else {
-            return;
-        };
-        if let Err(error) = draw_extras(
-            3,
-            phase,
-            world,
-            entity,
-            &mut context,
-            &targets.0.colors,
-            &targets.0.depth.attachment,
-            &extras,
-        ) {
-            *status.0.lock().unwrap() = RenderingState::Failed(error);
-            return;
-        }
-        if !clouds.encode(
-            owner + 1,
-            context.command_encoder(),
-            &cache,
-            &allocator,
-            targets.0.colors.attachment(),
-            None,
-            &targets.0.depth.attachment,
-        ) {
-            return;
-        }
-        if let Err(error) = draw_extras(
-            4,
-            phase,
-            world,
-            entity,
-            &mut context,
-            &targets.0.colors,
-            &targets.0.depth.attachment,
-            &extras,
-        ) {
-            *status.0.lock().unwrap() = RenderingState::Failed(error);
-            return;
-        }
-        mirror_status.sky_encoded(instance.0, owner, frame.frame);
+    ) && let Some(probe) = probe.as_ref()
+    {
+        probe.probes[frame.probe_index].sky_frames[source.index - 3]
+            .store(frame.frame, Ordering::Release);
     }
 }
 fn filter_probe(
@@ -1747,275 +1551,4 @@ fn filter_probe(
         }
         probe.encoded_token = Some(frame.probe_token);
     }
-}
-
-fn prepare_motion(
-    mut commands: Commands,
-    mut existing: Option<ResMut<MotionFrame>>,
-    views: Query<(
-        Entity,
-        &SourceSurfaceView,
-        &super::surface_graph::SurfaceViewTargets,
-        Option<&MotionDrawView>,
-    )>,
-    frame: Res<SourceViewFrame>,
-    objects: Res<MotionObjects>,
-    assets: Option<Res<LightingRenderAssets>>,
-    device: Res<RenderDevice>,
-    queue: Res<RenderQueue>,
-    cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
-) {
-    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
-        || !objects.matches(frame.frame, frame.main_token)
-    {
-        return;
-    }
-    let (Some(snapshot), Some(assets), Some(origin)) =
-        (frame.views[1].as_ref(), assets, objects.origin())
-    else {
-        return;
-    };
-    let Some((entity, _, targets, draw)) = views.iter().find(|(_, view, _, _)| view.index == 1)
-    else {
-        return;
-    };
-    let result = (|| -> Result<(), String> {
-        if let Some(existing) = existing.as_mut() {
-            if existing.scene != frame.scene || existing.motion_revision != frame.motion_revision {
-                existing.motion_revision = frame.motion_revision;
-                existing.scene = frame.scene;
-                existing.first_token = 0;
-                existing.first_draws = [0; 3];
-                existing.first_camera_registered = false;
-                existing.pass.as_mut().unwrap().recreate(snapshot);
-                existing.origin = origin;
-                existing.camera_frame = 0;
-                existing.camera_token = 0;
-                existing.submitted_token = 0;
-                existing.validation = 0;
-            }
-            let delta = Vec3::from_array(std::array::from_fn(|i| {
-                (origin[i] - existing.origin[i]) as f32
-            }));
-            if !delta.is_finite() {
-                return Err("Source motion origin is invalid".into());
-            }
-            if delta != Vec3::ZERO {
-                existing.pass.as_mut().unwrap().rebase(delta);
-                existing.origin = origin;
-                existing.rebase_count += 1;
-            }
-            if !Arc::ptr_eq(&existing.targets, &targets.0) {
-                let previous = existing.pass.take();
-                existing.pass = Some(SourceMotionPass::new(
-                    &device,
-                    &queue,
-                    &cache,
-                    assets.shaders.motion_camera.clone(),
-                    targets.0.depth.sampled.as_ref().unwrap(),
-                    snapshot,
-                    previous,
-                )?);
-                existing.targets = targets.0.clone();
-                existing.camera_frame = 0;
-                existing.camera_token = 0;
-                existing.validation = 0;
-                existing.resize_count += 1;
-                let pass = existing.pass.as_ref().unwrap();
-                commands.entity(entity).insert(MotionDrawView::new(
-                    pass.binding().clone(),
-                    pass.copied_depth.clone(),
-                ));
-            } else if draw.is_none() {
-                let pass = existing.pass.as_ref().unwrap();
-                commands.entity(entity).insert(MotionDrawView::new(
-                    pass.binding().clone(),
-                    pass.copied_depth.clone(),
-                ));
-            }
-            if let Some(error) = existing.pass.as_ref().unwrap().failure(&cache) {
-                return Err(error);
-            }
-        } else {
-            let pass = SourceMotionPass::new(
-                &device,
-                &queue,
-                &cache,
-                assets.shaders.motion_camera.clone(),
-                targets.0.depth.sampled.as_ref().unwrap(),
-                snapshot,
-                None,
-            )?;
-            commands.entity(entity).insert(MotionDrawView::new(
-                pass.binding().clone(),
-                pass.copied_depth.clone(),
-            ));
-            commands.insert_resource(MotionFrame {
-                motion_revision: frame.motion_revision,
-                scene: frame.scene,
-                first_token: 0,
-                first_draws: [0; 3],
-                first_camera_registered: false,
-                pass: Some(pass),
-                targets: targets.0.clone(),
-                origin,
-                camera_frame: 0,
-                camera_token: 0,
-                submitted_token: 0,
-                validation: 0,
-                resize_count: 0,
-                rebase_count: 0,
-            });
-        }
-        Ok(())
-    })();
-    if let Err(error) = result {
-        *status.0.lock().unwrap() = RenderingState::Failed(error);
-    }
-}
-
-fn encode_motion_camera(
-    view: ViewQuery<(
-        &SourceSurfaceView,
-        &super::surface_graph::SurfaceViewTargets,
-    )>,
-    mut motion: Option<ResMut<MotionFrame>>,
-    frame: Res<SourceViewFrame>,
-    objects: Res<MotionObjects>,
-    pipelines: Res<MotionPipelines>,
-    device: Res<RenderDevice>,
-    queue: Res<RenderQueue>,
-    cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
-    mut context: RenderContext,
-) {
-    let (source, targets) = view.into_inner();
-    if source.index != 1
-        || !objects.matches(frame.frame, frame.main_token)
-        || !pipelines.ready(&cache)
-        || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
-    {
-        return;
-    }
-    let (Some(motion), Some(snapshot)) = (motion.as_mut(), frame.views[1].as_ref()) else {
-        return;
-    };
-    if motion.first_token == 0 {
-        motion.first_camera_registered = motion
-            .pass
-            .as_ref()
-            .unwrap()
-            .camera_history_matches(snapshot);
-    }
-    match motion.pass.as_mut().unwrap().encode_camera(
-        context.command_encoder(),
-        &device,
-        &queue,
-        &cache,
-        &targets.0.motion.attachment,
-        snapshot,
-        frame.main_token,
-    ) {
-        Ok(true) => {
-            motion.camera_frame = frame.frame;
-            motion.camera_token = frame.main_token;
-        }
-        Ok(false) => {}
-        Err(error) => *status.0.lock().unwrap() = RenderingState::Failed(error),
-    }
-}
-
-fn encode_motion_objects(
-    world: &World,
-    view: ViewQuery<&SourceSurfaceView>,
-    motion: Option<Res<MotionFrame>>,
-    frame: Res<SourceViewFrame>,
-    status: Res<SourceLightingStatus>,
-    mut context: RenderContext,
-) {
-    let entity = view.entity();
-    if view.into_inner().index != 1
-        || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
-    {
-        return;
-    }
-    let Some(motion) = motion else { return };
-    if motion.camera_frame != frame.frame || motion.camera_token != frame.main_token {
-        return;
-    }
-    if let Err(error) =
-        super::motion_draw::render_objects(world, entity, frame.main_token, &mut context)
-    {
-        *status.0.lock().unwrap() = RenderingState::Failed(error);
-    }
-}
-
-fn submit_motion(
-    mut motion: Option<ResMut<MotionFrame>>,
-    views: Query<(&SourceSurfaceView, &MotionDrawView)>,
-    objects: Res<MotionObjects>,
-    pipelines: Res<MotionPipelines>,
-    frame: Res<SourceViewFrame>,
-    progress: Res<SourceGraphProgress>,
-    cache: Res<PipelineCache>,
-    gate: Res<SourceExecutionGate>,
-    queue: Res<RenderQueue>,
-    status: Res<SourceLightingStatus>,
-) {
-    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
-        return;
-    }
-    let Some(motion) = motion.as_mut() else {
-        return;
-    };
-    let Some((_, draw)) = views.iter().find(|(view, _)| view.index == 1) else {
-        return;
-    };
-    let mut state = progress.0.lock().unwrap();
-    let token = frame.main_token;
-    if state.presented
-        && state.frame == frame.frame
-        && state.token == token
-        && motion.camera_frame == frame.frame
-        && motion.camera_token == token
-        && draw.encoded_token() == token
-        && objects.matches(frame.frame, token)
-        && token > motion.submitted_token
-        && objects.can_complete(token)
-    {
-        if !motion.pass.as_mut().unwrap().completed(token) || !objects.completed(token) {
-            *status.0.lock().unwrap() =
-                RenderingState::Failed("Source motion history submission did not match".into());
-            return;
-        }
-        if motion.first_token == 0 {
-            motion.first_token = token;
-            motion.first_draws = draw.counts();
-        }
-        motion.submitted_token = token;
-        if motion.validation == 0 {
-            motion.validation = gate.watch_submission(&queue);
-        }
-    }
-    state.motion = MotionAudit {
-        first_token: motion.first_token,
-        first_draws: motion.first_draws,
-        first_camera_registered: motion.first_camera_registered,
-        pipelines_ready: pipelines.ready(&cache) && motion.pass.as_ref().unwrap().ready(&cache),
-        objects_ready: objects.matches(frame.frame, token),
-        frame: motion.camera_frame,
-        camera_token: motion.camera_token,
-        object_token: draw.encoded_token(),
-        submitted_token: motion.submitted_token,
-        registered_objects: objects.count() as u32,
-        allocated_slots: objects.allocated_slots(),
-        reused_slots: objects.reused_slots(),
-        draws: draw.counts(),
-        extent: motion.pass.as_ref().unwrap().extent.to_array(),
-        validation: motion.validation,
-        validated: gate.submission_validated(motion.validation),
-        resize_count: motion.resize_count,
-        rebase_count: motion.rebase_count,
-    };
 }

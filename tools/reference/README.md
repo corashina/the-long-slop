@@ -136,10 +136,7 @@ Startup conditions use a fixed build-based seed and original source ranges.
 Rims and tires use the matching source material variants.
 The exporter selects the highest source LOD and retains all transform IDs.
 
-Mirror materials retain their authored factors. The selected Lada has three checked live mirror bindings.
-Each binding has a source camera, plane, screen, live material, and disabled material.
-The runtime captures into retained 256 by 256 linear RGBA8 targets with D24S8 depth.
-See [mirror acceptance](../../docs/verification.md#live-mirror-acceptance-2026-10-12) for checks and limits.
+Mirror glass uses the source disabled-mirror material. The export has no live mirror records.
 Plate text is omitted because serialized glyphs contain obsolete editor text.
 The exporter maps supported Unity materials to glTF PBR and retains source properties and keywords.
 The source renderer ports the approved lighting, cookie, shadow, sky, cloud, and flare paths.
@@ -209,7 +206,8 @@ Native and browser loaders share a 128 MiB manifest limit.
 All prototype node indices belong to one prototype instance.
 Road control counts and skin bone counts are separate.
 
-The world contract uses the saved 5,000-metre source settings profile.
+The world contract uses the source minimum draw distance of 500 metres.
+`draw_distance.py` holds this value for world distances, fog, and camera planes.
 It requires Task 1's checked local samples and retained source runs.
 Source captures, managed methods, and exported assets remain outside Git.
 Synthetic fixtures test contract rejection; they do not prove world generation parity.

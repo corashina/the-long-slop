@@ -59,7 +59,7 @@ impl SceneLighting {
         &self,
         shadow_fade: Vec4,
         shadow_fade_center: Vec4,
-        nonjittered_clip_from_world: Mat4,
+        clip_from_world: Mat4,
         near: f32,
         far: f32,
     ) -> LightingUniform {
@@ -74,7 +74,7 @@ impl SceneLighting {
             probe_center: self.probe_center,
             probe_extents: self.probe_extents,
             source_time: self.source_time,
-            nonjittered_clip_from_world,
+            clip_from_world,
             near_far: Vec4::new(near, far, 0., 0.),
         }
     }

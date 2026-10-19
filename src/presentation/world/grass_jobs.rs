@@ -49,10 +49,8 @@ struct Instance {
     session: u64,
     settings: GrassSettings,
     patches: Arc<[GrassPatch]>,
-    authored_mesh: Handle<Mesh>,
     material: Handle<GrassMaterial>,
     shadows: bool,
-    shadow_entity: Option<Entity>,
     bounds: bevy::camera::primitives::Aabb,
     latest: GrassView,
     accepted_view: Option<GrassView>,
@@ -206,12 +204,10 @@ impl GrassJobs {
         entity: Entity,
         parent: Entity,
         patches: Arc<[GrassPatch]>,
-        authored_mesh: Handle<Mesh>,
         settings: GrassSettings,
         material: Handle<GrassMaterial>,
         view: GrassView,
         shadows: bool,
-        shadow_entity: Option<Entity>,
         bounds: bevy::camera::primitives::Aabb,
     ) -> Result<(), ReferenceError> {
         let group_idle = !self
@@ -264,10 +260,8 @@ impl GrassJobs {
             session: stream.frame().request.session,
             settings,
             patches,
-            authored_mesh,
             material,
             shadows,
-            shadow_entity,
             bounds,
             latest: view,
             accepted_view: None,
@@ -408,9 +402,6 @@ impl GrassJobs {
                         material,
                         instance.shadows,
                     )?;
-                    if let Some(ticket) = ticket {
-                        ticket.set_motion_mesh(&instance.authored_mesh);
-                    }
                 }
                 if let Some(ticket) = ticket {
                     match ticket.state() {
@@ -447,13 +438,6 @@ impl GrassJobs {
                         MeshMaterial3d(material.clone()),
                         instance.bounds,
                     ));
-                    if let Some(entity) = instance.shadow_entity {
-                        commands.entity(entity).insert((
-                            Mesh3d(mesh.clone()),
-                            MeshMaterial3d(material.clone()),
-                            instance.bounds,
-                        ));
-                    }
                     instance.accepted_view = Some(view);
                     instance.accepted = Some(Geometry {
                         mesh,

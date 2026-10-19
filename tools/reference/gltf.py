@@ -417,9 +417,6 @@ class GltfExporter(GltfBuilder):
                 else:pointers=[v[k] for v in data['szamok'] for k in ('MOn','MOff')]
                 for ptr in pointers:
                     if ptr['m_PathID']:self.material(self.source.resolve(component,ptr))
-        if self.asset_id == 2:
-            for reader in (self.source.mirror_live_material, self.source.mirror_disabled_material):
-                self.material(reader)
         from .conditions import export_condition_variants
         export_condition_variants(self, records, mapping)
         if world_prototype:

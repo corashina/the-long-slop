@@ -12,7 +12,6 @@ pub mod conditions;
 pub mod fluids;
 pub mod interaction;
 pub mod lighting;
-pub mod mirrors;
 pub mod particles;
 pub mod plates;
 pub mod player;

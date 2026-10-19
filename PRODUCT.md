@@ -22,7 +22,7 @@ It includes source road segments, supported structures and supplies, chase camer
 The interface uses source menus, action icons, fluid percentages, and animated car instruments.
 Recovery preserves state. Restart restores the garage and clears session changes.
 The checked source road contains 50,000 segments. The off-road grid has no finite extent.
-The normal seed is 42. Generation uses the saved 5,000-metre default source settings.
+The normal seed is 42. Generation uses the source minimum draw distance of 500 metres for speed.
 The runtime retains stable source identities, bounded source replay inputs, and uncapped actual change records.
 Changes include supported physics motion, fluids, attachments, mechanisms, and lamps. Unloaded objects do not simulate.
 A full source-history budget can prevent further first encounters. Accepted collision support remains available.
@@ -35,7 +35,11 @@ House switches use E or eligible LMB. Cabin controls follow source modes and doo
 Pause freezes cycle time, fades, and switch movement. Recovery preserves these states.
 Restart restores the garage and source startup state at 240 seconds.
 
-Adjustable mirrors show live views. The renderer covers source shadows, sky, reflections, post effects, and stained glass.
+The renderer covers sun shadows, sky, reflections, post effects, and stained glass.
+Lamps light the scene but cast no shadows, for speed. Lamp shadows are outside current scope.
+Each reflection probe captures once per scene, then keeps that image.
+Mirrors show the source glass material without a live view. Live mirror views are outside current scope.
+Antialiasing uses MSAA only. Source motion blur and TAA are outside current scope.
 Source audio covers ignition, engine, horn, interaction sounds, and the Lada radio.
 One manual browser save slot stores both cars, items, mechanisms, pumps, and lamps.
 Driving includes source manual gears, clutch, Automatic clutch, and Automatic gears.

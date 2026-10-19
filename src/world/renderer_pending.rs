@@ -644,8 +644,7 @@ mod batch_tests {
         assert_eq!(waiting.work.base_keys, 4);
     }
     #[test]
-    fn shared_receipt_withholds_errors_and_dropped_pair_proof_until_all_siblings_drain() {
-        use crate::mirrors::capture::{GeneratedProof, SourceProof};
+    fn shared_receipt_withholds_errors_until_all_siblings_drain() {
         use std::sync::Arc;
         let operation = PipelineOperation {
             owns_pending: false,
@@ -691,30 +690,6 @@ mod batch_tests {
         );
         assert!(!pipeline_pair_ready(&first, true));
         drop(first_user);
-        let mut proof = GeneratedProof {
-            ids: Vec::with_capacity(64),
-        };
-        for (pair, id) in [(&first, 263), (&second, 264)] {
-            proof.include_ticket(
-                7,
-                7,
-                true,
-                pipeline_pair_ready(pair, false),
-                Arc::strong_count(pair) > 1,
-                [SourceProof {
-                    id,
-                    isolated: false,
-                    cancelled: false,
-                }]
-                .into_iter(),
-            );
-        }
-        proof.finish();
-        assert!(
-            !proof.contains(263),
-            "a live sibling must not authorize the dropped pair"
-        );
-        assert!(proof.contains(264));
         assert!(batch.retain());
         batch.retire_pairs();
         assert_eq!(Arc::weak_count(&first), 0);

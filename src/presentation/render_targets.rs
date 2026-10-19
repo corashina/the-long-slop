@@ -1,5 +1,5 @@
 //! Persistent source render targets. Allocation is restricted to startup or resize.
-use super::surface_views::{MIRROR_START, VIEW_COUNT};
+use super::surface_views::VIEW_COUNT;
 
 use bevy::render::{
     render_resource::*,
@@ -10,7 +10,6 @@ pub const HDR_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const DEPTH_FORMAT: TextureFormat = TextureFormat::Depth24PlusStencil8;
 pub const SHADOW_FORMAT: TextureFormat = TextureFormat::Depth16Unorm;
 pub const COLLECTOR_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
-pub const MOTION_FORMAT: TextureFormat = TextureFormat::Rg16Float;
 pub const EXPOSURE_FORMAT: TextureFormat = TextureFormat::R32Float;
 pub const HISTOGRAM_FORMAT: TextureFormat = TextureFormat::Rgba32Uint;
 
@@ -33,7 +32,6 @@ pub fn validate_source_device(
         DEPTH_FORMAT,
         SHADOW_FORMAT,
         COLLECTOR_FORMAT,
-        MOTION_FORMAT,
         HISTOGRAM_FORMAT,
         EXPOSURE_FORMAT,
     ] {
@@ -179,14 +177,13 @@ impl SourceColorTargets {
     }
 }
 
-/// Depth, motion, attenuation, and shadow storage belong to exactly one surface view.
+/// Depth, attenuation, and shadow storage belong to exactly one surface view.
 /// Color ownership is shared without sharing any writable view uniform.
 pub struct SourceViewTargets {
     pub colors: std::sync::Arc<SourceColorTargets>,
     pub atlas_size: u32,
     pub multisample_depth: Option<Target>,
     pub depth: Target,
-    pub motion: Target,
     pub collector: Target,
     pub atlas: Target,
     /// Excludes shared color storage. Count each color pair once in the graph total.
@@ -219,15 +216,6 @@ impl SourceViewTargets {
             )
         });
         let depth = Target::new(device, "source_depth", width, height, 1, DEPTH_FORMAT, true);
-        let motion = Target::new(
-            device,
-            "source_motion",
-            width,
-            height,
-            1,
-            MOTION_FORMAT,
-            true,
-        );
         let collector = Target::new(
             device,
             "source_screen_shadows",
@@ -249,19 +237,17 @@ impl SourceViewTargets {
         // D24S8 uses four logical bytes. Backend allocation overhead is excluded.
         let logical_bytes = u64::from(width)
             * u64::from(height)
-            * (12
-                + if samples > 1 {
-                    4 * u64::from(samples)
-                } else {
-                    0
-                })
+            * (8 + if samples > 1 {
+                4 * u64::from(samples)
+            } else {
+                0
+            })
             + 2 * u64::from(atlas_size).pow(2);
         Ok(Self {
             colors,
             atlas_size,
             multisample_depth,
             depth,
-            motion,
             collector,
             atlas,
             logical_bytes,
@@ -274,7 +260,6 @@ impl SourceViewTargets {
 pub struct SurfaceTargets {
     pub stack: std::sync::Arc<SourceColorTargets>,
     pub capture: std::sync::Arc<SourceColorTargets>,
-    pub mirrors: [std::sync::Arc<SourceColorTargets>; 3],
     pub views: [std::sync::Arc<SourceViewTargets>; VIEW_COUNT],
     pub logical_bytes: u64,
 }
@@ -286,20 +271,12 @@ impl SurfaceTargets {
         let capture_atlas = crate::reference::shadows::source_atlas_size(64, 64).unwrap();
         let stack = Arc::new(SourceColorTargets::new(device, width, height, 8)?);
         let capture = Arc::new(SourceColorTargets::new(device, 64, 64, 1)?);
-        let mirrors = [
-            Arc::new(SourceColorTargets::new(device, 256, 256, 1)?),
-            Arc::new(SourceColorTargets::new(device, 256, 256, 1)?),
-            Arc::new(SourceColorTargets::new(device, 256, 256, 1)?),
-        ];
-        let mirror_atlas = crate::reference::shadows::source_atlas_size(256, 256).unwrap();
         let mut views = Vec::with_capacity(VIEW_COUNT);
         for index in 0..VIEW_COUNT {
             let (color, atlas_size) = if index < 3 {
                 (&stack, atlas)
-            } else if index < MIRROR_START {
-                (&capture, capture_atlas)
             } else {
-                (&mirrors[index - MIRROR_START], mirror_atlas)
+                (&capture, capture_atlas)
             };
             views.push(Arc::new(SourceViewTargets::new(
                 device,
@@ -309,12 +286,10 @@ impl SurfaceTargets {
         }
         let logical_bytes = stack.logical_bytes
             + capture.logical_bytes
-            + mirrors.iter().map(|color| color.logical_bytes).sum::<u64>()
             + views.iter().map(|view| view.logical_bytes).sum::<u64>();
         Ok(Self {
             stack,
             capture,
-            mirrors,
             views: views.try_into().ok().unwrap(),
             logical_bytes,
         })
@@ -336,11 +311,6 @@ impl SurfaceTargets {
         self.stack = stack;
         self.logical_bytes = self.stack.logical_bytes
             + self.capture.logical_bytes
-            + self
-                .mirrors
-                .iter()
-                .map(|color| color.logical_bytes)
-                .sum::<u64>()
             + self
                 .views
                 .iter()

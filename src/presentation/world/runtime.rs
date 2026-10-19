@@ -61,7 +61,6 @@ pub struct WorldPresentation<'w, 's> {
     pub writers: ResMut<'w, GrassWriters>,
     pub materials: InstanceMaterials<'w>,
     pub terrain: ResMut<'w, Assets<TerrainMaterial>>,
-    pub casters: ResMut<'w, Assets<crate::presentation::materials::lod::SurfaceCasterMaterial>>,
     pub assets: ResMut<'w, Assets<SourceGltf>>,
     pub plans: ResMut<'w, Assets<super::preflight::SourcePlan>>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
@@ -101,8 +100,7 @@ impl WorldPresentation<'_, '_> {
     ) -> Result<(), ReferenceError> {
         let started = crate::browser::game_now();
         loop {
-            // Gameplay runs one step, so it skips the metrics walk.
-            let before = (budget_ms > 0.).then(|| stream.metrics());
+            let before = stream.metrics();
             let remaining = (budget_ms - (crate::browser::game_now() - started)).max(0.);
             self.prepare_step(
                 stream,
@@ -118,9 +116,10 @@ impl WorldPresentation<'_, '_> {
                 required_views,
                 remaining,
             )?;
-            if before.is_none_or(|before| {
-                crate::browser::game_now() - started >= budget_ms || before == stream.metrics()
-            }) {
+            if budget_ms <= 0.
+                || crate::browser::game_now() - started >= budget_ms
+                || before == stream.metrics()
+            {
                 return Ok(());
             }
         }
@@ -175,8 +174,7 @@ impl WorldPresentation<'_, '_> {
             self.materials.cache.begin_world_session();
             self.surfaces
                 .retire_session(&mut self.commands, &mut self.meshes);
-            self.surfaces
-                .reset_bindings(&mut self.terrain, &mut self.casters);
+            self.surfaces.reset_bindings(&mut self.terrain);
         }
         // Cancellation and cleanup run before any material or stream failure can return.
         self.instances.retire(
@@ -383,7 +381,6 @@ impl WorldPresentation<'_, '_> {
             &mut self.materials.cache,
             &mut self.materials.primary,
             &mut self.terrain,
-            &mut self.casters,
         )?;
         self.instances.prepare(
             stream,

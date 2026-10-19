@@ -43,7 +43,7 @@ pub struct LightingUniform {
     pub probe_center: [Vec4; super::lighting_scene::PROBE_COUNT],
     pub probe_extents: [Vec4; super::lighting_scene::PROBE_COUNT],
     pub source_time: Vec4,
-    pub nonjittered_clip_from_world: Mat4,
+    pub clip_from_world: Mat4,
     pub near_far: Vec4,
 }
 
@@ -190,7 +190,7 @@ pub(crate) type DrawSourceMaterial = (
     SetSourceViewCamera,
     SetSourceViewLighting,
     SetMeshBindGroup<2>,
-    super::mirrors::SetMirrorMaterial<3>,
+    bevy::pbr::SetMaterialBindGroup<3>,
     DrawMesh,
     SourceDrawMark<false, true>,
     super::surface_pass::SetSourceAdditivePipeline,
@@ -208,7 +208,7 @@ pub(crate) type DrawSourceBase = (
     SetSourceViewCamera,
     SetSourceViewLighting,
     SetMeshBindGroup<2>,
-    super::mirrors::SetMirrorMaterial<3>,
+    bevy::pbr::SetMaterialBindGroup<3>,
     DrawMesh,
     SourceDrawMark<false, true>,
 );
@@ -240,7 +240,7 @@ pub(crate) type DrawSourceGlass = (
     SetSourceViewCamera,
     super::stained_glass::SetSourceGlassView,
     SetMeshBindGroup<2>,
-    super::mirrors::SetMirrorMaterial<3>,
+    bevy::pbr::SetMaterialBindGroup<3>,
     DrawMesh,
     SourceDrawMark<false, true>,
 );
@@ -253,7 +253,7 @@ pub(crate) type DrawSourceAdd = (
     SetSourceViewCamera,
     SetSourceViewLighting,
     SetMeshBindGroup<2>,
-    super::mirrors::SetMirrorMaterial<3>,
+    bevy::pbr::SetMaterialBindGroup<3>,
     DrawMesh,
     SourceDrawMark<true, true>,
 );

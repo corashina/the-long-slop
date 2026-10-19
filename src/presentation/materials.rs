@@ -2,7 +2,6 @@ mod generated;
 
 pub mod grass;
 pub mod impostor;
-pub mod lod;
 pub mod primary;
 pub mod specular;
 pub mod terrain;
@@ -314,8 +313,6 @@ impl Plugin for SourceMaterialPlugin {
             MaterialPlugin::<terrain::TerrainMaterial>::default(),
             MaterialPlugin::<specular::SpecularMaterial>::default(),
             MaterialPlugin::<impostor::ImpostorMaterial>::default(),
-            MaterialPlugin::<lod::LodCasterMaterial>::default(),
-            MaterialPlugin::<lod::SurfaceCasterMaterial>::default(),
             MaterialPlugin::<grass::material::GrassMaterial>::default(),
             grass::writers::GrassDisplacementPlugin,
             world_texture_upload::WorldTextureUploadPlugin,
@@ -353,8 +350,7 @@ impl Plugin for SourceMaterialPlugin {
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
             render.add_systems(
                 Render,
-                (prepare_retained_casters, upload_retained_colors)
-                    .chain()
+                upload_retained_colors
                     .after(RenderSystems::PrepareBindGroups)
                     .before(prewarm_materials),
             );
@@ -870,7 +866,6 @@ fn make_material(
     SourceMaterial {
         retained_color: None,
         preparation: default(),
-        mirror: None,
         base: StandardMaterial {
             base_color_channel: main.map_or(bevy::mesh::UvChannel::Uv0, |texture| {
                 if texture.uv_channel == 0 {
@@ -1142,7 +1137,6 @@ use bevy::ecs::system::SystemParamItem;
 pub struct SourceMaterial {
     pub(crate) retained_color: Option<RetainedColor>,
     pub preparation: super::gpu_prepare::GpuPreparation,
-    pub(crate) mirror: Option<(u64, usize, bool)>,
     pub base: StandardMaterial,
     pub extension: SourceExtension,
 }
@@ -1163,7 +1157,6 @@ impl AsBindGroup for SourceMaterial {
     type Param = (
         <StandardMaterial as AsBindGroup>::Param,
         <SourceExtension as AsBindGroup>::Param,
-        SRes<super::mirrors::MirrorGpuStatus>,
     );
     fn label() -> &'static str {
         "source material"
@@ -1229,9 +1222,6 @@ impl AsBindGroup for SourceMaterial {
                 .find(|(binding, _)| *binding == 120)
                 .expect("source color binding") = (120, OwnedBindingResource::Buffer(buffer));
             retained.dirty = true;
-        }
-        if let Some((instance, owner, live)) = self.mirror {
-            params.2.record(instance, owner, live, &prepared.bindings);
         }
         Ok(prepared)
     }
@@ -1536,52 +1526,6 @@ impl AsBindGroup for SourceReceiver {
                     ),
                 ),
                 (
-                    114,
-                    OwnedBindingResource::Buffer(
-                        gpu.shadow_a
-                            .buffer()
-                            .ok_or(AsBindGroupError::RetryNextUpdate)?
-                            .clone(),
-                    ),
-                ),
-                (
-                    115,
-                    OwnedBindingResource::Buffer(
-                        gpu.shadow_b
-                            .buffer()
-                            .ok_or(AsBindGroupError::RetryNextUpdate)?
-                            .clone(),
-                    ),
-                ),
-                (
-                    101,
-                    OwnedBindingResource::TextureView(
-                        TextureViewDimension::D2,
-                        gpu.atlas_view.clone(),
-                    ),
-                ),
-                (
-                    102,
-                    OwnedBindingResource::Sampler(
-                        SamplerBindingType::Comparison,
-                        gpu.shadow_sampler.clone(),
-                    ),
-                ),
-                (
-                    113,
-                    OwnedBindingResource::TextureView(
-                        TextureViewDimension::D2,
-                        gpu.atlas_view.clone(),
-                    ),
-                ),
-                (
-                    112,
-                    OwnedBindingResource::Sampler(
-                        SamplerBindingType::Comparison,
-                        gpu.hard_shadow_sampler.clone(),
-                    ),
-                ),
-                (
                     103,
                     OwnedBindingResource::TextureView(
                         TextureViewDimension::D2Array,
@@ -1653,22 +1597,6 @@ impl AsBindGroup for SourceReceiver {
                     uniform_buffer::<super::lighting::LightingUniform>(false),
                 ),
                 (
-                    114,
-                    uniform_buffer::<
-                        super::lighting::ShadowUniform<{ super::lighting::SHADOW_BANK_SIZE }>,
-                    >(false),
-                ),
-                (
-                    115,
-                    uniform_buffer::<
-                        super::lighting::ShadowUniform<
-                            { super::lighting::SHADOW_SLOTS - super::lighting::SHADOW_BANK_SIZE },
-                        >,
-                    >(false),
-                ),
-                (101, texture_2d(TextureSampleType::Depth)),
-                (102, sampler(SamplerBindingType::Comparison)),
-                (
                     103,
                     texture_2d_array(TextureSampleType::Float { filterable: true }),
                 ),
@@ -1684,8 +1612,6 @@ impl AsBindGroup for SourceReceiver {
                 ),
                 (108, sampler(SamplerBindingType::Filtering)),
                 (111, sampler(SamplerBindingType::Filtering)),
-                (112, sampler(SamplerBindingType::Comparison)),
-                (113, texture_2d(TextureSampleType::Depth)),
             ),
         )
         .to_vec();
@@ -1694,24 +1620,20 @@ impl AsBindGroup for SourceReceiver {
 }
 use bevy::ecs::system::lifetimeless::SRes;
 
-#[derive(Component)]
-pub struct SourceCaster;
 #[derive(Component, Clone, Copy)]
 pub struct SourceShadowMode(pub u8);
 
 #[derive(Resource, Default)]
 pub struct MaterialCache {
-    pub variants: std::collections::HashMap<
-        (AssetId<StandardMaterial>, bool, bool),
-        Handle<StandardMaterial>,
-    >,
+    /// Mirrored copies of authored materials. They key mirrored receiver conversions.
+    pub variants: std::collections::HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>>,
     pub converted:
         std::collections::HashMap<(AssetId<StandardMaterial>, u32), Handle<SourceMaterial>>,
 }
 pub fn bind_materials(
     mut commands: Commands,
     visuals: Res<super::reference::ReferenceVisuals>,
-    mut originals: ResMut<Assets<StandardMaterial>>,
+    originals: Res<Assets<StandardMaterial>>,
     mut materials: ResMut<Assets<SourceMaterial>>,
     mut cache: ResMut<MaterialCache>,
     imported_nodes: Query<&bevy::gltf::GltfExtras>,
@@ -1720,7 +1642,6 @@ pub fn bind_materials(
     query: Query<
         (
             Entity,
-            &Mesh3d,
             &MeshMaterial3d<StandardMaterial>,
             Option<&bevy::camera::visibility::RenderLayers>,
             Option<&SourceShadowMode>,
@@ -1728,13 +1649,13 @@ pub fn bind_materials(
             Option<&GltfMaterialExtras>,
             &GlobalTransform,
         ),
-        (Without<SourceCaster>, Without<super::sky::SkyMesh>),
+        (With<Mesh3d>, Without<super::sky::SkyMesh>),
     >,
 ) {
     if !visuals.bound || !renderer_meshes.bound || !authored.textures_ready() {
         return;
     }
-    for (entity, mesh, handle, layers, shadow_mode, parent, extras, global) in &query {
+    for (entity, handle, layers, shadow_mode, parent, extras, global) in &query {
         if shadow_mode.is_none()
             && parent.is_some_and(|parent| imported_nodes.contains(parent.parent()))
         {
@@ -1745,69 +1666,10 @@ pub fn bind_materials(
                 mask | 1u32.checked_shl(layer as u32).unwrap_or(0)
             })
         });
-        let Some(mut base) = originals.get(&handle.0).cloned() else {
+        let Some(base) = originals.get(&handle.0).cloned() else {
             continue;
         };
-        if let Some(extras) = extras {
-            let identity: MaterialIdentity =
-                serde_json::from_str(&extras.value).expect("validated material identity");
-            base = authored_caster_material((identity.asset, identity.gltf_material), &authored);
-            let record = authored
-                .records
-                .iter()
-                .find(|r| r.asset == identity.asset && r.gltf_material == identity.gltf_material)
-                .expect("validated material");
-            base.base_color = Color::srgba(
-                record.color[0],
-                record.color[1],
-                record.color[2],
-                record.color[3],
-            );
-            base.cull_mode = match record.state.cull {
-                0 => None,
-                1 => Some(Face::Front),
-                _ => Some(Face::Back),
-            };
-            if global.affine().matrix3.determinant() < 0. {
-                base.cull_mode = base.cull_mode.map(|face| match face {
-                    Face::Front => Face::Back,
-                    Face::Back => Face::Front,
-                });
-            }
-            originals
-                .insert(handle.0.id(), base.clone())
-                .expect("loaded source caster material");
-        }
-        let mode = shadow_mode.map_or(1, |mode| mode.0);
-        if mode != 0 {
-            let caster_material = if mode == 2 {
-                cache
-                    .variants
-                    .entry((handle.0.id(), false, true))
-                    .or_insert_with(|| {
-                        let mut material = base.clone();
-                        material.cull_mode = None;
-                        originals.add(material)
-                    })
-                    .clone()
-            } else {
-                handle.0.clone()
-            };
-            let layers = (0..32)
-                .filter(|layer| mask & (1 << layer) != 0)
-                .map(|layer| layer + 32)
-                .collect::<bevy::camera::visibility::RenderLayers>();
-            commands.spawn((
-                SourceCaster,
-                mesh.clone(),
-                MeshMaterial3d(caster_material),
-                layers,
-                Transform::default(),
-                Visibility::Inherited,
-                ChildOf(entity),
-            ));
-        }
-        if mode == 3 {
+        if shadow_mode.is_some_and(|mode| mode.0 == 3) {
             commands
                 .entity(entity)
                 .insert(bevy::camera::visibility::RenderLayers::none());
@@ -1848,7 +1710,6 @@ pub struct LampReceiverChoice {
     entity: Entity,
     sort: Option<super::transparent::SourceSortData>,
     material: Handle<SourceMaterial>,
-    casters: Vec<(Entity, Handle<StandardMaterial>)>,
 }
 #[derive(Clone)]
 pub struct LampMaterialChoice {
@@ -1860,20 +1721,12 @@ impl LampMaterialChoice {
     pub(crate) fn validate_assets(
         &self,
         materials: &Assets<SourceMaterial>,
-        casters: &Assets<StandardMaterial>,
     ) -> Result<(), crate::save::SaveError> {
         for receiver in &self.receivers {
             if !materials.contains(receiver.material.id()) {
                 return Err(crate::save::SaveError::MissingAssets(
                     "lamp material choice".into(),
                 ));
-            }
-            for (_, handle) in &receiver.casters {
-                if !casters.contains(handle.id()) {
-                    return Err(crate::save::SaveError::MissingAssets(
-                        "lamp caster material choice".into(),
-                    ));
-                }
             }
         }
         Ok(())
@@ -1891,19 +1744,13 @@ pub(crate) fn prepare_lamp_materials(
     mut materials: ResMut<Assets<SourceMaterial>>,
     mut cache: ResMut<MaterialCache>,
     authored_materials: Res<SourceMaterials>,
-    receivers: Query<
-        (
-            &Mesh3d,
-            &MeshMaterial3d<SourceMaterial>,
-            &GlobalTransform,
-            Option<&SourceShadowMode>,
-            Option<&Children>,
-            &super::renderers::SourceRenderer,
-            &GltfExtras,
-        ),
-        Without<SourceCaster>,
-    >,
-    casters: Query<(), With<SourceCaster>>,
+    receivers: Query<(
+        &Mesh3d,
+        &MeshMaterial3d<SourceMaterial>,
+        &GlobalTransform,
+        &super::renderers::SourceRenderer,
+        &GltfExtras,
+    )>,
 ) {
     if !authored_materials.textures_ready()
         || !source.bound
@@ -1964,16 +1811,12 @@ pub(crate) fn prepare_lamp_materials(
                 .find(|m| (m.asset, m.index) == key)
                 .expect("validated lamp material");
             let authored_base = authored_caster_material(key, &authored_materials);
-            originals
-                .insert(authored.handle.id(), authored_base.clone())
-                .expect("loaded lamp caster material");
             let mut choice = LampMaterialChoice {
                 key,
                 receivers: Vec::with_capacity(target.receivers.len()),
             };
             for &entity in &target.receivers {
-                let (mesh, receiver, global, shadow_mode, children, renderer, primitive) =
-                    receivers.get(entity).unwrap();
+                let (mesh, receiver, global, renderer, primitive) = receivers.get(entity).unwrap();
                 let mask = materials.get(&receiver.0).unwrap().extension.receiver_mask;
                 let inverted = global.affine().matrix3.determinant() < 0.;
                 let mut base = authored_base.clone();
@@ -1986,24 +1829,11 @@ pub(crate) fn prepare_lamp_materials(
                 let surface = if inverted {
                     cache
                         .variants
-                        .entry((authored.handle.id(), true, false))
+                        .entry(authored.handle.id())
                         .or_insert_with(|| originals.add(base.clone()))
                         .clone()
                 } else {
                     authored.handle.clone()
-                };
-                let caster = if shadow_mode.is_some_and(|mode| mode.0 == 2) {
-                    cache
-                        .variants
-                        .entry((authored.handle.id(), inverted, true))
-                        .or_insert_with(|| {
-                            let mut material = base.clone();
-                            material.cull_mode = None;
-                            originals.add(material)
-                        })
-                        .clone()
-                } else {
-                    surface.clone()
                 };
                 let material = cache
                     .converted
@@ -2039,33 +1869,12 @@ pub(crate) fn prepare_lamp_materials(
                 if let Some(sort) = sort {
                     warm.insert((sort, bevy::render::batching::NoAutomaticBatching));
                 }
-                source.warmups.push((warm.id(), false));
-                let mut binding = LampReceiverChoice {
+                source.warmups.push(warm.id());
+                choice.receivers.push(LampReceiverChoice {
                     entity,
                     sort,
                     material,
-                    casters: Vec::new(),
-                };
-                if let Some(children) = children {
-                    for child in children.iter().filter(|child| casters.contains(*child)) {
-                        binding.casters.push((child, caster.clone()));
-                    }
-                }
-                if !binding.casters.is_empty() {
-                    let warm = commands
-                        .spawn((
-                            SourceCaster,
-                            mesh.clone(),
-                            MeshMaterial3d(caster),
-                            far,
-                            Visibility::Visible,
-                            (32..64).collect::<bevy::camera::visibility::RenderLayers>(),
-                            bevy::camera::visibility::NoFrustumCulling,
-                        ))
-                        .id();
-                    source.warmups.push((warm, true));
-                }
-                choice.receivers.push(binding);
+                });
             }
             target.choices.push(choice);
         }
@@ -2090,7 +1899,6 @@ pub(crate) fn sync_lamp_materials(
     drive: Res<crate::app::Drive>,
     mut source: ResMut<super::lighting::SourceLighting>,
     receivers: Query<&MeshMaterial3d<SourceMaterial>>,
-    casters: Query<&MeshMaterial3d<StandardMaterial>>,
 ) {
     if !source.materials_prepared {
         return;
@@ -2104,12 +1912,10 @@ pub(crate) fn sync_lamp_materials(
             .find(|choice| choice.key == key)
             .expect("prepared source material choice");
         if target.current == Some(key)
-            && choice.receivers.iter().all(|r| {
-                receivers.get(r.entity).is_ok_and(|m| m.0 == r.material)
-                    && r.casters
-                        .iter()
-                        .all(|(entity, handle)| casters.get(*entity).is_ok_and(|m| &m.0 == handle))
-            })
+            && choice
+                .receivers
+                .iter()
+                .all(|r| receivers.get(r.entity).is_ok_and(|m| m.0 == r.material))
         {
             continue;
         }
@@ -2125,11 +1931,6 @@ pub(crate) fn sync_lamp_materials(
                 commands
                     .entity(receiver.entity)
                     .remove::<super::transparent::SourceSortData>();
-            }
-            for (entity, material) in &receiver.casters {
-                commands
-                    .entity(*entity)
-                    .insert(MeshMaterial3d(material.clone()));
             }
         }
         target.current = Some(key);
@@ -2176,72 +1977,6 @@ pub fn authored_caster_material(
     base
 }
 
-/// Both source slots use one texture bank and its single sampler.
-pub fn make_mirror_material(
-    record: &MaterialRecord,
-    source: &SourceMaterials,
-    target: Handle<Image>,
-    reflected: bool,
-    mask: u32,
-) -> SourceMaterial {
-    let mut material = make_material(record, reflected, mask, source);
-    let surface = &mut material.extension.surface;
-    for slot in [0usize, 4] {
-        surface.data.flags.y |= 1 << slot;
-        surface.data.banks[slot / 4][slot % 4] = 0;
-    }
-    material.base.base_color_texture = Some(target);
-    material
-}
-
-pub(crate) fn warm_mirror_material(
-    world: &World,
-    mesh: AssetId<Mesh>,
-    material: AssetId<SourceMaterial>,
-) {
-    let loading = world.resource::<MaterialLoading>();
-    let mut pending = loading.0.lock().unwrap();
-    pending.requests.push(PipelineRequest {
-        mesh,
-        material: material.untyped(),
-        label: "source mirror surface".into(),
-    });
-}
-
-pub(crate) fn release_mirror_warmup(
-    world: &World,
-    live: AssetId<SourceMaterial>,
-    disabled: AssetId<SourceMaterial>,
-) {
-    world
-        .resource::<MaterialLoading>()
-        .0
-        .lock()
-        .unwrap()
-        .requests
-        .retain(|request| {
-            request.material != live.untyped() && request.material != disabled.untyped()
-        });
-}
-
-/// Retain all source choices, including hidden lamps, for capture loading.
-pub(crate) fn mirror_warmup_pairs(world: &World, pairs: &mut Vec<(AssetId<Mesh>, UntypedAssetId)>) {
-    let loading = world.resource::<MaterialLoading>().0.lock().unwrap();
-    pairs.extend(loading.requests.iter().map(|r| (r.mesh, r.material)));
-    for target in &world
-        .resource::<super::lighting::SourceLighting>()
-        .lamp_materials
-    {
-        for choice in &target.choices {
-            for receiver in &choice.receivers {
-                if let Some(mesh) = world.get::<Mesh3d>(receiver.entity) {
-                    pairs.push((mesh.0.id(), receiver.material.id().untyped()));
-                }
-            }
-        }
-    }
-}
-
 impl SourceMaterials {
     pub(crate) fn texture(&self, file: &str) -> Option<Handle<Image>> {
         self.texture_indices
@@ -2278,15 +2013,10 @@ pub(crate) fn seal_plate_materials(world: &World) {
             .iter_entities()
             .filter(|e| e.contains::<MeshMaterial3d<SourceMaterial>>())
             .count();
-        let casters = world
-            .iter_entities()
-            .filter(|e| e.contains::<SourceCaster>())
-            .count();
         let weight = world.resource::<SourceMaterials>().maximum_pass_weight();
         let mut pending = world.resource::<MaterialLoading>().0.lock().unwrap();
         pending.transparent_pass_capacity =
             pending.transparent_pass_capacity.max(warmup * weight + 2);
-        pending.shadow_capacity = pending.shadow_capacity.max(casters);
         pending.sealed = true;
     }
 }
@@ -2328,8 +2058,6 @@ struct RetainedColorData {
     revision: u64,
     dirty: bool,
     buffer: Option<Buffer>,
-    caster: Option<(AssetId<StandardMaterial>, StandardMaterial)>,
-    caster_buffer: Option<Buffer>,
 }
 #[derive(Resource, Clone, Default, ExtractResource)]
 struct RetainedColors(Arc<Mutex<Vec<RetainedColor>>>);
@@ -2351,8 +2079,6 @@ pub(crate) fn retain_color(material: &mut SourceMaterial, world: &World) {
         revision: 0,
         dirty: true,
         buffer: None,
-        caster: None,
-        caster_buffer: None,
     })));
     world
         .resource::<RetainedColors>()
@@ -2381,96 +2107,6 @@ pub(crate) fn update_retained_color(material: &SourceMaterial, color: [f32; 4]) 
         retained.dirty = true;
     }
 }
-pub(crate) fn link_retained_color(
-    material: &Handle<SourceMaterial>,
-    caster: &Handle<StandardMaterial>,
-    world: &World,
-) {
-    let source = world
-        .resource::<Assets<SourceMaterial>>()
-        .get(material)
-        .unwrap();
-    let mut retained = source.retained_color.as_ref().unwrap().0.lock().unwrap();
-    retained.caster = Some((
-        caster.id(),
-        world
-            .resource::<Assets<StandardMaterial>>()
-            .get(caster)
-            .unwrap()
-            .clone(),
-    ));
-}
-fn prepare_retained_casters(
-    colors: Res<RetainedColors>,
-    device: Res<RenderDevice>,
-    cache: Res<PipelineCache>,
-    mut params: bevy::ecs::system::StaticSystemParam<<StandardMaterial as AsBindGroup>::Param>,
-    mut prepared: ResMut<ErasedRenderAssets<PreparedMaterial>>,
-    mut allocators: ResMut<bevy::pbr::MaterialBindGroupAllocators>,
-) {
-    for color in colors.0.lock().unwrap().iter() {
-        let mut color = color.0.lock().unwrap();
-        if color.caster_buffer.is_some() {
-            continue;
-        }
-        let Some((id, source)) = &color.caster else {
-            continue;
-        };
-        let Some(material) = prepared.get_mut(*id) else {
-            continue;
-        };
-        assert!(
-            !StandardMaterial::bindless_supported(&device),
-            "retained source casters require the checked WebGL2 layout"
-        );
-        let descriptor = material
-            .properties
-            .material_layout
-            .as_ref()
-            .expect("standard material layout");
-        let layout = cache.get_bind_group_layout(descriptor);
-        let Ok(mut group) = source.unprepared_bind_group(&layout, &device, &mut params, true)
-        else {
-            continue;
-        };
-        let binding = group
-            .bindings
-            .0
-            .iter_mut()
-            .find(|(binding, _)| *binding == 0)
-            .expect("standard uniform binding");
-        let OwnedBindingResource::Data(data) = &binding.1 else {
-            panic!("checked StandardMaterial binding 0 Data");
-        };
-        let buffer = device.create_buffer_with_data(&BufferInitDescriptor {
-            label: Some("retained condition caster"),
-            contents: &data.0,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-        });
-        binding.1 = OwnedBindingResource::Buffer(buffer.clone());
-        let entries: Vec<_> = group
-            .bindings
-            .0
-            .iter()
-            .map(|(binding, resource)| BindGroupEntry {
-                binding: *binding,
-                resource: resource.get_binding(),
-            })
-            .collect();
-        let bind_group = device.create_bind_group("retained condition caster", &layout, &entries);
-        let allocator = allocators
-            .get_mut(&std::any::TypeId::of::<StandardMaterial>())
-            .expect("standard allocator");
-        let old = material.binding;
-        material.binding = allocator.allocate_prepared(PreparedBindGroup {
-            bindings: group.bindings,
-            bind_group,
-        });
-        allocator.free(old);
-        color.caster_buffer = Some(buffer);
-        color.dirty = true;
-    }
-}
 fn upload_retained_colors(colors: Res<RetainedColors>, queue: Res<RenderQueue>) {
     for color in colors.0.lock().unwrap().iter() {
         let mut color = color.0.lock().unwrap();
@@ -2485,9 +2121,6 @@ fn upload_retained_colors(colors: Res<RetainedColors>, queue: Res<RenderQueue>) 
             slot.copy_from_slice(&value.to_le_bytes());
         }
         queue.write_buffer(buffer, 0, &bytes);
-        if let Some(buffer) = &color.caster_buffer {
-            queue.write_buffer(buffer, 0, &bytes);
-        }
         color.dirty = false;
     }
 }

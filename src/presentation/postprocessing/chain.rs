@@ -9,8 +9,6 @@ use super::{
     copy::CopyPass,
     exposure::ExposurePass,
     lut::{CURVE_BYTES, LUT_BYTES, LutPass},
-    motion_blur::MotionBlurPass,
-    taa::TaaPass,
     uber::{MainInputs, UberPass},
 };
 use crate::reference::postprocessing::{CameraEffectScope, PostprocessingRecord};
@@ -23,8 +21,6 @@ use bevy::render::{
 #[derive(Clone)]
 pub struct PostShaders {
     pub copy: Handle<Shader>,
-    pub taa: Handle<Shader>,
-    pub motion_blur: Handle<Shader>,
     pub histogram: Handle<Shader>,
     pub exposure: Handle<Shader>,
     pub bloom: Handle<Shader>,
@@ -43,10 +39,6 @@ pub struct PostTextures<'a> {
 #[derive(Clone, Copy)]
 pub struct PostFrame {
     pub token: u32,
-    pub jitter_uv: [f32; 2],
-    pub near: f32,
-    pub far: f32,
-    pub shutter: f32,
     pub delta_seconds: f32,
 }
 struct ColorTarget {
@@ -77,9 +69,6 @@ impl ColorTarget {
     }
 }
 struct MainChain {
-    _taa_output: ColorTarget,
-    taa: TaaPass,
-    motion: MotionBlurPass,
     histogram: HistogramPasses,
     exposure: ExposurePass,
     bloom: BloomPass,
@@ -92,7 +81,7 @@ pub struct SourcePostChain {
     pub logical_bytes: u64,
     pub startup_count: u32,
     pub resize_count: u32,
-    _initial: ColorTarget,
+    initial: ColorTarget,
     copy: CopyPass,
     uber: UberPass,
     main: Option<MainChain>,
@@ -109,8 +98,6 @@ impl SourcePostChain {
         shaders: &PostShaders,
         textures: &PostTextures<'_>,
         source: &TextureView,
-        raw_depth: &TextureView,
-        motion: &TextureView,
         extent: [u32; 2],
         record: &PostprocessingRecord,
         scope: CameraEffectScope,
@@ -139,50 +126,22 @@ impl SourcePostChain {
         };
         copy.rebind(device, cache, source);
         let main = if scope == CameraEffectScope::MainStack {
-            let (old_taa, old_motion, old_histogram, old_exposure, old_bloom, old_lut, lut_baked) =
-                match old_main {
-                    Some(old) => (
-                        Some(old.taa),
-                        Some(old.motion),
-                        Some(old.histogram),
-                        Some(old.exposure),
-                        Some(old.bloom),
-                        Some(old.lut),
-                        old.lut_baked,
-                    ),
-                    None => (None, None, None, None, None, None, false),
-                };
-            let taa_output = ColorTarget::new(device, extent);
-            let taa = TaaPass::new(
-                device,
-                queue,
-                cache,
-                shaders.taa.clone(),
-                &initial.view,
-                raw_depth,
-                motion,
-                extent,
-                record.taa,
-                old_taa,
-            )?;
-            let motion = MotionBlurPass::new(
-                adapter,
-                device,
-                queue,
-                cache,
-                shaders.motion_blur.clone(),
-                &taa_output.view,
-                raw_depth,
-                motion,
-                extent,
-                old_motion.as_ref(),
-            )?;
+            let (old_histogram, old_exposure, old_bloom, old_lut, lut_baked) = match old_main {
+                Some(old) => (
+                    Some(old.histogram),
+                    Some(old.exposure),
+                    Some(old.bloom),
+                    Some(old.lut),
+                    old.lut_baked,
+                ),
+                None => (None, None, None, None, false),
+            };
             let histogram = HistogramPasses::new(
                 device,
                 queue,
                 cache,
                 shaders.histogram.clone(),
-                motion.output(),
+                &initial.view,
                 extent[0],
                 extent[1],
                 old_histogram.as_ref(),
@@ -206,7 +165,7 @@ impl SourcePostChain {
                 queue,
                 cache,
                 shaders.bloom.clone(),
-                motion.output(),
+                &initial.view,
                 exposure.views(),
                 extent,
                 &record.bloom,
@@ -225,9 +184,6 @@ impl SourcePostChain {
                 )?
             };
             Some(MainChain {
-                _taa_output: taa_output,
-                taa,
-                motion,
                 histogram,
                 exposure,
                 bloom,
@@ -250,8 +206,7 @@ impl SourcePostChain {
             queue,
             cache,
             shaders.uber.clone(),
-            main.as_ref()
-                .map_or(&initial.view, |main| main.motion.output()),
+            &initial.view,
             textures.noise,
             extent,
             record,
@@ -261,10 +216,7 @@ impl SourcePostChain {
         let area = u64::from(extent[0]) * u64::from(extent[1]);
         let logical_bytes = area * 8
             + main.as_ref().map_or(0, |main| {
-                area * 8
-                    + main.taa.logical_bytes
-                    + main.motion.layout.logical_bytes()
-                    + main.histogram.layout.logical_bytes()
+                main.histogram.layout.logical_bytes()
                     + 8
                     + main.bloom.layout.logical_bytes()
                     + LUT_BYTES
@@ -276,7 +228,7 @@ impl SourcePostChain {
             logical_bytes,
             startup_count,
             resize_count,
-            _initial: initial,
+            initial,
             copy,
             uber,
             main,
@@ -295,9 +247,7 @@ impl SourcePostChain {
         self.copy.ready(cache)
             && self.uber.ready(cache)
             && self.main.as_ref().is_none_or(|main| {
-                main.taa.ready(cache)
-                    && main.motion.ready(cache)
-                    && main.histogram.ready(cache)
+                main.histogram.ready(cache)
                     && main.exposure.ready(cache)
                     && main.bloom.ready(cache)
                     && main.lut.ready(cache)
@@ -309,10 +259,8 @@ impl SourcePostChain {
             .or_else(|| self.uber.failure(cache))
             .or_else(|| {
                 self.main.as_ref().and_then(|main| {
-                    main.taa
+                    main.histogram
                         .failure(cache)
-                        .or_else(|| main.motion.failure(cache))
-                        .or_else(|| main.histogram.failure(cache))
                         .or_else(|| main.exposure.failure(cache))
                         .or_else(|| main.bloom.failure(cache))
                         .or_else(|| main.lut.failure(cache))
@@ -324,29 +272,18 @@ impl SourcePostChain {
         self.completed = 0;
         self.uber.recreate();
         if let Some(main) = &mut self.main {
-            main.taa.recreate();
             main.exposure.recreate();
-            main.motion.reset_history();
             main.lut_baked = false;
         }
     }
-    /// Noise index, TAA next/initialized, exposure output/initialized.
-    pub fn history(&self) -> [u32; 5] {
-        let taa = self.main.as_ref().map_or([0; 2], |m| m.taa.history());
+    /// Noise index, exposure output/initialized.
+    pub fn history(&self) -> [u32; 3] {
         let exposure = self.main.as_ref().map_or([0; 2], |m| m.exposure.history());
-        [
-            self.uber.noise_index(),
-            taa[0],
-            taa[1],
-            exposure[0],
-            exposure[1],
-        ]
+        [self.uber.noise_index(), exposure[0], exposure[1]]
     }
     pub fn reset_history(&mut self) {
         self.pending = None;
         if let Some(main) = &mut self.main {
-            main.taa.reset_history();
-            main.motion.reset_history();
             main.exposure.reset_history();
         }
     }
@@ -368,32 +305,12 @@ impl SourcePostChain {
         if !self.ready(cache) {
             return Ok(false);
         }
-        if !frame.jitter_uv.iter().all(|v| v.is_finite())
-            || !frame.near.is_finite()
-            || !frame.far.is_finite()
-            || frame.near <= 0.
-            || frame.far <= frame.near
-            || !frame.shutter.is_finite()
-            || !(0. ..=360.).contains(&frame.shutter)
-            || !frame.delta_seconds.is_finite()
-            || frame.delta_seconds < 0.
-        {
+        if !frame.delta_seconds.is_finite() || frame.delta_seconds < 0. {
             return Err("Invalid source effect frame".into());
         }
         self.copy
-            .encode(encoder, cache, &self._initial.view, self.stop_nan);
+            .encode(encoder, cache, &self.initial.view, self.stop_nan);
         let exposure_index = if let Some(main) = &mut self.main {
-            main.taa.encode(
-                encoder,
-                device,
-                queue,
-                cache,
-                &main._taa_output.view,
-                frame.jitter_uv,
-            )?;
-            main.motion
-                .update(device, queue, frame.near, frame.far, frame.shutter);
-            main.motion.encode(encoder, cache);
             main.histogram.encode(encoder, cache);
             main.exposure
                 .encode(encoder, device, queue, cache, frame.delta_seconds)?;
@@ -428,8 +345,6 @@ impl SourcePostChain {
             return false;
         }
         if let Some(main) = &mut self.main {
-            main.taa.completed();
-            main.motion.completed();
             main.exposure.completed();
             main.lut_baked = true;
         }
@@ -513,9 +428,6 @@ impl SourceAoChain {
             upsample,
             composite,
         })
-    }
-    pub fn raw_depth(&self) -> &TextureView {
-        &self.depth.copy.view
     }
     pub fn ready(&self, cache: &PipelineCache) -> bool {
         self.depth.ready(cache)

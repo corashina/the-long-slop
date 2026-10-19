@@ -9,8 +9,6 @@ pub mod copy;
 pub mod dither;
 pub mod exposure;
 pub mod lut;
-pub mod motion_blur;
-pub mod taa;
 pub mod uber;
 
 use super::render_targets::{HDR_FORMAT, HISTOGRAM_FORMAT};

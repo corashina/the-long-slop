@@ -3755,24 +3755,6 @@ impl WorldStream {
         counters
     }
 
-    /// Same as `metrics().generation_jobs`, without the memory walk.
-    pub fn generation_jobs(&self) -> usize {
-        self.presentation.jobs
-            + usize::from(self.terrain_work.is_some())
-            + usize::from(self.contents.has_replay())
-    }
-    /// Same as `metrics().pending_work`, without the memory walk.
-    pub fn pending_work(&self) -> usize {
-        self.replay_roots
-            .len()
-            .max(usize::from(self.contents.has_replay()))
-            + self.contents.pending_requests()
-            + self.props.pending_requests()
-            + self.ready_structures.len()
-            + usize::from(self.ready.is_some())
-            + usize::from(self.terrain_work.is_some())
-            + self.presentation.pending
-    }
     pub fn metrics(&self) -> WorldMetrics {
         let imported_snapshot_bytes = self.imported_baselines.capacity()
             * std::mem::size_of::<(crate::reference::ItemId, super::ObjectSnapshot)>()
@@ -3788,9 +3770,20 @@ impl WorldStream {
             building_checkpoints: self.placements.checkpoint_count(),
             road_replay_ms: self.roads.replay_ms(),
             peak_road_replay_ms: self.roads.peak_replay_ms(),
-            generation_jobs: self.generation_jobs(),
+            generation_jobs: self.presentation.jobs
+                + usize::from(self.terrain_work.is_some())
+                + usize::from(self.contents.has_replay()),
             pending_bytes: self.presentation.staging_bytes + self.generation_pending_bytes(),
-            pending_work: self.pending_work(),
+            pending_work: self
+                .replay_roots
+                .len()
+                .max(usize::from(self.contents.has_replay()))
+                + self.contents.pending_requests()
+                + self.props.pending_requests()
+                + self.ready_structures.len()
+                + usize::from(self.ready.is_some())
+                + usize::from(self.terrain_work.is_some())
+                + self.presentation.pending,
             spawn_parents: self.contents.state.parent_count(),
             spawn_boundaries: self.contents.state.boundary_count(),
             spawn_boundary_bytes: self.contents.state.retained_bytes(),
@@ -4138,9 +4131,6 @@ fn source_distance_squared(a: [f64; 3], b: [f64; 3]) -> f32 {
 
 #[path = "content_bindings.rs"]
 pub(crate) mod content_bindings;
-
-#[path = "content_index.rs"]
-pub(crate) mod content_index;
 
 #[path = "content_lamps.rs"]
 mod content_lamps;

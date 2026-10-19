@@ -110,37 +110,13 @@ impl ExposureSettings {
 pub struct PostprocessingRecord {
     pub main_layer: super::SourceId,
     pub stop_nan: bool,
-    pub taa: TaaSettings,
     pub exposure: ExposureSettings,
     pub bloom: BloomSettings,
     pub occlusion: OcclusionSettings,
-    pub motion_blur: MotionBlurSettings,
     pub grading: GradingSettings,
     pub blue_noise: Vec<super::SourceId>,
     pub heat_haze_weight: f32,
 }
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TaaSettings {
-    pub jitter_spread: f32,
-    pub stationary_blending: f32,
-    pub motion_blending: f32,
-    pub sharpness: f32,
-}
-impl TaaSettings {
-    pub fn validate(&self) -> bool {
-        [
-            self.jitter_spread,
-            self.stationary_blending,
-            self.motion_blending,
-        ]
-        .iter()
-        .all(|value| value.is_finite() && (0. ..=1.).contains(value))
-            && self.sharpness.is_finite()
-            && self.sharpness >= 0.
-    }
-}
-
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BloomSettings {
@@ -164,14 +140,6 @@ pub struct OcclusionSettings {
     pub blur_tolerance: f32,
     pub upsample_tolerance: f32,
     pub direct_lighting_strength: f32,
-}
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MotionBlurSettings {
-    pub samples: u32,
-    pub shutter_range: [f32; 2],
-    pub speed_range: [f32; 2],
-    pub shutter_lerp: f32,
 }
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -203,7 +171,6 @@ impl PostprocessingRecord {
             !self.main_layer.file.is_empty() && self.main_layer.path_id != 0,
             "postprocessing main layer",
         )?;
-        require(self.taa.validate(), "postprocessing temporal antialiasing")?;
         require(self.exposure.validate(), "postprocessing exposure")?;
         let bloom = &self.bloom;
         require(
@@ -241,19 +208,6 @@ impl PostprocessingRecord {
                 && ao.thickness > 0.
                 && (0. ..=1.).contains(&ao.direct_lighting_strength),
             "postprocessing multiscale occlusion",
-        )?;
-        let motion = self.motion_blur;
-        require(
-            motion.samples == 4
-                && finite(&motion.shutter_range)
-                && finite(&motion.speed_range)
-                && motion.shutter_range[0] >= 0.
-                && motion.shutter_range[1] <= 360.
-                && motion.shutter_range[0] <= motion.shutter_range[1]
-                && motion.speed_range[0] < motion.speed_range[1]
-                && motion.shutter_lerp.is_finite()
-                && motion.shutter_lerp >= 0.,
-            "postprocessing motion blur",
         )?;
         let grading = &self.grading;
         require(

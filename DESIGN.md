@@ -81,8 +81,8 @@ Retain imported scene nodes and shared assets through recovery and restart.
 Replace light proxies and road pole instances on restart.
 Keep loading markers on warmup instances only.
 
-The renderer uses WebGL2 and a shared 4000-square shadow atlas.
-Each shadow cell has a 398-square usable viewport.
+The renderer uses WebGL2. Only the sun casts shadows, through its four-cascade atlas.
+Lamps light receivers without shadow maps or shadow caster copies.
 Read `docs/verification.md` before claiming source pixel parity.
 
 ## Typography

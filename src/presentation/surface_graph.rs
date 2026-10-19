@@ -24,7 +24,6 @@ pub enum SourceSurfaceStage {
     CameraDepth,
     ShadowAtlas,
     Collector,
-    Motion,
     Opaque,
     AfterOpaque,
     Transparent,
@@ -60,7 +59,6 @@ pub fn install(app: &mut SubApp) {
                 SourceSurfaceStage::CameraDepth,
                 SourceSurfaceStage::ShadowAtlas,
                 SourceSurfaceStage::Collector,
-                SourceSurfaceStage::Motion,
                 SourceSurfaceStage::Opaque,
                 SourceSurfaceStage::AfterOpaque,
                 SourceSurfaceStage::Transparent,
@@ -247,7 +245,7 @@ fn transparent(
     }
     glass.completed(
         frame.frame,
-        if source_view.index < 3 || source_view.index >= super::surface_views::MIRROR_START {
+        if source_view.index < 3 {
             frame.main_token
         } else {
             frame.probe_token

@@ -6,15 +6,15 @@ use crate::reference::{ColliderId, LightControlId, ReferenceError, SourceId};
 use crate::vehicle::PhysicsWorld;
 use crate::world::spawn_rules::*;
 use crate::world::{GeneratedId, ObjectKey, ObjectSnapshot};
-pub(super) struct ButtonPose {
-    pub(super) node: SourceId,
-    pub(super) pose: Transform,
+struct ButtonPose {
+    node: SourceId,
+    pose: Transform,
     target: Transform,
     progress: f32,
     moving: bool,
 }
 pub(super) struct LampBinding {
-    pub(super) button: Option<ButtonPose>,
+    button: Option<ButtonPose>,
     collision_dirty: bool,
     pub parent: GeneratedId,
     pub source: SourceId,

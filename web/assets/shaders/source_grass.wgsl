@@ -95,7 +95,7 @@ fn vertex(input:GrassVertex)->GrassOutput {
 #ifdef PREPASS_PIPELINE
 @fragment fn fragment(input:GrassOutput) {if input.alive<.5 || !source_lod_keep(input.position.xy,grass.lod.x) {discard;}}
 #else
-#import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler, source_shadow}
+#import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler}
 #import source_view_lighting::{lighting, diffuse_sh, direct_attenuation, fog_factor, sun_cookie, sun_cookie_sampler}
 #import bevy_pbr::{forward_io::FragmentOutput,pbr_types::pbr_input_new}
 @fragment
@@ -113,7 +113,7 @@ fn fragment(input:GrassOutput)->FragmentOutput {
             weight=textureSampleLevel(attenuation,attenuation_sampler,vec2(ratio,.5),0.).r;
         }
         if lamp.cookie_rect.x>0. {
-            var uv=local.xy/lamp.shadow.w+lamp.cookie_rect.yz+.5;
+            var uv=local.xy/lamp.cookie_size+lamp.cookie_rect.yz+.5;
             if lamp.direction_kind.w!=0. {if local.z<=0. {continue;} uv=local.xy/local.w+.5;if any(uv<vec2(0.))||any(uv>vec2(1.)){continue;}}
             if lamp.cookie_rect.x==1. {weight*=textureSampleGrad(sun_cookie,sun_cookie_sampler,uv,dpdx(uv),dpdy(uv)).a;}
             else if lamp.cookie_rect.x==2. {weight*=textureSampleGrad(default_cookie,default_sampler,uv,dpdx(uv),dpdy(uv)).a;}

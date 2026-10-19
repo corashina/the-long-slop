@@ -23,9 +23,9 @@ struct SkyBinding {
 }
 #[derive(Resource)]
 pub struct SkyPass {
-    pipelines: [CachedRenderPipelineId; 3],
+    pipelines: [CachedRenderPipelineId; 2],
     vertices: Buffer,
-    bindings: [SkyBinding; 10],
+    bindings: [SkyBinding; 7],
 }
 impl SkyPass {
     pub fn new(
@@ -56,7 +56,7 @@ impl SkyPass {
                 vertex: VertexState {
                     shader: shader.clone(),
                     entry_point: Some(
-                        if index != 1 {
+                        if index == 0 {
                             "vertex_main"
                         } else {
                             "vertex_capture"
@@ -77,7 +77,7 @@ impl SkyPass {
                 fragment: Some(FragmentState {
                     shader: shader.clone(),
                     entry_point: Some(
-                        if index != 1 {
+                        if index == 0 {
                             "fragment_main"
                         } else {
                             "fragment_capture"
@@ -201,15 +201,8 @@ impl SkyPass {
         resolved: Option<&TextureView>,
         depth: &TextureView,
     ) -> bool {
-        let Some(pipeline) = cache.get_render_pipeline(
-            self.pipelines[if index == 0 {
-                0
-            } else if index < 7 {
-                1
-            } else {
-                2
-            }],
-        ) else {
+        let Some(pipeline) = cache.get_render_pipeline(self.pipelines[usize::from(index != 0)])
+        else {
             return false;
         };
         let colors = [Some(RenderPassColorAttachment {

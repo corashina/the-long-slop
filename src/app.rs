@@ -183,9 +183,6 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
                         title: "My Summer Slop".into(),
                         canvas: Some("#game".into()),
                         fit_canvas_to_parent: true,
-                        // Render at CSS pixels. HiDPI scaling would multiply the pixel count.
-                        resolution: bevy::window::WindowResolution::default()
-                            .with_scale_factor_override(1.0),
                         prevent_default_event_handling: true,
                         ..default()
                     }),
@@ -197,7 +194,6 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
             presentation::materials::SourceMaterialPlugin,
             presentation::plates::PlateTextPlugin,
             presentation::conditions::ConditionPlugin,
-            presentation::mirrors::SourceMirrorPlugin,
             presentation::source_lighting::SourceLightingPlugin,
             presentation::frame_graph::SourceFramePlugin,
             presentation::particles::SourceParticlePlugin,
@@ -331,7 +327,6 @@ fn check_ready(
         Res<presentation::source_lighting::SourceLightingStatus>,
     ),
     mut materials: ResMut<presentation::materials::SourceMaterials>,
-    mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
     plates: (
         Res<presentation::plates::PlateTextStatus>,
         Res<presentation::particles::ParticleRender>,
@@ -358,13 +353,6 @@ fn check_ready(
         return;
     }
     drop(shared_status);
-    if let Some(error) = mirrors.failure() {
-        game_failure(&error);
-        visuals.failed = true;
-        graph.invalidate_loading();
-        readiness.reset();
-        return;
-    }
     if let presentation::materials::RenderingState::Failed(error) = &source_lighting.state {
         game_failure(error);
         visuals.failed = true;
@@ -516,10 +504,6 @@ fn check_ready(
             let session = drive.runtime.stream.frame().request.session;
             let revision = drive.runtime.stream.required_content().selection_revision;
             graph.content_checked(Some((session, revision)));
-            if !mirrors.ready() {
-                readiness.reset();
-                return;
-            }
             if source_lighting.state != presentation::materials::RenderingState::Ready {
                 readiness.reset();
                 return;
@@ -799,18 +783,16 @@ fn sync_world(
             let required =
                 required_views.get_or_insert_with(|| crate::world::RequiredViews::new(first));
             required.reset(first);
-            for (index, view) in views.views.iter().enumerate().skip(1) {
-                if (3..presentation::surface_views::MIRROR_START).contains(&index) {
-                    continue;
-                }
-                if let Some(view) = view {
-                    required.push(presentation::view_frame::required_view(
-                        view,
-                        runtime.stream.origin.offset,
-                        forward,
-                        reference.0.render_lighting.lights[0].mask,
-                    )?)?;
-                }
+            for view in views.views[1..presentation::surface_views::PROBE_START]
+                .iter()
+                .flatten()
+            {
+                required.push(presentation::view_frame::required_view(
+                    view,
+                    runtime.stream.origin.offset,
+                    forward,
+                    reference.0.render_lighting.lights[0].mask,
+                )?)?;
             }
             presentation::view_frame::append_probe_required_views(
                 required,
@@ -973,7 +955,6 @@ fn sync_instruments(
     mut visuals: ResMut<InstrumentVisuals>,
     mut transforms: Query<&mut Transform, Without<DriveCamera>>,
     mut materials: Query<&mut MeshMaterial3d<presentation::materials::SourceMaterial>>,
-    mut casters: Query<&mut MeshMaterial3d<StandardMaterial>>,
 ) {
     let drive = &mut *drive;
     let run = &drive.runtime;
@@ -989,7 +970,6 @@ fn sync_instruments(
         &drive.instruments,
         &mut transforms,
         &mut materials,
-        &mut casters,
     );
 }
 fn active_camera(drive: &Drive) -> Transform {
@@ -1016,7 +996,6 @@ fn publish_loading(
     materials: Res<presentation::materials::SourceMaterials>,
     lighting: Res<presentation::lighting::SourceLighting>,
     source_lighting: Res<presentation::source_lighting::SourceLighting>,
-    mirrors: Res<presentation::mirrors::MirrorGpuStatus>,
     plates: Res<presentation::plates::PlateTextStatus>,
     time: Res<Time<Real>>,
     mut last: Local<f64>,
@@ -1028,7 +1007,6 @@ fn publish_loading(
         && materials.state == presentation::materials::RenderingState::Ready
         && lighting.state == presentation::lighting::RenderingState::Ready
         && source_lighting.state == presentation::materials::RenderingState::Ready
-        && mirrors.ready()
         && plates.ready();
     if stream.initial_generation_ready() && *traced & 1 == 0 {
         game_startup_stage("generation", false);

@@ -27,7 +27,6 @@ pub mod shadow_splits;
 pub mod shadows;
 pub mod sky;
 pub mod sorting;
-pub mod temporal;
 pub mod texture_batch;
 pub mod view_math;
 pub use rendering::*;
@@ -44,8 +43,6 @@ pub mod flashlights;
 pub use flashlights::*;
 pub mod plates;
 pub use plates::*;
-pub mod mirrors;
-pub use mirrors::*;
 pub mod clothing;
 pub use clothing::*;
 pub mod item_prototypes;
@@ -861,7 +858,6 @@ pub struct ReferenceManifest {
     pub ui: UiReference,
     pub library: LibraryProvenance,
     pub lighting: LightingRecord,
-    pub mirrors: MirrorRecord,
     pub render_lighting: lighting_scene::LightingRecord,
     pub plates: PlateRecord,
     pub flashlights: FlashlightRecord,
@@ -1020,7 +1016,6 @@ impl ReferenceManifest {
         )?;
         self.world.validate(self)?;
         self.lighting.validate(self)?;
-        self.mirrors.validate(self)?;
         self.render_lighting.validate(&self.nodes)?;
         self.survival.validate(self)?;
         for food in &self.survival.foods {

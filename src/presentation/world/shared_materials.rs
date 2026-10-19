@@ -13,7 +13,6 @@ pub(crate) struct SharedMaterialKey {
     pub material: MaterialIdentity,
     pub layer: u8,
     pub receive: bool,
-    pub shadow_mode: u8,
     pub reflected: bool,
 }
 impl SharedMaterialKey {
@@ -114,32 +113,28 @@ mod tests {
             material: MaterialIdentity::Primary(AssetId(7), 3),
             layer: 0,
             receive: true,
-            shadow_mode: 1,
             reflected: false,
         }
     }
     #[test]
     fn sharing_retirement_and_private_mutation_keep_other_users() {
         let mut cache = SharedMaterials::default();
-        // Stand-in handles address independent visible and caster state.
-        let mut assets = vec![("white", 1.0), ("caster", 1.0)];
-        cache.insert(key(), (0, 1));
-        assert_eq!(cache.acquire(&key()), Some((0, 1)));
-        let private = cache.make_private(&key(), |&(visible, caster)| {
+        // Stand-in handles address independent visible state.
+        let mut assets = vec![("white", 1.0)];
+        cache.insert(key(), 0);
+        assert_eq!(cache.acquire(&key()), Some(0));
+        let private = cache.make_private(&key(), |&visible| {
             assets.push(assets[visible]);
-            assets.push(assets[caster]);
-            (2, 3)
+            1
         });
-        assets[private.0] = ("red", 0.5);
-        assets[private.1].1 = 0.5;
+        assets[private] = ("red", 0.5);
         assert_eq!(assets[0], ("white", 1.0));
-        assert_eq!(assets[1], ("caster", 1.0));
-        // The sole remaining user keeps its handles, including its warm ticket identity.
+        // The sole remaining user keeps its original handle.
         let last = cache.make_private(&key(), |_| panic!("The sole user must not copy handles"));
-        assert_eq!(last, (0, 1));
+        assert_eq!(last, 0);
         assert!(cache.acquire(&key()).is_none());
-        cache.insert(key(), (30, 40));
-        assert_eq!(cache.acquire(&key()), Some((30, 40)));
+        cache.insert(key(), 30);
+        assert_eq!(cache.acquire(&key()), Some(30));
         assert!(!cache.release(&key()));
         assert!(cache.release(&key()));
         assert!(cache.acquire(&key()).is_none());
@@ -156,9 +151,6 @@ mod tests {
         keys.push(changed);
         let mut changed = original.clone();
         changed.receive = false;
-        keys.push(changed);
-        let mut changed = original.clone();
-        changed.shadow_mode = 2;
         keys.push(changed);
         let mut changed = original.clone();
         changed.reflected = true;

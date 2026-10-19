@@ -41,7 +41,6 @@ pub struct PreparedPresentation {
     screen_height: f32,
     aspect_ratio: f32,
     required_views: Option<Box<crate::world::RequiredViews>>,
-    mirror_state: crate::mirrors::MirrorState,
 }
 impl PreparedPresentation {
     pub fn can_start(world: &World) -> bool {
@@ -60,13 +59,15 @@ impl PreparedPresentation {
                 .resource::<crate::app::Drive>()
                 .runtime
                 .stream
-                .generation_jobs()
+                .metrics()
+                .generation_jobs
                 == 0
             && world
                 .resource::<crate::app::Drive>()
                 .runtime
                 .stream
-                .pending_work()
+                .metrics()
+                .pending_work
                 == 0
     }
     pub fn new(
@@ -134,7 +135,6 @@ impl PreparedPresentation {
             .map_or(1., |w| w.width() / w.height().max(1.));
         Ok(Self {
             required_views: None,
-            mirror_state: crate::mirrors::MirrorState::new(&reference.mirrors),
             aspect_ratio,
             screen_height,
             poses: CandidateImportedPoses(std::collections::HashMap::with_capacity(mesh_count)),
@@ -266,7 +266,6 @@ impl PreparedPresentation {
             self.screen_height,
             world,
             &self.updates,
-            &mut self.mirror_state,
             &mut self.required_views,
         )?;
         self.poses.0.clear();
@@ -395,7 +394,6 @@ impl PreparedPresentation {
                 self.screen_height,
                 world,
                 &self.updates,
-                &mut self.mirror_state,
                 &mut self.required_views,
             )?;
             validate_assets(reference, world)?;
@@ -474,7 +472,7 @@ impl PreparedPresentation {
             r.grass.release_all(&mut r.meshes, &mut r.materials.grass);
             r.writers.release_all();
             r.surfaces.retire_session(&mut r.commands, &mut r.meshes);
-            r.surfaces.reset_bindings(&mut r.terrain, &mut r.casters);
+            r.surfaces.reset_bindings(&mut r.terrain);
             r.lights.road_lamps.reset_instances(&mut r.commands);
         }
         self.system.apply(world);
@@ -692,10 +690,10 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
     let authored = world.resource::<Assets<materials::SourceMaterial>>();
     for lamp in &source.lamp_materials {
         for choice in &lamp.choices {
-            choice.validate_assets(authored, standard)?;
+            choice.validate_assets(authored)?;
         }
     }
-    instruments.validate_assets(authored, standard)?;
+    instruments.validate_assets(authored)?;
     for entity in world.iter_entities() {
         // Generated GPU-only surfaces are validated by their pipeline tickets.
         if entity
@@ -779,7 +777,6 @@ fn candidate_required_views(
     height: f32,
     world: &World,
     updates: &[(Entity, Transform, Visibility)],
-    mirrors: &mut crate::mirrors::MirrorState,
     views: &mut Option<Box<crate::world::RequiredViews>>,
 ) -> Result<(), SaveError> {
     use super::view_frame::{camera_snapshot, required_view};
@@ -803,8 +800,6 @@ fn candidate_required_views(
             first.field_of_view,
             first.mask,
             lighting.shadows.distance,
-            None,
-            None,
         ),
         candidate.stream.origin.offset,
         forward,
@@ -835,8 +830,6 @@ fn candidate_required_views(
                 stage.field_of_view,
                 stage.mask,
                 lighting.shadows.distance,
-                None,
-                None,
             ),
         )?;
     }
@@ -859,47 +852,5 @@ fn candidate_required_views(
         forward,
         lighting.lights[0].mask,
     )?;
-    let mut inputs = [crate::mirrors::MirrorInput::default(); 3];
-    for (input, record) in inputs.iter_mut().zip(&reference.mirrors.mirrors) {
-        let plane = candidate_node_pose(record.plane_node, world, updates)?;
-        let pose = candidate_node_pose(record.camera_node, world, updates)?;
-        let rotation = plane.to_scale_rotation_translation().1;
-        *input = crate::mirrors::MirrorInput {
-            plane_position: plane.w_axis.truncate().to_array(),
-            plane_normal: (rotation * Vec3::Y).to_array(),
-            camera_up: (rotation * Vec3::NEG_Z).to_array(),
-            camera_position: pose.w_axis.truncate().to_array(),
-            normal_view_visible: true,
-        };
-    }
-    mirrors.update(
-        &reference.mirrors.rules,
-        crate::mirrors::MirrorFrame {
-            player_position: candidate.area.player.body_pose(&candidate.physics).position,
-            view_head_position: camera.w_axis.truncate().to_array(),
-            source_enabled: true,
-            pointer_locked: false,
-        },
-        &inputs,
-    );
-    for (output, record) in mirrors.outputs().iter().zip(&reference.mirrors.mirrors) {
-        if !output.pose_valid || !output.has_valid_clip_range() {
-            continue;
-        }
-        append(
-            views,
-            camera_snapshot(
-                UVec2::from_array(reference.mirrors.target.extent),
-                super::transform(output.pose).to_matrix().inverse(),
-                output.capture_near_plane,
-                output.capture_far_plane,
-                output.fov_degrees,
-                record.culling_mask,
-                lighting.shadows.distance,
-                None,
-                None,
-            ),
-        )?;
-    }
     Ok(())
 }

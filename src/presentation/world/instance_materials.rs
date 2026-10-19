@@ -9,7 +9,6 @@ use crate::{
         self, RenderingState, SourceMaterial, SourceMaterials,
         grass::{GrassView, material::GrassMaterial},
         impostor::ImpostorMaterial,
-        lod::{LodCaster, LodCasterMaterial},
         specular::SpecularMaterial,
     },
     reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
@@ -27,13 +26,11 @@ pub enum InstanceMaterial {
 pub struct RendererMaterial {
     pub visible: InstanceMaterial,
     pub sort: Option<crate::presentation::transparent::SourceSortData>,
-    pub caster: Option<Handle<LodCasterMaterial>>,
     shared: Option<SharedMaterialKey>,
 }
 #[derive(Clone)]
 pub(crate) struct SharedBinding {
     visible: InstanceMaterial,
-    caster: Option<Handle<LodCasterMaterial>>,
 }
 #[derive(SystemParam)]
 pub struct InstanceMaterials<'w> {
@@ -42,7 +39,6 @@ pub struct InstanceMaterials<'w> {
     pub specular: ResMut<'w, Assets<SpecularMaterial>>,
     pub impostors: ResMut<'w, Assets<ImpostorMaterial>>,
     pub grass: ResMut<'w, Assets<GrassMaterial>>,
-    pub casters: ResMut<'w, Assets<LodCasterMaterial>>,
 }
 impl InstanceMaterials<'_> {
     pub fn admit(
@@ -143,13 +139,11 @@ impl InstanceMaterials<'_> {
         selected: Option<&crate::reference::SourceId>,
         layer: u8,
         receive: bool,
-        shadow_mode: u8,
         reflected: bool,
         source_position: Vec3,
         view: GrassView,
     ) -> Result<Option<RendererMaterial>, ReferenceError> {
         let mask = 1u32 << layer;
-        let mut caster = None;
         let mut sort = None;
         let mut shared = None;
         let key = |material| SharedMaterialKey {
@@ -157,7 +151,6 @@ impl InstanceMaterials<'_> {
             material,
             layer,
             receive,
-            shadow_mode,
             reflected,
         };
         let visible = if initial.is_none() && (selected.is_some() || primitive.has_source_material)
@@ -193,7 +186,6 @@ impl InstanceMaterials<'_> {
                     if let Some(binding) = self.cache.generated.acquire(&key) {
                         return Ok(Some(RendererMaterial {
                             visible: binding.visible,
-                            caster: binding.caster,
                             sort,
                             shared: Some(key),
                         }));
@@ -205,26 +197,6 @@ impl InstanceMaterials<'_> {
                         mask,
                         reflected,
                     )?;
-                    if shadow_mode != 0 {
-                        caster = Some(self.casters.add(LodCasterMaterial::new(
-                            bevy::pbr::ExtendedMaterial {
-                                base: StandardMaterial {
-                                    cull_mode: if shadow_mode == 2 {
-                                        None
-                                    } else {
-                                        Some(if reflected {
-                                            bevy::render::render_resource::Face::Front
-                                        } else {
-                                            bevy::render::render_resource::Face::Back
-                                        })
-                                    },
-                                    ..default()
-                                },
-                                extension: LodCaster { fade: Vec4::X },
-                            },
-                            self.cache.preparation.clone(),
-                        )));
-                    }
                     InstanceMaterial::Specular(self.specular.add(material))
                 }
                 name => {
@@ -252,7 +224,6 @@ impl InstanceMaterials<'_> {
                 if let Some(binding) = self.cache.generated.acquire(&key) {
                     return Ok(Some(RendererMaterial {
                         visible: binding.visible,
-                        caster: binding.caster,
                         sort,
                         shared: Some(key),
                     }));
@@ -260,26 +231,6 @@ impl InstanceMaterials<'_> {
                 if self.cache.shareable_generated_primary(identity) {
                     shared = Some(key);
                 }
-            }
-            if shadow_mode != 0 {
-                let mut base = materials::authored_caster_material(identity, &self.cache);
-                if shadow_mode == 2 {
-                    base.cull_mode = None;
-                } else if reflected {
-                    base.cull_mode = base.cull_mode.map(|face| match face {
-                        bevy::render::render_resource::Face::Back => {
-                            bevy::render::render_resource::Face::Front
-                        }
-                        _ => bevy::render::render_resource::Face::Back,
-                    });
-                }
-                caster = Some(self.casters.add(LodCasterMaterial::new(
-                    bevy::pbr::ExtendedMaterial {
-                        base,
-                        extension: LodCaster { fade: Vec4::X },
-                    },
-                    self.cache.preparation.clone(),
-                )));
             }
             InstanceMaterial::Primary(self.primary.add(materials::authored_material(
                 identity,
@@ -307,14 +258,12 @@ impl InstanceMaterials<'_> {
                 key.clone(),
                 SharedBinding {
                     visible: visible.clone(),
-                    caster: caster.clone(),
                 },
             );
         }
         Ok(Some(RendererMaterial {
             visible,
             sort,
-            caster,
             shared,
         }))
     }
@@ -327,7 +276,6 @@ impl InstanceMaterials<'_> {
             cache,
             primary,
             specular,
-            casters,
             ..
         } = self;
         let private = cache.generated.make_private(&key, |shared| {
@@ -342,14 +290,9 @@ impl InstanceMaterials<'_> {
                 }
                 _ => unreachable!("Only immutable primary and specular bindings are shared"),
             };
-            let caster = shared.caster.as_ref().map(|handle| {
-                let material = casters.get(handle).unwrap().clone();
-                casters.add(material)
-            });
-            SharedBinding { visible, caster }
+            SharedBinding { visible }
         });
         binding.visible = private.visible;
-        binding.caster = private.caster;
     }
     pub fn color(
         &mut self,
@@ -409,11 +352,6 @@ impl InstanceMaterials<'_> {
                 }
             }
         }
-        if let Some(h) = &binding.caster {
-            if let Some(mut m) = self.casters.get_mut(h) {
-                m.extension.fade.x = fade;
-            }
-        }
     }
     pub fn release(&mut self, binding: RendererMaterial) {
         if let Some(key) = &binding.shared {
@@ -434,9 +372,6 @@ impl InstanceMaterials<'_> {
             InstanceMaterial::Grass(h) => {
                 self.grass.remove(h.id());
             }
-        }
-        if let Some(h) = binding.caster {
-            self.casters.remove(h.id());
         }
     }
 }

@@ -9,7 +9,7 @@ use super::{
 };
 use crate::{
     presentation::materials::{
-        SourceCaster, SourceShadowMode,
+        SourceShadowMode,
         grass::{GrassPatch, GrassSettings, GrassView},
     },
     reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
@@ -26,17 +26,16 @@ use std::sync::Arc;
 struct MaterialVariant {
     source: Option<crate::reference::SourceId>,
     binding: RendererMaterial,
-    tickets: [Option<PipelineTicket>; 2],
+    ticket: Option<PipelineTicket>,
 }
 struct Renderer {
     material_source: Option<crate::reference::SourceId>,
     variants: Vec<MaterialVariant>,
-    caster_entity: Option<Entity>,
     node: usize,
     entity: Entity,
     mesh: Handle<Mesh>,
     binding: RendererMaterial,
-    tickets: [Option<PipelineTicket>; 2],
+    ticket: Option<PipelineTicket>,
     shadow: bool,
     lod_state: Option<(bool, f32)>,
     settings: Option<GrassSettings>,
@@ -47,12 +46,6 @@ struct Instance {
     upload: Option<Arc<crate::presentation::fixed_assets::MeshUpload>>,
     caps_bound: bool,
     placement: Placement,
-    // Index into `reference.world.prototypes`.
-    prototype: usize,
-    // Last index in `frame.structures`; checked before use.
-    structure: usize,
-    // No pose changed last frame, so node transforms are current.
-    settled: bool,
     session: u64,
     root: Entity,
     nodes: Vec<Entity>,
@@ -76,7 +69,6 @@ struct Instance {
 pub struct SourceInstances {
     instances: Vec<Instance>,
     pending: Option<Placement>,
-    contents: crate::world::ContentIndex,
 }
 impl SourceInstances {
     pub(crate) fn drained(&self) -> bool {
@@ -93,7 +85,7 @@ impl SourceInstances {
             "unready_renderers": self.instances.iter().filter(|i| !i.ready).flat_map(|i| &i.renderers)
                 .take(4).map(|r| serde_json::json!({
                     "grass": r.settings.is_some(),
-                    "tickets": r.tickets.each_ref().map(|t| t.as_ref().map(|t| format!("{:?}", t.state()))),
+                    "ticket": r.ticket.as_ref().map(|t| format!("{:?}", t.state())),
                 })).collect::<Vec<_>>(),
         })
     }
@@ -141,7 +133,6 @@ impl SourceInstances {
                 scale: Vec3::from_array(instance.placement.scale),
             });
             instance.origin = origin.offset;
-            instance.settled = false;
         }
     }
     pub(crate) fn measurement_meshes(
@@ -235,13 +226,12 @@ impl SourceInstances {
                 });
             stream.can_request_independent(1 + usize::from(child))
         }) {
-            let prototype_index = reference
+            let prototype = reference
                 .world
                 .prototypes
                 .iter()
-                .position(|p| p.source == placement.prototype)
+                .find(|p| p.source == placement.prototype)
                 .ok_or_else(|| ReferenceError("Missing generated structure prototype".into()))?;
-            let prototype = &reference.world.prototypes[prototype_index];
             let admitted = prototypes
                 .plan(stream.frame().request.session, &placement.prototype)
                 .is_some()
@@ -487,7 +477,6 @@ impl SourceInstances {
                                         selected,
                                         source_node.layer,
                                         receive,
-                                        shadow,
                                         world.determinant() < 0.,
                                         source_position,
                                         view,
@@ -590,7 +579,6 @@ impl SourceInstances {
                                                 Some(&source),
                                                 source_node.layer,
                                                 receive,
-                                                shadow,
                                                 world.determinant() < 0.,
                                                 source_position,
                                                 view,
@@ -608,7 +596,7 @@ impl SourceInstances {
                                         variants.push(MaterialVariant {
                                             source: Some(source),
                                             binding: variant,
-                                            tickets: [None, None],
+                                            ticket: None,
                                         });
                                     }
                                     if !receive {
@@ -616,17 +604,11 @@ impl SourceInstances {
                                             .entity(entity)
                                             .insert(bevy::light::NotShadowReceiver);
                                     }
-                                    commands.entity(entity).insert(
-                                        crate::presentation::motion_draw::AuthoredMotionMesh(
-                                            mesh.clone(),
-                                        ),
-                                    );
                                     if !is_grass {
                                         commands.entity(entity).insert(Mesh3d(mesh.clone()));
                                         binding.visible.insert(entity, commands);
                                         binding.apply_sort(entity, commands);
                                     }
-                                    let mut skin_binding = None;
                                     if let Some(skin) = node.skin {
                                         let joints = asset
                                             .joints
@@ -645,46 +627,7 @@ impl SourceInstances {
                                                 .clone(),
                                             joints,
                                         };
-                                        commands.entity(entity).insert(binding.clone());
-                                        skin_binding = Some(binding);
-                                    }
-                                    let mut caster_entity = None;
-                                    if let Some(caster) = &binding.caster {
-                                        let caster = commands
-                                            .spawn((
-                                                SourceCaster,
-                                                Mesh3d(mesh.clone()),
-                                                MeshMaterial3d(caster.clone()),
-                                                Transform::default(),
-                                                Visibility::Inherited,
-                                                ChildOf(entity),
-                                                RenderLayers::layer(
-                                                    source_node.layer as usize + 32,
-                                                ),
-                                            ))
-                                            .id();
-                                        caster_entity = Some(caster);
-                                        if let Some(skin) = &skin_binding {
-                                            commands.entity(caster).insert(skin.clone());
-                                        }
-                                    } else if shadow != 0 && !is_grass {
-                                        let caster = commands
-                                            .spawn((
-                                                SourceCaster,
-                                                Mesh3d(mesh.clone()),
-                                                Transform::default(),
-                                                Visibility::Inherited,
-                                                ChildOf(entity),
-                                                RenderLayers::layer(
-                                                    source_node.layer as usize + 32,
-                                                ),
-                                            ))
-                                            .id();
-                                        binding.visible.insert(caster, commands);
-                                        caster_entity = Some(caster);
-                                        if let Some(skin) = &skin_binding {
-                                            commands.entity(caster).insert(skin.clone());
-                                        }
+                                        commands.entity(entity).insert(binding);
                                     }
                                     let (_patches, settings) = if is_grass {
                                         let record = prototype
@@ -721,19 +664,6 @@ impl SourceInstances {
                                         let patches = grass_patches(mesh_data, source_world)?;
                                         let settings = GrassSettings::from_source(record)?;
                                         if let InstanceMaterial::Grass(handle) = &binding.visible {
-                                            let caster = (shadow != 0).then(|| {
-                                                commands
-                                                    .spawn((
-                                                        SourceCaster,
-                                                        Transform::default(),
-                                                        Visibility::Inherited,
-                                                        ChildOf(entity),
-                                                        RenderLayers::layer(
-                                                            source_node.layer as usize + 32,
-                                                        ),
-                                                    ))
-                                                    .id()
-                                            });
                                             let bounds = grass_bounds(
                                                 &patches,
                                                 source_world,
@@ -748,12 +678,10 @@ impl SourceInstances {
                                                 entity,
                                                 root,
                                                 Arc::clone(&patches),
-                                                mesh.clone(),
                                                 settings,
                                                 handle.clone(),
                                                 view,
                                                 shadow != 0,
-                                                caster,
                                                 bounds,
                                             )?;
                                         }
@@ -764,12 +692,11 @@ impl SourceInstances {
                                     renderers.push(Renderer {
                                         material_source,
                                         variants,
-                                        caster_entity,
                                         node: source_index,
                                         entity,
                                         mesh,
                                         binding,
-                                        tickets: [None, None],
+                                        ticket: None,
                                         lod_state: None,
                                         shadow: shadow != 0,
                                         settings,
@@ -782,9 +709,6 @@ impl SourceInstances {
                                 upload: None,
                                 caps_bound: false,
                                 placement: placement.clone(),
-                                prototype: prototype_index,
-                                structure: 0,
-                                settled: false,
                                 session: stream.frame().request.session,
                                 root,
                                 active_nodes: prototype
@@ -865,9 +789,9 @@ impl SourceInstances {
                     complete &= grass.ready(renderer.entity);
                     continue;
                 }
-                PipelineTicket::retry(&mut renderer.tickets[0]);
-                if renderer.tickets[0].is_none() {
-                    renderer.tickets[0] = renderer.binding.visible.warm(
+                PipelineTicket::retry(&mut renderer.ticket);
+                if renderer.ticket.is_none() {
+                    renderer.ticket = renderer.binding.visible.warm(
                         stream,
                         pipelines,
                         instance.continuation.as_mut().unwrap(),
@@ -875,11 +799,11 @@ impl SourceInstances {
                         renderer.shadow,
                     )?;
                 }
-                complete &= ready(&renderer.tickets[0])?;
+                complete &= ready(&renderer.ticket)?;
                 for variant in &mut renderer.variants {
-                    PipelineTicket::retry(&mut variant.tickets[0]);
-                    if variant.tickets[0].is_none() {
-                        variant.tickets[0] = variant.binding.visible.warm(
+                    PipelineTicket::retry(&mut variant.ticket);
+                    if variant.ticket.is_none() {
+                        variant.ticket = variant.binding.visible.warm(
                             stream,
                             pipelines,
                             instance.continuation.as_mut().unwrap(),
@@ -887,33 +811,7 @@ impl SourceInstances {
                             renderer.shadow,
                         )?;
                     }
-                    complete &= ready(&variant.tickets[0])?;
-                    if let Some(caster) = &variant.binding.caster {
-                        PipelineTicket::retry(&mut variant.tickets[1]);
-                        if variant.tickets[1].is_none() {
-                            variant.tickets[1] = pipelines.request_continuation(
-                                stream,
-                                instance.continuation.as_mut().unwrap(),
-                                &renderer.mesh,
-                                caster,
-                                true,
-                            )?;
-                        }
-                        complete &= ready(&variant.tickets[1])?;
-                    }
-                }
-                if let Some(caster) = &renderer.binding.caster {
-                    PipelineTicket::retry(&mut renderer.tickets[1]);
-                    if renderer.tickets[1].is_none() {
-                        renderer.tickets[1] = pipelines.request_continuation(
-                            stream,
-                            instance.continuation.as_mut().unwrap(),
-                            &renderer.mesh,
-                            caster,
-                            true,
-                        )?;
-                    }
-                    complete &= ready(&renderer.tickets[1])?;
+                    complete &= ready(&variant.ticket)?;
                 }
             }
             if complete && instance.continuation.as_ref().unwrap().drained() {
@@ -939,41 +837,37 @@ impl SourceInstances {
         materials: &mut InstanceMaterials,
     ) -> Result<(), ReferenceError> {
         self.rebase(stream.origin, commands);
-        stream.index_contents(&mut self.contents);
         let frame = stream.frame();
         for instance in &mut self.instances {
             if instance.retirement.started() {
                 continue;
             }
-            let content = stream.indexed_content(&self.contents, &instance.placement.id);
-            if !content.bindings_ready() {
+            if !stream.bindings_ready(&instance.placement.id) {
                 if instance.visible {
                     commands.entity(instance.root).insert(Visibility::Hidden);
                     instance.visible = false;
                 }
                 continue;
             }
-            let cached = frame
+            let Some(published) = frame
                 .structures
-                .get(instance.structure)
-                .filter(|s| s.placement.id == instance.placement.id);
-            let Some(published) = cached.or_else(|| {
-                let index = frame
-                    .structures
-                    .iter()
-                    .position(|s| s.placement.id == instance.placement.id)?;
-                instance.structure = index;
-                Some(&frame.structures[index])
-            }) else {
+                .iter()
+                .find(|s| s.placement.id == instance.placement.id)
+            else {
                 continue;
             };
             if !instance.visible {
                 commands.entity(instance.root).insert(Visibility::Inherited);
                 instance.visible = true;
             }
-            let prototype = &reference.world.prototypes[instance.prototype];
+            let prototype = reference
+                .world
+                .prototypes
+                .iter()
+                .find(|p| p.source == instance.placement.prototype)
+                .ok_or_else(|| ReferenceError("Missing visible source prototype".into()))?;
             if !instance.caps_bound {
-                for cap in content.caps() {
+                for cap in stream.generated_cap_visuals(&instance.placement.id) {
                     crate::presentation::reference::bind_generated_cap(
                         commands,
                         cap,
@@ -983,10 +877,11 @@ impl SourceInstances {
                 }
                 instance.caps_bound = true;
             }
-            let appearance = stream.indexed_appearance(&content, &instance.placement.id);
+            let appearance = stream.appearance(&instance.placement.id);
             let food = items
-                .generated_item(&instance.placement.id)
-                .filter(|item| item.food.is_some());
+                .generated_bindings()
+                .find(|(id, item)| **id == instance.placement.id && item.food.is_some())
+                .map(|(_, item)| item);
             if let Some(item) = food {
                 let recipe = &reference.survival.foods[item.food.unwrap().prototype_index];
                 let root = reference
@@ -1010,15 +905,8 @@ impl SourceInstances {
                     ));
                 }
             }
-            // Settled instances skip node and impostor updates that would repeat last frame.
-            // Lamp buttons write node transforms that the node pose loop may overwrite.
-            let mut moved = false;
             for (i, node) in prototype.nodes.iter().enumerate() {
-                if let Some((_, pose)) = stream
-                    .indexed_lamp_buttons(&self.contents, &instance.placement.id)
-                    .find(|(button, _)| *button == &node.source)
-                {
-                    moved = true;
+                if let Some(pose) = stream.lamp_button_pose(&instance.placement.id, &node.source) {
                     if let Ok(mut transform) =
                         transforms.get_mut(instance.nodes[node.gltf_node as usize])
                     {
@@ -1060,29 +948,11 @@ impl SourceInstances {
                 {
                     std::mem::swap(&mut renderer.binding, &mut variant.binding);
                     std::mem::swap(&mut renderer.material_source, &mut variant.source);
-                    std::mem::swap(&mut renderer.tickets, &mut variant.tickets);
+                    std::mem::swap(&mut renderer.ticket, &mut variant.ticket);
                     moved = true;
                     renderer.lod_state = None;
                     renderer.binding.visible.replace(renderer.entity, commands);
                     renderer.binding.apply_sort(renderer.entity, commands);
-                    if let Some(entity) = renderer.caster_entity {
-                        if let Some(caster) = &renderer.binding.caster {
-                            commands.entity(entity).remove::<(
-                                MeshMaterial3d<crate::presentation::materials::SourceMaterial>,
-                                MeshMaterial3d<
-                                    crate::presentation::materials::specular::SpecularMaterial,
-                                >,
-                            )>();
-                            commands
-                                .entity(entity)
-                                .insert(MeshMaterial3d(caster.clone()));
-                        } else {
-                            commands.entity(entity).remove::<MeshMaterial3d<
-                                crate::presentation::materials::lod::LodCasterMaterial,
-                            >>();
-                            renderer.binding.visible.replace(entity, commands);
-                        }
-                    }
                 }
             }
             for (body, handle) in prototype.bodies.iter().zip(&published.bodies) {
@@ -1107,7 +977,6 @@ impl SourceInstances {
                     ),
                 ) * Mat4::from_scale(scale);
                 if instance.worlds[index] != world {
-                    moved = true;
                     let delta = world * instance.worlds[index].inverse();
                     let source_changed = source_world != instance.source_worlds[index];
                     let source_delta = source_world * instance.source_worlds[index].inverse();
@@ -1143,37 +1012,19 @@ impl SourceInstances {
                     }
                 }
             }
-            let pose_world =
-                |instance: &Instance, index: usize, pose: crate::vehicle::VehiclePose| {
-                    Mat4::from_scale_rotation_translation(
-                        instance.scales[index].0,
-                        Quat::from_array(pose.rotation),
-                        Vec3::from_array(pose.position),
-                    )
-                    .as_dmat4()
-                };
-            moved = moved
-                || prototype
-                    .nodes
-                    .iter()
-                    .enumerate()
-                    .any(|(node_index, node)| {
-                        let index = node.gltf_node as usize;
-                        content.node_pose(node_index).is_some_and(|pose| {
-                            instance.worlds[index] != pose_world(instance, index, pose)
-                        })
-                    });
-            let settled = instance.settled && !moved;
-            instance.settled = !moved;
-            if settled {
-                continue;
-            }
             for (node_index, node) in prototype.nodes.iter().enumerate() {
-                let Some(pose) = content.node_pose(node_index) else {
+                let Some(pose) = stream.generated_node_pose(&instance.placement.id, node_index)
+                else {
                     continue;
                 };
                 let index = node.gltf_node as usize;
-                let world = pose_world(instance, index, pose);
+                let scale = instance.scales[index].0;
+                let world = Mat4::from_scale_rotation_translation(
+                    scale,
+                    Quat::from_array(pose.rotation),
+                    Vec3::from_array(pose.position),
+                )
+                .as_dmat4();
                 instance.worlds[index] = world;
                 let source_scale = instance.scales[index].1;
                 instance.source_worlds[index] = Mat4::from_scale_rotation_translation(
@@ -1220,7 +1071,12 @@ impl SourceInstances {
             if instance.retirement.started() {
                 continue;
             }
-            let prototype = &reference.world.prototypes[instance.prototype];
+            let prototype = reference
+                .world
+                .prototypes
+                .iter()
+                .find(|p| p.source == instance.placement.prototype)
+                .expect("admitted prototype");
             for renderer in &mut instance.renderers {
                 let mut visible = true;
                 let mut fade = 1.0;
@@ -1282,7 +1138,12 @@ impl SourceInstances {
             if instance.retirement.started() {
                 continue;
             }
-            let prototype = &reference.world.prototypes[instance.prototype];
+            let prototype = reference
+                .world
+                .prototypes
+                .iter()
+                .find(|p| p.source == instance.placement.prototype)
+                .expect("admitted prototype");
             for renderer in &instance.renderers {
                 let node = &prototype.nodes[renderer.node];
                 if reference

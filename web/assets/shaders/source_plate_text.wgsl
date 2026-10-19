@@ -1,6 +1,6 @@
 // TMP Surface programs 4 and 20, installed build 11140890.
 #import bevy_pbr::{mesh_functions, mesh_view_bindings::view}
-#import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, source_shadow, attenuation, attenuation_sampler, default_cookie, default_sampler, cookies, cookie_sampler}
+#import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, attenuation, attenuation_sampler, default_cookie, default_sampler, cookies, cookie_sampler}
 #import source_view_lighting::{lighting, diffuse_sh, direct_attenuation, fog_factor, sun_cookie, sun_cookie_sampler}
 struct PlateUniform { face:vec4<f32>, outline:vec4<f32>, sdf:vec4<f32>, scale:vec4<f32>, bevel:vec4<f32>, bump:vec4<f32>, specular:vec4<f32> }
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> plate:PlateUniform;
@@ -16,7 +16,7 @@ struct Out { @builtin(position) position:vec4<f32>, @location(0) world:vec4<f32>
     var o:Out;
     let model=mesh_functions::get_world_from_local(v.instance);
     o.world=mesh_functions::mesh_position_local_to_world(model,vec4(v.position,1.));
-    o.position=lighting.nonjittered_clip_from_world*o.world;
+    o.position=lighting.clip_from_world*o.world;
     o.normal=normalize(mesh_functions::mesh_normal_local_to_world(v.normal,v.instance));
     o.tangent=normalize((model*vec4(-1.,0.,0.,0.)).xyz);
     o.uv=v.uv;
@@ -79,7 +79,7 @@ struct Out { @builtin(position) position:vec4<f32>, @location(0) world:vec4<f32>
         }
         if lamp.cookie_rect.x>0. {
             var uv=vec2(0.);
-            if lamp.direction_kind.w==0. {uv=local.xy/lamp.shadow.w+lamp.cookie_rect.yz+.5;}
+            if lamp.direction_kind.w==0. {uv=local.xy/lamp.cookie_size+lamp.cookie_rect.yz+.5;}
             else {if local.z<=0. {continue;} uv=local.xy/local.w+.5;if any(uv<vec2(0.))||any(uv>vec2(1.)){continue;}}
             if lamp.cookie_rect.x==1. {weight*=textureSampleGrad(sun_cookie,sun_cookie_sampler,uv,dpdx(uv),dpdy(uv)).a;}
             else if lamp.cookie_rect.x==2. {weight*=textureSampleGrad(default_cookie,default_sampler,uv,dpdx(uv),dpdy(uv)).a;}
@@ -88,11 +88,10 @@ struct Out { @builtin(position) position:vec4<f32>, @location(0) world:vec4<f32>
                 weight*=textureSampleGrad(cookies,cookie_sampler,array_uv,i32(lamp.cookie_rect.x)-3,dpdx(array_uv),dpdy(array_uv)).a;
             }
         }
-        weight*=source_shadow(lamp,i.world.xyz,normal,depth);
         let specular=pow(max(dot(normal,normalize(direction+eye)),0.),shininess);
         light+=(diffuse*max(dot(normal,direction),0.)+plate.specular.rgb*specular)*lamp.color.rgb*weight;
     }
-    let clip=lighting.nonjittered_clip_from_world*i.world;
+    let clip=lighting.clip_from_world*i.world;
     light=mix(lighting.fog_color_density.rgb,light,fog_factor(clip.z,lighting.near_far.x,lighting.near_far.y));
     return vec4(light,color.a);
 }

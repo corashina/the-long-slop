@@ -1,7 +1,7 @@
-use super::materials::{MaterialCache, SourceCaster, SourceMaterial, SourceShadowMode};
+use super::materials::{MaterialCache, SourceMaterial};
 use crate::reference::{MaterialLink, NodeId, ReferenceError, ReferenceManifest};
 use crate::simulation::instruments::{InstrumentState, source_rotation};
-use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::ecs as bevy_ecs;
 use bevy::gltf::{Gltf, GltfMaterial};
 use bevy::prelude::*;
@@ -45,7 +45,6 @@ struct InstrumentReceiver {
     entity: Entity,
     on: Handle<SourceMaterial>,
     off: Handle<SourceMaterial>,
-    casters: Vec<(Entity, Handle<StandardMaterial>, Handle<StandardMaterial>)>,
 }
 /// The gauges of one vehicle.
 #[derive(Default)]
@@ -68,7 +67,6 @@ impl InstrumentVisuals {
     pub(crate) fn validate_assets(
         &self,
         materials: &Assets<SourceMaterial>,
-        casters: &Assets<StandardMaterial>,
     ) -> Result<(), crate::save::SaveError> {
         for visual in self
             .dashboards
@@ -80,13 +78,6 @@ impl InstrumentVisuals {
                     return Err(crate::save::SaveError::MissingAssets(
                         "instrument material choice".into(),
                     ));
-                }
-                for (_, lit, dark) in &choice.casters {
-                    if !casters.contains(lit.id()) || !casters.contains(dark.id()) {
-                        return Err(crate::save::SaveError::MissingAssets(
-                            "instrument caster material choice".into(),
-                        ));
-                    }
                 }
             }
         }
@@ -242,7 +233,6 @@ impl InstrumentVisuals {
         states: &[InstrumentState],
         transforms: &mut Query<&mut Transform, Without<super::camera::DriveCamera>>,
         materials: &mut Query<&mut MeshMaterial3d<SourceMaterial>>,
-        casters: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
     ) {
         if !self.prepared {
             return;
@@ -253,7 +243,7 @@ impl InstrumentVisuals {
             .zip(&reference.vehicles)
             .zip(states)
         {
-            dashboard.update(&vehicle.instruments, state, transforms, materials, casters);
+            dashboard.update(&vehicle.instruments, state, transforms, materials);
         }
     }
 }
@@ -265,7 +255,6 @@ impl Dashboard {
         state: &InstrumentState,
         transforms: &mut Query<&mut Transform, Without<super::camera::DriveCamera>>,
         materials: &mut Query<&mut MeshMaterial3d<SourceMaterial>>,
-        casters: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
     ) {
         for (i, entity) in self.needles.iter().enumerate() {
             if let Ok(mut t) = transforms.get_mut(*entity) {
@@ -291,18 +280,13 @@ impl Dashboard {
         }
         if self.last_digits_lit != Some(state.digits_lit) {
             for digit in &self.digit_materials {
-                select_material(digit, state.digits_lit, materials, casters);
+                select_material(digit, state.digits_lit, materials);
             }
             self.last_digits_lit = Some(state.digits_lit);
         }
         if self.last_lamps != Some(state.lamp_bits) {
             for lamp in &self.lamps {
-                select_material(
-                    lamp,
-                    state.lamp_bits & (1 << lamp.index) != 0,
-                    materials,
-                    casters,
-                );
+                select_material(lamp, state.lamp_bits & (1 << lamp.index) != 0, materials);
             }
             self.last_lamps = Some(state.lamp_bits);
         }
@@ -313,18 +297,12 @@ fn select_material(
     visual: &MaterialVisual,
     on: bool,
     materials: &mut Query<&mut MeshMaterial3d<SourceMaterial>>,
-    casters: &mut Query<&mut MeshMaterial3d<StandardMaterial>>,
 ) {
     for choice in &visual.choices {
         if let Ok(mut material) = materials.get_mut(choice.entity) {
             material.set_if_neq(MeshMaterial3d(
                 if on { &choice.on } else { &choice.off }.clone(),
             ));
-        }
-        for (entity, lit, dark) in &choice.casters {
-            if let Ok(mut material) = casters.get_mut(*entity) {
-                material.set_if_neq(MeshMaterial3d(if on { lit } else { dark }.clone()));
-            }
         }
     }
 }
@@ -337,19 +315,13 @@ pub(crate) fn prepare_instruments(
     mut materials: ResMut<Assets<SourceMaterial>>,
     mut cache: ResMut<MaterialCache>,
     authored: Res<super::materials::SourceMaterials>,
-    receivers: Query<
-        (
-            &Mesh3d,
-            &MeshMaterial3d<SourceMaterial>,
-            &GlobalTransform,
-            Option<&SourceShadowMode>,
-            Option<&Children>,
-            &super::renderers::SourceRenderer,
-            &bevy::gltf::GltfExtras,
-        ),
-        Without<SourceCaster>,
-    >,
-    casters: Query<(), With<SourceCaster>>,
+    receivers: Query<(
+        &Mesh3d,
+        &MeshMaterial3d<SourceMaterial>,
+        &GlobalTransform,
+        &super::renderers::SourceRenderer,
+        &bevy::gltf::GltfExtras,
+    )>,
 ) {
     if !authored.textures_ready() || !visuals.bound || visuals.prepared || !source.bound {
         return;
@@ -375,16 +347,12 @@ pub(crate) fn prepare_instruments(
         .flat_map(|d| d.lamps.iter_mut().chain(&mut d.digit_materials))
     {
         for &entity in &visual.entities {
-            let (mesh, receiver, global, mode, children, renderer, primitive) =
-                receivers.get(entity).unwrap();
+            let (mesh, receiver, global, renderer, primitive) = receivers.get(entity).unwrap();
             let mask = materials.get(&receiver.0).unwrap().extension.receiver_mask;
             let inverted = global.affine().matrix3.determinant() < 0.;
             let mut prepare = |handle: &Handle<StandardMaterial>| {
                 let key = authored.standard_records[&handle.id()];
                 let mut base = super::materials::authored_caster_material(key, &authored);
-                originals
-                    .insert(handle.id(), base.clone())
-                    .expect("loaded instrument caster material");
                 if inverted {
                     base.cull_mode = base.cull_mode.map(|face| match face {
                         Face::Front => Face::Back,
@@ -394,24 +362,11 @@ pub(crate) fn prepare_instruments(
                 let surface = if inverted {
                     cache
                         .variants
-                        .entry((handle.id(), true, false))
+                        .entry(handle.id())
                         .or_insert_with(|| originals.add(base.clone()))
                         .clone()
                 } else {
                     handle.clone()
-                };
-                let caster = if mode.is_some_and(|mode| mode.0 == 2) {
-                    cache
-                        .variants
-                        .entry((handle.id(), inverted, true))
-                        .or_insert_with(|| {
-                            let mut material = base.clone();
-                            material.cull_mode = None;
-                            originals.add(material)
-                        })
-                        .clone()
-                } else {
-                    surface.clone()
                 };
                 let material = cache
                     .converted
@@ -446,49 +401,24 @@ pub(crate) fn prepare_instruments(
                 if let Some(sort) = sort {
                     warm.insert((sort, bevy::render::batching::NoAutomaticBatching));
                 }
-                source.warmups.push((warm.id(), false));
-                if mode.is_some_and(|mode| mode.0 != 0) {
-                    let warm = commands
-                        .spawn((
-                            SourceCaster,
-                            mesh.clone(),
-                            MeshMaterial3d(caster.clone()),
-                            far,
-                            Visibility::Visible,
-                            (32..64).collect::<RenderLayers>(),
-                            NoFrustumCulling,
-                        ))
-                        .id();
-                    source.warmups.push((warm, true));
-                }
-                Ok::<_, String>((material, caster))
+                source.warmups.push(warm.id());
+                Ok::<_, String>(material)
             };
-            let (on, lit_caster) = match prepare(&visual.on) {
+            let on = match prepare(&visual.on) {
                 Ok(value) => value,
                 Err(error) => {
                     source.state = super::lighting::RenderingState::Failed(error);
                     return;
                 }
             };
-            let (off, dark_caster) = match prepare(&visual.off) {
+            let off = match prepare(&visual.off) {
                 Ok(value) => value,
                 Err(error) => {
                     source.state = super::lighting::RenderingState::Failed(error);
                     return;
                 }
             };
-            let casters = children
-                .into_iter()
-                .flat_map(|children| children.iter())
-                .filter(|child| casters.contains(*child))
-                .map(|child| (child, lit_caster.clone(), dark_caster.clone()))
-                .collect();
-            visual.choices.push(InstrumentReceiver {
-                entity,
-                on,
-                off,
-                casters,
-            });
+            visual.choices.push(InstrumentReceiver { entity, on, off });
         }
     }
     visuals.prepared = true;
