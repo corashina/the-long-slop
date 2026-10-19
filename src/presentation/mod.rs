@@ -53,6 +53,7 @@ mod reflection_preparation;
 pub mod render_targets;
 pub mod renderers;
 pub mod shadow_atlas;
+mod shadow_changes;
 pub mod shadow_collector;
 pub mod shadow_phase;
 pub mod shadow_queue;

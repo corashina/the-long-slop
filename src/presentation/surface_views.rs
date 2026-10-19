@@ -3,7 +3,7 @@ use super::{
     lighting_assets::LightingRenderAssets,
     lighting_scene::{PROBE_COUNT, SourceSceneLighting},
     materials::{MaterialLoading, RenderingState},
-    render_targets::{HDR_FORMAT, ProbeTargets, SurfaceTargets},
+    render_targets::{HDR_FORMAT, MSAA_SAMPLES, ProbeTargets, SurfaceTargets},
     source_lighting::{SourceLightingStatus, SourceViewLighting},
     stained_glass::{GlassViewUniform, SourceGlassView},
     surface_graph::SurfaceViewTargets,
@@ -125,7 +125,7 @@ pub fn prepare_views(
         if source.index >= VIEW_COUNT
             || extents[source.index].is_some()
             || view.target_format != HDR_FORMAT
-            || msaa.samples() != if source.index < 3 { 8 } else { 1 }
+            || msaa.samples() != if source.index < 3 { MSAA_SAMPLES } else { 1 }
         {
             *status.0.lock().unwrap() = RenderingState::Failed(
                 "Source surface view identity, format, or sample count is invalid".into(),

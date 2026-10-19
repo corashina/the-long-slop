@@ -104,7 +104,7 @@ impl UberPass {
                         ..default()
                     }),
                     multisample: MultisampleState {
-                        count: 8,
+                        count: crate::presentation::render_targets::MSAA_SAMPLES,
                         ..default()
                     },
                     ..default()
