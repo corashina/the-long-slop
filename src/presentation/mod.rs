@@ -56,6 +56,7 @@ pub mod shadow_atlas;
 mod shadow_changes;
 pub mod shadow_collector;
 pub mod shadow_phase;
+pub(crate) mod shadow_preparation;
 pub mod shadow_queue;
 pub mod shadow_scene;
 pub mod source_effects;

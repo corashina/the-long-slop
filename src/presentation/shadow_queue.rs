@@ -11,6 +11,7 @@ use super::{
     surface_views::SourceSurfaceView,
     view_frame::SourceViewFrame,
 };
+use crate::reference::shadow_profile;
 use bevy::material::{
     MaterialProperties,
     key::{ErasedMaterialPipelineKey, ErasedMeshPipelineKey},
@@ -37,6 +38,8 @@ struct QueuedShadow {
     key: ShadowBatchKey,
     mesh: bevy::asset::AssetId<Mesh>,
     batchable: bool,
+    specialization: SpecializationKey,
+    base: CachedRenderPipelineId,
     seen: u64,
 }
 struct CachedSpecialization {
@@ -54,6 +57,7 @@ pub struct ShadowQueues {
     retained: [Option<RetainedViewEntity>; VIEW_COUNT],
     // Keep idle face bins out of Bevy's per-frame instance preparation.
     idle_probe_phases: [Option<BinnedRenderPhase<SourceShadow>>; 6],
+    epoch: Option<(u64, u32)>,
     revision: u64,
     pub instances: [[u32; 4]; VIEW_COUNT],
     pub ready: [bool; VIEW_COUNT],
@@ -67,6 +71,7 @@ impl FromWorld for ShadowQueues {
             queued: std::array::from_fn(|_| MainEntityHashMap::default()),
             retained: [None; VIEW_COUNT],
             idle_probe_phases: std::array::from_fn(|_| None),
+            epoch: None,
             revision: 0,
             instances: [[0; 4]; VIEW_COUNT],
             ready: [false; VIEW_COUNT],
@@ -84,7 +89,8 @@ fn base_pipeline(
     state: &mut ShadowQueues,
     entity: MainEntity,
     view_key: MeshPipelineKey,
-) -> Result<Option<(CachedRenderPipelineId, bool)>, String> {
+    previous: Option<&QueuedShadow>,
+) -> Result<Option<(CachedRenderPipelineId, bool, SpecializationKey)>, String> {
     let Some(mesh_id) = world
         .resource::<RenderMeshInstances>()
         .mesh_asset_id(entity)
@@ -121,11 +127,22 @@ fn base_pipeline(
             &Msaa::from_samples(view_key.msaa_samples()),
         );
     let cache_key = SpecializationKey::new(key.bits(), &mesh.layout.0, &material.properties);
+    if let Some(previous) = previous {
+        if previous.specialization == cache_key {
+            return Ok(Some((previous.base, indexed, cache_key)));
+        }
+    }
     let index = match state
         .specializations
         .binary_search_by_key(&cache_key, |entry| entry.key)
     {
-        Ok(index) => return Ok(Some((state.specializations[index].base, indexed))),
+        Ok(index) => {
+            return Ok(Some((
+                state.specializations[index].base,
+                indexed,
+                cache_key,
+            )));
+        }
         Err(index) => index,
     };
     if state.specializations.len() == state.specializations.capacity() {
@@ -150,7 +167,7 @@ fn base_pipeline(
             base,
         },
     );
-    Ok(Some((base, indexed)))
+    Ok(Some((base, indexed, cache_key)))
 }
 pub fn queue(world: &mut World) {
     let mut timing = super::reflection_preparation::Timer::new(
@@ -158,6 +175,7 @@ pub fn queue(world: &mut World) {
         world.resource::<SourceViewFrame>(),
     );
     world.resource_scope(|world, mut state: Mut<ShadowQueues>| {
+        let mut shadow_timing = shadow_profile::Timer::new(shadow_profile::Stage::Queue);
         state.ready = [false; VIEW_COUNT];
         state.instances = [[0; 4]; VIEW_COUNT];
         state.revision += 1;
@@ -196,6 +214,21 @@ pub fn queue(world: &mut World) {
             let draw = shadow_phase::draw_id(world.resource::<DrawFunctions<SourceShadow>>());
             world.resource_scope(
                 |world, mut phases: Mut<ViewBinnedRenderPhases<SourceShadow>>| {
+                    let frame = world.resource::<SourceViewFrame>();
+                    let epoch = (frame.session, frame.scene);
+                    if state.epoch != Some(epoch) {
+                        // Old bins and pointer keys belong to the previous scene.
+                        for retained in state.retained.iter().flatten() {
+                            phases.remove(retained);
+                        }
+                        for queued in &mut state.queued {
+                            queued.clear();
+                        }
+                        state.specializations.clear();
+                        state.retained = [None; VIEW_COUNT];
+                        state.idle_probe_phases = std::array::from_fn(|_| None);
+                        state.epoch = Some(epoch);
+                    }
                     for index in PROBE_START..VIEW_COUNT {
                         if world
                             .resource::<SourceViewFrame>()
@@ -245,8 +278,16 @@ pub fn queue(world: &mut World) {
                             if mask == 0 {
                                 continue;
                             }
+                            shadow_timing.items(1);
                             let main = MainEntity::from(*main);
-                            let base = match base_pipeline(world, &mut state, main, key) {
+                            let previous = state.queued[index].get(&main).cloned();
+                            let base = match base_pipeline(
+                                world,
+                                &mut state,
+                                main,
+                                key,
+                                previous.as_ref(),
+                            ) {
                                 Ok(Some(v)) => v,
                                 Ok(None) => {
                                     ready = false;
@@ -291,10 +332,11 @@ pub fn queue(world: &mut World) {
                                 },
                                 mesh,
                                 batchable,
+                                specialization: base.2,
+                                base: base.0,
                                 seen: revision,
                             };
-                            let previous = state.queued[index].get(&main);
-                            if previous.is_none_or(|old| {
+                            if previous.as_ref().is_none_or(|old| {
                                 old.key != next.key
                                     || old.mesh != mesh
                                     || old.batchable != batchable
@@ -312,7 +354,17 @@ pub fn queue(world: &mut World) {
                                     },
                                 );
                             }
-                            state.queued[index].insert(main, next);
+                            if let Some(previous) = state.queued[index].get_mut(&main) {
+                                if previous.key == next.key
+                                    && previous.mesh == next.mesh
+                                    && previous.batchable == next.batchable
+                                {
+                                    shadow_timing.hit();
+                                }
+                                *previous = next;
+                            } else {
+                                state.queued[index].insert(main, next);
+                            }
                             for cascade in 0..4 {
                                 state.instances[index][cascade] +=
                                     u32::from(mask & (1 << cascade) != 0);
@@ -397,6 +449,7 @@ pub fn write_cascades(
     let (Some(assets), Some(live)) = (assets, live.0) else {
         return;
     };
+    let mut shadow_timing = shadow_profile::Timer::new(shadow_profile::Stage::Cascades);
     let light = &assets.record.lights[0];
     let rotation = live.sun_rotation;
     let h = |v: Vec3| Vec3::new(v.x, v.y, -v.z);
@@ -410,9 +463,17 @@ pub fn write_cascades(
             continue;
         }
         timing.face(view.index);
+        let key = super::shadow_preparation::CascadeKey {
+            view: scene.view_revision(view.index, &frame),
+            bias: [
+                light.shadows.depth_bias.to_bits(),
+                light.shadows.normal_bias.to_bits(),
+            ],
+        };
         let Some(fit) = scene.fits[view.index] else {
             view.shadow_fade = Vec4::ZERO;
             view.shadow_fade_center = Vec4::ZERO;
+            slots.shadow_key = Some(key);
             continue;
         };
         view.shadow_fade = Vec4::from_array(fit.fade);
@@ -422,19 +483,26 @@ pub fn write_cascades(
             -fit.fade_center[2],
             fit.fade_center[3],
         );
+        // SourceSurfaceView is extracted again each frame. Always restore its fade values.
+        if slots.shadow_key == Some(key) {
+            shadow_timing.hit();
+            continue;
+        }
+        slots.shadow_key = Some(key);
         for (index, cascade) in fit.cascades.iter().enumerate() {
             let (projection, device_e22) = cascade_projection(cascade, basis);
             // Selected D3D reversed-depth orthographic device e22 = 1/(far-near).
             let depth_bias = -light.shadows.depth_bias * device_e22;
             let normal_bias = (light.shadows.normal_bias * 3.6500000953674316_f32)
                 * cascade.texel_size[0].max(cascade.texel_size[1]);
+            let world_from_view = cascade_world_from_view(cascade, basis);
             slots.write(
                 index + 1,
                 CasterUniform {
                     clip_from_world: projection,
-                    world_from_view: cascade_world_from_view(cascade, basis),
-                    view_from_world: cascade_world_from_view(cascade, basis).inverse(),
-                    clip_from_view: projection * cascade_world_from_view(cascade, basis),
+                    world_from_view,
+                    view_from_world: world_from_view.inverse(),
+                    clip_from_view: projection * world_from_view,
                     direction_to_light: (rotation * Vec3::Z).extend(0.),
                     bias: Vec4::new(depth_bias, 1., normal_bias, 0.),
                 },
