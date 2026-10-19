@@ -18,8 +18,7 @@ That file exists. Session validation looks for its lazy prototype in the eager s
 ## Work order
 
 Keep each layer working before you add the next.
-Use [targeted checks](../README.md#export-build-and-run) during edits. The check script does not build release WASM.
-Run full checks and release builds only on explicit request or at an agreed milestone.
+Follow the check rules in [AGENTS.md](../AGENTS.md). The check script does not build release WASM.
 
 1. **Fix New game asset validation.** Match eager checks to the eager scene owners.
    Keep strict checks for loaded scenes and for each lazy prototype's owner.
@@ -52,7 +51,7 @@ Stopped at the user's request. Branch: `codex/inventory-clothing`.
 
 These 15 improvements are ordered from easiest to hardest, not by execution order. No performance gain is verified.
 Review each proposal against current source and profile evidence before implementation. Items 2 and 5 change image quality and need specific approval.
-Start profiling with items 3, 4, or 7 for fidelity-preserving work, or item 1 for startup. This suggestion does not change the work order.
+Item 4 is implemented. Start profiling with items 3 or 7 for fidelity-preserving work, or item 1 for startup. This suggestion does not change the work order.
 
 Use this prompt preamble for each item:
 
@@ -94,7 +93,7 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    See the [validation note](content-lookup-cache.md) for merged-tree checks and historical benchmark limits.
 
 4. **Remove redundant fullscreen image copies.**
-   Status: Proposed. Difficulty: Moderate. Estimate: 1–3 days. Owner: [source effects](../src/presentation/source_effects.rs).
+   Status: Implemented, not measured. Uber writes all MSAA samples, so both copies were removed. On some GPUs, the copies could spread Inf or NaN from a neighbor pixel. That no longer occurs. Difficulty: Moderate. Estimate: 1–3 days. Owner: [source effects](../src/presentation/source_effects.rs).
    Effect: Remove only post-Uber Far and Main copies that produce equivalent pixels and submissions.
    Prompt:
    ```text
