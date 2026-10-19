@@ -9,9 +9,6 @@
 - Avoid allocations and repeated setup in per-frame update and render paths.
 - Implement only critical tests.
 - Do not build features that the product specification lists as out of scope.
-- Do not implement reduced-motion variants or `prefers-reduced-motion` handling unless the user explicitly requests it.
-- Use the [stop-slop skill](https://github.com/hardikpandya/stop-slop/blob/main/SKILL.md) when writing or editing UI text and documentation.
-- Use subagents for independent tasks. Delegate merges and simple tasks to GPT-6 Luna subagents.
-- Use GPT-6.1 Sol with high reasoning for all work, including subagents.
-- Use GPT-6 Luna for merges and simple tasks, including subagents.
-- Never use GPT-6 Astra.
+- Do not implement reduced-motion variants or prefers-reduced-motion handling unless the user explicitly requests it.
+- Use the pstack unslop skill when writing or editing UI text and documentation.
+- Use GPT-6.1 Sol with high reasoning for most work. Use GPT-6 Luna for merges and simpler tasks. Never use GPT-6 Astra.
