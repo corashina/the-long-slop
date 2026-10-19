@@ -67,6 +67,12 @@ G13 follows the approved garage state. Saved survival needs remain deferred.
 G15 covers defects in the selected experience. It does not reopen the old optimization proposal list.
 G16 requires real input, active physics, visible results, and submitted frames on the same tested package.
 
+Startup selection, 2026-10-19: the runtime export contains only the garage Lada.
+The yard Skoda and its parking code are removed. The Lada record and pose are unchanged.
+Export validation, 16 Python tests, two native tests, and the WASM compile check passed.
+Full-library verification stopped at missing managed coverage. Targeted runtime derivation passed.
+Full checks, release build, and browser acceptance were deferred for this change.
+
 G01 implementation merged, 2026-10-19: Escape in the pause menu uses the existing Continue path.
 Targeted web tests cover resume, pause, capture loss, failed capture, and canceled capture.
 The baseline reached prepared New game, restart, and cold Load states with matching assets and WASM.
