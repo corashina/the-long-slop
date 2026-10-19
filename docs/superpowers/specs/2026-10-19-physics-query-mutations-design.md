@@ -3,7 +3,7 @@
 Date: 2026-10-19
 Branch: `codex/physics-query-mutations`
 Base: `8eca150d90e7d0fa216823276c01825f8b1189d1`
-Status: Design direction approved. Written specification awaits review.
+Status: Written specification approved on 2026-10-19. Implementation planning authorized.
 
 ## Goal and scope
 
