@@ -87,20 +87,20 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    Runtime acceptance and performance gains remain unverified.
 
 3. **Reuse unchanged content lookup tables.**
-   Status: Proposed. Difficulty: Moderate. Estimate: 1–2 days. Owners: [content index](../src/world/content_index.rs), [instance presentation](../src/presentation/world/instances.rs).
-   Effect: Cache sorted lookup tables while session, membership, and ordering stay unchanged.
-   Prompt:
-   ```text
-   Inspect the unconditional sorts in content_index.rs and instances.rs. Cache the tables by session, membership, and order revision. Invalidate correctly on insert, remove, replace, swap_remove, static-control changes, and lamp-binding changes. Preserve exact identities, duplicates, and source order. Read live pose and appearance so the cache stores membership and order only.
-   ```
+   Status: Implemented and merged into master on 2026-10-19. Runtime performance remains unverified.
+   Owners: [content index](../src/world/content_index.rs), [instance presentation](../src/presentation/world/instances.rs).
+   The cache keeps membership and order. Lookups read live pose and appearance.
+   See the [validation note](content-lookup-cache.md) for merged-tree checks and historical benchmark limits.
 
 4. **Remove redundant fullscreen image copies.**
-   Status: Implemented, not measured. Uber writes all MSAA samples, so both copies were removed. On some GPUs, the copies could spread Inf or NaN from a neighbor pixel. That no longer occurs. Difficulty: Moderate. Estimate: 1–3 days. Owner: [source effects](../src/presentation/source_effects.rs).
-   Effect: Remove only post-Uber Far and Main copies that produce equivalent pixels and submissions.
-   Prompt:
-   ```text
-   Trace both Far and Main image copies after Uber in source_effects.rs. Prove equivalence for half-float rounding, NaN, infinity, pixel sampling, and MSAA before removing each copy. Preserve effects, display, and resize behavior. Update submission audits to count actual work, and report any case that cannot be proven equivalent.
-   ```
+   Status: Implemented and merged into master at `2c80503`. Source commit: `2e3d483`.
+   Owner: [source effects](../src/presentation/source_effects.rs).
+   Uber writes one value to all MSAA samples and the resolve. Far and Main no longer copy it to a scratch image and back.
+   The scratch image and its callback audit counts are removed. The display copy keeps only its sRGB path.
+   Finite values, half-float rounding, pixel sampling, and MSAA are unchanged.
+   One case differs: on some GPUs, the bilinear copy could spread Inf or NaN from a neighbor pixel. That no longer occurs.
+   Checks: Native and WASM Clippy show no new warnings. WASM check passed.
+   Remaining: Check the image in a browser with a fresh export. Measure garage and driving average, p95, and p99 frame times.
 
 5. **Reduce MSAA8 to 4.**
    Status: Implemented, not measured. Approved by the user. `MSAA_SAMPLES` sets 4 samples for all three cameras, targets, and pipelines. The source export still records 8. Difficulty: Moderate. Estimate: 2–3 days. Owner: [render targets](../src/presentation/render_targets.rs).
