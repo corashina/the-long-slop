@@ -1,7 +1,7 @@
 # Project roadmap
 
 Updated: 2026-10-19.
-[PRODUCT.md](../PRODUCT.md) sets the scope. Source authority is Steam build `11140890`. Save schema is 5.
+Source authority is Steam build `11140890`. Save schema is 5.
 
 ## Current state
 
