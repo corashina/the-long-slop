@@ -51,7 +51,7 @@ Stopped at the user's request. Branch: `codex/inventory-clothing`.
 
 These 15 improvements are ordered from easiest to hardest, not by execution order. No performance gain is verified.
 Review each proposal against current source and profile evidence before implementation. Item 2 changes image quality and needs specific approval.
-Items 1 to 5, 7 to 9, and 14 are merged. Items 6, 10 to 13, and 15 are proposed.
+Items 1 to 5, 7 to 9, and 14 are merged. Item 15 is implemented; browser acceptance is open. Items 6 and 10 to 13 are proposed.
 
 Use this prompt preamble for each item:
 
@@ -192,8 +192,10 @@ Effort estimates include developer work, builds, critical checks, and browser ve
     ```
 
 15. **Add a WebGPU renderer.**
-    Status: Proposed. Difficulty: Architectural. Estimate: 2–4 weeks. Owner: [Cargo features](../Cargo.toml).
+    Status: Implemented, not run in a browser, not measured. Difficulty: Architectural. Estimate: 2–4 weeks. Owner: [Cargo features](../Cargo.toml).
     Effect: Add a WebGPU backend after equal-quality behavior works across the current renderer paths.
+    Done: Features `webgl2` (default) and `webgpu` select one backend per WASM build. `scripts/build.ps1` builds both. `?renderer=webgpu` loads the WebGPU build. Both backends use the same CPU-batched phases, because the source frame graph has no GPU preprocessing nodes. The device check requires `MSAA_SAMPLES`, not 8 samples. WebGPU allows only 1 or 4.
+    Open: Compare images on both backends. Then check garage, driving, shadows, glass, streaming, resize, and Save/Load on WebGPU. After acceptance, make WebGPU the only build and remove WebGL2.
     Prompt:
     ```text
     Check current Bevy and wgpu support, then audit WebGL shaders, depth, formats, MSAA, and custom phases. Reuse existing dependencies where possible. Match image quality before comparing backends; add GPU-driven features only after that comparison. Verify garage, driving, shadows, glass, streaming, resize, and Save/Load. Remove obsolete WebGL paths after acceptance. Do not claim a performance gain without matched measurements.

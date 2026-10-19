@@ -15,7 +15,7 @@ pub const HISTOGRAM_FORMAT: TextureFormat = TextureFormat::Rgba32Uint;
 /// The source uses 8 samples. Four samples is an approved image-quality change.
 pub const MSAA_SAMPLES: u32 = 4;
 
-/// Validate the wgpu device contract, separately from raw WebGL capability probes.
+/// Validate the wgpu device contract for both browser backends.
 pub fn validate_source_device(
     device: &RenderDevice,
     adapter: &RenderAdapter,
@@ -48,9 +48,11 @@ pub fn validate_source_device(
         if !adapter
             .get_texture_format_features(format)
             .flags
-            .contains(TextureFormatFeatureFlags::MULTISAMPLE_X8)
+            .sample_count_supported(MSAA_SAMPLES)
         {
-            return Err(format!("Source rendering requires8-sample {format:?}"));
+            return Err(format!(
+                "Source rendering requires {MSAA_SAMPLES}-sample {format:?}"
+            ));
         }
     }
     let hdr = adapter.get_texture_format_features(HDR_FORMAT).flags;
@@ -77,8 +79,7 @@ impl Target {
         format: TextureFormat,
         sampled: bool,
     ) -> Self {
-        // WebGL2 multisample attachments use renderbuffers. Only resolved
-        // single-sample textures support sampling and copy operations.
+        // Only resolved single-sample textures support sampling and copy operations.
         let usage = TextureUsages::RENDER_ATTACHMENT
             | if samples == 1 {
                 TextureUsages::COPY_SRC

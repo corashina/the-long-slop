@@ -18,7 +18,8 @@ use bevy::core_pipeline::core_3d::Transparent3d;
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::render::camera::CameraRenderGraph;
 use bevy::render::{
-    Render, RenderApp, RenderSystems,
+    Render, RenderApp, RenderStartup, RenderSystems,
+    batching::gpu_preprocessing::{GpuPreprocessingMode, GpuPreprocessingSupport},
     extract_component::ExtractComponent,
     render_phase::{DrawFunctions, PhaseItem, SortedPhaseItem, ViewSortedRenderPhases},
     render_resource::*,
@@ -279,6 +280,10 @@ impl Plugin for SourceFramePlugin {
         render
             .insert_resource(progress)
             .init_resource::<SkyExtras>()
+            .add_systems(
+                RenderStartup,
+                cpu_batching.after(bevy::render::init_gpu_resource::<GpuPreprocessingSupport>),
+            )
             .add_systems(Render, gpu_boundaries.in_set(RenderSystems::Cleanup))
             .add_systems(
                 Render,
@@ -1201,6 +1206,10 @@ fn resource_stamp<T: Resource>(world: &World) -> Option<u32> {
     world
         .get_resource_ref::<T>()
         .map(|resource| resource.last_changed().get())
+}
+/// Source passes draw CPU-batched phases on every backend.
+fn cpu_batching(mut support: ResMut<GpuPreprocessingSupport>) {
+    support.max_supported_mode = GpuPreprocessingMode::None;
 }
 fn gpu_boundaries(
     world: &World,

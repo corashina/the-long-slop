@@ -18,6 +18,7 @@ test('preparation compresses current WASM and JSON outside checked packages and 
   const originals = new Map([
     ['assets/reference/manifest.json', Buffer.from(JSON.stringify(manifest))],
     ['pkg/my_summer_slop_bg.wasm', Buffer.from([0, 97, 115, 109, 1, 0, 0, 0])],
+    ['pkg/my_summer_slop_webgpu_bg.wasm', Buffer.from([0, 97, 115, 109, 1, 0, 0, 1])],
     [runtime + 'reference/car.plan.json', Buffer.from('{"nodes":[]}')],
     [runtime + 'reference/image.png', Buffer.from('already compressed')],
     ['assets/runtime/old/unused.json', Buffer.from('{}')],
@@ -27,7 +28,7 @@ test('preparation compresses current WASM and JSON outside checked packages and 
     await writeFile(join(webRoot, name), bytes);
   }
   const first = await prepareStartupCompression({webRoot, compressionRoot});
-  assert.equal(Object.keys(first.files).length, 3);
+  assert.equal(Object.keys(first.files).length, 4);
   for (const [name, entry] of Object.entries(first.files)) {
     const encoded = await readFile(join(compressionRoot, entry.brotli.file));
     const original = originals.get(name.slice(1));
