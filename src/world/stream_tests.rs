@@ -1258,3 +1258,806 @@ fn content_index_matches_linear_lookups() {
         );
     }
 }
+
+fn decoration_source(path_id: i64) -> SourceId {
+    SourceId {
+        file: "sharedassets1.assets".into(),
+        path_id,
+    }
+}
+
+fn publish_decoration_fixture(run: &mut GarageRuntime, placement: Placement) {
+    let stream = &mut run.stream;
+    stream
+        .contents
+        .active
+        .push(super::super::contents::ContentInstance::for_structure(
+            placement.clone(),
+        ));
+    stream.wanted_structures.push(placement.clone());
+    stream
+        .reserve_prototype(placement.prototype.clone(), 0, 0)
+        .unwrap();
+    stream.bind_prototype(&placement.prototype).unwrap();
+    stream.bind_structure_recipe(&placement.prototype).unwrap();
+    let mut claim = stream
+        .reserve_instance_renderer(stream.request, &placement.id, 0, 0, 0)
+        .unwrap();
+    stream
+        .accept_structure_renderer(stream.request, &placement.id, &mut claim)
+        .unwrap();
+    stream.plan_revision = stream.request.revision;
+    stream.publish_structure(&mut run.physics, &[]).unwrap();
+}
+
+fn sync_decoration_fixture(run: &mut GarageRuntime, reference: &ReferenceManifest) {
+    run.stream
+        .sync_supplies(
+            reference,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.physics,
+            &mut run.wheels,
+        )
+        .unwrap();
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn fixed_decorations_preserve_collision_without_item_bindings() {
+    use rapier3d::prelude::{Group, InteractionGroups, InteractionTestMode, RigidBodyType};
+    let mut reference = reference();
+    let mut wrong_file = reference
+        .world
+        .prototypes
+        .iter()
+        .find(|p| p.source == decoration_source(84448))
+        .unwrap()
+        .clone();
+    wrong_file.source.file = "wrong.assets".into();
+    let wrong_source = wrong_file.source.clone();
+    std::sync::Arc::get_mut(&mut reference.world)
+        .unwrap()
+        .prototypes
+        .push(wrong_file);
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    let sources = [84448, 69558, 66737, 79572].map(decoration_source);
+    for (ordinal, source) in sources.iter().enumerate() {
+        let prototype = reference
+            .world
+            .prototypes
+            .iter()
+            .find(|p| &p.source == source)
+            .unwrap();
+        assert!(!prototype.bodies.is_empty());
+        for scale in [1., 1.5] {
+            let mut placement = replay_placement(
+                source,
+                (ordinal * 2 + usize::from(scale > 1.)) as u32,
+                [ordinal as f64 * 20., 10., 0.],
+            );
+            placement.scale = prototype.prefab_pose.scale.map(|v| v * scale);
+            let before = (
+                run.area.items.len(),
+                run.area.interaction.retained_binding_bytes(),
+                run.wheels.retained_binding_bytes(),
+            );
+            let dynamic = run
+                .physics
+                .rapier()
+                .bodies
+                .iter()
+                .filter(|(_, b)| b.is_dynamic())
+                .count();
+            publish_decoration_fixture(&mut run, placement.clone());
+            assert_eq!(
+                run.physics
+                    .rapier()
+                    .bodies
+                    .iter()
+                    .filter(|(_, b)| b.is_dynamic())
+                    .count(),
+                dynamic
+            );
+            let instance = run.stream.structures.last().unwrap();
+            assert_eq!(instance.bodies.len(), prototype.bodies.len());
+            for (index, handle) in instance.bodies.iter().enumerate() {
+                let source_body = &prototype.bodies[index];
+                let expected = crate::vehicle::to_rapier(crate::vehicle::VehiclePose {
+                    position: placement.pose.position.map(|v| v as f32),
+                    rotation: placement.pose.rotation,
+                }) * crate::vehicle::to_rapier(crate::vehicle::VehiclePose {
+                    position: std::array::from_fn(|i| {
+                        source_body.pose.translation[i] * placement.scale[i]
+                    }),
+                    rotation: source_body.pose.rotation,
+                });
+                assert_eq!(run.physics.rapier().bodies[*handle].position(), &expected);
+                assert_eq!(
+                    run.physics.rapier().bodies[*handle].body_type(),
+                    RigidBodyType::Fixed,
+                    "{} scale={scale}",
+                    source.path_id
+                );
+            }
+            for (source, handle) in &instance.colliders {
+                let record = prototype
+                    .colliders
+                    .iter()
+                    .find(|c| &c.source == source)
+                    .unwrap();
+                let collider = &run.physics.rapier().colliders[*handle];
+                assert_eq!(
+                    collider.parent(),
+                    record.body.map(|i| instance.bodies[i as usize])
+                );
+                let layer = prototype.nodes[record.node as usize].layer as usize;
+                assert_eq!(
+                    collider.collision_groups(),
+                    InteractionGroups::new(
+                        Group::from_bits_truncate(1 << layer),
+                        Group::from_bits_truncate(reference.world.collision_rules.layers[layer]),
+                        InteractionTestMode::And
+                    )
+                );
+                assert_eq!(collider.is_sensor(), record.trigger);
+                if prototype.source.path_id == 66737 {
+                    assert_eq!(prototype.prefab_pose.scale, [0.94613105, 1., 1.2322059]);
+                    assert!(
+                        prototype
+                            .bodies
+                            .iter()
+                            .all(|b| b.pose.rotation == [0., 0., 0., 1.])
+                    );
+                    let bounds = collider.shape().compute_aabb(collider.position());
+                    assert!(
+                        (bounds.maxs.x
+                            - placement.pose.position[0] as f32
+                            - 0.84375 * placement.scale[0])
+                            .abs()
+                            < 0.001
+                    );
+                    assert!(
+                        (bounds.maxs.z
+                            - placement.pose.position[2] as f32
+                            - 1.0625 * placement.scale[2])
+                            .abs()
+                            < 0.001
+                    );
+                    let sphere = rapier3d::parry::shape::Ball::new(0.1);
+                    let contact = rapier3d::parry::query::contact(
+                        collider.position(),
+                        collider.shape(),
+                        &rapier3d::math::Pose::translation(
+                            placement.pose.position[0] as f32,
+                            10.05,
+                            0.,
+                        ),
+                        &sphere,
+                        0.,
+                    )
+                    .unwrap();
+                    assert!(
+                        contact.is_some(),
+                        "actual nonuniform plank must retain contact"
+                    );
+                }
+            }
+            assert_eq!(
+                instance.colliders.len(),
+                prototype
+                    .colliders
+                    .iter()
+                    .filter(|c| c.source_empty_mesh.is_none())
+                    .count()
+            );
+            sync_decoration_fixture(&mut run, &reference);
+            assert_eq!(
+                before,
+                (
+                    run.area.items.len(),
+                    run.area.interaction.retained_binding_bytes(),
+                    run.wheels.retained_binding_bytes()
+                ),
+                "fixed decoration must not register item, pickup, attachment, part, or mechanism bindings"
+            );
+            let content = run
+                .stream
+                .contents
+                .active
+                .iter()
+                .find(|c| c.content.placement.id == placement.id)
+                .unwrap();
+            assert!(
+                content.item.is_none()
+                    && content.bindings.is_empty()
+                    && content.slots.is_empty()
+                    && content.nodes.is_empty()
+            );
+        }
+    }
+    let ordinary = reference
+        .world
+        .prototypes
+        .iter()
+        .find(|p| {
+            !sources.contains(&p.source)
+                && !p.bodies.is_empty()
+                && p.bodies.iter().any(|b| !b.kinematic)
+                && p.role == crate::reference::WorldPrototypeRole::Nested
+        })
+        .unwrap();
+    for prototype in [
+        ordinary,
+        reference
+            .world
+            .prototypes
+            .iter()
+            .find(|p| p.source == wrong_source)
+            .unwrap(),
+    ] {
+        let mut placement = replay_placement(
+            &prototype.source,
+            100 + run.stream.structures.len() as u32,
+            [0., 20., 0.],
+        );
+        placement.scale = prototype.prefab_pose.scale;
+        publish_decoration_fixture(&mut run, placement);
+        assert!(
+            run.stream
+                .structures
+                .last()
+                .unwrap()
+                .bodies
+                .iter()
+                .any(|h| run.physics.rapier().bodies[*h].body_type() == RigidBodyType::Dynamic)
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn fixed_decoration_replay_rebases_retires_and_republishes() {
+    use rapier3d::prelude::RigidBodyType;
+    let reference = reference();
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    let source = decoration_source(66737);
+    let prototype = reference
+        .world
+        .prototypes
+        .iter()
+        .find(|p| p.source == source)
+        .unwrap();
+    let mut placement = replay_placement(&source, 400, [2., 20., 3.]);
+    placement.scale = prototype.prefab_pose.scale;
+    let key = super::super::ObjectKey::Generated(placement.id.clone());
+    run.stream.changes.record(
+        key.clone(),
+        replay_snapshot(placement.pose.position),
+        &replay_snapshot([9000.; 3]),
+    );
+    run.stream
+        .changes
+        .set_replay(&key, &placement, &placement.id);
+    run.stream.changes.remove(key.clone());
+    let mut replacement = placement.clone();
+    replacement.id.ordinal = 401;
+    replacement.id.children.last_mut().unwrap().1 = 401;
+    replacement.pose.position = [10000., 20., 3.];
+    let replacement_key = super::super::ObjectKey::Generated(replacement.id.clone());
+    run.stream.changes.record(
+        replacement_key.clone(),
+        replay_snapshot(replacement.pose.position),
+        &replay_snapshot([9000.; 3]),
+    );
+    run.stream
+        .changes
+        .set_replay(&replacement_key, &replacement, &replacement.id);
+    let saved = run.stream.capture_save(
+        &reference,
+        &run.area.items,
+        &run.area.interaction,
+        &run.physics,
+        &[],
+    );
+    let saved: crate::save::WorldSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    run.stream = WorldStream::new(&reference, saved.seed).unwrap();
+    run.stream.restore_save(&saved).unwrap();
+    publish_decoration_fixture(&mut run, placement.clone());
+    assert!(
+        run.stream.changes.get(&key).is_none(),
+        "old removal records cannot suppress fixed decorations"
+    );
+    assert!(run.stream.replay_roots.is_empty());
+    let original = run.stream.contents.active.pop().unwrap();
+    run.stream
+        .contents
+        .active
+        .push(super::super::contents::ContentInstance::for_structure(
+            replacement,
+        ));
+    run.stream.discard_fixed_decoration_changes();
+    assert!(
+        run.stream.changes.get(&replacement_key).is_none(),
+        "equal-count replacement must classify the new source instance"
+    );
+    assert_replay_selection(&run.stream);
+    assert!(run.stream.replay_roots.is_empty());
+    assert!(run.stream.replay_query.is_empty());
+    assert_eq!(run.stream.change_revision, run.stream.changes.revision());
+    run.stream.contents.active.pop();
+    run.stream.contents.active.push(original);
+    run.stream.contents.active.last_mut().unwrap().replay_only = true;
+    sync_decoration_fixture(&mut run, &reference);
+    let content = run.stream.contents.active.last().unwrap();
+    assert!(
+        content.restored,
+        "itemless fixed replay must complete restoration"
+    );
+    assert!(content.item.is_none());
+    let handles = run.stream.structures.last().unwrap().bodies.clone();
+    let poses: Vec<_> = handles
+        .iter()
+        .map(|h| *run.physics.rapier().bodies[*h].position())
+        .collect();
+    for _ in 0..30 {
+        run.physics.step_physics();
+    }
+    for (handle, pose) in handles.iter().zip(&poses) {
+        assert_eq!(run.physics.rapier().bodies[*handle].position(), pose);
+    }
+    let shift = run
+        .stream
+        .rebase([4096., 0., 0.], &mut run.physics)
+        .unwrap();
+    for (handle, pose) in handles.iter().zip(&poses) {
+        let body = &run.physics.rapier().bodies[*handle];
+        assert_eq!(body.body_type(), RigidBodyType::Fixed);
+        assert!((body.translation().x - (pose.translation.x - shift[0])).abs() < 0.001);
+    }
+    run.stream.request.player = [10000., 0., 0.];
+    run.stream.request.vehicle = [10000., 0., 0.];
+    run.stream.retire_contents(
+        &mut run.physics,
+        &mut run.area.items,
+        &mut run.area.interaction,
+        &mut run.wheels,
+    );
+    assert!(
+        run.stream.contents.active.is_empty(),
+        "itemless replay cannot pin retirement"
+    );
+    assert!(
+        !run.stream
+            .wanted_structures
+            .iter()
+            .any(|p| p.id == placement.id)
+    );
+    run.stream
+        .structures
+        .pop()
+        .unwrap()
+        .retire(&mut run.physics);
+    assert!(
+        handles
+            .iter()
+            .all(|h| run.physics.rapier().bodies.get(*h).is_none())
+    );
+    publish_decoration_fixture(&mut run, placement);
+    sync_decoration_fixture(&mut run, &reference);
+    assert!(
+        run.stream
+            .structures
+            .last()
+            .unwrap()
+            .bodies
+            .iter()
+            .all(|h| run.physics.rapier().bodies[*h].body_type() == RigidBodyType::Fixed)
+    );
+    assert!(run.stream.contents.active.last().unwrap().restored);
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn fixed_decoration_possessions_restore_on_item_path() {
+    use super::super::{AttachmentSnapshot, ObjectKey};
+    use crate::interaction::items::ItemLocation;
+    let reference = reference();
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    let sources = [84448, 69558, 66737, 79572].map(decoration_source);
+    let mut placements: Vec<_> = sources
+        .iter()
+        .enumerate()
+        .map(|(i, source)| {
+            let mut p = replay_placement(source, 500 + i as u32, [i as f64 * 5., 10., 0.]);
+            p.scale = reference
+                .world
+                .prototypes
+                .iter()
+                .find(|p| &p.source == source)
+                .unwrap()
+                .prefab_pose
+                .scale;
+            p
+        })
+        .collect();
+    let part = reference
+        .world
+        .prototypes
+        .iter()
+        .find(|p| {
+            !sources.contains(&p.source)
+                && !p.bodies.is_empty()
+                && p.prefab_pose.scale[0] == p.prefab_pose.scale[1]
+                && p.prefab_pose.scale[0] == p.prefab_pose.scale[2]
+                && run
+                    .stream
+                    .contents
+                    .rules
+                    .component(&reference.world, &p.source, "partscript")
+                    .unwrap()
+                    .is_some()
+        })
+        .expect("unrelated generated vehicle part");
+    let mut part_placement = replay_placement(&part.source, 600, [25., 10., 0.]);
+    part_placement.scale = part.prefab_pose.scale;
+    placements.push(part_placement);
+    for (ordinal, source) in
+        [700, 701, 702]
+            .into_iter()
+            .zip([&sources[0], &sources[1], &sources[0]])
+    {
+        let mut p = replay_placement(
+            source,
+            ordinal,
+            [30. + f64::from(ordinal - 700) * 5., 10., 0.],
+        );
+        p.scale = reference
+            .world
+            .prototypes
+            .iter()
+            .find(|p| &p.source == source)
+            .unwrap()
+            .prefab_pose
+            .scale;
+        placements.push(p);
+    }
+    // These keys arrive from saved inventory and an imported child's generated-owner link.
+    let required: Vec<_> = placements[5..]
+        .iter()
+        .map(|p| ObjectKey::Generated(p.id.clone()))
+        .collect();
+    let baseline = replay_snapshot([9000.; 3]);
+    for (i, p) in placements.iter().enumerate() {
+        let mut snapshot = replay_snapshot(p.pose.position);
+        snapshot.held = i == 0;
+        if i == 1 {
+            snapshot.attachment = Some(AttachmentSnapshot {
+                owner: Some(ObjectKey::Generated(placements[2].id.clone())),
+                slot: None,
+                local_pose: p.pose,
+            });
+        }
+        let key = ObjectKey::Generated(p.id.clone());
+        run.stream.changes.record(key.clone(), snapshot, &baseline);
+        run.stream.changes.set_replay(&key, p, &p.id);
+    }
+    let saved = run.stream.capture_save(
+        &reference,
+        &run.area.items,
+        &run.area.interaction,
+        &run.physics,
+        &[],
+    );
+    let json = serde_json::to_vec(&saved).unwrap();
+    let saved: crate::save::WorldSnapshot = serde_json::from_slice(&json).unwrap();
+    run.stream = WorldStream::new(&reference, saved.seed).unwrap();
+    run.stream.restore_save(&saved).unwrap();
+    run.stream.protect_saved_items(&required);
+    for p in &placements {
+        publish_decoration_fixture(&mut run, p.clone());
+    }
+    sync_decoration_fixture(&mut run, &reference);
+    sync_decoration_fixture(&mut run, &reference);
+    assert!(
+        run.stream.saved_item_protection.is_empty(),
+        "save protection must end after binding"
+    );
+    for (i, p) in placements.iter().enumerate() {
+        let instance = run
+            .stream
+            .structures
+            .iter()
+            .find(|s| s.placement.id == p.id)
+            .unwrap();
+        if i == 3 {
+            assert!(
+                instance
+                    .bodies
+                    .iter()
+                    .all(|h| run.physics.rapier().bodies[*h].is_fixed())
+            );
+            assert!(
+                run.area
+                    .items
+                    .resolve_key(&ObjectKey::Generated(p.id.clone()))
+                    .is_none()
+            );
+            assert!(
+                run.stream
+                    .changes
+                    .get(ObjectKey::Generated(p.id.clone()))
+                    .is_none(),
+                "obsolete mutable decoration must not block saved readiness"
+            );
+        } else {
+            let item = run
+                .area
+                .items
+                .resolve_key(&ObjectKey::Generated(p.id.clone()))
+                .expect("retained possession or dependency binding");
+            assert!(
+                !instance
+                    .bodies
+                    .iter()
+                    .any(|h| run.physics.rapier().bodies[*h].is_fixed())
+            );
+            if i == 0 {
+                assert_eq!(
+                    run.area.items.get(item).unwrap().location,
+                    ItemLocation::Held
+                );
+            }
+            if i == 1 {
+                let owner = run
+                    .area
+                    .items
+                    .resolve_key(&ObjectKey::Generated(placements[2].id.clone()))
+                    .unwrap();
+                let expected = crate::vehicle::to_rapier(run.area.items.get(owner).unwrap().pose)
+                    * crate::vehicle::to_rapier(crate::vehicle::VehiclePose {
+                        position: p.pose.position.map(|v| v as f32),
+                        rotation: p.pose.rotation,
+                    });
+                assert_eq!(
+                    crate::vehicle::to_rapier(run.area.items.get(item).unwrap().pose),
+                    expected
+                );
+                assert!(
+                    run.stream
+                        .changes
+                        .get(ObjectKey::Generated(p.id.clone()))
+                        .unwrap()
+                        .snapshot
+                        .as_ref()
+                        .unwrap()
+                        .attachment
+                        .is_some()
+                );
+            }
+            if i == 4 {
+                assert!(run.area.interaction.parts.contains(item));
+            }
+            if i == 5 {
+                run.area.items.get_mut(item).unwrap().location = ItemLocation::Stored(0);
+            }
+            if i == 6 {
+                run.area.items.get_mut(item).unwrap().location = ItemLocation::Equipped;
+            }
+            if i == 7 {
+                let imported = reference
+                    .items
+                    .iter()
+                    .find(|r| {
+                        run.area
+                            .items
+                            .get(r.id)
+                            .is_some_and(|s| s.location == ItemLocation::World && s.body.is_some())
+                    })
+                    .unwrap()
+                    .id;
+                run.area.items.get_mut(imported).unwrap().location = ItemLocation::Attached(item);
+                assert!(
+                    run.stream
+                        .contents
+                        .active
+                        .iter()
+                        .find(|c| c.item == Some(item))
+                        .unwrap()
+                        .has_external_dependents(
+                            &run.area.items,
+                            &run.area.interaction.parts,
+                            &run.wheels
+                        )
+                );
+            }
+            assert!(run.stream.bindings_ready(&p.id));
+        }
+    }
+    prepare_ready(&mut run, &reference);
+    run.stream.select_changed_destinations();
+    assert!(run.stream.saved_bindings_ready(&run.area.items));
+    let dropped_key = ObjectKey::Generated(placements[5].id.clone());
+    let dropped = run.area.items.resolve_key(&dropped_key).unwrap();
+    run.area.items.get_mut(dropped).unwrap().location = ItemLocation::World;
+    run.stream.request.player = [10000., 0., 0.];
+    run.stream.request.vehicle = [10000., 0., 0.];
+    run.stream.retire_contents(
+        &mut run.physics,
+        &mut run.area.items,
+        &mut run.area.interaction,
+        &mut run.wheels,
+    );
+    assert!(
+        run.area.items.resolve_key(&dropped_key).is_none(),
+        "dropped loot must not retain save protection"
+    );
+    let equipped_key = ObjectKey::Generated(placements[6].id.clone());
+    assert_eq!(
+        run.area
+            .items
+            .get(run.area.items.resolve_key(&equipped_key).unwrap())
+            .unwrap()
+            .location,
+        ItemLocation::Equipped
+    );
+    let owner_key = ObjectKey::Generated(placements[7].id.clone());
+    assert!(
+        run.area.items.resolve_key(&owner_key).is_some(),
+        "imported child must protect its generated owner"
+    );
+    let index = run
+        .stream
+        .structures
+        .iter()
+        .position(|p| p.placement.id == placements[5].id)
+        .unwrap();
+    run.stream
+        .structures
+        .swap_remove(index)
+        .retire(&mut run.physics);
+    publish_decoration_fixture(&mut run, placements[5].clone());
+    sync_decoration_fixture(&mut run, &reference);
+    assert!(
+        run.stream.structures.last().unwrap().fixed_decoration,
+        "dropped, retired possessions return as fixed decoration"
+    );
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn fixed_decoration_imported_inventory_reload_waits_for_real_readiness() {
+    use crate::inventory::InventoryCommand;
+    use crate::save::{CameraSave, SourceHash, SourceStamp};
+    let reference = reference();
+    let digest = std::process::Command::new("sha256sum")
+        .arg("web/assets/reference/manifest.json")
+        .output()
+        .unwrap();
+    assert!(digest.status.success());
+    let stamp = SourceStamp {
+        app_id: reference.app_id,
+        build_id: reference.build_id,
+        manifest_sha256: String::from_utf8(digest.stdout)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .into(),
+        source_hashes: reference
+            .source_hashes
+            .iter()
+            .map(|h| SourceHash {
+                file: h.file.clone(),
+                sha256: h.sha256.clone(),
+            })
+            .collect(),
+    };
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    let oil = reference
+        .items
+        .iter()
+        .find(|i| i.name == "OilCan")
+        .unwrap()
+        .id;
+    let light = reference
+        .flashlights
+        .instances
+        .iter()
+        .find(|f| f.startup_active)
+        .unwrap()
+        .item;
+    for (item, slot) in [(oil, 1), (light, 0)] {
+        let point = run.area.items.get(item).unwrap().pose.position;
+        if run.area.interaction.storage.stored(item) {
+            run.area
+                .interaction
+                .pickup_stored_item(
+                    item,
+                    point,
+                    &run.area.player,
+                    &mut run.area.items,
+                    &mut run.physics,
+                )
+                .unwrap();
+        } else {
+            run.area
+                .interaction
+                .pickup_item(
+                    item,
+                    point,
+                    &run.area.player,
+                    &mut run.area.items,
+                    &mut run.physics,
+                )
+                .unwrap();
+        }
+        run.area.sync_inventory();
+        assert!(
+            run.area
+                .apply_inventory_command(
+                    InventoryCommand::Select(slot),
+                    &reference,
+                    &mut run.physics
+                )
+                .unwrap()
+        );
+    }
+    assert!(
+        run.area
+            .apply_inventory_command(InventoryCommand::Select(1), &reference, &mut run.physics)
+            .unwrap()
+    );
+    assert_eq!(run.area.interaction.equipment.item(), Some(light));
+    let saved = run
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-18T12:00:00Z",
+        )
+        .unwrap();
+    let saved = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    let mut loaded = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    assert!(loaded.restore_pending());
+    assert!(
+        loaded
+            .capture_save(
+                &reference,
+                &stamp,
+                CameraSave::FirstPerson,
+                "2026-10-18T12:00:00Z"
+            )
+            .is_err()
+    );
+    prepare_ready(&mut loaded, &reference);
+    assert!(loaded.advance_saved_restore(&reference).unwrap());
+    assert!(!loaded.restore_pending());
+    let recaptured = loaded
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-18T12:00:00Z",
+        )
+        .unwrap();
+    assert_eq!(loaded.area.inventory.slots, run.area.inventory.slots);
+    assert_eq!(loaded.area.interaction.equipment.item(), Some(light));
+    for item in [oil, light] {
+        let key = crate::save::InstanceId::initial(
+            &reference
+                .items
+                .iter()
+                .find(|i| i.id == item)
+                .unwrap()
+                .source,
+        );
+        let before = saved.items.iter().find(|i| i.instance == key).unwrap();
+        let after = recaptured.items.iter().find(|i| i.instance == key).unwrap();
+        assert_eq!(before.location, after.location);
+        for axis in 0..3 {
+            assert!((before.pose.position[axis] - after.pose.position[axis]).abs() < 0.0001);
+        }
+    }
+}

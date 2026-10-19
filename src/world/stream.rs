@@ -185,6 +185,7 @@ pub struct WorldStream {
     wanted_tiles: Vec<SurfaceKey>,
     road_points: Vec<TerrainRoadPoint>,
     structures: Vec<super::StructureInstance>,
+    saved_item_protection: Vec<super::ObjectKey>,
     recipes: HashMap<SourceId, super::StructureRecipe>,
     supplies: Vec<PublishedSupply>,
     wanted_structures: Vec<Placement>,
@@ -435,6 +436,77 @@ impl WorldStream {
                             .is_some_and(|id| self.bindings_ready(id)))
             })
     }
+    /// Saved inventory and imported attachment links protect their generated owners until binding.
+    pub(crate) fn protect_saved_items(&mut self, keys: &[super::ObjectKey]) {
+        for key in keys {
+            if !self.saved_item_protection.contains(key) {
+                self.saved_item_protection.push(key.clone());
+            }
+        }
+    }
+    fn fixed_decoration(&self, placement: &Placement) -> bool {
+        if !super::instances::fixed_decoration_source(&placement.prototype) {
+            return false;
+        }
+        if let Some(instance) = self
+            .structures
+            .iter()
+            .find(|s| s.placement.id == placement.id)
+        {
+            return instance.fixed_decoration;
+        }
+        let owns = |key: &super::ObjectKey| {
+            matches!(key, super::ObjectKey::Generated(id) if id == &placement.id)
+                || self
+                    .changes
+                    .get(key)
+                    .is_some_and(|c| c.instance.as_ref() == Some(&placement.id))
+        };
+        !self.saved_item_protection.iter().any(owns)
+            && !self.changes.iter().any(|(key, change)| {
+                change.snapshot.as_ref().is_some_and(|snapshot| {
+                    ((snapshot.held || snapshot.attachment.is_some())
+                        && (owns(key) || change.instance.as_ref() == Some(&placement.id)))
+                        || snapshot
+                            .attachment
+                            .as_ref()
+                            .and_then(|a| a.owner.as_ref())
+                            .is_some_and(owns)
+                })
+            })
+    }
+    fn forget_fixed_decoration_changes(&mut self, id: &super::GeneratedId) {
+        loop {
+            let obsolete = self.changes.iter().find_map(|(key, change)| {
+                (change.instance.as_ref() == Some(id)
+                    || matches!(key, super::ObjectKey::Generated(key) if key == id))
+                .then(|| key.clone())
+            });
+            let Some(key) = obsolete else {
+                break;
+            };
+            self.changes.forget(&key);
+        }
+    }
+    fn discard_fixed_decoration_changes(&mut self) {
+        for index in 0..self.contents.active.len() {
+            let content = &self.contents.active[index];
+            if content.restored
+                || content.item.is_some()
+                || !self.fixed_decoration(&content.content.placement)
+            {
+                continue;
+            }
+            let id = content.content.placement.id.clone();
+            self.forget_fixed_decoration_changes(&id);
+            // This instance has no mutable state or bindings to reconstruct.
+            self.contents.active[index].restored = true;
+        }
+        // Deletion compacts records. Refresh indices before any replay consumer runs.
+        if self.change_revision != self.changes.revision() {
+            self.select_changed_destinations();
+        }
+    }
     pub fn select_source_car(&mut self, car_id: i32) {
         if self.contents.state.context.current_car != car_id {
             self.contents.state.context.current_car = car_id;
@@ -602,6 +674,7 @@ impl WorldStream {
             wanted_tiles: Vec::with_capacity(MAX_NEAR + 2 * MAX_DISTANT),
             road_points: Vec::with_capacity(MAX_ROADS * super::ROAD_CONTROLS),
             structures: Vec::new(),
+            saved_item_protection: Vec::new(),
             recipes: HashMap::new(),
             supplies: Vec::new(),
             wanted_structures: Vec::with_capacity(MAX_OBJECTS),
@@ -1512,6 +1585,7 @@ impl WorldStream {
             self.failure = Some(error.0);
             return;
         }
+        self.discard_fixed_decoration_changes();
         self.wanted_structures.retain(|p| {
             self.changes
                 .get(super::ObjectKey::Generated(p.id.clone()))
@@ -3100,6 +3174,7 @@ impl WorldStream {
         if self.plan_revision != self.request.revision {
             return Ok(());
         }
+        self.discard_fixed_decoration_changes();
         let request = self.request;
         let ready = |placement: &&Placement| {
             !self
@@ -3159,8 +3234,9 @@ impl WorldStream {
             .iter()
             .find(|p| p.source == placement.prototype)
             .unwrap();
+        let fixed_decoration = self.fixed_decoration(placement);
         let (binding_reservation, binding_objects) =
-            self.binding_reservation(prototype, &placement.id)?;
+            self.binding_reservation(prototype, &placement.id, fixed_decoration)?;
         if binding_reservation > self.available_dependency_staging_bytes()
             || self
                 .metrics()
@@ -3183,7 +3259,12 @@ impl WorldStream {
         let instance = if placement.scale == prototype.prefab_pose.scale
             && !appearance.iter().any(|a| a.scale.is_some())
         {
-            self.recipes[&placement.prototype].publish(placement.clone(), self.origin, physics)?
+            self.recipes[&placement.prototype].publish(
+                placement.clone(),
+                self.origin,
+                fixed_decoration,
+                physics,
+            )?
         } else {
             let extra = super::StructureRecipe::reservation(prototype);
             if self.metrics().active_cpu_bytes.saturating_add(extra * 2) > ACTIVE_CPU
@@ -3199,7 +3280,8 @@ impl WorldStream {
                 placement.scale,
                 appearance,
             )?;
-            let mut instance = recipe.publish(placement.clone(), self.origin, physics)?;
+            let mut instance =
+                recipe.publish(placement.clone(), self.origin, fixed_decoration, physics)?;
             instance.cpu_bytes += extra;
             instance
         };
@@ -3232,6 +3314,12 @@ impl WorldStream {
                 items: None,
                 baselines: None,
             });
+        }
+        if fixed_decoration {
+            self.forget_fixed_decoration_changes(&instance.placement.id);
+            if self.change_revision != self.changes.revision() {
+                self.select_changed_destinations();
+            }
         }
         self.release_structure_renderer(&instance.placement.id);
         self.structures.push(instance);
@@ -3379,6 +3467,19 @@ impl WorldStream {
         self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
         self.binding_objects = items.len();
         self.binding_reserved = 0;
+        // Published instances keep their item policy. Live locations now own retention.
+        self.saved_item_protection.retain(|key| {
+            items.resolve_key(key).is_none_or(|item| {
+                self.contents
+                    .active
+                    .iter()
+                    .chain(&self.static_controls)
+                    .any(|c| {
+                        !c.restored
+                            && (c.item == Some(item) || c.bindings.iter().any(|b| b.item == item))
+                    })
+            })
+        });
         Ok(())
     }
 
@@ -3909,6 +4010,12 @@ impl WorldStream {
                     .map(super::WorldLight::heap_bytes)
                     .sum::<usize>()
                 + self.structures.capacity() * std::mem::size_of::<super::StructureInstance>()
+                + self.saved_item_protection.capacity() * std::mem::size_of::<super::ObjectKey>()
+                + self
+                    .saved_item_protection
+                    .iter()
+                    .map(super::changes::key_heap)
+                    .sum::<usize>()
                 + self.supplies.capacity() * std::mem::size_of::<PublishedSupply>()
                 + self.wanted_structures.capacity() * std::mem::size_of::<Placement>()
                 + self

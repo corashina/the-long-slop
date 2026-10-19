@@ -138,7 +138,11 @@ impl WorldStream {
         &self,
         prototype: &crate::reference::WorldPrototypeReference,
         id: &crate::world::GeneratedId,
+        fixed_decoration: bool,
     ) -> Result<(usize, usize), ReferenceError> {
+        if fixed_decoration {
+            return Ok((0, 0));
+        }
         let mut components = 0usize;
         let mut parts = 0usize;
         let mut fields_bytes = 0usize;
@@ -222,11 +226,12 @@ impl WorldStream {
         }
         for index in 0..self.structures.len() {
             let instance = &mut self.structures[index];
-            if self
-                .contents
-                .active
-                .iter()
-                .any(|c| c.content.placement.id == instance.placement.id)
+            if instance.fixed_decoration
+                || self
+                    .contents
+                    .active
+                    .iter()
+                    .any(|c| c.content.placement.id == instance.placement.id)
                 || self
                     .static_controls
                     .iter()
@@ -360,14 +365,19 @@ impl WorldStream {
                 }
                 continue;
             }
-            let placement = content.content.placement.clone();
+            let placement_id = &content.content.placement.id;
             let Some(instance) = self
                 .structures
                 .iter_mut()
-                .find(|i| i.placement.id == placement.id)
+                .find(|i| &i.placement.id == placement_id)
             else {
                 continue;
             };
+            if instance.fixed_decoration {
+                content.restored = true;
+                continue;
+            }
+            let placement = content.content.placement.clone();
             let prototype = self
                 .reference
                 .prototypes

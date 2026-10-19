@@ -241,9 +241,9 @@ impl ChangeRecords {
         }
         self.revision = self.revision.wrapping_add(1);
     }
-    fn forget(&mut self, key: &ObjectKey) {
+    pub(crate) fn forget(&mut self, key: &ObjectKey) -> bool {
         let Some(index) = self.identities.remove(key) else {
-            return;
+            return false;
         };
         self.unindex(index);
         let last = self.records.len() - 1;
@@ -261,6 +261,7 @@ impl ChangeRecords {
             }
         }
         self.revision = self.revision.wrapping_add(1);
+        true
     }
     pub fn get(&self, key: impl std::borrow::Borrow<ObjectKey>) -> Option<&ObjectChange> {
         self.identities

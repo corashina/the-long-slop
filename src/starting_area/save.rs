@@ -247,6 +247,40 @@ impl GarageRuntime {
             *slot = instance.as_ref().map(|id| ids.item(id)).transpose()?;
         }
         candidate.stream.restore_save(&saved.world)?;
+        let mut protected = Vec::new();
+        for instance in saved
+            .inventory
+            .slots
+            .iter()
+            .flatten()
+            .chain(saved.inventory.equipped.iter())
+            .chain(saved.player.carry.iter().map(|c| &c.item))
+            .chain(
+                saved
+                    .items
+                    .iter()
+                    .filter(|i| !matches!(i.location, ItemLocationSave::World))
+                    .map(|i| &i.instance),
+            )
+        {
+            if let InstanceId::Generated { id } = instance {
+                protected.push(crate::world::ObjectKey::Generated(id.clone()));
+            }
+        }
+        for item in &saved.items {
+            match &item.location {
+                ItemLocationSave::GeneratedAttachment { attachment } => {
+                    protected.extend(attachment.owner.iter().cloned());
+                }
+                ItemLocationSave::Attached {
+                    owner: InstanceId::Generated { id },
+                } => {
+                    protected.push(crate::world::ObjectKey::Generated(id.clone()));
+                }
+                _ => (),
+            }
+        }
+        candidate.stream.protect_saved_items(&protected);
         candidate.stream.origin.offset = saved.player.pose.position;
         candidate.area.sync_origin(candidate.stream.origin.offset);
         let vehicle = saved
