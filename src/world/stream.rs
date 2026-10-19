@@ -2420,6 +2420,10 @@ impl WorldStream {
             if !self.admit_generation(pending_bytes) {
                 return;
             }
+            #[cfg(target_arch = "wasm32")]
+            let _profile = crate::app::cpu_profile::Timer::new(
+                crate::app::cpu_profile::Stage::TerrainInputPreparation,
+            );
             let mut foundations = Vec::new();
             let mut holes = Vec::new();
             if tier == 0 {

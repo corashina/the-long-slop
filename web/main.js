@@ -8,6 +8,17 @@ import {createSaveBridge} from './save-bridge.js';
 export const saveRuntime=createSaveBridge();
 const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime});
 import {createInput} from './input.js';
+import {createCpuProfile,observeRenderMainThread} from './cpu-profile.js';
+export const cpuProfile=createCpuProfile(()=>performance.now(),performance.timeOrigin);
+const startupCpuProfile=new URL(location.href).searchParams.get('profileCpu')==='1';
+cpuProfile.enable(startupCpuProfile);
+let rustCpuProfile,profileStep=0,startupRenderTrace=startupCpuProfile?observeRenderMainThread():null;
+window.gameCpuProfile=enabled=>{cpuProfile.enable(enabled);profileStep=0;rustCpuProfile?.(enabled);if(enabled)terrainClient.profileHandshake();};
+window.gameCpuProfileSnapshot=()=>cpuProfile.snapshot();
+window.gameCpuStartupRenderTrace=()=>{const trace=startupRenderTrace?.stop()??null;startupRenderTrace=null;return trace;};
+window.gameCpuInputConsumed=()=>input?.consume(++profileStep);
+window.gameCpuClearInput=()=>cpuProfile.clearInput();
+window.gameCpuSubmitted=token=>cpuProfile.submitFrame(token);
 import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
 import {createLoading} from './loading.js';
@@ -15,9 +26,13 @@ import {createStartupTrace} from './startup-trace.js';
 import {createPerformance} from './performance.js';
 import {loadUiAssets} from './ui-layout.js';
 import {createTerrain,installTerrainBridge} from './terrain.js';
-import {configureAssetCatalog,readAsset,readPackageAsset,assetReceipt,checkImageSize,worldBootstrapMeasurements,worldInputBytes,worldInputMetadataBytes} from './world-assets.js';
+import {configureAssetCatalog,readAsset,readPackageAsset,assetReceipt,checkImageSize,worldBootstrapMeasurements,worldInputBytes,worldInputMetadataBytes,setAssetCpuProfile} from './world-assets.js';
+setAssetCpuProfile(cpuProfile);
 // Start the terrain worker and its WASM download early.
-installTerrainBridge(window,createTerrain(new Worker(new URL('./terrain-worker.js',import.meta.url),{type:'module'})));
+const terrainWorkerUrl=new URL('./terrain-worker.js',import.meta.url);
+if(startupCpuProfile)terrainWorkerUrl.searchParams.set('profileCpu','1');
+const terrainClient=createTerrain(new Worker(terrainWorkerUrl,{type:'module'}),cpuProfile);
+installTerrainBridge(window,terrainClient);
 window.sourceReadAsset=(base,receipt)=>readAsset(base,JSON.parse(receipt));
 window.sourceInputBytes=worldInputBytes;
 window.sourceInputMetadataBytes=worldInputMetadataBytes;
@@ -33,7 +48,7 @@ function fetched(record){
 window.gameStartupTrace=()=>startup.snapshot();
 window.gameStartupDone=()=>startupDone;
 window.gameStartupFailureDetails=json=>{startupFailureDetails=JSON.parse(json);};
-window.gameStartupStage=(stage,started)=>{if(started)startup.begin(stage);else startup.end(stage);};
+window.gameStartupStage=(stage,started)=>{if(started){startup.begin(stage);cpuProfile.begin(stage);}else{startup.end(stage);cpuProfile.end(stage);}};
 window.gameLoadingProgress=(roads,total,rendering,world)=>loading.progress(roads,total,rendering,world);
 window.gameLoadingBudget=(name,used,limit,unit)=>loading.budget(name,used,limit,unit);
 const bootStarted=performance.now();
@@ -120,6 +135,7 @@ window.addEventListener('error',event=>fail(event.message||'The runtime stopped.
 window.addEventListener('unhandledrejection',event=>fail(event.reason?.message||String(event.reason)));
 canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();fail('The graphics context was lost.');});
 async function load(){
+ cpuProfile.begin('startup');
  startup.begin('webgl');
  const probe=document.createElement('canvas'),graphics=probe.getContext('webgl2');
  if(!graphics)throw Error('This browser cannot use WebGL2.');
@@ -136,8 +152,9 @@ async function load(){
  const bytes=new Uint8Array(await response.arrayBuffer());
  status.textContent='Loading game code...';
  loading.stage(status.textContent);
- const [{default:init,run,manifest_shell,source_render_failure},module]=await code;
+ const [{default:init,run,manifest_shell,source_render_failure,cpu_profile},module]=await code;
  const exports=await init({module_or_path:module});wasmMemory=exports.memory;renderFailure=source_render_failure;
+ rustCpuProfile=cpu_profile;if(startupCpuProfile)rustCpuProfile(true);
  // Rust copies only the shell fields, so JS does not parse the world records.
  const text=manifest_shell(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
@@ -145,7 +162,7 @@ async function load(){
  startup.build({sourceBuildId:manifest.build_id,manifestSha256:manifestHash,wasm:'release'});
  configureAssetCatalog(manifest.content_base,manifest.file_catalog,fetched);worldAdmitted=true;
  startup.end('manifest');startup.begin('interface');
- input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas,manifest.driving.bindings);
+ input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas,manifest.driving.bindings,cpuProfile);
  bootstrap.manifestUtf16PayloadBytes=text.length*2;
  status.textContent='Loading interface assets...';
  loading.stage(status.textContent);
@@ -163,5 +180,6 @@ async function load(){
  if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
  startup.begin('generation');startup.begin('decodeUpload');startup.begin('pipeline');
  run(bytes,manifestHash);
+ cpuProfile.end('startup');
 }
 load().catch(error=>fail(error?.message??String(error)));

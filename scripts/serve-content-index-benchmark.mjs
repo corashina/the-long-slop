@@ -1,6 +1,6 @@
 import {createServer} from 'node:http';
 import {createReadStream} from 'node:fs';
-import {stat,mkdir,realpath,writeFile} from 'node:fs/promises';
+import {stat,mkdir,realpath,writeFile,readdir} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {resolve,dirname,extname,relative,isAbsolute,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -19,19 +19,23 @@ async function mountedFile(root,name){
  return {path:actual,size:file.size};
 }
 async function sha256(root,name){const file=await mountedFile(root,name),hash=createHash('sha256');for await(const chunk of createReadStream(file.path))hash.update(chunk);return hash.digest('hex');}
+async function scriptHashes(root,excluded=[]){
+ const entries=await readdir(root,{recursive:true,withFileTypes:true}),names=entries.filter(entry=>entry.isFile()&&/\.(?:m?js|wasm)$/.test(entry.name)).map(entry=>relative(root,resolve(entry.parentPath,entry.name)).split(sep).join('/')).filter(name=>!excluded.includes(name.split('/')[0])).sort();
+ return Object.fromEntries(await Promise.all(names.map(async name=>[name,await sha256(root,name)])));
+}
 
-export async function createContentIndexBenchmarkServer({webRoot=resolve(project,'web'),assetRoot,packageRoot,resultsRoot=resolve(project,'.cache/benchmark/content-index/results'),variant}={}) {
+export async function createContentIndexBenchmarkServer({webRoot,scriptsRoot,assetRoot,packageRoot,resultsRoot=resolve(project,'.cache/benchmark/content-index/results'),variant,commit,buildProfile='release'}={}) {
  if(!['baseline','candidate','baseline-recheck'].includes(variant))throw Error('BENCH_VARIANT must be baseline, candidate, or baseline-recheck');
- if(!assetRoot||!packageRoot)throw Error('BENCH_ASSET_ROOT and BENCH_PACKAGE_ROOT are required');
- const [web,assets,pkg,scripts]=await Promise.all([directory(webRoot),directory(assetRoot),directory(packageRoot),directory(resolve(project,'scripts'))]);
+ if(!webRoot||!assetRoot||!packageRoot||!scriptsRoot)throw Error('BENCH_WEB_ROOT, BENCH_ASSET_ROOT, BENCH_PACKAGE_ROOT, and BENCH_SCRIPTS_ROOT are required');
+ if(!/^[a-f0-9]{40}$/.test(commit??''))throw Error('BENCH_COMMIT must identify the frozen build');
+ const [web,assets,pkg,scripts]=await Promise.all([directory(webRoot),directory(assetRoot),directory(packageRoot),directory(scriptsRoot)]);
  const requestedResults=resolve(resultsRoot);
  if([web,assets,pkg,scripts].some(root=>inside(root,requestedResults)))throw Error('Receipts must be outside served directories');
  await mkdir(requestedResults,{recursive:true});
  const results=await directory(requestedResults);
  if([web,assets,pkg,scripts].some(root=>inside(root,results)))throw Error('Receipts must be outside served directories');
- const [manifestSha256,packageJsSha256,packageWasmSha256]=await Promise.all([
-  sha256(assets,'reference/manifest.json'),sha256(pkg,'my_summer_slop.js'),sha256(pkg,'my_summer_slop_bg.wasm')]);
- const configuration={variant,assetRoot:assets,packageRoot:pkg,resultsRoot:results,manifestSha256,packageJsSha256,packageWasmSha256};
+ const [manifestSha256,webHashes,runnerHashes,packages]=await Promise.all([sha256(assets,'reference/manifest.json'),scriptHashes(web,['assets','pkg']),scriptHashes(scripts),scriptHashes(pkg)]);
+ const configuration={variant,commit,buildProfile,webRoot:web,scriptsRoot:scripts,assetRoot:assets,packageRoot:pkg,resultsRoot:results,manifestSha256,identity:{web:webHashes,scripts:runnerHashes,packages}};
  return createServer(async(request,response)=>{
   try {
    const pathname=decodeURIComponent(new URL(request.url,'http://localhost').pathname);
@@ -41,7 +45,7 @@ export async function createContentIndexBenchmarkServer({webRoot=resolve(project
     let receipt;
     try{receipt=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{response.writeHead(400).end('Invalid JSON');return;}
     const label=pathname.split('/').at(-1);
-    if(!receipt||typeof receipt!=='object'||Array.isArray(receipt)||receipt.label!==label||!['garage','driving'].includes(receipt.scenario)||typeof receipt.instrument!=='boolean'){
+    if(!receipt||typeof receipt!=='object'||Array.isArray(receipt)||receipt.schemaVersion!==2||receipt.label!==label||!['garage','driving','startup-cold','startup-warm','interaction','save-load'].includes(receipt.scenario)||typeof receipt.instrument!=='boolean'||typeof receipt.profileCpu!=='boolean'||typeof receipt.profileStreaming!=='boolean'||!['cold','warm','unknown'].includes(receipt.cacheState)||JSON.stringify(receipt.configuration)!==JSON.stringify(configuration)){
      response.writeHead(400).end('Invalid receipt');return;
     }
     const path=resolve(results,`${variant}-${label}.json`);
@@ -73,7 +77,7 @@ export async function createContentIndexBenchmarkServer({webRoot=resolve(project
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  const port=Number(process.env.PORT??4173);
  if(!Number.isInteger(port)||port<1||port>65535)throw Error('PORT must be between 1 and 65535');
- const server=await createContentIndexBenchmarkServer({assetRoot:process.env.BENCH_ASSET_ROOT,packageRoot:process.env.BENCH_PACKAGE_ROOT,
-  resultsRoot:process.env.BENCH_RESULTS_ROOT,variant:process.env.BENCH_VARIANT});
+ const server=await createContentIndexBenchmarkServer({webRoot:process.env.BENCH_WEB_ROOT,assetRoot:process.env.BENCH_ASSET_ROOT,packageRoot:process.env.BENCH_PACKAGE_ROOT,
+  scriptsRoot:process.env.BENCH_SCRIPTS_ROOT,commit:process.env.BENCH_COMMIT,resultsRoot:process.env.BENCH_RESULTS_ROOT,variant:process.env.BENCH_VARIANT});
  server.listen(port,'127.0.0.1',()=>console.log(`Content index ${process.env.BENCH_VARIANT}: http://127.0.0.1:${port}/`));
 }

@@ -136,6 +136,7 @@ fn process_request(
             Ok(String::new())
         }
         "Commit" => {
+            let _profile = cpu_profile::Timer::new(cpu_profile::Stage::SaveCommit);
             if let Some(PendingPreparation::Fresh(permit)) = requests.pending.as_ref() {
                 let permit = *permit;
                 let generation = world
@@ -225,6 +226,11 @@ fn process_request(
             Ok(String::new())
         }
         "Capture" | "Prepare" | "PrepareNewGame" => {
+            let _profile = cpu_profile::Timer::new(if request.kind == "Prepare" {
+                cpu_profile::Stage::LoadPrepare
+            } else {
+                cpu_profile::Stage::SavePrepare
+            });
             let drive = world.resource::<Drive>();
             if !drive.ready {
                 return Err(invalid("The garage is not ready"));
@@ -324,6 +330,7 @@ fn advance(world: &mut World) {
             return;
         }
         let reference = world.resource::<RuntimeReference>().0.clone();
+        let _profile = cpu_profile::Timer::new(cpu_profile::Stage::LoadPrepare);
         let result = (|| -> Result<bool, SaveError> {
             if candidate.presentation.is_none() {
                 if !PreparedPresentation::can_start(world) {

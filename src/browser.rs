@@ -120,6 +120,12 @@ extern "C" {
     );
     #[wasm_bindgen(js_namespace = window, js_name = gameNow)]
     pub fn game_now() -> f64;
+    #[wasm_bindgen(js_namespace = window, js_name = gameCpuInputConsumed)]
+    pub fn game_cpu_input_consumed();
+    #[wasm_bindgen(js_namespace = window, js_name = gameCpuClearInput)]
+    pub fn game_cpu_clear_input();
+    #[wasm_bindgen(js_namespace = window, js_name = gameCpuSubmitted)]
+    pub fn game_cpu_submitted(token: u32);
     #[wasm_bindgen(js_namespace = window, js_name = gamePerformanceFrame)]
     pub fn game_performance_frame(physics_ms: f64, world_ms: f64) -> bool;
     #[wasm_bindgen(js_namespace = window, js_name = gamePerformanceCounters)]

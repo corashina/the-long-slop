@@ -72,6 +72,8 @@ struct Measurement {
     over_2_ms: u64,
 }
 static ENABLED: AtomicBool = AtomicBool::new(false);
+const SAMPLE_CAPACITY: usize = 4096;
+static SAMPLES: Mutex<[[f64; SAMPLE_CAPACITY]; 27]> = Mutex::new([[0.; SAMPLE_CAPACITY]; 27]);
 static VALUES: Mutex<[Measurement; 27]> = Mutex::new(
     [Measurement {
         calls: 0,
@@ -110,6 +112,7 @@ impl Timer {
         let ms = start.elapsed().as_secs_f64() * 1000.;
         let mut values = VALUES.lock().unwrap();
         let value = &mut values[self.stage as usize];
+        SAMPLES.lock().unwrap()[self.stage as usize][value.calls as usize % SAMPLE_CAPACITY] = ms;
         value.calls += 1;
         value.total_ms += ms;
         value.max_ms = value.max_ms.max(ms);
@@ -134,14 +137,32 @@ fn now() -> std::time::Instant {
 pub fn streaming_profile(enabled: bool) {
     ENABLED.store(false, Ordering::Relaxed);
     *VALUES.lock().unwrap() = [Measurement::default(); 27];
+    if enabled {
+        for samples in SAMPLES.lock().unwrap().iter_mut() {
+            samples.fill(0.);
+        }
+    }
     ENABLED.store(enabled, Ordering::Relaxed);
 }
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub fn streaming_profile_audit() -> String {
+    let values = VALUES.lock().unwrap();
+    let samples = SAMPLES.lock().unwrap();
+    let measurements: Vec<_> = values.iter().enumerate().map(|(index, row)| {
+        let count = (row.calls as usize).min(SAMPLE_CAPACITY);
+        let mut sorted = samples[index][..count].to_vec();
+        sorted.sort_by(f64::total_cmp);
+        let percentile = |p: f64| sorted.get((count as f64 * p).ceil() as usize - usize::from(count > 0)).copied();
+        serde_json::json!({"calls": row.calls, "total_ms": row.total_ms, "max_ms": row.max_ms,
+            "over_2_ms": row.over_2_ms, "mean_ms": (row.calls > 0).then(|| row.total_ms / row.calls as f64),
+            "p95_ms": percentile(0.95), "p99_ms": percentile(0.99), "sample_count": count,
+            "dropped": row.calls.saturating_sub(SAMPLE_CAPACITY as u64)})
+    }).collect();
     serde_json::to_string(&serde_json::json!({
         "enabled": ENABLED.load(Ordering::Relaxed),
         "stages": NAMES,
-        "measurements": *VALUES.lock().unwrap(),
+        "measurements": measurements,
+        "retainedBytes": std::mem::size_of_val(&*samples) + std::mem::size_of_val(&*values),
         "nested_stages": ["StreamDescriptors", "StreamGeometry", "Terrain", "Road"],
     }))
     .expect("streaming measurements serialize")

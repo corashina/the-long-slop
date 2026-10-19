@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createTerrain} from '../../web/terrain.js';
+import {createCpuProfile} from '../../web/cpu-profile.js';
 
 function fakeWorker(){
  const listeners={},posted=[];
@@ -43,4 +44,17 @@ test('worker failures reach the next poll',()=>{
  const other=fakeWorker(),stopped=createTerrain(other);
  other.fail('Cannot load terrain code');
  assert.throws(()=>stopped.poll(),/Cannot load/);
+});
+
+test('disabled terrain profiling reads no clock and enabled jobs use a validated context origin',()=>{
+ const worker=fakeWorker();let clock=100,calls=0;const now=()=>{calls++;return clock++;};
+ const profile=createCpuProfile(now,1000),terrain=createTerrain(worker,profile,now);
+ let id=terrain.submit(new Uint8Array(2));worker.reply(result(id));terrain.discard();assert.equal(calls,0);
+ profile.enable(true);id=terrain.submit(new Uint8Array(2));
+ const sent=worker.posted[1].data.cpuHandshake.windowSent;
+ worker.reply({cpuHandshake:{windowOrigin:1000,windowSent:sent,workerOrigin:900,workerReceived:sent+101,workerSent:sent+102}});
+ const output=result(id);output.cpuProfile={workerOrigin:900,workerReceived:205,resultPostStart:205,outputBytes:100};
+ worker.reply(output);terrain.discard();
+ const records=profile.snapshot().workers;assert.equal(records[0].phase,'initialization');
+ const record=records[1];assert.ok(record.returnDeliveryMs>=0);assert.ok(record.submitDeliveryMs>=0);assert.equal(record.inputBytes,2);assert.equal(record.outputBytes,100);assert.equal(record.discarded,true);
 });

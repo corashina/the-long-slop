@@ -1,3 +1,4 @@
+pub(crate) mod cpu_profile;
 mod performance;
 pub(crate) mod save;
 use crate::browser::*;
@@ -106,6 +107,7 @@ pub fn manifest_shell(reference_json: &[u8]) -> Result<String, JsValue> {
 
 #[wasm_bindgen]
 pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue> {
+    let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Startup);
     console_error_panic_hook::set_once();
     let reference = Arc::new(
         ReferenceManifest::from_runtime_json(reference_json)
@@ -592,6 +594,9 @@ fn check_ready(
 }
 
 fn clear_input(drive: &mut Drive) {
+    if cpu_profile::enabled() {
+        game_cpu_clear_input();
+    }
     drive.input.clear();
     drive.tool_lmb = false;
     drive.tool_delta_seconds = 0.;
@@ -607,6 +612,7 @@ fn read_input(
     mut drive: ResMut<Drive>,
     requests: Res<save::SaveRequests>,
 ) {
+    let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Input);
     let runtime = &drive.runtime;
     let assists = runtime.driving_assists;
     game_driving_state(
@@ -629,6 +635,9 @@ fn read_input(
     };
     drive.tool_lmb = frame.held & keys::PRIMARY != 0;
     if requests.pending() {
+        if cpu_profile::enabled() {
+            game_cpu_clear_input();
+        }
         return;
     }
     if actions & 2 != 0 {
@@ -657,6 +666,9 @@ fn read_input(
     }
     if !drive.ready || !drive.runtime.started || drive.runtime.paused {
         drive.input.clear();
+        if cpu_profile::enabled() {
+            game_cpu_clear_input();
+        }
         return;
     }
     if actions & 22 != 0 {
@@ -693,6 +705,7 @@ fn advance_physics(
         return;
     }
     let started = game_now();
+    let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Physics);
     if let Some(audio) = &mut drive.runtime.audio {
         let calendar = game_audio_calendar();
         audio

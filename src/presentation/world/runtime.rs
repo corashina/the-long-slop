@@ -139,6 +139,8 @@ impl WorldPresentation<'_, '_> {
         required_views: &[crate::world::RequiredView],
         budget_ms: f64,
     ) -> Result<(), ReferenceError> {
+        let _profile =
+            crate::app::cpu_profile::Timer::new(crate::app::cpu_profile::Stage::RenderPreparation);
         let mut timer =
             crate::world::stream_profile::Timer::new(crate::world::stream_profile::Stage::Cleanup);
         super::preflight::configure_staging(stream, &reference.file_catalog)?;
