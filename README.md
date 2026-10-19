@@ -23,9 +23,8 @@ node scripts/serve.mjs
 
 Open [the local game](http://127.0.0.1:4173). Wait for the scene. Select New game, then Continue to capture the mouse.
 Press Ctrl+C in the server terminal to stop it.
-The exporter checks the Steam build and leaves Steam files unchanged.
-Git excludes recovered assets, source analysis, and `web/pkg`.
-A missing or invalid reference export stops loading.
+The exporter does not change Steam files. Git excludes exported assets and `web/pkg`.
+A missing or invalid export stops loading.
 
 Run formatting, native tests, and the release WASM check:
 
@@ -33,7 +32,6 @@ Run formatting, native tests, and the release WASM check:
 ./scripts/check.ps1
 ```
 
-Docker caches use `tld-wasm-cargo` and `tld-wasm-target`.
 The build script writes the browser package to `web/pkg`.
 It also prepares Brotli downloads in `.cache/http-compression`. Keep that directory with the server deployment.
 After replacing an export without rebuilding WASM, prepare its downloads and restart the server:
@@ -48,17 +46,9 @@ This check measures HTTP transfers. It does not measure playable startup.
 
 ## Development asset library
 
-The export preserves 183 source files, 262,784 objects, and 721,957 dependency links.
-The library contains 5,121 converted assets, 257,587 native records, and 76 source-empty records.
-Its 8,570 published files total 3,105,818,196 bytes.
-Typed records and managed analysis use a separate ignored cache.
-The asset branch selected 89 runtime files, totaling 73,261,688 bytes, before integration with source UI and interaction work.
-Startup requests contain only selected runtime assets.
-
-Use [export stages and verification commands](tools/reference/README.md) to access the library.
-Read [coverage and support limits](docs/research/2026-10-10-full-asset-audit.md) before using an asset.
-The library includes embedded Liberation Sans. The current shell uses self-hosted Liberation Sans and Arial.
-Development availability does not add further vehicles, audio, animation playback, or other gameplay.
+The export holds the full build 11140890 library. Startup loads only the selected runtime assets.
+Read [export stages](tools/reference/README.md) and [support limits](tools/reference/README.md#development-support-limits) before you use an asset.
+Library assets do not add gameplay.
 
 ## Controls
 
@@ -70,14 +60,14 @@ Development availability does not add further vehicles, audio, animation playbac
 | Space | Jump | Toggle handbrake |
 | E | Use cap, switch, or seat | Use control or leave seat |
 | Hold LMB + mouse | Move an aimed mechanism | Move an aimed mechanism |
-| F | Carry or remove a part; release to install; tap to drop | - |
-| Hold F, then release | Charge and throw a held item | - |
-| Hold F at the car body | Push while held | - |
-| F at the steering grip | Latch grip; WASD pushes and steers; F releases | - |
-| Mouse wheel / Tab | Change carry distance / recenter | - |
-| Hold MMB / RMB + mouse | Rotate / move held item | - |
-| Hold MMB and RMB + mouse | Roll held item | - |
-| X | Split a wheel | - |
+| F | Carry or remove a part; release to install; tap to drop | — |
+| Hold F, then release | Charge and throw a held item | — |
+| Hold F at the car body | Push while held | — |
+| F at the steering grip | Latch grip; WASD pushes and steers; F releases | — |
+| Mouse wheel / Tab | Change carry distance / recenter | — |
+| Hold MMB / RMB + mouse | Rotate / move held item | — |
+| Hold MMB and RMB + mouse | Roll held item | — |
+| X | Split a wheel | — |
 | Hold LMB | Fill an open container | Use an aimed switch |
 | I | — | Tap ignition; hold starter |
 | Left Ctrl / Right Ctrl / Numpad 0 | Crouch with Ctrl | Clutch |
@@ -86,6 +76,10 @@ Development availability does not add further vehicles, audio, animation playbac
 | 0 / Numpad - / N | — | Select neutral |
 | 1–6 / Numpad 1–6 | — | Select a forward gear, when available |
 | L | — | Cycle headlights: off, low beam, high beam |
+| H / Numpad 8 | — | Horn |
+| Hold V | Sleep, when eligible | Sleep, when eligible |
+| Hold P | Urinate | Urinate |
+| B | Burp or fart | Burp or fart |
 | C | — | Switch first person / chase view |
 | Backspace | Hide or show feedback | Hide or show feedback |
 | Esc | Pause menu | Pause menu |
