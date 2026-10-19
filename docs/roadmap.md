@@ -15,6 +15,25 @@ Fresh browser acceptance and performance measurements remain open.
 An earlier package reached "The garage is ready." New game then failed with `Missing source asset: reference/food.gltf`.
 That file exists. Session validation looks for its lazy prototype in the eager scene cache.
 
+### Single camera and roadside reset
+
+The renderer uses one world camera. Selected ordinary roadside debris now stays fixed.
+Rocks and signs were already fixed.
+Distant roadside edits expire after both the player and car leave the object's source and destination.
+Carried, stored, equipped, mounted, and attached items keep their records after their source owner retires.
+The imported garage, both cars, and their attachment dependencies remain required.
+
+Source: `codex/single-camera-roadside` at `46e9c0f`.
+The merged tree passed `scripts/check.ps1 -Full`: 47 web and 73 native checks passed; 51 source fixtures were ignored.
+The WASM development check passed in 0.56 s. Fourteen focused terrain, roadside, and fixed-behavior checks passed after a test-adapter fix.
+The merged renderer keeps one world camera, six probe views, and 4× MSAA.
+New Game and Save passed. The generated fixture loaded twice. Scenes 2 and 3 validated and presented.
+Scripted physics advanced from 0 to 552 steps and submitted 149 frames.
+These runtime results are from the feature branch. Real input, driving, and full source parity remain unverified.
+A fresh cold Load stopped when the browser tab closed; the cause is unknown. No valid matched A/B/A run measured an FPS gain.
+The merged tree has no new release build or browser acceptance run.
+Local evidence: `.cache/integration/single-camera-roadside-46e9c0f/benchmark/acceptance-report.md` and `merge-focused-*.log`.
+
 ## Work order
 
 Keep each layer working before you add the next.

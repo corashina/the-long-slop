@@ -235,7 +235,7 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
                 presentation::lighting::sync_control_visuals,
                 presentation::reference::sync_inventory,
                 update_camera,
-                presentation::frame_graph::sync_stack_cameras,
+                presentation::frame_graph::sync_sky_camera,
                 publish_loading,
                 update_hud,
             )
@@ -541,7 +541,7 @@ fn check_ready(
             let extent =
                 cameras
                     .iter()
-                    .find(|(view, _)| view.index == 1)
+                    .find(|(view, _)| view.index == 0)
                     .and_then(|(_, camera)| {
                         let extent = camera.physical_viewport_size()?;
                         let target = camera.physical_target_size()?;
@@ -798,11 +798,13 @@ fn sync_world(
     let forward = [forward.x, forward.y, -forward.z];
     let coherent = views.session == runtime.stream.frame().request.session
         && views.scene == epoch.0
-        && views.views[..3].iter().all(Option::is_some);
+        && views.views[..presentation::surface_views::WORLD_VIEWS]
+            .iter()
+            .all(Option::is_some);
     if coherent {
         let first = views.views[0]
             .as_ref()
-            .expect("complete source stack snapshot");
+            .expect("complete world camera snapshot");
         let result = (|| -> Result<(), crate::reference::ReferenceError> {
             let first = presentation::view_frame::required_view(
                 first,
@@ -813,17 +815,6 @@ fn sync_world(
             let required =
                 required_views.get_or_insert_with(|| crate::world::RequiredViews::new(first));
             required.reset(first);
-            for view in views.views[1..presentation::surface_views::PROBE_START]
-                .iter()
-                .flatten()
-            {
-                required.push(presentation::view_frame::required_view(
-                    view,
-                    runtime.stream.origin.offset,
-                    forward,
-                    reference.0.render_lighting.lights[0].mask,
-                )?)?;
-            }
             presentation::view_frame::append_probe_required_views(
                 required,
                 &reference.0.render_lighting.probes,

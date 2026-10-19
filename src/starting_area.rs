@@ -52,7 +52,6 @@ pub struct StartingArea {
     pub inventory: crate::inventory::InventoryState,
     pub pose: crate::player::pose::PlayerPoseState,
     inventory_offsets: [Option<(ItemId, VehiclePose)>; 4],
-    pub(crate) inventory_items: std::collections::HashSet<ItemId>,
     pub player: PlayerState,
     pub origin: [f64; 3],
     attachments: Vec<(RigidBodyHandle, RigidBodyHandle, rapier3d::math::Pose)>,
@@ -373,12 +372,6 @@ impl StartingArea {
             inventory: crate::inventory::InventoryState::new(&reference.inventory),
             inventory_offsets: [None; 4],
             pose: crate::player::pose::PlayerPoseState::new(reference)?,
-            inventory_items: reference
-                .items
-                .iter()
-                .filter(|i| i.pickup.as_ref().is_some_and(|p| p.can_inventory))
-                .map(|i| i.id)
-                .collect(),
             bodies,
             items,
             interaction,

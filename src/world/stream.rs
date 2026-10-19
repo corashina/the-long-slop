@@ -7,7 +7,7 @@ use super::{
 use crate::reference::{ReferenceError, ReferenceManifest, SourceId, WorldReference};
 use crate::vehicle::{ColliderHandle, PhysicsWorld};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -189,6 +189,13 @@ pub struct WorldStream {
     wanted_tiles: Vec<SurfaceKey>,
     road_points: Vec<TerrainRoadPoint>,
     structures: Vec<super::StructureInstance>,
+    saved_item_protection: Vec<super::ObjectKey>,
+    change_dependencies: Vec<super::ObjectKey>,
+    external_dependencies: HashSet<super::ObjectKey>,
+    changes_prune_due: bool,
+    #[cfg(test)]
+    change_prune_scans: usize,
+    saved_locations_pending: bool,
     recipes: HashMap<SourceId, super::StructureRecipe>,
     supplies: Vec<PublishedSupply>,
     wanted_structures: Vec<Placement>,
@@ -315,6 +322,30 @@ impl WorldStream {
                 changes.set_replay(&key, &owner.origin, &owner.content.placement.id);
             }
         }
+        let mut dependencies = HashSet::new();
+        super::changes::external_attachment_chain(&changes, &mut dependencies);
+        let radius = self.reference.distances["ItemRemoveDist"];
+        changes.retain(|key, change| {
+            items.resolve_key(key).is_some()
+                || required.contains(key)
+                || self.saved_item_protection.contains(key)
+                || dependencies.contains(key)
+                || change.snapshot.as_ref().is_some_and(|s| s.held)
+                || change.instance.as_ref().is_some_and(|id| {
+                    self.contents
+                        .active
+                        .iter()
+                        .chain(&self.static_controls)
+                        .any(|c| &c.content.placement.id == id)
+                        || self.supplies.iter().any(|s| &s.key == id)
+                        || self.lamp_bindings.iter().any(|l| &l.parent == id)
+                })
+                || !super::changes::roadside_change_expired(
+                    change,
+                    [self.request.player, self.request.vehicle],
+                    radius * radius,
+                )
+        });
         crate::save::WorldSnapshot {
             generation: super::GenerationSnapshot {
                 generator_contract: super::GENERATOR_CONTRACT,
@@ -438,6 +469,92 @@ impl WorldStream {
                             .as_ref()
                             .is_some_and(|id| self.bindings_ready(id)))
             })
+    }
+    /// Saved inventory and imported attachment links protect their generated owners until binding.
+    pub(crate) fn protect_saved_items(&mut self, keys: &[super::ObjectKey]) {
+        for key in keys {
+            if !self.saved_item_protection.contains(key) {
+                self.saved_item_protection.push(key.clone());
+            }
+        }
+    }
+    pub(crate) fn hold_saved_item_locations(&mut self) {
+        self.saved_locations_pending = true;
+    }
+    pub(crate) fn release_saved_item_locations(
+        &mut self,
+        items: &crate::interaction::items::ItemStore,
+        pending: &[crate::save::ItemSnapshot],
+    ) {
+        self.saved_item_protection.retain(|key| {
+            items.resolve_key(key).is_none() || pending.iter().any(|item| {
+                matches!(&item.location, crate::save::ItemLocationSave::GeneratedAttachment { attachment } if attachment.owner.as_ref() == Some(key))
+            })
+        });
+        self.saved_locations_pending = !self.saved_item_protection.is_empty();
+    }
+    fn fixed_decoration(&self, placement: &Placement) -> bool {
+        if !super::instances::fixed_decoration_source(&placement.prototype) {
+            return false;
+        }
+        if let Some(instance) = self
+            .structures
+            .iter()
+            .find(|s| s.placement.id == placement.id)
+        {
+            return instance.fixed_decoration;
+        }
+        let owns = |key: &super::ObjectKey| {
+            matches!(key, super::ObjectKey::Generated(id) if id == &placement.id)
+                || self
+                    .changes
+                    .get(key)
+                    .is_some_and(|c| c.instance.as_ref() == Some(&placement.id))
+        };
+        !self.saved_item_protection.iter().any(owns)
+            && !self.changes.iter().any(|(key, change)| {
+                change.snapshot.as_ref().is_some_and(|snapshot| {
+                    ((snapshot.held || snapshot.attachment.is_some())
+                        && (owns(key) || change.instance.as_ref() == Some(&placement.id)))
+                        || snapshot
+                            .attachment
+                            .as_ref()
+                            .and_then(|a| a.owner.as_ref())
+                            .is_some_and(owns)
+                })
+            })
+    }
+    fn forget_fixed_decoration_changes(&mut self, id: &super::GeneratedId) {
+        loop {
+            let obsolete = self.changes.iter().find_map(|(key, change)| {
+                (change.instance.as_ref() == Some(id)
+                    || matches!(key, super::ObjectKey::Generated(key) if key == id))
+                .then(|| key.clone())
+            });
+            let Some(key) = obsolete else {
+                break;
+            };
+            self.changes.forget(&key);
+        }
+    }
+    fn discard_fixed_decoration_changes(&mut self) {
+        for index in 0..self.contents.active.len() {
+            let content = &self.contents.active[index];
+            if content.restored
+                || content.item.is_some()
+                || !self.fixed_decoration(&content.content.placement)
+            {
+                continue;
+            }
+            let id = content.content.placement.id.clone();
+            self.forget_fixed_decoration_changes(&id);
+            // This instance has no mutable state or bindings to reconstruct.
+            self.contents.active[index].restored = true;
+        }
+        // Deletion compacts records. Refresh indices before any replay consumer runs.
+        if self.change_revision != self.changes.revision() {
+            self.select_changed_destinations();
+        }
     }
     pub fn select_source_car(&mut self, car_id: i32) {
         if self.contents.state.context.current_car != car_id {
@@ -608,6 +725,13 @@ impl WorldStream {
             wanted_tiles: Vec::with_capacity(MAX_NEAR + 2 * MAX_DISTANT),
             road_points: Vec::with_capacity(MAX_ROADS * super::ROAD_CONTROLS),
             structures: Vec::new(),
+            saved_item_protection: Vec::new(),
+            change_dependencies: Vec::new(),
+            external_dependencies: HashSet::new(),
+            changes_prune_due: true,
+            #[cfg(test)]
+            change_prune_scans: 0,
+            saved_locations_pending: false,
             recipes: HashMap::new(),
             supplies: Vec::new(),
             wanted_structures: Vec::with_capacity(MAX_OBJECTS),
@@ -824,10 +948,21 @@ impl WorldStream {
         self.dependency_metadata = metadata;
         Ok(())
     }
+    fn pending_work(&self) -> usize {
+        self.replay_roots
+            .len()
+            .max(usize::from(self.contents.has_replay()))
+            + self.contents.pending_requests()
+            + self.props.pending_requests()
+            + self.ready_structures.len()
+            + usize::from(self.ready.is_some())
+            + usize::from(self.terrain_work.is_some())
+            + self.presentation.pending
+    }
     pub(crate) fn can_request_independent(&self, claims: usize) -> bool {
-        self.metrics()
-            .pending_work
-            .checked_add(claims)
+        self.pending_work()
+            .checked_add(self.overlap.pending_work)
+            .and_then(|count| count.checked_add(claims))
             .is_some_and(|count| count <= MAX_PENDING)
     }
     pub fn available_external_jobs(&self) -> usize {
@@ -1331,6 +1466,7 @@ impl WorldStream {
         }
         // Planning also forces refreshes. Movement starts from the last completed refresh.
         self.structure_focus = points;
+        self.changes_prune_due = true;
         for placement in self
             .props
             .placements()
@@ -1518,6 +1654,7 @@ impl WorldStream {
             self.failure = Some(error.0);
             return;
         }
+        self.discard_fixed_decoration_changes();
         self.wanted_structures.retain(|p| {
             self.changes
                 .get(super::ObjectKey::Generated(p.id.clone()))
@@ -1545,6 +1682,7 @@ impl WorldStream {
                 || self.replay_indices.iter().any(|&index| {
                     let (_, c) = self.changes.get_indexed(index);
                     c.instance.as_ref() == Some(&p.id)
+                        || c.replay.as_ref().is_some_and(|root| root.id == p.id)
                         || matches!(c.snapshot
                                 .as_ref()
                                 .and_then(|s| s.attachment.as_ref())
@@ -1605,6 +1743,9 @@ impl WorldStream {
             let selected = self.replay_indices.iter().any(|&index| {
                 let (_, c) = self.changes.get_indexed(index);
                 c.instance.as_ref() == Some(&content.placement.id)
+                    || c.replay
+                        .as_ref()
+                        .is_some_and(|root| root.id == content.placement.id)
                     || matches!(c.snapshot
                             .as_ref()
                             .and_then(|s| s.attachment.as_ref())
@@ -2764,6 +2905,13 @@ impl WorldStream {
     pub fn structure_required(&self, id: &super::GeneratedId) -> bool {
         self.required.structures.contains(id)
     }
+    pub fn structure_replay_required(&self, id: &super::GeneratedId) -> bool {
+        self.replay_roots.iter().any(|root| &root.id == id)
+            || self
+                .replay_indices
+                .iter()
+                .any(|&index| self.changes.get_indexed(index).1.instance.as_ref() == Some(id))
+    }
     pub fn select_required(&mut self, views: &[super::RequiredView]) {
         let ranges = self.required_content().collision_ranges;
         let required = |bounds, layers| {
@@ -3108,6 +3256,7 @@ impl WorldStream {
         if self.plan_revision != self.request.revision {
             return Ok(());
         }
+        self.discard_fixed_decoration_changes();
         let request = self.request;
         let ready = |placement: &&Placement| {
             !self
@@ -3167,8 +3316,9 @@ impl WorldStream {
             .iter()
             .find(|p| p.source == placement.prototype)
             .unwrap();
+        let fixed_decoration = self.fixed_decoration(placement);
         let (binding_reservation, binding_objects) =
-            self.binding_reservation(prototype, &placement.id)?;
+            self.binding_reservation(prototype, &placement.id, fixed_decoration)?;
         if binding_reservation > self.available_dependency_staging_bytes()
             || self
                 .metrics()
@@ -3191,7 +3341,12 @@ impl WorldStream {
         let instance = if placement.scale == prototype.prefab_pose.scale
             && !appearance.iter().any(|a| a.scale.is_some())
         {
-            self.recipes[&placement.prototype].publish(placement.clone(), self.origin, physics)?
+            self.recipes[&placement.prototype].publish(
+                placement.clone(),
+                self.origin,
+                fixed_decoration,
+                physics,
+            )?
         } else {
             let extra = super::StructureRecipe::reservation(prototype);
             if self.metrics().active_cpu_bytes.saturating_add(extra * 2) > ACTIVE_CPU
@@ -3207,7 +3362,8 @@ impl WorldStream {
                 placement.scale,
                 appearance,
             )?;
-            let mut instance = recipe.publish(placement.clone(), self.origin, physics)?;
+            let mut instance =
+                recipe.publish(placement.clone(), self.origin, fixed_decoration, physics)?;
             instance.cpu_bytes += extra;
             instance
         };
@@ -3240,6 +3396,12 @@ impl WorldStream {
                 items: None,
                 baselines: None,
             });
+        }
+        if fixed_decoration {
+            self.forget_fixed_decoration_changes(&instance.placement.id);
+            if self.change_revision != self.changes.revision() {
+                self.select_changed_destinations();
+            }
         }
         self.release_structure_renderer(&instance.placement.id);
         self.structures.push(instance);
@@ -3393,6 +3555,22 @@ impl WorldStream {
         self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
         self.binding_objects = items.len();
         self.binding_reserved = 0;
+        // Published instances keep their item policy. Live locations now own retention.
+        if !self.saved_locations_pending {
+            self.saved_item_protection.retain(|key| {
+                items.resolve_key(key).is_none_or(|item| {
+                    self.contents
+                        .active
+                        .iter()
+                        .chain(&self.static_controls)
+                        .any(|c| {
+                            !c.restored
+                                && (c.item == Some(item)
+                                    || c.bindings.iter().any(|b| b.item == item))
+                        })
+                })
+            });
+        }
         Ok(())
     }
 
@@ -3432,6 +3610,45 @@ impl WorldStream {
             }
         }
     }
+    pub(crate) fn invalidate_changed_selection(&mut self) {
+        self.replay_indices.clear();
+        self.replay_query.clear();
+        self.replay_roots.clear();
+        self.change_bounds = None;
+    }
+    pub(crate) fn prune_unloaded_changes(&mut self, items: &crate::interaction::items::ItemStore) {
+        #[cfg(test)]
+        {
+            self.change_prune_scans += 1;
+        }
+        super::changes::external_attachment_chain(&self.changes, &mut self.external_dependencies);
+        let radius = self.reference.distances["ItemRemoveDist"];
+        let foci = [self.request.player, self.request.vehicle];
+        let dependencies = &self.external_dependencies;
+        let saved = &self.saved_item_protection;
+        let controls = &self.static_controls;
+        let supplies = &self.supplies;
+        let lamps = &self.lamp_bindings;
+        let contents = &self.contents.active;
+        if self.changes.retain(|key, change| {
+            matches!(key, super::ObjectKey::Imported(_))
+                || items.resolve_key(key).is_some()
+                || saved.contains(key)
+                || dependencies.contains(key)
+                || change.snapshot.as_ref().is_some_and(|s| s.held)
+                || change.instance.as_ref().is_some_and(|id| {
+                    controls.iter().any(|c| &c.content.placement.id == id)
+                        || contents.iter().any(|c| &c.content.placement.id == id)
+                        || supplies.iter().any(|s| &s.key == id)
+                        || lamps.iter().any(|l| &l.parent == id)
+                })
+                || !super::changes::roadside_change_expired(change, foci, radius * radius)
+        }) {
+            self.invalidate_changed_selection();
+        }
+        self.external_dependencies.clear();
+        self.changes_prune_due = false;
+    }
     pub fn changes(&self) -> &super::ChangeRecords {
         &self.changes
     }
@@ -3453,6 +3670,7 @@ impl WorldStream {
         }
         self.retire_contents(physics, items, interaction, wheels);
         let mut index = 0;
+        let mut retired_structure = false;
         while index < self.structures.len() {
             let id = &self.structures[index].placement.id;
             let radius = self.reference.distances["BuildingGenDist"];
@@ -3492,6 +3710,30 @@ impl WorldStream {
                 continue;
             }
             let instance = self.structures.swap_remove(index);
+            self.change_dependencies.clear();
+            for content in self
+                .static_controls
+                .iter()
+                .filter(|c| c.content.placement.id == instance.placement.id)
+            {
+                for item in content
+                    .item
+                    .into_iter()
+                    .chain(content.bindings.iter().map(|b| b.item))
+                {
+                    self.change_dependencies.push(items.object_key(item));
+                }
+            }
+            for supply in self
+                .supplies
+                .iter()
+                .filter(|s| s.key == instance.placement.id)
+            {
+                if let Some((tank, cap)) = supply.items {
+                    self.change_dependencies.push(items.object_key(tank));
+                    self.change_dependencies.push(items.object_key(cap));
+                }
+            }
             if let Some(i) = self
                 .static_controls
                 .iter()
@@ -3525,7 +3767,19 @@ impl WorldStream {
                 }
             }
             instance.retire(physics);
+            let revision = self.changes.revision();
+            for key in self.change_dependencies.drain(..) {
+                self.changes.forget(&key);
+            }
+            if self.changes.revision() != revision {
+                self.invalidate_changed_selection();
+            }
+            self.changes_prune_due = true;
+            retired_structure = true;
             break;
+        }
+        if self.changes_prune_due && !retired_structure {
+            self.prune_unloaded_changes(items);
         }
     }
 
@@ -3736,16 +3990,7 @@ impl WorldStream {
             jobs: self.presentation.jobs
                 + usize::from(self.terrain_work.is_some())
                 + usize::from(self.contents.has_replay()),
-            pending: self
-                .replay_roots
-                .len()
-                .max(usize::from(self.contents.has_replay()))
-                + self.contents.pending_requests()
-                + self.props.pending_requests()
-                + self.ready_structures.len()
-                + usize::from(self.ready.is_some())
-                + usize::from(self.terrain_work.is_some())
-                + self.presentation.pending,
+            pending: self.pending_work(),
             render_cpu_bytes: self.presentation.active_cpu + self.presentation.prototype_cpu,
             render_gpu_bytes: self.presentation.active_gpu + self.presentation.prototype_gpu,
             ..Default::default()
@@ -3783,16 +4028,7 @@ impl WorldStream {
                 + usize::from(self.terrain_work.is_some())
                 + usize::from(self.contents.has_replay()),
             pending_bytes: self.presentation.staging_bytes + self.generation_pending_bytes(),
-            pending_work: self
-                .replay_roots
-                .len()
-                .max(usize::from(self.contents.has_replay()))
-                + self.contents.pending_requests()
-                + self.props.pending_requests()
-                + self.ready_structures.len()
-                + usize::from(self.ready.is_some())
-                + usize::from(self.terrain_work.is_some())
-                + self.presentation.pending,
+            pending_work: self.pending_work(),
             spawn_parents: self.contents.state.parent_count(),
             spawn_boundaries: self.contents.state.boundary_count(),
             spawn_boundary_bytes: self.contents.state.retained_bytes(),
@@ -3917,6 +4153,26 @@ impl WorldStream {
                     .map(super::WorldLight::heap_bytes)
                     .sum::<usize>()
                 + self.structures.capacity() * std::mem::size_of::<super::StructureInstance>()
+                + self.change_dependencies.capacity() * std::mem::size_of::<super::ObjectKey>()
+                + self
+                    .change_dependencies
+                    .iter()
+                    .map(super::changes::key_heap)
+                    .sum::<usize>()
+                + self.external_dependencies.capacity().saturating_mul(2)
+                    * (std::mem::size_of::<super::ObjectKey>() + 1)
+                + 16
+                + self
+                    .external_dependencies
+                    .iter()
+                    .map(super::changes::key_heap)
+                    .sum::<usize>()
+                + self.saved_item_protection.capacity() * std::mem::size_of::<super::ObjectKey>()
+                + self
+                    .saved_item_protection
+                    .iter()
+                    .map(super::changes::key_heap)
+                    .sum::<usize>()
                 + self.supplies.capacity() * std::mem::size_of::<PublishedSupply>()
                 + self.wanted_structures.capacity() * std::mem::size_of::<Placement>()
                 + self

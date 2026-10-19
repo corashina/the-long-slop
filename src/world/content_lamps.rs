@@ -45,8 +45,15 @@ impl WorldStream {
                 i += 1;
                 continue;
             }
-            interaction.remove_generated_light(self.lamp_bindings.swap_remove(i).control);
+            let binding = self.lamp_bindings.swap_remove(i);
+            interaction.remove_generated_light(binding.control);
             self.lamp_binding_revision += 1;
+            let mut key = binding.parent;
+            key.children.push((binding.source, 0));
+            if self.changes.forget(&ObjectKey::Generated(key)) {
+                self.invalidate_changed_selection();
+            }
+            self.changes_prune_due = true;
         }
         loop {
             let next = self

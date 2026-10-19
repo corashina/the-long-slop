@@ -4,6 +4,7 @@ use crate::interaction::{InteractionState, items::ItemStore};
 use crate::reference::{ActionBinding, PickupReference, ReferenceError, ReferenceManifest};
 use crate::vehicle::{PhysicsWorld, from_rapier, to_rapier};
 use crate::world::spawn_rules::*;
+use crate::world::{ObjectKey, changes};
 impl WorldStream {
     pub fn initialize_imported_changes(
         &mut self,
@@ -138,7 +139,11 @@ impl WorldStream {
         &self,
         prototype: &crate::reference::WorldPrototypeReference,
         id: &crate::world::GeneratedId,
+        fixed_decoration: bool,
     ) -> Result<(usize, usize), ReferenceError> {
+        if fixed_decoration {
+            return Ok((0, 0));
+        }
         let mut components = 0usize;
         let mut parts = 0usize;
         let mut fields_bytes = 0usize;
@@ -222,11 +227,12 @@ impl WorldStream {
         }
         for index in 0..self.structures.len() {
             let instance = &mut self.structures[index];
-            if self
-                .contents
-                .active
-                .iter()
-                .any(|c| c.content.placement.id == instance.placement.id)
+            if instance.fixed_decoration
+                || self
+                    .contents
+                    .active
+                    .iter()
+                    .any(|c| c.content.placement.id == instance.placement.id)
                 || self
                     .static_controls
                     .iter()
@@ -361,14 +367,19 @@ impl WorldStream {
                 }
                 continue;
             }
-            let placement = content.content.placement.clone();
+            let placement_id = &content.content.placement.id;
             let Some(instance) = self
                 .structures
                 .iter_mut()
-                .find(|i| i.placement.id == placement.id)
+                .find(|i| &i.placement.id == placement_id)
             else {
                 continue;
             };
+            if instance.fixed_decoration {
+                content.restored = true;
+                continue;
+            }
+            let placement = content.content.placement.clone();
             let prototype = self
                 .reference
                 .prototypes
@@ -811,6 +822,38 @@ impl WorldStream {
             .find(|c| &c.content.placement.id == id)
             .is_none_or(|c| c.item.is_none() || c.restored)
     }
+    fn forget_expired_retired_item_change(&mut self, key: &ObjectKey, radius_squared: f32) {
+        let Some(change) = self.changes.get(key) else {
+            return;
+        };
+        if self.saved_item_protection.contains(key)
+            || self.changes.has_attachment_dependents(key)
+            || change
+                .snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.held)
+            || changes::external_attachment(change, &self.changes)
+            || change.instance.as_ref().is_some_and(|id| {
+                self.contents
+                    .active
+                    .iter()
+                    .chain(&self.static_controls)
+                    .any(|content| &content.content.placement.id == id)
+                    || self.supplies.iter().any(|supply| &supply.key == id)
+                    || self.lamp_bindings.iter().any(|lamp| &lamp.parent == id)
+            })
+            || !changes::roadside_change_expired(
+                change,
+                [self.request.player, self.request.vehicle],
+                radius_squared,
+            )
+        {
+            return;
+        }
+        if self.changes.forget(key) {
+            self.invalidate_changed_selection();
+        }
+    }
     pub(super) fn retire_contents(
         &mut self,
         physics: &mut PhysicsWorld,
@@ -887,6 +930,10 @@ impl WorldStream {
                 }
             }
             protected |= content.has_external_dependents(items, &interaction.parts, wheels);
+            protected |= self
+                .saved_item_protection
+                .iter()
+                .any(|key| items.resolve_key(key).is_some_and(local_item));
             let removed = id
                 .and_then(|id| items.get(id))
                 .is_some_and(|item| item.removed);
@@ -940,6 +987,7 @@ impl WorldStream {
                     .remove_generated(item, &content.nodes);
             }
             for binding in &content.bindings {
+                let key = items.object_key(binding.item);
                 wheels.remove_generated(binding.item);
                 if let Some(instance) = self
                     .structures
@@ -954,8 +1002,10 @@ impl WorldStream {
                 items.get_mut(binding.item).unwrap().location =
                     crate::interaction::items::ItemLocation::World;
                 items.remove_generated(binding.item);
+                self.forget_expired_retired_item_change(&key, remove * remove);
             }
             if let Some(id) = content.item {
+                let key = items.object_key(id);
                 if let Some(instance) = self
                     .structures
                     .iter()
@@ -969,6 +1019,7 @@ impl WorldStream {
                 items.get_mut(id).unwrap().location =
                     crate::interaction::items::ItemLocation::World;
                 items.remove_generated(id);
+                self.forget_expired_retired_item_change(&key, remove * remove);
             }
             self.wanted_structures
                 .retain(|p| p.id != content.content.placement.id);
@@ -1114,6 +1165,54 @@ pub(crate) fn restore_item(
             wheels.assemble(parent, id, items, physics)?;
         }
     }
+    if let (Some(parent_id), Some(attachment)) = (resolved, &snapshot.attachment) {
+        if attachment.slot.is_none() && !wheels.rules().iter().any(|r| r.item == id) {
+            let parent = items.get(parent_id).unwrap();
+            let Some(parent_body) = parent.body else {
+                return Ok(false);
+            };
+            let item = items.get(id).unwrap();
+            let Some(old_body) = item.body else {
+                return Ok(false);
+            };
+            if old_body != parent_body {
+                if items
+                    .iter()
+                    .any(|other| other.body == Some(old_body) && !items.attached_to(other.id, id))
+                {
+                    return Err(ReferenceError(
+                        "Saved attachment shares an unrelated body".into(),
+                    ));
+                }
+                let local = crate::vehicle::VehiclePose {
+                    position: attachment.local_pose.position.map(|v| v as f32),
+                    rotation: attachment.local_pose.rotation,
+                };
+                let transform = to_rapier(parent.local_pose)
+                    * to_rapier(local)
+                    * to_rapier(item.local_pose).inverse();
+                let colliders = physics.rapier().bodies[old_body].colliders().to_vec();
+                for collider in colliders {
+                    let local = *physics.rapier().colliders[collider]
+                        .position_wrt_parent()
+                        .unwrap();
+                    let world = physics.rapier_mut();
+                    world
+                        .colliders
+                        .set_parent(collider, Some(parent_body), &mut world.bodies);
+                    world.colliders[collider].set_position_wrt_parent(transform * local);
+                }
+                let pose = *physics.rapier().bodies[parent_body].position();
+                for child in items.iter_mut().filter(|i| i.body == Some(old_body)) {
+                    child.body = Some(parent_body);
+                    child.local_pose = from_rapier(&(transform * to_rapier(child.local_pose)));
+                    child.pose = from_rapier(&(pose * to_rapier(child.local_pose)));
+                    child.inactive_pose = None;
+                }
+                physics.rapier_mut().bodies[old_body].set_enabled(false);
+            }
+        }
+    }
     match (&snapshot.food, items.get(id).and_then(|i| i.food)) {
         (Some(saved), Some(food)) => {
             let recipe = &reference.survival.foods[food.prototype_index];
@@ -1155,6 +1254,9 @@ pub(crate) fn restore_item(
             rotation: attachment.local_pose.rotation,
         };
         let item = items.get_mut(id).unwrap();
+        if attachment.slot.is_none() {
+            item.location = ItemLocation::Attached(parent.id);
+        }
         item.pose = from_rapier(&(to_rapier(parent.pose) * to_rapier(local)));
         item.local_pose = from_rapier(&(to_rapier(parent.local_pose) * to_rapier(local)));
     } else {

@@ -158,7 +158,10 @@ impl SourceInstances {
         let required_ready = stream.required_ready();
         for index in 0..stream.pending_structures().len() {
             let placement = &stream.pending_structures()[index];
-            if !stream.structure_required(&placement.id) && !required_ready {
+            if !stream.structure_required(&placement.id)
+                && !stream.structure_replay_required(&placement.id)
+                && !required_ready
+            {
                 continue;
             }
             let source = &placement.prototype;
@@ -206,7 +209,9 @@ impl SourceInstances {
                 .iter()
                 .filter(|p| {
                     stream.contents_initialized(&p.id)
-                        && (stream.structure_required(&p.id) || required_ready)
+                        && (stream.structure_required(&p.id)
+                            || stream.structure_replay_required(&p.id)
+                            || required_ready)
                         && !self.instances.iter().any(|i| i.placement.id == p.id)
                 })
                 .min_by(|a, b| {
