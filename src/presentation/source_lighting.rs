@@ -62,7 +62,6 @@ pub fn surface_lighting_layout() -> BindGroupLayoutDescriptor {
                 sampler(SamplerBindingType::Filtering),
                 texture_2d(TextureSampleType::Float { filterable: true }),
                 sampler(SamplerBindingType::Filtering),
-                texture_cube(TextureSampleType::Float { filterable: true }),
             ),
         ),
     )
@@ -101,7 +100,6 @@ impl SourceViewLighting {
                 probe.1,
                 attenuation.0,
                 attenuation.1,
-                probe.0[1],
             )),
         );
         Self {

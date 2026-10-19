@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::{ecs as bevy_ecs, render as bevy_render};
 
-pub const PROBE_COUNT: usize = 2;
+pub const PROBE_COUNT: usize = 1;
 
 #[derive(Resource)]
 pub struct ProbeActivation {

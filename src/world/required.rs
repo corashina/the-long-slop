@@ -23,8 +23,8 @@ impl RequiredView {
                 || self.light_mask & layers != 0 && self.shadow.intersects(bounds))
     }
 }
-/// Complete view frontier: one world view and twelve probe faces.
-pub const REQUIRED_VIEW_CAPACITY: usize = 13;
+/// Complete view frontier: one world view and six probe faces.
+pub const REQUIRED_VIEW_CAPACITY: usize = 7;
 
 /// Inline storage starts with a real source view, including its valid shadow hull.
 pub struct RequiredViews {

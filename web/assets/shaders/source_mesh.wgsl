@@ -19,7 +19,7 @@ struct SourceVertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) world_position: vec4<f32>,
     @location(1) world_normal: vec3<f32>,
-    @location(9) @interpolate(flat) source_renderer: vec3<f32>,
+    @location(9) @interpolate(flat) source_renderer: vec2<f32>,
     @location(10) source_fog: f32,
     @location(11) source_screen: vec4<f32>,
 #ifdef SOURCE_FORWARD_ADD
@@ -152,7 +152,7 @@ fn vertex(vertex_no_morph: Vertex, @location(8) bounds_center_usage: vec4<f32>, 
 #ifdef SOURCE_TRANSPARENT
     out.position = lighting.clip_from_world * out.world_position;
 #endif
-    out.source_renderer = vec3(probe_weight(world_from_local,bounds_center_usage,bounds_extents_flags),bounds_extents_flags.w);
+    out.source_renderer = vec2(probe_weight(world_from_local,bounds_center_usage,bounds_extents_flags),bounds_extents_flags.w);
 #ifdef SOURCE_FORWARD_ADD
     // Authored bounds do not prove the full extent of skinning or morph displacement.
     var bounded = true;

@@ -966,7 +966,7 @@ fn complete_probe_union_preserves_revision_and_fresh_cycles() {
             origin: [0.; 3],
         }
     };
-    // Published source structures provide distinct probe-exclusive geometry.
+    // One probe face union includes distinct published geometry.
     let first_structure = run.stream.structures.iter().max_by(|a, b| {
         let a = a.placement.bounds.min[0].abs() + a.placement.bounds.min[2].abs();
         let b = b.placement.bounds.min[0].abs() + b.placement.bounds.min[2].abs();
@@ -1000,22 +1000,22 @@ fn complete_probe_union_preserves_revision_and_fresh_cycles() {
             break;
         }
     }
-    let (second, second_ids) = pair.expect("two probe-exclusive published regions");
+    let (second, second_ids) = pair.expect("two face-exclusive published regions");
     let seed = tiny([0.; 3], 0);
     let mut required = RequiredViews::new(seed);
-    let build = |required: &mut RequiredViews, enabled: [bool; 2]| {
+    let build = |required: &mut RequiredViews, enabled: [bool; 1]| {
         required.reset(seed);
         required
-            .append_probe_faces(&enabled, |probe, _| Ok([first, second][probe]))
+            .append_probe_faces(&enabled, |_, side| Ok([first, second][side % 2]))
             .unwrap();
     };
-    build(&mut required, [true, true]);
+    build(&mut required, [true]);
     let storage = required.as_slice().as_ptr();
     run.stream.select_required(required.as_slice());
     let ids = run.stream.required.structures.clone();
     assert!(first_ids.iter().all(|id| ids.contains(id)));
     assert!(second_ids.iter().all(|id| ids.contains(id)));
-    assert_eq!(required.as_slice().len(), 13);
+    assert_eq!(required.as_slice().len(), 7);
     assert!(run.stream.required_ready());
     let revision = run.stream.required.revision;
     let key = LoadingKey {
@@ -1023,37 +1023,43 @@ fn complete_probe_union_preserves_revision_and_fresh_cycles() {
         scene: 1,
         extent: [800, 600],
     };
-    let mut policy = LoadingDispatch::<2>::default();
-    let mut schedule = [ProbeSchedule::default(), ProbeSchedule::default()];
-    let mut probe = 0;
-    for frame in 1..=16 {
-        build(&mut required, [true, true]);
+    let mut policy = LoadingDispatch::<1>::default();
+    let mut schedule = ProbeSchedule::default();
+    for frame in 1..=8 {
+        build(&mut required, [true]);
         run.stream.select_required(required.as_slice());
         assert_eq!(run.stream.required.structures, ids);
         assert_eq!(run.stream.required.revision, revision);
         assert_eq!(required.as_slice().as_ptr(), storage);
-        policy.snapshot(key, frame, false, run.stream.required_ready(), revision, 3);
-        let job = schedule[probe].job();
+        policy.snapshot(key, frame, false, run.stream.required_ready(), revision, 1);
+        let job = schedule.job();
         if job == ProbeJob::Face(0) {
-            policy.capture_started(key, frame, probe);
+            policy.capture_started(key, frame, 0);
         }
-        schedule[probe].complete(job).unwrap();
+        schedule.complete(job).unwrap();
         if job == ProbeJob::RemainingMipsAndPublish {
-            policy.publication_validated(key, probe);
-            probe = (probe + 1) % 2;
+            policy.publication_validated(key, 0);
         }
-        assert_eq!(policy.fresh(key, revision, 3), frame == 16);
+        assert_eq!(policy.fresh(key, revision, 1), frame == 8);
     }
     let mut presented = PresentedFrames::default();
-    assert!(!presented.observe(key.session, key.scene, 16, 16));
-    assert!(!presented.observe(key.session, key.scene, 17, 17));
-    assert!(presented.observe(key.session, key.scene, 18, 18));
-    build(&mut required, [true, false]);
-    assert_eq!(required.as_slice().len(), 7);
+    assert!(!presented.observe(key.session, key.scene, 8, 8));
+    assert!(!presented.observe(key.session, key.scene, 9, 9));
+    assert!(presented.observe(key.session, key.scene, 10, 10));
+    required.reset(seed);
+    required
+        .append_probe_faces(&[true], |_, _| Ok(first))
+        .unwrap();
     run.stream.select_required(required.as_slice());
     assert_ne!(run.stream.required.revision, revision);
-    policy.snapshot(key, 19, false, true, run.stream.required.revision, 1);
+    policy.snapshot(key, 11, false, true, run.stream.required.revision, 1);
     assert!(!policy.fresh(key, run.stream.required.revision, 1));
+    build(&mut required, [false]);
+    assert_eq!(required.as_slice().len(), 1);
+    run.stream.select_required(required.as_slice());
+    assert_ne!(run.stream.required.revision, revision);
+    policy.snapshot(key, 12, false, true, run.stream.required.revision, 0);
+    assert!(policy.fresh(key, run.stream.required.revision, 0));
     while required.as_slice().len() < REQUIRED_VIEW_CAPACITY {
         required.push(seed).unwrap();
     }

@@ -106,7 +106,7 @@ fn fragment(
 #ifdef VERTEX_TANGENTS
     @location(8) world_bitangent: vec3<f32>,
 #endif
-    @location(9) @interpolate(flat) source_renderer: vec3<f32>,
+    @location(9) @interpolate(flat) source_renderer: vec2<f32>,
     @location(10) source_fog: f32,
     @location(11) source_screen: vec4<f32>,
 #ifdef SOURCE_FORWARD_ADD
@@ -182,7 +182,7 @@ fn fragment(
     var light: vec3<f32>;
 #ifdef SOURCE_FORWARD_ADD
     let view_depth = -(mesh_view_bindings::view.view_from_world * in.world_position).z;
-    let receive_shadows = (u32(source_renderer.z) & 2u) != 0u;
+    let receive_shadows = (u32(source_renderer.y) & 2u) != 0u;
     let sun_attenuation = direct_attenuation(in.world_position.xyz,source_screen.xy/source_screen.w,view_depth,receive_shadows);
     light = source_brdf(diffuse,specular,smoothness,pbr.N,pbr.V,lighting.direction_to_sun.xyz)*lighting.sun_radiance.xyz*sun_attenuation;
     // Visit low bits first. Floating-point accumulation keeps source slot order.
@@ -229,7 +229,7 @@ fn fragment(
 #else
     light = diffuse * diffuse_sh(pbr.N) * occlusion;
     if !source_flag(7u) {
-        light += indirect_specular(specular,one_minus_reflectivity,smoothness,pbr.N,pbr.V,occlusion,source_renderer.xy);
+        light += indirect_specular(specular,one_minus_reflectivity,smoothness,pbr.N,pbr.V,occlusion,source_renderer.x);
     }
     // Glossy-off unity_IndirectSpecColor is RGB0 in the fixed source profile.
     if source_flag(3u) { light += sample_source(4u, uv, detail_uv, offset).rgb * source.emission.rgb; }
