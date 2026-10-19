@@ -51,7 +51,7 @@ Stopped at the user's request. Branch: `codex/inventory-clothing`.
 
 These 15 improvements are ordered from easiest to hardest, not by execution order. No performance gain is verified.
 Review each proposal against current source and profile evidence before implementation. Item 2 changes image quality and needs specific approval.
-Items 4 and 5 are implemented. Start profiling with items 3 or 7 for fidelity-preserving work, or item 1 for startup. This suggestion does not change the work order.
+Items 1 to 5, 7 to 9, and 14 are merged. Items 6, 10 to 13, and 15 are proposed.
 
 Use this prompt preamble for each item:
 
@@ -183,7 +183,8 @@ Effort estimates include developer work, builds, critical checks, and browser ve
     ```
 
 14. **Move terrain work to a Web Worker.**
-    Status: Proposed. Difficulty: Architectural. Estimate: 2–3 weeks. Owner: [terrain generation](../src/world/terrain.rs).
+    Status: Merged, not measured. Owners: [terrain crate](../crates/terrain/src/lib.rs), [worker](../web/terrain-worker.js), [client](../src/world/terrain.rs).
+    Tile meshes come from one Web Worker with a 42 KB WASM. Results match the old job bit for bit in native checks.
     Effect: Evaluate pure terrain data in one worker with its own WASM; keep engine ownership on the main thread.
     Prompt:
     ```text

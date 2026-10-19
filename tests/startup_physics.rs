@@ -155,7 +155,7 @@ fn installed_spawn_alignment_and_settling() {
     assert!(fixed_room(&run.stream, 1024, 0, 1024, true).unwrap());
     let mut roads = my_summer_slop::world::RoadIndex::new(
         my_summer_slop::world::RoadSequence::new(&reference.world, 42).unwrap(),
-        my_summer_slop::world::TerrainEvaluator::new(&reference.world, 42),
+        my_summer_slop::world::terrain_evaluator(&reference.world, 42),
     );
     roads.prepare(102);
     let frontier = roads.segment(101).unwrap().position();

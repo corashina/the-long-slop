@@ -22,7 +22,7 @@ try {
     if ($Full -or $WebTest) {
         $suites = if ($Full) {
             @('audio', 'loading', 'input', 'performance', 'save-storage', 'save-session',
-                'save-bridge', 'http-compression', 'serve', 'world-assets', 'scene-resolution')
+                'save-bridge', 'http-compression', 'serve', 'world-assets', 'scene-resolution', 'terrain')
         } else { $WebTest }
         $webFiles = @(foreach ($suite in $suites) {
             $file = "$root/tests/web/$suite.test.mjs"
@@ -43,9 +43,9 @@ try {
     } elseif ($Filter) {
         $checks += " && cargo test --locked --lib $Filter"
     } elseif ($Full) {
-        $checks += ' && cargo test --locked'
+        $checks += ' && cargo test --locked --workspace'
     }
-    $checks += ' && cargo check --locked --target wasm32-unknown-unknown --lib'
+    $checks += ' && cargo check --locked --target wasm32-unknown-unknown --workspace --lib'
 
     . "$PSScriptRoot/cargo-target.ps1"
     $cargoTarget = Get-CargoTargetDirectory $root

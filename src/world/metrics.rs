@@ -50,7 +50,6 @@ pub struct WorldMetrics {
     pub prepared_roads: u32,
     pub prepared_buildings: u32,
     pub last_road_work: usize,
-    pub last_terrain_work: usize,
 }
 
 /// Hash-table allocation bound includes spare buckets and control bytes.
