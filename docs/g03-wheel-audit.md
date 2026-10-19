@@ -2,9 +2,9 @@
 
 Date: 2026-10-19.
 Garage assembly fixes are implemented. Browser acceptance is deferred by request.
-Branch: `codex/g03-wheel-assembly`. Changes remain unmerged.
-Code base: `260476e92f5c48bedb700a71af278534a0f42107`.
-The supplied garage roadmap was copied into this worktree before the G03 edits.
+Implementation branch: `codex/g03-wheel-assembly`.
+Initial code base: `260476e92f5c48bedb700a71af278534a0f42107`.
+Integration includes the current master and its single-Lada runtime export.
 
 ## Source rules
 
@@ -15,10 +15,12 @@ Evidence comes from `Assembly-CSharp.cs` and the complete serialized source reco
 | --- | --- |
 | Assembly-CSharp.dll | `9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e` |
 | Assembly-CSharp.cs | `22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee` |
-| Runtime manifest | `20c89ef5c9e7ce2ae922f2dc6fa30d88eb3528a470a4e8b446655f9af6bc6ecb` |
+| Initial runtime manifest | `20c89ef5c9e7ce2ae922f2dc6fa30d88eb3528a470a4e8b446655f9af6bc6ecb` |
+
+The integration manifest SHA-256 is `f1a86a6c91448e2c1d07dd90dae273cc136546d0e39f3e1b5cef963b2f7c9a8d`.
 
 The Lada source identity is `level1:77839`.
-Existing Skoda content does not expand this task.
+The integration export contains only the garage Lada.
 
 | Hub slot source | Rim item | Tire item | Hubcap slot source | Tire slot source |
 | --- | --- | --- | --- | --- |
@@ -68,7 +70,7 @@ These values do not establish source driving response.
 | `tests/wheel_assembly.rs` | Critical identity, condition, mass, collision, transform, and repeated-cycle checks. |
 | `tests/wheel_input.rs` | Critical source target, input order, tire swap, hubcap mass, and rejection ownership checks. |
 | `tests/web/input.test.mjs` | Check that X no longer sets an input bit. |
-| `docs/roadmap.md` | Recorded G03 terminal results, deferred browser acceptance, and the clarified measurement rule. |
+| `docs/roadmap.md` | Removed the completed G03 implementation row. Kept wheel browser acceptance under G16 and clarified the measurement rule. |
 
 The assembly transactions preserve the held item and carry constraint when validation rejects an action.
 Tire slot removal resolves the currently attached tire rather than the original serialized tire.
@@ -92,7 +94,7 @@ The input test also uses the garage spare tire, item 231, on Lada rim 46.
 | Explicit `wheel_assembly` export test | Passed. Twelve wheel cycles. |
 | Explicit `wheel_input` export test | Passed. Source rays, F input order, tire swap, rejected actions, mass, and conditions. |
 | Native `fresh_session` target | Two passed. One export test ignored. |
-| Web `input`, `save-session`, and `save-bridge` | Thirteen passed. |
+| Web `input`, `save-session`, `save-bridge`, and `menu` | Sixteen passed after integration. |
 | JavaScript syntax checks | Passed for `input.js` and `feedback.js`. |
 | WASM library compile check | Passed. Exit code 0. |
 | Formatting and whitespace checks | Passed. |
@@ -120,7 +122,7 @@ The other targeted commands are:
 
 ```powershell
 ./scripts/check.ps1 -Test fresh_session
-./scripts/check.ps1 -WebTest input,save-session,save-bridge
+./scripts/check.ps1 -WebTest input,save-session,save-bridge,menu
 node --check web/input.js
 node --check web/feedback.js
 ```
@@ -128,7 +130,8 @@ node --check web/feedback.js
 The session check also checks formatting and compiles the WASM library.
 Logs and source records are summarized in `.cache/g03/`.
 The baseline failure log is `wheel-audit-before-fix.log`.
-Current logs are `wheel-final-native.log`, `wheel-input-final.log`, `session-wasm-final.log`, and `web-final.log`.
+Initial logs are `wheel-final-native.log`, `wheel-input-final.log`, `session-wasm-final.log`, and `web-final.log`.
+Integration logs are `merge-native-wasm.log` and `merge-web.log`.
 
 ## Deferred acceptance
 
