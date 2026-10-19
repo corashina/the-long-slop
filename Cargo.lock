@@ -3088,6 +3088,7 @@ dependencies = [
  "console_error_panic_hook",
  "gltf",
  "js-sys",
+ "naga",
  "rapier3d",
  "serde",
  "serde_json",

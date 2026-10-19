@@ -1615,6 +1615,11 @@ impl AsBindGroup for SourceReceiver {
             ),
         )
         .to_vec();
+        for entry in &mut entries {
+            if matches!(entry.binding, 100 | 106) {
+                entry.visibility = ShaderStages::VERTEX_FRAGMENT;
+            }
+        }
         entries
     }
 }

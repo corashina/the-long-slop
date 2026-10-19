@@ -133,7 +133,11 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 9. **Select local lights per object.**
-   Status: Proposed. Difficulty: Hard. Estimate: 4–7 days. Owner: [surface shader](../web/assets/shaders/source_surface.wgsl).
+   Status: Implemented on isolated branch `codex/object-local-lights`. Runtime acceptance and performance remain unverified.
+   Owner: [surface shader](../web/assets/shaders/source_surface.wgsl).
+   The additive vertex pass builds a conservative 64-bit mask from full renderer bounds.
+   Selected lights keep source slot order. Deformed meshes retain all eligible local lights.
+   See the [implementation and check note](performance/2026-10-19-object-local-lights.md).
    Effect: Skip only local lights that cannot affect an object's full bounds.
    Prompt:
    ```text
