@@ -1,7 +1,7 @@
 # More worker tasks
 
 Date: 2026-10-19.
-Status: design approved in chat. Written spec awaits review.
+Status: written spec approved by the user on 2026-10-19.
 Base: `738ce8b2b907491725c52b3a917c42f552ac9174`.
 Branch: `codex/more-worker-tasks`.
 
