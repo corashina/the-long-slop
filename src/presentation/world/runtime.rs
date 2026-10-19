@@ -139,6 +139,8 @@ impl WorldPresentation<'_, '_> {
         required_views: &[crate::world::RequiredView],
         budget_ms: f64,
     ) -> Result<(), ReferenceError> {
+        let mut timer =
+            crate::world::stream_profile::Timer::new(crate::world::stream_profile::Stage::Cleanup);
         super::preflight::configure_staging(stream, &reference.file_catalog)?;
         let mut failure = self
             .fixed
@@ -197,6 +199,7 @@ impl WorldPresentation<'_, '_> {
             .ok_or_else(|| ReferenceError("Fixed lighting control accounting".into()))?;
         stream.set_presentation_allocation(controls)?;
         self.allocation.lighting_cpu = lighting_cpu;
+        timer.next(crate::world::stream_profile::Stage::FixedInputs);
         if let Err(error) = self.fixed.prepare_metadata(
             stream,
             &mut self.allocation.fixed,
@@ -224,6 +227,7 @@ impl WorldPresentation<'_, '_> {
                 failure.get_or_insert(error);
             }
         }
+        timer.next(crate::world::stream_profile::Stage::Pipelines);
         if let Err(error) = self.pipelines.prepare(stream) {
             failure.get_or_insert(error);
         }
@@ -233,6 +237,7 @@ impl WorldPresentation<'_, '_> {
             Vec3::from_array(stream.origin.offset.map(|v| v as f32)),
             time,
         );
+        timer.next(crate::world::stream_profile::Stage::PrimaryTextures);
         if let Err(error) = self.materials.cache.prepare_world_primary(
             stream,
             &self.server,
@@ -242,6 +247,7 @@ impl WorldPresentation<'_, '_> {
         ) {
             failure.get_or_insert(error);
         }
+        timer.next(crate::world::stream_profile::Stage::DeferredTextures);
         if let Err(error) = self.materials.cache.prepare_world_deferred(
             stream,
             &self.server,
@@ -250,6 +256,7 @@ impl WorldPresentation<'_, '_> {
         ) {
             failure.get_or_insert(error);
         }
+        timer.next(crate::world::stream_profile::Stage::Prototypes);
         if let Err(error) = self.prototypes.prepare(
             stream,
             reference,
@@ -261,8 +268,10 @@ impl WorldPresentation<'_, '_> {
         ) {
             failure.get_or_insert(error);
         }
+        timer.next(crate::world::stream_profile::Stage::Stream);
         stream.prepare(budget_ms);
         stream.select_required(required_views);
+        timer.next(crate::world::stream_profile::Stage::MaterialRetirement);
         while let Some(source) = self.prototypes.take_retired() {
             self.allocation.retired_materials.push(source);
         }
@@ -364,6 +373,7 @@ impl WorldPresentation<'_, '_> {
         if let Some(error) = stream.frame().failure {
             return Err(ReferenceError(error.to_owned()));
         }
+        timer.next(crate::world::stream_profile::Stage::Descriptors);
         self.surfaces
             .request_descriptors(stream, reference, &mut self.prototypes)?;
         self.instances
@@ -373,6 +383,7 @@ impl WorldPresentation<'_, '_> {
         if !self.fixed.pipeline_inputs_ready() {
             return Ok(());
         }
+        timer.next(crate::world::stream_profile::Stage::Bindings);
         self.surfaces.prepare_bindings(
             stream,
             reference,
@@ -382,6 +393,7 @@ impl WorldPresentation<'_, '_> {
             &mut self.materials.primary,
             &mut self.terrain,
         )?;
+        timer.next(crate::world::stream_profile::Stage::Instances);
         self.instances.prepare(
             stream,
             reference,
@@ -396,6 +408,7 @@ impl WorldPresentation<'_, '_> {
             &mut self.commands,
             view,
         )?;
+        timer.next(crate::world::stream_profile::Stage::Lods);
         self.instances.select_lods(
             reference,
             lod_view,
@@ -403,12 +416,14 @@ impl WorldPresentation<'_, '_> {
             &mut self.materials,
             &mut self.grass,
         );
+        timer.next(crate::world::stream_profile::Stage::Surface);
         self.surfaces.prepare_surface(
             stream,
             &mut self.meshes,
             &mut self.pipelines,
             &self.fixed,
         )?;
+        timer.next(crate::world::stream_profile::Stage::Lamps);
         let lamps = super::lamps::source_lamp_admission(
             &stream.frame(),
             stream.required_content().lights,
@@ -424,10 +439,12 @@ impl WorldPresentation<'_, '_> {
         a.objects = a.objects.saturating_sub(old.2) + lamps.2;
         stream.set_presentation_allocation(a)?;
         self.allocation.lamps = lamps;
+        timer.next(crate::world::stream_profile::Stage::Publication);
         // Light admission and complete renderer preparation precede collision mutation.
         if let Some(required) = self.lights.road_lamps.admitted_lights() {
             stream.publish(physics, required)?;
         }
+        timer.next(crate::world::stream_profile::Stage::Supplies);
         stream.sync_supplies(
             reference,
             &mut area.items,
@@ -435,12 +452,14 @@ impl WorldPresentation<'_, '_> {
             physics,
             wheels,
         )?;
+        timer.next(crate::world::stream_profile::Stage::SurfaceSync);
         self.surfaces.sync(
             &stream.frame(),
             &mut self.commands,
             &mut self.meshes,
             &mut self.roots,
         )?;
+        timer.next(crate::world::stream_profile::Stage::InstanceSync);
         self.instances.sync(
             stream,
             reference,
@@ -450,6 +469,7 @@ impl WorldPresentation<'_, '_> {
             &mut self.roots,
             &mut self.materials,
         )?;
+        timer.next(crate::world::stream_profile::Stage::LampSync);
         super::lamps::sync_source_lamps(
             &stream.frame(),
             enabled,
@@ -457,6 +477,7 @@ impl WorldPresentation<'_, '_> {
             &mut self.commands,
             &mut self.roots,
         )?;
+        timer.next(crate::world::stream_profile::Stage::Writers);
         self.instances
             .request_writers(stream, reference, &mut self.writers, &self.meshes)?;
         if !self.allocation.writers_bound && self.imported.bound {
@@ -501,6 +522,7 @@ impl WorldPresentation<'_, '_> {
         }
         self.writers.prepare(stream, &self.meshes)?;
         // Existing expansions must release their slots even when a new writer is pending.
+        timer.next(crate::world::stream_profile::Stage::Grass);
         self.grass.prepare(
             stream,
             self.writers.ready()?,
@@ -512,7 +534,9 @@ impl WorldPresentation<'_, '_> {
         )?;
         self.instances
             .request_grass(stream, &mut self.grass, view)?;
+        timer.next(crate::world::stream_profile::Stage::Capture);
         stream.capture_changes(reference, &mut area.items, &area.interaction, physics);
+        timer.next(crate::world::stream_profile::Stage::FinalCleanup);
         stream.retire_structures(physics, &mut area.items, &mut area.interaction, wheels);
         self.instances.retire(
             stream,

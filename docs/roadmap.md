@@ -109,7 +109,10 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 6. **Split expensive streaming steps.**
-   Status: Proposed. Difficulty: Hard. Estimate: 3–5 days. Owner: [world runtime](../src/presentation/world/runtime.rs).
+   Status: Profiler implemented on `codex/streaming-step-budget`, not merged. Stage split remains pending.
+   Driving measurements are blocked by mouse capture. Load also produced a renderer panic.
+   Checks and profiling commands: [Streaming stage measurements](performance/2026-10-19-streaming-steps.md).
+   Difficulty: Hard. Estimate: 3–5 days. Owner: [world runtime](../src/presentation/world/runtime.rs).
    Effect: Bound measured long driving stages as resumable work within the current frame budget.
    Prompt:
    ```text

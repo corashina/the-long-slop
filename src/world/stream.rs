@@ -1237,7 +1237,10 @@ impl WorldStream {
         }
     }
     pub fn prepare(&mut self, budget_ms: f64) {
+        let mut timer =
+            super::stream_profile::Timer::new(super::stream_profile::Stage::StreamDescriptors);
         self.prepare_descriptors(budget_ms);
+        timer.next(super::stream_profile::Stage::StreamGeometry);
         self.prepare_geometry();
     }
     fn prepare_startup(&mut self) {
@@ -2100,6 +2103,7 @@ impl WorldStream {
         self.next_road += 1;
     }
     fn prepare_road(&mut self) {
+        let _timer = super::stream_profile::Timer::new(super::stream_profile::Stage::Road);
         if self.available_external_jobs() == 0 {
             return;
         }
@@ -2177,6 +2181,7 @@ impl WorldStream {
         })
     }
     fn prepare_terrain(&mut self) {
+        let _timer = super::stream_profile::Timer::new(super::stream_profile::Stage::Terrain);
         if self.terrain_work.is_none()
             && (self.available_external_jobs() == 0 || !self.can_request_independent(1))
         {
