@@ -62,7 +62,9 @@ pub(super) fn bind(
             let mut id = ColliderId((physics.rapier().colliders[*handle].user_data >> 64) as u32);
             if id.0 == 0 {
                 id = interaction.allocate_generated_collider()?;
-                physics.rapier_mut().colliders[*handle].user_data |= (id.0 as u128) << 64;
+                physics.edit_collider(*handle, |collider| {
+                    collider.user_data |= (id.0 as u128) << 64;
+                });
             }
             shapes.push((id, *handle));
         }

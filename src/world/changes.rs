@@ -432,22 +432,21 @@ pub(crate) fn restore_motion(
     physics: &mut crate::vehicle::PhysicsWorld,
 ) {
     if let Some(item) = items.get(id) {
-        if let Some(body) = item
-            .body
-            .and_then(|b| physics.rapier_mut().bodies.get_mut(b))
-        {
-            body.set_position(
-                crate::vehicle::to_rapier(item.pose)
-                    * crate::vehicle::to_rapier(item.local_pose).inverse(),
-                false,
-            );
-            body.set_linvel(snapshot.linear_velocity.into(), false);
-            body.set_angvel(snapshot.angular_velocity.into(), false);
-            if snapshot.sleeping {
-                body.sleep();
-            } else {
-                body.wake_up(true);
-            }
+        if let Some(handle) = item.body {
+            physics.try_edit_body(handle, |body| {
+                body.set_position(
+                    crate::vehicle::to_rapier(item.pose)
+                        * crate::vehicle::to_rapier(item.local_pose).inverse(),
+                    false,
+                );
+                body.set_linvel(snapshot.linear_velocity.into(), false);
+                body.set_angvel(snapshot.angular_velocity.into(), false);
+                if snapshot.sleeping {
+                    body.sleep();
+                } else {
+                    body.wake_up(true);
+                }
+            });
         }
     }
 }

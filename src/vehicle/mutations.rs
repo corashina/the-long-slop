@@ -1,0 +1,191 @@
+use super::PhysicsWorld;
+use rapier3d::control::{CharacterCollision, KinematicCharacterController};
+#[cfg(test)]
+use rapier3d::math::Vector;
+use rapier3d::parry::shape::Shape;
+use rapier3d::prelude::{
+    Collider, ColliderHandle, ColliderSet, GenericJoint, ImpulseJoint, ImpulseJointHandle,
+    QueryFilter, QueryPipelineMut, RigidBody, RigidBodyHandle,
+};
+
+impl PhysicsWorld {
+    pub fn edit_body<R>(
+        &mut self,
+        handle: RigidBodyHandle,
+        edit: impl FnOnce(&mut RigidBody) -> R,
+    ) -> R {
+        let body = self
+            .physics
+            .bodies
+            .get_mut(handle)
+            .expect("Invalid rigid-body handle");
+        self.query_bounds.mark_body(handle);
+        edit(body)
+    }
+    pub fn try_edit_body<R>(
+        &mut self,
+        handle: RigidBodyHandle,
+        edit: impl FnOnce(&mut RigidBody) -> R,
+    ) -> Option<R> {
+        let body = self.physics.bodies.get_mut(handle)?;
+        self.query_bounds.mark_body(handle);
+        Some(edit(body))
+    }
+    pub fn edit_collider<R>(
+        &mut self,
+        handle: ColliderHandle,
+        edit: impl FnOnce(&mut Collider) -> R,
+    ) -> R {
+        let collider = self
+            .physics
+            .colliders
+            .get_mut(handle)
+            .expect("Invalid collider handle");
+        self.query_bounds.mark_collider(handle, true);
+        edit(collider)
+    }
+    pub fn try_edit_collider<R>(
+        &mut self,
+        handle: ColliderHandle,
+        edit: impl FnOnce(&mut Collider) -> R,
+    ) -> Option<R> {
+        let collider = self.physics.colliders.get_mut(handle)?;
+        self.query_bounds.mark_collider(handle, true);
+        Some(edit(collider))
+    }
+    pub fn insert_body(&mut self, body: impl Into<RigidBody>) -> RigidBodyHandle {
+        let handle = self.physics.insert_body(body);
+        self.query_bounds.mark_body(handle);
+        handle
+    }
+    pub fn insert(
+        &mut self,
+        body: impl Into<RigidBody>,
+        collider: impl Into<Collider>,
+    ) -> (RigidBodyHandle, ColliderHandle) {
+        let body = self.insert_body(body);
+        let collider = self.insert_collider_with_parent(collider, body);
+        (body, collider)
+    }
+    pub fn insert_collider(&mut self, collider: impl Into<Collider>) -> ColliderHandle {
+        let handle = self.physics.colliders.insert(collider);
+        self.query_bounds.mark_collider(handle, true);
+        handle
+    }
+    pub fn insert_collider_with_parent(
+        &mut self,
+        collider: impl Into<Collider>,
+        parent: RigidBodyHandle,
+    ) -> ColliderHandle {
+        let handle =
+            self.physics
+                .colliders
+                .insert_with_parent(collider, parent, &mut self.physics.bodies);
+        self.query_bounds.mark_body(parent);
+        self.query_bounds.mark_collider(handle, true);
+        handle
+    }
+    pub fn set_collider_parent(
+        &mut self,
+        collider: ColliderHandle,
+        parent: Option<RigidBodyHandle>,
+    ) {
+        if let Some(state) = self.physics.colliders.get(collider) {
+            if let Some(old) = state
+                .parent()
+                .filter(|parent| self.physics.bodies.contains(*parent))
+            {
+                self.query_bounds.mark_body(old);
+            }
+            if let Some(parent) = parent.filter(|parent| self.physics.bodies.contains(*parent)) {
+                self.query_bounds.mark_body(parent);
+            }
+            self.query_bounds.mark_collider(collider, false);
+        }
+        self.physics
+            .colliders
+            .set_parent(collider, parent, &mut self.physics.bodies);
+    }
+    pub fn remove_body(&mut self, body: RigidBodyHandle) -> Option<RigidBody> {
+        let state = self.physics.bodies.get(body)?;
+        for &collider in state.colliders() {
+            self.query_bounds.retire_collider(collider);
+        }
+        self.query_bounds.mark_body(body);
+        self.physics.remove_body(body)
+    }
+    pub fn recompute_body_mass(&mut self, body: RigidBodyHandle) {
+        let state = self
+            .physics
+            .bodies
+            .get_mut(body)
+            .expect("Invalid rigid-body handle");
+        self.query_bounds.mark_body(body);
+        state.recompute_mass_properties_from_colliders(&self.physics.colliders);
+    }
+    pub fn edit_bodies(
+        &mut self,
+        mut edit: impl FnMut(RigidBodyHandle, &mut RigidBody, &ColliderSet),
+    ) {
+        for (handle, body) in self.physics.bodies.iter_mut() {
+            self.query_bounds.mark_body(handle);
+            edit(handle, body, &self.physics.colliders);
+        }
+    }
+    pub fn edit_colliders(&mut self, mut edit: impl FnMut(ColliderHandle, &mut Collider)) {
+        for (handle, collider) in self.physics.colliders.iter_mut() {
+            self.query_bounds.mark_collider(handle, true);
+            edit(handle, collider);
+        }
+    }
+    pub fn insert_impulse_joint(
+        &mut self,
+        first: RigidBodyHandle,
+        second: RigidBodyHandle,
+        joint: impl Into<GenericJoint>,
+        wake_up: bool,
+    ) -> ImpulseJointHandle {
+        for body in [first, second] {
+            if self.physics.bodies.contains(body) {
+                self.query_bounds.mark_body(body);
+            }
+        }
+        self.physics
+            .impulse_joints
+            .insert(first, second, joint, wake_up)
+    }
+    pub fn remove_impulse_joint(
+        &mut self,
+        joint: ImpulseJointHandle,
+        wake_up: bool,
+    ) -> Option<ImpulseJoint> {
+        self.physics.impulse_joints.remove(joint, wake_up)
+    }
+    #[cfg(test)]
+    pub(super) fn set_gravity(&mut self, gravity: Vector) {
+        self.physics.gravity = gravity;
+    }
+    pub fn solve_character_collision_impulses(
+        &mut self,
+        controller: &KinematicCharacterController,
+        dt: f32,
+        filter: QueryFilter<'_>,
+        shape: &dyn Shape,
+        mass: f32,
+        collisions: &[CharacterCollision],
+    ) {
+        controller.solve_character_collision_impulses(
+            dt,
+            &mut QueryPipelineMut {
+                dispatcher: self.physics.narrow_phase.query_dispatcher(),
+                bvh: &self.query_bounds.bvh,
+                bodies: &mut self.physics.bodies,
+                colliders: &mut self.physics.colliders,
+                filter,
+            },
+            shape,
+            mass,
+            collisions,
+        );
+    }
+}

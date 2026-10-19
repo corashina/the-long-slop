@@ -1,3 +1,4 @@
+mod mutations;
 mod query_bounds;
 
 use query_bounds::QueryBounds;
@@ -107,24 +108,31 @@ impl PhysicsWorld {
         if poses.len() != reference.vehicles.len() {
             return Err(ReferenceError("Expected one pose per vehicle".into()));
         }
-        let mut physics = rapier3d::prelude::PhysicsWorld::new();
-        physics.integration_parameters.dt = FIXED_DT;
-        let mut vehicles = Vec::with_capacity(poses.len());
+        let mut physics = Self {
+            physics: rapier3d::prelude::PhysicsWorld::new(),
+            query_bounds: QueryBounds::default(),
+            chassis: Vec::with_capacity(poses.len()),
+            vehicles: Vec::with_capacity(poses.len()),
+            inactive_bodies: std::collections::HashSet::with_capacity(
+                reference.bodies.len() + reference.parts.len() + reference.wheel_parts.len(),
+            ),
+        };
+        physics.physics.integration_parameters.dt = FIXED_DT;
         for (vehicle, pose) in reference.vehicles.iter().zip(poses) {
-            vehicles.push(VehicleBody::new(reference, vehicle, *pose, &mut physics)?);
+            let vehicle = VehicleBody::new(reference, vehicle, *pose, &mut physics)?;
+            physics.chassis.push(vehicle.chassis);
+            physics.vehicles.push(vehicle);
         }
-        let mut query_bounds = QueryBounds::default();
-        query_bounds.refresh(&mut physics);
-        let chassis: Vec<_> = vehicles.iter().map(|v| v.chassis).collect();
-        for vehicle in &mut vehicles {
+        physics.refresh_queries();
+        for vehicle in &mut physics.vehicles {
             // Reserve Rapier's four-wheel scratch buffers before the frame loop.
             vehicle.controller.update_vehicle(
                 FIXED_DT,
                 QueryPipelineMut {
-                    dispatcher: physics.narrow_phase.query_dispatcher(),
-                    bvh: &query_bounds.bvh,
-                    bodies: &mut physics.bodies,
-                    colliders: &mut physics.colliders,
+                    dispatcher: physics.physics.narrow_phase.query_dispatcher(),
+                    bvh: &physics.query_bounds.bvh,
+                    bodies: &mut physics.physics.bodies,
+                    colliders: &mut physics.physics.colliders,
                     filter: QueryFilter::default()
                         .exclude_sensors()
                         .exclude_rigid_body(vehicle.chassis),
@@ -135,15 +143,7 @@ impl PhysicsWorld {
                 .wheels_mut()
                 .copy_from_slice(&vehicle.resting_wheels);
         }
-        Ok(Self {
-            physics,
-            query_bounds,
-            chassis,
-            vehicles,
-            inactive_bodies: std::collections::HashSet::with_capacity(
-                reference.bodies.len() + reference.parts.len() + reference.wheel_parts.len(),
-            ),
-        })
+        Ok(physics)
     }
 }
 
@@ -152,7 +152,7 @@ impl VehicleBody {
         reference: &ReferenceManifest,
         vehicle: &VehicleReference,
         pose: VehiclePose,
-        physics: &mut rapier3d::prelude::PhysicsWorld,
+        physics: &mut PhysicsWorld,
     ) -> Result<Self, ReferenceError> {
         let source_body = reference
             .bodies
@@ -185,19 +185,19 @@ impl VehicleBody {
                 ))
                 .density(if collider.sensor { 0.0 } else { 1.0 })
                 .user_data(VEHICLE_COLLIDER_FLAG | ((id.0 as u128) << 64));
-            physics
-                .colliders
-                .insert_with_parent(builder, chassis, &mut physics.bodies);
+            physics.insert_collider_with_parent(builder, chassis);
         }
-        physics.bodies[chassis].recompute_mass_properties_from_colliders(&physics.colliders);
-        let geometry_mass = physics.bodies[chassis].mass();
+        physics.recompute_body_mass(chassis);
+        let geometry_mass = physics.rapier().bodies[chassis].mass();
         if geometry_mass <= 0.0 || geometry_mass >= vehicle.mass_kg {
             return Err(ReferenceError(
                 "Invalid car collision volume or mass".into(),
             ));
         }
-        physics.bodies[chassis].set_additional_mass(vehicle.mass_kg - geometry_mass, true);
-        physics.bodies[chassis].recompute_mass_properties_from_colliders(&physics.colliders);
+        physics.edit_body(chassis, |body| {
+            body.set_additional_mass(vehicle.mass_kg - geometry_mass, true)
+        });
+        physics.recompute_body_mass(chassis);
         let mut controller = DynamicRayCastVehicleController::new(chassis);
         controller.index_forward_axis = 2;
         let mut wheel_records = Vec::with_capacity(4);
@@ -323,6 +323,7 @@ impl PhysicsWorld {
             || input.steer != 0.0
             || handbrake != vehicle.last_handbrake
         {
+            self.query_bounds.mark_body(vehicle.chassis);
             self.physics.bodies[vehicle.chassis].wake_up(true);
         }
         vehicle.last_handbrake = handbrake;
@@ -401,6 +402,7 @@ impl PhysicsWorld {
     pub fn step_physics(&mut self) {
         self.physics.step();
         self.query_bounds.refresh(&mut self.physics);
+        self.query_bounds.clear_step();
     }
 
     pub fn capture_save(
@@ -478,6 +480,7 @@ impl PhysicsWorld {
             .iter()
             .map(|handle| self.physics.colliders[*handle].mass())
             .sum();
+        self.query_bounds.mark_body(vehicle.chassis);
         let body = &mut self.physics.bodies[vehicle.chassis];
         body.set_additional_mass((mass_kg - geometry_mass).max(0.0), true);
         body.recompute_mass_properties_from_colliders(&self.physics.colliders);
@@ -549,16 +552,13 @@ impl PhysicsWorld {
             vehicle.active_slots.push(slot);
         }
         vehicle.controller = controller;
+        self.query_bounds.mark_body(vehicle.chassis);
         self.physics.bodies[vehicle.chassis].wake_up(true);
         Ok(())
     }
 
     pub fn rapier(&self) -> &rapier3d::prelude::PhysicsWorld {
         &self.physics
-    }
-
-    pub fn rapier_mut(&mut self) -> &mut rapier3d::prelude::PhysicsWorld {
-        &mut self.physics
     }
 
     pub fn chassis_handle(&self, index: usize) -> RigidBodyHandle {
@@ -583,15 +583,6 @@ impl PhysicsWorld {
         }
     }
 
-    pub fn queries_mut<'a>(&'a mut self, filter: QueryFilter<'a>) -> QueryPipelineMut<'a> {
-        QueryPipelineMut {
-            dispatcher: self.physics.narrow_phase.query_dispatcher(),
-            bvh: &self.query_bounds.bvh,
-            bodies: &mut self.physics.bodies,
-            colliders: &mut self.physics.colliders,
-            filter,
-        }
-    }
     pub fn snapshot(&self, index: usize) -> VehicleSnapshot {
         let vehicle = &self.vehicles[index];
         let body = &self.physics.bodies[vehicle.chassis];
@@ -666,6 +657,7 @@ impl PhysicsWorld {
 
     pub fn reset(&mut self, index: usize, pose: VehiclePose) {
         let vehicle = &mut self.vehicles[index];
+        self.query_bounds.mark_body(vehicle.chassis);
         let body = &mut self.physics.bodies[vehicle.chassis];
 
         body.set_position(to_rapier(pose), true);
@@ -707,7 +699,7 @@ impl PhysicsWorld {
         .expect("Static mesh must contain valid triangles")
         .friction(0.8)
         .translation(Vector::from_array(position));
-        let handle = self.physics.colliders.insert(mesh);
+        let handle = self.insert_collider(mesh);
         self.refresh_queries();
         handle
     }
@@ -765,7 +757,7 @@ impl PhysicsWorld {
                 "Source collision allocation exceeds budget: {bytes}"
             )));
         }
-        let handle = self.physics.colliders.insert(mesh);
+        let handle = self.insert_collider(mesh);
         self.refresh_queries();
         Ok((handle, bytes))
     }
@@ -778,8 +770,20 @@ impl PhysicsWorld {
                 .iter()
                 .any(|wheel| wheel.raycast_info().ground_object == Some(handle))
             {
+                self.query_bounds.mark_body(vehicle.chassis);
                 self.physics.bodies[vehicle.chassis].wake_up(true);
             }
+        }
+        if self.physics.colliders.contains(handle) {
+            self.query_bounds.retire_collider(handle);
+        }
+        if let Some(parent) = self
+            .physics
+            .colliders
+            .get(handle)
+            .and_then(|collider| collider.parent())
+        {
+            self.query_bounds.mark_body(parent);
         }
         self.physics.remove_collider(handle);
         self.refresh_queries();
@@ -791,10 +795,12 @@ impl PhysicsWorld {
             if self.inactive_bodies.contains(&handle) {
                 continue;
             }
+            self.query_bounds.mark_body(handle);
             body.set_translation(body.translation() - shift, false);
         }
-        for (_, collider) in self.physics.colliders.iter_mut() {
+        for (handle, collider) in self.physics.colliders.iter_mut() {
             if collider.parent().is_none() {
+                self.query_bounds.mark_collider(handle, false);
                 collider.set_translation(collider.translation() - shift);
             }
         }
@@ -804,7 +810,7 @@ impl PhysicsWorld {
     }
 
     pub fn insert_box(&mut self, center: [f32; 3], half_size: [f32; 3]) -> ColliderHandle {
-        let handle = self.physics.colliders.insert(
+        let handle = self.insert_collider(
             ColliderBuilder::cuboid(half_size[0], half_size[1], half_size[2])
                 .translation(Vector::from_array(center))
                 .friction(0.8),

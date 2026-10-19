@@ -186,7 +186,7 @@ fn transport_prepared(
         .sync(&mut area.items, physics)
         .expect("validated wheel bindings");
     if let Some(pose) = plan.player {
-        physics.rapier_mut().remove_body(area.player.body_handle());
+        physics.remove_body(area.player.body_handle());
         area.player = PlayerState::new(&reference.player, pose, physics);
         area.player.configure_seats(&reference.seats);
         area.interaction.bind_player_body(area.player.body_handle());

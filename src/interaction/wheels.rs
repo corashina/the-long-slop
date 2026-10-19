@@ -82,7 +82,7 @@ impl WheelAssemblies {
         self.bind(items, physics)?;
         for part in &mut self.parts {
             if let Some(body) = part.free_body {
-                physics.rapier_mut().bodies[body].set_enabled(false);
+                physics.edit_body(body, |body| body.set_enabled(false));
             }
             part.tire = None;
         }
@@ -692,9 +692,10 @@ impl WheelAssemblies {
                     handle,
                     inverse * *physics.rapier().colliders[handle].position(),
                 ));
-                let collider = &mut physics.rapier_mut().colliders[handle];
-                collider.user_data =
-                    (collider.user_data & !(u32::MAX as u128)) | (part.item.0 as u128 + 1);
+                physics.edit_collider(handle, |collider| {
+                    collider.user_data =
+                        (collider.user_data & !(u32::MAX as u128)) | (part.item.0 as u128 + 1);
+                });
             }
         }
         for (handle, collider) in physics.rapier().colliders.iter() {
@@ -732,8 +733,8 @@ impl WheelAssemblies {
         let chassis = physics.chassis_handle(self.slots[slot].vehicle);
         let velocity = physics.rapier().bodies[chassis].velocity_at_point(world.translation);
         let angular = physics.rapier().bodies[chassis].angvel();
-        physics.rapier_mut().bodies[body].set_linvel(velocity, true);
-        physics.rapier_mut().bodies[body].set_angvel(angular, true);
+        physics.edit_body(body, |body| body.set_linvel(velocity, true));
+        physics.edit_body(body, |body| body.set_angvel(angular, true));
         self.place_part(rim, body, Pose::IDENTITY, true, items, physics)?;
         items.get_mut(self.parts[rim].item).unwrap().location = ItemLocation::World;
         if let Some(tire) = self.parts[rim].tire {
@@ -805,7 +806,7 @@ impl WheelAssemblies {
             self.place_part(tire, chassis, Pose::IDENTITY, false, items, physics)?;
         }
         if let Some(body) = self.parts[rim].free_body {
-            physics.rapier_mut().bodies[body].set_enabled(false);
+            physics.edit_body(body, |body| body.set_enabled(false));
         }
         self.slots[slot].rim = Some(rim);
         items.get_mut(item).unwrap().location = ItemLocation::WheelSlot(id);
@@ -847,8 +848,8 @@ impl WheelAssemblies {
             .ok_or_else(|| error("Missing loose rim body"))?;
         let velocity = physics.rapier().bodies[rim_body].velocity_at_point(world.translation);
         let angular = physics.rapier().bodies[rim_body].angvel();
-        physics.rapier_mut().bodies[body].set_linvel(velocity, true);
-        physics.rapier_mut().bodies[body].set_angvel(angular, true);
+        physics.edit_body(body, |body| body.set_linvel(velocity, true));
+        physics.edit_body(body, |body| body.set_angvel(angular, true));
         self.place_part(tire, body, Pose::IDENTITY, true, items, physics)?;
         items.get_mut(self.parts[tire].item).unwrap().location = ItemLocation::World;
         self.parts[rim].tire = None;
@@ -897,7 +898,7 @@ impl WheelAssemblies {
         if let Some(old) = self.parts[tire].free_body
             && old != body
         {
-            physics.rapier_mut().bodies[old].set_enabled(false);
+            physics.edit_body(old, |body| body.set_enabled(false));
         }
         items.get_mut(tire_id).unwrap().location = ItemLocation::Attached(rim_id);
         self.parts[rim].tire = Some(tire);
@@ -914,15 +915,14 @@ impl WheelAssemblies {
         physics: &mut PhysicsWorld,
     ) -> RigidBodyHandle {
         let handle = *self.parts[part].free_body.get_or_insert_with(|| {
-            physics
-                .rapier_mut()
-                .insert_body(RigidBodyBuilder::dynamic().pose(world).ccd_enabled(true))
+            physics.insert_body(RigidBodyBuilder::dynamic().pose(world).ccd_enabled(true))
         });
-        let body = &mut physics.rapier_mut().bodies[handle];
-        body.set_enabled(true);
-        body.set_position(world, true);
-        body.reset_forces(true);
-        body.reset_torques(true);
+        physics.edit_body(handle, |body| {
+            body.set_enabled(true);
+            body.set_position(world, true);
+            body.reset_forces(true);
+            body.reset_torques(true);
+        });
         handle
     }
     fn place_part(
@@ -942,19 +942,17 @@ impl WheelAssemblies {
         state.pose = from_rapier(&(*physics.rapier().bodies[body].position() * local));
         let vehicle = physics.vehicle_of(body).is_some();
         for &(handle, pose) in &self.parts[part].colliders {
-            let world = physics.rapier_mut();
-            world
-                .colliders
-                .set_parent(handle, Some(body), &mut world.bodies);
-            let collider = &mut world.colliders[handle];
-            collider.set_position_wrt_parent(local * pose);
-            crate::vehicle::set_collider_enabled(collider, enabled);
-            collider.set_density(0.0);
-            if vehicle {
-                collider.user_data |= VEHICLE_COLLIDER_FLAG;
-            } else {
-                collider.user_data &= !VEHICLE_COLLIDER_FLAG;
-            }
+            physics.set_collider_parent(handle, Some(body));
+            physics.edit_collider(handle, |collider| {
+                collider.set_position_wrt_parent(local * pose);
+                crate::vehicle::set_collider_enabled(collider, enabled);
+                collider.set_density(0.0);
+                if vehicle {
+                    collider.user_data |= VEHICLE_COLLIDER_FLAG;
+                } else {
+                    collider.user_data &= !VEHICLE_COLLIDER_FLAG;
+                }
+            });
         }
         Ok(())
     }
@@ -984,9 +982,8 @@ impl WheelAssemblies {
                 })
                 .sum::<f32>();
         if self.parts[rim].last_mass != mass {
-            let world = physics.rapier_mut();
-            world.bodies[body].set_additional_mass(mass, true);
-            world.bodies[body].recompute_mass_properties_from_colliders(&world.colliders);
+            physics.edit_body(body, |body| body.set_additional_mass(mass, true));
+            physics.recompute_body_mass(body);
             self.parts[rim].last_mass = mass;
         }
     }
@@ -995,7 +992,7 @@ impl WheelAssemblies {
         for slot in &self.slots {
             let active = physics.body_active(physics.chassis_handle(slot.vehicle));
             if let Some(handle) = slot.sensor {
-                physics.rapier_mut().colliders[handle].set_enabled(active);
+                physics.edit_collider(handle, |collider| collider.set_enabled(active));
             }
         }
     }
@@ -1112,24 +1109,25 @@ impl WheelAssemblies {
             }
             if let Some(handle) = slot.sensor {
                 let world = to_rapier(snapshot.wheels[slot.index]) * slot.hub_to_mount;
-                let collider = &mut physics.rapier_mut().colliders[handle];
-                if !collider.is_enabled() {
-                    collider.set_enabled(true);
-                }
-                let item = slot
-                    .rim
-                    .map_or(slot.original_rim, |rim| self.parts[rim].item);
-                let mut data = (collider.user_data & !(SLOT_SENSOR_FLAG | u32::MAX as u128))
-                    | (item.0 as u128 + 1);
-                if slot.rim.is_none() {
-                    data |= SLOT_SENSOR_FLAG;
-                }
-                if collider.user_data != data {
-                    collider.user_data = data;
-                }
-                if *collider.position() != world {
-                    collider.set_position(world);
-                }
+                physics.edit_collider(handle, |collider| {
+                    if !collider.is_enabled() {
+                        collider.set_enabled(true);
+                    }
+                    let item = slot
+                        .rim
+                        .map_or(slot.original_rim, |rim| self.parts[rim].item);
+                    let mut data = (collider.user_data & !(SLOT_SENSOR_FLAG | u32::MAX as u128))
+                        | (item.0 as u128 + 1);
+                    if slot.rim.is_none() {
+                        data |= SLOT_SENSOR_FLAG;
+                    }
+                    if collider.user_data != data {
+                        collider.user_data = data;
+                    }
+                    if *collider.position() != world {
+                        collider.set_position(world);
+                    }
+                });
             }
         }
 

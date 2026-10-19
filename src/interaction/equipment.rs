@@ -37,12 +37,13 @@ impl EquipmentState {
                 .push((handle, physics.rapier().colliders[handle].is_enabled()));
         }
         for &(handle, _) in &self.colliders {
-            physics.rapier_mut().colliders[handle].set_enabled(false);
+            physics.edit_collider(handle, |collider| collider.set_enabled(false));
         }
-        let rb = &mut physics.rapier_mut().bodies[body];
-        rb.set_body_type(RigidBodyType::KinematicPositionBased, true);
-        rb.set_linvel(rapier3d::math::Vector::ZERO, false);
-        rb.set_angvel(rapier3d::math::Vector::ZERO, false);
+        physics.edit_body(body, |rb| {
+            rb.set_body_type(RigidBodyType::KinematicPositionBased, true);
+            rb.set_linvel(rapier3d::math::Vector::ZERO, false);
+            rb.set_angvel(rapier3d::math::Vector::ZERO, false);
+        });
         item.location = ItemLocation::Equipped;
         self.item = Some(id);
     }
@@ -53,9 +54,11 @@ impl EquipmentState {
     ) -> Option<ItemId> {
         let id = self.item.take()?;
         let item = items.get_mut(id).unwrap();
-        physics.rapier_mut().bodies[item.body.unwrap()].set_body_type(RigidBodyType::Dynamic, true);
+        physics.edit_body(item.body.unwrap(), |body| {
+            body.set_body_type(RigidBodyType::Dynamic, true)
+        });
         for &(handle, enabled) in &self.colliders {
-            physics.rapier_mut().colliders[handle].set_enabled(enabled);
+            physics.edit_collider(handle, |collider| collider.set_enabled(enabled));
         }
         self.colliders.clear();
         item.location = ItemLocation::World;
@@ -84,8 +87,9 @@ impl EquipmentState {
         let target = to_rapier(pose.anchor(self.anchor).expect("retained source hand"))
             * to_rapier(offset)
             * to_rapier(item.local_pose).inverse();
-        let body = &mut physics.rapier_mut().bodies[item.body.unwrap()];
-        body.set_position(target, false);
-        body.set_next_kinematic_position(target);
+        physics.edit_body(item.body.unwrap(), |body| {
+            body.set_position(target, false);
+            body.set_next_kinematic_position(target);
+        });
     }
 }

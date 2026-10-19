@@ -135,12 +135,12 @@ impl GarageRuntime {
         self.wheels.sync(&mut self.area.items, &mut self.physics)?;
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, true);
-        let world = self.physics.rapier_mut();
-        for (_, body) in world.bodies.iter_mut() {
+
+        self.physics.edit_bodies(|_, body, colliders| {
             if body.is_dynamic() {
-                body.recompute_mass_properties_from_colliders(&world.colliders);
+                body.recompute_mass_properties_from_colliders(colliders);
             }
-        }
+        });
         for record in &pending.motion {
             let handle = match &record.identity {
                 BodyIdentity::Source { source } => {
@@ -151,14 +151,15 @@ impl GarageRuntime {
                 }
             };
             if let Some(handle) = handle.filter(|h| self.physics.body_active(*h)) {
-                let body = &mut self.physics.rapier_mut().bodies[handle];
-                body.set_linvel(record.linear_velocity.into(), false);
-                body.set_angvel(record.angular_velocity.into(), false);
-                if record.sleeping {
-                    body.sleep();
-                } else {
-                    body.wake_up(true);
-                }
+                self.physics.edit_body(handle, |body| {
+                    body.set_linvel(record.linear_velocity.into(), false);
+                    body.set_angvel(record.angular_velocity.into(), false);
+                    if record.sleeping {
+                        body.sleep();
+                    } else {
+                        body.wake_up(true);
+                    }
+                });
             }
         }
         if !pending.motion.is_empty() {
@@ -288,12 +289,12 @@ impl GarageRuntime {
         candidate.area.items.sync_poses(&candidate.physics);
         // Rapier defers collider and additional-mass updates until a step or recomputation.
         // Commit them while paused, before restoring motion and sleep.
-        let world = candidate.physics.rapier_mut();
-        for (_, body) in world.bodies.iter_mut() {
+
+        candidate.physics.edit_bodies(|_, body, colliders| {
             if body.is_dynamic() {
-                body.recompute_mass_properties_from_colliders(&world.colliders);
+                body.recompute_mass_properties_from_colliders(colliders);
             }
-        }
+        });
         // Mass and collider assembly may wake bodies. Restore velocities and sleep last.
         for record in saved
             .bodies
@@ -312,20 +313,21 @@ impl GarageRuntime {
                     })?,
             };
             if candidate.physics.body_active(handle) {
-                let body = &mut candidate.physics.rapier_mut().bodies[handle];
-                body.set_linvel(
-                    rapier3d::math::Vector::from_array(record.linear_velocity),
-                    false,
-                );
-                body.set_angvel(
-                    rapier3d::math::Vector::from_array(record.angular_velocity),
-                    false,
-                );
-                if record.sleeping {
-                    body.sleep();
-                } else {
-                    body.wake_up(true);
-                }
+                candidate.physics.edit_body(handle, |body| {
+                    body.set_linvel(
+                        rapier3d::math::Vector::from_array(record.linear_velocity),
+                        false,
+                    );
+                    body.set_angvel(
+                        rapier3d::math::Vector::from_array(record.angular_velocity),
+                        false,
+                    );
+                    if record.sleeping {
+                        body.sleep();
+                    } else {
+                        body.wake_up(true);
+                    }
+                });
             }
         }
         candidate

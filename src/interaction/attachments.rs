@@ -177,9 +177,9 @@ impl PlateAttachments {
             if let Some(damping) = p.reference.linear_damping {
                 builder = builder.linear_damping(damping);
             }
-            p.body = Some(physics.rapier_mut().insert_body(builder));
+            p.body = Some(physics.insert_body(builder));
             for s in &p.shapes {
-                physics.rapier_mut().colliders[s.handle.unwrap()].set_density(0.);
+                physics.edit_collider(s.handle.unwrap(), |collider| collider.set_density(0.));
             }
         }
         self.bound = true;
@@ -276,7 +276,9 @@ impl PlateAttachments {
         self.targets[self.plates[index].target.unwrap()]
             .members
             .push(item);
-        physics.rapier_mut().bodies[self.plates[index].body.unwrap()].set_enabled(false);
+        physics.edit_body(self.plates[index].body.unwrap(), |body| {
+            body.set_enabled(false)
+        });
         self.sync(items, physics)?;
         physics.refresh_queries();
         Ok(())
@@ -306,12 +308,13 @@ impl PlateAttachments {
         let body = p.body.unwrap();
         let velocity = physics.rapier().bodies[parent].velocity_at_point(pose.translation);
         let angular = physics.rapier().bodies[parent].angvel();
-        let b = &mut physics.rapier_mut().bodies[body];
-        b.set_position(pose, true);
-        b.set_enabled(true);
-        b.set_linvel(velocity, true);
-        b.set_angvel(angular, true);
-        b.set_gravity_scale(1., true);
+        physics.edit_body(body, |b| {
+            b.set_position(pose, true);
+            b.set_enabled(true);
+            b.set_linvel(velocity, true);
+            b.set_angvel(angular, true);
+            b.set_gravity_scale(1., true);
+        });
         self.targets[p.target.unwrap()]
             .members
             .retain(|id| *id != item);
@@ -322,8 +325,8 @@ impl PlateAttachments {
         s.pose = from_rapier(&pose);
         s.local_pose = from_rapier(&Pose::IDENTITY);
         Self::move_shapes(p, body, pose, physics);
-        let world = physics.rapier_mut();
-        world.bodies[body].recompute_mass_properties_from_colliders(&world.colliders);
+
+        physics.recompute_body_mass(body);
         physics.refresh_queries();
         Ok(item)
     }
@@ -332,16 +335,22 @@ impl PlateAttachments {
         let vehicle = physics.vehicle_of(body).is_some();
         for s in &p.shapes {
             let h = s.handle.unwrap();
-            let world = physics.rapier_mut();
-            if world.colliders[h].parent() != Some(body) {
-                world.colliders.set_parent(h, Some(body), &mut world.bodies);
+
+            if physics.rapier().colliders[h].parent() != Some(body) {
+                physics.set_collider_parent(h, Some(body));
             }
-            world.colliders[h].set_position_wrt_parent(inverse * pose * s.local);
-            world.colliders[h].set_enabled(s.enabled);
+            physics.edit_collider(h, |collider| {
+                collider.set_position_wrt_parent(inverse * pose * s.local)
+            });
+            physics.edit_collider(h, |collider| collider.set_enabled(s.enabled));
             if vehicle {
-                world.colliders[h].user_data |= VEHICLE_COLLIDER_FLAG;
+                physics.edit_collider(h, |collider| {
+                    collider.user_data |= VEHICLE_COLLIDER_FLAG;
+                });
             } else {
-                world.colliders[h].user_data &= !VEHICLE_COLLIDER_FLAG;
+                physics.edit_collider(h, |collider| {
+                    collider.user_data &= !VEHICLE_COLLIDER_FLAG;
+                });
             }
         }
     }

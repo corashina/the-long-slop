@@ -8,6 +8,47 @@ pub(super) struct QueryBounds {
     pub bvh: Bvh,
     states: Vec<Option<ColliderState>>,
     changed: Vec<(ColliderHandle, Pose)>,
+    pending_bodies: HandleQueue<RigidBodyHandle>,
+    pending_colliders: HandleQueue<ColliderHandle>,
+    geometry_changed: Vec<bool>,
+    removals: HandleQueue<ColliderHandle>,
+    step_bodies: HandleQueue<RigidBodyHandle>,
+    step_colliders: HandleQueue<ColliderHandle>,
+}
+
+#[derive(Default)]
+struct HandleQueue<H> {
+    handles: Vec<H>,
+    markers: Vec<Option<(H, usize)>>,
+}
+impl<H: Copy + Eq> HandleQueue<H> {
+    fn mark(&mut self, handle: H, slot: usize) -> usize {
+        if self.markers.len() <= slot {
+            self.markers.resize_with(slot + 1, || None);
+        }
+        if let Some((previous, index)) = self.markers[slot] {
+            if previous == handle {
+                return index;
+            }
+        }
+        let index = self.handles.len();
+        self.handles.push(handle);
+        self.markers[slot] = Some((handle, index));
+        index
+    }
+    fn clear(&mut self, slot: impl Fn(H) -> usize) {
+        for &handle in &self.handles {
+            let marker = &mut self.markers[slot(handle)];
+            if marker.is_some_and(|(previous, _)| previous == handle) {
+                *marker = None;
+            }
+        }
+        self.handles.clear();
+    }
+    fn retained_bytes(&self) -> usize {
+        self.handles.capacity() * std::mem::size_of::<H>()
+            + self.markers.capacity() * std::mem::size_of::<Option<(H, usize)>>()
+    }
 }
 
 struct ColliderState {
@@ -20,8 +61,60 @@ struct ColliderState {
 }
 
 impl QueryBounds {
+    pub(super) fn mark_body(&mut self, body: RigidBodyHandle) {
+        let slot = body.into_raw_parts().0 as usize;
+        self.pending_bodies.mark(body, slot);
+        self.step_bodies.mark(body, slot);
+    }
+    pub(super) fn mark_collider(&mut self, collider: ColliderHandle, geometry_changed: bool) {
+        let slot = collider.into_raw_parts().0 as usize;
+        let index = self.pending_colliders.mark(collider, slot);
+        if self.geometry_changed.len() <= index {
+            self.geometry_changed.push(geometry_changed);
+        } else {
+            self.geometry_changed[index] |= geometry_changed;
+        }
+        self.step_colliders.mark(collider, slot);
+    }
+    pub(super) fn retire_collider(&mut self, collider: ColliderHandle) {
+        self.removals
+            .mark(collider, collider.into_raw_parts().0 as usize);
+    }
+    fn clear_pending(&mut self) {
+        self.pending_bodies.clear(|h| h.into_raw_parts().0 as usize);
+        self.pending_colliders
+            .clear(|h| h.into_raw_parts().0 as usize);
+        self.removals.clear(|h| h.into_raw_parts().0 as usize);
+        self.geometry_changed.clear();
+    }
+    pub(super) fn clear_step(&mut self) {
+        self.step_bodies.clear(|h| h.into_raw_parts().0 as usize);
+        self.step_colliders.clear(|h| h.into_raw_parts().0 as usize);
+    }
+    #[cfg(test)]
+    pub(super) fn pending_counts(&self) -> (usize, usize, usize) {
+        (
+            self.pending_bodies.handles.len(),
+            self.pending_colliders.handles.len(),
+            self.removals.handles.len(),
+        )
+    }
+    #[cfg(test)]
+    pub(super) fn step_counts(&self) -> (usize, usize) {
+        (
+            self.step_bodies.handles.len(),
+            self.step_colliders.handles.len(),
+        )
+    }
+
     pub fn retained_bytes(&self) -> usize {
-        self.bvh.heap_memory_size()
+        self.pending_bodies.retained_bytes()
+            + self.pending_colliders.retained_bytes()
+            + self.removals.retained_bytes()
+            + self.step_bodies.retained_bytes()
+            + self.step_colliders.retained_bytes()
+            + self.geometry_changed.capacity() * std::mem::size_of::<bool>()
+            + self.bvh.heap_memory_size()
             + self.states.capacity() * std::mem::size_of::<Option<ColliderState>>()
             + self.changed.capacity() * std::mem::size_of::<(ColliderHandle, Pose)>()
     }
@@ -102,6 +195,7 @@ impl QueryBounds {
                 shape: collider.shared_shape().clone(),
             });
         }
+        self.clear_pending();
         updates
     }
 }

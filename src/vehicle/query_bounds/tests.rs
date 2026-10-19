@@ -3,130 +3,121 @@ use rapier3d::math::{Rotation, Vector};
 use rapier3d::parry::bounding_volume::BoundingVolume;
 use rapier3d::prelude::{ColliderBuilder, QueryFilter, QueryPipeline, Ray, RigidBodyBuilder};
 
-fn hit(bounds: &QueryBounds, physics: &PhysicsWorld, x: f32, z: f32) -> Option<ColliderHandle> {
-    QueryPipeline {
-        dispatcher: physics.narrow_phase.query_dispatcher(),
-        bvh: &bounds.bvh,
-        bodies: &physics.bodies,
-        colliders: &physics.colliders,
-        filter: QueryFilter::default(),
-    }
-    .cast_ray(&Ray::new(Vector::new(x, 10.0, z), -Vector::Y), 20.0, true)
-    .map(|hit| hit.0)
-}
-
 #[test]
 fn direct_mutations_refresh_hits_without_rebuilding_unchanged_bounds() {
-    let mut physics = PhysicsWorld::new();
-    let mut bounds = QueryBounds::default();
-    let collider = physics.colliders.insert(ColliderBuilder::ball(1.0));
-    assert_eq!(bounds.refresh(&mut physics), 1);
-    assert_eq!(hit(&bounds, &physics, 0.0, 0.0), Some(collider));
+    let mut physics = empty_world();
+    let collider = physics.insert_collider(ColliderBuilder::ball(1.0));
+    assert_eq!(physics.query_bounds.refresh(&mut physics.physics), 1);
+    assert_eq!(ray_hit(&physics, 0.0, 0.0), Some(collider));
     let capacities = (
-        bounds.states.capacity(),
-        bounds.changed.capacity(),
-        bounds.retained_bytes(),
+        physics.query_bounds.states.capacity(),
+        physics.query_bounds.changed.capacity(),
+        physics.query_bounds.retained_bytes(),
     );
     for _ in 0..8 {
-        assert_eq!(bounds.refresh(&mut physics), 0);
+        assert_eq!(physics.query_bounds.refresh(&mut physics.physics), 0);
     }
     assert_eq!(
         capacities,
         (
-            bounds.states.capacity(),
-            bounds.changed.capacity(),
-            bounds.retained_bytes()
+            physics.query_bounds.states.capacity(),
+            physics.query_bounds.changed.capacity(),
+            physics.query_bounds.retained_bytes()
         )
     );
 
-    physics.colliders[collider].set_translation(Vector::new(5.0, 0.0, 0.0));
-    assert_eq!(bounds.refresh(&mut physics), 1);
-    assert_eq!(hit(&bounds, &physics, 0.0, 0.0), None);
-    assert_eq!(hit(&bounds, &physics, 5.0, 0.0), Some(collider));
-    physics.colliders[collider].set_shape(SharedShape::ball(2.0));
-    assert_eq!(bounds.refresh(&mut physics), 1);
-    assert_eq!(hit(&bounds, &physics, 6.5, 0.0), Some(collider));
-    physics.colliders[collider]
-        .shape_mut()
-        .as_ball_mut()
-        .unwrap()
-        .radius = 3.0;
-    assert_eq!(bounds.refresh(&mut physics), 1);
-    assert_eq!(hit(&bounds, &physics, 7.5, 0.0), Some(collider));
-    physics.colliders[collider].set_enabled(false);
-    assert_eq!(bounds.refresh(&mut physics), 0);
-    assert_eq!(hit(&bounds, &physics, 5.0, 0.0), None);
-    physics.colliders[collider].set_enabled(true);
-    assert_eq!(bounds.refresh(&mut physics), 1);
-    assert_eq!(hit(&bounds, &physics, 5.0, 0.0), Some(collider));
+    physics.edit_collider(collider, |collider| {
+        collider.set_translation(Vector::new(5.0, 0.0, 0.0))
+    });
+    assert_eq!(physics.query_bounds.refresh(&mut physics.physics), 1);
+    assert_eq!(ray_hit(&physics, 0.0, 0.0), None);
+    assert_eq!(ray_hit(&physics, 5.0, 0.0), Some(collider));
+    physics.edit_collider(collider, |collider| {
+        collider.set_shape(SharedShape::ball(2.0))
+    });
+    assert_eq!(physics.query_bounds.refresh(&mut physics.physics), 1);
+    assert_eq!(ray_hit(&physics, 6.5, 0.0), Some(collider));
+    physics.edit_collider(collider, |collider| {
+        collider.shape_mut().as_ball_mut().unwrap().radius = 3.0;
+    });
+    assert_eq!(physics.query_bounds.refresh(&mut physics.physics), 1);
+    assert_eq!(ray_hit(&physics, 7.5, 0.0), Some(collider));
+    physics.edit_collider(collider, |collider| collider.set_enabled(false));
+    assert_eq!(physics.query_bounds.refresh(&mut physics.physics), 0);
+    assert_eq!(ray_hit(&physics, 5.0, 0.0), None);
+    physics.edit_collider(collider, |collider| collider.set_enabled(true));
+    assert_eq!(physics.query_bounds.refresh(&mut physics.physics), 1);
+    assert_eq!(ray_hit(&physics, 5.0, 0.0), Some(collider));
 
-    let retired_shape = Arc::downgrade(&physics.colliders[collider].shared_shape().0);
+    let retired_shape = Arc::downgrade(&physics.rapier().colliders[collider].shared_shape().0);
     physics.remove_collider(collider);
     let replacement = physics
-        .colliders
-        .insert(ColliderBuilder::ball(0.5).translation(Vector::new(-5.0, 0.0, 0.0)));
+        .insert_collider(ColliderBuilder::ball(0.5).translation(Vector::new(-5.0, 0.0, 0.0)));
     assert_eq!(collider.into_raw_parts().0, replacement.into_raw_parts().0);
     assert_ne!(collider, replacement);
-    assert_eq!(bounds.refresh(&mut physics), 1);
+    assert_eq!(physics.query_bounds.refresh(&mut physics.physics), 1);
     assert!(retired_shape.upgrade().is_none());
-    assert_eq!(hit(&bounds, &physics, 5.0, 0.0), None);
-    assert_eq!(hit(&bounds, &physics, -5.0, 0.0), Some(replacement));
+    assert_eq!(ray_hit(&physics, 5.0, 0.0), None);
+    assert_eq!(ray_hit(&physics, -5.0, 0.0), Some(replacement));
     physics.remove_collider(replacement);
-    assert_eq!(bounds.refresh(&mut physics), 0);
-    assert!(bounds.bvh.is_empty());
-    assert!(bounds.states.iter().all(Option::is_none));
+    assert_eq!(physics.query_bounds.refresh(&mut physics.physics), 0);
+    assert!(physics.query_bounds.bvh.is_empty());
+    assert!(physics.query_bounds.states.iter().all(Option::is_none));
 }
 
 #[test]
 fn body_attachment_and_enablement_changes_keep_queries_current() {
-    let mut physics = PhysicsWorld::new();
-    physics.gravity = Vector::ZERO;
+    let mut physics = empty_world();
+    physics.set_gravity(Vector::ZERO);
     let (body, collider) = physics.insert(
         RigidBodyBuilder::dynamic(),
         ColliderBuilder::cuboid(2.0, 0.5, 0.25),
     );
     let other =
         physics.insert_body(RigidBodyBuilder::fixed().translation(Vector::new(-8.0, 0.0, 0.0)));
-    let mut bounds = QueryBounds::default();
-    bounds.refresh(&mut physics);
-    physics.step();
-    physics.bodies[body].set_translation(Vector::new(5.0, 0.0, 0.0), true);
-    assert_eq!(bounds.refresh(&mut physics), 1);
-    assert_eq!(hit(&bounds, &physics, 5.0, 0.0), Some(collider));
-    physics.bodies[body].set_rotation(Rotation::from_rotation_y(std::f32::consts::FRAC_PI_2), true);
-    bounds.refresh(&mut physics);
-    assert_eq!(hit(&bounds, &physics, 5.0, 1.5), Some(collider));
-    physics.step();
-    physics.colliders[collider].set_translation_wrt_parent(Vector::new(3.0, 0.0, 0.0));
-    assert_eq!(bounds.refresh(&mut physics), 1);
-    assert_eq!(hit(&bounds, &physics, 5.0, -3.0), Some(collider));
-    physics
-        .colliders
-        .set_parent(collider, Some(other), &mut physics.bodies);
-    bounds.refresh(&mut physics);
-    assert_eq!(hit(&bounds, &physics, -5.0, 0.0), Some(collider));
-    assert_eq!(hit(&bounds, &physics, 5.0, -3.0), None);
-    physics.bodies[other].set_enabled(false);
-    bounds.refresh(&mut physics);
-    assert_eq!(hit(&bounds, &physics, -5.0, 0.0), None);
-    physics.step();
-    physics.bodies[other].set_enabled(true);
-    physics.step();
-    bounds.refresh(&mut physics);
-    assert_eq!(hit(&bounds, &physics, -5.0, 0.0), Some(collider));
-    physics
-        .colliders
-        .set_parent(collider, None, &mut physics.bodies);
-    bounds.refresh(&mut physics);
-    physics.colliders[collider].set_translation(Vector::new(-12.0, 0.0, 0.0));
-    bounds.refresh(&mut physics);
-    assert_eq!(hit(&bounds, &physics, -12.0, 0.0), Some(collider));
-    assert_eq!(bounds.refresh(&mut physics), 0);
+    physics.query_bounds.refresh(&mut physics.physics);
+    physics.step_physics();
+    physics.edit_body(body, |body| {
+        body.set_translation(Vector::new(5.0, 0.0, 0.0), true)
+    });
+    assert_eq!(physics.query_bounds.refresh(&mut physics.physics), 1);
+    assert_eq!(ray_hit(&physics, 5.0, 0.0), Some(collider));
+    physics.edit_body(body, |body| {
+        body.set_rotation(Rotation::from_rotation_y(std::f32::consts::FRAC_PI_2), true)
+    });
+    physics.query_bounds.refresh(&mut physics.physics);
+    assert_eq!(ray_hit(&physics, 5.0, 1.5), Some(collider));
+    physics.step_physics();
+    physics.edit_collider(collider, |collider| {
+        collider.set_translation_wrt_parent(Vector::new(3.0, 0.0, 0.0))
+    });
+    assert_eq!(physics.query_bounds.refresh(&mut physics.physics), 1);
+    assert_eq!(ray_hit(&physics, 5.0, -3.0), Some(collider));
+    physics.set_collider_parent(collider, Some(other));
+    physics.query_bounds.refresh(&mut physics.physics);
+    assert_eq!(ray_hit(&physics, -5.0, 0.0), Some(collider));
+    assert_eq!(ray_hit(&physics, 5.0, -3.0), None);
+    physics.edit_body(other, |body| body.set_enabled(false));
+    physics.query_bounds.refresh(&mut physics.physics);
+    assert_eq!(ray_hit(&physics, -5.0, 0.0), None);
+    physics.step_physics();
+    physics.edit_body(other, |body| body.set_enabled(true));
+    physics.step_physics();
+    physics.query_bounds.refresh(&mut physics.physics);
+    assert_eq!(ray_hit(&physics, -5.0, 0.0), Some(collider));
+    physics.set_collider_parent(collider, None);
+    physics.query_bounds.refresh(&mut physics.physics);
+    physics.edit_collider(collider, |collider| {
+        collider.set_translation(Vector::new(-12.0, 0.0, 0.0))
+    });
+    physics.query_bounds.refresh(&mut physics.physics);
+    assert_eq!(ray_hit(&physics, -12.0, 0.0), Some(collider));
+    assert_eq!(physics.query_bounds.refresh(&mut physics.physics), 0);
 }
 
 #[test]
 fn query_refresh_keeps_new_bodies_and_contacts_in_the_physics_pipeline() {
-    let mut physics = PhysicsWorld::new();
+    let mut physics = empty_world();
     physics.insert(
         RigidBodyBuilder::fixed().translation(Vector::new(0.0, -0.5, 0.0)),
         ColliderBuilder::cuboid(10.0, 0.5, 10.0),
@@ -135,25 +126,27 @@ fn query_refresh_keeps_new_bodies_and_contacts_in_the_physics_pipeline() {
         RigidBodyBuilder::dynamic().translation(Vector::new(0.0, 3.0, 0.0)),
         ColliderBuilder::ball(0.5),
     );
-    let mut bounds = QueryBounds::default();
-    bounds.refresh(&mut physics);
+    physics.query_bounds.refresh(&mut physics.physics);
     for _ in 0..240 {
-        bounds.refresh(&mut physics);
-        physics.step();
-        bounds.refresh(&mut physics);
+        physics.query_bounds.refresh(&mut physics.physics);
+        physics.step_physics();
+        physics.query_bounds.refresh(&mut physics.physics);
     }
-    assert!((physics.bodies[body].translation().y - 0.5).abs() < 0.05);
-    assert_eq!(hit(&bounds, &physics, 0.0, 0.0), Some(collider));
+    assert!((physics.rapier().bodies[body].translation().y - 0.5).abs() < 0.05);
+    assert_eq!(ray_hit(&physics, 0.0, 0.0), Some(collider));
     assert!(
         physics
+            .rapier()
             .narrow_phase
             .contact_pairs()
             .any(|pair| pair.has_any_active_contact())
     );
-    physics.bodies[body].set_translation(Vector::new(0.0, 5.0, 0.0), true);
-    bounds.refresh(&mut physics);
-    physics.step();
-    assert!(physics.bodies[body].translation().y < 5.0);
+    physics.edit_body(body, |body| {
+        body.set_translation(Vector::new(0.0, 5.0, 0.0), true)
+    });
+    physics.query_bounds.refresh(&mut physics.physics);
+    physics.step_physics();
+    assert!(physics.rapier().bodies[body].translation().y < 5.0);
 }
 
 #[test]
@@ -165,8 +158,8 @@ fn public_queries_follow_step_without_an_extra_caller_refresh() {
         chassis: Vec::new(),
         vehicles: Vec::new(),
     };
-    world.rapier_mut().gravity = Vector::ZERO;
-    let (body, collider) = world.rapier_mut().insert(
+    world.set_gravity(Vector::ZERO);
+    let (body, collider) = world.insert(
         RigidBodyBuilder::dynamic().linvel(Vector::new(60.0, 0.0, 0.0)),
         ColliderBuilder::ball(0.01),
     );
@@ -177,14 +170,6 @@ fn public_queries_follow_step_without_an_extra_caller_refresh() {
     assert_eq!(
         world
             .queries(QueryFilter::default())
-            .cast_ray(&ray, 20.0, true)
-            .map(|hit| hit.0),
-        Some(collider)
-    );
-    assert_eq!(
-        world
-            .queries_mut(QueryFilter::default())
-            .as_ref()
             .cast_ray(&ray, 20.0, true)
             .map(|hit| hit.0),
         Some(collider)
@@ -348,15 +333,10 @@ pub(super) fn assert_matches_scan(
 #[test]
 fn scan_comparison_covers_hits_overlaps_and_bounds() {
     let mut world = empty_world();
-    let first = world
-        .rapier_mut()
-        .colliders
-        .insert(ColliderBuilder::ball(1.0));
-    let second = world
-        .rapier_mut()
-        .colliders
-        .insert(ColliderBuilder::ball(1.0).translation(Vector::new(8.0, 0.0, 0.0)));
-    let (body, _) = world.rapier_mut().insert(
+    let first = world.insert_collider(ColliderBuilder::ball(1.0));
+    let second =
+        world.insert_collider(ColliderBuilder::ball(1.0).translation(Vector::new(8.0, 0.0, 0.0)));
+    let (body, _) = world.insert(
         RigidBodyBuilder::fixed().translation(Vector::new(-8.0, 0.0, 0.0)),
         ColliderBuilder::cuboid(1.0, 0.5, 0.75),
     );
@@ -369,21 +349,63 @@ fn scan_comparison_covers_hits_overlaps_and_bounds() {
     assert_eq!(ray_hit(&world, 20.0, 0.0), None);
     assert_matches_scan(&mut world, &mut scan, &samples);
 
-    world.rapier_mut().colliders[first].set_translation(Vector::new(4.0, 0.0, 0.0));
-    world.rapier_mut().colliders[second].set_translation(Vector::new(12.0, 0.0, 0.0));
-    world.rapier_mut().bodies[body].set_translation(Vector::new(-4.0, 0.0, 0.0), true);
+    world.edit_collider(first, |collider| {
+        collider.set_translation(Vector::new(4.0, 0.0, 0.0))
+    });
+    world.edit_collider(second, |collider| {
+        collider.set_translation(Vector::new(12.0, 0.0, 0.0))
+    });
+    world.edit_body(body, |body| {
+        body.set_translation(Vector::new(-4.0, 0.0, 0.0), true)
+    });
     assert_matches_scan(&mut world, &mut scan, &samples);
 
-    world.rapier_mut().colliders[first].set_enabled(false);
-    world.rapier_mut().bodies[body].set_enabled(false);
+    world.edit_collider(first, |collider| collider.set_enabled(false));
+    world.edit_body(body, |body| body.set_enabled(false));
     assert_matches_scan(&mut world, &mut scan, &samples);
 
-    world.rapier_mut().remove_collider(first);
-    let replacement = world
-        .rapier_mut()
-        .colliders
-        .insert(ColliderBuilder::ball(0.5).translation(Vector::new(-12.0, 0.0, 0.0)));
+    world.remove_collider(first);
+    let replacement =
+        world.insert_collider(ColliderBuilder::ball(0.5).translation(Vector::new(-12.0, 0.0, 0.0)));
     assert_eq!(first.into_raw_parts().0, replacement.into_raw_parts().0);
     assert_ne!(first, replacement);
     assert_matches_scan(&mut world, &mut scan, &samples);
+}
+
+#[test]
+fn tracked_edits_cover_optional_handles_and_lifecycle() {
+    let mut world = empty_world();
+    let parent = world.insert_body(RigidBodyBuilder::fixed());
+    let child = world.insert_collider_with_parent(ColliderBuilder::ball(1.0), parent);
+    world.refresh_queries();
+    assert_eq!(world.query_bounds.pending_counts(), (0, 0, 0));
+    assert_eq!(world.query_bounds.step_counts(), (1, 1));
+    for _ in 0..3 {
+        world.edit_body(parent, |body| body.set_enabled(true));
+        world.edit_collider(child, |collider| collider.set_enabled(true));
+    }
+    assert_eq!(world.query_bounds.pending_counts(), (1, 1, 0));
+    assert_eq!(world.query_bounds.step_counts(), (1, 1));
+    world.refresh_queries();
+    assert_eq!(world.query_bounds.pending_counts(), (0, 0, 0));
+    assert_eq!(world.query_bounds.step_counts(), (1, 1));
+    assert_eq!(
+        world.try_edit_body(RigidBodyHandle::invalid(), |_| panic!(
+            "invalid body closure"
+        )),
+        None::<()>
+    );
+    assert_eq!(
+        world.try_edit_collider(ColliderHandle::invalid(), |_| panic!(
+            "invalid collider closure"
+        )),
+        None::<()>
+    );
+    assert!(world.remove_body(parent).is_some());
+    assert!(!world.rapier().colliders.contains(child));
+    assert_eq!(world.query_bounds.pending_counts(), (1, 0, 1));
+    assert_eq!(world.query_bounds.removals.handles, [child]);
+    world.refresh_queries();
+    assert_eq!(world.query_bounds.pending_counts(), (0, 0, 0));
+    assert_eq!(ray_hit(&world, 0.0, 0.0), None);
 }

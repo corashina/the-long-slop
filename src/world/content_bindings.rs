@@ -345,7 +345,7 @@ impl WorldStream {
                     if state.body != Some(body) {
                         let pose = to_rapier(state.pose) * to_rapier(local).inverse();
                         if physics.rapier().bodies[body].position() != &pose {
-                            physics.rapier_mut().bodies[body].set_position(pose, false);
+                            physics.edit_body(body, |state| state.set_position(pose, false));
                         }
                     }
                 }
@@ -355,7 +355,7 @@ impl WorldStream {
                     if state.body != Some(body) {
                         let pose = to_rapier(state.pose) * to_rapier(local).inverse();
                         if physics.rapier().bodies[body].position() != &pose {
-                            physics.rapier_mut().bodies[body].set_position(pose, false);
+                            physics.edit_body(body, |state| state.set_position(pose, false));
                         }
                     }
                 }
@@ -421,7 +421,7 @@ impl WorldStream {
                 );
                 let state = items.get(id).unwrap();
                 let body_pose = to_rapier(state.pose) * to_rapier(state.local_pose).inverse();
-                physics.rapier_mut().bodies[body].set_position(body_pose, true);
+                physics.edit_body(body, |state| state.set_position(body_pose, true));
                 let mut layers = 0u32;
                 for (source, handle) in &instance.colliders {
                     let collider = prototype
@@ -434,8 +434,9 @@ impl WorldStream {
                     }
                     layers |= 1u32 << prototype.nodes[collider.node as usize].layer;
                     let collider_id = interaction.allocate_generated_collider()?;
-                    physics.rapier_mut().colliders[*handle].user_data =
-                        ((collider_id.0 as u128) << 64) | (id.0 as u128 + 1);
+                    physics.edit_collider(*handle, |collider| {
+                        collider.user_data = ((collider_id.0 as u128) << 64) | (id.0 as u128 + 1);
+                    });
                     interaction.bind_surface(
                         *handle,
                         ActionBinding {
@@ -559,10 +560,12 @@ impl WorldStream {
                     .unwrap();
                 }
                 let state = items.get(id).unwrap();
-                physics.rapier_mut().bodies[body].set_position(
-                    to_rapier(state.pose) * to_rapier(state.local_pose).inverse(),
-                    true,
-                );
+                physics.edit_body(body, |body| {
+                    body.set_position(
+                        to_rapier(state.pose) * to_rapier(state.local_pose).inverse(),
+                        true,
+                    )
+                });
                 Ok(())
             })();
             if let Err(error) = result {
@@ -722,7 +725,7 @@ impl WorldStream {
                 continue;
             }
             for (body, enabled) in content.suspended_bodies.drain(..) {
-                physics.rapier_mut().bodies[body].set_enabled(enabled);
+                physics.edit_body(body, |state| state.set_enabled(enabled));
             }
             let mut complete = !pending_parent;
             let mut restore_error = None;
@@ -773,23 +776,26 @@ impl WorldStream {
                         .iter()
                         .find(|c| &c.source == source)
                         .unwrap();
-                    physics.rapier_mut().colliders[*handle].set_enabled(
-                        complete
-                            && collider.enabled
-                            && crate::world::spawn_appearance::node_active(
-                                prototype,
-                                collider.node as usize,
-                                &content.content.appearance,
-                            ),
-                    );
+                    physics.edit_collider(*handle, |state| {
+                        state.set_enabled(
+                            complete
+                                && collider.enabled
+                                && crate::world::spawn_appearance::node_active(
+                                    prototype,
+                                    collider.node as usize,
+                                    &content.content.appearance,
+                                ),
+                        )
+                    });
                 }
                 if !complete {
                     for body in &instance.bodies {
-                        let body_state = &mut physics.rapier_mut().bodies[*body];
-                        content
-                            .suspended_bodies
-                            .push((*body, body_state.is_enabled()));
-                        body_state.set_enabled(false);
+                        physics.edit_body(*body, |body_state| {
+                            content
+                                .suspended_bodies
+                                .push((*body, body_state.is_enabled()));
+                            body_state.set_enabled(false);
+                        });
                     }
                 }
             }
@@ -903,7 +909,7 @@ impl WorldStream {
                             rapier3d::prelude::RigidBodyType::Dynamic
                         };
                         if physics.rapier().bodies[body].body_type() != kind {
-                            physics.rapier_mut().bodies[body].set_body_type(kind, true);
+                            physics.edit_body(body, |state| state.set_body_type(kind, true));
                             if kind == rapier3d::prelude::RigidBodyType::Dynamic {
                                 if let Some(item) = id {
                                     if let Some(snapshot) = self
@@ -911,10 +917,12 @@ impl WorldStream {
                                         .get(items.object_key(item))
                                         .and_then(|c| c.snapshot.as_ref())
                                     {
-                                        physics.rapier_mut().bodies[body]
-                                            .set_linvel(snapshot.linear_velocity.into(), true);
-                                        physics.rapier_mut().bodies[body]
-                                            .set_angvel(snapshot.angular_velocity.into(), true);
+                                        physics.edit_body(body, |body| {
+                                            body.set_linvel(snapshot.linear_velocity.into(), true)
+                                        });
+                                        physics.edit_body(body, |body| {
+                                            body.set_angvel(snapshot.angular_velocity.into(), true)
+                                        });
                                     }
                                 }
                             }
@@ -1042,7 +1050,9 @@ pub(super) fn rollback(
             .remove_generated(item, &content.nodes);
     }
     for (_, collider) in &instance.colliders {
-        physics.rapier_mut().colliders[*collider].user_data = 0;
+        physics.edit_collider(*collider, |collider| {
+            collider.user_data = 0;
+        });
     }
     content.item = None;
     content.baseline = None;
@@ -1136,10 +1146,11 @@ pub(crate) fn restore_item(
     if snapshot.held {
         items.get_mut(id).unwrap().location = ItemLocation::Held;
         if let Some(handle) = items.get(id).and_then(|i| i.body) {
-            let body = &mut physics.rapier_mut().bodies[handle];
-            if body.is_kinematic() {
-                body.set_body_type(rapier3d::prelude::RigidBodyType::Dynamic, false);
-            }
+            physics.edit_body(handle, |body| {
+                if body.is_kinematic() {
+                    body.set_body_type(rapier3d::prelude::RigidBodyType::Dynamic, false);
+                }
+            });
         }
     }
     if let Some(valve) = snapshot.valve {
