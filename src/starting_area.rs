@@ -1615,44 +1615,8 @@ impl GarageRuntime {
         let Some(startup) = frame.startup else {
             return Ok(false);
         };
-        let nodes: HashMap<_, _> = reference.nodes.iter().map(|node| (node.id, node)).collect();
-        let records: HashMap<_, _> = reference
-            .world
-            .records
-            .iter()
-            .map(|r| (&r.source, r))
-            .collect();
-        for body in &reference.bodies {
-            let mut node = &nodes[&body.node];
-            let mut offset = 0.0;
-            loop {
-                offset += startup
-                    .root_offsets
-                    .iter()
-                    .filter(|(id, _)| *id == node.source)
-                    .map(|(_, value)| *value)
-                    .sum::<f32>();
-                if let Some(parent) = node.parent {
-                    node = &nodes[&parent];
-                } else {
-                    break;
-                }
-            }
-            // Asset roots can have source parents outside the exported scene.
-            let mut source = &node.source;
-            while let Some(crate::reference::WorldValue::Link(parent)) = records
-                .get(source)
-                .and_then(|record| record.fields.get("m_Father"))
-            {
-                offset += startup
-                    .root_offsets
-                    .iter()
-                    .filter(|(id, _)| id == parent)
-                    .map(|(_, value)| *value)
-                    .sum::<f32>();
-                source = parent;
-            }
-            let handle = self.area.bodies[&body.id];
+        for (id, offset) in startup.body_offsets(reference) {
+            let handle = self.area.bodies[&id];
             self.physics.edit_body(handle, |body| {
                 let mut pose = *body.position();
                 pose.translation.y += offset;
