@@ -801,9 +801,17 @@ impl WheelAssemblies {
         let slot = self.slots.iter().position(|slot| slot.id == id).unwrap();
         let rim = self.indices[&item];
         let chassis = physics.chassis_handle(self.slots[slot].vehicle);
-        self.place_part(rim, chassis, Pose::IDENTITY, false, items, physics)?;
+        let snapshot = physics.snapshot(self.slots[slot].vehicle);
+        let rim_pose = to_rapier(snapshot.wheels[self.slots[slot].index])
+            * self.slots[slot].hub_to_mount
+            * Pose::from_rotation(self.parts[rim].rotation);
+        let local = to_rapier(snapshot.pose).inverse() * rim_pose;
+        self.place_part(rim, chassis, local, false, items, physics)?;
         if let Some(tire) = self.parts[rim].tire {
-            self.place_part(tire, chassis, Pose::IDENTITY, false, items, physics)?;
+            let tire_local = local
+                * self.parts[rim].tire_mount.unwrap()
+                * Pose::from_rotation(self.parts[tire].rotation);
+            self.place_part(tire, chassis, tire_local, false, items, physics)?;
         }
         if let Some(body) = self.parts[rim].free_body {
             physics.edit_body(body, |body| body.set_enabled(false));
@@ -815,13 +823,7 @@ impl WheelAssemblies {
         Ok(())
     }
 
-    pub fn split(
-        &mut self,
-        item: ItemId,
-        items: &mut ItemStore,
-        physics: &mut PhysicsWorld,
-    ) -> Result<(ItemId, ItemId), ReferenceError> {
-        self.bind(items, physics)?;
+    pub fn can_split(&self, item: ItemId, items: &ItemStore) -> Result<ItemId, ReferenceError> {
         let rim = *self
             .indices
             .get(&item)
@@ -839,6 +841,19 @@ impl WheelAssemblies {
         let tire = self.parts[rim]
             .tire
             .ok_or_else(|| error("Rim has no tire"))?;
+        Ok(self.parts[tire].item)
+    }
+
+    pub fn split(
+        &mut self,
+        item: ItemId,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(ItemId, ItemId), ReferenceError> {
+        self.can_split(item, items)?;
+        self.bind(items, physics)?;
+        let rim = self.indices[&item];
+        let tire = self.parts[rim].tire.unwrap();
         let world = item_pose(items, self.parts[tire].item, physics)?;
         let body = self.free_body(tire, world, physics);
         let rim_body = items
@@ -860,19 +875,16 @@ impl WheelAssemblies {
         Ok((item, self.parts[tire].item))
     }
 
-    pub fn assemble(
-        &mut self,
+    pub fn can_assemble(
+        &self,
         rim_id: ItemId,
         tire_id: ItemId,
-        items: &mut ItemStore,
-        physics: &mut PhysicsWorld,
-    ) -> Result<ItemId, ReferenceError> {
-        self.bind(items, physics)?;
+        items: &ItemStore,
+    ) -> Result<(), ReferenceError> {
         if !self.tire_fits.contains(&(rim_id, tire_id)) {
             return Err(error("Tire does not fit rim"));
         }
         let rim = self.indices[&rim_id];
-        let tire = self.indices[&tire_id];
         if self.parts[rim].tire.is_some() {
             return Err(error("Rim already has a tire"));
         }
@@ -881,20 +893,48 @@ impl WheelAssemblies {
             .is_none_or(|i| !matches!(i.location, ItemLocation::World | ItemLocation::WheelSlot(_)))
             || items
                 .get(tire_id)
-                .is_none_or(|i| i.location != ItemLocation::World)
+                .is_none_or(|i| !matches!(i.location, ItemLocation::World | ItemLocation::Held))
         {
             return Err(error("Assembly requires loose parts"));
         }
+        if self.parts[rim].tire_mount.is_none() || items.get(rim_id).unwrap().body.is_none() {
+            return Err(error("Missing rim mount or body"));
+        }
+        Ok(())
+    }
+
+    pub fn assemble(
+        &mut self,
+        rim_id: ItemId,
+        tire_id: ItemId,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<ItemId, ReferenceError> {
+        self.can_assemble(rim_id, tire_id, items)?;
+        if items.get(tire_id).unwrap().location != ItemLocation::World {
+            return Err(error("Release the carry constraint before assembly"));
+        }
+        self.bind(items, physics)?;
+        let rim = self.indices[&rim_id];
+        let tire = self.indices[&tire_id];
         let body = items
             .get(rim_id)
             .unwrap()
             .body
             .ok_or_else(|| error("Missing rim body"))?;
-        let local = self.parts[rim]
-            .tire_mount
-            .ok_or_else(|| error("Missing tire mount"))?
+        let local = to_rapier(items.get(rim_id).unwrap().local_pose)
+            * self.parts[rim]
+                .tire_mount
+                .ok_or_else(|| error("Missing tire mount"))?
             * Pose::from_rotation(self.parts[tire].rotation);
-        self.place_part(tire, body, local, true, items, physics)?;
+        self.place_part(
+            tire,
+            body,
+            local,
+            physics.vehicle_of(body).is_none(),
+            items,
+            physics,
+        )?;
         if let Some(old) = self.parts[tire].free_body
             && old != body
         {

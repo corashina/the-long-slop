@@ -18,7 +18,6 @@ impl ActionMask {
     pub const PUSH: u32 = 2048;
     pub const GRIP: u32 = 4096;
     pub const THROW: u32 = 8192;
-    pub const SPLIT: u32 = 16384;
     pub const ROTATE: u32 = 32768;
     pub const RELEASE_GRIP: u32 = 65536;
     pub const PRIMARY_SWITCH: u32 = 131072;
@@ -56,7 +55,6 @@ pub struct ActionAvailability {
     pub item: Option<ItemId>,
     pub part: Option<ItemId>,
     pub rim: Option<ItemId>,
-    pub tire: Option<ItemId>,
     pub opening: Option<OpeningId>,
     pub slot: Option<SlotTarget>,
     pub consumes_mouse: bool,
@@ -179,15 +177,6 @@ impl InteractionState {
             if self.carry.allows_held_rotation() {
                 a.actions.0 |= ActionMask::ROTATE;
             }
-            if self.is_wheel(held)
-                && items.iter().any(|i| {
-                    i.location == ItemLocation::Attached(held)
-                        && matches!(self.kinds.get(&i.id), Some(ItemKind::Tire))
-                })
-            {
-                a.actions.0 |= ActionMask::SPLIT;
-                a.rim = Some(held);
-            }
         }
         if let Some(t) = use_target {
             if self.mechanisms.contains(t.item) {
@@ -277,15 +266,27 @@ impl InteractionState {
             a.actions.0 &= !ActionMask::DRINK;
         }
         if self.held().is_none() {
-            if let Some(t) = focus
+            if let Some(t) = grab_target
                 && matches!(self.kinds.get(&t.item), Some(ItemKind::Tire))
                 && let Some(ItemLocation::Attached(rim)) = items.get(t.item).map(|i| i.location)
                 && self.is_wheel(rim)
-                && !self.parts.covered(rim)
+                && items
+                    .get(rim)
+                    .is_some_and(|item| item.location == ItemLocation::World)
+                && self
+                    .carry
+                    .allows_pickup(t.item, player.seat().is_some(), true)
+                && items
+                    .get(rim)
+                    .and_then(|item| item.body)
+                    .is_some_and(|body| {
+                        self.carry
+                            .can_acquire(t.item, t.point, player, body, physics)
+                            .is_ok()
+                    })
             {
                 a.actions.0 |= ActionMask::DISMOUNT;
                 a.rim = Some(rim);
-                a.tire = Some(t.item);
                 a.part = Some(t.item);
                 a.context = FeedbackContext::Wheel;
             } else if let Some(t) = grab_target
@@ -356,10 +357,6 @@ impl InteractionState {
                             }) =>
                     {
                         a.actions.0 |= ActionMask::PICKUP;
-                        if self.is_wheel(t.item) {
-                            a.actions.0 |= ActionMask::SPLIT;
-                            a.rim = Some(t.item);
-                        }
                     }
                     _ => {}
                 }
@@ -374,38 +371,15 @@ impl InteractionState {
                     SlotTarget::Attachment(target) => {
                         self.attachments.can_mount(held, target, items).is_ok()
                     }
-                    SlotTarget::Wheel(_) => self.wheel_installation_block(aim, items).is_none(),
+                    SlotTarget::Wheel(_) | SlotTarget::Tire(_) => {
+                        self.wheel_installation_block(aim, items).is_none()
+                    }
                 };
                 if fits {
                     a.actions.0 |= ActionMask::MOUNT;
                     a.slot = Some(slot);
                     a.part = Some(held);
                     a.rim = self.is_wheel(held).then_some(held);
-                }
-            } else if let Some(t) = focus.or(grab_target)
-                && let Some(item) = items.get(t.item)
-            {
-                let pair = if matches!(self.kinds.get(&held), Some(ItemKind::Tire)) {
-                    (t.item, held)
-                } else {
-                    (held, t.item)
-                };
-                let empty = !items.iter().any(|i| {
-                    i.location == ItemLocation::Attached(pair.0)
-                        && matches!(self.kinds.get(&i.id), Some(ItemKind::Tire))
-                });
-                if empty
-                    && matches!(
-                        item.location,
-                        ItemLocation::World | ItemLocation::WheelSlot(_)
-                    )
-                    && self.tire_fits.contains(&pair)
-                    && !self.parts.covered(pair.0)
-                {
-                    a.actions.0 |= ActionMask::MOUNT;
-                    a.rim = Some(pair.0);
-                    a.tire = Some(pair.1);
-                    a.context = FeedbackContext::Wheel;
                 }
             }
         }

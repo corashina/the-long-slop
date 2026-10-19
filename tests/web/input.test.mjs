@@ -15,3 +15,8 @@ test('inventory_does_not_set_driving_bits',()=>{
  i.code('Digit1',false);f=i.takeFrame();assert.equal(f.released,2**26);assert.equal(f.inventoryReleased,1);
  i.clear();assert.equal(i.takeFrame().inventoryReleased,0);
 });
+
+test('obsolete_wheel_shortcut_has_no_input_bit',()=>{
+ const i=new InputState(bindings);i.code('KeyX',true);
+ const f=i.takeFrame();assert.equal(f.held,0);assert.equal(f.pressed,0);
+});

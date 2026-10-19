@@ -132,7 +132,9 @@ Save stores both cars' gears and engine state, plus the two assist choices. Load
 New game restores neutral and enables both assists. Recovery and input clearing keep the selected gears.
 
 Use Recover in the pause menu. Use Controls for bindings and Fullscreen.
-Aim at a tire and press F to dismount it. Release F to mount a held tire or rim.
+Release the wheel before tire removal. Aim at its tire and press F to remove it.
+Hold a compatible tire beside the loose rim. Release F at the tire slot to install it.
+Remove the hubcap before installing the wheel.
 Focus loss pauses play and clears input. Continue captures the mouse again.
 Recovery preserves fluids, parts, condition, trip distance, cycle time, and lamp state.
 An empty fuel tank requests the nearest supported physical supply. Water supplies do not provide gasoline.
