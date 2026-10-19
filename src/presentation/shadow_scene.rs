@@ -3,7 +3,8 @@ use super::surface_views::VIEW_COUNT;
 use super::{
     lighting_assets::LightingAssets,
     lighting_scene::{SourceSceneLighting, SourceWorldOrigin},
-    materials::{RenderingState, SourceMaterialWarmup, SourceMaterials},
+    materials::{RenderingState, SourceMaterials},
+    renderer_visibility::SourceMaterialWarmup,
     shadow_changes::{ShadowChanges, ShadowMaterials, ShadowMesh, ShadowMeshItem},
     source_lighting::SourceLightingStatus,
     view_frame::SourceViewFrame,
@@ -76,6 +77,7 @@ pub(super) fn prepare_scene(
     mut scene: ResMut<ShadowScene>,
     status: Res<SourceLightingStatus>,
     master: Res<super::lighting::SourceLighting>,
+    camera: Res<super::renderer_visibility::CameraVisibility>,
     meshes: Query<ShadowMesh, (With<ViewVisibility>, Without<SourceMaterialWarmup>)>,
 ) {
     let mut timing = super::reflection_preparation::Timer::new(
@@ -236,13 +238,13 @@ pub(super) fn prepare_scene(
         let Ok(mut visible) = visibility.get_mut(*entity) else {
             continue;
         };
-        scene.camera_visible += usize::from(visible.get());
+        scene.camera_visible += usize::from(camera.entities.contains(entity));
         if scene
             .masks
             .iter()
             .any(|m| m.get(i).is_some_and(|mask| *mask != 0))
         {
-            if !visible.get() {
+            if !camera.entities.contains(entity) {
                 scene.shadow_only += 1;
             }
             visible.set_visible();

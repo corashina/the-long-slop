@@ -120,13 +120,19 @@ window.addEventListener('error',event=>fail(event.message||'The runtime stopped.
 window.addEventListener('unhandledrejection',event=>fail(event.reason?.message||String(event.reason)));
 canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();fail('The graphics context was lost.');});
 async function load(){
- startup.begin('webgl');
- const probe=document.createElement('canvas'),graphics=probe.getContext('webgl2');
- if(!graphics)throw Error('This browser cannot use WebGL2.');
- graphics.getExtension('WEBGL_lose_context')?.loseContext();
- startup.end('webgl');startup.begin('manifest');
+ startup.begin('graphics');
+ // ?renderer=webgpu selects the WebGPU build. WebGL2 stays the default until WebGPU acceptance.
+ const webgpu=new URLSearchParams(location.search).get('renderer')==='webgpu',name=webgpu?'my_summer_slop_webgpu':'my_summer_slop';
+ if(webgpu){
+  if(!await navigator.gpu?.requestAdapter())throw Error('This browser cannot use WebGPU.');
+ }else{
+  const probe=document.createElement('canvas'),graphics=probe.getContext('webgl2');
+  if(!graphics)throw Error('This browser cannot use WebGL2.');
+  graphics.getExtension('WEBGL_lose_context')?.loseContext();
+ }
+ startup.end('graphics');startup.begin('manifest');
  // Download and compile the game code while the manifest downloads.
- const code=Promise.all([import('./pkg/my_summer_slop.js'),fetch('./pkg/my_summer_slop_bg.wasm').then(response=>{
+ const code=Promise.all([import('./pkg/'+name+'.js'),fetch('./pkg/'+name+'_bg.wasm').then(response=>{
   if(!response.ok)throw Error('Cannot load game code (HTTP '+response.status+').');
   return WebAssembly.compileStreaming(response);
  })]);

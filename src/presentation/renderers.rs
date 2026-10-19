@@ -1,6 +1,7 @@
 //! Startup mesh variants preserve source renderer state across shared geometry.
 use super::materials::{RenderingState, SourceMaterials};
 use super::reference::ReferenceVisuals;
+use super::renderer_visibility::SourceRenderer;
 use crate::reference::render_lighting::RendererRecord;
 use bevy::asset::AssetId;
 use bevy::ecs as bevy_ecs;
@@ -20,8 +21,6 @@ pub const SOURCE_BOUNDS_EXTENTS: MeshVertexAttribute = MeshVertexAttribute::new(
     0x5352430000000002,
     VertexFormat::Float32x4,
 );
-#[derive(Component, Clone)]
-pub struct SourceRenderer(pub RendererRecord);
 #[derive(Resource, Default)]
 pub struct RendererMeshes {
     pub bound: bool,
@@ -45,7 +44,7 @@ pub fn bind_renderer_meshes(
         (
             With<GltfMaterialExtras>,
             Without<SourceRenderer>,
-            Without<super::materials::SourceMaterialWarmup>,
+            Without<super::renderer_visibility::SourceMaterialWarmup>,
         ),
     >,
     extras: Query<&GltfExtras>,
@@ -119,44 +118,4 @@ pub fn bind_renderer_meshes(
         "Source renderer meshes: {} variants, {} attribute bytes",
         state.variants, bytes
     );
-}
-
-/// Bevy batches retain main entity IDs and can use a placeholder render entity.
-#[derive(Resource, Default)]
-pub struct ShadowsOnly(std::collections::HashSet<Entity>);
-pub(crate) fn extract_shadows_only(
-    source: bevy::render::Extract<
-        Query<(Entity, &SourceRenderer), Without<super::save::HiddenWorld>>,
-    >,
-    mut target: ResMut<ShadowsOnly>,
-) {
-    target.0.clear();
-    target.0.extend(
-        source
-            .iter()
-            .filter(|(_, r)| r.0.cast_shadows == 3)
-            .map(|(e, _)| e),
-    );
-}
-/// ShadowsOnly renderers remain in light passes and skip camera passes.
-pub struct SourceCameraVisible;
-impl<P: bevy::render::render_phase::PhaseItem> bevy::render::render_phase::RenderCommand<P>
-    for SourceCameraVisible
-{
-    type Param = bevy::ecs::system::lifetimeless::SRes<ShadowsOnly>;
-    type ViewQuery = ();
-    type ItemQuery = ();
-    fn render<'w>(
-        item: &P,
-        _: (),
-        _: Option<()>,
-        only: bevy::ecs::system::SystemParamItem<'w, '_, Self::Param>,
-        _: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
-    ) -> bevy::render::render_phase::RenderCommandResult {
-        if only.0.contains(&item.main_entity().id()) {
-            bevy::render::render_phase::RenderCommandResult::Skip
-        } else {
-            bevy::render::render_phase::RenderCommandResult::Success
-        }
-    }
 }

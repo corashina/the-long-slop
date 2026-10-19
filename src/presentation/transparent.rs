@@ -1,64 +1,35 @@
 //! Reused source pass order over Bevy's prepared transparent mesh items.
 use super::{
     materials::{MaterialLoading, RenderingState},
+    renderer_visibility::{CameraVisibility, SourceSortData},
     source_lighting::{DrawSourceAdd, DrawSourceBase, DrawSourceGlass, SourceLightingStatus},
 };
 use crate::reference::sorting::{PassSortKey, perspective_distance};
 use bevy::core_pipeline::core_3d::{Transparent3d, TransparentSortingInfo3d};
 use bevy::render::{
-    extract_component::ExtractComponent,
     render_phase::{
         CachedRenderPipelinePhaseItem, DrawError, DrawFunctionId, DrawFunctions, PhaseItem,
         SortedRenderPhase, TrackedRenderPass, ViewSortedRenderPhases,
     },
-    sync_world::MainEntity,
     view::ExtractedView,
 };
 use bevy::{ecs as bevy_ecs, prelude::*};
 use std::ops::Range;
 
-#[derive(Component, Clone, Copy)]
-pub struct SourceSortData {
-    pub material_key: u32,
-    pub material_identity: u32,
-    pub glass_source: i64,
-    pub shader_identity: i32,
-    pub source_material_index: u16,
-    pub layer_and_order: u32,
-    pub queue: i16,
-    pub additive: bool,
-    pub glass: bool,
-}
-impl bevy::render::sync_component::SyncComponent for SourceSortData {
-    type Target = Self;
-}
-impl ExtractComponent for SourceSortData {
-    type QueryData = &'static Self;
-    type QueryFilter = ();
-    type Out = Self;
-    fn extract_component(
-        item: bevy::ecs::query::QueryItem<'_, '_, Self::QueryData>,
-    ) -> Option<Self> {
-        Some(*item)
-    }
-}
 /// Bevy mesh phases retain main IDs and use a placeholder render entity.
 #[derive(Resource, Default)]
-pub struct SourceSortIndex(bevy::ecs::entity::EntityHashMap<(Entity, SourceSortData)>);
-pub fn update_sort_index(
-    changed: Query<
-        (Entity, &MainEntity, &SourceSortData),
-        Or<(Changed<SourceSortData>, Changed<MainEntity>)>,
-    >,
-    mut removed: RemovedComponents<SourceSortData>,
+pub struct SourceSortIndex(bevy::ecs::entity::EntityHashMap<SourceSortData>);
+pub fn extract_sort_index(
+    input: bevy::render::Extract<Res<CameraVisibility>>,
     mut index: ResMut<SourceSortIndex>,
 ) {
-    for entity in removed.read() {
-        index.0.retain(|_, (render, _)| *render != entity);
-    }
-    for (render, main, data) in &changed {
-        index.0.insert(main.id(), (render, *data));
-    }
+    index.0.clear();
+    index.0.extend(
+        input
+            .sort_data
+            .iter()
+            .map(|(entity, data)| (*entity, *data)),
+    );
 }
 #[derive(Clone, Copy)]
 struct OrderedPass {
@@ -205,7 +176,7 @@ pub(crate) fn prepare_pass_order(
             {
                 continue;
             }
-            let Some((_, data)) = metadata.0.get(&item.main_entity().id()) else {
+            let Some(data) = metadata.0.get(&item.main_entity().id()) else {
                 *status.0.lock().unwrap() = RenderingState::Failed(format!(
                     "Source transparent sort metadata is missing: entity {:?}, material {:?}",
                     item.main_entity(),

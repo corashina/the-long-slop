@@ -54,7 +54,7 @@ impl SourceMaterials {
             + self.sort_data.capacity()
                 * (size_of::<(
                     (SourceAssetId, u32),
-                    super::super::transparent::SourceSortData,
+                    super::super::renderer_visibility::SourceSortData,
                 )>() + 1)
             + self.records.capacity() * size_of::<Arc<MaterialRecord>>()
             + self.textures.capacity() * size_of::<SourceTexture>()

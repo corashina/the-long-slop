@@ -17,6 +17,16 @@ pub(crate) struct CasterBatchState {
     pub lod_fade: f32,
 }
 impl CasterBatchState {
+    /// SpecularMaterial validates its opaque blend and depth state when constructed.
+    pub fn opaque_specular(flags: u32, lod_fade: f32) -> Self {
+        Self {
+            standard: true,
+            opaque: true,
+            flags,
+            lod_fade,
+        }
+    }
+
     pub fn material_key<M>(
         self,
         material: M,

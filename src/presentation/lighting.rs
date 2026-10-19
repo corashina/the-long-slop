@@ -1,4 +1,4 @@
-//! Persistent WebGL2 source lighting resources.
+//! Persistent source lighting resources.
 use super::{
     materials::{MaterialCache, SourceMaterial, bind_materials},
     reference::ReferenceVisuals,

@@ -291,7 +291,7 @@ fn add_group(
         entities.push(
             commands
                 .spawn((
-                    super::transparent::SourceSortData {
+                    super::renderer_visibility::SourceSortData {
                         material_key: (start + i) as u32,
                         material_identity: (start + i) as u32,
                         glass_source: 0,

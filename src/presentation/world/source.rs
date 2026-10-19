@@ -346,7 +346,7 @@ impl SourceWorldVisuals {
                     let binding = &self.road_materials[prototype][index];
                     let mut entity = commands.spawn((
                         Mesh3d(mesh.clone()),
-                        crate::presentation::renderers::SourceRenderer(record.clone()),
+                        crate::presentation::renderer_visibility::SourceRenderer(record.clone()),
                         MeshMaterial3d(binding.material.clone()),
                         Transform::default(),
                         Visibility::Inherited,
@@ -362,7 +362,7 @@ impl SourceWorldVisuals {
                     let tier = tier(published.key.layer)?;
                     commands.spawn((
                         Mesh3d(mesh.clone()),
-                        crate::presentation::renderers::SourceRenderer(record.clone()),
+                        crate::presentation::renderer_visibility::SourceRenderer(record.clone()),
                         MeshMaterial3d(self.terrain[tier].as_ref().unwrap().clone()),
                         Transform::default(),
                         Visibility::Inherited,

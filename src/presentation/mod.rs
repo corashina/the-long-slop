@@ -51,6 +51,7 @@ pub mod postprocessing;
 pub mod probes;
 mod reflection_preparation;
 pub mod render_targets;
+pub mod renderer_visibility;
 pub mod renderers;
 pub mod shadow_atlas;
 mod shadow_changes;
