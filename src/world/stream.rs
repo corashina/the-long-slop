@@ -1,8 +1,9 @@
 //! Bounded source generation. Publication uses absolute geometry and the current physics origin.
 use super::{
     AbsolutePose, Placement, PlacementIndex, RoadIndex, RoadSegment, RoadSequence, StartupTerrain,
-    TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainRoadPoint, TerrainSurfaceJob,
-    TerrainTile, WorldBounds, WorldLayer, WorldMetrics, WorldOrigin, WorldSurface, deform_road,
+    TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainJob, TerrainPoll, TerrainRoadPoint,
+    TerrainTile, TerrainWorker, WorldBounds, WorldLayer, WorldMetrics, WorldOrigin, WorldSurface,
+    deform_road,
 };
 use crate::reference::{ReferenceError, ReferenceManifest, SourceId, WorldReference};
 use crate::vehicle::{ColliderHandle, PhysicsWorld};
@@ -110,11 +111,10 @@ struct TerrainWork {
     pending_bytes: usize,
     request: WorldRequest,
     key: SurfaceKey,
-    job: TerrainSurfaceJob,
-    surface: WorldSurface,
-    foundations: Vec<TerrainFoundation>,
-    holes: Vec<[[f32; 3]; 4]>,
-    roads: Vec<TerrainRoadPoint>,
+    /// Encoded job input. It is kept until the result arrives.
+    input: Vec<u8>,
+    /// Worker job identity after submission.
+    id: Option<u32>,
 }
 #[derive(Clone, Copy)]
 struct PrototypeAllocation {
@@ -207,13 +207,13 @@ pub struct WorldStream {
     surfaces: Vec<PublishedSurface>,
     ready: Option<PreparedSurface>,
     terrain_work: Option<TerrainWork>,
+    terrain_worker: TerrainWorker,
     admissions: HashMap<SourceId, PrototypeAllocation>,
     terrain_ready: [bool; 3],
     shared_cpu_bytes: Option<usize>,
     publication_available: bool,
     failure: Option<String>,
     last_road_work: usize,
-    last_terrain_work: usize,
 }
 
 impl WorldStream {
@@ -596,10 +596,10 @@ impl WorldStream {
                 "Source immutable graph exceeds prototype CPU budget: {shared_cpu_bytes}"
             )));
         }
-        let evaluator = TerrainEvaluator::new(world, seed);
+        let evaluator = super::terrain_evaluator(world, seed);
         let roads = RoadIndex::new(
             RoadSequence::new(world, seed)?,
-            TerrainEvaluator::new(world, seed),
+            super::terrain_evaluator(world, seed),
         );
         let terrain_transform = world
             .records
@@ -705,9 +705,9 @@ impl WorldStream {
             color_foundations: Vec::new(),
             color_helpers: Vec::new(),
             tiles: [
-                TerrainTile::new(world, 0)?,
-                TerrainTile::new(world, 1)?,
-                TerrainTile::new(world, 2)?,
+                super::terrain_tile(world, 0)?,
+                super::terrain_tile(world, 1)?,
+                super::terrain_tile(world, 2)?,
             ],
             initial_generation_ready: false,
             plan_revision: 0,
@@ -743,13 +743,13 @@ impl WorldStream {
             surfaces: Vec::new(),
             ready: None,
             terrain_work: None,
+            terrain_worker: TerrainWorker::default(),
             admissions: HashMap::new(),
             terrain_ready: [false; 3],
             shared_cpu_bytes: Some(shared_cpu_bytes),
             publication_available: false,
             failure: None,
             last_road_work: 0,
-            last_terrain_work: 0,
         })
     }
 
@@ -1268,7 +1268,6 @@ impl WorldStream {
         let started = std::time::Instant::now();
         self.publication_available = true;
         self.last_road_work = 0;
-        self.last_terrain_work = 0;
         // Request and source-input changes force structures. Captured item motion only
         // revises replay selection; it must not restart the one-metre baseline.
         let force_structures = self.plan_revision != self.request.revision
@@ -1343,7 +1342,7 @@ impl WorldStream {
         }
     }
     /// Keep payload construction and renderer publication downstream from source selection.
-    pub fn prepare_geometry(&mut self) {
+    fn prepare_geometry(&mut self, should_yield: impl FnMut() -> bool) {
         if self.failure.is_some()
             || self.ready.is_some()
             || !self.initial_generation_ready
@@ -1358,7 +1357,7 @@ impl WorldStream {
             .iter()
             .any(|key| self.local_collision_pending(*key))
         {
-            self.prepare_terrain();
+            self.prepare_terrain(should_yield);
         } else if self.required.roads.iter().any(|id| {
             !self
                 .surfaces
@@ -1368,12 +1367,28 @@ impl WorldStream {
         {
             self.prepare_road();
         } else {
-            self.prepare_terrain();
+            self.prepare_terrain(should_yield);
         }
     }
     pub fn prepare(&mut self, budget_ms: f64) {
+        #[cfg(target_arch = "wasm32")]
+        let started = crate::browser::game_now();
+        #[cfg(not(target_arch = "wasm32"))]
+        let started = std::time::Instant::now();
+        // Zero requests one driving step. Bound its terrain work to a 1 ms slice.
+        // Loading keeps its supplied budget, including time spent on descriptors.
+        let limit_ms = if budget_ms == 0. { 1. } else { budget_ms };
+        let mut timer =
+            super::stream_profile::Timer::new(super::stream_profile::Stage::StreamDescriptors);
         self.prepare_descriptors(budget_ms);
-        self.prepare_geometry();
+        timer.next(super::stream_profile::Stage::StreamGeometry);
+        self.prepare_geometry(|| {
+            #[cfg(target_arch = "wasm32")]
+            let elapsed = crate::browser::game_now() - started;
+            #[cfg(not(target_arch = "wasm32"))]
+            let elapsed = started.elapsed().as_secs_f64() * 1000.;
+            elapsed >= limit_ms
+        });
     }
     fn prepare_startup(&mut self) {
         if self.startup_candidates.is_empty() && self.startup_next == 0 {
@@ -2071,6 +2086,7 @@ impl WorldStream {
         if let Some(work) = &mut self.terrain_work {
             if self.terrain_context_dirty || !self.wanted_tiles.contains(&work.key) {
                 self.terrain_work = None;
+                self.terrain_worker.discard();
             } else {
                 work.request = self.request;
             }
@@ -2241,6 +2257,7 @@ impl WorldStream {
         self.next_road += 1;
     }
     fn prepare_road(&mut self) {
+        let _timer = super::stream_profile::Timer::new(super::stream_profile::Stage::Road);
         if self.available_external_jobs() == 0 {
             return;
         }
@@ -2317,7 +2334,49 @@ impl WorldStream {
                 && self.reference.road.prototypes[r.segment.biome as usize] == *source
         })
     }
-    fn prepare_terrain(&mut self) {
+    fn prepare_terrain(&mut self, should_yield: impl FnMut() -> bool) {
+        let _timer = super::stream_profile::Timer::new(super::stream_profile::Stage::Terrain);
+        let mut poll = match self.terrain_worker.poll(should_yield) {
+            Ok(poll) => poll,
+            Err(error) => {
+                self.failure = Some(error.0);
+                return;
+            }
+        };
+        if let TerrainPoll::Ready(id) = poll {
+            let owner = self.terrain_work.as_ref().is_some_and(|w| w.id == Some(id));
+            if owner && same_request(self.terrain_work.as_ref().unwrap().request, self.request) {
+                let work = self.terrain_work.take().unwrap();
+                let mut surface = WorldSurface::default();
+                self.terrain_worker.read(
+                    work.key.unit,
+                    self.tiles[layer_tier(work.key.layer)],
+                    &mut surface,
+                );
+                self.ready = Some(PreparedSurface {
+                    pending_bytes: work.pending_bytes,
+                    renderer_ready: false,
+                    renderer_reserved: false,
+                    request: work.request,
+                    published: PublishedSurface {
+                        key: work.key,
+                        bounds: surface_bounds(&surface),
+                        surface,
+                        prototype: None,
+                        collider: None,
+                        collision_bytes: 0,
+                        road: None,
+                    },
+                });
+                return;
+            }
+            // A cancelled job, or one from an earlier world, still returns its result.
+            self.terrain_worker.discard();
+            if owner {
+                self.terrain_work = None;
+            }
+            poll = TerrainPoll::Idle;
+        }
         if self.terrain_work.is_none()
             && (self.available_external_jobs() == 0 || !self.can_request_independent(1))
         {
@@ -2349,7 +2408,7 @@ impl WorldStream {
                 s.foundations.len() * std::mem::size_of::<TerrainFoundation>()
                     + s.holes.len() * std::mem::size_of::<[[f32; 3]; 4]>()
             });
-            let pending_bytes = TerrainSurfaceJob::allocation_bound(tile)
+            let pending_bytes = super::terrain_output_bound(tile)
                 + (self.placements.foundation_count()
                     + self.structure_helpers.count(&self.wanted_structures))
                     * 2
@@ -2408,77 +2467,43 @@ impl WorldStream {
                     range_squared: p.range_squared,
                 }));
             }
-            let mut work = TerrainWork {
+            let roads = self
+                .road_points
+                .iter()
+                .filter(|point| {
+                    let x = point.segment_origin[0] - key.unit[0] as f32 * tile.size as f32;
+                    let z = point.segment_origin[1] - key.unit[1] as f32 * tile.size as f32;
+                    x * x + z * z < 1_000_000.0
+                })
+                .copied()
+                .collect::<Vec<_>>();
+            let mut input = Vec::new();
+            TerrainJob {
+                settings: self.evaluator.settings(),
+                unit: key.unit,
+                tile,
+                biome_override: source_override(&self.reference),
+                roads: &roads,
+                foundations: &foundations,
+                holes: &holes,
+            }
+            .encode(&mut input);
+            self.terrain_work = Some(TerrainWork {
                 pending_bytes,
                 request: self.request,
                 key,
-                job: TerrainSurfaceJob::default(),
-                surface: WorldSurface::default(),
-                foundations,
-                holes,
-                roads: self
-                    .road_points
-                    .iter()
-                    .filter(|point| {
-                        let x = point.segment_origin[0] - key.unit[0] as f32 * tile.size as f32;
-                        let z = point.segment_origin[1] - key.unit[1] as f32 * tile.size as f32;
-                        x * x + z * z < 1_000_000.0
-                    })
-                    .copied()
-                    .collect(),
-            };
-            work.job.begin(
-                key.unit,
-                TerrainContext {
-                    evaluator: &self.evaluator,
-                    tile,
-                    roads: &work.roads,
-                    road_radius_squared: None,
-                    foundations: &work.foundations,
-                    holes: &work.holes,
-                    biome_override: source_override(&self.reference),
-                },
-                &mut work.surface,
-            );
-            self.terrain_work = Some(work);
+                input,
+                id: None,
+            });
         }
         let work = self.terrain_work.as_mut().unwrap();
         if !same_request(work.request, self.request) {
             self.terrain_work = None;
+            self.terrain_worker.discard();
             return;
         }
-        let tier = layer_tier(work.key.layer);
-        let before = work.job.prepared_vertices();
-        let done = work.job.advance(
-            TerrainContext {
-                evaluator: &self.evaluator,
-                tile: self.tiles[tier],
-                roads: &work.roads,
-                road_radius_squared: None,
-                foundations: &work.foundations,
-                holes: &work.holes,
-                biome_override: source_override(&self.reference),
-            },
-            &mut work.surface,
-        );
-        self.last_terrain_work = work.job.prepared_vertices() - before;
-        if done {
-            let work = self.terrain_work.take().unwrap();
-            self.ready = Some(PreparedSurface {
-                pending_bytes: work.pending_bytes,
-                renderer_ready: false,
-                renderer_reserved: false,
-                request: work.request,
-                published: PublishedSurface {
-                    key: work.key,
-                    bounds: surface_bounds(&work.surface),
-                    surface: work.surface,
-                    prototype: None,
-                    collider: None,
-                    collision_bytes: 0,
-                    road: None,
-                },
-            });
+        if work.id.is_none() && poll == TerrainPoll::Idle {
+            work.id = Some(self.terrain_worker.submit(&work.input));
         }
     }
     pub fn prepared_surface(&self) -> Option<(WorldRequest, &PublishedSurface)> {
@@ -4184,7 +4209,6 @@ impl WorldStream {
             prepared_buildings: self.placements.prepared_buildings(),
 
             last_road_work: self.last_road_work,
-            last_terrain_work: self.last_terrain_work,
             generated_objects: self
                 .contents
                 .active

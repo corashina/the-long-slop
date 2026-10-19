@@ -70,7 +70,7 @@ Stopped at the user's request. Branch: `codex/inventory-clothing`.
 
 These 15 improvements are ordered from easiest to hardest, not by execution order. No performance gain is verified.
 Review each proposal against current source and profile evidence before implementation. Item 2 changes image quality and needs specific approval.
-Items 4 and 5 are implemented. Start profiling with items 3 or 7 for fidelity-preserving work, or item 1 for startup. This suggestion does not change the work order.
+Items 1 to 5, 7 to 9, and 14 are merged. Items 6, 10 to 13, and 15 are proposed.
 
 Use this prompt preamble for each item:
 
@@ -130,7 +130,14 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 6. **Split expensive streaming steps.**
-   Status: Proposed. Difficulty: Hard. Estimate: 3–5 days. Owner: [world runtime](../src/presentation/world/runtime.rs).
+   Status: Implemented and merged into master on 2026-10-19. Source commit: `760af3d`. Worker integration: `f13afc7`.
+   Terrain work resumes at deadline checks in the shared terrain crate.
+   Native worker polling uses the deadline. Browser terrain runs in the worker from item 14.
+   Native terrain measurements selected the stage. Native tests and the WASM compile check passed.
+   Browser testing is deferred by request. Driving frame times and runtime acceptance remain unverified.
+   Earlier profiling hit mouse capture and Load failures.
+   Checks and profiling commands: [Streaming stage measurements](performance/2026-10-19-streaming-steps.md).
+   Difficulty: Hard. Estimate: 3–5 days. Owner: [world runtime](../src/presentation/world/runtime.rs).
    Effect: Bound measured long driving stages as resumable work within the current frame budget.
    Prompt:
    ```text
@@ -202,7 +209,8 @@ Effort estimates include developer work, builds, critical checks, and browser ve
     ```
 
 14. **Move terrain work to a Web Worker.**
-    Status: Proposed. Difficulty: Architectural. Estimate: 2–3 weeks. Owner: [terrain generation](../src/world/terrain.rs).
+    Status: Merged, not measured. Owners: [terrain crate](../crates/terrain/src/lib.rs), [worker](../web/terrain-worker.js), [client](../src/world/terrain.rs).
+    Tile meshes come from one Web Worker with a 42 KB WASM. Results match the old job bit for bit in native checks.
     Effect: Evaluate pure terrain data in one worker with its own WASM; keep engine ownership on the main thread.
     Prompt:
     ```text

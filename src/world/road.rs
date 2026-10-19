@@ -163,7 +163,7 @@ impl RoadSequence {
         }
         // FStart samples terrain before StartObjs receives its shared garage offset.
         // The road parent translation is not the generation origin.
-        let terrain = TerrainEvaluator::new(reference, seed);
+        let terrain = super::terrain_evaluator(reference, seed);
         let origin = [
             0.0,
             terrain.base_height([0.0; 2], road.align_edge_of_the_world != 0) as f64,
