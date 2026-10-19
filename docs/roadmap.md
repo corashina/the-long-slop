@@ -322,7 +322,10 @@ Effort estimates include developer work, builds, critical checks, and browser ve
 
 2. **Lower internal rendering resolution — proposed.** Difficulty: Easy to moderate. Estimate: 1–2 days. [Canvas sizing](../src/app.rs) fits the render canvas to the window. Add an optional 0.75 scene scale, which uses 56% of the pixels and softens the image. Keep UI and text at native resolution. Check projection, input, resize, and probe behavior independently. Prompt: Add the optional scene scale and verify rendering, input, resize, and probes.
 
-3. **Reuse unchanged content lookup tables — proposed.** Difficulty: Moderate. Estimate: 1–2 days. [Content indexing](../src/content_index.rs) and [instance handling](../src/instances.rs) sort data unconditionally. Cache by session, membership, and order revision. Cover insert, remove, replace, `swap_remove`, static controls, and lamp bindings. Preserve exact identity, duplicates, and order. Read live pose and appearance. Prompt: Cache only unchanged lookup tables; verify mutation paths and ordering.
+3. **Reuse unchanged content lookup tables: implemented in an isolated branch.**
+   Branch `codex/content-lookup-cache` remains unmerged. [Content indexing](../src/world/content_index.rs) now caches session, membership, and order.
+   [Instance presentation](../src/presentation/world/instances.rs) reads live pose and appearance through those tables.
+   Critical cache checks pass. Runtime performance remains unverified. See the [validation note](content-lookup-cache.md) for evidence and blockers.
 
 4. **Remove redundant fullscreen image copies — proposed.** Difficulty: Moderate. Estimate: 1–3 days. [Source effects](../src/presentation/source_effects.rs) copies each Far and Main image twice after Uber. Prove equivalence for half-float rounding, NaN, infinity, pixel sampling, and MSAA. Remove only work proven equivalent. Update audits to count actual submissions; do not claim completion from estimates. Preserve effects, display, and resize behavior. Prompt: Trace each copy, prove equivalent output, and remove only redundant submissions.
 

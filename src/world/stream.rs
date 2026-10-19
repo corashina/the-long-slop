@@ -128,12 +128,16 @@ pub struct WorldStream {
     required: super::required::RequiredSelection,
     lamp_material_choices: Vec<(SourceId, SourceId, Vec<SourceId>)>,
     static_controls: Vec<super::contents::ContentInstance>,
+    // Membership and order only, independent of live control state.
+    static_control_revision: u64,
     binding_baseline: Option<usize>,
     binding_bytes: usize,
     binding_owner_bytes: usize,
     binding_objects: usize,
     binding_reserved: usize,
     lamp_bindings: Vec<content_lamps::LampBinding>,
+    // Membership and order only, independent of button animation.
+    lamp_binding_revision: u64,
     seed: i32,
     package_id: String,
     generation_revision: u64,
@@ -537,12 +541,14 @@ impl WorldStream {
             required: Default::default(),
             lamp_material_choices: Vec::new(),
             static_controls: Vec::new(),
+            static_control_revision: 0,
             binding_baseline: None,
             binding_bytes: 0,
             binding_owner_bytes: 0,
             binding_objects: reference.items.len(),
             binding_reserved: 0,
             lamp_bindings: Vec::new(),
+            lamp_binding_revision: 0,
             seed,
             structure_helpers,
             building_components: Default::default(),
@@ -3490,6 +3496,7 @@ impl WorldStream {
                 .position(|c| c.content.placement.id == instance.placement.id)
             {
                 let mut content = self.static_controls.swap_remove(i);
+                self.static_control_revision += 1;
                 content_bindings::rollback(
                     &mut content,
                     &instance,
