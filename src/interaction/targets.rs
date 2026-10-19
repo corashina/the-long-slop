@@ -222,8 +222,7 @@ impl InteractionState {
             }
         }
         if let Some(item) = self.held().filter(|item| self.parts.contains(*item)) {
-            (aim.installation_target, aim.installation_block) =
-                self.parts.scan(item, items, physics);
+            aim.installation_target = self.parts.scan(item, items, physics);
         } else {
             aim.installation_block = self.wheel_installation_block(&aim, items);
         }

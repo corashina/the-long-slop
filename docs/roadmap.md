@@ -45,7 +45,7 @@ Verify = code exists. Partial = known behavior gaps. Missing = no complete gamep
 | ID | Task and starting code | Difficulty | Status | Completion goal |
 | --- | --- | --- | --- | --- |
 | G01 | Reliable session start. [Session](../src/app/save.rs), [menu](../web/menu.js) | Hard | Verify | Use matching assets and WASM. Verify New game, mouse capture, pause, Continue, restart, and cold Load. |
-| G02 | Remove and install Lada parts. [Parts](../src/interaction/parts.rs) | Hard | Verify | Remove and reinstall the engine, radiator, body parts, seats, and plates. Preserve identities, fluids, mass, and collision. |
+| G02 | Remove and install Lada parts. [Parts](../src/interaction/parts.rs) | Hard | Verify | Remove and reinstall the engine, radiator, body parts, and plates. Reject removal of source-fixed seats. Preserve identities, fluids, mass, and collision. |
 | G03 | Assemble wheels. [Wheels](../src/interaction/wheels.rs) | Hard | Verify | Remove hubcaps and wheels. Split and join tires and rims. Enforce source fit rules and update mass. |
 | G04 | Fill and drain fluids. [Fluids](../src/fluids.rs), [interaction](../src/interaction.rs) | Hard | Verify | Operate caps and containers. Verify pouring, spilling, mixtures, empty supplies, and fluid retention after part removal. |
 | G05 | Start and maintain the engine. [Engine](../src/simulation/engine.rs) | Hard | Verify | Verify ignition, starter, fuel use, cooling, oil effects, stalling, and missing-part behavior. |
@@ -61,6 +61,11 @@ Verify = code exists. Partial = known behavior gaps. Missing = no complete gamep
 | G15 | Finish usability and performance. [Presentation](../src/presentation/mod.rs), [audio](../web/audio.js) | Very hard | Partial | Fix reproduced visual and audio defects. Agree performance targets, measure them, and fix measured startup or frame-time problems. |
 | G16 | Accept the complete garage experience | Hard | Verify | Repair the Lada, fill it, start it, drive outside, return, save, reload, and continue through normal input. |
 
+G02 update, 2026-10-19: the incompatible-slot scan no longer blocks dropping a held part.
+Three targeted native tests passed. They cover 20 general parts and both plates through three cycles each.
+Checks cover identity, fluids, mass, collision ownership, invalid fits, duplicate attachment, and source-fixed seats.
+The WASM compile check passed. G01 session input and G02 browser acceptance remain open.
+See [G02 verification](g02-parts.md) for source evidence, checks, and limits. G02 stays Verify.
 G11 includes service braking, engine braking, and the handbrake under simultaneous inputs.
 G12 requires a reliable local driving area. It does not require extended road generation or distant travel.
 G13 follows the approved garage state. Saved survival needs remain deferred.
