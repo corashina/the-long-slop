@@ -1,6 +1,6 @@
 // TMP Surface programs 4 and 20, installed build 11140890.
 #import bevy_pbr::{mesh_functions, mesh_view_bindings::view}
-#import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, attenuation, attenuation_sampler, default_cookie, default_sampler, cookies, cookie_sampler}
+#import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, cookie_uv_gradient, attenuation, attenuation_sampler, default_cookie, default_sampler, cookies, cookie_sampler}
 #import source_view_lighting::{lighting, diffuse_sh, direct_attenuation, fog_factor, sun_cookie, sun_cookie_sampler}
 struct PlateUniform { face:vec4<f32>, outline:vec4<f32>, sdf:vec4<f32>, scale:vec4<f32>, bevel:vec4<f32>, bump:vec4<f32>, specular:vec4<f32> }
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> plate:PlateUniform;
@@ -66,6 +66,7 @@ struct Out { @builtin(position) position:vec4<f32>, @location(0) world:vec4<f32>
     let sun_direction=lighting.direction_to_sun.xyz;
     let sun_specular=pow(max(dot(normal,normalize(sun_direction+eye)),0.),shininess);
     light+=(diffuse*max(dot(normal,sun_direction),0.)+plate.specular.rgb*sun_specular)*lighting.sun_radiance.rgb*direct_attenuation(i.world.xyz,screen,depth,true);
+    let world_dx=dpdx(i.world);let world_dy=dpdy(i.world);
     for(var n=0u;n<lamp_lighting.counts.x;n+=1u) {
         let lamp=lamp_lighting.lights[n];
         if lamp.direction_kind.w==0. {continue;}
@@ -81,11 +82,13 @@ struct Out { @builtin(position) position:vec4<f32>, @location(0) world:vec4<f32>
             var uv=vec2(0.);
             if lamp.direction_kind.w==0. {uv=local.xy/lamp.cookie_size+lamp.cookie_rect.yz+.5;}
             else {if local.z<=0. {continue;} uv=local.xy/local.w+.5;if any(uv<vec2(0.))||any(uv>vec2(1.)){continue;}}
-            if lamp.cookie_rect.x==1. {weight*=textureSampleGrad(sun_cookie,sun_cookie_sampler,uv,dpdx(uv),dpdy(uv)).a;}
-            else if lamp.cookie_rect.x==2. {weight*=textureSampleGrad(default_cookie,default_sampler,uv,dpdx(uv),dpdy(uv)).a;}
+            let uv_dx=cookie_uv_gradient(lamp,local,world_dx);let uv_dy=cookie_uv_gradient(lamp,local,world_dy);
+            if lamp.cookie_rect.x==1. {weight*=textureSampleGrad(sun_cookie,sun_cookie_sampler,uv,uv_dx,uv_dy).a;}
+            else if lamp.cookie_rect.x==2. {weight*=textureSampleGrad(default_cookie,default_sampler,uv,uv_dx,uv_dy).a;}
             else {
-                let array_uv=select(uv,uv*0.5+0.25,lamp.cookie_rect.x>3.0);
-                weight*=textureSampleGrad(cookies,cookie_sampler,array_uv,i32(lamp.cookie_rect.x)-3,dpdx(array_uv),dpdy(array_uv)).a;
+                let half=lamp.cookie_rect.x>3.0;let scale=select(1.,0.5,half);
+                let array_uv=select(uv,uv*0.5+0.25,half);
+                weight*=textureSampleGrad(cookies,cookie_sampler,array_uv,i32(lamp.cookie_rect.x)-3,uv_dx*scale,uv_dy*scale).a;
             }
         }
         let specular=pow(max(dot(normal,normalize(direction+eye)),0.),shininess);

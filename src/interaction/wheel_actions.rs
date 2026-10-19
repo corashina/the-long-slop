@@ -1,10 +1,11 @@
 use super::{
-    InteractionAction, InteractionState, ResolvedAim, items::ItemStore, wheels::WheelAssemblies,
+    InteractionAction, InteractionState, ResolvedAim,
+    items::{ItemLocation, ItemStore},
+    wheels::WheelAssemblies,
 };
 use crate::{
     player::PlayerState,
-    reference::{ItemId, WheelSlotId},
-    simulation::{FrameInput, keys},
+    reference::{ItemId, ReferenceError, WheelSlotId},
     vehicle::PhysicsWorld,
 };
 
@@ -20,7 +21,6 @@ impl InteractionState {
     pub(crate) fn complete_wheel_action(
         &mut self,
         action: WheelAction,
-        input: FrameInput,
         aim: ResolvedAim,
         wheels: &mut WheelAssemblies,
         player: &PlayerState,
@@ -63,31 +63,20 @@ impl InteractionState {
                 }
             }
             WheelAction::Split(rim) => {
-                self.drop_held(items, physics);
-                if let Ok((_, tire)) = wheels.split(rim, items, physics) {
-                    self.completed_action(InteractionAction::PartRemove(tire));
-                    if input.pressed & keys::GRAB != 0 {
-                        let point = aim
-                            .focus_target
-                            .or(aim.grab_target)
-                            .map_or(items.get(tire).unwrap().pose.position, |target| {
-                                target.point
-                            });
-                        if self
-                            .pickup_item(tire, point, player, items, physics)
-                            .is_err()
-                        {
-                            return Some("Cannot carry this tire.");
-                        }
+                let point = aim
+                    .grab_target
+                    .or(aim.focus_target)
+                    .map_or(items.get(rim).unwrap().pose.position, |target| target.point);
+                match self.split_wheel(rim, point, player, wheels, items, physics) {
+                    Ok(tire) => {
+                        self.completed_action(InteractionAction::PartRemove(tire));
+                        ""
                     }
-                    ""
-                } else {
-                    "Cannot dismount this tire."
+                    Err(_) => "Cannot dismount this tire.",
                 }
             }
             WheelAction::Join { rim, tire } => {
-                self.drop_held(items, physics);
-                if wheels.assemble(rim, tire, items, physics).is_ok() {
+                if self.join_wheel(rim, tire, wheels, items, physics).is_ok() {
                     self.completed_action(InteractionAction::Wheel(WheelAction::Join {
                         rim,
                         tire,
@@ -98,5 +87,58 @@ impl InteractionState {
                 }
             }
         })
+    }
+
+    pub fn join_wheel(
+        &mut self,
+        rim: ItemId,
+        tire: ItemId,
+        wheels: &mut WheelAssemblies,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        if self.held() != Some(tire)
+            || items
+                .get(rim)
+                .is_none_or(|item| item.location != ItemLocation::World)
+        {
+            return Err(ReferenceError("Hold the tire beside a loose rim".into()));
+        }
+        wheels.can_assemble(rim, tire, items)?;
+        self.drop_held(items, physics);
+        wheels.assemble(rim, tire, items, physics)?;
+        Ok(())
+    }
+
+    pub fn split_wheel(
+        &mut self,
+        rim: ItemId,
+        point: [f32; 3],
+        player: &PlayerState,
+        wheels: &mut WheelAssemblies,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<ItemId, ReferenceError> {
+        if self.held().is_some()
+            || items
+                .get(rim)
+                .is_none_or(|item| item.location != ItemLocation::World)
+        {
+            return Err(ReferenceError(
+                "Release the wheel before tire removal".into(),
+            ));
+        }
+        let tire = wheels.can_split(rim, items)?;
+        if !self
+            .carry
+            .allows_pickup(tire, player.seat().is_some(), true)
+        {
+            return Err(ReferenceError("Cannot remove this tire".into()));
+        }
+        let body = items.get(rim).unwrap().body.unwrap();
+        self.carry.can_acquire(tire, point, player, body, physics)?;
+        wheels.split(rim, items, physics)?;
+        self.carry.pickup(tire, point, player, items, physics)?;
+        Ok(tire)
     }
 }

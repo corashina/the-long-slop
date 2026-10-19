@@ -8,8 +8,8 @@ struct LightingUniform {
     fog_color_density: vec4<f32>,
     shadow_fade: vec4<f32>,
     shadow_fade_center: vec4<f32>,
-    probe_center: array<vec4<f32>, 2>,
-    probe_extents: array<vec4<f32>, 2>,
+    probe_center: array<vec4<f32>, 1>,
+    probe_extents: array<vec4<f32>, 1>,
     source_time: vec4<f32>,
     clip_from_world: mat4x4<f32>,
     near_far: vec4<f32>,
@@ -21,28 +21,19 @@ struct LightingUniform {
 @group(1) @binding(4) var local_probe_sampler: sampler;
 @group(1) @binding(5) var screen_shadow: texture_2d<f32>;
 @group(1) @binding(6) var screen_shadow_sampler: sampler;
-@group(1) @binding(7) var local_probe_second: texture_cube<f32>;
 
-// Both selected car probes have equal importance and equal axis-aligned box sizes.
-// Unity 2021.3 BlendProbes weights use renderer/probe intersection volumes.
+// The selected Lada has one probe. Positive intersection gives it full weight.
 // Renderer extents retain the recovered native Vector3f::epsilon clamp.
-fn probe_weight(model: mat4x4<f32>, center_usage: vec4<f32>, extents_flags: vec4<f32>) -> vec2<f32> {
-    if center_usage.w == 0.0 { return vec2(0.0); }
+fn probe_weight(model: mat4x4<f32>, center_usage: vec4<f32>, extents_flags: vec4<f32>) -> f32 {
+    if center_usage.w == 0.0 || lighting.probe_extents[0].w == 0.0 { return 0.0; }
     let center = (model * vec4(center_usage.xyz,1.0)).xyz;
     let extents = max(abs(model[0].xyz)*extents_flags.x
         + abs(model[1].xyz)*extents_flags.y + abs(model[2].xyz)*extents_flags.z,
         vec3(9.999999747378752e-06));
-    var volumes = vec2(0.0);
-    for (var index = 0u; index < 2u; index++) {
-        if lighting.probe_extents[index].w == 0.0 { continue; }
-        let minimum = max(center-extents, lighting.probe_center[index].xyz-lighting.probe_extents[index].xyz);
-        let maximum = min(center+extents, lighting.probe_center[index].xyz+lighting.probe_extents[index].xyz);
-        let size = max(maximum-minimum, vec3(0.0));
-        volumes[index] = size.x*size.y*size.z;
-    }
-    let total = volumes.x+volumes.y;
-    if total == 0.0 { return vec2(0.0); }
-    return volumes/total;
+    let minimum = max(center-extents, lighting.probe_center[0].xyz-lighting.probe_extents[0].xyz);
+    let maximum = min(center+extents, lighting.probe_center[0].xyz+lighting.probe_extents[0].xyz);
+    let size = max(maximum-minimum, vec3(0.0));
+    return select(0.0, 1.0, size.x*size.y*size.z > 0.0);
 }
 fn diffuse_sh(normal: vec3<f32>) -> vec3<f32> {
     // ShadeSH9 in source world axes. Flat startup SH has only the constant term.
@@ -53,7 +44,7 @@ fn diffuse_sh(normal: vec3<f32>) -> vec3<f32> {
     return max(vec3(0.0),linear+quadratic+lighting.ambient_sh[6].xyz*(n.x*n.x-n.y*n.y));
 }
 fn indirect_specular(specular: vec3<f32>,one_minus_reflectivity: f32,smoothness: f32,
-    normal: vec3<f32>,view: vec3<f32>,occlusion: f32,weight: vec2<f32>) -> vec3<f32> {
+    normal: vec3<f32>,view: vec3<f32>,occlusion: f32,weight: f32) -> vec3<f32> {
     let reflected=reflect(-view,normal);
     // Native face storage retains source axes; target world coordinates reflect Z.
     let source_ray=vec3(reflected.x,reflected.y,-reflected.z);
@@ -61,9 +52,7 @@ fn indirect_specular(specular: vec3<f32>,one_minus_reflectivity: f32,smoothness:
     let level=(perceptual*(1.7-0.7*perceptual))*6.0;
     // RGBA16F carries linear radiance directly, equivalent to native FP decode.
     // During capture this binding uses the proven black local-probe override.
-    let first=textureSampleLevel(local_probe,local_probe_sampler,source_ray,level).rgb;
-    let second=textureSampleLevel(local_probe_second,local_probe_sampler,source_ray,level).rgb;
-    let radiance=(first*weight.x+second*weight.y)*occlusion;
+    let radiance=textureSampleLevel(local_probe,local_probe_sampler,source_ray,level).rgb*weight*occlusion;
     let roughness=max(perceptual*perceptual,0.002);
     let reduction=1.0/(roughness*roughness+1.0);
     let grazing=clamp(smoothness+(1.0-one_minus_reflectivity),0.0,1.0);

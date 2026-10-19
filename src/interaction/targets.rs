@@ -187,6 +187,15 @@ impl InteractionState {
                             && self.carry.allows_pickup(target.item, false, true)
                     }
                     ItemLocation::PartSlot(_) => self.carry.allows_pickup(target.item, false, true),
+                    ItemLocation::Attached(parent)
+                        if matches!(self.kinds.get(&target.item), Some(ItemKind::Tire))
+                            && self.is_wheel(parent)
+                            && items
+                                .get(parent)
+                                .is_some_and(|item| item.location == ItemLocation::World) =>
+                    {
+                        self.carry.allows_pickup(target.item, false, true)
+                    }
                     ItemLocation::Attached(_) if self.attachments.target(target.item).is_some() => {
                         self.carry.allows_pickup(target.item, false, true)
                     }
@@ -222,8 +231,7 @@ impl InteractionState {
             }
         }
         if let Some(item) = self.held().filter(|item| self.parts.contains(*item)) {
-            (aim.installation_target, aim.installation_block) =
-                self.parts.scan(item, items, physics);
+            aim.installation_target = self.parts.scan(item, items, physics);
         } else {
             aim.installation_block = self.wheel_installation_block(&aim, items);
         }
@@ -253,24 +261,42 @@ impl InteractionState {
         items: &ItemStore,
     ) -> Option<InteractionBlock> {
         aim.installation_block.or_else(|| {
-            let Some(SlotTarget::Wheel(slot)) = aim.installation_target.and_then(|t| t.slot) else {
-                return None;
-            };
             let held = self.held()?;
-            if !self.is_wheel(held)
-                || !self
-                    .slot_fits
-                    .get(&slot)
-                    .is_some_and(|fits| fits.contains(&held))
-            {
-                Some(InteractionBlock::Incompatible)
-            } else if items
-                .iter()
-                .any(|item| item.location == ItemLocation::WheelSlot(slot))
-            {
-                Some(InteractionBlock::Occupied)
-            } else {
-                None
+            match aim.installation_target.and_then(|t| t.slot)? {
+                SlotTarget::Wheel(slot) => {
+                    if !self.is_wheel(held)
+                        || !self
+                            .slot_fits
+                            .get(&slot)
+                            .is_some_and(|fits| fits.contains(&held))
+                    {
+                        Some(InteractionBlock::Incompatible)
+                    } else if self.parts.covered(held) {
+                        Some(InteractionBlock::Covered)
+                    } else if items
+                        .iter()
+                        .any(|item| item.location == ItemLocation::WheelSlot(slot))
+                    {
+                        Some(InteractionBlock::Occupied)
+                    } else {
+                        None
+                    }
+                }
+                SlotTarget::Tire(rim) => {
+                    if !self.tire_fits.contains(&(rim, held)) {
+                        Some(InteractionBlock::Incompatible)
+                    } else if items
+                        .get(rim)
+                        .is_none_or(|item| item.location != ItemLocation::World)
+                    {
+                        Some(InteractionBlock::Unavailable)
+                    } else if self.attached_tire(rim, items).is_some() {
+                        Some(InteractionBlock::Occupied)
+                    } else {
+                        None
+                    }
+                }
+                SlotTarget::Part(_) | SlotTarget::Attachment(_) => None,
             }
         })
     }
@@ -304,6 +330,27 @@ impl InteractionState {
             distance: hit.time_of_impact,
             point: ray.point_at(hit.time_of_impact).to_array(),
         })
+    }
+
+    fn tire_slot_owner(&self, handle: ColliderHandle, physics: &PhysicsWorld) -> Option<ItemId> {
+        let binding = self.collider_bindings.get(&handle)?;
+        let rim = binding.pickup_owner?;
+        (physics.rapier().colliders[handle].is_sensor()
+            && self.is_wheel(rim)
+            && binding
+                .removal_owner
+                .is_some_and(|item| matches!(self.kinds.get(&item), Some(ItemKind::Tire))))
+        .then_some(rim)
+    }
+
+    fn attached_tire(&self, rim: ItemId, items: &ItemStore) -> Option<ItemId> {
+        items
+            .iter()
+            .find(|item| {
+                item.location == ItemLocation::Attached(rim)
+                    && matches!(self.kinds.get(&item.id), Some(ItemKind::Tire))
+            })
+            .map(|item| item.id)
     }
 
     fn supports_use(&self, item: ItemId) -> bool {
@@ -343,6 +390,9 @@ impl InteractionState {
                 QueryAction::Grab | QueryAction::Removal => binding
                     .and_then(|binding| {
                         if matches!(action, QueryAction::Removal) {
+                            if let Some(rim) = self.tire_slot_owner(handle, physics) {
+                                return self.attached_tire(rim, items);
+                            }
                             self.attachments
                                 .collider_target(binding.collider)
                                 .and_then(|target| self.attachments.removal_member(target))
@@ -357,7 +407,8 @@ impl InteractionState {
                         }
                     })
                     .map(|id| {
-                        if matches!(self.kinds.get(&id), Some(ItemKind::Tire))
+                        if matches!(action, QueryAction::Grab)
+                            && matches!(self.kinds.get(&id), Some(ItemKind::Tire))
                             && let Some(ItemLocation::Attached(parent)) =
                                 items.get(id).map(|item| item.location)
                             && self.is_wheel(parent)
@@ -378,6 +429,16 @@ impl InteractionState {
                     })
                     .filter(|id| {
                         !matches!(action, QueryAction::Removal)
+                            || (matches!(self.kinds.get(id), Some(ItemKind::Tire))
+                                && items.get(*id).is_some_and(|item| match item.location {
+                                    ItemLocation::Attached(rim) => {
+                                        self.is_wheel(rim)
+                                            && items.get(rim).is_some_and(|rim| {
+                                                rim.location == ItemLocation::World
+                                            })
+                                    }
+                                    _ => false,
+                                }))
                             || self.attachments.target(*id).is_some()
                             || (self.parts.contains(*id)
                                 && matches!(
@@ -404,10 +465,12 @@ impl InteractionState {
                 QueryAction::Install if collider.user_data & SLOT_SENSOR_FLAG != 0 => {
                     (collider.user_data as u32).checked_sub(1).map(ItemId)
                 }
-                QueryAction::Focus => binding
-                    .and_then(|binding| binding.use_owner)
+                QueryAction::Install => self.tire_slot_owner(handle, physics),
+                QueryAction::Focus => self
+                    .tire_slot_owner(handle, physics)
+                    .map(|rim| self.attached_tire(rim, items).unwrap_or(rim))
+                    .or_else(|| binding.and_then(|binding| binding.use_owner))
                     .or_else(|| (collider.user_data as u32).checked_sub(1).map(ItemId)),
-                _ => None,
             }
         };
         let eligible = |handle: ColliderHandle, collider: &rapier3d::prelude::Collider| {
@@ -460,6 +523,7 @@ impl InteractionState {
                         .then_some(SlotTarget::Wheel(WheelSlotId(
                             (collider.user_data >> 96) as u8,
                         )))
+                        .or_else(|| self.tire_slot_owner(handle, physics).map(SlotTarget::Tire))
                         .or_else(|| {
                             self.parts
                                 .slot_target(ColliderId((collider.user_data >> 64) as u32))
@@ -539,8 +603,13 @@ impl InteractionState {
             {
                 return "F: remove wheel";
             }
-            if self.is_wheel(target.item) {
-                return "F: carry · X: split wheel";
+            if matches!(self.kinds.get(&target.item), Some(ItemKind::Tire))
+                && matches!(
+                    items.get(target.item).map(|item| item.location),
+                    Some(ItemLocation::Attached(_))
+                )
+            {
+                return "F: remove tire";
             }
             return "F: carry";
         }

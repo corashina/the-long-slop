@@ -1,6 +1,6 @@
 import {applyLayout} from './ui-layout.js';
 export function formatGear(gear){return gear<0?'R':gear===0?'N':String(gear);}
-export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,SPLIT:16384,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144,CONSUME:524288,DRINK:1048576,HELD_SWITCH:2097152,WASH:4194304,SCRUB:8388608};
+export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144,CONSUME:524288,DRINK:1048576,HELD_SWITCH:2097152,WASH:4194304,SCRUB:8388608};
 const FLUIDS=['Gas','Oil','Alcohol','Water','Blood','Diesel'];
 export function formatRadio(r){if(r.context===11&&Number.isFinite(r.radioVolume))return 'Volume: '+Math.round(r.radioVolume*10).toString().padStart(2,'0');if(r.context===12&&Number.isFinite(r.radioFrequency))return (r.radioAm?'AM '+r.radioFrequency.toFixed(0).padStart(3,'0'):'FM '+r.radioFrequency.toFixed(1).padStart(4,'0'));return '';}
 function volume(value){return (Math.round(value*10)/10).toFixed(1).replace(/\.0$/,'');}
@@ -71,7 +71,6 @@ export function createFeedback(ui,switchIconUrl,manifest) {
   [ACTION.GRIP,'grip','[F]: Grip'],
   [ACTION.RELEASE_GRIP,'release','[WASD]: Push / [F]: Release'],
   [ACTION.THROW,'throw','[F]: Drop / hold to throw'],
-  [ACTION.SPLIT,'split','[X]: Split / assemble'],
   [ACTION.SCROLL,'scroll','[Scroll]: Open/Close'],
   [ACTION.HELD_SWITCH,'heldSwitch','[LMB]: Switch flashlight'],
   [ACTION.WASH,'wash','[LMB]: Wash'],
@@ -81,7 +80,7 @@ export function createFeedback(ui,switchIconUrl,manifest) {
  const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance / [Tab]: Center';
  const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance / [Tab]: Center';
  const counts=new Uint8Array(4);
- const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',split:'mount',scroll:'use',heldSwitch:'use',wash:'use',scrub:'use'};
+ const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',scroll:'use',heldSwitch:'use',wash:'use',scrub:'use'};
  const families={use:0,pickup:1,mount:2,fill:3};
  function placeRows(){
   counts.fill(0);

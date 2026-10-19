@@ -2,8 +2,7 @@
 use super::{
     materials::{self, SourceMaterial, SourceMaterials},
     reference::ReferenceVisuals,
-    renderers::SourceRenderer,
-    transparent::SourceSortData,
+    renderer_visibility::{SourceMaterialWarmup, SourceRenderer, SourceSortData},
 };
 use crate::{
     app::{Drive, RuntimeReference},
@@ -256,7 +255,7 @@ fn prepare(
                             let mut warm = world.spawn((
                                 Mesh3d(mesh.clone()),
                                 MeshMaterial3d(material.clone()),
-                                materials::SourceMaterialWarmup,
+                                SourceMaterialWarmup,
                                 far,
                                 Visibility::Visible,
                                 bevy::light::NotShadowCaster,
@@ -350,7 +349,7 @@ fn prepare(
                 let mut warm = world.spawn((
                     Mesh3d(mesh.clone()),
                     MeshMaterial3d(material.clone()),
-                    materials::SourceMaterialWarmup,
+                    SourceMaterialWarmup,
                     far,
                     Visibility::Visible,
                     bevy::light::NotShadowCaster,
@@ -684,6 +683,10 @@ pub(crate) fn sync_conditions(world: &mut World) {
             apply_spray(receivers, color, visuals.bank, world, false);
         }
         visuals.apply_visibility(world);
+        let mut timing = super::reflection_preparation::Timer::new(
+            super::reflection_preparation::Stage::ConditionTools,
+            world.resource::<super::view_frame::SourceViewFrame>(),
+        );
         for (index, (_, model, _)) in visuals.tools.iter().enumerate() {
             let Some(model) = model else { continue };
             let pose = world
@@ -706,8 +709,15 @@ pub(crate) fn sync_conditions(world: &mut World) {
             let local =
                 Transform::from_matrix(Mat4::from(basis.inverse() * desired.compute_affine()));
             if let Some(mut transform) = world.get_mut::<Transform>(*model) {
-                transform.translation = local.translation;
-                transform.rotation = local.rotation;
+                let next = Transform {
+                    translation: local.translation,
+                    rotation: local.rotation,
+                    ..*transform
+                };
+                let changed = transform.set_if_neq(next);
+                if timing.enabled() {
+                    timing.work(1, usize::from(!changed), usize::from(changed));
+                }
             }
         }
     });

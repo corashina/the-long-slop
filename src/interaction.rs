@@ -14,10 +14,10 @@ pub mod push;
 pub mod storage;
 pub mod targets;
 mod wheel_actions;
-pub use wheel_actions::WheelAction;
 pub mod wheels;
 use feedback::ActionMask;
 pub use targets::{InteractionBlock, LightAim, ResolvedAim};
+pub use wheel_actions::WheelAction;
 
 use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
@@ -49,6 +49,7 @@ pub struct AimTarget {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlotTarget {
     Wheel(WheelSlotId),
+    Tire(ItemId),
     Part(PartSlotId),
     Attachment(AttachmentTargetId),
 }
@@ -1429,6 +1430,13 @@ impl InteractionState {
                             target: slot,
                         }));
                     }
+                    SlotTarget::Tire(rim) => {
+                        self.carry.cancel_input();
+                        action = Some(InteractionAction::Wheel(WheelAction::Join {
+                            rim,
+                            tire: held,
+                        }));
+                    }
                     SlotTarget::Attachment(target) => {
                         self.mount_plate(held, target, items, physics)
                             .expect("validated plate mount");
@@ -1447,9 +1455,6 @@ impl InteractionState {
                         )));
                     }
                 }
-            } else if let (Some(rim), Some(tire)) = (available.rim, available.tire) {
-                self.carry.cancel_input();
-                action = Some(InteractionAction::Wheel(WheelAction::Join { rim, tire }));
             }
         }
         if input.pressed & keys::GRAB != 0
@@ -1544,18 +1549,6 @@ impl InteractionState {
                     });
                 }
             }
-        }
-        if input.pressed & keys::ASSEMBLE != 0
-            && available.actions.0 & ActionMask::SPLIT != 0
-            && let Some(item) = self
-                .held()
-                .or_else(|| grab_target.map(|target| target.item))
-            && matches!(self.kinds.get(&item), Some(ItemKind::Wheel | ItemKind::Rim))
-            && items.get(item).is_some_and(|item| {
-                matches!(item.location, ItemLocation::Held | ItemLocation::World)
-            })
-        {
-            action = Some(InteractionAction::Wheel(WheelAction::Split(item)));
         }
         if self.carry.step(carry_input, player, physics, dt)
             && let Some(item) = self.drop_held(items, physics)

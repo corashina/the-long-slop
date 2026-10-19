@@ -17,8 +17,11 @@ pub enum Stage {
     Caster,
     Surface,
     Transparent,
+    ConditionTools,
+    LightingControls,
+    LightingUpload,
 }
-const STAGES: usize = 9;
+const STAGES: usize = 12;
 const NAMES: [&str; STAGES] = [
     "snapshot",
     "shadows",
@@ -29,6 +32,9 @@ const NAMES: [&str; STAGES] = [
     "caster",
     "surface",
     "transparent",
+    "condition_tools",
+    "lighting_controls",
+    "lighting_upload",
 ];
 #[derive(Clone, Copy, Default, serde::Serialize)]
 struct Measurement {
@@ -37,6 +43,10 @@ struct Measurement {
     max_ms: f64,
     faces: u64,
     face_counts: [u64; 7],
+    items: u64,
+    unchanged: u64,
+    writes: u64,
+    upload_bytes: u64,
 }
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static MEASUREMENTS: Mutex<[[Measurement; STAGES]; 10]> = Mutex::new(
@@ -46,6 +56,10 @@ static MEASUREMENTS: Mutex<[[Measurement; STAGES]; 10]> = Mutex::new(
         max_ms: 0.,
         faces: 0,
         face_counts: [0; 7],
+        items: 0,
+        unchanged: 0,
+        writes: 0,
+        upload_bytes: 0,
     }; STAGES]; 10],
 );
 
@@ -54,6 +68,7 @@ pub struct Timer {
     stage: Stage,
     job: usize,
     faces: usize,
+    work: Measurement,
 }
 impl Timer {
     pub fn new(stage: Stage, frame: &SourceViewFrame) -> Self {
@@ -73,7 +88,19 @@ impl Timer {
                 }
             },
             faces: 0,
+            work: Measurement::default(),
         }
+    }
+    pub fn enabled(&self) -> bool {
+        self.start.is_some()
+    }
+    pub fn work(&mut self, items: usize, unchanged: usize, writes: usize) {
+        self.work.items += items as u64;
+        self.work.unchanged += unchanged as u64;
+        self.work.writes += writes as u64;
+    }
+    pub fn upload(&mut self, bytes: u64) {
+        self.work.upload_bytes += bytes;
     }
     pub fn face(&mut self, index: usize) {
         self.faces += usize::from(index >= PROBE_START);
@@ -103,6 +130,10 @@ impl Drop for Timer {
         value.max_ms = value.max_ms.max(elapsed);
         value.faces += self.faces as u64;
         value.face_counts[self.faces] += 1;
+        value.items += self.work.items;
+        value.unchanged += self.work.unchanged;
+        value.writes += self.work.writes;
+        value.upload_bytes += self.work.upload_bytes;
     }
 }
 #[wasm_bindgen::prelude::wasm_bindgen]

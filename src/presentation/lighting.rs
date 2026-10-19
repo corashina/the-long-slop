@@ -1,4 +1,4 @@
-//! Persistent WebGL2 source lighting resources.
+//! Persistent source lighting resources.
 use super::{
     materials::{MaterialCache, SourceMaterial, bind_materials},
     reference::ReferenceVisuals,
@@ -29,7 +29,7 @@ pub enum RenderingState {
     Ready,
     Failed(String),
 }
-#[derive(Clone, Copy, ShaderType, Default)]
+#[derive(Clone, Copy, PartialEq, ShaderType, Default)]
 pub struct GpuLight {
     pub cookie_from_world: Mat4,
     pub position_range: Vec4,
@@ -39,7 +39,7 @@ pub struct GpuLight {
     pub mask: UVec4,
     pub cookie_size: f32,
 }
-#[derive(Clone, Copy, ShaderType)]
+#[derive(Clone, Copy, PartialEq, ShaderType)]
 pub struct LightingUniform {
     pub lights: [GpuLight; MAX_LIGHTS],
     pub ambient: Vec4,
@@ -647,15 +647,27 @@ pub(crate) fn bind_lighting(
 }
 pub(crate) fn sync_control_visuals(
     drive: Res<Drive>,
+    frame: Res<super::view_frame::SourceViewFrame>,
     source: Res<SourceLighting>,
     mut poses: Query<&mut Transform>,
     mut nodes: Query<&mut Visibility>,
 ) {
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::LightingControls,
+        &frame,
+    );
     for &(index, entity) in &source.control_poses {
         if let Ok(mut pose) = poses.get_mut(entity) {
             let output = &drive.runtime.lighting.control_poses()[index].local_pose;
-            pose.translation = Vec3::from_array(output.translation);
-            pose.rotation = Quat::from_array(output.rotation);
+            let next = Transform {
+                translation: Vec3::from_array(output.translation),
+                rotation: Quat::from_array(output.rotation),
+                ..*pose
+            };
+            let changed = pose.set_if_neq(next);
+            if timing.enabled() {
+                timing.work(1, usize::from(!changed), usize::from(changed));
+            }
         }
     }
     for &(index, entity) in &source.visibility {
@@ -1003,6 +1015,7 @@ fn extract_lighting(
 }
 fn upload_lighting(
     extracted: Res<ExtractedLighting>,
+    frame: Res<super::view_frame::SourceViewFrame>,
     mut gpu: ResMut<LightingGpu>,
     images: Res<RenderAssets<GpuImage>>,
     device: Res<RenderDevice>,
@@ -1022,8 +1035,21 @@ fn upload_lighting(
     }
     gpu.source_shader = extracted.shader;
     gpu.sky_shader = extracted.sky_shader;
-    gpu.uniform.set(extracted.uniform);
-    gpu.uniform.write_buffer(&device, &queue);
+    let mut timing = super::reflection_preparation::Timer::new(
+        super::reflection_preparation::Stage::LightingUpload,
+        &frame,
+    );
+    let unchanged = gpu.uniform.get() == &extracted.uniform;
+    if timing.enabled() {
+        timing.work(1, usize::from(unchanged), usize::from(!unchanged));
+        if !unchanged {
+            timing.upload(LightingUniform::min_size().get());
+        }
+    }
+    if !unchanged {
+        gpu.uniform.set(extracted.uniform);
+        gpu.uniform.write_buffer(&device, &queue);
+    }
     if gpu.cookies.is_none() {
         if let Some(ids) = extracted.cookies {
             if ids.iter().all(|id| images.get(*id).is_some()) {

@@ -28,6 +28,15 @@ test('driving permits pending work and requires seated movement',()=>{
  assert.ok(contentIndexSampleFailures({...driving,scenario:'garage'}).includes('garage-work-not-settled'));
 });
 
+test('scene scale receipts reject resize, scale changes, and wrong target extents',()=>{
+ const scaled={...sample(),sceneResolution:{scale:.75,native:[1280,720],changedDuringSample:false},
+  auditBefore:{state:'Ready',graph:{presented:true,extent:[960,540]}},auditAfter:{state:'Ready',graph:{presented:true,extent:[960,540]}}};
+ assert.deepEqual(contentIndexSampleFailures(scaled),[]);
+ assert.ok(contentIndexSampleFailures({...scaled,sceneResolution:{...scaled.sceneResolution,changedDuringSample:true}}).includes('scene-resolution-mismatch'));
+ assert.ok(contentIndexSampleFailures({...scaled,auditAfter:{state:'Ready',graph:{presented:true,extent:[1280,720]}}}).includes('scene-resolution-mismatch'));
+ assert.ok(contentIndexSampleFailures({...scaled,auditAfter:{state:'Ready',graph:{presented:false,extent:[960,540]}}}).includes('scene-resolution-mismatch'));
+});
+
 test('server selects frozen inputs, confines paths, and preserves separate receipts',async t=>{
  const root=await mkdtemp(resolve(tmpdir(),'content-index-benchmark-'));
  t.after(()=>rm(root,{recursive:true,force:true}));
@@ -44,6 +53,8 @@ test('server selects frozen inputs, confines paths, and preserves separate recei
  assert.equal(await(await fetch(base+'/pkg/my_summer_slop.js')).text(),'frozen-package');
  assert.equal(await(await fetch(base+'/assets/reference/manifest.json')).text(),'{}');
  assert.match(await(await fetch(base+'/__measure.mjs')).text(),/measureContentIndex/);
+ assert.match(await(await fetch(base+'/__scene-measure.mjs')).text(),/measureSceneResolution/);
+ assert.match(await(await fetch(base+'/measure-content-index.mjs')).text(),/measureContentIndex/);
  assert.equal((await fetch(base+'/assets/%2e%2e%5cprivate.txt')).status,400);
  assert.equal((await fetch(base+'/pkg/%2e%2e%5cprivate.txt')).status,400);
  const configuration=await(await fetch(base+'/__benchmark-config')).json();

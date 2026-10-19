@@ -673,12 +673,12 @@ impl PartAttachments {
         item: ItemId,
         items: &ItemStore,
         physics: &PhysicsWorld,
-    ) -> (Option<AimTarget>, Option<InteractionBlock>) {
+    ) -> Option<AimTarget> {
         let Some(&index) = self.indices.get(&item) else {
-            return (None, None);
+            return None;
         };
         let Some(state) = items.get(item) else {
-            return (None, None);
+            return None;
         };
         let part = &self.parts[index];
         let center = to_rapier(state.pose).transform_point(part.scan_offset);
@@ -689,9 +689,7 @@ impl PartAttachments {
         };
         let radius = self.scan_radius * scale;
         let mut nearest = f32::INFINITY;
-        let mut blocked_distance = f32::INFINITY;
         let mut selected = None;
-        let mut blocked = None;
         for slot in &self.slots {
             for shape in &slot.scan_shapes {
                 let Some(handle) = shape.handle else {
@@ -714,12 +712,7 @@ impl PartAttachments {
                 }
                 let node = *collider.position() * shape.local_node;
                 let distance = node.translation.distance_squared(center);
-                if let Err(reason) = self.can_install(item, slot.reference.id, items) {
-                    if distance < blocked_distance {
-                        blocked_distance = distance;
-                        blocked = Some(reason);
-                    }
-                } else if distance < nearest {
+                if self.can_install(item, slot.reference.id, items).is_ok() && distance < nearest {
                     nearest = distance;
                     selected = Some(AimTarget {
                         collider: handle,
@@ -731,7 +724,7 @@ impl PartAttachments {
                 }
             }
         }
-        (selected, if selected.is_some() { None } else { blocked })
+        selected
     }
     pub fn loose_body(&self, item: ItemId) -> Option<RigidBodyHandle> {
         self.parts

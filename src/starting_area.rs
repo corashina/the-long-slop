@@ -948,9 +948,7 @@ impl GarageRuntime {
                 &self.area.items,
             )
         };
-        if !self.aim.same_actions(&aim)
-            || input.pressed & (keys::GRAB | keys::USE | keys::ASSEMBLE) != 0
-        {
+        if !self.aim.same_actions(&aim) || input.pressed & (keys::GRAB | keys::USE) != 0 {
             self.notice = "";
         }
         self.aim = aim;
@@ -1028,7 +1026,6 @@ impl GarageRuntime {
             Some(InteractionAction::Wheel(action)) => {
                 if let Some(notice) = self.area.interaction.complete_wheel_action(
                     action,
-                    input,
                     aim,
                     &mut self.wheels,
                     &self.area.player,

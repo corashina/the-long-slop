@@ -1,4 +1,5 @@
 //! Per-view source candidate selection, projection fit, and split masks without heap allocation.
+use super::shadow_profile::{Stage, Timer};
 use super::{
     shadow_candidates::{
         Bounds, CandidateState, DirectionalHull, ProjectionUnion, no_umbra_candidate,
@@ -128,6 +129,7 @@ impl ShadowViewCache {
         if casters.len() != masks.len() {
             return Err("Source shadow candidate and mask counts differ");
         }
+        let mut timing = Timer::new(Stage::View);
         let input = ViewInput {
             revision,
             planes,
@@ -140,6 +142,7 @@ impl ShadowViewCache {
             .as_ref()
             .is_some_and(|previous| previous.unchanged(&input))
         {
+            timing.hit();
             fit.caster_min = self.caster_min;
             fit.caster_max = self.caster_max;
             return Ok(self.result);
@@ -187,6 +190,8 @@ pub fn prepare_frame(
     if frustum_scale(fit_input)? <= 9.999999747378752e-6 {
         return Ok(None);
     }
+    let mut selection = Timer::new(Stage::Selection);
+    selection.items(casters.len());
     let hull = DirectionalHull::new(planes.shadow, fit_input.light_basis[2])?;
     let mut union = ProjectionUnion::default();
     let mut candidate_count = 0;
@@ -200,12 +205,17 @@ pub fn prepare_frame(
         candidate_count += 1;
         union.include(caster.bounds, &planes.camera);
     }
+    drop(selection);
     let Some(bounds) = union.bounds() else {
         return Ok(None);
     };
     fit_input.caster_min = bounds.min;
     fit_input.caster_max = bounds.max;
+    let fitting = Timer::new(Stage::Fit);
     let fit = fit_cascades(fit_input)?;
+    drop(fitting);
+    let mut splitting = Timer::new(Stage::Splits);
+    splitting.items(candidate_count);
     let make_split = |index: usize| {
         let cascade = &fit.cascades[index];
         SplitCull::new(

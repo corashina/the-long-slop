@@ -242,6 +242,18 @@ pub fn prepare_views(
                     RenderingState::Failed("Source glass view binding is missing".into());
                 return;
             };
+            if timing.enabled() {
+                let glass_unchanged = glass.unchanged(&glass_value);
+                let lighting_unchanged = binding.unchanged(&uniform);
+                let writes = usize::from(!glass_unchanged) + usize::from(!lighting_unchanged);
+                timing.work(2, 2 - writes, writes);
+                if !glass_unchanged {
+                    timing.upload(GlassViewUniform::min_size().get());
+                }
+                if !lighting_unchanged {
+                    timing.upload(super::source_lighting::LightingUniform::min_size().get());
+                }
+            }
             if let Err(error) = glass.write(glass_value, &device, &queue) {
                 *status.0.lock().unwrap() = RenderingState::Failed(error.into());
                 return;
