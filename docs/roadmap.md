@@ -67,12 +67,12 @@ G13 follows the approved garage state. Saved survival needs remain deferred.
 G15 covers defects in the selected experience. It does not reopen the old optimization proposal list.
 G16 requires real input, active physics, visible results, and submitted frames on the same tested package.
 
-G01 recheck, 2026-10-19: Escape in the pause menu now uses the existing Continue path.
+G01 implementation merged, 2026-10-19: Escape in the pause menu uses the existing Continue path.
 Targeted web tests cover resume, pause, capture loss, failed capture, and canceled capture.
 The baseline reached prepared New game, restart, and cold Load states with matching assets and WASM.
 The in-app browser rejected capture in the game and a standalone page without game code.
 Browser control timed out during the modified package recheck. Its readiness remains unverified.
-Active physics and the six required browser paths remain unaccepted. G01 stays Verify.
+All six browser paths require acceptance with working mouse capture. G01 stays Verify.
 
 ## Deferred local tasks
 
