@@ -50,8 +50,8 @@ Stopped at the user's request. Branch: `codex/inventory-clothing`.
 ## Performance improvements
 
 These 15 improvements are ordered from easiest to hardest, not by execution order. No performance gain is verified.
-Review each proposal against current source and profile evidence before implementation. Items 2 and 5 change image quality and need specific approval.
-Item 4 is implemented. Start profiling with items 3 or 7 for fidelity-preserving work, or item 1 for startup. This suggestion does not change the work order.
+Review each proposal against current source and profile evidence before implementation. Item 2 changes image quality and needs specific approval.
+Items 4 and 5 are implemented. Start profiling with items 3 or 7 for fidelity-preserving work, or item 1 for startup. This suggestion does not change the work order.
 
 Use this prompt preamble for each item:
 
@@ -103,8 +103,8 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    Remaining: Check the image in a browser with a fresh export. Measure garage and driving average, p95, and p99 frame times.
 
 5. **Reduce MSAA8 to 4.**
-   Status: Proposed. Difficulty: Moderate. Estimate: 2–3 days. Owner: [render targets](../src/presentation/render_targets.rs).
-   Effect: Offer a fixed 4-sample profile as an optional image-quality change. This item needs specific approval before implementation.
+   Status: Merged, not measured. Approved by the user. `MSAA_SAMPLES` sets 4 samples for all three cameras, targets, and pipelines. The source export still records 8. Difficulty: Moderate. Estimate: 2–3 days. Owner: [render targets](../src/presentation/render_targets.rs).
+   Effect: Halve the multisample color and depth memory and resolve cost. Edges, glass, and particles are not compared in a browser.
    Prompt:
    ```text
    After specific approval, inspect all sample-count checks and render targets. Add one fixed 4-sample profile and keep camera, target, pipeline, effect, and device counts consistent. Preserve layers, shadows, and effects. Check edge detail, glass, particles, and resize. Compare image quality and GPU cost with the current 8-sample profile.
