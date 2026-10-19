@@ -127,7 +127,8 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 8. **Update shadow scenes incrementally.**
-   Status: Implemented on `codex/incremental-shadow-scene`, unmerged. Runtime performance remains unverified.
+   Status: Implemented and merged into master on 2026-10-19 at `5004b7e`. Source commit: `194e5ec`.
+   Runtime performance remains unverified.
    Owner: [shadow scene](../src/presentation/shadow_scene.rs).
    Caster component changes update cached rows. Membership, scene, origin, and recovery changes rebuild the ordered collection.
    Revisions skip unchanged caster and mask copies. Camera-dependent selection, fitting, and per-frame visibility remain.

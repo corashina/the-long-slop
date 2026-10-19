@@ -1,8 +1,8 @@
 # Incremental shadow scene updates
 
-Roadmap item 8 uses branch `codex/incremental-shadow-scene`.
+Roadmap item 8 was implemented on branch `codex/incremental-shadow-scene` at `194e5ec`.
 The base is `8eca150d90e7d0fa216823276c01825f8b1189d1`.
-The branch remains unmerged.
+Merge `5004b7e` added the change to master on 2026-10-19.
 
 ## Change
 
@@ -35,10 +35,12 @@ Targeted checks passed on 2026-10-19:
 - The locked WASM library compile check passed.
 - `git diff --check` passed.
 
-No check failed.
+The first merged-tree check stopped on upstream MSAA formatting in `render_targets.rs`.
+The correction changes formatting only.
+The merged-tree rerun passed formatting, all four native tests, and the WASM library compile check.
 Existing warnings remain in `world/stream.rs` for native tests and `presentation/materials.rs` for WASM.
 
-Run the targeted checks from the worktree:
+Run the targeted checks from the repository:
 
 ```powershell
 .\scripts\check.ps1 -Test source_shadow_preparation
